@@ -58,7 +58,7 @@ class LevelUpStore {
             stream.on('data', async function(data) {
                 let keySplit = data.key.toString("utf-8").split(":")
                 let paramName = keySplit[2]
-				let paramValue = data.value
+                let paramValue = data.value
                 
                 config[paramName] = paramValue
             })
@@ -72,12 +72,12 @@ class LevelUpStore {
             })
         })
     }
-	
-	async getAllConfigs(coin, network){
+    
+    async getAllConfigs(coin, network){
         let thisObject = this
         
-		return new Promise((resolve, reject) => {
-		var config = {}
+        return new Promise((resolve, reject) => {
+        var config = {}
             const options = {
                 gte: PREFIX_PARAM+":",
                 lte: PREFIX_PARAM+":"+"\xFF",
@@ -90,26 +90,26 @@ class LevelUpStore {
             stream.on('data', async function(data) {
                 let keySplit = data.key.toString("utf-8").split(":")
                 let coinNetworkModuleSplit = keySplit[1].split("-")
-				let coin = coinNetworkSplit[0]
-				let network = coinNetworkSplit[1]
-				let module = coinNetworkSplit[2]
-				let paramName = keySplit[2]
-				let paramValue = data.value
+                let coin = coinNetworkSplit[0]
+                let network = coinNetworkSplit[1]
+                let module = coinNetworkSplit[2]
+                let paramName = keySplit[2]
+                let paramValue = data.value
                 
-				
-				if (!(coin in config)){
-					config[coin] = {}
-				}
-				
-				if (!(network in config[coin])){
-					config[coin][network] = {}
-				}
-				
-				if (!(module in config[coin][network])){
-					config[coin][network][module] = {}
-				}
-				
-				config[coin][network][module][paramName] = paramValue
+                
+                if (!(coin in config)){
+                    config[coin] = {}
+                }
+                
+                if (!(network in config[coin])){
+                    config[coin][network] = {}
+                }
+                
+                if (!(module in config[coin][network])){
+                    config[coin][network][module] = {}
+                }
+                
+                config[coin][network][module][paramName] = paramValue
             })
 
             stream.on('error', function(err) {

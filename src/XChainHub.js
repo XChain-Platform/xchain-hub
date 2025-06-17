@@ -10,41 +10,41 @@ class XChainHub {
       this.db = null
     }
     
-	async addCoinNetworkParameter(coin, network, module, parameterName, parameterValue){
-		try {
-			await this.db.setParam(coin, network, module, parameterName, parameterValue)
-			return true
-		} catch (err){
-			throw new Error("There was an error trying to add the parameter "+parameterName+"("+parameterValue+")"+" in "+coin+"-"+network)
-		}
-	}
-	
+    async addCoinNetworkParameter(coin, network, module, parameterName, parameterValue){
+        try {
+            await this.db.setParam(coin, network, module, parameterName, parameterValue)
+            return true
+        } catch (err){
+            throw new Error("There was an error trying to add the parameter "+parameterName+"("+parameterValue+")"+" in "+coin+"-"+network)
+        }
+    }
+    
     async addParametersFromJson(coin, network, module, json){
         let jsonParsed = JSON.parse(json)
-		
-		try {
-			let parameterList = ["host", "port", "name", "user", "pass"]
-		
-		
-			for (let nextParamIndex in parameterList){
-				let nextParam = parameterList[nextParamIndex]
-				this.db.addCoinNetworkParameters(coin, network, module, nextParam, jsonParsed[nextParam])
-			}
-			
-		} catch(err){
-			throw err
-		}
+        
+        try {
+            let parameterList = ["host", "port", "name", "user", "pass"]
+        
+        
+            for (let nextParamIndex in parameterList){
+                let nextParam = parameterList[nextParamIndex]
+                this.db.addCoinNetworkParameters(coin, network, module, nextParam, jsonParsed[nextParam])
+            }
+            
+        } catch(err){
+            throw err
+        }
     }
-	
-	async getAllConfigs(){
-		try {
-			let configs = await this.db.getAllConfigs()
-			
-			return configs
-		} catch (err) {
-			throw new Error("There was an error trying to get all the coins/networks configs for this server")
-		}
-	}
+    
+    async getAllConfigs(){
+        try {
+            let configs = await this.db.getAllConfigs()
+            
+            return configs
+        } catch (err) {
+            throw new Error("There was an error trying to get all the coins/networks configs for this server")
+        }
+    }
 }
 
 module.exports = XChainHub
