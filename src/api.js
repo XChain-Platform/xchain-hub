@@ -14,7 +14,7 @@ const LISTEN_PORT = 3000
 async function startApi(){
     //Start the monitor
     const hub = new XChainHub();
-    hub.start()
+    //hub.start()
 
     // Create the app
     const app = express();

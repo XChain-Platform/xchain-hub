@@ -1,4 +1,4 @@
-const util = require('./util')
+//const util = require('./util')
 
 var levelup = require('levelup')
 var leveldown = require('leveldown')
