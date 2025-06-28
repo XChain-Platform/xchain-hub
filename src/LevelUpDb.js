@@ -30,11 +30,11 @@ class LevelUpStore {
     }
     
     getParamKey(coin, network, module, paramName){
-        return PREFIX_PARAM+":"+getCoinNetworkModuleKey(coin, network, module) + ":" + paramName
+        return PREFIX_PARAM+":"+this.getCoinNetworkModuleKey(coin, network, module) + ":" + paramName
     }
     
     async setParam(coin, network, module, paramName, paramValue){
-        let key = getParamKey(coin, network, module, paramName)
+        let key = this.getParamKey(coin, network, module, paramName)
       
         this.db.put(key, paramValue)
         return true
@@ -85,16 +85,16 @@ class LevelUpStore {
                 values: true
             }
 
-            const stream = this.db.createReadStream(options);
+            const stream = thisObject.db.createReadStream(options);
 
             stream.on('data', async function(data) {
                 let keySplit = data.key.toString("utf-8").split(":")
                 let coinNetworkModuleSplit = keySplit[1].split("-")
-                let coin = coinNetworkSplit[0]
-                let network = coinNetworkSplit[1]
-                let module = coinNetworkSplit[2]
+                let coin = coinNetworkModuleSplit[0]
+                let network = coinNetworkModuleSplit[1]
+                let module = coinNetworkModuleSplit[2]
                 let paramName = keySplit[2]
-                let paramValue = data.value
+                let paramValue = data.value.toString()
                 
                 
                 if (!(coin in config)){

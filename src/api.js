@@ -13,8 +13,8 @@ const LISTEN_PORT = 3000
 
 async function startApi(){
     //Start the monitor
-    const hub = new XChainHub();
-    //hub.start()
+    const hub = new XChainHub(DB_NAME);
+    await hub.start()
 
     // Create the app
     const app = express();
@@ -41,15 +41,15 @@ async function startApi(){
                 let configs = await hub.getAllConfigs()
                 return configs
             } catch (err) {
-                return {error:"there was an error trying to update the config of "+coin+"-"+network};
+                return {error:"there was an error trying to get all configs"};
             }
         },
-        async updateconfig(coin, network, newConfigJson){
+        async updateconfig({config}){
             try {
-                await hub.addParametersFromJson(coin, network, newConfigJson)
+                await hub.addParametersFromJson(config)
                 return {status:"success"}
             } catch (err) {
-                return {error:"there was an error trying to update the config of "+coin+"-"+network};
+                return {error:"there was an error trying to update a config"};
             }
         }
     }
