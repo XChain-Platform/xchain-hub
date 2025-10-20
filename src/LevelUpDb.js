@@ -92,7 +92,7 @@ class LevelUpStore {
                 let coinNetworkModuleSplit = keySplit[1].split("-")
                 let coin = coinNetworkModuleSplit[0]
                 let network = coinNetworkModuleSplit[1]
-                let module = coinNetworkModuleSplit[2]
+                let module = coinNetworkModuleSplit.slice(2).join("-")
                 let paramName = keySplit[2]
                 let paramValue = data.value.toString()
                 

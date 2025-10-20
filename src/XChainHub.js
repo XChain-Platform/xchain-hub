@@ -35,7 +35,11 @@ class XChainHub {
                     for (let nextModule in json[nextCoin][nextNetwork]){
                         try {
                             for (let nextParam of PARAMETER_LIST){
-                                await this.addCoinNetworkParameter(nextCoin, nextNetwork, nextModule, nextParam, json[nextCoin][nextNetwork][nextModule][nextParam])
+                                let nextValue = json[nextCoin][nextNetwork][nextModule][nextParam]
+                                if ((nextValue !== null) && (nextValue !== undefined)){
+                                
+                                    await this.addCoinNetworkParameter(nextCoin, nextNetwork, nextModule, nextParam, nextValue)
+                                }
                             }
                             
                         } catch(err){
