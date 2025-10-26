@@ -1,6 +1,12 @@
 {
   "name":"xchain-hub",
+  "description": "xchain-hub acts as an oracle for coin pricing information and handles processing cross-chain actions which are synced out to nodes",
   "version": "0.0.2",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/XChain-platform/xchain-hub.git"
+  },
   "dependencies": {
     "axios": "^1.6.7",
     "cors": "^2.8.5",
