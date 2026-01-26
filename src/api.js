@@ -31,7 +31,8 @@ const XChainHub  = require('./XChainHub');
 const jsonRouter = require('express-json-rpc-router')
 
 const DB_NAME =  "xchain-hub"
-const LISTEN_PORT = 3000
+const HUB_HOST = process.env.HUB_HOST
+const HUB_PORT = process.env.HUB_PORT
 
 async function startApi(){
     //Start the monitor
@@ -81,8 +82,8 @@ async function startApi(){
 
 
     // Start the server
-    app.listen(LISTEN_PORT, () => {
-      console.log('API listening on port '+LISTEN_PORT);
+    app.listen(HUB_PORT, () => {
+      console.log('API listening on port '+HUB_PORT);
     });
 }
 
