@@ -24,7 +24,7 @@
 const axios = require('axios');
 axios.defaults.timeout = 5000
 const LevelUpStore = require('./LevelUpDb.js')
-const PARAMETER_LIST = ["host", "port", "service_port", "name", "user", "pass"]
+const PARAMETER_LIST = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass"]
 
 
 class XChainHub {
