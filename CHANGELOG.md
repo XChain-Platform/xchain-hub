@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.4] - 2026-04-06
+
+### Added
+- Smoke test suite (24 tests) for quick service health checks
+- Covers env validation, DB schema init, JSON-RPC routing, config round-trip, PriceFetcher with mocked APIs, median calculation, oracle trimmed-median aggregation, circuit breaker state, and graceful handling of disabled subsystems
+- `npm run test:smoke` script with `--bail` flag for fast-fail execution
+
 ## [2.0.3] - 2026-04-06
 
 ### Added
