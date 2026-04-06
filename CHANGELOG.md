@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-04-06
+
+### Added
+- Comprehensive unit test suite (295 tests) covering all 13 source modules
+- Test infrastructure: mocha, chai, sinon, proxyquire devDependencies
+- Shared test helpers: mockHub factory and fixtures (validator sets, sample prices)
+- Tests for: ValidatorIdentity, OracleConsensus (trimmed median, PBFT), Consensus (PBFT, view change), SlashDetector (deviation/participation thresholds), CrossChainEngine (chain-pair filtering, attestation PBFT), PriceFetcher (API mocking), OracleRound, Governance (change bounds, tally logic), ReorgHandler (rollback, consensus), RewardTracker, SwapTracker, PeerManager (dedup, signatures), Database (circuit breaker), XChainHub orchestrator
+
+### Changed
+- `npm test` now runs mocha against `test/unit/**/*.test.js`
+
 ## [2.0.1] - 2026-04-06
 
 ### Changed

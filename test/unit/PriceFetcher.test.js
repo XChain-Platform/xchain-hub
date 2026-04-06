@@ -1,0 +1,249 @@
+'use strict';
+
+const sinon        = require('sinon');
+const { expect }   = require('chai');
+const proxyquire   = require('proxyquire');
+
+describe('PriceFetcher', function () {
+
+    let axiosStub, PriceFetcher, pf;
+
+    beforeEach(function () {
+        axiosStub = { get: sinon.stub() };
+        PriceFetcher = proxyquire('../../src/PriceFetcher', { axios: axiosStub });
+    });
+
+    afterEach(function () {
+        sinon.restore();
+    });
+
+    // -----------------------------------------------------------------
+    // _median()
+    // -----------------------------------------------------------------
+
+    describe('_median()', function () {
+        beforeEach(function () {
+            pf = new PriceFetcher({});
+        });
+
+        it('single value returns that value', function () {
+            expect(pf._median([42])).to.equal(42);
+        });
+
+        it('two values returns average', function () {
+            expect(pf._median([10, 20])).to.equal(15);
+        });
+
+        it('odd count returns middle value', function () {
+            expect(pf._median([1, 3, 2])).to.equal(2);
+        });
+
+        it('even count returns average of two middle values', function () {
+            expect(pf._median([1, 2, 3, 4])).to.equal(2.5);
+        });
+
+        it('empty array returns 0', function () {
+            expect(pf._median([])).to.equal(0);
+        });
+
+        it('does not mutate input array', function () {
+            let arr = [3, 1, 2];
+            pf._median(arr);
+            expect(arr).to.deep.equal([3, 1, 2]);
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // fetchFromCoinGecko()
+    // -----------------------------------------------------------------
+
+    describe('fetchFromCoinGecko()', function () {
+
+        it('returns prices from valid response', async function () {
+            pf = new PriceFetcher({});
+            axiosStub.get.resolves({
+                data: {
+                    bitcoin:  { usd: 100000.5 },
+                    litecoin: { usd: 85.25 },
+                    dogecoin: { usd: 0.15 }
+                }
+            });
+
+            let result = await pf.fetchFromCoinGecko();
+            expect(result['BTC/USD']).to.equal(100000.5);
+            expect(result['LTC/USD']).to.equal(85.25);
+            expect(result['DOGE/USD']).to.equal(0.15);
+        });
+
+        it('includes API key header when configured', async function () {
+            pf = new PriceFetcher({ COINGECKO_API_KEY: 'test-key' });
+            axiosStub.get.resolves({ data: { bitcoin: { usd: 1 }, litecoin: { usd: 1 }, dogecoin: { usd: 1 } } });
+
+            await pf.fetchFromCoinGecko();
+            let headers = axiosStub.get.getCall(0).args[1].headers;
+            expect(headers['x-cg-demo-api-key']).to.equal('test-key');
+        });
+
+        it('returns null on network error', async function () {
+            pf = new PriceFetcher({});
+            axiosStub.get.rejects(new Error('timeout'));
+
+            let result = await pf.fetchFromCoinGecko();
+            expect(result).to.be.null;
+        });
+
+        it('handles partial response (missing coin)', async function () {
+            pf = new PriceFetcher({});
+            axiosStub.get.resolves({
+                data: { bitcoin: { usd: 100000 } } // missing litecoin, dogecoin
+            });
+
+            let result = await pf.fetchFromCoinGecko();
+            expect(result['BTC/USD']).to.equal(100000);
+            expect(result['LTC/USD']).to.be.undefined;
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // fetchFromCoinMarketCap()
+    // -----------------------------------------------------------------
+
+    describe('fetchFromCoinMarketCap()', function () {
+
+        it('returns null when no API key configured', async function () {
+            pf = new PriceFetcher({});
+            let result = await pf.fetchFromCoinMarketCap();
+            expect(result).to.be.null;
+            expect(axiosStub.get.called).to.be.false;
+        });
+
+        it('returns prices from valid response', async function () {
+            pf = new PriceFetcher({ COINMARKETCAP_API_KEY: 'cmc-key' });
+            axiosStub.get.resolves({
+                data: {
+                    data: {
+                        BTC:  { quote: { USD: { price: 100500 } } },
+                        LTC:  { quote: { USD: { price: 86.5 } } },
+                        DOGE: { quote: { USD: { price: 0.16 } } }
+                    }
+                }
+            });
+
+            let result = await pf.fetchFromCoinMarketCap();
+            expect(result['BTC/USD']).to.equal(100500);
+            expect(result['LTC/USD']).to.equal(86.5);
+        });
+
+        it('passes API key in header', async function () {
+            pf = new PriceFetcher({ COINMARKETCAP_API_KEY: 'my-key' });
+            axiosStub.get.resolves({ data: { data: {} } });
+
+            await pf.fetchFromCoinMarketCap();
+            let headers = axiosStub.get.getCall(0).args[1].headers;
+            expect(headers['X-CMC_PRO_API_KEY']).to.equal('my-key');
+        });
+
+        it('returns null on error', async function () {
+            pf = new PriceFetcher({ COINMARKETCAP_API_KEY: 'key' });
+            axiosStub.get.rejects(new Error('500'));
+
+            let result = await pf.fetchFromCoinMarketCap();
+            expect(result).to.be.null;
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // fetchPrices()
+    // -----------------------------------------------------------------
+
+    describe('fetchPrices()', function () {
+
+        it('returns median from both sources', async function () {
+            pf = new PriceFetcher({ COINMARKETCAP_API_KEY: 'key' });
+
+            // CoinGecko call
+            axiosStub.get.onFirstCall().resolves({
+                data: { bitcoin: { usd: 100000 }, litecoin: { usd: 80 }, dogecoin: { usd: 0.14 } }
+            });
+            // CoinMarketCap call
+            axiosStub.get.onSecondCall().resolves({
+                data: {
+                    data: {
+                        BTC: { quote: { USD: { price: 100010 } } },
+                        LTC: { quote: { USD: { price: 82 } } },
+                        DOGE: { quote: { USD: { price: 0.16 } } }
+                    }
+                }
+            });
+
+            let prices = await pf.fetchPrices();
+            expect(prices).to.have.lengthOf(3);
+
+            let btc = prices.find(p => p.coinPair === 'BTC/USD');
+            expect(btc.price).to.equal('100005.00000000'); // median of 100000, 100010
+            expect(btc.sources).to.equal(2);
+        });
+
+        it('returns prices from single source when other fails', async function () {
+            pf = new PriceFetcher({ COINMARKETCAP_API_KEY: 'key' });
+
+            axiosStub.get.onFirstCall().resolves({
+                data: { bitcoin: { usd: 99000 }, litecoin: { usd: 78 }, dogecoin: { usd: 0.13 } }
+            });
+            axiosStub.get.onSecondCall().rejects(new Error('CMC down'));
+
+            let prices = await pf.fetchPrices();
+            expect(prices).to.have.lengthOf(3);
+            let btc = prices.find(p => p.coinPair === 'BTC/USD');
+            expect(btc.price).to.equal('99000.00000000');
+            expect(btc.sources).to.equal(1);
+        });
+
+        it('returns empty array when all sources fail', async function () {
+            pf = new PriceFetcher({ COINMARKETCAP_API_KEY: 'key' });
+            axiosStub.get.rejects(new Error('fail'));
+
+            let prices = await pf.fetchPrices();
+            expect(prices).to.deep.equal([]);
+        });
+
+        it('only calls CoinGecko when no CMC key', async function () {
+            pf = new PriceFetcher({});
+            axiosStub.get.resolves({
+                data: { bitcoin: { usd: 50000 }, litecoin: { usd: 40 }, dogecoin: { usd: 0.1 } }
+            });
+
+            let prices = await pf.fetchPrices();
+            expect(axiosStub.get.calledOnce).to.be.true;
+            expect(prices).to.have.lengthOf(3);
+        });
+
+        it('returns 8-decimal fixed-point prices', async function () {
+            pf = new PriceFetcher({});
+            axiosStub.get.resolves({
+                data: { bitcoin: { usd: 1.5 }, litecoin: { usd: 2 }, dogecoin: { usd: 3 } }
+            });
+
+            let prices = await pf.fetchPrices();
+            for (let p of prices) {
+                expect(p.price).to.match(/^\d+\.\d{8}$/);
+            }
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // Timeout configuration
+    // -----------------------------------------------------------------
+
+    describe('timeout', function () {
+        it('uses default 10000ms', function () {
+            pf = new PriceFetcher({});
+            expect(pf.timeout).to.equal(10000);
+        });
+
+        it('uses configured timeout', function () {
+            pf = new PriceFetcher({ PRICE_FETCH_TIMEOUT: 5000 });
+            expect(pf.timeout).to.equal(5000);
+        });
+    });
+});
