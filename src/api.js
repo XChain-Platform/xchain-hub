@@ -92,6 +92,9 @@ async function startApi(){
     // Start reorg handler (no-op if P2P is not active)
     await hub.startReorgHandler();
 
+    // Start governance engine (no-op if P2P is not active)
+    await hub.startGovernance();
+
     // Create the app
     const app = express();
 
@@ -204,6 +207,48 @@ async function startApi(){
                 return await hub.getFeeQuote(action, chain);
             } catch (err) {
                 return {error: "error calculating fee quote"};
+            }
+        },
+
+        // Submit a governance proposal
+        async propose({parameter, current_value, proposed_value, rationale}){
+            if(!parameter || !proposed_value)
+                return {error: "parameter and proposed_value are required"};
+            try {
+                return await hub.propose(parameter, current_value || '', proposed_value, rationale);
+            } catch (err) {
+                return {error: err.message || "error creating proposal"};
+            }
+        },
+
+        // Cast a governance vote
+        async vote({proposal_id, vote}){
+            if(!proposal_id || !vote)
+                return {error: "proposal_id and vote (approve/reject) are required"};
+            try {
+                return await hub.vote(proposal_id, vote);
+            } catch (err) {
+                return {error: err.message || "error casting vote"};
+            }
+        },
+
+        // Get governance proposals
+        async getproposals({status}){
+            try {
+                return await hub.getProposals(status);
+            } catch (err) {
+                return {error: "error fetching proposals"};
+            }
+        },
+
+        // Get a specific proposal with votes
+        async getproposal({proposal_id}){
+            if(!proposal_id) return {error: "proposal_id is required"};
+            try {
+                let result = await hub.getProposal(proposal_id);
+                return result || {error: "proposal not found"};
+            } catch (err) {
+                return {error: "error fetching proposal"};
             }
         },
 

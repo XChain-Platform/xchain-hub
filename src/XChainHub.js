@@ -31,6 +31,7 @@ const SlashDetector     = require('./SlashDetector.js');
 const CrossChainEngine  = require('./CrossChainEngine.js');
 const ReorgHandler      = require('./ReorgHandler.js');
 const SwapTracker       = require('./SwapTracker.js');
+const Governance        = require('./Governance.js');
 const PARAMETER_LIST = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass"];
 
 class XChainHub {
@@ -52,6 +53,7 @@ class XChainHub {
         this.crossChain       = null;
         this.reorgHandler     = null;
         this.swapTracker      = null;
+        this.governance       = null;
     }
 
     async start(){
@@ -203,6 +205,39 @@ class XChainHub {
     async getReorgHistory(limit){
         if(!this.reorgHandler) return [];
         return await this.reorgHandler.getReorgHistory(limit);
+    }
+
+    // Start the governance engine (no-op if P2P is not active)
+    async startGovernance(){
+        if(!this.peerManager) return;
+        this.governance = new Governance(this);
+        let validators = await this._loadValidatorSet();
+        this.governance.setValidatorSet(validators);
+        await this.governance.start();
+    }
+
+    // Submit a governance proposal
+    async propose(parameter, currentValue, proposedValue, rationale){
+        if(!this.governance) throw new Error('Governance not active');
+        return await this.governance.propose(parameter, currentValue, proposedValue, rationale);
+    }
+
+    // Cast a governance vote
+    async vote(proposalId, voteChoice){
+        if(!this.governance) throw new Error('Governance not active');
+        return await this.governance.vote(proposalId, voteChoice);
+    }
+
+    // Get governance proposals
+    async getProposals(status){
+        if(!this.governance) return [];
+        return await this.governance.getProposals(status);
+    }
+
+    // Get a specific proposal with votes
+    async getProposal(proposalId){
+        if(!this.governance) return null;
+        return await this.governance.getProposal(proposalId);
     }
 
     // Request a cross-chain attestation
@@ -475,6 +510,7 @@ class XChainHub {
     }
 
     async close(){
+        if(this.governance)       await this.governance.stop();
         if(this.reorgHandler)     await this.reorgHandler.stop();
         if(this.crossChain)       await this.crossChain.stop();
         if(this.oracle)           await this.oracle.stop();

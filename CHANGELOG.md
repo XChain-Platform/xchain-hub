@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-04-06
+
+### Added
+- Governance engine (`Governance.js`) — off-chain PBFT voting for parameter changes
+- `governance_proposals` and `governance_votes` tables
+- 7-day voting period with 2/3+ approval threshold and 50% quorum
+- Proposal constraints: max 50%/33% change bounds (25%/20% for slashing params), 14-day cooldown after rejection
+- `propose`, `vote`, `getproposals`, `getproposal` JSON-RPC methods
+- Automatic proposal tallying when voting period ends
+- `proposal:passed` event emitted for downstream parameter application
+- HEARTBEAT messages now include hub software version for upgrade coordination
+- `GOV_VOTING_PERIOD` env var (default 7 days)
+
+### Changed
+- **Major version bump to 2.0.0** — governance system completes the decentralized hub architecture (Phases 0-5)
+
 ## [1.9.0] - 2026-04-06
 
 ### Added

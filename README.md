@@ -4,20 +4,29 @@
 # XChain Hub
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.0.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.0.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/node-%3E%3D18-green" alt="Node">
   <img src="https://img.shields.io/badge/license-Dankest%20Community-orange" alt="License">
 </p>
 
-Config oracle and cross-chain coordinator for the XChain Platform. Stores service discovery configs (host, port, database credentials) for all platform services across all chains and networks in MariaDB, and serves them via a JSON-RPC API.
+Decentralized config oracle, price oracle, and cross-chain coordinator for the XChain Platform. Validators form a P2P gossip network with PBFT consensus, Ed25519 identity, and governance.
 
 ## Features
 
-- **Service config registry** — stores connection parameters for all XChain services (decoder, indexer, explorer, etc.) across BTC, LTC, DOGE on mainnet, testnet, and regtest
-- **JSON-RPC API** — `ping`, `getallconfigs`, `updateconfig` methods consumed by explorer, node, and e2e-test services
-- **MariaDB storage** — relational config storage with upsert semantics, replacing the original LevelDB backend
-- **Circuit breaker** — automatic failure detection and recovery for database connections with exponential backoff
-- **Docker-ready** — Dockerfile for containerized deployment alongside other XChain services
+- **Service config registry** — stores connection parameters for all XChain services across BTC, LTC, DOGE on mainnet, testnet, and regtest
+- **PBFT consensus** — config writes go through a 2/3+ validator consensus round
+- **P2P gossip** — WebSocket-based peer mesh with heartbeat, reconnection, and message deduplication
+- **Ed25519 validator identity** — cryptographic message signing and verification
+- **Decentralized price oracle** — validators fetch prices from external APIs, aggregate via trimmed median, finalize via PBFT consensus
+- **Cross-chain attestation** — PBFT-based attestation for cross-chain actions (SWAP lifecycle tracking)
+- **Reorg propagation** — cross-chain reorg detection, hub rollback, and coordinated chain rollback
+- **Governance** — off-chain PBFT voting for parameter changes (7-day voting period, 2/3+ approval)
+- **Reward tracking** — per-round XCHAIN rewards for oracle participants
+- **Slash detection** — price deviation, repeated deviation, and non-participation monitoring
+- **Leader rotation** — deterministic per-sequence leader with view change on timeout
+- **Multi-instance** — multiple hub instances against shared MariaDB with consumer fallback
+- **MariaDB storage** — relational storage with circuit breaker and exponential backoff
+- **Docker-ready** — Dockerfile for containerized deployment
 
 ## Documentation
 

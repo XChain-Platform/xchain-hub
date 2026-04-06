@@ -440,8 +440,10 @@ class PeerManager extends EventEmitter {
     // Start heartbeat broadcasts
     _startHeartbeat() {
         let interval = this.config.P2P_HEARTBEAT_INTERVAL || 15000;
+        let version = '0.0.0';
+        try { version = require('../package.json').version; } catch(e) {}
         this.heartbeatTimer = setInterval(() => {
-            this.broadcast('HEARTBEAT', {});
+            this.broadcast('HEARTBEAT', { version: version });
         }, interval);
     }
 
