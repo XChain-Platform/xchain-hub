@@ -24,6 +24,7 @@ const Database          = require('./db.js');
 const PeerManager       = require('./PeerManager.js');
 const Consensus         = require('./Consensus.js');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
+const OracleConsensus   = require('./OracleConsensus.js');
 const OracleRound       = require('./OracleRound.js');
 const PARAMETER_LIST = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass"];
 
@@ -35,11 +36,12 @@ class XChainHub {
         this.dbUser    = dbUser;
         this.dbPass    = dbPass;
         this.p2pConfig = p2pConfig || null;
-        this.db          = null;
-        this.peerManager = null;
-        this.consensus   = null;
-        this.identity    = null;
-        this.oracle      = null;
+        this.db               = null;
+        this.peerManager      = null;
+        this.consensus        = null;
+        this.identity         = null;
+        this.oracle           = null;
+        this.oracleConsensus  = null;
     }
 
     async start(){
@@ -97,7 +99,20 @@ class XChainHub {
     // Start the oracle round system (no-op if P2P is not active)
     async startOracle(){
         if(!this.peerManager) return;
+
+        // Create oracle round manager
         this.oracle = new OracleRound(this);
+
+        // Create oracle consensus engine
+        this.oracleConsensus = new OracleConsensus(this, this.oracle);
+        let validators = await this._loadValidatorSet();
+        this.oracleConsensus.setValidatorSet(validators);
+
+        // Wire them together
+        this.oracle.setConsensus(this.oracleConsensus);
+
+        // Start both
+        await this.oracleConsensus.start();
         await this.oracle.start();
     }
 
@@ -198,11 +213,25 @@ class XChainHub {
         }
     }
 
+    // Get price snapshots from DB
+    async getPriceSnapshots(limit) {
+        let query = "SELECT * FROM price_snapshots WHERE status = 'finalized' ORDER BY round_number DESC, coin_pair ASC LIMIT ?";
+        return await this.db.doQuery(query, [limit || 50]);
+    }
+
+    // Get latest price for a coin pair
+    async getPrice(coinPair) {
+        let query = "SELECT * FROM price_snapshots WHERE coin_pair = ? AND status = 'finalized' ORDER BY round_number DESC LIMIT 1";
+        let rows = await this.db.doQuery(query, [coinPair]);
+        return rows.length > 0 ? rows[0] : null;
+    }
+
     async close(){
-        if(this.oracle)      await this.oracle.stop();
-        if(this.consensus)   await this.consensus.stop();
-        if(this.peerManager) await this.peerManager.stop();
-        if(this.db)          await this.db.close();
+        if(this.oracle)           await this.oracle.stop();
+        if(this.oracleConsensus)  await this.oracleConsensus.stop();
+        if(this.consensus)        await this.consensus.stop();
+        if(this.peerManager)      await this.peerManager.stop();
+        if(this.db)               await this.db.close();
     }
 }
 

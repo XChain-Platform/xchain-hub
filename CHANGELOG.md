@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-04-06
+
+### Added
+- Oracle consensus engine (`OracleConsensus.js`) — PBFT-like finalization for price rounds
+- Trimmed median aggregation — discard top/bottom 15%, compute median of remaining submissions
+- `price_snapshots` table for finalized price data (round_number, coin_pair, price, status, consensus_proof)
+- Automatic round finalization after submission window closes
+- Skipped round detection — rounds with no submissions stored as `status='skipped'`
+- `getpricesnapshots` JSON-RPC method — returns recent finalized snapshots
+- `getprice` JSON-RPC method — returns latest finalized price for a coin pair
+- Single-node fallback — stores local prices directly as snapshots when no peers connected
+
 ## [1.4.0] - 2026-04-06
 
 ### Added

@@ -50,12 +50,23 @@ class OracleRound {
         // Submissions per round: Map<round, Map<sender, { prices, sources, timestamp }>>
         this.submissions = new Map();
 
+        // Oracle consensus engine (set via setConsensus after creation)
+        this.oracleConsensus = null;
+
+        // Finalization timer
+        this.finalizationTimer = null;
+
         // Message handler reference
         this._messageHandler = null;
 
         // Config
         this.roundInterval    = this.config.ORACLE_ROUND_INTERVAL || 600000;     // 10 minutes
         this.submissionWindow = this.config.ORACLE_SUBMISSION_WINDOW || 180000;   // 3 minutes
+    }
+
+    // Set the oracle consensus engine (called by XChainHub after both are created)
+    setConsensus(oracleConsensus) {
+        this.oracleConsensus = oracleConsensus;
     }
 
     // Start the oracle round system
@@ -82,6 +93,10 @@ class OracleRound {
         if (this.roundTimer) {
             clearInterval(this.roundTimer);
             this.roundTimer = null;
+        }
+        if (this.finalizationTimer) {
+            clearTimeout(this.finalizationTimer);
+            this.finalizationTimer = null;
         }
     }
 
@@ -173,6 +188,21 @@ class OracleRound {
 
         // Persist to DB (fire and forget)
         this._persistSubmissions(this.currentRound, myAddr, prices);
+
+        // Schedule finalization after the submission window closes
+        this._scheduleFinalization(this.currentRound);
+    }
+
+    // Schedule finalization for a round after the submission window
+    _scheduleFinalization(round) {
+        if (this.finalizationTimer) clearTimeout(this.finalizationTimer);
+        this.finalizationTimer = setTimeout(() => {
+            if (this.oracleConsensus) {
+                this.oracleConsensus.finalizeRound(round).catch(err => {
+                    console.error('Oracle: Finalization error for round ' + round + ':', err.message);
+                });
+            }
+        }, this.submissionWindow);
     }
 
     // Handle incoming gossip messages

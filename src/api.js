@@ -126,6 +126,27 @@ async function startApi(){
             return oracle.getSubmissionsInfo();
         },
 
+        // Get recent finalized price snapshots
+        async getpricesnapshots({limit}){
+            try {
+                let snapshots = await hub.getPriceSnapshots(limit || 50);
+                return snapshots;
+            } catch (err) {
+                return {error: "error fetching price snapshots"};
+            }
+        },
+
+        // Get latest finalized price for a coin pair
+        async getprice({coin_pair}){
+            if(!coin_pair) return {error: "coin_pair is required"};
+            try {
+                let price = await hub.getPrice(coin_pair);
+                return price || {error: "no price data for " + coin_pair};
+            } catch (err) {
+                return {error: "error fetching price"};
+            }
+        },
+
         // Register a validator (Phase 2C bootstrap)
         async registervalidator({signing_pubkey, addr}){
             try {
