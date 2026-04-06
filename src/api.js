@@ -57,6 +57,9 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     P2P_MAX_PAYLOAD:        parseInt(process.env.P2P_MAX_PAYLOAD) || 1048576,
     ORACLE_ROUND_INTERVAL:  parseInt(process.env.ORACLE_ROUND_INTERVAL) || 600000,
     ORACLE_SUBMISSION_WINDOW: parseInt(process.env.ORACLE_SUBMISSION_WINDOW) || 180000,
+    ORACLE_REWARD_PER_ROUND: process.env.ORACLE_REWARD_PER_ROUND || '10.00000000',
+    SLASH_DEVIATION_THRESHOLD: process.env.SLASH_DEVIATION_THRESHOLD || '0.05',
+    SLASH_MISSED_ROUNDS_THRESHOLD: process.env.SLASH_MISSED_ROUNDS_THRESHOLD || '30',
     COINGECKO_API_KEY:      process.env.COINGECKO_API_KEY || '',
     COINMARKETCAP_API_KEY:  process.env.COINMARKETCAP_API_KEY || '',
     PRICE_FETCH_TIMEOUT:    parseInt(process.env.PRICE_FETCH_TIMEOUT) || 10000
@@ -154,6 +157,47 @@ async function startApi(){
                 return {status: "success"};
             } catch (err) {
                 return {error: err.message || "there was an error trying to register a validator"};
+            }
+        },
+
+        // Sync validators from external staking data
+        async syncvalidators({validators}){
+            try {
+                await hub.syncValidators(validators);
+                return {status: "success"};
+            } catch (err) {
+                return {error: err.message || "error syncing validators"};
+            }
+        },
+
+        // Get active validator list
+        async getvalidators(){
+            try {
+                return await hub.getValidators();
+            } catch (err) {
+                return {error: "error fetching validators"};
+            }
+        },
+
+        // Get detailed validator status
+        async getvalidatorstatus({signing_pubkey}){
+            if(!signing_pubkey) return {error: "signing_pubkey is required"};
+            try {
+                let status = await hub.getValidatorStatus(signing_pubkey);
+                return status || {error: "validator not found"};
+            } catch (err) {
+                return {error: "error fetching validator status"};
+            }
+        },
+
+        // Get fee quote (gas → XCHAIN → native coin)
+        async getfeequote({action, chain}){
+            if(!action) return {error: "action is required"};
+            if(!chain) return {error: "chain is required"};
+            try {
+                return await hub.getFeeQuote(action, chain);
+            } catch (err) {
+                return {error: "error calculating fee quote"};
             }
         }
     };

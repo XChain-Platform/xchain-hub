@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-04-06
+
+### Added
+- Reward tracker (`RewardTracker.js`) — distributes XCHAIN rewards to oracle round participants
+- Slash detector (`SlashDetector.js`) — detects price deviation (>5%), repeated deviation (3+ in 24h), and non-participation (30+ missed rounds)
+- `validator_rewards` table for reward tracking with unclaimed/claimed status
+- `slash_proposals` table for recording detected offenses
+- `syncvalidators` JSON-RPC method — push validator set from external staking data
+- `getvalidators` JSON-RPC method — list active validators
+- `getvalidatorstatus` JSON-RPC method — detailed validator status with rewards and slash history
+- `getfeequote` JSON-RPC method — calculates native coin fee amount via gas → XCHAIN → oracle conversion
+- OracleConsensus now emits `round:finalized` event consumed by reward tracker and slash detector
+- New env vars: `ORACLE_REWARD_PER_ROUND`, `SLASH_DEVIATION_THRESHOLD`, `SLASH_MISSED_ROUNDS_THRESHOLD`
+
 ## [1.5.0] - 2026-04-06
 
 ### Added

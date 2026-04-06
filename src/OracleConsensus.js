@@ -23,7 +23,8 @@
  *
  ********************************************************************/
 
-const crypto = require('crypto');
+const crypto       = require('crypto');
+const EventEmitter = require('events');
 
 const ORACLE_PROPOSE = 'ORACLE_PROPOSE';
 const ORACLE_PREPARE = 'ORACLE_PREPARE';
@@ -32,9 +33,10 @@ const ORACLE_COMMIT  = 'ORACLE_COMMIT';
 const TRIM_PERCENT = 0.15;  // Discard top and bottom 15% of submissions
 const DEFAULT_FINALIZATION_TIMEOUT = 120000; // 2 minutes
 
-class OracleConsensus {
+class OracleConsensus extends EventEmitter {
 
     constructor(hub, oracleRound) {
+        super();
         this.hub         = hub;
         this.oracleRound = oracleRound;
         this.peerManager = hub.getPeerManager();
@@ -96,6 +98,14 @@ class OracleConsensus {
         if (quorum === 0) {
             let aggregated = this._aggregateAll(submissions);
             await this._storeSnapshot(round, aggregated, 1, '[]');
+            // Emit finalization event for single-node mode
+            let selfAddr = this.peerManager.validatorAddr;
+            this.emit('round:finalized', {
+                round:        round,
+                prices:       aggregated,
+                participants: [selfAddr],
+                submissions:  submissions
+            });
             return;
         }
 
@@ -275,6 +285,14 @@ class OracleConsensus {
                     console.log('Oracle: Round ' + round + ' finalized (' +
                         pending.prepares.size + ' prepares, ' +
                         pending.commits.size + ' commits)');
+
+                    // Emit finalization event for RewardTracker and SlashDetector
+                    this.emit('round:finalized', {
+                        round:        round,
+                        prices:       pending.prices,
+                        participants: [...pending.prepares],
+                        submissions:  this.oracleRound.getSubmissions(round)
+                    });
                 })
                 .catch(err => {
                     console.error('Oracle: Error storing snapshot for round ' + round + ':', err.message);

@@ -26,6 +26,8 @@ const Consensus         = require('./Consensus.js');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const OracleConsensus   = require('./OracleConsensus.js');
 const OracleRound       = require('./OracleRound.js');
+const RewardTracker     = require('./RewardTracker.js');
+const SlashDetector     = require('./SlashDetector.js');
 const PARAMETER_LIST = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass"];
 
 class XChainHub {
@@ -42,6 +44,8 @@ class XChainHub {
         this.identity         = null;
         this.oracle           = null;
         this.oracleConsensus  = null;
+        this.rewardTracker    = null;
+        this.slashDetector    = null;
     }
 
     async start(){
@@ -111,7 +115,32 @@ class XChainHub {
         // Wire them together
         this.oracle.setConsensus(this.oracleConsensus);
 
-        // Start both
+        // Create reward tracker and slash detector
+        this.rewardTracker = new RewardTracker(this);
+        this.slashDetector = new SlashDetector(this);
+
+        // Subscribe to oracle finalization events
+        this.oracleConsensus.on('round:finalized', async (event) => {
+            // Resolve participant addrs to pubkeys for rewards
+            let participantPubkeys = [];
+            if(this.peerManager.validatorPubkeys){
+                for(let addr of event.participants){
+                    let pk = this.peerManager.validatorPubkeys.get(addr);
+                    if(pk) participantPubkeys.push(pk);
+                }
+            }
+
+            // Distribute rewards
+            await this.rewardTracker.distributeRewards(event.round, participantPubkeys);
+
+            // Check for slashable offenses
+            await this.slashDetector.checkRound(
+                event.round, event.submissions, event.prices,
+                participantPubkeys, validators
+            );
+        });
+
+        // Start all oracle subsystems
         await this.oracleConsensus.start();
         await this.oracle.start();
     }
@@ -224,6 +253,113 @@ class XChainHub {
         let query = "SELECT * FROM price_snapshots WHERE coin_pair = ? AND status = 'finalized' ORDER BY round_number DESC LIMIT 1";
         let rows = await this.db.doQuery(query, [coinPair]);
         return rows.length > 0 ? rows[0] : null;
+    }
+
+    // Sync validators from external data (e.g., indexer staking data)
+    // validators: [{ signing_pubkey, addr, tier, chains }]
+    async syncValidators(validators) {
+        if (!Array.isArray(validators)) throw new Error('validators must be an array');
+
+        for (let v of validators) {
+            if (!v.signing_pubkey || !/^[0-9a-fA-F]{64}$/.test(v.signing_pubkey)) continue;
+            if (!v.addr) continue;
+
+            await this.db.doQuery(
+                `INSERT INTO validators (signing_pubkey, addr, status)
+                 VALUES (?, ?, 'active')
+                 ON DUPLICATE KEY UPDATE addr = ?, status = 'active', updated_at = NOW()`,
+                [v.signing_pubkey, v.addr, v.addr]
+            );
+        }
+
+        // Reload validator set across all subsystems
+        await this._loadValidatorPubkeys();
+        let validatorSet = await this._loadValidatorSet();
+        if (this.consensus) this.consensus.setValidatorSet(validatorSet);
+        if (this.oracleConsensus) this.oracleConsensus.setValidatorSet(validatorSet);
+
+        console.log('Validators synced: ' + validators.length + ' entries');
+        return true;
+    }
+
+    // Get the active validator list
+    async getValidators() {
+        let query = "SELECT signing_pubkey, addr, status, created_at, updated_at FROM validators WHERE status = 'active' ORDER BY signing_pubkey";
+        return await this.db.doQuery(query);
+    }
+
+    // Get detailed status for a validator
+    async getValidatorStatus(signingPubkey) {
+        // Get validator info
+        let vRows = await this.db.doQuery(
+            "SELECT * FROM validators WHERE signing_pubkey = ?", [signingPubkey]
+        );
+        if (vRows.length === 0) return null;
+
+        // Get unclaimed rewards
+        let unclaimed = this.rewardTracker ? await this.rewardTracker.getUnclaimedRewards(signingPubkey) : '0';
+
+        // Get recent rewards
+        let rewards = this.rewardTracker ? await this.rewardTracker.getRewardHistory(signingPubkey, 20) : [];
+
+        // Get slash proposals
+        let slashes = this.slashDetector ? await this.slashDetector.getProposalsForValidator(signingPubkey) : [];
+
+        return {
+            validator:       vRows[0],
+            unclaimedRewards: unclaimed,
+            recentRewards:   rewards,
+            slashProposals:  slashes
+        };
+    }
+
+    // Calculate a fee quote: gas cost → XCHAIN → native coin
+    // action: string (e.g., 'ISSUE'), chain: string (e.g., 'BTC'), params: object
+    async getFeeQuote(action, chain) {
+        // Gas schedule (same as indexer config)
+        let gasSchedule = {
+            ISSUE: 100000, ISSUE_SUBTOKEN: 50000,
+            EXPIRATION_PER_DAY: 550,
+            AIRDROP_PER_RECIPIENT: 100, DIVIDEND_PER_RECIPIENT: 100,
+            VM_EXECUTE_BASE: 1000, VM_DEPLOY_BASE: 100000
+        };
+        let gasPrice = 0.00001;  // XCHAIN per gas unit
+
+        let gasCost = gasSchedule[action] || 0;
+        if (gasCost === 0) return { error: 'unknown action: ' + action };
+
+        let xchainAmount = gasCost * gasPrice;
+
+        // Get XCHAIN/USD and chain/USD prices from latest snapshots
+        let xchainPrice = await this.getPrice('XCHAIN/BTC');
+        let coinPrice   = await this.getPrice(chain + '/USD');
+
+        let result = {
+            action:       action,
+            chain:        chain,
+            gasCost:      gasCost,
+            gasPrice:     gasPrice.toFixed(8),
+            xchainAmount: xchainAmount.toFixed(8)
+        };
+
+        // If we have oracle prices, compute the native coin amount
+        if (coinPrice && coinPrice.price) {
+            let coinUsd = parseFloat(coinPrice.price);
+            if (coinUsd > 0) {
+                // For now, use a simple XCHAIN = $1 placeholder until XCHAIN/USD oracle is live
+                let xchainUsd = 1.0;
+                let feeUsd = xchainAmount * xchainUsd;
+                let nativeCoinAmount = feeUsd / coinUsd;
+
+                result.xchainUsd        = xchainUsd.toFixed(8);
+                result.feeUsd           = feeUsd.toFixed(8);
+                result.coinUsd          = coinUsd.toFixed(8);
+                result.nativeCoinAmount = nativeCoinAmount.toFixed(8);
+                result.nativeCoin       = chain;
+            }
+        }
+
+        return result;
     }
 
     async close(){

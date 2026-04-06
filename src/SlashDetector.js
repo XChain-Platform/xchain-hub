@@ -1,0 +1,184 @@
+/*********************************************************************
+ *
+ * Copyright © 2025 Dankest, LLC
+ * Based on XChain Platform by Dankest, LLC – https://dankest.llc
+ *
+ * Licensed under the Dankest Community License (Apache License 2.0 + Additional Terms).
+ * You may not use this file except in compliance with that License.
+ *
+ * A copy of the License is available at:
+ *     https://dankest.llc/license
+ *
+ * This software is provided "AS IS", without warranties or conditions of any kind.
+ *
+ **********************************************************************
+ *
+ * XChain Hub - Slash Detector
+ *
+ * Monitors validator behavior and records slash proposals for:
+ * - Price deviation > threshold from consensus
+ * - Repeated deviation (3+ rounds in 24 hours)
+ * - Non-participation (consecutive missed rounds)
+ *
+ * Detection only — actual stake slashing happens in the indexer.
+ *
+ ********************************************************************/
+
+class SlashDetector {
+
+    constructor(hub) {
+        this.hub = hub;
+        this.db  = hub.db;
+
+        // Config
+        this.deviationThreshold    = parseFloat(hub.p2pConfig.SLASH_DEVIATION_THRESHOLD || '0.05');    // 5%
+        this.missedRoundsThreshold = parseInt(hub.p2pConfig.SLASH_MISSED_ROUNDS_THRESHOLD || '30');     // 30 rounds
+
+        // Track consecutive missed rounds per validator: Map<pubkey, count>
+        this.missedRounds = new Map();
+
+        // Track deviations in 24h window: Map<pubkey, [{ round, timestamp }]>
+        this.recentDeviations = new Map();
+    }
+
+    // Check a finalized round for slashable offenses
+    // submissions: Map<sender, { prices, sources, timestamp }> (from OracleRound)
+    // finalizedPrices: [{ coinPair, price }] (from OracleConsensus aggregation)
+    // participants: array of validator pubkeys that submitted
+    // allValidators: array of { pubkey, addr } (full validator set)
+    async checkRound(round, submissions, finalizedPrices, participants, allValidators) {
+        // Check price deviations
+        await this._checkDeviations(round, submissions, finalizedPrices);
+
+        // Check participation (update missed round counters)
+        await this._checkParticipation(round, participants, allValidators);
+    }
+
+    // Check for price deviations exceeding the threshold
+    async _checkDeviations(round, submissions, finalizedPrices) {
+        if (!submissions || !finalizedPrices) return;
+
+        // Build a map of finalized prices for quick lookup
+        let finalizedMap = {};
+        for (let fp of finalizedPrices) {
+            finalizedMap[fp.coinPair] = parseFloat(fp.price);
+        }
+
+        // Check each validator's submission against the finalized price
+        for (let [sender, sub] of submissions) {
+            if (!sub.prices || !Array.isArray(sub.prices)) continue;
+
+            // Resolve the validator's pubkey
+            let pubkey = this._resolveValidatorPubkey(sender);
+            if (!pubkey) continue;
+
+            for (let p of sub.prices) {
+                let finalPrice = finalizedMap[p.coinPair];
+                if (!finalPrice || finalPrice === 0) continue;
+
+                let submittedPrice = parseFloat(p.price);
+                if (isNaN(submittedPrice) || submittedPrice === 0) continue;
+
+                let deviation = Math.abs(submittedPrice - finalPrice) / finalPrice;
+
+                if (deviation > this.deviationThreshold) {
+                    console.warn('Slash: Validator ' + pubkey.substring(0, 16) + '... deviated ' +
+                        (deviation * 100).toFixed(2) + '% on ' + p.coinPair + ' in round ' + round);
+
+                    // Record the deviation
+                    await this._recordSlashProposal(pubkey, 'price_deviation', round,
+                        JSON.stringify({
+                            coinPair: p.coinPair,
+                            submitted: submittedPrice,
+                            finalized: finalPrice,
+                            deviation: (deviation * 100).toFixed(2) + '%'
+                        })
+                    );
+
+                    // Track for repeated deviation check
+                    this._trackDeviation(pubkey, round);
+                }
+            }
+        }
+    }
+
+    // Check for non-participation (validators who didn't submit)
+    async _checkParticipation(round, participants, allValidators) {
+        if (!allValidators || allValidators.length === 0) return;
+
+        let participantSet = new Set(participants);
+
+        for (let v of allValidators) {
+            if (participantSet.has(v.pubkey)) {
+                // Validator participated — reset missed counter
+                this.missedRounds.set(v.pubkey, 0);
+            } else {
+                // Validator missed this round
+                let missed = (this.missedRounds.get(v.pubkey) || 0) + 1;
+                this.missedRounds.set(v.pubkey, missed);
+
+                if (missed === this.missedRoundsThreshold) {
+                    console.warn('Slash: Validator ' + v.pubkey.substring(0, 16) +
+                        '... missed ' + missed + ' consecutive rounds');
+
+                    await this._recordSlashProposal(v.pubkey, 'non_participation', round,
+                        JSON.stringify({ missedRounds: missed })
+                    );
+                }
+            }
+        }
+    }
+
+    // Track a deviation for repeated-deviation detection
+    _trackDeviation(pubkey, round) {
+        if (!this.recentDeviations.has(pubkey)) {
+            this.recentDeviations.set(pubkey, []);
+        }
+
+        let deviations = this.recentDeviations.get(pubkey);
+        deviations.push({ round: round, timestamp: Date.now() });
+
+        // Prune entries older than 24 hours
+        let cutoff = Date.now() - (24 * 60 * 60 * 1000);
+        this.recentDeviations.set(pubkey, deviations.filter(d => d.timestamp > cutoff));
+
+        // Check for 3+ deviations in 24h → repeated deviation
+        if (this.recentDeviations.get(pubkey).length >= 3) {
+            console.warn('Slash: Validator ' + pubkey.substring(0, 16) +
+                '... has 3+ price deviations in 24 hours');
+
+            this._recordSlashProposal(pubkey, 'repeated_deviation', round,
+                JSON.stringify({ deviationsIn24h: this.recentDeviations.get(pubkey).length })
+            );
+        }
+    }
+
+    // Record a slash proposal in the database
+    async _recordSlashProposal(validatorPubkey, offenseType, round, evidence) {
+        let query = `INSERT INTO slash_proposals (validator_pubkey, offense_type, round_number, evidence)
+                     VALUES (?, ?, ?, ?)`;
+        await this.db.doQuery(query, [validatorPubkey, offenseType, round, evidence])
+            .catch(e => console.error('Error recording slash proposal:', e.message));
+    }
+
+    // Resolve a validator addr to their pubkey
+    _resolveValidatorPubkey(addr) {
+        let pm = this.hub.getPeerManager();
+        if (!pm || !pm.validatorPubkeys) return null;
+        return pm.validatorPubkeys.get(addr) || null;
+    }
+
+    // Get all pending slash proposals
+    async getPendingProposals() {
+        let query = "SELECT * FROM slash_proposals WHERE status = 'pending' ORDER BY created_at DESC";
+        return await this.db.doQuery(query);
+    }
+
+    // Get slash proposals for a specific validator
+    async getProposalsForValidator(validatorPubkey) {
+        let query = "SELECT * FROM slash_proposals WHERE validator_pubkey = ? ORDER BY created_at DESC LIMIT 50";
+        return await this.db.doQuery(query, [validatorPubkey]);
+    }
+}
+
+module.exports = SlashDetector;
