@@ -51,6 +51,16 @@ npm run api
 
 The hub will automatically create the `XChain_Hub` database and `configs` table on first startup.
 
+## Multi-Instance Deployment
+
+Multiple hub instances can run against the same MariaDB database for high availability. Consumer services use the `HUB_VALIDATORS` environment variable to specify a comma-separated list of hub endpoints:
+
+```env
+HUB_VALIDATORS=hub1.local:10000,hub2.local:10000,hub3.local:10000
+```
+
+Consumers try each endpoint in order and fall back to the next if one is unreachable. If `HUB_VALIDATORS` is not set, consumers fall back to the legacy `HUB_API_HOST:HUB_PORT` variables for backward compatibility.
+
 ## Environment Variables
 
 | Variable | Required | Default | Description |
