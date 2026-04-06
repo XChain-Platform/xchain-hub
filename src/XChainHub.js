@@ -30,6 +30,7 @@ const RewardTracker     = require('./RewardTracker.js');
 const SlashDetector     = require('./SlashDetector.js');
 const CrossChainEngine  = require('./CrossChainEngine.js');
 const ReorgHandler      = require('./ReorgHandler.js');
+const SwapTracker       = require('./SwapTracker.js');
 const PARAMETER_LIST = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass"];
 
 class XChainHub {
@@ -50,6 +51,7 @@ class XChainHub {
         this.slashDetector    = null;
         this.crossChain       = null;
         this.reorgHandler     = null;
+        this.swapTracker      = null;
     }
 
     async start(){
@@ -165,6 +167,15 @@ class XChainHub {
         this.crossChain = new CrossChainEngine(this);
         let validators = await this._loadValidatorSet();
         this.crossChain.setValidatorSet(validators);
+
+        // Load per-chain-pair validator sets for Tier 2 filtering
+        let chainPairMap = await this._loadChainPairValidators();
+        this.crossChain.setChainPairValidators(chainPairMap);
+
+        // Create and wire SWAP tracker
+        this.swapTracker = new SwapTracker(this);
+        this.swapTracker.start(this.crossChain);
+
         await this.crossChain.start();
     }
 
@@ -198,6 +209,25 @@ class XChainHub {
     async requestAttestation(sourceChain, sourceActionIndex, destChain){
         if(!this.crossChain) throw new Error('Cross-chain engine not active');
         return await this.crossChain.requestAttestation(sourceChain, sourceActionIndex, destChain);
+    }
+
+    // Initiate a cross-chain SWAP
+    async initiateSwap(sourceChain, sourceActionIndex, destChain, destActionIndex){
+        if(!this.swapTracker) throw new Error('SWAP tracker not active');
+        await this.swapTracker.initiateSwap(sourceChain, sourceActionIndex, destChain, destActionIndex);
+        return true;
+    }
+
+    // Get a specific swap
+    async getSwap(sourceChain, sourceActionIndex){
+        if(!this.swapTracker) return null;
+        return await this.swapTracker.getSwap(sourceChain, sourceActionIndex);
+    }
+
+    // Query swaps
+    async getSwaps(status, limit){
+        if(!this.swapTracker) return [];
+        return await this.swapTracker.getSwaps(status, limit);
     }
 
     // Update config — routes through consensus if active, otherwise writes directly
@@ -285,6 +315,43 @@ class XChainHub {
             console.error('Error loading validator set:', e.message);
             return [];
         }
+    }
+
+    // Load per-chain-pair validator subsets for cross-chain quorum
+    // Validators with a 'chains' column (comma-separated) are filtered by chain-pair
+    // Validators with NULL/empty chains support all chains (backward compat)
+    async _loadChainPairValidators(){
+        let chainPairMap = new Map();
+        try {
+            // First, try to add 'chains' and 'tier' columns if they don't exist
+            // (migration from Phase 2C validators table to Phase 4C)
+            await this.db.doQuery("ALTER TABLE validators ADD COLUMN chains VARCHAR(50) DEFAULT NULL").catch(() => {});
+            await this.db.doQuery("ALTER TABLE validators ADD COLUMN tier TINYINT UNSIGNED DEFAULT NULL").catch(() => {});
+
+            let rows = await this.db.doQuery(
+                "SELECT signing_pubkey, addr, chains FROM validators WHERE status = 'active' ORDER BY signing_pubkey"
+            );
+
+            let allChains = ['BTC', 'LTC', 'DOGE'];
+            let chainPairs = ['BTC-LTC', 'BTC-DOGE', 'LTC-DOGE'];
+
+            for (let pair of chainPairs) {
+                let [chainA, chainB] = pair.split('-');
+                let pairValidators = [];
+                for (let row of rows) {
+                    let supportedChains = row.chains ? row.chains.split(',').map(c => c.trim()) : allChains;
+                    if (supportedChains.includes(chainA) && supportedChains.includes(chainB)) {
+                        pairValidators.push({ pubkey: row.signing_pubkey, addr: row.addr });
+                    }
+                }
+                if (pairValidators.length > 0) {
+                    chainPairMap.set(pair, pairValidators);
+                }
+            }
+        } catch(e) {
+            console.error('Error loading chain-pair validators:', e.message);
+        }
+        return chainPairMap;
     }
 
     // Get price snapshots from DB

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-04-06
+
+### Added
+- SWAP lifecycle tracker (`SwapTracker.js`) — tracks cross-chain swaps through initiated → attested → executed → settled
+- `swap_records` table for SWAP lifecycle persistence
+- Per-chain-pair validator filtering in CrossChainEngine — only validators supporting both chains participate in cross-chain quorum
+- `chains` and `tier` columns added to `validators` table (auto-migration on startup)
+- Validators with NULL chains support all chain-pairs (backward compatible)
+- `initiateswap`, `getswap`, `getswaps` JSON-RPC methods
+- SwapTracker auto-progresses swap status on attestation finalization
+
 ## [1.8.0] - 2026-04-06
 
 ### Added

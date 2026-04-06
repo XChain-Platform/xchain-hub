@@ -251,6 +251,39 @@ async function startApi(){
             }
         },
 
+        // Initiate a cross-chain SWAP
+        async initiateswap({source_chain, source_action_index, dest_chain, dest_action_index}){
+            if(!source_chain || !source_action_index || !dest_chain)
+                return {error: "source_chain, source_action_index, and dest_chain are required"};
+            try {
+                await hub.initiateSwap(source_chain, parseInt(source_action_index), dest_chain, dest_action_index ? parseInt(dest_action_index) : null);
+                return {status: "success"};
+            } catch (err) {
+                return {error: err.message || "error initiating swap"};
+            }
+        },
+
+        // Get a specific swap
+        async getswap({source_chain, source_action_index}){
+            if(!source_chain || !source_action_index)
+                return {error: "source_chain and source_action_index are required"};
+            try {
+                let swap = await hub.getSwap(source_chain, parseInt(source_action_index));
+                return swap || {error: "swap not found"};
+            } catch (err) {
+                return {error: "error fetching swap"};
+            }
+        },
+
+        // Get swaps by status
+        async getswaps({status, limit}){
+            try {
+                return await hub.getSwaps(status, limit);
+            } catch (err) {
+                return {error: "error fetching swaps"};
+            }
+        },
+
         // Get a specific attestation
         async getattestation({source_chain, source_action_index}){
             if(!source_chain || !source_action_index)

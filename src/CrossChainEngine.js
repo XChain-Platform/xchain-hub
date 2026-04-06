@@ -46,6 +46,9 @@ class CrossChainEngine extends EventEmitter {
         // Validator set (shared with consensus/oracle)
         this.validatorSet = [];
 
+        // Per-chain-pair validator sets: Map<'BTC-DOGE', [{pubkey, addr}]>
+        this.chainPairValidators = new Map();
+
         // Pending attestations: Map<attestationId, pending>
         this.pendingAttestations = new Map();
 
@@ -65,6 +68,12 @@ class CrossChainEngine extends EventEmitter {
     // Set the validator set for quorum and leader calculation
     setValidatorSet(validators) {
         this.validatorSet = validators;
+    }
+
+    // Set per-chain-pair validator subsets for cross-chain quorum
+    // chainPairMap: Map<'BTC-DOGE', [{pubkey, addr}]>
+    setChainPairValidators(chainPairMap) {
+        this.chainPairValidators = chainPairMap;
     }
 
     // Start listening for cross-chain attestation messages
@@ -99,7 +108,7 @@ class CrossChainEngine extends EventEmitter {
         }
 
         // Single-node fallback
-        let quorum = this._getQuorum();
+        let quorum = this._getQuorum(sourceChain, destChain);
         if (quorum === 0) {
             let attestation = {
                 attestationId, sourceChain, sourceActionIndex: parseInt(sourceActionIndex),
@@ -110,9 +119,9 @@ class CrossChainEngine extends EventEmitter {
             return attestation;
         }
 
-        // Check if this node is the leader
+        // Check if this node is the leader for this chain pair
         this.seq++;
-        let leader = this._getLeader(this.seq);
+        let leader = this._getLeader(this.seq, sourceChain, destChain);
         if (leader && leader.addr !== this.peerManager.validatorAddr) {
             throw new Error('Not the leader for attestation (leader: ' + leader.addr + ')');
         }
@@ -330,13 +339,35 @@ class CrossChainEngine extends EventEmitter {
 
     // --- Utilities ---
 
-    _getLeader(seq) {
-        if (this.validatorSet.length === 0) return null;
-        return this.validatorSet[seq % this.validatorSet.length];
+    // Get the validator set for a specific chain pair, or fall back to the full set
+    _getChainPairSet(sourceChain, destChain) {
+        if (this.chainPairValidators.size > 0) {
+            // Try both orderings of the chain pair
+            let key1 = sourceChain + '-' + destChain;
+            let key2 = destChain + '-' + sourceChain;
+            let set = this.chainPairValidators.get(key1) || this.chainPairValidators.get(key2);
+            if (set && set.length > 0) return set;
+        }
+        // Fall back to full validator set
+        return this.validatorSet;
     }
 
-    _getQuorum() {
-        let N = this.validatorSet.length;
+    _getLeader(seq, sourceChain, destChain) {
+        let set = (sourceChain && destChain)
+            ? this._getChainPairSet(sourceChain, destChain)
+            : this.validatorSet;
+        if (set.length === 0) return null;
+        return set[seq % set.length];
+    }
+
+    _getQuorum(sourceChain, destChain) {
+        let N;
+        if (sourceChain && destChain) {
+            let set = this._getChainPairSet(sourceChain, destChain);
+            N = set.length;
+        } else {
+            N = this.validatorSet.length;
+        }
         if (N <= 0) {
             let peers = this.peerManager.getPeerStatus().filter(p => p.state === 'open');
             N = peers.length + 1;
