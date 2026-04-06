@@ -15,14 +15,15 @@
  *
  * XChain Hub - Hub Class
  *
- * This file handles starting the hub and managing service configs.
- * Orchestrates the database, P2P gossip, and PBFT consensus layers.
+ * Orchestrates the database, P2P gossip, PBFT consensus, and
+ * validator identity layers.
  *
  ********************************************************************/
 
-const Database    = require('./db.js');
-const PeerManager = require('./PeerManager.js');
-const Consensus   = require('./Consensus.js');
+const Database          = require('./db.js');
+const PeerManager       = require('./PeerManager.js');
+const Consensus         = require('./Consensus.js');
+const ValidatorIdentity = require('./ValidatorIdentity.js');
 const PARAMETER_LIST = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass"];
 
 class XChainHub {
@@ -36,6 +37,7 @@ class XChainHub {
         this.db          = null;
         this.peerManager = null;
         this.consensus   = null;
+        this.identity    = null;
     }
 
     async start(){
@@ -48,7 +50,23 @@ class XChainHub {
     // Start the P2P gossip layer (no-op if p2pConfig is null)
     async startP2P(){
         if(!this.p2pConfig) return;
+
+        // Load validator identity if private key is configured
+        if(this.p2pConfig.SIGNING_PRIVKEY_HEX){
+            this.identity = new ValidatorIdentity(this.p2pConfig.SIGNING_PRIVKEY_HEX);
+            console.log('Validator identity loaded (pubkey: ' + this.identity.getPubkeyHex().substring(0, 16) + '...)');
+        }
+
         this.peerManager = new PeerManager(this.p2pConfig, this.db);
+
+        // Attach identity for signing
+        if(this.identity){
+            this.peerManager.setIdentity(this.identity);
+        }
+
+        // Load validator pubkey registry for verification
+        await this._loadValidatorPubkeys();
+
         await this.peerManager.start();
     }
 
@@ -56,32 +74,40 @@ class XChainHub {
     async startConsensus(){
         if(!this.peerManager) return;
         this.consensus = new Consensus(this);
+
+        // Load validator set for leader rotation
+        let validators = await this._loadValidatorSet();
+        this.consensus.setValidatorSet(validators);
+
         await this.consensus.start();
     }
 
-    // Get the PeerManager instance (for higher layers)
+    // Get the PeerManager instance
     getPeerManager(){
         return this.peerManager;
     }
 
-    // Get the Consensus instance (for higher layers)
+    // Get the Consensus instance
     getConsensus(){
         return this.consensus;
+    }
+
+    // Get the ValidatorIdentity instance
+    getIdentity(){
+        return this.identity;
     }
 
     // Update config — routes through consensus if active, otherwise writes directly
     async addParametersFromJson(json){
         if(this.consensus){
-            // Route through PBFT consensus
             await this.consensus.propose(json);
             return true;
         }
-        // Direct write (no consensus — single-instance mode)
         await this.applyConfig(json);
         return true;
     }
 
-    // Apply config directly to the database (called by Consensus after quorum, or directly in single-instance mode)
+    // Apply config directly to the database
     async applyConfig(json){
         for(let nextCoin in json){
             if(nextCoin != ""){
@@ -101,6 +127,61 @@ class XChainHub {
 
     async getAllConfigs(){
         return await this.db.getAllConfigs();
+    }
+
+    // Register a validator (for Phase 2C bootstrap)
+    async registerValidator(signingPubkey, addr){
+        if(!signingPubkey || !/^[0-9a-fA-F]{64}$/.test(signingPubkey))
+            throw new Error('Invalid signing pubkey (must be 64 hex chars)');
+        if(!addr)
+            throw new Error('Validator addr is required');
+
+        await this.db.doQuery(
+            `INSERT INTO validators (signing_pubkey, addr, status)
+             VALUES (?, ?, 'active')
+             ON DUPLICATE KEY UPDATE addr = ?, status = 'active', updated_at = NOW()`,
+            [signingPubkey, addr, addr]
+        );
+
+        // Reload pubkey registry and validator set
+        await this._loadValidatorPubkeys();
+        if(this.consensus){
+            let validators = await this._loadValidatorSet();
+            this.consensus.setValidatorSet(validators);
+        }
+
+        console.log('Validator registered: ' + addr + ' (pubkey: ' + signingPubkey.substring(0, 16) + '...)');
+        return true;
+    }
+
+    // Load validator pubkeys from DB into PeerManager for signature verification
+    async _loadValidatorPubkeys(){
+        if(!this.peerManager) return;
+        try {
+            let rows = await this.db.doQuery(
+                "SELECT signing_pubkey, addr FROM validators WHERE status = 'active' ORDER BY signing_pubkey"
+            );
+            let pubkeyMap = new Map();
+            for(let row of rows){
+                pubkeyMap.set(row.addr, row.signing_pubkey);
+            }
+            this.peerManager.setValidatorPubkeys(pubkeyMap);
+        } catch(e){
+            console.error('Error loading validator pubkeys:', e.message);
+        }
+    }
+
+    // Load sorted validator set for consensus leader rotation
+    async _loadValidatorSet(){
+        try {
+            let rows = await this.db.doQuery(
+                "SELECT signing_pubkey, addr FROM validators WHERE status = 'active' ORDER BY signing_pubkey"
+            );
+            return rows.map(r => ({ pubkey: r.signing_pubkey, addr: r.addr }));
+        } catch(e){
+            console.error('Error loading validator set:', e.message);
+            return [];
+        }
     }
 
     async close(){

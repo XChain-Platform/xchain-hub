@@ -48,6 +48,8 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     P2P_HOST:               process.env.P2P_HOST || '0.0.0.0',
     SEED_NODES:             (process.env.SEED_NODES || '').split(',').map(s => s.trim()).filter(s => s),
     P2P_VALIDATOR_ADDR:     P2P_VALIDATOR_ADDR,
+    SIGNING_PRIVKEY_HEX:    process.env.SIGNING_PRIVKEY_HEX || '',
+    REQUIRE_SIGNATURES:     (process.env.REQUIRE_SIGNATURES || '').toLowerCase() === 'true',
     P2P_HEARTBEAT_INTERVAL: parseInt(process.env.P2P_HEARTBEAT_INTERVAL) || 15000,
     P2P_RECONNECT_BASE:     parseInt(process.env.P2P_RECONNECT_BASE) || 2000,
     P2P_RECONNECT_MAX:      parseInt(process.env.P2P_RECONNECT_MAX) || 60000,
@@ -105,7 +107,17 @@ async function startApi(){
                 await hub.addParametersFromJson(config);
                 return {status: "success"};
             } catch (err) {
-                return {error: "there was an error trying to update a config"};
+                return {error: err.message || "there was an error trying to update a config"};
+            }
+        },
+
+        // Register a validator (Phase 2C bootstrap)
+        async registervalidator({signing_pubkey, addr}){
+            try {
+                await hub.registerValidator(signing_pubkey, addr);
+                return {status: "success"};
+            } catch (err) {
+                return {error: err.message || "there was an error trying to register a validator"};
             }
         }
     };

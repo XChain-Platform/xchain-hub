@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-04-06
+
+### Added
+- Ed25519 validator identity (`ValidatorIdentity.js`) — message signing and signature verification using Node.js built-in crypto
+- `validators` table for validator registry (signing pubkey, addr, status)
+- `registervalidator` JSON-RPC method for bootstrap validator registration
+- Leader rotation in PBFT consensus — deterministic leader per sequence number from sorted validator set
+- View change protocol — `PBFT_VIEW_CHANGE` and `PBFT_NEW_VIEW` messages for leader failover on timeout
+- Signature verification in PeerManager — incoming messages verified against registered validator pubkeys
+- `SIGNING_PRIVKEY_HEX` env var for Ed25519 private key
+- `REQUIRE_SIGNATURES` env var (default false) — when true, rejects unsigned P2P messages
+
+### Changed
+- PeerManager broadcasts now include Ed25519 signature in envelope `sig` field (when identity is configured)
+- Consensus quorum now uses registered validator set size (not transient peer count)
+- Consensus timeout now triggers view change (leader rotation) instead of simple rejection
+
 ## [1.2.0] - 2026-04-06
 
 ### Added

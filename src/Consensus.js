@@ -31,6 +31,8 @@ const crypto = require('crypto');
 const PBFT_PRE_PREPARE = 'PBFT_PRE_PREPARE';
 const PBFT_PREPARE     = 'PBFT_PREPARE';
 const PBFT_COMMIT      = 'PBFT_COMMIT';
+const PBFT_VIEW_CHANGE = 'PBFT_VIEW_CHANGE';
+const PBFT_NEW_VIEW    = 'PBFT_NEW_VIEW';
 
 const DEFAULT_TIMEOUT = 30000; // 30 seconds
 
@@ -44,19 +46,35 @@ class Consensus {
         // Sequence counter (loaded from DB on start)
         this.seq = 0;
 
+        // View number (incremented on leader failover, reset on successful consensus)
+        this.view = 0;
+
+        // Validator set — sorted array of { pubkey, addr }
+        // Loaded from DB on start; used for leader rotation and quorum
+        this.validatorSet = [];
+
         // Pending proposals: Map<seq, proposal>
-        // proposal = { config, digest, prepares: Set<sender>, commits: Set<sender>,
-        //              resolved: bool, timer, resolve, reject, applied: bool }
         this.pendingProposals = new Map();
+
+        // Pending view changes: Map<view, Set<sender>>
+        this.pendingViewChanges = new Map();
 
         // Digests already applied (prevents double-apply from late COMMIT messages)
         this.applied = new Set();
+
+        // Pending client request (when this node is not the leader)
+        this.pendingClientConfig = null;
 
         // Message handler reference (for cleanup)
         this._messageHandler = null;
 
         // Config
         this.timeout = parseInt(process.env.PBFT_TIMEOUT) || DEFAULT_TIMEOUT;
+    }
+
+    // Set the validator set (sorted array of { pubkey, addr })
+    setValidatorSet(validators) {
+        this.validatorSet = validators;
     }
 
     // Start the consensus engine
@@ -98,9 +116,17 @@ class Consensus {
             return true;
         }
 
+        // Leader check: only the leader for the next seq can propose
+        let nextSeq = this.seq + 1;
+        let leader = this._getLeader(nextSeq);
+        if (leader && leader.addr !== this.peerManager.validatorAddr) {
+            throw new Error('Not the leader for seq ' + nextSeq + ' (leader: ' + leader.addr + ')');
+        }
+
         // Increment sequence
         this.seq++;
         let seq = this.seq;
+        this.view = 0; // Reset view on new proposal
         let digest = this._digest(config);
 
         // Create proposal
@@ -122,11 +148,13 @@ class Consensus {
 
             this.pendingProposals.set(seq, proposal);
 
-            // Set timeout
+            // Set timeout — triggers view change on failure
             proposal.timer = setTimeout(() => {
                 if (!proposal.resolved) {
                     proposal.resolved = true;
                     this.pendingProposals.delete(seq);
+                    // Initiate view change so a new leader can take over
+                    this._initiateViewChange(seq);
                     reject(new Error('Consensus timeout for seq ' + seq + ' (received ' +
                         proposal.prepares.size + ' prepares, ' + proposal.commits.size + ' commits, need ' + quorum + ')'));
                 }
@@ -152,6 +180,8 @@ class Consensus {
             case PBFT_PRE_PREPARE: this._handlePrePrepare(envelope); break;
             case PBFT_PREPARE:     this._handlePrepare(envelope);    break;
             case PBFT_COMMIT:      this._handleCommit(envelope);     break;
+            case PBFT_VIEW_CHANGE: this._handleViewChange(envelope); break;
+            case PBFT_NEW_VIEW:    this._handleNewView(envelope);    break;
         }
     }
 
@@ -320,12 +350,80 @@ class Consensus {
         await this.hub.applyConfig(config);
     }
 
+    // Handle VIEW_CHANGE: collect votes and promote new leader
+    _handleViewChange(envelope) {
+        let { view, seq } = envelope.data;
+        if (typeof view !== 'number' || typeof seq !== 'number') return;
+
+        if (!this.pendingViewChanges.has(view)) {
+            this.pendingViewChanges.set(view, new Set());
+        }
+        this.pendingViewChanges.get(view).add(envelope.sender);
+
+        let quorum = this._getQuorum();
+        if (quorum === 0) return;
+
+        if (this.pendingViewChanges.get(view).size >= quorum) {
+            // View change accepted — update view and check if we're the new leader
+            this.view = view;
+            let newLeader = this._getLeader(seq);
+            if (newLeader && newLeader.addr === this.peerManager.validatorAddr) {
+                console.log('PBFT: View change to view ' + view + ' — this node is the new leader');
+                this.peerManager.broadcast(PBFT_NEW_VIEW, { view: view, seq: seq });
+            }
+            this.pendingViewChanges.delete(view);
+        }
+    }
+
+    // Handle NEW_VIEW: acknowledge new leader
+    _handleNewView(envelope) {
+        let { view, seq } = envelope.data;
+        if (typeof view !== 'number') return;
+        this.view = view;
+        console.log('PBFT: New view ' + view + ' announced by ' + envelope.sender);
+    }
+
+    // Initiate a view change (called when leader times out)
+    _initiateViewChange(seq) {
+        this.view++;
+        console.log('PBFT: Initiating view change to view ' + this.view + ' (seq ' + seq + ')');
+        this.peerManager.broadcast(PBFT_VIEW_CHANGE, {
+            view: this.view,
+            seq:  seq
+        });
+
+        // Add own vote
+        if (!this.pendingViewChanges.has(this.view)) {
+            this.pendingViewChanges.set(this.view, new Set());
+        }
+        this.pendingViewChanges.get(this.view).add(this.peerManager.validatorAddr);
+    }
+
+    // Get the leader for a given sequence number
+    _getLeader(seq) {
+        if (this.validatorSet.length === 0) return null;
+        let idx = (seq + this.view) % this.validatorSet.length;
+        return this.validatorSet[idx];
+    }
+
+    // Check if this node is the current leader for a given sequence
+    _isLeader(seq) {
+        let leader = this._getLeader(seq);
+        return leader && leader.addr === this.peerManager.validatorAddr;
+    }
+
     // Calculate quorum size
     _getQuorum() {
-        if (!this.peerManager) return 0;
-        let peers = this.peerManager.getPeerStatus().filter(p => p.state === 'open');
-        let N = peers.length + 1; // +1 for self
-        if (N === 1) return 0;    // Single node — no consensus needed
+        // Use validator set if available, otherwise fall back to live peer count
+        let N;
+        if (this.validatorSet.length > 0) {
+            N = this.validatorSet.length;
+        } else {
+            if (!this.peerManager) return 0;
+            let peers = this.peerManager.getPeerStatus().filter(p => p.state === 'open');
+            N = peers.length + 1; // +1 for self
+        }
+        if (N <= 1) return 0;    // Single node — no consensus needed
         let f = Math.floor((N - 1) / 3);
         return 2 * f + 1;
     }

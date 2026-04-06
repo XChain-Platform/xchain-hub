@@ -21,9 +21,10 @@
  *
  ********************************************************************/
 
-const EventEmitter = require('events');
-const http         = require('http');
-const WebSocket    = require('ws');
+const EventEmitter     = require('events');
+const http             = require('http');
+const WebSocket        = require('ws');
+const ValidatorIdentity = require('./ValidatorIdentity.js');
 
 class PeerManager extends EventEmitter {
 
@@ -32,6 +33,11 @@ class PeerManager extends EventEmitter {
         this.config        = config;
         this.db            = db;
         this.validatorAddr = config.P2P_VALIDATOR_ADDR;
+
+        // Validator identity (set via setIdentity, used for signing/verification)
+        this.identity         = null;   // ValidatorIdentity instance
+        this.validatorPubkeys = null;   // Map<addr, pubkeyHex> — loaded from DB
+        this.requireSigs      = config.REQUIRE_SIGNATURES || false;
 
         // Peer connections: Map<addr, { ws, state, lastSeen, reconnectDelay, reconnectTimer, inbound }>
         this.peers = new Map();
@@ -46,6 +52,16 @@ class PeerManager extends EventEmitter {
         this.dedupTimer     = null;
         this.pingTimer      = null;
         this.running        = false;
+    }
+
+    // Set the validator identity for signing outgoing messages
+    setIdentity(identity) {
+        this.identity = identity;
+    }
+
+    // Set the validator pubkey registry for verifying incoming messages
+    setValidatorPubkeys(pubkeyMap) {
+        this.validatorPubkeys = pubkeyMap;  // Map<addr, pubkeyHex>
     }
 
     // Start the P2P layer
@@ -136,13 +152,7 @@ class PeerManager extends EventEmitter {
 
     // Broadcast a message to all connected peers
     broadcast(type, data) {
-        let envelope = {
-            type:      type,
-            id:        this._makeId(),
-            sender:    this.validatorAddr,
-            timestamp: Date.now(),
-            data:      data || {}
-        };
+        let envelope = this._buildEnvelope(type, data);
 
         // Mark own message as seen
         this.seenIds.set(envelope.id, Date.now() + (this.config.P2P_MSG_DEDUP_TTL || 60000));
@@ -163,13 +173,7 @@ class PeerManager extends EventEmitter {
         let peer = this.peers.get(addr);
         if (!peer || !peer.ws || peer.ws.readyState !== WebSocket.OPEN) return false;
 
-        let envelope = {
-            type:      type,
-            id:        this._makeId(),
-            sender:    this.validatorAddr,
-            timestamp: Date.now(),
-            data:      data || {}
-        };
+        let envelope = this._buildEnvelope(type, data);
 
         this.seenIds.set(envelope.id, Date.now() + (this.config.P2P_MSG_DEDUP_TTL || 60000));
         this._send(peer.ws, JSON.stringify(envelope));
@@ -195,6 +199,40 @@ class PeerManager extends EventEmitter {
     // Generate a unique message ID
     _makeId() {
         return 'v1:' + this.validatorAddr + ':' + Date.now() + ':' + Math.random().toString(16).slice(2, 8);
+    }
+
+    // Build an envelope with optional Ed25519 signature
+    _buildEnvelope(type, data) {
+        let envelope = {
+            type:      type,
+            id:        this._makeId(),
+            sender:    this.validatorAddr,
+            timestamp: Date.now(),
+            data:      data || {}
+        };
+        // Sign if identity is available
+        if (this.identity) {
+            envelope.sig = this.identity.signEnvelope(envelope);
+        }
+        return envelope;
+    }
+
+    // Verify an envelope's signature against the validator registry
+    _verifySignature(envelope) {
+        // If signatures not required, accept unsigned messages
+        if (!this.requireSigs && !envelope.sig) return true;
+        // If signatures required but missing, reject
+        if (this.requireSigs && !envelope.sig) return false;
+        // If no validator registry loaded, accept (bootstrap mode)
+        if (!this.validatorPubkeys) return true;
+        // Look up sender's pubkey
+        let pubkeyHex = this.validatorPubkeys.get(envelope.sender);
+        if (!pubkeyHex) {
+            // Unknown sender — accept if sigs not required, reject if required
+            return !this.requireSigs;
+        }
+        // Verify the signature
+        return ValidatorIdentity.verifyEnvelope(envelope, pubkeyHex);
     }
 
     // Send a serialized message on a WebSocket
@@ -232,6 +270,12 @@ class PeerManager extends EventEmitter {
         // Deduplication
         if (this.seenIds.has(envelope.id)) return;
         this.seenIds.set(envelope.id, Date.now() + (this.config.P2P_MSG_DEDUP_TTL || 60000));
+
+        // Signature verification
+        if (!this._verifySignature(envelope)) {
+            console.warn('P2P: Invalid signature from ' + envelope.sender + ' — dropping message');
+            return;
+        }
 
         // Register inbound peer if unknown
         if (knownAddr === null && ws._peerAddr === null) {
