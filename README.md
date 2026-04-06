@@ -1,15 +1,15 @@
 <!-- SPDX-License-Identifier: LicenseRef-Dankest-Community -->
 <!-- Copyright © 2025 Dankest, LLC -->
 
-# XChain Hub
+# XChain Platform Hub
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.0.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.0.1-blue" alt="Version">
   <img src="https://img.shields.io/badge/node-%3E%3D18-green" alt="Node">
   <img src="https://img.shields.io/badge/license-Dankest%20Community-orange" alt="License">
 </p>
 
-Decentralized config oracle, price oracle, and cross-chain coordinator for the XChain Platform. Validators form a P2P gossip network with PBFT consensus, Ed25519 identity, and governance.
+Decentralized config oracle, price oracle, and cross-chain coordinator for the XChain Platform. Validators form a P2P gossip network with PBFT consensus, Ed25519 identity, trimmed-median price aggregation, cross-chain attestation, and off-chain governance.
 
 ## Features
 
@@ -17,16 +17,19 @@ Decentralized config oracle, price oracle, and cross-chain coordinator for the X
 - **PBFT consensus** — config writes go through a 2/3+ validator consensus round
 - **P2P gossip** — WebSocket-based peer mesh with heartbeat, reconnection, and message deduplication
 - **Ed25519 validator identity** — cryptographic message signing and verification
-- **Decentralized price oracle** — validators fetch prices from external APIs, aggregate via trimmed median, finalize via PBFT consensus
-- **Cross-chain attestation** — PBFT-based attestation for cross-chain actions (SWAP lifecycle tracking)
-- **Reorg propagation** — cross-chain reorg detection, hub rollback, and coordinated chain rollback
-- **Governance** — off-chain PBFT voting for parameter changes (7-day voting period, 2/3+ approval)
+- **Decentralized price oracle** — validators fetch prices from CoinGecko and CoinMarketCap, aggregate via trimmed median, finalize via PBFT consensus
+- **Fee quotes** — gas → XCHAIN → native coin conversion using live oracle prices
+- **Cross-chain attestation** — PBFT-based attestation for cross-chain actions with per-chain-pair validator filtering
+- **SWAP lifecycle tracking** — tracks cross-chain swaps through initiated → attested → executed → settled
+- **Reorg propagation** — cross-chain reorg detection, hub rollback, and coordinated chain rollback via PBFT consensus
+- **Governance** — off-chain PBFT voting for parameter changes (7-day voting period, 2/3+ approval, 50% quorum)
 - **Reward tracking** — per-round XCHAIN rewards for oracle participants
-- **Slash detection** — price deviation, repeated deviation, and non-participation monitoring
+- **Slash detection** — price deviation (>5%), repeated deviation (3+ in 24h), and non-participation (30+ missed rounds)
 - **Leader rotation** — deterministic per-sequence leader with view change on timeout
 - **Multi-instance** — multiple hub instances against shared MariaDB with consumer fallback
-- **MariaDB storage** — relational storage with circuit breaker and exponential backoff
-- **Docker-ready** — Dockerfile for containerized deployment
+- **Single-node fallback** — all consensus operations apply directly when no peers are connected
+- **MariaDB storage** — 13 relational tables with circuit breaker and exponential backoff
+- **Docker-ready** — Dockerfile for containerized deployment via xchain-node
 
 ## Documentation
 
@@ -34,8 +37,11 @@ Full hub documentation is available in the [xchain-documentation](https://github
 
 | Document | Description |
 |---|---|
-| [README](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/README.md) | Overview, architecture, API reference, service discovery |
-| [Decentralization](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/DECENTRALIZATION.md) | Roadmap for evolving the hub into a decentralized validator network |
+| [README](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/README.md) | Overview, installation, quick start, service discovery, multi-instance deployment |
+| [Architecture](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/ARCHITECTURE.md) | Subsystem design, P2P gossip, PBFT consensus, oracle pipeline, cross-chain engine |
+| [Configuration](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/CONFIGURATION.md) | All environment variables, database schema, connection pool, validator identity |
+| [API](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/API.md) | JSON-RPC method reference: config, validators, oracle, attestations, swaps, reorgs, governance |
+| [Decentralization](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/DECENTRALIZATION.md) | Evolution from centralized oracle to decentralized validator network (all phases complete) |
 
 ## Quick Start
 
@@ -58,19 +64,21 @@ EOF
 npm run api
 ```
 
-The hub will automatically create the `XChain_Hub` database and `configs` table on first startup.
+The hub automatically creates the database and all tables on first startup. Without `P2P_VALIDATOR_ADDR`, it runs in standalone mode (config oracle only). Set P2P variables to activate the full validator stack.
 
 ## Multi-Instance Deployment
 
-Multiple hub instances can run against the same MariaDB database for high availability. Consumer services use the `HUB_VALIDATORS` environment variable to specify a comma-separated list of hub endpoints:
+Multiple hub instances can run against the same MariaDB database for high availability. Consumer services use `HUB_VALIDATORS` to specify a comma-separated list of hub endpoints:
 
 ```env
 HUB_VALIDATORS=hub1.local:10000,hub2.local:10000,hub3.local:10000
 ```
 
-Consumers try each endpoint in order and fall back to the next if one is unreachable. If `HUB_VALIDATORS` is not set, consumers fall back to the legacy `HUB_API_HOST:HUB_PORT` variables for backward compatibility.
+Consumers try each endpoint in order and fall back to the next if one is unreachable.
 
 ## Environment Variables
+
+### Core
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
@@ -78,59 +86,88 @@ Consumers try each endpoint in order and fall back to the next if one is unreach
 | `HUB_PORT` | Yes | — | Port for the JSON-RPC API |
 | `HUB_DB_HOST` | Yes | — | MariaDB host |
 | `HUB_DB_PORT` | Yes | — | MariaDB port |
-| `HUB_DB_NAME` | Yes | — | MariaDB database name (e.g., `XChain_Hub`) |
+| `HUB_DB_NAME` | Yes | — | MariaDB database name |
 | `HUB_DB_USER` | Yes | — | MariaDB username |
 | `HUB_DB_PASS` | Yes | — | MariaDB password |
 
+### Validator Mode (optional)
+
+| Variable | Default | Description |
+|---|---|---|
+| `P2P_VALIDATOR_ADDR` | — | This validator's public address (activates validator mode) |
+| `P2P_PORT` | `10001` | WebSocket P2P listen port |
+| `SEED_NODES` | — | Comma-separated peer addresses |
+| `SIGNING_PRIVKEY_HEX` | — | 64-hex-char Ed25519 private key seed |
+| `COINGECKO_API_KEY` | — | CoinGecko API key |
+| `COINMARKETCAP_API_KEY` | — | CoinMarketCap API key (enables second price source) |
+
+See [Configuration](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/CONFIGURATION.md) for the full list of 30+ environment variables.
+
 ## Scripts
 
-| Script | Command | Description |
-|---|---|---|
-| `npm run api` | `node ./src/api.js` | Start the hub API server |
+| Command | Description |
+|---|---|
+| `npm run api` | Start the hub API server |
 
 ## JSON-RPC API
 
-All methods are called via HTTP POST to `http://<host>:<port>` with JSON-RPC 2.0 format.
+All methods are called via HTTP POST with JSON-RPC 2.0 format. See [API Reference](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/API.md) for full details.
 
-### `ping`
-
-Health check.
-
-```json
-{"jsonrpc":"2.0","method":"ping","id":1}
-→ {"status":"success"}
-```
-
-### `getallconfigs`
-
-Returns all service configs as a nested object: `{ coin: { network: { module: { param: value } } } }`.
-
-```json
-{"jsonrpc":"2.0","method":"getallconfigs","id":1}
-```
-
-### `updateconfig`
-
-Upserts service configs from a nested JSON object.
-
-```json
-{"jsonrpc":"2.0","method":"updateconfig","params":{"config":{"BTC":{"mainnet":{"xchain-decoder":{"host":"192.168.1.10","port":"8332"}}}}},"id":1}
-→ {"status":"success"}
-```
+| Category | Methods |
+|---|---|
+| Config | `ping`, `getallconfigs`, `updateconfig` |
+| Validators | `registervalidator`, `syncvalidators`, `getvalidators`, `getvalidatorstatus` |
+| Oracle | `getoraclesubmissions`, `getpricesnapshots`, `getprice` |
+| Fees | `getfeequote` |
+| Cross-Chain | `requestattestation`, `getattestation`, `getattestations` |
+| Swaps | `initiateswap`, `getswap`, `getswaps` |
+| Reorgs | `reportreorg`, `getreorghistory` |
+| Governance | `propose`, `vote`, `getproposals`, `getproposal` |
 
 ## Database Schema
 
-The hub uses a single `configs` table:
+The hub uses 13 MariaDB tables (auto-created on startup):
 
-| Column | Type | Description |
-|---|---|---|
-| `coin` | VARCHAR(16) | Coin identifier (BTC, LTC, DOGE) |
-| `network` | VARCHAR(16) | Network (mainnet, testnet, regtest) |
-| `module` | VARCHAR(64) | Service name (xchain-decoder, xchain-indexer, etc.) |
-| `param_name` | VARCHAR(32) | Parameter name (host, port, db_host, etc.) |
-| `param_value` | TEXT | Parameter value |
-| `updated_at` | TIMESTAMP | Last update timestamp |
+| Table | Purpose |
+|---|---|
+| `configs` | Service config parameters per coin/network/module |
+| `validators` | Active validators with signing pubkey, address, chains, tier |
+| `consensus_state` | PBFT sequence number persistence |
+| `p2p_peers` | Known P2P peers and last-seen timestamps |
+| `oracle_submissions` | Per-validator price submissions per round |
+| `price_snapshots` | Finalized price data per round per coin pair |
+| `attestations` | Cross-chain attestation records |
+| `swap_records` | SWAP lifecycle tracking |
+| `reorg_attestations` | Confirmed blockchain reorg events |
+| `governance_proposals` | Parameter change proposals |
+| `governance_votes` | Validator votes on proposals |
+| `slash_proposals` | Detected validator misbehavior |
+| `validator_rewards` | Per-round oracle reward accounting |
+
+## Dependencies
+
+### Runtime
+
+| Package | Purpose |
+|---|---|
+| `axios` | HTTP client for external price API calls (CoinGecko, CoinMarketCap) |
+| `express` | HTTP server for JSON-RPC API |
+| `express-json-rpc-router` | JSON-RPC 2.0 routing for the API server |
+| `helmet` | HTTP security headers |
+| `cors` | Cross-origin resource sharing |
+| `mariadb` | MariaDB connection pool for all hub data |
+| `ws` | WebSocket server/client for P2P gossip layer |
+| `dotenv` | `.env` file loading for environment-based configuration |
 
 ---
 
-Copyright © 2025 Dankest, LLC. Licensed under the [Dankest Community License](LICENSE.md). See [NOTICE.md](NOTICE.md) for third-party attributions.
+**Copyright &copy; 2025 Dankest, LLC**
+
+**Based on XChain Platform by Dankest, LLC &ndash; https://dankest.llc**
+
+Licensed under the **Dankest Community License**
+(based on the Apache License 2.0 with additional non-commercial and network-disclosure terms).
+
+You may not use, modify, or distribute this material except in compliance with the License.
+See [LICENSE](./LICENSE.md) and [NOTICE](./NOTICE.md) for full terms.
+A full copy of the License is also available at: [https://dankest.llc/license](https://dankest.llc/license)
