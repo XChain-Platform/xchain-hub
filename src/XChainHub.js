@@ -16,20 +16,24 @@
  * XChain Hub - Hub Class
  *
  * This file handles starting the hub and managing service configs.
+ * Orchestrates the database layer and optional P2P gossip layer.
  *
  ********************************************************************/
 
-const Database = require('./db.js');
+const Database    = require('./db.js');
+const PeerManager = require('./PeerManager.js');
 const PARAMETER_LIST = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass"];
 
 class XChainHub {
-    constructor(dbHost, dbPort, dbName, dbUser, dbPass) {
-        this.dbHost = dbHost;
-        this.dbPort = dbPort;
-        this.dbName = dbName;
-        this.dbUser = dbUser;
-        this.dbPass = dbPass;
-        this.db     = null;
+    constructor(dbHost, dbPort, dbName, dbUser, dbPass, p2pConfig) {
+        this.dbHost    = dbHost;
+        this.dbPort    = dbPort;
+        this.dbName    = dbName;
+        this.dbUser    = dbUser;
+        this.dbPass    = dbPass;
+        this.p2pConfig = p2pConfig || null;
+        this.db          = null;
+        this.peerManager = null;
     }
 
     async start(){
@@ -37,6 +41,18 @@ class XChainHub {
         await this.db.createDatabase();
         await this.db.verifyTables();
         console.log('XChain Hub started (MariaDB: ' + this.dbName + ')');
+    }
+
+    // Start the P2P gossip layer (no-op if p2pConfig is null)
+    async startP2P(){
+        if(!this.p2pConfig) return;
+        this.peerManager = new PeerManager(this.p2pConfig, this.db);
+        await this.peerManager.start();
+    }
+
+    // Get the PeerManager instance (for PBFT and other higher layers)
+    getPeerManager(){
+        return this.peerManager;
     }
 
     async addCoinNetworkParameter(coin, network, module, parameterName, parameterValue){
@@ -67,6 +83,7 @@ class XChainHub {
     }
 
     async close(){
+        if(this.peerManager) await this.peerManager.stop();
         if(this.db) await this.db.close();
     }
 }

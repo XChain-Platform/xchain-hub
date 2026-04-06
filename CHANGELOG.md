@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-04-06
+
+### Added
+- P2P gossip layer (`PeerManager.js`) for validator-to-validator communication
+- WebSocket-based peer connections with exponential backoff reconnection
+- Heartbeat broadcasts every 15 seconds for liveness detection
+- Message deduplication with configurable TTL
+- Gossip relay (flood-fill) for small validator networks
+- WS ping/pong dead connection detection (30-second interval)
+- `p2p_peers` table for peer tracking
+- New env vars: `P2P_PORT`, `P2P_HOST`, `SEED_NODES`, `P2P_VALIDATOR_ADDR`, etc.
+- P2P is optional — hub works without it for backward compatibility
+- `getPeerManager()` method on XChainHub for higher-layer access (PBFT, oracle)
+
 ## [1.0.0] - 2026-04-06
 
 ### Changed

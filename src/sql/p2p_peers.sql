@@ -1,0 +1,10 @@
+CREATE TABLE p2p_peers (
+    id           BIGINT AUTO_INCREMENT PRIMARY KEY,
+    addr         VARCHAR(255) NOT NULL,
+    validator_id VARCHAR(255) NOT NULL,
+    last_seen_at TIMESTAMP NULL DEFAULT NULL,
+    is_seed      TINYINT(1) NOT NULL DEFAULT 0,
+    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY idx_p2p_addr (addr)
+);
