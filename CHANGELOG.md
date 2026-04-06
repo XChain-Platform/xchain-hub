@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.5] - 2026-04-06
+
+### Added
+- End-to-end test suite (64 tests across 8 files) validating full operational pipelines
+- E2E test helpers: cluster manager (multi-hub in-process with real P2P), JSON-RPC client, price API mocks, async polling, DB assertion utilities
+- Oracle E2E tests: price fetch → single-node finalization → JSON-RPC serving, API degradation, round skipping, reward distribution, multi-round persistence
+- Config E2E tests: write/read round-trip, multi-coin updates, overwrite behavior
+- Attestation E2E tests: single-node attestation lifecycle, SWAP initiation and status queries
+- Governance E2E tests: proposal creation, vote casting, tally/pass, rejection with cooldown, change bounds enforcement
+- Reorg E2E tests: rollback cascade (attestation deletion, reorg history), chain isolation
+- Fee quote E2E tests: oracle-fed fee calculation, gas schedule verification, missing data handling
+- API contract E2E tests: all 24 JSON-RPC methods validated, invalid input handling across all endpoints
+- Multi-node E2E tests: 3-node cluster with real WebSocket P2P, PBFT oracle consensus, cross-chain attestation, cross-instance data consistency
+- `npm run test:e2e` script
+
 ## [2.0.4] - 2026-04-06
 
 ### Added
