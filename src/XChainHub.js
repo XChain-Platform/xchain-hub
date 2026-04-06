@@ -24,6 +24,7 @@ const Database          = require('./db.js');
 const PeerManager       = require('./PeerManager.js');
 const Consensus         = require('./Consensus.js');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
+const OracleRound       = require('./OracleRound.js');
 const PARAMETER_LIST = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass"];
 
 class XChainHub {
@@ -38,6 +39,7 @@ class XChainHub {
         this.peerManager = null;
         this.consensus   = null;
         this.identity    = null;
+        this.oracle      = null;
     }
 
     async start(){
@@ -92,9 +94,21 @@ class XChainHub {
         return this.consensus;
     }
 
+    // Start the oracle round system (no-op if P2P is not active)
+    async startOracle(){
+        if(!this.peerManager) return;
+        this.oracle = new OracleRound(this);
+        await this.oracle.start();
+    }
+
     // Get the ValidatorIdentity instance
     getIdentity(){
         return this.identity;
+    }
+
+    // Get the OracleRound instance
+    getOracle(){
+        return this.oracle;
     }
 
     // Update config — routes through consensus if active, otherwise writes directly
@@ -185,6 +199,7 @@ class XChainHub {
     }
 
     async close(){
+        if(this.oracle)      await this.oracle.stop();
         if(this.consensus)   await this.consensus.stop();
         if(this.peerManager) await this.peerManager.stop();
         if(this.db)          await this.db.close();

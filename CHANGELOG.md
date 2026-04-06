@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-04-06
+
+### Added
+- Price oracle round system (`OracleRound.js`) — timer-based round lifecycle with configurable interval
+- External price fetcher (`PriceFetcher.js`) — fetches BTC/USD, LTC/USD, DOGE/USD from CoinGecko and CoinMarketCap
+- `ORACLE_PRICE_SUBMIT` gossip message — validators broadcast price submissions each round
+- `oracle_submissions` table for persisting price submissions per round
+- `getoraclesubmissions` JSON-RPC method for oracle diagnostics
+- `startOracle()` and `getOracle()` methods on XChainHub
+- New env vars: `ORACLE_ROUND_INTERVAL`, `ORACLE_SUBMISSION_WINDOW`, `COINGECKO_API_KEY`, `COINMARKETCAP_API_KEY`, `PRICE_FETCH_TIMEOUT`
+
 ## [1.3.0] - 2026-04-06
 
 ### Added

@@ -54,7 +54,12 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     P2P_RECONNECT_BASE:     parseInt(process.env.P2P_RECONNECT_BASE) || 2000,
     P2P_RECONNECT_MAX:      parseInt(process.env.P2P_RECONNECT_MAX) || 60000,
     P2P_MSG_DEDUP_TTL:      parseInt(process.env.P2P_MSG_DEDUP_TTL) || 60000,
-    P2P_MAX_PAYLOAD:        parseInt(process.env.P2P_MAX_PAYLOAD) || 1048576
+    P2P_MAX_PAYLOAD:        parseInt(process.env.P2P_MAX_PAYLOAD) || 1048576,
+    ORACLE_ROUND_INTERVAL:  parseInt(process.env.ORACLE_ROUND_INTERVAL) || 600000,
+    ORACLE_SUBMISSION_WINDOW: parseInt(process.env.ORACLE_SUBMISSION_WINDOW) || 180000,
+    COINGECKO_API_KEY:      process.env.COINGECKO_API_KEY || '',
+    COINMARKETCAP_API_KEY:  process.env.COINMARKETCAP_API_KEY || '',
+    PRICE_FETCH_TIMEOUT:    parseInt(process.env.PRICE_FETCH_TIMEOUT) || 10000
 } : null;
 
 async function startApi(){
@@ -74,6 +79,9 @@ async function startApi(){
 
     // Start PBFT consensus (no-op if P2P is not active)
     await hub.startConsensus();
+
+    // Start oracle round system (no-op if P2P is not active)
+    await hub.startOracle();
 
     // Create the app
     const app = express();
@@ -109,6 +117,13 @@ async function startApi(){
             } catch (err) {
                 return {error: err.message || "there was an error trying to update a config"};
             }
+        },
+
+        // Get oracle submission status (diagnostics)
+        async getoraclesubmissions(){
+            let oracle = hub.getOracle();
+            if(!oracle) return {error: "oracle not active"};
+            return oracle.getSubmissionsInfo();
         },
 
         // Register a validator (Phase 2C bootstrap)
