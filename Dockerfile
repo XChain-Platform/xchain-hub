@@ -1,7 +1,6 @@
 FROM node:latest
 
 RUN mkdir /XChainHub/
-RUN mkdir /data/
 COPY ./package.json /XChainHub/package.json
 WORKDIR /XChainHub
 RUN npm install

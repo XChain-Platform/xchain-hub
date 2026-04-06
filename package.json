@@ -1,7 +1,7 @@
 {
-  "name":"xchain-hub",
-  "description": "xchain-hub acts as an oracle for coin pricing information and handles processing cross-chain actions which are synced out to nodes",
-  "version": "0.0.3",
+  "name": "xchain-hub",
+  "description": "Config oracle and cross-chain coordinator for the XChain Platform. Stores service configs in MariaDB and serves them via JSON-RPC.",
+  "version": "1.0.0",
   "license": "SEE LICENSE IN LICENSE.md",
   "repository": {
     "type": "git",
@@ -14,10 +14,10 @@
     "express": "^4.18.3",
     "express-json-rpc-router": "^1.4.0",
     "helmet": "^7.1.0",
-    "leveldown": "^6.1.1",
-    "levelup": "^5.1.1"
+    "mariadb": "3.2.3"
   },
   "scripts": {
-    "api": "node ./src/api.js"
+    "api": "node ./src/api.js",
+    "test": "echo \"No tests configured yet\" && exit 0"
   }
 }
