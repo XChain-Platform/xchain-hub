@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-04-06
+
+### Added
+- PBFT consensus engine (`Consensus.js`) for config writes
+- Config updates now go through PRE_PREPARE → PREPARE → COMMIT consensus round
+- Quorum calculation: `2f+1` where `f = floor((N-1)/3)` (tolerates f Byzantine faults)
+- `consensus_state` table for persistent sequence number tracking
+- Single-node fallback: when no peers are connected, writes apply directly (backward compatible)
+- Configurable consensus timeout via `PBFT_TIMEOUT` env var (default 30s)
+- `startConsensus()` and `getConsensus()` methods on XChainHub
+- `applyConfig()` method on XChainHub (separates consensus proposal from DB write)
+
 ## [1.1.0] - 2026-04-06
 
 ### Added

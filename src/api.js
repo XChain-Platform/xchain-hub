@@ -70,6 +70,9 @@ async function startApi(){
     // Start P2P layer (no-op if p2pConfig is null)
     await hub.startP2P();
 
+    // Start PBFT consensus (no-op if P2P is not active)
+    await hub.startConsensus();
+
     // Create the app
     const app = express();
 

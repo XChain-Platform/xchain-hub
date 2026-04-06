@@ -16,12 +16,13 @@
  * XChain Hub - Hub Class
  *
  * This file handles starting the hub and managing service configs.
- * Orchestrates the database layer and optional P2P gossip layer.
+ * Orchestrates the database, P2P gossip, and PBFT consensus layers.
  *
  ********************************************************************/
 
 const Database    = require('./db.js');
 const PeerManager = require('./PeerManager.js');
+const Consensus   = require('./Consensus.js');
 const PARAMETER_LIST = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass"];
 
 class XChainHub {
@@ -34,6 +35,7 @@ class XChainHub {
         this.p2pConfig = p2pConfig || null;
         this.db          = null;
         this.peerManager = null;
+        this.consensus   = null;
     }
 
     async start(){
@@ -50,17 +52,37 @@ class XChainHub {
         await this.peerManager.start();
     }
 
-    // Get the PeerManager instance (for PBFT and other higher layers)
+    // Start the PBFT consensus engine (no-op if P2P is not active)
+    async startConsensus(){
+        if(!this.peerManager) return;
+        this.consensus = new Consensus(this);
+        await this.consensus.start();
+    }
+
+    // Get the PeerManager instance (for higher layers)
     getPeerManager(){
         return this.peerManager;
     }
 
-    async addCoinNetworkParameter(coin, network, module, parameterName, parameterValue){
-        await this.db.setParam(coin, network, module, parameterName, parameterValue);
+    // Get the Consensus instance (for higher layers)
+    getConsensus(){
+        return this.consensus;
+    }
+
+    // Update config — routes through consensus if active, otherwise writes directly
+    async addParametersFromJson(json){
+        if(this.consensus){
+            // Route through PBFT consensus
+            await this.consensus.propose(json);
+            return true;
+        }
+        // Direct write (no consensus — single-instance mode)
+        await this.applyConfig(json);
         return true;
     }
 
-    async addParametersFromJson(json){
+    // Apply config directly to the database (called by Consensus after quorum, or directly in single-instance mode)
+    async applyConfig(json){
         for(let nextCoin in json){
             if(nextCoin != ""){
                 for(let nextNetwork in json[nextCoin]){
@@ -68,14 +90,13 @@ class XChainHub {
                         for(let nextParam of PARAMETER_LIST){
                             let nextValue = json[nextCoin][nextNetwork][nextModule][nextParam];
                             if(nextValue !== null && nextValue !== undefined){
-                                await this.addCoinNetworkParameter(nextCoin, nextNetwork, nextModule, nextParam, nextValue);
+                                await this.db.setParam(nextCoin, nextNetwork, nextModule, nextParam, nextValue);
                             }
                         }
                     }
                 }
             }
         }
-        return true;
     }
 
     async getAllConfigs(){
@@ -83,8 +104,9 @@ class XChainHub {
     }
 
     async close(){
+        if(this.consensus)   await this.consensus.stop();
         if(this.peerManager) await this.peerManager.stop();
-        if(this.db) await this.db.close();
+        if(this.db)          await this.db.close();
     }
 }
 
