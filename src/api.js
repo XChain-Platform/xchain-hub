@@ -89,6 +89,9 @@ async function startApi(){
     // Start cross-chain attestation engine (no-op if P2P is not active)
     await hub.startCrossChain();
 
+    // Start reorg handler (no-op if P2P is not active)
+    await hub.startReorgHandler();
+
     // Create the app
     const app = express();
 
@@ -224,6 +227,27 @@ async function startApi(){
                 return await cc.getAttestations(status, limit);
             } catch (err) {
                 return {error: "error fetching attestations"};
+            }
+        },
+
+        // Report a blockchain reorg for cross-chain propagation
+        async reportreorg({chain, reorg_height, timestamp}){
+            if(!chain || !reorg_height || !timestamp)
+                return {error: "chain, reorg_height, and timestamp are required"};
+            try {
+                await hub.reportReorg(chain, parseInt(reorg_height), parseInt(timestamp));
+                return {status: "success"};
+            } catch (err) {
+                return {error: err.message || "error reporting reorg"};
+            }
+        },
+
+        // Get reorg history
+        async getreorghistory({limit}){
+            try {
+                return await hub.getReorgHistory(limit);
+            } catch (err) {
+                return {error: "error fetching reorg history"};
             }
         },
 

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-04-06
+
+### Added
+- Reorg handler (`ReorgHandler.js`) — cross-chain reorg propagation with PBFT consensus
+- `reorg_attestations` table for storing confirmed reorg events
+- Hub rollback on reorg: deletes attestations after reorg timestamp, invalidates price snapshots
+- `REORG_ALERT` gossip message for reorg detection
+- `XCHAIN_REORG_PREPARE` / `XCHAIN_REORG_COMMIT` for reorg consensus
+- `reportreorg` JSON-RPC method — report a blockchain reorg for cross-chain propagation
+- `getreorghistory` JSON-RPC method — query confirmed reorg attestations
+- `reorg:confirmed` event emitted for downstream indexer notification
+
 ## [1.7.0] - 2026-04-06
 
 ### Added

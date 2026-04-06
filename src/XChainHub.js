@@ -29,6 +29,7 @@ const OracleRound       = require('./OracleRound.js');
 const RewardTracker     = require('./RewardTracker.js');
 const SlashDetector     = require('./SlashDetector.js');
 const CrossChainEngine  = require('./CrossChainEngine.js');
+const ReorgHandler      = require('./ReorgHandler.js');
 const PARAMETER_LIST = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass"];
 
 class XChainHub {
@@ -48,6 +49,7 @@ class XChainHub {
         this.rewardTracker    = null;
         this.slashDetector    = null;
         this.crossChain       = null;
+        this.reorgHandler     = null;
     }
 
     async start(){
@@ -169,6 +171,27 @@ class XChainHub {
     // Get the CrossChainEngine instance
     getCrossChain(){
         return this.crossChain;
+    }
+
+    // Start the reorg handler (no-op if P2P is not active)
+    async startReorgHandler(){
+        if(!this.peerManager) return;
+        this.reorgHandler = new ReorgHandler(this);
+        let validators = await this._loadValidatorSet();
+        this.reorgHandler.setValidatorSet(validators);
+        await this.reorgHandler.start();
+    }
+
+    // Report a blockchain reorg
+    async reportReorg(chain, reorgHeight, timestamp){
+        if(!this.reorgHandler) throw new Error('Reorg handler not active');
+        return await this.reorgHandler.reportReorg(chain, reorgHeight, timestamp);
+    }
+
+    // Get reorg history
+    async getReorgHistory(limit){
+        if(!this.reorgHandler) return [];
+        return await this.reorgHandler.getReorgHistory(limit);
     }
 
     // Request a cross-chain attestation
@@ -385,6 +408,7 @@ class XChainHub {
     }
 
     async close(){
+        if(this.reorgHandler)     await this.reorgHandler.stop();
         if(this.crossChain)       await this.crossChain.stop();
         if(this.oracle)           await this.oracle.stop();
         if(this.oracleConsensus)  await this.oracleConsensus.stop();
