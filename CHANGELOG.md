@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.3] - 2026-04-06
+
+### Added
+- Integration test suite (63 tests across 10 files) covering cross-module data flows
+- Test infrastructure: testDb (real MariaDB setup/teardown), mockExternalApi (nock-based API mocking), testPeerNetwork (WS peer simulation, envelope builder)
+- Oracle pipeline integration tests: price fetching, round lifecycle, persistence precision, reward distribution, slash detection
+- Cross-chain integration tests: attestation PBFT, SWAP auto-progression, reorg rollback cascading writes
+- Consensus integration tests: PBFT config consensus, single-node fallback, timeout/view-change
+- Governance integration tests: proposal lifecycle, rejection, change bounds, cooldown, non-validator rejection
+- JSON-RPC API integration tests: end-to-end Express server with config, validator, price, and fee quote endpoints
+- P2P integration tests: real WebSocket message routing, deduplication, Ed25519 signature verification
+- Resilience integration tests: circuit breaker activation/recovery, DB failure during finalization, concurrent operations
+- `nock` devDependency for HTTP request interception
+- `npm run test:integration` and `npm run test:all` scripts
+
 ## [2.0.2] - 2026-04-06
 
 ### Added
