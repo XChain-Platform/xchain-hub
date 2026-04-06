@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-04-06
+
+### Added
+- Cross-chain attestation engine (`CrossChainEngine.js`) — PBFT-based consensus for cross-chain action verification
+- `attestations` table for storing finalized cross-chain attestations
+- Attestation lifecycle: PROPOSE → PREPARE (2f+1) → COMMIT (2f+1) → store
+- Per-chain confirmation thresholds (BTC: 3, LTC: 3, DOGE: 6)
+- `requestattestation` JSON-RPC method — submit attestation requests
+- `getattestations` JSON-RPC method — query stored attestations
+- `getattestation` JSON-RPC method — get specific attestation by source chain + action index
+- `attestation:finalized` event emitted for downstream processing
+- Single-node fallback for attestations (stores directly without consensus)
+
 ## [1.6.0] - 2026-04-06
 
 ### Added

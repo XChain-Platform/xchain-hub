@@ -28,6 +28,7 @@ const OracleConsensus   = require('./OracleConsensus.js');
 const OracleRound       = require('./OracleRound.js');
 const RewardTracker     = require('./RewardTracker.js');
 const SlashDetector     = require('./SlashDetector.js');
+const CrossChainEngine  = require('./CrossChainEngine.js');
 const PARAMETER_LIST = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass"];
 
 class XChainHub {
@@ -46,6 +47,7 @@ class XChainHub {
         this.oracleConsensus  = null;
         this.rewardTracker    = null;
         this.slashDetector    = null;
+        this.crossChain       = null;
     }
 
     async start(){
@@ -153,6 +155,26 @@ class XChainHub {
     // Get the OracleRound instance
     getOracle(){
         return this.oracle;
+    }
+
+    // Start the cross-chain attestation engine (no-op if P2P is not active)
+    async startCrossChain(){
+        if(!this.peerManager) return;
+        this.crossChain = new CrossChainEngine(this);
+        let validators = await this._loadValidatorSet();
+        this.crossChain.setValidatorSet(validators);
+        await this.crossChain.start();
+    }
+
+    // Get the CrossChainEngine instance
+    getCrossChain(){
+        return this.crossChain;
+    }
+
+    // Request a cross-chain attestation
+    async requestAttestation(sourceChain, sourceActionIndex, destChain){
+        if(!this.crossChain) throw new Error('Cross-chain engine not active');
+        return await this.crossChain.requestAttestation(sourceChain, sourceActionIndex, destChain);
     }
 
     // Update config — routes through consensus if active, otherwise writes directly
@@ -363,6 +385,7 @@ class XChainHub {
     }
 
     async close(){
+        if(this.crossChain)       await this.crossChain.stop();
         if(this.oracle)           await this.oracle.stop();
         if(this.oracleConsensus)  await this.oracleConsensus.stop();
         if(this.consensus)        await this.consensus.stop();

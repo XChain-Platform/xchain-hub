@@ -86,6 +86,9 @@ async function startApi(){
     // Start oracle round system (no-op if P2P is not active)
     await hub.startOracle();
 
+    // Start cross-chain attestation engine (no-op if P2P is not active)
+    await hub.startCrossChain();
+
     // Create the app
     const app = express();
 
@@ -198,6 +201,43 @@ async function startApi(){
                 return await hub.getFeeQuote(action, chain);
             } catch (err) {
                 return {error: "error calculating fee quote"};
+            }
+        },
+
+        // Request a cross-chain attestation
+        async requestattestation({source_chain, source_action_index, dest_chain}){
+            if(!source_chain || !source_action_index || !dest_chain)
+                return {error: "source_chain, source_action_index, and dest_chain are required"};
+            try {
+                let attestation = await hub.requestAttestation(source_chain, source_action_index, dest_chain);
+                return attestation;
+            } catch (err) {
+                return {error: err.message || "error requesting attestation"};
+            }
+        },
+
+        // Get cross-chain attestations
+        async getattestations({status, limit}){
+            try {
+                let cc = hub.getCrossChain();
+                if(!cc) return {error: "cross-chain engine not active"};
+                return await cc.getAttestations(status, limit);
+            } catch (err) {
+                return {error: "error fetching attestations"};
+            }
+        },
+
+        // Get a specific attestation
+        async getattestation({source_chain, source_action_index}){
+            if(!source_chain || !source_action_index)
+                return {error: "source_chain and source_action_index are required"};
+            try {
+                let cc = hub.getCrossChain();
+                if(!cc) return {error: "cross-chain engine not active"};
+                let att = await cc.getAttestation(source_chain, source_action_index);
+                return att || {error: "attestation not found"};
+            } catch (err) {
+                return {error: "error fetching attestation"};
             }
         }
     };
