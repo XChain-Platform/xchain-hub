@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.10] - 2026-04-06
+
+### Added
+- Chaos engineering test suite (81 tests, 14 files) covering:
+  - Database resilience: circuit breaker lifecycle, flapping connections, pool exhaustion
+  - Oracle fault tolerance: single source failure, total blackout, malformed price data
+  - Consensus disruption: network partition, leader crash, quorum loss
+  - Compound failures: reorg during oracle round, validator churn during consensus
+  - API abuse protection: rate limit saturation, concurrent burst handling
+- Chaos test helpers: experiment runner, steady-state checker, metrics collector
+- `test:chaos` npm script (`mocha --timeout 30000`)
+
 ## [2.0.9] - 2026-04-06
 
 ### Added
