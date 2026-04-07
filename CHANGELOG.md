@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.12] - 2026-04-06
+
+### Added
+- Comprehensive regression test suite (195 tests across 7 files) covering:
+  - Consensus PBFT: quorum math, leader rotation, full PRE_PREPARE→PREPARE→COMMIT flow, view change, sequence persistence, replay prevention, single-node fallback, digest determinism
+  - Oracle pipeline: PriceFetcher local median, trimmed median aggregation (15% trim), PBFT finalization, price validation, 8-decimal formatting, single-node fallback
+  - Cross-chain engine: attestation PBFT flow, confirmation thresholds (BTC=3, LTC=3, DOGE=6), chain-pair validator filtering, attestation:finalized events
+  - SwapTracker: auto-progress on attestation finalization, lifecycle management, null safety
+  - ReorgHandler: PBFT reorg consensus, attestation rollback, price snapshot dispute marking, affected chain computation
+  - Governance: proposal lifecycle, vote collection, 2/3+50% quorum tally, parameter change bounds (±50%/±33% normal, ±25%/±20% slashing), 14-day cooldown
+  - P2P & ValidatorIdentity: Ed25519 sign/verify round-trip, envelope signatures, message deduplication, signature enforcement, identity seed validation
+  - Database: circuit breaker open/half-open/closed, parameterized queries, SQL injection prevention, config CRUD hierarchy
+  - Incentives: equal-split reward distribution, slash detection (price deviation >5%, repeated deviation 3+/24h, non-participation 30+ rounds)
+- Three-tier test execution via Mocha `--grep`:
+  - `test:regression:p0` — 78 critical tests (<1s) for every commit
+  - `test:regression:p0p1` — 154 high-priority tests (3s) for PR gating
+  - `test:regression` — full 195-test suite (3s) for nightly/pre-release
+- Regression testing plan document at `reports/XCHAIN_HUB_REGRESSION_TESTING_PLAN.md`
+
 ## [2.0.11] - 2026-04-06
 
 ### Added
