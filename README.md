@@ -4,9 +4,14 @@
 # XChain Platform Hub
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.0.1-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.0.12-blue" alt="Version">
+  <img src="https://img.shields.io/badge/tests-1222%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/node-%3E%3D18-green" alt="Node">
   <img src="https://img.shields.io/badge/license-Dankest%20Community-orange" alt="License">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/coverage-unit%20%7C%20integration%20%7C%20e2e%20%7C%20fuzz%20%7C%20chaos%20%7C%20boundary%20%7C%20smoke%20%7C%20regression%20%7C%20performance-brightgreen" alt="Coverage">
 </p>
 
 Decentralized config oracle, price oracle, and cross-chain coordinator for the XChain Platform. Validators form a P2P gossip network with PBFT consensus, Ed25519 identity, trimmed-median price aggregation, cross-chain attestation, and off-chain governance.
@@ -29,6 +34,7 @@ Decentralized config oracle, price oracle, and cross-chain coordinator for the X
 - **Multi-instance** — multiple hub instances against shared MariaDB with consumer fallback
 - **Single-node fallback** — all consensus operations apply directly when no peers are connected
 - **MariaDB storage** — 13 relational tables with circuit breaker and exponential backoff
+- **1,222 tests** — unit, integration, e2e, fuzz, chaos, boundary, smoke, regression, performance
 - **Docker-ready** — Dockerfile for containerized deployment via xchain-node
 
 ## Documentation
@@ -41,6 +47,8 @@ Full hub documentation is available in the [xchain-documentation](https://github
 | [Architecture](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/ARCHITECTURE.md) | Subsystem design, P2P gossip, PBFT consensus, oracle pipeline, cross-chain engine |
 | [Configuration](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/CONFIGURATION.md) | All environment variables, database schema, connection pool, validator identity |
 | [API](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/API.md) | JSON-RPC method reference: config, validators, oracle, attestations, swaps, reorgs, governance |
+| [Database](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/DATABASE.md) | Full schema reference — 13 tables for config, validators, oracle, attestations, governance |
+| [Operations](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/OPERATIONS.md) | Running, Docker, resilience, troubleshooting |
 | [Decentralization](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/DECENTRALIZATION.md) | Evolution from centralized oracle to decentralized validator network (all phases complete) |
 
 ## Quick Start
@@ -108,6 +116,35 @@ See [Configuration](https://github.com/XChain-platform/xchain-documentation/blob
 | Command | Description |
 |---|---|
 | `npm run api` | Start the hub API server |
+| `npm test` | Run unit tests (~366 tests) |
+| `npm run test:integration` | Integration tests (~72 tests, requires MariaDB) |
+| `npm run test:e2e` | End-to-end tests (~64 tests, requires full stack) |
+| `npm run test:fuzz` | Fuzz tests (property-based via fast-check) |
+| `npm run test:chaos` | Chaos engineering tests |
+| `npm run test:smoke` | Smoke tests (quick sanity check) |
+| `npm run test:regression` | Regression tests (tagged across all suites) |
+| `npm run test:regression:p0` | P0-priority regression tests |
+| `npm run test:regression:p0p1` | P0+P1 regression tests |
+| `npm run test:perf` | All performance tests |
+| `npm run test:mutate` | Mutation tests (Stryker) |
+| `npm run test:mutate:pilot` | Pilot mutation tests (phase 1) |
+| `npm run test:all` | Complete test suite |
+
+## Test Suite
+
+| Type | Tests | Description |
+|---|---|---|
+| Unit — Core | ~294 | `XChainHub.test.js`, `Consensus.test.js`, `PeerManager.test.js`, `OracleRound.test.js`, `OracleConsensus.test.js`, `CrossChainEngine.test.js`, `Governance.test.js`, `PriceFetcher.test.js`, `ReorgHandler.test.js`, `SwapTracker.test.js`, `ValidatorIdentity.test.js`, `RewardTracker.test.js`, `SlashDetector.test.js`, `db.test.js` |
+| Unit — Security | ~72 | SQL safety, parameter injection, authentication, rate limiting |
+| Boundary | ~260 | Quorum thresholds, consensus edge cases, fee quotes, governance bounds, P2P limits, price fetcher, trimmed median, rewards, slashing, config, cross-chain, reorg, DB, validator |
+| Integration | ~72 | Oracle rounds, price persistence, attestation, reorg, config consensus, governance, JSON-RPC API, message routing, error handling |
+| E2E | ~64 | Oracle, fee quotes, config, governance, attestation, reorg, multi-node, API contract |
+| Fuzz | ~88 | Property-based testing via fast-check: price fetcher, governance, validator identity, consensus, oracle consensus, peer manager, fee quotes |
+| Chaos | ~122 | Network partition, leader crash, quorum loss, DB flapping, pool exhaustion, connection loss, single source failure, malformed data, total blackout, reorg-during-oracle, validator churn, rate limit saturation |
+| Smoke | ~15 | Hub startup, API liveness, basic config operations |
+| Regression | ~193 | Oracle, reorg, governance, P2P, DB, incentives, consensus, cross-chain |
+| Performance | ~42 | API load, oracle load, P2P flood, DB stress, soak, resilience |
+| **Total** | **~1,222** | |
 
 ## JSON-RPC API
 
@@ -157,7 +194,21 @@ The hub uses 13 MariaDB tables (auto-created on startup):
 | `cors` | Cross-origin resource sharing |
 | `mariadb` | MariaDB connection pool for all hub data |
 | `ws` | WebSocket server/client for P2P gossip layer |
+| `express-rate-limit` | API rate limiting |
 | `dotenv` | `.env` file loading for environment-based configuration |
+
+### Development
+
+| Package | Purpose |
+|---|---|
+| `mocha` | Test framework |
+| `chai` | Assertion library |
+| `sinon` | Mocking, stubbing, and spying for tests |
+| `fast-check` | Property-based (fuzz) testing |
+| `nock` | HTTP request mocking for tests |
+| `proxyquire` | Module dependency injection for tests |
+| `@stryker-mutator/core` | Mutation testing framework |
+| `@stryker-mutator/mocha-runner` | Stryker Mocha integration |
 
 ---
 

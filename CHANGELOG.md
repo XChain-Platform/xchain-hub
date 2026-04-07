@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `README.md` — updated version badge to 2.0.12, added tests badge (1,222 passing), coverage badge, test suite breakdown table, expanded scripts table with all test commands, added development dependencies section, added links to new DATABASE.md and OPERATIONS.md documentation
+
 ## [2.0.12] - 2026-04-06
 
 ### Added
