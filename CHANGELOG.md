@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.7] - 2026-04-06
+
+### Added
+- Fuzz testing suite (88 properties across 7 test files) using fast-check for property-based testing
+- Shared generator module with 17 composable fast-check arbitraries for prices, submissions, P2P envelopes, hex strings, configs, and governance parameters
+- OracleConsensus fuzz tests: trimmed median aggregation invariants, NaN/Infinity filtering, quorum monotonicity, digest determinism
+- PeerManager fuzz tests: structural robustness against arbitrary JSON, malformed envelope rejection, deduplication correctness, ID uniqueness
+- PriceFetcher fuzz tests: median bounds and immutability, API response parsing robustness, output format validation
+- Consensus PBFT fuzz tests: leader rotation, quorum bounds, digest properties, PrePrepare message validation
+- Governance fuzz tests: change bound enforcement for normal and slashing parameters, tally quorum arithmetic
+- Fee quote fuzz tests: gas arithmetic consistency, round-trip precision, unknown action handling
+- ValidatorIdentity fuzz tests: constructor validation, sign/verify round-trip, mutation detection, cross-key rejection
+
+### Fixed
+- Infinity values leaking through oracle price aggregation — replaced `!isNaN(val)` with `isFinite(val)` in `_aggregate()` filter
+- TypeError crash in PeerManager when receiving non-object JSON (null, number, string) — added type guard after JSON.parse
+- Message ID collisions under high throughput — replaced `Math.random()` with `crypto.randomUUID()` in `_makeId()`
+- Object.prototype pollution in fee quote gas schedule lookup — replaced bracket notation with `hasOwnProperty` check
+
 ## [2.0.6] - 2026-04-06
 
 ### Added

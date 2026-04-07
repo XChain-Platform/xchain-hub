@@ -472,8 +472,8 @@ class XChainHub {
         };
         let gasPrice = 0.00001;  // XCHAIN per gas unit
 
-        let gasCost = gasSchedule[action] || 0;
-        if (gasCost === 0) return { error: 'unknown action: ' + action };
+        if (!Object.prototype.hasOwnProperty.call(gasSchedule, action)) return { error: 'unknown action: ' + action };
+        let gasCost = gasSchedule[action];
 
         let xchainAmount = gasCost * gasPrice;
 

@@ -21,6 +21,7 @@
  *
  ********************************************************************/
 
+const crypto            = require('crypto');
 const EventEmitter     = require('events');
 const http             = require('http');
 const WebSocket        = require('ws');
@@ -198,7 +199,7 @@ class PeerManager extends EventEmitter {
 
     // Generate a unique message ID
     _makeId() {
-        return 'v1:' + this.validatorAddr + ':' + Date.now() + ':' + Math.random().toString(16).slice(2, 8);
+        return 'v1:' + this.validatorAddr + ':' + Date.now() + ':' + crypto.randomUUID();
     }
 
     // Build an envelope with optional Ed25519 signature
@@ -252,6 +253,9 @@ class PeerManager extends EventEmitter {
         } catch (e) {
             return; // Invalid JSON — silently discard
         }
+
+        // Guard against non-object JSON values (null, number, string, boolean)
+        if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return;
 
         // Validate envelope fields
         if (!envelope.type || typeof envelope.type !== 'string') return;

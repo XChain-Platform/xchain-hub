@@ -334,7 +334,7 @@ class OracleConsensus extends EventEmitter {
                 for (let p of sub.prices) {
                     if (p.coinPair === coinPair && p.price) {
                         let val = parseFloat(p.price);
-                        if (!isNaN(val) && val > 0) {
+                        if (isFinite(val) && val > 0) {
                             values.push(val);
                         }
                     }
