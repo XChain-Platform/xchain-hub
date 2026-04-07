@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.9] - 2026-04-06
+
+### Added
+- Performance and load testing suite (6 test files, 3 helpers) covering:
+  - API query saturation with concurrent blast and ramp-up tests
+  - Oracle round execution timing and degradation under load
+  - P2P WebSocket message flood, dedup cache, and rate limiting verification
+  - MariaDB connection pool stress, mixed read/write concurrency, and saturation
+  - 2-minute soak test with memory leak detection and p95 trend analysis
+  - Dependency degradation scenarios (slow/failed APIs, recovery timing)
+- `test:perf` npm script (`mocha --timeout 300000`)
+- Reusable performance helpers: `Histogram`, `MemoryTracker`, `blast()`, `ramp()`, `seedAll()`
+
 ## [2.0.8] - 2026-04-06
 
 ### Added
