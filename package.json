@@ -1,7 +1,7 @@
 {
   "name": "xchain-hub",
   "description": "Config oracle and cross-chain coordinator for the XChain Platform. Stores service configs in MariaDB and serves them via JSON-RPC.",
-  "version": "2.0.10",
+  "version": "2.0.11",
   "license": "SEE LICENSE IN LICENSE.md",
   "repository": {
     "type": "git",
@@ -27,9 +27,13 @@
     "test:e2e": "mocha 'test/e2e/**/*.e2e.test.js' --timeout 30000 --recursive",
     "test:fuzz": "mocha 'test/fuzz/**/*.fuzz.test.js' --timeout 30000 --recursive",
     "test:perf": "mocha 'test/performance/**/*.perf.test.js' --timeout 300000 --recursive",
-    "test:chaos": "mocha 'test/chaos/**/*.chaos.test.js' --timeout 30000 --recursive"
+    "test:chaos": "mocha 'test/chaos/**/*.chaos.test.js' --timeout 30000 --recursive",
+    "test:mutate": "stryker run",
+    "test:mutate:pilot": "stryker run stryker.config.phase1.json"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "^8.7.1",
+    "@stryker-mutator/mocha-runner": "^8.7.1",
     "chai": "^4.5.0",
     "fast-check": "^3.23.2",
     "mocha": "^11.7.5",
