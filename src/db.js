@@ -52,7 +52,8 @@ class Database {
             idleTimeout:        60000,
             insertIdAsNumber:   true,
             bigIntAsNumber:     true,
-            minDelayValidation: 3000
+            minDelayValidation: 3000,
+            queryTimeout:       parseInt(process.env.DB_QUERY_TIMEOUT) || 30000
         };
 
         // Setup pool of connections
@@ -208,8 +209,10 @@ class Database {
         if(query){
             if(Array.isArray(args)){
                 for(let i = 0; i < args.length; i++){
-                    if(args[i] !== null && args[i] !== undefined && typeof args[i] === 'object')
-                        args[i] = args[i].toString();
+                    if(args[i] !== null && args[i] !== undefined && typeof args[i] === 'object') {
+                        console.warn('db.doQuery: object arg serialized to JSON at index ' + i);
+                        args[i] = JSON.stringify(args[i]);
+                    }
                 }
             }
             let tx = this.transactionConnection != null;

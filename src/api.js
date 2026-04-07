@@ -35,11 +35,38 @@ for(const key of REQUIRED_ENV){
 const express    = require('express');
 const helmet     = require('helmet');
 const cors       = require('cors');
+const rateLimit  = require('express-rate-limit');
 const XChainHub  = require('./XChainHub');
 const jsonRouter = require('express-json-rpc-router');
 
 const HUB_PORT = process.env.HUB_PORT;
 const HUB_HOST = process.env.HUB_HOST || '0.0.0.0';
+
+// Security constants
+const HUB_API_KEY        = process.env.HUB_API_KEY || '';
+const HUB_API_RATE_LIMIT = parseInt(process.env.HUB_API_RATE_LIMIT) || 100;
+const CORS_ORIGIN        = process.env.CORS_ORIGIN || false;
+
+const ALLOWED_CHAINS = new Set(['BTC', 'LTC', 'DOGE']);
+const WRITE_METHODS  = new Set([
+    'updateconfig', 'registervalidator', 'syncvalidators',
+    'propose', 'vote', 'requestattestation', 'reportreorg', 'initiateswap'
+]);
+
+function validateChain(chain) {
+    if (!ALLOWED_CHAINS.has(chain))
+        return { error: 'chain must be one of: BTC, LTC, DOGE' };
+    return null;
+}
+
+function validateLimit(limit) {
+    if (limit !== undefined && limit !== null) {
+        let n = parseInt(limit);
+        if (!Number.isInteger(n) || n <= 0 || n > 1000)
+            return { error: 'limit must be a positive integer no greater than 1000' };
+    }
+    return null;
+}
 
 // Parse optional P2P config (P2P is enabled when P2P_VALIDATOR_ADDR is set)
 const P2P_VALIDATOR_ADDR = process.env.P2P_VALIDATOR_ADDR || '';
@@ -49,7 +76,7 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     SEED_NODES:             (process.env.SEED_NODES || '').split(',').map(s => s.trim()).filter(s => s),
     P2P_VALIDATOR_ADDR:     P2P_VALIDATOR_ADDR,
     SIGNING_PRIVKEY_HEX:    process.env.SIGNING_PRIVKEY_HEX || '',
-    REQUIRE_SIGNATURES:     (process.env.REQUIRE_SIGNATURES || '').toLowerCase() === 'true',
+    REQUIRE_SIGNATURES:     (process.env.REQUIRE_SIGNATURES || 'true').toLowerCase() !== 'false',
     P2P_HEARTBEAT_INTERVAL: parseInt(process.env.P2P_HEARTBEAT_INTERVAL) || 15000,
     P2P_RECONNECT_BASE:     parseInt(process.env.P2P_RECONNECT_BASE) || 2000,
     P2P_RECONNECT_MAX:      parseInt(process.env.P2P_RECONNECT_MAX) || 60000,
@@ -101,7 +128,29 @@ async function startApi(){
     // Security and parsing middleware
     app.use(helmet());
     app.use(express.json());
-    app.use(cors());
+    app.use(cors({ origin: CORS_ORIGIN }));
+    app.use(rateLimit({
+        windowMs: 60 * 1000,
+        max: HUB_API_RATE_LIMIT,
+        standardHeaders: true,
+        legacyHeaders: false
+    }));
+
+    // API key enforcement for write methods
+    app.use((req, res, next) => {
+        if (!HUB_API_KEY) return next();
+        let method = req.body && req.body.method;
+        if (method && WRITE_METHODS.has(method.toLowerCase())) {
+            let provided = req.headers['x-api-key'] || '';
+            if (provided !== HUB_API_KEY) {
+                return res.status(401).json({
+                    jsonrpc: '2.0', id: req.body.id || null,
+                    error: { code: -32001, message: 'Unauthorized' }
+                });
+            }
+        }
+        next();
+    });
 
     // JSON-RPC methods
     const jsonRpcController = {
@@ -140,6 +189,8 @@ async function startApi(){
 
         // Get recent finalized price snapshots
         async getpricesnapshots({limit}){
+            let limErr = validateLimit(limit);
+            if (limErr) return limErr;
             try {
                 let snapshots = await hub.getPriceSnapshots(limit || 50);
                 return snapshots;
@@ -203,6 +254,8 @@ async function startApi(){
         async getfeequote({action, chain}){
             if(!action) return {error: "action is required"};
             if(!chain) return {error: "chain is required"};
+            let chainErr = validateChain(chain);
+            if (chainErr) return chainErr;
             try {
                 return await hub.getFeeQuote(action, chain);
             } catch (err) {
@@ -256,6 +309,10 @@ async function startApi(){
         async requestattestation({source_chain, source_action_index, dest_chain}){
             if(!source_chain || !source_action_index || !dest_chain)
                 return {error: "source_chain, source_action_index, and dest_chain are required"};
+            let scErr = validateChain(source_chain);
+            if (scErr) return scErr;
+            let dcErr = validateChain(dest_chain);
+            if (dcErr) return dcErr;
             try {
                 let attestation = await hub.requestAttestation(source_chain, source_action_index, dest_chain);
                 return attestation;
@@ -266,6 +323,8 @@ async function startApi(){
 
         // Get cross-chain attestations
         async getattestations({status, limit}){
+            let limErr = validateLimit(limit);
+            if (limErr) return limErr;
             try {
                 let cc = hub.getCrossChain();
                 if(!cc) return {error: "cross-chain engine not active"};
@@ -279,8 +338,13 @@ async function startApi(){
         async reportreorg({chain, reorg_height, timestamp}){
             if(!chain || !reorg_height || !timestamp)
                 return {error: "chain, reorg_height, and timestamp are required"};
+            let chainErr = validateChain(chain);
+            if (chainErr) return chainErr;
+            let rh = parseInt(reorg_height);
+            if (!Number.isInteger(rh) || rh < 0)
+                return {error: "reorg_height must be a non-negative integer"};
             try {
-                await hub.reportReorg(chain, parseInt(reorg_height), parseInt(timestamp));
+                await hub.reportReorg(chain, rh, parseInt(timestamp));
                 return {status: "success"};
             } catch (err) {
                 return {error: err.message || "error reporting reorg"};
@@ -289,6 +353,8 @@ async function startApi(){
 
         // Get reorg history
         async getreorghistory({limit}){
+            let limErr = validateLimit(limit);
+            if (limErr) return limErr;
             try {
                 return await hub.getReorgHistory(limit);
             } catch (err) {
@@ -300,6 +366,10 @@ async function startApi(){
         async initiateswap({source_chain, source_action_index, dest_chain, dest_action_index}){
             if(!source_chain || !source_action_index || !dest_chain)
                 return {error: "source_chain, source_action_index, and dest_chain are required"};
+            let scErr = validateChain(source_chain);
+            if (scErr) return scErr;
+            let dcErr = validateChain(dest_chain);
+            if (dcErr) return dcErr;
             try {
                 await hub.initiateSwap(source_chain, parseInt(source_action_index), dest_chain, dest_action_index ? parseInt(dest_action_index) : null);
                 return {status: "success"};
@@ -322,6 +392,8 @@ async function startApi(){
 
         // Get swaps by status
         async getswaps({status, limit}){
+            let limErr = validateLimit(limit);
+            if (limErr) return limErr;
             try {
                 return await hub.getSwaps(status, limit);
             } catch (err) {

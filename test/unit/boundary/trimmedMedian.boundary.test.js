@@ -103,15 +103,16 @@ describe('Boundary: Trimmed Median Aggregation', function () {
 
     describe('outlier handling', function () {
 
-        it('N=5 (no trim): extreme outlier stays in dataset', function () {
+        it('N=5 (no trim): extreme outlier stays in dataset (if within price bounds)', function () {
             // floor(5 * 0.15) = 0 → no trim
-            let subs = submissionsForPair([100000, 100001, 100002, 100003, 999999999]);
-            // Sorted: [100000, 100001, 100002, 100003, 999999999] → median = 100002
+            // Outlier 9999999 is within 10M bounds so it stays
+            let subs = submissionsForPair([100000, 100001, 100002, 100003, 9999999]);
+            // Sorted: [100000, 100001, 100002, 100003, 9999999] → median = 100002
             expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100002.00000000');
         });
 
         it('N=7 (trim=1): extreme outlier is trimmed', function () {
-            let subs = submissionsForPair([100000, 100001, 100002, 100003, 100004, 100005, 999999999]);
+            let subs = submissionsForPair([100000, 100001, 100002, 100003, 100004, 100005, 9999999]);
             // After trim: [100001, 100002, 100003, 100004, 100005] → median = 100003
             expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100003.00000000');
         });
@@ -162,10 +163,9 @@ describe('Boundary: Trimmed Median Aggregation', function () {
             expect(oc._aggregate(subs, 'BTC/USD')).to.equal('0.00000002');
         });
 
-        it('large price value', function () {
-            let subs = submissionsForPair([999999999.99999999]);
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('1000000000.00000000');
-            // Note: 999999999.99999999 becomes 1000000000 due to float precision
+        it('large price value within bounds', function () {
+            let subs = submissionsForPair([9999999]);
+            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('9999999.00000000');
         });
 
         it('toFixed(8) output format is consistent', function () {

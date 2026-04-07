@@ -68,8 +68,12 @@ class Consensus {
         // Message handler reference (for cleanup)
         this._messageHandler = null;
 
+        // Sequence tracking for replay prevention
+        this.lastAppliedSeq = 0;
+
         // Config
-        this.timeout = parseInt(process.env.PBFT_TIMEOUT) || DEFAULT_TIMEOUT;
+        this.timeout       = parseInt(process.env.PBFT_TIMEOUT) || DEFAULT_TIMEOUT;
+        this.minValidators = parseInt(process.env.MIN_VALIDATORS) || 1;
     }
 
     // Set the validator set (sorted array of { pubkey, addr })
@@ -112,6 +116,9 @@ class Consensus {
         // Single-node fallback: no peers connected → apply directly
         let quorum = this._getQuorum();
         if (quorum === 0) {
+            if (this.minValidators > 1) {
+                console.warn('Consensus: Operating in single-node mode — MIN_VALIDATORS=' + this.minValidators + ' but quorum is 0');
+            }
             await this._applyConfig(config);
             return true;
         }
@@ -192,6 +199,12 @@ class Consensus {
         // Validate
         if (!seq || !configDigest || !config) return;
         if (typeof seq !== 'number' || seq <= 0) return;
+
+        // Reject stale/replayed sequence numbers
+        if (seq <= this.lastAppliedSeq) {
+            console.warn('Consensus: Rejecting PRE_PREPARE with stale seq ' + seq + ' (last applied: ' + this.lastAppliedSeq + ')');
+            return;
+        }
 
         // Verify digest matches the config
         let computedDigest = this._digest(config);
@@ -317,6 +330,7 @@ class Consensus {
             this._applyConfig(proposal.config).then(() => {
                 // Update sequence in DB
                 this._saveSeq(seq);
+                if (seq > this.lastAppliedSeq) this.lastAppliedSeq = seq;
 
                 // Resolve the proposer's promise (if we initiated)
                 if (!proposal.resolved && proposal.resolve) {
@@ -443,6 +457,7 @@ class Consensus {
             );
             if (rows.length > 0) {
                 this.seq = parseInt(rows[0].value) || 0;
+                this.lastAppliedSeq = this.seq;
             }
         } catch (e) {
             console.error('Error loading consensus sequence:', e.message);

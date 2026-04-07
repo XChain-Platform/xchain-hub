@@ -75,20 +75,17 @@ describe('Boundary: ReorgHandler', function () {
             expect(deleteCall[1][1]).to.equal(0); // timestamp param
         });
 
-        it('far-future timestamp causes no price_snapshots to be disputed', async function () {
+        it('far-future timestamp is rejected by validation', async function () {
             rh.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
 
-            // db returns empty arrays by default — simulates no rows matched
             let futureTs = Date.now() + 1e13; // ~317 years from now
-            await rh.reportReorg('DOGE', 500, futureTs);
-
-            let calls = hub.db.doQuery.args;
-            let updateCall = calls.find(c => /UPDATE price_snapshots/.test(c[0]));
-            expect(updateCall).to.exist;
-            expect(updateCall[1][0]).to.equal(futureTs);
-            // No error thrown; rollback completed normally
-            expect(rh.processed.has('DOGE:500:' + futureTs)).to.be.true;
+            try {
+                await rh.reportReorg('DOGE', 500, futureTs);
+                expect.fail('should have thrown');
+            } catch (e) {
+                expect(e.message).to.include('future');
+            }
         });
     });
 
@@ -98,17 +95,20 @@ describe('Boundary: ReorgHandler', function () {
 
     describe('duplicate reorg report', function () {
 
-        it('second call with same reorgId is a no-op', async function () {
+        it('second call with same reorgId is rate-limited', async function () {
             rh.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
 
-            let ts = 1700000000000;
+            let ts = Date.now() - 1000;
             await rh.reportReorg('BTC', 200, ts);
-            let callCount = hub.db.doQuery.callCount;
 
-            // Second identical report — processed set should suppress it
-            await rh.reportReorg('BTC', 200, ts);
-            expect(hub.db.doQuery.callCount).to.equal(callCount);
+            // Second identical report — rate limiter suppresses it
+            try {
+                await rh.reportReorg('BTC', 200, ts);
+                expect.fail('should have thrown');
+            } catch (e) {
+                expect(e.message).to.include('Rate limit');
+            }
         });
     });
 

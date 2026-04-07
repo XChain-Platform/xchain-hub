@@ -38,51 +38,44 @@ describe('Boundary: PriceFetcher', function () {
 
     describe('CoinGecko price value edge cases', function () {
 
-        it('price=0 is valid (parseFloat(0) is a number) and is included in results', async function () {
+        it('price=0 is filtered out by price bounds (must be > 0)', async function () {
             axiosStub.get.resolves(cgBody(0, 80, 0.08));
             let fetcher = makeFetcher();
             let prices = await fetcher.fetchPrices();
 
             let btc = prices.find(p => p.coinPair === 'BTC/USD');
-            expect(btc).to.not.be.undefined;
-            expect(btc.price).to.equal('0.00000000');
+            expect(btc).to.be.undefined;
+            // LTC and DOGE still present with valid prices
+            expect(prices.find(p => p.coinPair === 'LTC/USD')).to.not.be.undefined;
         });
 
-        it('negative price is valid (parseFloat(-100)) and is included in results', async function () {
+        it('negative price is filtered out by price bounds', async function () {
             axiosStub.get.resolves(cgBody(-100, 80, 0.08));
             let fetcher = makeFetcher();
             let prices = await fetcher.fetchPrices();
 
             let btc = prices.find(p => p.coinPair === 'BTC/USD');
-            expect(btc).to.not.be.undefined;
-            expect(btc.price).to.equal('-100.00000000');
+            expect(btc).to.be.undefined;
         });
 
-        it('NaN string ("not-a-number") → parseFloat returns NaN, which is a number type — included as NaN', async function () {
-            // parseFloat('not-a-number') returns NaN; NaN is typeof 'number',
-            // so the code does not filter it at the fetch stage.
-            // The test documents the actual behaviour: the value passes through.
+        it('NaN string is filtered out by isFinite check', async function () {
             axiosStub.get.resolves(cgBody('not-a-number', 80, 0.08));
             let fetcher = makeFetcher();
-            // Should not throw — graceful handling
             let prices = await fetcher.fetchPrices();
-            // NaN.toFixed(8) returns 'NaN'; the pair will be present if NaN passes the
-            // undefined/null check (it does). This documents observed behaviour.
+
             let btc = prices.find(p => p.coinPair === 'BTC/USD');
-            expect(btc).to.not.be.undefined;
-            expect(btc.price).to.equal('NaN');
+            expect(btc).to.be.undefined;
+            // LTC still present
+            expect(prices.find(p => p.coinPair === 'LTC/USD')).to.not.be.undefined;
         });
 
-        it('very large price (1e18) → toFixed(8) produces a valid numeric string', async function () {
+        it('very large price (1e18) is filtered out by upper bound', async function () {
             axiosStub.get.resolves(cgBody(1e18, 80, 0.08));
             let fetcher = makeFetcher();
             let prices = await fetcher.fetchPrices();
 
             let btc = prices.find(p => p.coinPair === 'BTC/USD');
-            expect(btc).to.not.be.undefined;
-            expect(btc.price).to.equal((1e18).toFixed(8));
-            // Must be a string matching numeric format
-            expect(btc.price).to.match(/^\d+\.\d{8}$/);
+            expect(btc).to.be.undefined;
         });
 
         it('string price "100000" → parseFloat coerces to number correctly', async function () {
@@ -95,14 +88,13 @@ describe('Boundary: PriceFetcher', function () {
             expect(btc.price).to.equal('100000.00000000');
         });
 
-        it('Infinity price → parseFloat(Infinity) is a number and is included', async function () {
+        it('Infinity price is filtered out by isFinite check', async function () {
             axiosStub.get.resolves(cgBody(Infinity, 80, 0.08));
             let fetcher = makeFetcher();
             let prices = await fetcher.fetchPrices();
 
             let btc = prices.find(p => p.coinPair === 'BTC/USD');
-            expect(btc).to.not.be.undefined;
-            expect(btc.price).to.equal('Infinity');
+            expect(btc).to.be.undefined;
         });
     });
 

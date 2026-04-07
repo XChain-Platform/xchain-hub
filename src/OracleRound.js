@@ -60,8 +60,10 @@ class OracleRound {
         this._messageHandler = null;
 
         // Config
-        this.roundInterval    = this.config.ORACLE_ROUND_INTERVAL || 600000;     // 10 minutes
-        this.submissionWindow = this.config.ORACLE_SUBMISSION_WINDOW || 180000;   // 3 minutes
+        this.roundInterval          = this.config.ORACLE_ROUND_INTERVAL || 600000;     // 10 minutes
+        this.submissionWindow       = this.config.ORACLE_SUBMISSION_WINDOW || 180000;   // 3 minutes
+        this.maxSubmissionsPerRound  = parseInt(this.config.ORACLE_MAX_SUBMISSIONS_PER_ROUND) || 200;
+        this.priceMax               = 10000000;
     }
 
     // Set the oracle consensus engine (called by XChainHub after both are created)
@@ -231,8 +233,21 @@ class OracleRound {
         let roundSubs = this.submissions.get(round);
         if (roundSubs.has(envelope.sender)) return; // Already have a submission from this sender
 
+        // Enforce max submissions per round
+        if (roundSubs.size >= this.maxSubmissionsPerRound) {
+            console.warn('Oracle: Max submissions per round reached for round ' + round + ' — dropping from ' + envelope.sender);
+            return;
+        }
+
+        // Validate individual prices — filter to positive finite values within bounds
+        let validPrices = prices.filter(p => {
+            let val = parseFloat(p.price);
+            return Number.isFinite(val) && val > 0 && val < this.priceMax;
+        });
+        if (validPrices.length === 0) return;
+
         roundSubs.set(envelope.sender, {
-            prices:    prices,
+            prices:    validPrices,
             sources:   sources || 0,
             timestamp: envelope.timestamp
         });

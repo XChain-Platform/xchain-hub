@@ -5,6 +5,12 @@ const { expect }    = require('chai');
 const RewardTracker = require('../../../src/RewardTracker');
 const { createMockHub } = require('../../helpers/mockHub');
 
+// Generate valid unique 64-hex-char pubkeys for testing
+function hexPubkey(n) {
+    let hex = n.toString(16).padStart(64, '0');
+    return hex.slice(0, 64);
+}
+
 describe('Boundary: RewardTracker', function () {
 
     let hub, rt;
@@ -31,7 +37,7 @@ describe('Boundary: RewardTracker', function () {
         }
 
         it('10 / 1 = 10.00000000 (exact, no rounding loss)', async function () {
-            await rt.distributeRewards(1, ['pubkey-A']);
+            await rt.distributeRewards(1, [hexPubkey(1)]);
 
             let amounts = insertAmounts();
             expect(amounts).to.have.length(1);
@@ -39,7 +45,7 @@ describe('Boundary: RewardTracker', function () {
         });
 
         it('10 / 3 = 3.33333333 (truncated — total 9.99999999, 1 satoshi lost)', async function () {
-            await rt.distributeRewards(1, ['pub-A', 'pub-B', 'pub-C']);
+            await rt.distributeRewards(1, [hexPubkey(1), hexPubkey(2), hexPubkey(3)]);
 
             let amounts = insertAmounts();
             expect(amounts).to.have.length(3);
@@ -51,7 +57,7 @@ describe('Boundary: RewardTracker', function () {
         });
 
         it('10 / 7 → toFixed(8) output equals (10/7).toFixed(8)', async function () {
-            let participants = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7'];
+            let participants = Array.from({ length: 7 }, (_, i) => hexPubkey(i + 1));
             await rt.distributeRewards(1, participants);
 
             let expected = (10 / 7).toFixed(8);
@@ -61,7 +67,7 @@ describe('Boundary: RewardTracker', function () {
         });
 
         it('10 / 100 = 0.10000000 (exact)', async function () {
-            let participants = Array.from({ length: 100 }, (_, i) => 'pub-' + i);
+            let participants = Array.from({ length: 100 }, (_, i) => hexPubkey(i + 1));
             await rt.distributeRewards(1, participants);
 
             let amounts = insertAmounts();
@@ -70,7 +76,7 @@ describe('Boundary: RewardTracker', function () {
         });
 
         it('10 / 1000 = 0.01000000', async function () {
-            let participants = Array.from({ length: 1000 }, (_, i) => 'pub-' + i);
+            let participants = Array.from({ length: 1000 }, (_, i) => hexPubkey(i + 1));
             await rt.distributeRewards(1, participants);
 
             let amounts = insertAmounts();
@@ -108,7 +114,7 @@ describe('Boundary: RewardTracker', function () {
             hub = createMockHub({ p2pConfig: { ORACLE_REWARD_PER_ROUND: '0.00000001' } });
             rt  = new RewardTracker(hub);
 
-            await rt.distributeRewards(1, ['pub-A']);
+            await rt.distributeRewards(1, [hexPubkey(1)]);
 
             let calls = hub.db.doQuery.getCalls().filter(c => c.args[0].includes('validator_rewards'));
             expect(calls).to.have.length(1);
@@ -119,22 +125,23 @@ describe('Boundary: RewardTracker', function () {
             hub = createMockHub({ p2pConfig: { ORACLE_REWARD_PER_ROUND: '0.00000001' } });
             rt  = new RewardTracker(hub);
 
-            await rt.distributeRewards(1, ['pub-A', 'pub-B', 'pub-C']);
+            await rt.distributeRewards(1, [hexPubkey(1), hexPubkey(2), hexPubkey(3)]);
 
             let calls = hub.db.doQuery.getCalls().filter(c => c.args[0].includes('validator_rewards'));
             expect(calls).to.have.length(3);
             calls.forEach(c => expect(c.args[1][2]).to.equal('0.00000000'));
         });
 
-        it('rewardPerRound = 0 → perValidator = 0.00000000 for every participant', async function () {
+        it('rewardPerRound = 0 → throws invalid reward error', async function () {
             hub = createMockHub({ p2pConfig: { ORACLE_REWARD_PER_ROUND: '0' } });
             rt  = new RewardTracker(hub);
 
-            await rt.distributeRewards(1, ['pub-A', 'pub-B']);
-
-            let calls = hub.db.doQuery.getCalls().filter(c => c.args[0].includes('validator_rewards'));
-            expect(calls).to.have.length(2);
-            calls.forEach(c => expect(c.args[1][2]).to.equal('0.00000000'));
+            try {
+                await rt.distributeRewards(1, [hexPubkey(1), hexPubkey(2)]);
+                expect.fail('should have thrown');
+            } catch (e) {
+                expect(e.message).to.include('Invalid reward amount');
+            }
         });
     });
 });

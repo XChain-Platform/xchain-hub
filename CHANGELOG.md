@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.8] - 2026-04-06
+
+### Added
+- API key authentication for write methods via `HUB_API_KEY` env var
+- Rate limiting on JSON-RPC endpoint via `express-rate-limit` (`HUB_API_RATE_LIMIT`, default 100/min)
+- Configurable CORS origin restriction via `CORS_ORIGIN` env var
+- Chain validation (BTC/LTC/DOGE only) on all chain-accepting endpoints
+- Limit parameter validation (positive integer, max 1000) on list endpoints
+- Per-IP connection limit on P2P WebSocket server (`P2P_MAX_CONNECTIONS_PER_IP`, default 3)
+- Per-peer message rate limiting on P2P layer (`P2P_MSG_RATE_LIMIT`, default 100/min)
+- Dedup cache size bound to prevent memory exhaustion (`P2P_DEDUP_CACHE_MAX`, default 100000)
+- Peer address format validation before WebSocket connection
+- Consensus sequence monotonicity check to reject replayed PRE_PREPARE messages
+- Single-node mode warning when `MIN_VALIDATORS` > 1 but no peers connected
+- Minimum submission count for oracle round finalization (`ORACLE_MIN_SUBMISSIONS`, default 1)
+- Price sanity bounds (> 0, < 10M) on oracle submissions, aggregation, and external API responses
+- Max submissions per oracle round (`ORACLE_MAX_SUBMISSIONS_PER_ROUND`, default 200)
+- Cross-chain attestation ID format validation
+- Reorg report parameter validation (chain, height, timestamp) and rate limiting (1 per chain per 60s)
+- Governance voter authorization (must be active validator to vote)
+- Governance parameter name length limit (255 chars) and rationale length limit (2000 chars)
+- Reward participant pubkey validation (must be 64 hex chars)
+- Slash proposal pubkey validation and in-memory deviation array bounds (max 1000)
+- Database query timeout (`DB_QUERY_TIMEOUT`, default 30s)
+- Config structure validation with value length limit (1024 chars) and type coercion
+- Security test suite (72 tests) covering all hardening measures
+- `express-rate-limit` production dependency
+
+### Changed
+- `REQUIRE_SIGNATURES` now defaults to `true` (was `false`) — P2P messages require Ed25519 signatures by default
+- Object query arguments serialized via `JSON.stringify()` instead of `toString()` with warning log
+- Null-safe traversal for CoinGecko and CoinMarketCap API response parsing
+- Invalid JSON on P2P WebSocket now logged at warn level instead of silently discarded
+
 ## [2.0.7] - 2026-04-06
 
 ### Added

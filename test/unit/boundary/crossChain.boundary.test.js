@@ -170,12 +170,16 @@ describe('Boundary: CrossChainEngine', function () {
             expect(result.confirmations).to.equal(6);
         });
 
-        it('unknown chain falls back to 3 confirmations', async function () {
+        it('unknown chain is rejected by validation', async function () {
             cc.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
 
-            let result = await cc.requestAttestation('UNKNOWN', '1', 'BTC');
-            expect(result.confirmations).to.equal(3);
+            try {
+                await cc.requestAttestation('UNKNOWN', '1', 'BTC');
+                expect.fail('should have thrown');
+            } catch (e) {
+                expect(e.message).to.include('Invalid sourceChain');
+            }
         });
     });
 

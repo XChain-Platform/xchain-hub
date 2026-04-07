@@ -111,7 +111,7 @@ describe('Boundary: Config Management', function () {
             // null host skipped, port written
             expect(mockDb.setParam.callCount).to.equal(1);
             expect(mockDb.setParam.firstCall.args[3]).to.equal('port');
-            expect(mockDb.setParam.firstCall.args[4]).to.equal(8332);
+            expect(mockDb.setParam.firstCall.args[4]).to.equal('8332');
         });
 
         it('skips parameters whose value is undefined', async function () {

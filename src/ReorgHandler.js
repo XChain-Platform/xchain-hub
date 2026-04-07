@@ -52,6 +52,9 @@ class ReorgHandler extends EventEmitter {
         // Message handler
         this._messageHandler = null;
 
+        // Rate limit: max 1 reorg report per chain per 60 seconds
+        this.reorgRateTracker = new Map();
+
         // Config
         this.timeout = parseInt(process.env.REORG_TIMEOUT) || DEFAULT_REORG_TIMEOUT;
     }
@@ -79,6 +82,30 @@ class ReorgHandler extends EventEmitter {
 
     // Report a reorg (called via JSON-RPC or internally)
     async reportReorg(chain, reorgHeight, timestamp) {
+        // Validate chain
+        let allowedChains = ['BTC', 'LTC', 'DOGE'];
+        if (!allowedChains.includes(chain))
+            throw new Error('Invalid chain: ' + chain + ' (allowed: ' + allowedChains.join(', ') + ')');
+
+        // Validate reorgHeight
+        let h = parseInt(reorgHeight);
+        if (!Number.isInteger(h) || h < 0)
+            throw new Error('reorgHeight must be a non-negative integer');
+
+        // Validate timestamp
+        let t = parseInt(timestamp);
+        if (!Number.isFinite(t) || t < 0)
+            throw new Error('timestamp must be a non-negative number');
+        let now = Date.now();
+        if (t > now + 300000)
+            throw new Error('timestamp is too far in the future');
+
+        // Rate limit: 1 report per chain per 60 seconds
+        let lastReport = this.reorgRateTracker.get(chain) || 0;
+        if (now - lastReport < 60000)
+            throw new Error('Rate limit: only one reorg report per chain per 60 seconds');
+        this.reorgRateTracker.set(chain, now);
+
         let reorgId = chain + ':' + reorgHeight + ':' + timestamp;
 
         if (this.processed.has(reorgId)) return;

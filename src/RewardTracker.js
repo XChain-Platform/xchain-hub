@@ -36,18 +36,28 @@ class RewardTracker {
     async distributeRewards(round, participants) {
         if (!participants || participants.length === 0) return;
 
-        // Calculate per-validator reward (equal split)
+        // Validate reward amount
         let totalReward = parseFloat(this.rewardPerRound);
-        let perValidator = (totalReward / participants.length).toFixed(8);
+        if (!Number.isFinite(totalReward) || totalReward <= 0)
+            throw new Error('Invalid reward amount: ' + this.rewardPerRound);
 
-        for (let pubkey of participants) {
+        // Filter to valid pubkeys (64 hex chars)
+        let validParticipants = participants.filter(pk =>
+            typeof pk === 'string' && /^[0-9a-fA-F]{64}$/.test(pk)
+        );
+        if (validParticipants.length === 0) return;
+
+        // Calculate per-validator reward (equal split)
+        let perValidator = (totalReward / validParticipants.length).toFixed(8);
+
+        for (let pubkey of validParticipants) {
             let query = `INSERT INTO validator_rewards (validator_pubkey, round_number, reward_type, amount)
                          VALUES (?, ?, 'oracle_round', ?)`;
             await this.db.doQuery(query, [pubkey, round, perValidator])
                 .catch(e => console.error('Error recording reward for ' + pubkey + ':', e.message));
         }
 
-        console.log('Rewards: Round ' + round + ' — ' + perValidator + ' XCHAIN each to ' + participants.length + ' validators');
+        console.log('Rewards: Round ' + round + ' — ' + perValidator + ' XCHAIN each to ' + validParticipants.length + ' validators');
     }
 
     // Get total unclaimed rewards for a validator

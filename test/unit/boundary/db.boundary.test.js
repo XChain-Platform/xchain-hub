@@ -151,7 +151,7 @@ describe('Boundary: Database Layer', function () {
             expect(result).to.deep.equal([]);
         });
 
-        it('object arguments are converted to strings', async function () {
+        it('object arguments are serialized via JSON.stringify', async function () {
             let db = new Database('h', 3306, 'test_db', 'u', 'p');
             let mockConn = {
                 query: sinon.stub().resolves([{ id: 1 }]),
@@ -159,9 +159,11 @@ describe('Boundary: Database Layer', function () {
             };
             poolStub.getConnection.resolves(mockConn);
 
-            await db.doQuery('SELECT ?', [{ toString: () => 'obj-string' }]);
+            let warnStub = sinon.stub(console, 'warn');
+            await db.doQuery('SELECT ?', [{ key: 'value' }]);
             let passedArgs = mockConn.query.getCall(0).args[1];
-            expect(passedArgs[0]).to.equal('obj-string');
+            expect(passedArgs[0]).to.equal('{"key":"value"}');
+            expect(warnStub.calledWith(sinon.match('object arg serialized'))).to.be.true;
         });
 
         it('null arguments are preserved (not converted)', async function () {

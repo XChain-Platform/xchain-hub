@@ -1,7 +1,7 @@
 {
   "name": "xchain-hub",
   "description": "Config oracle and cross-chain coordinator for the XChain Platform. Stores service configs in MariaDB and serves them via JSON-RPC.",
-  "version": "2.0.7",
+  "version": "2.0.8",
   "license": "SEE LICENSE IN LICENSE.md",
   "repository": {
     "type": "git",
@@ -13,13 +13,14 @@
     "dotenv": "^16.4.5",
     "express": "^4.18.3",
     "express-json-rpc-router": "^1.4.0",
+    "express-rate-limit": "^7.5.0",
     "helmet": "^7.1.0",
     "mariadb": "3.2.3",
     "ws": "^8.18.0"
   },
   "scripts": {
     "api": "node ./src/api.js",
-    "test": "mocha test/unit/**/*.test.js --timeout 5000 --recursive",
+    "test": "mocha 'test/unit/**/*.test.js' --timeout 5000 --recursive",
     "test:integration": "mocha 'test/integration/**/*.test.js' --timeout 30000 --recursive",
     "test:all": "mocha 'test/**/*.test.js' --timeout 30000 --recursive",
     "test:smoke": "mocha 'test/smoke/**/*.smoke.test.js' --timeout 5000 --recursive --bail",

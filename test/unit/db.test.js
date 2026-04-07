@@ -138,10 +138,10 @@ describe('Database', function () {
             expect(mockConn.query.called).to.be.false;
         });
 
-        it('converts object args to strings', async function () {
-            let objArg = { toString: () => 'converted' };
+        it('serializes object args to JSON strings', async function () {
+            let objArg = { key: 'value' };
             await db.doQuery('INSERT INTO foo VALUES (?)', [objArg]);
-            expect(mockConn.query.getCall(0).args[1][0]).to.equal('converted');
+            expect(mockConn.query.getCall(0).args[1][0]).to.equal('{"key":"value"}');
         });
 
         it('returns empty array on query error (non-transaction)', async function () {

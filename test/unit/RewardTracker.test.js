@@ -5,6 +5,9 @@ const { expect }     = require('chai');
 const RewardTracker  = require('../../src/RewardTracker');
 const { createMockHub }     = require('../helpers/mockHub');
 
+// Generate valid unique 64-hex-char pubkeys for testing
+function hexPk(n) { return n.toString(16).padStart(64, '0'); }
+
 describe('RewardTracker', function () {
 
     let hub, rt;
@@ -42,26 +45,26 @@ describe('RewardTracker', function () {
     describe('distributeRewards()', function () {
 
         it('equal split — 10 / 5 = 2.00000000 each', async function () {
-            let participants = ['pk1', 'pk2', 'pk3', 'pk4', 'pk5'];
+            let participants = [hexPk(1), hexPk(2), hexPk(3), hexPk(4), hexPk(5)];
             await rt.distributeRewards(1, participants);
 
             expect(hub.db.doQuery.callCount).to.equal(5);
             for (let i = 0; i < 5; i++) {
                 let args = hub.db.doQuery.getCall(i).args;
-                expect(args[1][0]).to.equal(participants[i]);
+                expect(args[1][0]).to.equal(hexPk(i + 1));
                 expect(args[1][1]).to.equal(1); // round
                 expect(args[1][2]).to.equal('2.00000000');
             }
         });
 
         it('single participant gets full reward', async function () {
-            await rt.distributeRewards(1, ['pk1']);
+            await rt.distributeRewards(1, [hexPk(1)]);
             let args = hub.db.doQuery.getCall(0).args;
             expect(args[1][2]).to.equal('10.00000000');
         });
 
         it('odd division — 10 / 3 = 3.33333333 each', async function () {
-            await rt.distributeRewards(1, ['pk1', 'pk2', 'pk3']);
+            await rt.distributeRewards(1, [hexPk(1), hexPk(2), hexPk(3)]);
             let args = hub.db.doQuery.getCall(0).args;
             expect(args[1][2]).to.equal('3.33333333');
         });
@@ -80,7 +83,7 @@ describe('RewardTracker', function () {
             hub.db.doQuery.onFirstCall().rejects(new Error('dup'));
             hub.db.doQuery.onSecondCall().resolves();
 
-            await rt.distributeRewards(1, ['pk1', 'pk2']);
+            await rt.distributeRewards(1, [hexPk(1), hexPk(2)]);
             expect(hub.db.doQuery.callCount).to.equal(2); // both attempted
         });
     });

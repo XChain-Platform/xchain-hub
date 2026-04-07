@@ -95,6 +95,12 @@ class Governance extends EventEmitter {
         let isValidator = this.validatorSet.some(v => v.pubkey === proposerPubkey);
         if (!isValidator) throw new Error('Proposer is not an active validator');
 
+        // Validate parameter name and rationale length
+        if (parameter.length > 255)
+            throw new Error('parameter name exceeds maximum length of 255 characters');
+        if (rationale && rationale.length > 2000)
+            throw new Error('rationale exceeds maximum length of 2000 characters');
+
         // Check for active proposal on the same parameter
         let active = await this.db.doQuery(
             "SELECT id FROM governance_proposals WHERE parameter = ? AND status = 'voting'",
@@ -150,6 +156,9 @@ class Governance extends EventEmitter {
 
         let voterPubkey = this.identity ? this.identity.getPubkeyHex() : null;
         if (!voterPubkey) throw new Error('No validator identity configured');
+
+        let isValidatorVoter = this.validatorSet.some(v => v.pubkey === voterPubkey);
+        if (!isValidatorVoter) throw new Error('Voter is not an active validator');
 
         // Verify proposal exists and is in voting state
         let proposals = await this.db.doQuery(

@@ -56,6 +56,7 @@ class OracleConsensus extends EventEmitter {
 
         // Config
         this.finalizationTimeout = parseInt(process.env.ORACLE_FINALIZATION_TIMEOUT) || DEFAULT_FINALIZATION_TIMEOUT;
+        this.minSubmissions      = parseInt(process.env.ORACLE_MIN_SUBMISSIONS) || 1;
     }
 
     // Set the validator set for quorum calculation and leader selection
@@ -89,6 +90,14 @@ class OracleConsensus extends EventEmitter {
         let submissions = this.oracleRound.getSubmissions(round);
         if (!submissions || submissions.size === 0) {
             // No submissions — skip the round
+            await this._storeSkippedRound(round);
+            return;
+        }
+
+        // Enforce minimum submission count
+        if (submissions.size < this.minSubmissions) {
+            console.warn('Oracle: Round ' + round + ' has only ' + submissions.size +
+                ' submission(s); minimum is ' + this.minSubmissions + ' — skipping');
             await this._storeSkippedRound(round);
             return;
         }
@@ -334,7 +343,7 @@ class OracleConsensus extends EventEmitter {
                 for (let p of sub.prices) {
                     if (p.coinPair === coinPair && p.price) {
                         let val = parseFloat(p.price);
-                        if (isFinite(val) && val > 0) {
+                        if (isFinite(val) && val > 0 && val < 10000000) {
                             values.push(val);
                         }
                     }

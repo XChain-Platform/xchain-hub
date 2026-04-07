@@ -277,16 +277,36 @@ class XChainHub {
 
     // Apply config directly to the database
     async applyConfig(json){
+        if (!json || typeof json !== 'object' || Array.isArray(json))
+            throw new Error('Config must be a non-null object');
+
         for(let nextCoin in json){
-            if(nextCoin != ""){
-                for(let nextNetwork in json[nextCoin]){
-                    for(let nextModule in json[nextCoin][nextNetwork]){
-                        for(let nextParam of PARAMETER_LIST){
-                            let nextValue = json[nextCoin][nextNetwork][nextModule][nextParam];
-                            if(nextValue !== null && nextValue !== undefined){
-                                await this.db.setParam(nextCoin, nextNetwork, nextModule, nextParam, nextValue);
-                            }
+            if(nextCoin === '') continue;
+            let coinLevel = json[nextCoin];
+            if (!coinLevel || typeof coinLevel !== 'object') continue;
+
+            for(let nextNetwork in coinLevel){
+                let networkLevel = coinLevel[nextNetwork];
+                if (!networkLevel || typeof networkLevel !== 'object') continue;
+
+                for(let nextModule in networkLevel){
+                    let moduleLevel = networkLevel[nextModule];
+                    if (!moduleLevel || typeof moduleLevel !== 'object') continue;
+
+                    for(let nextParam of PARAMETER_LIST){
+                        let nextValue = moduleLevel[nextParam];
+                        if(nextValue === null || nextValue === undefined) continue;
+
+                        // Enforce string type and length
+                        if (typeof nextValue !== 'string') {
+                            console.warn('XChainHub.applyConfig: non-string value for ' + nextParam + ' — coercing');
+                            nextValue = String(nextValue);
                         }
+                        if (nextValue.length > 1024) {
+                            throw new Error('Config value for ' + nextParam + ' exceeds max length of 1024 chars');
+                        }
+
+                        await this.db.setParam(nextCoin, nextNetwork, nextModule, nextParam, nextValue);
                     }
                 }
             }

@@ -97,8 +97,13 @@ class PriceFetcher {
 
             let prices = {};
             for (let [pair, cgId] of Object.entries(COINGECKO_IDS)) {
-                if (data[cgId] && data[cgId].usd !== undefined) {
-                    prices[pair] = parseFloat(data[cgId].usd);
+                let cgData = data && data[cgId];
+                let raw = cgData && cgData.usd;
+                if (raw !== undefined && raw !== null) {
+                    let val = parseFloat(raw);
+                    if (Number.isFinite(val) && val > 0 && val < 10000000) {
+                        prices[pair] = val;
+                    }
                 }
             }
             return prices;
@@ -125,8 +130,13 @@ class PriceFetcher {
 
             let prices = {};
             for (let [pair, symbol] of Object.entries(CMC_SYMBOLS)) {
-                if (data[symbol] && data[symbol].quote && data[symbol].quote.USD) {
-                    prices[pair] = parseFloat(data[symbol].quote.USD.price);
+                let cmcData  = data && data[symbol];
+                let cmcQuote = cmcData && cmcData.quote && cmcData.quote.USD;
+                if (cmcQuote && cmcQuote.price !== undefined) {
+                    let val = parseFloat(cmcQuote.price);
+                    if (Number.isFinite(val) && val > 0 && val < 10000000) {
+                        prices[pair] = val;
+                    }
                 }
             }
             return prices;
