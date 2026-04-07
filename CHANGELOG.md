@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.6] - 2026-04-06
+
+### Added
+- Boundary test suite (266 tests across 14 files) validating behavior at extreme input edges
+- Quorum calculation boundary tests: N=0–100 across Consensus, OracleConsensus, CrossChainEngine, ReorgHandler
+- Trimmed median aggregation boundary tests: trim threshold transitions (N=1–20), outlier handling, float precision, invalid data filtering
+- PriceFetcher boundary tests: zero/negative/NaN/huge API responses, partial responses, dual-source failures
+- Governance boundary tests: exact change bounds (50%/33%/25%/20%), tally quorum arithmetic, cooldown expiry
+- SlashDetector boundary tests: exact 5% deviation threshold, missed rounds at 29/30/31, 24h repeated deviation window pruning
+- Consensus PBFT boundary tests: leader rotation wrap-around, seq/view boundaries, PRE_PREPARE validation, duplicate vote dedup
+- CrossChainEngine boundary tests: chain pair fallback with both orderings, confirmation thresholds per chain, attestation re-finalization
+- ReorgHandler boundary tests: height 0, far-future timestamps, duplicate reorgId dedup
+- RewardTracker boundary tests: division precision at N=1/3/7/100/1000, satoshi-level rounding loss
+- Config management boundary tests: empty coin key filtering, PARAMETER_LIST enforcement, null/undefined/empty value handling
+- Fee quote boundary tests: gas calculation precision, zero/small/large oracle prices, missing oracle data
+- Validator registration boundary tests: pubkey regex edge cases (63/64/65 chars, non-hex), addr validation
+- Database layer boundary tests: DB name regex, circuit breaker state transitions, doQuery argument handling
+- P2P layer boundary tests: malformed envelope rejection, self-connection detection, dedup, signature verification modes
+
 ## [2.0.5] - 2026-04-06
 
 ### Added
