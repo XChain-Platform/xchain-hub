@@ -32,6 +32,9 @@ const CrossChainEngine  = require('./CrossChainEngine.js');
 const ReorgHandler      = require('./ReorgHandler.js');
 const SwapTracker       = require('./SwapTracker.js');
 const Governance        = require('./Governance.js');
+const PriceAggregator   = require('./PriceAggregator.js');
+const OraclePublisher   = require('./OraclePublisher.js');
+const HubDbBroadcaster  = require('./HubDbBroadcaster.js');
 const PARAMETER_LIST = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass"];
 
 class XChainHub {
@@ -54,12 +57,23 @@ class XChainHub {
         this.reorgHandler     = null;
         this.swapTracker      = null;
         this.governance       = null;
+        this.priceAggregator  = null;
+        this.oraclePublisher  = null;
+        this.hubDbBroadcaster = null;
     }
 
     async start(){
         this.db = new Database(this.dbHost, this.dbPort, this.dbName, this.dbUser, this.dbPass);
         await this.db.createDatabase();
         await this.db.verifyTables();
+        // PriceAggregator doesn't require P2P/PBFT — always available for receiving on-chain PRICE actions
+        this.priceAggregator = new PriceAggregator(this);
+        // HubDbBroadcaster forwards row inserts from the aggregator to WebSocket subscribers
+        // for the cross-chain hub DB sync channel (used by indexers running in distributed mode)
+        this.hubDbBroadcaster = new HubDbBroadcaster(this.p2pConfig || {});
+        this.priceAggregator.on('row:inserted', (event) => {
+            this.hubDbBroadcaster.broadcastRow(event);
+        });
         console.log('XChain Hub started (MariaDB: ' + this.dbName + ')');
     }
 
@@ -138,8 +152,8 @@ class XChainHub {
                 }
             }
 
-            // Distribute rewards
-            await this.rewardTracker.distributeRewards(event.round, participantPubkeys);
+            // Distribute rewards (passes BTC block height for indexer-side block_index)
+            await this.rewardTracker.distributeRewards(event.round, participantPubkeys, event.btcBlockHeight);
 
             // Check for slashable offenses
             await this.slashDetector.checkRound(
@@ -151,6 +165,13 @@ class XChainHub {
         // Start all oracle subsystems
         await this.oracleConsensus.start();
         await this.oracle.start();
+
+        // Start the Tier 3 publisher (no-op if no broadcast hook is wired up)
+        // The publisher subscribes to round:finalized events and queues finalized rounds
+        // for publishing to the DOGE chain. The actual broadcast transport is wired
+        // by the operator via setBroadcastHook() / setBalanceHook().
+        this.oraclePublisher = new OraclePublisher(this);
+        await this.oraclePublisher.start();
     }
 
     // Get the ValidatorIdentity instance

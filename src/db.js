@@ -247,6 +247,24 @@ class Database {
         return config;
     }
 
+    // Set the latest chain tip for a given coin (block height and block time)
+    // Used by indexers to push their chain tip to the hub for cross-chain reference
+    async setChainTip(coin, blockHeight, blockTime){
+        await this.setParam(coin, 'mainnet', 'chain_tips', 'block_height', String(blockHeight));
+        await this.setParam(coin, 'mainnet', 'chain_tips', 'block_time',   String(blockTime));
+    }
+
+    // Get the latest chain tip for a given coin
+    // Returns: { blockHeight, blockTime } or null if not set
+    async getChainTip(coin){
+        let cfg = await this.getConfig(coin, 'mainnet', 'chain_tips');
+        if(!cfg.block_height) return null;
+        return {
+            blockHeight: parseInt(cfg.block_height),
+            blockTime:   parseInt(cfg.block_time) || 0
+        };
+    }
+
     // Get all configs, reconstructed as nested object
     // Returns: { coin: { network: { module: { param: value } } } }
     async getAllConfigs(){

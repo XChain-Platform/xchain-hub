@@ -7,7 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-04-08
+
+### Added
+- `PriceAggregator.js` — receives validated PRICE v0/v1 actions from indexers across all chains, deduplicates by `round_number` (v0) or `(source_chain, action_index)` (v1), writes to unified `price_snapshots` and `oracle_prices` tables. EventEmitter — emits `row:inserted` for the hub DB sync channel. Applies 24-hour lock window for PRICE v1 (first broadcast immediate, subsequent delayed).
+- `OraclePublisher.js` — Tier 3 oracle publisher for broadcasting finalized PRICE v0 transactions to the DOGE chain. Features: deterministic leader rotation (`round % active_tier3_count`, sorted by `signing_pubkey`), persistent JSONL queue with fsync, PRICE v0 wire format builder, DOGE balance monitoring with WARN/ERROR log thresholds. Subscribes to `OracleConsensus` `round:finalized` events and uses collected validator signatures from the PBFT prepare/commit phases.
+- `EncoderClient.js` — minimal JSON-RPC client for talking to `xchain-encoder` (`get_utxos`, `create_tx`, `broadcast_tx`). Used by `OraclePublisher` for the default DOGE broadcast pipeline.
+- `HubDbBroadcaster.js` — WebSocket subscriber registry that forwards `PriceAggregator` row events to connected indexer hub DB sync clients. Includes backpressure handling (drops connections exceeding `WS_BACKPRESSURE_LIMIT` buffered messages).
+- `sql/oracle_prices.sql` — new table for cross-chain user TOKEN/FIAT oracle prices with `effective_at` column enforcing the 24-hour price lock window.
+- `setChainTip()` / `getChainTip()` in `db.js` — stores the latest BTC/LTC/DOGE chain tip in the `configs` table, used by `OracleRound._executeRound()` to anchor oracle rounds to real BTC block heights (fixes the hardcoded `reference_block=0` bug).
+- New JSON-RPC methods on hub API: `pushchaintip`, `pushpriceround`, `pushoracleprice` — write methods (require API key) for indexers to push chain state and validated PRICE actions to the hub.
+- REST snapshot endpoints: `GET /hub-db/snapshot/price_snapshots` and `GET /hub-db/snapshot/oracle_prices` with `since_id` pagination for incremental bootstrap of indexers' local hub DB copies.
+- WebSocket channel `/hub-db/subscribe` — streams `row:inserted` events for the hub's cross-chain price tables to subscribed indexers. Requires `Authorization: Bearer <HUB_API_KEY>`.
+- Multi-validator signature aggregation in `OracleConsensus.js` — each validator signs the canonical PRICE v0 payload (`JSON.stringify({round, timestamp, sortedPairs})`) during PBFT prepare/commit phases. Signatures travel in PROPOSE/PREPARE/COMMIT messages and collect on `pending.signatures` Map. The `round:finalized` event now carries the collected signatures array so `OraclePublisher` can embed real validator sigs in the published PRICE v0 transaction.
+- `_signPriceV0()`, `_buildPriceV0Payload()`, `_verifyAndStoreSig()` helpers in `OracleConsensus.js` — canonical payload construction matching the indexer's `ed25519.js` format.
+
 ### Changed
+- `OracleConsensus.js` — `_storeSnapshot()` and `_storeSkippedRound()` now accept `btcBlockHeight` and `btcBlockTime` parameters, replacing the hardcoded `reference_block=0` and `block_timestamp=Date.now()` values. Cross-node determinism fix: two independent nodes processing the same BTC block height now produce identical oracle snapshots.
+- `OracleConsensus.finalizeRound(round, btcBlockHeight, btcBlockTime)` — accepts and threads BTC chain tip values through PBFT pending rounds to storage and round:finalized events.
+- `OracleRound.js` — `_executeRound()` reads BTC chain tip from `db.getChainTip('BTC')` at the start of each round and passes it through `_scheduleFinalization()` to `OracleConsensus.finalizeRound()`.
+- `PriceFetcher.js` — rewritten to support 3 coins × 12 fiat currencies = **36 pairs per round**. CoinGecko and CoinMarketCap APIs are now called with `vs_currencies` / `convert` parameters for all 12 fiats in a single call. Supported fiats: USD, CAD, AUD, MXN, GBP, JPY, CNY, CHF, BRL, INR, EUR, KRW. New static method `PriceFetcher.getCoinPairs()`.
+- `OracleConsensus._storeSkippedRound()` — now uses `PriceFetcher.getCoinPairs()` for dynamic pair list instead of hardcoded `['BTC/USD', 'LTC/USD', 'DOGE/USD']`.
+- `sql/price_snapshots.sql` — added `source_chain VARCHAR(10)` column (defaults to `DOGE`) to track which chain carried the PRICE v0 transaction, plus `source_action_index BIGINT` for audit. New index on `source_chain`.
+- `RewardTracker.js` — `distributeRewards()` now accepts a `btcBlockHeight` parameter and pushes reward records to the BTC indexer via the new `pushvalidatorrewards` JSON-RPC endpoint. Populates the previously-empty indexer `validator_rewards` table so `CLAIM_REWARDS` can find unclaimed rewards.
+- `XChainHub.start()` — instantiates `PriceAggregator` and `HubDbBroadcaster` (both available in all modes). In validator mode, `startOracle()` also instantiates and starts `OraclePublisher`.
+- Hub `api.js` — now uses an explicit `http.Server` with WebSocket upgrade handler attached (for the hub DB sync channel). New `WRITE_METHODS` entries for the three new push methods.
+
+### Fixed
+- `reference_block` hardcoded to `0` in `_storeSnapshot()` and `_storeSkippedRound()` — now uses the BTC chain tip at the time of round execution. Previously broke cross-node determinism for fee validation and VM oracle queries.
+- `block_timestamp` in price snapshots — now uses the BTC block's `block_time` instead of wall-clock `Date.now()`.
+- `round:finalized` event — now carries `btcBlockHeight`, `btcBlockTime`, and `signatures` fields for downstream consumers.
 - `README.md` — updated version badge to 2.0.12, added tests badge (1,222 passing), coverage badge, test suite breakdown table, expanded scripts table with all test commands, added development dependencies section, added links to new DATABASE.md and OPERATIONS.md documentation
 
 ## [2.0.12] - 2026-04-06

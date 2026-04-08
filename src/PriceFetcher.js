@@ -19,15 +19,30 @@
  * computes a local median for each coin pair. Used by the oracle
  * round system to generate price submissions.
  *
+ * Supports 3 coins × 12 fiat currencies = 36 pairs per round.
+ * Validators get all 12 fiats per coin in a single API call.
+ *
  ********************************************************************/
 
 const axios = require('axios');
 
-// Coin IDs for each API
-const COINGECKO_IDS = { 'BTC/USD': 'bitcoin', 'LTC/USD': 'litecoin', 'DOGE/USD': 'dogecoin' };
-const CMC_SYMBOLS   = { 'BTC/USD': 'BTC',     'LTC/USD': 'LTC',      'DOGE/USD': 'DOGE' };
+// CoinGecko coin IDs for the 3 supported coins
+const COINGECKO_IDS = { 'BTC': 'bitcoin', 'LTC': 'litecoin', 'DOGE': 'dogecoin' };
 
-const COIN_PAIRS = ['BTC/USD', 'LTC/USD', 'DOGE/USD'];
+// CoinMarketCap symbols for the 3 supported coins
+const CMC_SYMBOLS = { 'BTC': 'BTC', 'LTC': 'LTC', 'DOGE': 'DOGE' };
+
+// Supported coins (3) and fiat currencies (12)
+const COINS = ['BTC', 'LTC', 'DOGE'];
+const FIATS = ['USD', 'CAD', 'AUD', 'MXN', 'GBP', 'JPY', 'CNY', 'CHF', 'BRL', 'INR', 'EUR', 'KRW'];
+
+// Build all 36 coin pairs (BTC/USD, BTC/CAD, ..., DOGE/KRW)
+const COIN_PAIRS = [];
+for (let coin of COINS) {
+    for (let fiat of FIATS) {
+        COIN_PAIRS.push(coin + '/' + fiat);
+    }
+}
 
 class PriceFetcher {
 
@@ -38,7 +53,7 @@ class PriceFetcher {
     }
 
     // Fetch prices from all configured sources and return the local median per coin pair
-    // Returns: [{ coinPair: 'BTC/USD', price: '100000.00', sources: 2 }, ...]
+    // Returns: [{ coinPair: 'BTC/USD', price: '100000.00000000', sources: 2 }, ...] for all 36 pairs
     async fetchPrices() {
         let results = {};
         for (let pair of COIN_PAIRS) {
@@ -80,11 +95,13 @@ class PriceFetcher {
         return prices;
     }
 
-    // Fetch prices from CoinGecko
-    // Returns: { 'BTC/USD': number, 'LTC/USD': number, 'DOGE/USD': number } or null
+    // Fetch all coin/fiat pairs from CoinGecko in a single request
+    // CoinGecko supports `vs_currencies` as a comma-separated list of currencies
+    // Returns: { 'BTC/USD': number, 'BTC/CAD': number, ..., 'DOGE/KRW': number } or null
     async fetchFromCoinGecko() {
-        let ids = Object.values(COINGECKO_IDS).join(',');
-        let url = 'https://api.coingecko.com/api/v3/simple/price?ids=' + ids + '&vs_currencies=usd';
+        let ids  = COINS.map(c => COINGECKO_IDS[c]).join(',');
+        let vs   = FIATS.map(f => f.toLowerCase()).join(',');
+        let url  = 'https://api.coingecko.com/api/v3/simple/price?ids=' + ids + '&vs_currencies=' + vs;
 
         let headers = {};
         if (this.coingeckoApiKey) {
@@ -96,13 +113,16 @@ class PriceFetcher {
             let data = response.data;
 
             let prices = {};
-            for (let [pair, cgId] of Object.entries(COINGECKO_IDS)) {
+            for (let coin of COINS) {
+                let cgId   = COINGECKO_IDS[coin];
                 let cgData = data && data[cgId];
-                let raw = cgData && cgData.usd;
-                if (raw !== undefined && raw !== null) {
+                if (!cgData) continue;
+                for (let fiat of FIATS) {
+                    let raw = cgData[fiat.toLowerCase()];
+                    if (raw === undefined || raw === null) continue;
                     let val = parseFloat(raw);
-                    if (Number.isFinite(val) && val > 0 && val < 10000000) {
-                        prices[pair] = val;
+                    if (Number.isFinite(val) && val > 0 && val < 1e12) {
+                        prices[coin + '/' + fiat] = val;
                     }
                 }
             }
@@ -113,29 +133,35 @@ class PriceFetcher {
         }
     }
 
-    // Fetch prices from CoinMarketCap (requires API key)
-    // Returns: { 'BTC/USD': number, 'LTC/USD': number, 'DOGE/USD': number } or null
+    // Fetch all coin/fiat pairs from CoinMarketCap (requires API key)
+    // CMC supports `convert` as a comma-separated list of fiat currencies
+    // Returns: { 'BTC/USD': number, ..., 'DOGE/KRW': number } or null
     async fetchFromCoinMarketCap() {
         if (!this.coinmarketcapApiKey) return null;
 
-        let symbols = Object.values(CMC_SYMBOLS).join(',');
-        let url = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=' + symbols + '&convert=USD';
+        let symbols = COINS.map(c => CMC_SYMBOLS[c]).join(',');
+        let convert = FIATS.join(',');
+        let url     = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=' + symbols + '&convert=' + convert;
 
         try {
             let response = await axios.get(url, {
                 timeout: this.timeout,
                 headers: { 'X-CMC_PRO_API_KEY': this.coinmarketcapApiKey }
             });
-            let data = response.data.data;
+            let data = response.data && response.data.data;
+            if (!data) return null;
 
             let prices = {};
-            for (let [pair, symbol] of Object.entries(CMC_SYMBOLS)) {
-                let cmcData  = data && data[symbol];
-                let cmcQuote = cmcData && cmcData.quote && cmcData.quote.USD;
-                if (cmcQuote && cmcQuote.price !== undefined) {
+            for (let coin of COINS) {
+                let symbol  = CMC_SYMBOLS[coin];
+                let cmcData = data[symbol];
+                if (!cmcData || !cmcData.quote) continue;
+                for (let fiat of FIATS) {
+                    let cmcQuote = cmcData.quote[fiat];
+                    if (!cmcQuote || cmcQuote.price === undefined) continue;
                     let val = parseFloat(cmcQuote.price);
-                    if (Number.isFinite(val) && val > 0 && val < 10000000) {
-                        prices[pair] = val;
+                    if (Number.isFinite(val) && val > 0 && val < 1e12) {
+                        prices[coin + '/' + fiat] = val;
                     }
                 }
             }
@@ -155,6 +181,11 @@ class PriceFetcher {
             return (sorted[mid - 1] + sorted[mid]) / 2;
         }
         return sorted[mid];
+    }
+
+    // Expose the supported pair list (used by OracleConsensus._storeSkippedRound and tests)
+    static getCoinPairs() {
+        return COIN_PAIRS.slice();
     }
 }
 

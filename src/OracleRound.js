@@ -145,6 +145,24 @@ class OracleRound {
         this.currentRound++;
         this.roundStartTime = Date.now();
 
+        // Capture the BTC chain tip at the start of this round
+        // This is the deterministic anchor for cross-node price agreement
+        try {
+            let btcTip = await this.db.getChainTip('BTC');
+            if (btcTip) {
+                this.currentBtcBlockHeight = btcTip.blockHeight;
+                this.currentBtcBlockTime   = btcTip.blockTime;
+            } else {
+                // No BTC tip available yet — fall back to round number
+                this.currentBtcBlockHeight = this.currentRound;
+                this.currentBtcBlockTime   = Math.floor(Date.now() / 1000);
+            }
+        } catch (err) {
+            console.warn('Oracle: Failed to read BTC chain tip:', err.message);
+            this.currentBtcBlockHeight = this.currentRound;
+            this.currentBtcBlockTime   = Math.floor(Date.now() / 1000);
+        }
+
         // Prune old submissions (keep current and previous round only)
         this._pruneSubmissions();
 
@@ -197,10 +215,13 @@ class OracleRound {
 
     // Schedule finalization for a round after the submission window
     _scheduleFinalization(round) {
+        // Capture the BTC chain tip values for this round at scheduling time
+        let btcBlockHeight = this.currentBtcBlockHeight;
+        let btcBlockTime   = this.currentBtcBlockTime;
         if (this.finalizationTimer) clearTimeout(this.finalizationTimer);
         this.finalizationTimer = setTimeout(() => {
             if (this.oracleConsensus) {
-                this.oracleConsensus.finalizeRound(round).catch(err => {
+                this.oracleConsensus.finalizeRound(round, btcBlockHeight, btcBlockTime).catch(err => {
                     console.error('Oracle: Finalization error for round ' + round + ':', err.message);
                 });
             }
