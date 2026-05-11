@@ -140,6 +140,54 @@ class Database {
         return true;
     }
 
+    // Apply schema migrations against existing tables (idempotent — safe to run every startup)
+    async runMigrations(){
+        await this._migrateUniqueKey(
+            'oracle_submissions',
+            'uq_submission',
+            '(round_number, coin_pair, validator_pubkey)',
+            ['round_number', 'coin_pair', 'validator_pubkey']
+        );
+        await this._migrateUniqueKey(
+            'validator_rewards',
+            'uq_reward',
+            '(validator_pubkey, round_number, reward_type)',
+            ['validator_pubkey', 'round_number', 'reward_type']
+        );
+    }
+
+    // Add a UNIQUE KEY to a table, removing duplicate rows first
+    async _migrateUniqueKey(table, indexName, indexColumns, columnList){
+        let db = await this.getConnection();
+        try {
+            // Check if the unique key already exists — skip everything if so
+            let existing = await db.query(
+                "SELECT COUNT(*) AS c FROM information_schema.statistics " +
+                "WHERE table_schema = ? AND table_name = ? AND index_name = ?",
+                [this.dbName, table, indexName]
+            );
+            if(existing[0] && Number(existing[0].c) > 0) return;
+
+            // Delete duplicates, keeping the row with the smallest id per group
+            let joinClause = columnList.map(c => 't1.' + c + ' = t2.' + c).join(' AND ');
+            let deleteSql = 'DELETE t1 FROM ' + table + ' t1 ' +
+                            'INNER JOIN ' + table + ' t2 ' +
+                            'WHERE t1.id > t2.id AND ' + joinClause;
+            let result = await db.query(deleteSql);
+            let deleted = result && result.affectedRows ? Number(result.affectedRows) : 0;
+            if(deleted > 0)
+                console.log('Migration: removed ' + deleted + ' duplicate rows from ' + table);
+
+            // Add the unique key
+            await db.query('ALTER TABLE ' + table + ' ADD UNIQUE KEY ' + indexName + ' ' + indexColumns);
+            console.log('Migration: added UNIQUE KEY ' + indexName + ' on ' + table);
+        } catch(e){
+            console.error('Migration error on ' + table + ': ' + (e.message || e));
+        } finally {
+            await db.release();
+        }
+    }
+
     // Create a table from a local SQL file
     async _createTableFromFile(file){
         let dir     = path.join(__dirname, 'sql');

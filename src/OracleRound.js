@@ -240,11 +240,17 @@ class OracleRound {
         console.log('Oracle: Received submission from ' + envelope.sender +
             ' for round ' + round + ' (' + roundSubs.size + ' total)');
 
-        // Persist to DB (fire and forget)
-        let validatorPubkey = '0000000000000000000000000000000000000000000000000000000000000000';
+        // Resolve sender's validator pubkey. Drop the DB persist if unresolved —
+        // keeps the in-memory submission for aggregation but avoids placeholder rows.
+        let validatorPubkey = null;
         if (this.peerManager.validatorPubkeys) {
             let pk = this.peerManager.validatorPubkeys.get(envelope.sender);
             if (pk) validatorPubkey = pk;
+        }
+        if (!validatorPubkey) {
+            console.warn('Oracle: skipping DB persist for unregistered sender ' + envelope.sender +
+                ' (call syncvalidators to register the peer)');
+            return;
         }
         this._persistSubmissions(round, envelope.sender, prices, validatorPubkey);
     }

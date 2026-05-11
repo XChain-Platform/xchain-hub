@@ -60,6 +60,7 @@ class XChainHub {
         this.db = new Database(this.dbHost, this.dbPort, this.dbName, this.dbUser, this.dbPass);
         await this.db.createDatabase();
         await this.db.verifyTables();
+        await this.db.runMigrations();
         console.log('XChain Hub started (MariaDB: ' + this.dbName + ')');
     }
 

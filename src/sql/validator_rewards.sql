@@ -6,6 +6,7 @@ CREATE TABLE validator_rewards (
     amount           VARCHAR(40) NOT NULL,
     claimed          TINYINT(1) NOT NULL DEFAULT 0,
     created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_reward (validator_pubkey, round_number, reward_type),
     KEY idx_validator (validator_pubkey),
     KEY idx_round (round_number),
     KEY idx_unclaimed (validator_pubkey, claimed)

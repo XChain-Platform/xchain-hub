@@ -41,7 +41,9 @@ class RewardTracker {
         let perValidator = (totalReward / participants.length).toFixed(8);
 
         for (let pubkey of participants) {
-            let query = `INSERT INTO validator_rewards (validator_pubkey, round_number, reward_type, amount)
+            // INSERT IGNORE relies on the UNIQUE KEY (validator_pubkey, round_number, reward_type)
+            // so concurrent writes from multiple hubs collapse to one row per (validator, round).
+            let query = `INSERT IGNORE INTO validator_rewards (validator_pubkey, round_number, reward_type, amount)
                          VALUES (?, ?, 'oracle_round', ?)`;
             await this.db.doQuery(query, [pubkey, round, perValidator])
                 .catch(e => console.error('Error recording reward for ' + pubkey + ':', e.message));

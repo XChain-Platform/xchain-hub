@@ -6,6 +6,7 @@ CREATE TABLE oracle_submissions (
     price            VARCHAR(40) NOT NULL,
     sources          INT NOT NULL DEFAULT 0,
     submitted_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_submission (round_number, coin_pair, validator_pubkey),
     KEY idx_round (round_number, coin_pair),
     KEY idx_validator (validator_pubkey)
 );
