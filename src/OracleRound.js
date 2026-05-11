@@ -266,15 +266,13 @@ class OracleRound {
         }
 
         for (let p of prices) {
-            let query = `INSERT INTO oracle_submissions (round_number, coin_pair, validator_pubkey, price, sources)
+            // INSERT IGNORE relies on the UNIQUE KEY (round, coin_pair, validator_pubkey)
+            // so concurrent writes across hubs collapse silently instead of raising
+            // ER_DUP_ENTRY (which db.doQuery would log before our catch could filter it).
+            let query = `INSERT IGNORE INTO oracle_submissions (round_number, coin_pair, validator_pubkey, price, sources)
                          VALUES (?, ?, ?, ?, ?)`;
             this.db.doQuery(query, [round, p.coinPair, validatorPubkey, p.price, p.sources])
-                .catch(e => {
-                    // Ignore duplicate entries (same round + pair + validator)
-                    if (e.code !== 'ER_DUP_ENTRY') {
-                        console.error('Oracle: Error persisting submission:', e.message);
-                    }
-                });
+                .catch(e => console.error('Oracle: Error persisting submission:', e.message));
         }
     }
 
