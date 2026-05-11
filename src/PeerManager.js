@@ -106,8 +106,9 @@ class PeerManager extends EventEmitter {
         let seeds = this.config.SEED_NODES || [];
         for (let addr of seeds) {
             this._connectToPeer(addr);
-            // Record seed in DB (fire and forget)
-            this._recordPeer(addr, this.validatorAddr, true);
+            // Record seed in DB (fire and forget). validator_id is the peer's own addr,
+            // not ours — we are recording the peer, not ourselves.
+            this._recordPeer(addr, addr, true);
         }
 
         // Start heartbeat
@@ -290,8 +291,10 @@ class PeerManager extends EventEmitter {
             peer.lastSeen = Date.now();
         }
 
-        // Update DB (fire and forget)
-        this._recordPeer(peerAddr, envelope.sender, false);
+        // Update DB (fire and forget). validator_id is peerAddr (the immediate ws peer
+        // that delivered the message), NOT envelope.sender — the latter is the original
+        // publisher and will diverge from peerAddr on relayed messages.
+        this._recordPeer(peerAddr, peerAddr, false);
 
         // Emit events
         this.emit('message', envelope);
