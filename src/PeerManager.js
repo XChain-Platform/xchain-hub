@@ -87,7 +87,11 @@ class PeerManager extends EventEmitter {
 
             ws.on('message', (raw) => this._handleInbound(ws, raw, null));
             ws.on('pong', () => { ws._isAlive = true; });
-            ws.on('close', () => this._removeInboundPeer(ws));
+            ws.on('close', (code, reason) => {
+                let reasonStr = reason && reason.length ? reason.toString() : '';
+                console.log('Inbound ws closed from ' + (ws._peerAddr || 'unknown') + ' (code=' + code + ', reason="' + reasonStr + '")');
+                this._removeInboundPeer(ws);
+            });
             ws.on('error', (e) => console.error('Inbound peer error:', e.message));
         });
 
@@ -306,10 +310,15 @@ class PeerManager extends EventEmitter {
         this._relay(envelope, ws);
     }
 
-    // Relay a message to all peers except the source
+    // Relay a message to all peers except the source ws and the original sender.
+    // Skipping the sender prevents the message from echoing back to the originator
+    // via a different ws (e.g., our outbound to a peer who reached us via their
+    // outbound), which both wastes bandwidth and trips the self-connection guard
+    // on the other side when the receiving ws is freshly opened.
     _relay(envelope, sourceWs) {
         let serialized = JSON.stringify(envelope);
         for (let [addr, peer] of this.peers) {
+            if (addr === envelope.sender) continue;
             if (peer.ws && peer.ws !== sourceWs && peer.ws.readyState === WebSocket.OPEN) {
                 this._send(peer.ws, serialized);
             }
@@ -402,10 +411,11 @@ class PeerManager extends EventEmitter {
         ws.on('message', (raw) => this._handleInbound(ws, raw, addr));
         ws.on('pong', () => { ws._isAlive = true; });
 
-        ws.on('close', () => {
+        ws.on('close', (code, reason) => {
             if (peer.state === 'open') {
                 this.emit('peer:disconnect', addr);
-                console.log('Peer disconnected: ' + addr);
+                let reasonStr = reason && reason.length ? reason.toString() : '';
+                console.log('Peer disconnected: ' + addr + ' (code=' + code + ', reason="' + reasonStr + '")');
             }
             peer.state = 'closed';
             peer.ws = null;
@@ -413,7 +423,7 @@ class PeerManager extends EventEmitter {
         });
 
         ws.on('error', (e) => {
-            // Error is followed by close event — don't double-handle
+            console.error('Outbound peer error (' + addr + '):', e.message);
         });
 
         peer.ws = ws;
