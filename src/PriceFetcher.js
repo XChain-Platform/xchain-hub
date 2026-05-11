@@ -80,7 +80,10 @@ class PriceFetcher {
         return prices;
     }
 
-    // Fetch prices from CoinGecko
+    // Fetch prices from CoinGecko, retrying on 429/503 with exponential backoff
+    // and jitter. Multiple hubs behind the same NAT all hit CoinGecko's per-IP
+    // limit simultaneously on synchronized startup; jittered retries spread the
+    // attempts across a wider window so they succeed individually.
     // Returns: { 'BTC/USD': number, 'LTC/USD': number, 'DOGE/USD': number } or null
     async fetchFromCoinGecko() {
         let ids = Object.values(COINGECKO_IDS).join(',');
@@ -91,21 +94,40 @@ class PriceFetcher {
             headers['x-cg-demo-api-key'] = this.coingeckoApiKey;
         }
 
-        try {
-            let response = await axios.get(url, { timeout: this.timeout, headers });
-            let data = response.data;
+        // Initial jitter (0-3000ms) so multiple hubs behind the same NAT don't
+        // collide on CoinGecko's per-second rate limit at the start of each round.
+        await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 3000)));
 
-            let prices = {};
-            for (let [pair, cgId] of Object.entries(COINGECKO_IDS)) {
-                if (data[cgId] && data[cgId].usd !== undefined) {
-                    prices[pair] = parseFloat(data[cgId].usd);
+        let maxAttempts = 3;
+        let lastErr     = null;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                let response = await axios.get(url, { timeout: this.timeout, headers });
+                let data = response.data;
+
+                let prices = {};
+                for (let [pair, cgId] of Object.entries(COINGECKO_IDS)) {
+                    if (data[cgId] && data[cgId].usd !== undefined) {
+                        prices[pair] = parseFloat(data[cgId].usd);
+                    }
                 }
+                return prices;
+            } catch (err) {
+                lastErr = err;
+                let status = err.response && err.response.status;
+                let retryable = status === 429 || status === 503;
+                if (retryable && attempt < maxAttempts) {
+                    // Backoff with jitter: attempt 1 → 1-3s, attempt 2 → 2-6s
+                    let baseMs   = 1000 * attempt;
+                    let jitterMs = Math.floor(Math.random() * 2000 * attempt);
+                    await new Promise(resolve => setTimeout(resolve, baseMs + jitterMs));
+                    continue;
+                }
+                break;
             }
-            return prices;
-        } catch (err) {
-            console.warn('CoinGecko fetch failed:', err.message);
-            return null;
         }
+        console.warn('CoinGecko fetch failed after ' + maxAttempts + ' attempts: ' + (lastErr ? lastErr.message : 'unknown error'));
+        return null;
     }
 
     // Fetch prices from CoinMarketCap (requires API key)
