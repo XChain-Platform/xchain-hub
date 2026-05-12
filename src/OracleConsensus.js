@@ -32,6 +32,7 @@ const ORACLE_COMMIT  = 'ORACLE_COMMIT';
 
 const TRIM_PERCENT = 0.15;  // Discard top and bottom 15% of submissions
 const DEFAULT_FINALIZATION_TIMEOUT = 120000; // 2 minutes
+const FALLBACK_GRACE_MS = 3000;  // brief grace before fallback proposer takes over
 
 class OracleConsensus extends EventEmitter {
 
@@ -82,13 +83,17 @@ class OracleConsensus extends EventEmitter {
         this.pendingRounds.clear();
     }
 
-    // Finalize a round — called by OracleRound after the submission window closes
+    // Finalize a round — called by OracleRound after the submission window closes.
+    // If we're the deterministic leader, propose immediately. If we're a follower
+    // and the leader is missing from submissions (e.g. its CoinGecko fetch failed),
+    // the hub with the lowest addr (lex) among submitters takes over as fallback
+    // proposer after a brief grace period — salvages rounds where the leader has
+    // no prices but other hubs do.
     async finalizeRound(round) {
         if (this.finalized.has(round)) return;
 
         let submissions = this.oracleRound.getSubmissions(round);
         if (!submissions || submissions.size === 0) {
-            // No submissions — skip the round
             await this._storeSkippedRound(round);
             return;
         }
@@ -98,7 +103,6 @@ class OracleConsensus extends EventEmitter {
         if (quorum === 0) {
             let aggregated = this._aggregateAll(submissions);
             await this._storeSnapshot(round, aggregated, 1, '[]');
-            // Emit finalization event for single-node mode
             let selfAddr = this.peerManager.validatorAddr;
             this.emit('round:finalized', {
                 round:        round,
@@ -109,23 +113,50 @@ class OracleConsensus extends EventEmitter {
             return;
         }
 
-        // Check if this node is the leader for this round
-        let leader = this._getLeader(round);
-        if (!leader || leader.addr !== this.peerManager.validatorAddr) {
-            // Not the leader — wait for the leader's ORACLE_PROPOSE
+        let leader   = this._getLeader(round);
+        let myAddr   = this.peerManager.validatorAddr;
+        let isLeader = leader && leader.addr === myAddr;
+
+        if (isLeader) {
+            this._proposeRound(round, submissions, false);
             return;
         }
 
-        // Aggregate prices
+        // Follower path.
+        let leaderSubmitted = leader && submissions.has(leader.addr);
+        if (leaderSubmitted) {
+            // Leader will propose — wait for ORACLE_PROPOSE.
+            return;
+        }
+
+        // Leader has no submission. Lowest addr (lex) among submitters takes over.
+        let fallbackAddr = [...submissions.keys()].sort()[0];
+        if (fallbackAddr !== myAddr) {
+            // Someone else is the fallback. Wait for their PROPOSE.
+            return;
+        }
+
+        // I'm the fallback. Grace period in case a real-leader PROPOSE is in flight;
+        // if pendingRounds gets populated during the grace, abort.
+        setTimeout(() => {
+            if (this.pendingRounds.has(round) || this.finalized.has(round)) return;
+            let subs = this.oracleRound.getSubmissions(round);
+            if (!subs || subs.size === 0) return;
+            this._proposeRound(round, subs, true);
+        }, FALLBACK_GRACE_MS);
+    }
+
+    // Propose a round (used both by the real leader and the fallback proposer)
+    _proposeRound(round, submissions, isFallback) {
         let aggregated = this._aggregateAll(submissions);
         if (aggregated.length === 0) {
-            await this._storeSkippedRound(round);
+            this._storeSkippedRound(round).catch(err =>
+                console.error('Oracle: Error storing skipped round ' + round + ':', err.message));
             return;
         }
 
         let digest = this._digest(round, aggregated);
 
-        // Create pending round
         let pending = {
             prices:    aggregated,
             digest:    digest,
@@ -134,12 +165,9 @@ class OracleConsensus extends EventEmitter {
             finalized: false,
             timer:     null
         };
-
-        // Add own PREPARE vote
         pending.prepares.add(this.peerManager.validatorAddr);
         this.pendingRounds.set(round, pending);
 
-        // Set finalization timeout
         pending.timer = setTimeout(() => {
             if (!pending.finalized) {
                 console.warn('Oracle: Finalization timeout for round ' + round);
@@ -147,16 +175,16 @@ class OracleConsensus extends EventEmitter {
             }
         }, this.finalizationTimeout);
 
-        // Broadcast ORACLE_PROPOSE
         this.peerManager.broadcast(ORACLE_PROPOSE, {
             round:  round,
             prices: aggregated,
             digest: digest
         });
 
-        console.log('Oracle: Proposed round ' + round + ' with ' + aggregated.length + ' prices (' + submissions.size + ' submissions)');
+        let tag = isFallback ? '[FALLBACK] ' : '';
+        console.log('Oracle: ' + tag + 'Proposed round ' + round + ' with ' + aggregated.length +
+            ' prices (' + submissions.size + ' submissions)');
 
-        // Check quorum (in case we're the only validator)
         this._checkPrepareQuorum(round);
     }
 
@@ -182,20 +210,31 @@ class OracleConsensus extends EventEmitter {
             return;
         }
 
-        // Verify the proposer is the leader for this round
-        let leader = this._getLeader(round);
-        if (leader && leader.addr !== envelope.sender) {
+        // Accept PROPOSE if sender is the deterministic leader OR an authorized
+        // fallback (lowest-addr submitter when the leader has no submission in
+        // our local view). The fallback path salvages rounds where the leader's
+        // price fetch failed but other hubs have prices.
+        let leader       = this._getLeader(round);
+        let submissions  = this.oracleRound.getSubmissions(round);
+        let isRealLeader = leader && leader.addr === envelope.sender;
+        let isFallback   = false;
+
+        if (!isRealLeader && submissions && submissions.size > 0) {
+            let leaderSubmitted = leader && submissions.has(leader.addr);
+            if (!leaderSubmitted) {
+                let fallbackAddr = [...submissions.keys()].sort()[0];
+                if (fallbackAddr === envelope.sender) isFallback = true;
+            }
+        }
+
+        if (!isRealLeader && !isFallback) {
             console.warn('Oracle: PROPOSE from non-leader ' + envelope.sender + ' for round ' + round);
             return;
         }
 
-        // Verify aggregation by re-computing from our own submissions
-        let submissions = this.oracleRound.getSubmissions(round);
-        if (submissions && submissions.size > 0) {
-            let myAggregated = this._aggregateAll(submissions);
-            let myDigest = this._digest(round, myAggregated);
-            // Allow the leader's aggregation even if slightly different
-            // (different submission sets due to network timing)
+        if (isFallback) {
+            console.log('Oracle: Accepting [FALLBACK] PROPOSE from ' + envelope.sender +
+                ' for round ' + round + ' (leader ' + (leader ? leader.addr : 'unknown') + ' has no submission)');
         }
 
         // Create or update pending round
