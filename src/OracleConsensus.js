@@ -23,8 +23,10 @@
  *
  ********************************************************************/
 
-const crypto       = require('crypto');
-const EventEmitter = require('events');
+const crypto            = require('crypto');
+const EventEmitter      = require('events');
+const PriceFetcher      = require('./PriceFetcher.js');
+const ValidatorIdentity = require('./ValidatorIdentity.js');
 
 const ORACLE_PROPOSE = 'ORACLE_PROPOSE';
 const ORACLE_PREPARE = 'ORACLE_PREPARE';
@@ -57,6 +59,7 @@ class OracleConsensus extends EventEmitter {
 
         // Config
         this.finalizationTimeout = parseInt(process.env.ORACLE_FINALIZATION_TIMEOUT) || DEFAULT_FINALIZATION_TIMEOUT;
+        this.minSubmissions      = parseInt(process.env.ORACLE_MIN_SUBMISSIONS) || 1;
     }
 
     // Set the validator set for quorum calculation and leader selection
@@ -84,17 +87,33 @@ class OracleConsensus extends EventEmitter {
     }
 
     // Finalize a round — called by OracleRound after the submission window closes.
+    // btcBlockHeight and btcBlockTime are the BTC chain tip at the time the round was
+    // triggered (used for the on-chain PRICE v0 anchor).
+    //
     // If we're the deterministic leader, propose immediately. If we're a follower
     // and the leader is missing from submissions (e.g. its CoinGecko fetch failed),
     // the hub with the lowest addr (lex) among submitters takes over as fallback
     // proposer after a brief grace period — salvages rounds where the leader has
     // no prices but other hubs do.
-    async finalizeRound(round) {
+    async finalizeRound(round, btcBlockHeight, btcBlockTime) {
         if (this.finalized.has(round)) return;
+
+        // Default to round number if BTC tip is unavailable (early bootstrap)
+        btcBlockHeight = btcBlockHeight || round;
+        btcBlockTime   = btcBlockTime   || Math.floor(Date.now() / 1000);
 
         let submissions = this.oracleRound.getSubmissions(round);
         if (!submissions || submissions.size === 0) {
-            await this._storeSkippedRound(round);
+            // No submissions — skip the round
+            await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime);
+            return;
+        }
+
+        // Enforce minimum submission count
+        if (submissions.size < this.minSubmissions) {
+            console.warn('Oracle: Round ' + round + ' has only ' + submissions.size +
+                ' submission(s); minimum is ' + this.minSubmissions + ' — skipping');
+            await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime);
             return;
         }
 
@@ -102,13 +121,20 @@ class OracleConsensus extends EventEmitter {
         let quorum = this._getQuorum();
         if (quorum === 0) {
             let aggregated = this._aggregateAll(submissions);
-            await this._storeSnapshot(round, aggregated, 1, '[]');
+            // Sign locally and embed in the proof so the publisher can include the sig in PRICE v0
+            let mySig = this._signPriceV0(round, btcBlockTime, aggregated);
+            let sigsArray = mySig ? [{ pubkey: mySig.pubkey, sig: mySig.sig }] : [];
+            await this._storeSnapshot(round, aggregated, 1, JSON.stringify(sigsArray), btcBlockHeight, btcBlockTime);
+            // Emit finalization event for single-node mode
             let selfAddr = this.peerManager.validatorAddr;
             this.emit('round:finalized', {
-                round:        round,
-                prices:       aggregated,
-                participants: [selfAddr],
-                submissions:  submissions
+                round:          round,
+                btcBlockHeight: btcBlockHeight,
+                btcBlockTime:   btcBlockTime,
+                prices:         aggregated,
+                participants:   [selfAddr],
+                signatures:     sigsArray,
+                submissions:    submissions
             });
             return;
         }
@@ -118,7 +144,7 @@ class OracleConsensus extends EventEmitter {
         let isLeader = leader && leader.addr === myAddr;
 
         if (isLeader) {
-            this._proposeRound(round, submissions, false);
+            this._proposeRound(round, submissions, false, btcBlockHeight, btcBlockTime);
             return;
         }
 
@@ -142,30 +168,42 @@ class OracleConsensus extends EventEmitter {
             if (this.pendingRounds.has(round) || this.finalized.has(round)) return;
             let subs = this.oracleRound.getSubmissions(round);
             if (!subs || subs.size === 0) return;
-            this._proposeRound(round, subs, true);
+            this._proposeRound(round, subs, true, btcBlockHeight, btcBlockTime);
         }, FALLBACK_GRACE_MS);
     }
 
     // Propose a round (used both by the real leader and the fallback proposer)
-    _proposeRound(round, submissions, isFallback) {
+    _proposeRound(round, submissions, isFallback, btcBlockHeight, btcBlockTime) {
         let aggregated = this._aggregateAll(submissions);
         if (aggregated.length === 0) {
-            this._storeSkippedRound(round).catch(err =>
+            this._storeSkippedRound(round, btcBlockHeight, btcBlockTime).catch(err =>
                 console.error('Oracle: Error storing skipped round ' + round + ':', err.message));
             return;
         }
 
         let digest = this._digest(round, aggregated);
 
+        // Sign the canonical PRICE v0 payload locally (this validator's contribution
+        // to the on-chain anchor). Embedded in the published PRICE v0 transaction along
+        // with sigs from other validators.
+        let mySig = this._signPriceV0(round, btcBlockTime, aggregated);
+
         let pending = {
-            prices:    aggregated,
-            digest:    digest,
-            prepares:  new Set(),
-            commits:   new Set(),
-            finalized: false,
-            timer:     null
+            round:          round,
+            prices:         aggregated,
+            digest:         digest,
+            btcBlockHeight: btcBlockHeight,
+            btcBlockTime:   btcBlockTime,
+            prepares:       new Set(),
+            commits:        new Set(),
+            signatures:     new Map(),  // pubkey (hex) -> sig (hex)
+            finalized:      false,
+            timer:          null
         };
+
+        // Add own PREPARE vote and signature
         pending.prepares.add(this.peerManager.validatorAddr);
+        if (mySig) pending.signatures.set(mySig.pubkey, mySig.sig);
         this.pendingRounds.set(round, pending);
 
         pending.timer = setTimeout(() => {
@@ -175,10 +213,15 @@ class OracleConsensus extends EventEmitter {
             }
         }, this.finalizationTimeout);
 
+        // Broadcast ORACLE_PROPOSE (includes proposer's signature on the canonical PRICE v0 payload)
         this.peerManager.broadcast(ORACLE_PROPOSE, {
-            round:  round,
-            prices: aggregated,
-            digest: digest
+            round:          round,
+            prices:         aggregated,
+            digest:         digest,
+            btcBlockHeight: btcBlockHeight,
+            btcBlockTime:   btcBlockTime,
+            sig_pubkey:     mySig ? mySig.pubkey : null,
+            sig:            mySig ? mySig.sig    : null
         });
 
         let tag = isFallback ? '[FALLBACK] ' : '';
@@ -199,7 +242,7 @@ class OracleConsensus extends EventEmitter {
     }
 
     _handlePropose(envelope) {
-        let { round, prices, digest } = envelope.data;
+        let { round, prices, digest, btcBlockHeight, btcBlockTime, sig_pubkey, sig } = envelope.data;
         if (!round || !prices || !digest) return;
         if (this.finalized.has(round)) return;
 
@@ -240,12 +283,16 @@ class OracleConsensus extends EventEmitter {
         // Create or update pending round
         if (!this.pendingRounds.has(round)) {
             let pending = {
-                prices:    prices,
-                digest:    digest,
-                prepares:  new Set(),
-                commits:   new Set(),
-                finalized: false,
-                timer:     setTimeout(() => {
+                round:          round,
+                prices:         prices,
+                digest:         digest,
+                btcBlockHeight: btcBlockHeight || round,
+                btcBlockTime:   btcBlockTime   || Math.floor(Date.now() / 1000),
+                prepares:       new Set(),
+                commits:        new Set(),
+                signatures:     new Map(),  // pubkey (hex) -> sig (hex)
+                finalized:      false,
+                timer:          setTimeout(() => {
                     this.pendingRounds.delete(round);
                 }, this.finalizationTimeout)
             };
@@ -256,34 +303,49 @@ class OracleConsensus extends EventEmitter {
         pending.prepares.add(envelope.sender);
         pending.prepares.add(this.peerManager.validatorAddr);
 
-        // Send ORACLE_PREPARE
+        // Verify and store the proposer's signature on the canonical PRICE v0 payload
+        if (sig_pubkey && sig) {
+            this._verifyAndStoreSig(pending, sig_pubkey, sig);
+        }
+
+        // Sign the canonical PRICE v0 payload locally with this validator's identity
+        let mySig = this._signPriceV0(round, pending.btcBlockTime, prices);
+        if (mySig && !pending.signatures.has(mySig.pubkey)) {
+            pending.signatures.set(mySig.pubkey, mySig.sig);
+        }
+
+        // Send ORACLE_PREPARE (includes this validator's signature on the canonical PRICE v0 payload)
         this.peerManager.broadcast(ORACLE_PREPARE, {
-            round:  round,
-            digest: digest
+            round:      round,
+            digest:     digest,
+            sig_pubkey: mySig ? mySig.pubkey : null,
+            sig:        mySig ? mySig.sig    : null
         });
 
         this._checkPrepareQuorum(round);
     }
 
     _handlePrepare(envelope) {
-        let { round, digest } = envelope.data;
+        let { round, digest, sig_pubkey, sig } = envelope.data;
         if (!round || !digest) return;
 
         let pending = this.pendingRounds.get(round);
         if (!pending || pending.digest !== digest) return;
 
         pending.prepares.add(envelope.sender);
+        if (sig_pubkey && sig) this._verifyAndStoreSig(pending, sig_pubkey, sig);
         this._checkPrepareQuorum(round);
     }
 
     _handleCommit(envelope) {
-        let { round, digest } = envelope.data;
+        let { round, digest, sig_pubkey, sig } = envelope.data;
         if (!round || !digest) return;
 
         let pending = this.pendingRounds.get(round);
         if (!pending || pending.digest !== digest) return;
 
         pending.commits.add(envelope.sender);
+        if (sig_pubkey && sig) this._verifyAndStoreSig(pending, sig_pubkey, sig);
         this._checkCommitQuorum(round);
     }
 
@@ -296,9 +358,18 @@ class OracleConsensus extends EventEmitter {
             pending._commitSent = true;
             pending.commits.add(this.peerManager.validatorAddr);
 
+            // Include this validator's signature in the COMMIT message so late-joining nodes
+            // can collect signatures from any of the three phases (PROPOSE, PREPARE, COMMIT)
+            let mySig = this._signPriceV0(round, pending.btcBlockTime, pending.prices);
+            if (mySig && !pending.signatures.has(mySig.pubkey)) {
+                pending.signatures.set(mySig.pubkey, mySig.sig);
+            }
+
             this.peerManager.broadcast(ORACLE_COMMIT, {
-                round:  round,
-                digest: pending.digest
+                round:      round,
+                digest:     pending.digest,
+                sig_pubkey: mySig ? mySig.pubkey : null,
+                sig:        mySig ? mySig.sig    : null
             });
 
             this._checkCommitQuorum(round);
@@ -317,7 +388,7 @@ class OracleConsensus extends EventEmitter {
             let validatorCount = pending.prepares.size;
             let proof = JSON.stringify([...pending.commits]);
 
-            this._storeSnapshot(round, pending.prices, validatorCount, proof)
+            this._storeSnapshot(round, pending.prices, validatorCount, proof, pending.btcBlockHeight, pending.btcBlockTime)
                 .then(() => {
                     this.finalized.add(round);
                     this.pendingRounds.delete(round);
@@ -325,12 +396,21 @@ class OracleConsensus extends EventEmitter {
                         pending.prepares.size + ' prepares, ' +
                         pending.commits.size + ' commits)');
 
-                    // Emit finalization event for RewardTracker and SlashDetector
+                    // Convert collected signatures to the [{pubkey, sig}, ...] array format used by OraclePublisher
+                    let sigsArray = [];
+                    for (let [pubkey, sig] of pending.signatures) {
+                        sigsArray.push({ pubkey: pubkey, sig: sig });
+                    }
+
+                    // Emit finalization event for RewardTracker, SlashDetector, and OraclePublisher
                     this.emit('round:finalized', {
-                        round:        round,
-                        prices:       pending.prices,
-                        participants: [...pending.prepares],
-                        submissions:  this.oracleRound.getSubmissions(round)
+                        round:          round,
+                        btcBlockHeight: pending.btcBlockHeight,
+                        btcBlockTime:   pending.btcBlockTime,
+                        prices:         pending.prices,
+                        participants:   [...pending.prepares],
+                        signatures:     sigsArray,
+                        submissions:    this.oracleRound.getSubmissions(round)
                     });
                 })
                 .catch(err => {
@@ -373,7 +453,7 @@ class OracleConsensus extends EventEmitter {
                 for (let p of sub.prices) {
                     if (p.coinPair === coinPair && p.price) {
                         let val = parseFloat(p.price);
-                        if (!isNaN(val) && val > 0) {
+                        if (isFinite(val) && val > 0 && val < 10000000) {
                             values.push(val);
                         }
                     }
@@ -410,35 +490,100 @@ class OracleConsensus extends EventEmitter {
     // --- Storage ---
 
     // Store a finalized price snapshot
-    async _storeSnapshot(round, prices, validatorCount, proof) {
-        let timestamp = Date.now();
+    // btcBlockHeight is the BTC chain tip when this round was triggered (used as reference_block)
+    // btcBlockTime is the BTC block_time of that block (used as block_timestamp)
+    async _storeSnapshot(round, prices, validatorCount, proof, btcBlockHeight, btcBlockTime) {
+        let referenceBlock = btcBlockHeight || round;
+        let blockTimestamp = btcBlockTime   || Math.floor(Date.now() / 1000);
         for (let p of prices) {
             let query = `INSERT INTO price_snapshots
                 (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
                  validator_count, consensus_round, consensus_proof, status)
-                VALUES (?, ?, ?, 0, 'BTC', ?, ?, 1, ?, 'finalized')
-                ON DUPLICATE KEY UPDATE price = ?, validator_count = ?, consensus_proof = ?, status = 'finalized'`;
+                VALUES (?, ?, ?, ?, 'BTC', ?, ?, 1, ?, 'finalized')
+                ON DUPLICATE KEY UPDATE price = ?, reference_block = ?, block_timestamp = ?, validator_count = ?, consensus_proof = ?, status = 'finalized'`;
             await this.db.doQuery(query, [
-                round, p.coinPair, p.price, timestamp,
+                round, p.coinPair, p.price, referenceBlock, blockTimestamp,
                 validatorCount, proof,
-                p.price, validatorCount, proof
+                p.price, referenceBlock, blockTimestamp, validatorCount, proof
             ]);
         }
     }
 
     // Store a skipped round
-    async _storeSkippedRound(round) {
-        let coinPairs = ['BTC/USD', 'LTC/USD', 'DOGE/USD'];
+    async _storeSkippedRound(round, btcBlockHeight, btcBlockTime) {
+        let referenceBlock = btcBlockHeight || round;
+        let blockTimestamp = btcBlockTime   || Math.floor(Date.now() / 1000);
+        let coinPairs = PriceFetcher.getCoinPairs();
         for (let pair of coinPairs) {
             let query = `INSERT INTO price_snapshots
                 (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
                  validator_count, consensus_round, consensus_proof, status)
-                VALUES (?, ?, NULL, 0, 'BTC', ?, 0, 1, '[]', 'skipped')
-                ON DUPLICATE KEY UPDATE status = 'skipped'`;
-            await this.db.doQuery(query, [round, pair, Date.now()]);
+                VALUES (?, ?, NULL, ?, 'BTC', ?, 0, 1, '[]', 'skipped')
+                ON DUPLICATE KEY UPDATE reference_block = ?, block_timestamp = ?, status = 'skipped'`;
+            await this.db.doQuery(query, [round, pair, referenceBlock, blockTimestamp, referenceBlock, blockTimestamp]);
         }
         this.finalized.add(round);
         console.log('Oracle: Round ' + round + ' skipped (no submissions)');
+    }
+
+    // --- Signature collection (PRICE v0 anchor) ---
+
+    // Build the canonical signable payload for a PRICE v0 round.
+    // MUST match xchain-indexer/src/ed25519.js buildPriceV0Payload exactly so signatures
+    // produced here verify against the same canonical bytes when indexers parse on-chain PRICE v0 actions.
+    _buildPriceV0Payload(round, btcBlockTime, prices) {
+        let pairs = prices.map(p => ({ pair: p.coinPair || p.pair, price: String(p.price) }));
+        let sortedPairs = [...pairs].sort((a, b) => {
+            if (a.pair < b.pair) return -1;
+            if (a.pair > b.pair) return 1;
+            return 0;
+        });
+        return JSON.stringify({
+            round:     parseInt(round),
+            timestamp: parseInt(btcBlockTime),
+            pairs:     sortedPairs
+        });
+    }
+
+    // Sign the canonical PRICE v0 payload with the local validator identity
+    // Returns { pubkey, sig } or null if no identity is configured
+    _signPriceV0(round, btcBlockTime, prices) {
+        let identity = this.hub && this.hub.getIdentity ? this.hub.getIdentity() : null;
+        if (!identity) return null;
+        try {
+            let payload = this._buildPriceV0Payload(round, btcBlockTime, prices);
+            let sigHex  = identity.sign(payload);
+            return { pubkey: identity.getPubkeyHex(), sig: sigHex };
+        } catch (e) {
+            console.warn('Oracle: failed to sign PRICE v0 payload:', e.message);
+            return null;
+        }
+    }
+
+    // Verify a (pubkey, sig) pair against the pending round's canonical PRICE v0 payload,
+    // and store it on the pending round's signatures map if valid.
+    // The pending object must have a `round` field set when it's created.
+    _verifyAndStoreSig(pending, pubkeyHex, sigHex) {
+        if (!pending || !pubkeyHex || !sigHex) return false;
+        if (pending.signatures.has(pubkeyHex)) return false; // already collected
+        if (pending.round === undefined || pending.round === null) {
+            console.warn('Oracle: cannot verify sig — pending round has no round number');
+            return false;
+        }
+        try {
+            let payload = this._buildPriceV0Payload(pending.round, pending.btcBlockTime, pending.prices);
+            let ok = ValidatorIdentity.verify(payload, sigHex, pubkeyHex);
+            if (ok) {
+                pending.signatures.set(pubkeyHex, sigHex);
+                return true;
+            } else {
+                console.warn('Oracle: invalid PRICE v0 signature from ' + pubkeyHex.substring(0, 16) + '... for round ' + pending.round);
+                return false;
+            }
+        } catch (e) {
+            console.warn('Oracle: signature verification error:', e.message);
+            return false;
+        }
     }
 
     // --- Utilities ---

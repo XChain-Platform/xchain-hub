@@ -21,6 +21,7 @@
  *
  ********************************************************************/
 
+const crypto            = require('crypto');
 const EventEmitter     = require('events');
 const http             = require('http');
 const WebSocket        = require('ws');
@@ -37,7 +38,18 @@ class PeerManager extends EventEmitter {
         // Validator identity (set via setIdentity, used for signing/verification)
         this.identity         = null;   // ValidatorIdentity instance
         this.validatorPubkeys = null;   // Map<addr, pubkeyHex> — loaded from DB
-        this.requireSigs      = config.REQUIRE_SIGNATURES || false;
+        this.requireSigs      = config.REQUIRE_SIGNATURES !== false;
+
+        // Per-IP connection limits
+        this.maxConnectionsPerIp = parseInt(config.P2P_MAX_CONNECTIONS_PER_IP) || 3;
+        this.ipConnectionCounts  = new Map();
+
+        // Per-peer message rate limiting: Map<addr, { count, windowStart }>
+        this.msgRateLimit   = parseInt(config.P2P_MSG_RATE_LIMIT) || 100;
+        this.peerMsgCounts  = new Map();
+
+        // Dedup cache size bound
+        this.dedupCacheMax  = parseInt(config.P2P_DEDUP_CACHE_MAX) || 100000;
 
         // Peer connections: Map<addr, { ws, state, lastSeen, reconnectDelay, reconnectTimer, inbound }>
         this.peers = new Map();
@@ -82,8 +94,19 @@ class PeerManager extends EventEmitter {
 
         // Handle inbound connections
         this.wss.on('connection', (ws, req) => {
-            ws._peerAddr = null;
-            ws._isAlive  = true;
+            // Per-IP connection limit
+            let remoteIp = req.socket.remoteAddress || 'unknown';
+            let ipCount = this.ipConnectionCounts.get(remoteIp) || 0;
+            if (ipCount >= this.maxConnectionsPerIp) {
+                console.warn('P2P: Connection limit per IP exceeded for ' + remoteIp + ' — rejecting');
+                ws.close(1008, 'too many connections');
+                return;
+            }
+            this.ipConnectionCounts.set(remoteIp, ipCount + 1);
+
+            ws._peerAddr  = null;
+            ws._isAlive   = true;
+            ws._remoteIp  = remoteIp;
 
             ws.on('message', (raw) => this._handleInbound(ws, raw, null));
             ws.on('pong', () => { ws._isAlive = true; });
@@ -159,8 +182,8 @@ class PeerManager extends EventEmitter {
     broadcast(type, data) {
         let envelope = this._buildEnvelope(type, data);
 
-        // Mark own message as seen
-        this.seenIds.set(envelope.id, Date.now() + (this.config.P2P_MSG_DEDUP_TTL || 60000));
+        // Mark own message as seen (with cache bound)
+        this._addToDedup(envelope.id);
 
         let serialized = JSON.stringify(envelope);
 
@@ -180,7 +203,7 @@ class PeerManager extends EventEmitter {
 
         let envelope = this._buildEnvelope(type, data);
 
-        this.seenIds.set(envelope.id, Date.now() + (this.config.P2P_MSG_DEDUP_TTL || 60000));
+        this._addToDedup(envelope.id);
         this._send(peer.ws, JSON.stringify(envelope));
         return true;
     }
@@ -203,7 +226,7 @@ class PeerManager extends EventEmitter {
 
     // Generate a unique message ID
     _makeId() {
-        return 'v1:' + this.validatorAddr + ':' + Date.now() + ':' + Math.random().toString(16).slice(2, 8);
+        return 'v1:' + this.validatorAddr + ':' + Date.now() + ':' + crypto.randomUUID();
     }
 
     // Build an envelope with optional Ed25519 signature
@@ -255,8 +278,12 @@ class PeerManager extends EventEmitter {
         try {
             envelope = JSON.parse(rawData);
         } catch (e) {
-            return; // Invalid JSON — silently discard
+            console.warn('P2P: Invalid JSON from peer:', e.message);
+            return;
         }
+
+        // Guard against non-object JSON values (null, number, string, boolean)
+        if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return;
 
         // Validate envelope fields
         if (!envelope.type || typeof envelope.type !== 'string') return;
@@ -274,7 +301,14 @@ class PeerManager extends EventEmitter {
 
         // Deduplication
         if (this.seenIds.has(envelope.id)) return;
-        this.seenIds.set(envelope.id, Date.now() + (this.config.P2P_MSG_DEDUP_TTL || 60000));
+        this._addToDedup(envelope.id);
+
+        // Per-peer rate limiting
+        let ratePeer = knownAddr || ws._peerAddr || envelope.sender;
+        if (!this._checkMsgRate(ratePeer)) {
+            console.warn('P2P: Rate limit exceeded for peer ' + ratePeer + ' — dropping message');
+            return;
+        }
 
         // Signature verification
         if (!this._verifySignature(envelope)) {
@@ -367,10 +401,23 @@ class PeerManager extends EventEmitter {
                 this.peers.delete(addr);
             }
         }
+
+        // Decrement per-IP connection count
+        if (ws._remoteIp) {
+            let count = (this.ipConnectionCounts.get(ws._remoteIp) || 1) - 1;
+            if (count <= 0) this.ipConnectionCounts.delete(ws._remoteIp);
+            else this.ipConnectionCounts.set(ws._remoteIp, count);
+        }
     }
 
     // Connect to an outbound peer
     _connectToPeer(addr) {
+        // Validate peer address format (host:port)
+        if (!/^[\w.\-]+:\d+$/.test(addr)) {
+            console.warn('P2P: Invalid peer address format: ' + addr);
+            return;
+        }
+
         let existing = this.peers.get(addr);
         if (existing && (existing.state === 'open' || existing.state === 'connecting')) return;
 
@@ -498,6 +545,27 @@ class PeerManager extends EventEmitter {
                 });
             }
         }, 30000);
+    }
+
+    // Add a message ID to the dedup cache, enforcing the size bound
+    _addToDedup(id) {
+        if (this.seenIds.size >= this.dedupCacheMax) {
+            let oldest = this.seenIds.keys().next().value;
+            this.seenIds.delete(oldest);
+        }
+        this.seenIds.set(id, Date.now() + (this.config.P2P_MSG_DEDUP_TTL || 60000));
+    }
+
+    // Check per-peer message rate (returns true if within limit)
+    _checkMsgRate(addr) {
+        let now = Date.now();
+        let entry = this.peerMsgCounts.get(addr);
+        if (!entry || (now - entry.windowStart) > 60000) {
+            this.peerMsgCounts.set(addr, { count: 1, windowStart: now });
+            return true;
+        }
+        entry.count++;
+        return entry.count <= this.msgRateLimit;
     }
 
     // Record/update a peer in the database (fire and forget)

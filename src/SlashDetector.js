@@ -24,6 +24,8 @@
  *
  ********************************************************************/
 
+const MAX_DEVIATIONS_PER_VALIDATOR = 1000;
+
 class SlashDetector {
 
     constructor(hub) {
@@ -140,7 +142,14 @@ class SlashDetector {
 
         // Prune entries older than 24 hours
         let cutoff = Date.now() - (24 * 60 * 60 * 1000);
-        this.recentDeviations.set(pubkey, deviations.filter(d => d.timestamp > cutoff));
+        deviations = deviations.filter(d => d.timestamp > cutoff);
+
+        // Enforce memory bound
+        if (deviations.length > MAX_DEVIATIONS_PER_VALIDATOR) {
+            deviations = deviations.slice(deviations.length - MAX_DEVIATIONS_PER_VALIDATOR);
+        }
+
+        this.recentDeviations.set(pubkey, deviations);
 
         // Check for 3+ deviations in 24h → repeated deviation
         if (this.recentDeviations.get(pubkey).length >= 3) {
@@ -155,6 +164,10 @@ class SlashDetector {
 
     // Record a slash proposal in the database
     async _recordSlashProposal(validatorPubkey, offenseType, round, evidence) {
+        if (typeof validatorPubkey !== 'string' || !/^[0-9a-fA-F]{64}$/.test(validatorPubkey)) {
+            console.warn('SlashDetector: Invalid pubkey format — skipping slash proposal');
+            return;
+        }
         let query = `INSERT INTO slash_proposals (validator_pubkey, offense_type, round_number, evidence)
                      VALUES (?, ?, ?, ?)`;
         await this.db.doQuery(query, [validatorPubkey, offenseType, round, evidence])

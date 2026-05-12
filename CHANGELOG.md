@@ -7,6 +7,212 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-04-08
+
+### Added
+- `PriceAggregator.js` — receives validated PRICE v0/v1 actions from indexers across all chains, deduplicates by `round_number` (v0) or `(source_chain, action_index)` (v1), writes to unified `price_snapshots` and `oracle_prices` tables. EventEmitter — emits `row:inserted` for the hub DB sync channel. Applies 24-hour lock window for PRICE v1 (first broadcast immediate, subsequent delayed).
+- `OraclePublisher.js` — Tier 3 oracle publisher for broadcasting finalized PRICE v0 transactions to the DOGE chain. Features: deterministic leader rotation (`round % active_tier3_count`, sorted by `signing_pubkey`), persistent JSONL queue with fsync, PRICE v0 wire format builder, DOGE balance monitoring with WARN/ERROR log thresholds. Subscribes to `OracleConsensus` `round:finalized` events and uses collected validator signatures from the PBFT prepare/commit phases.
+- `EncoderClient.js` — minimal JSON-RPC client for talking to `xchain-encoder` (`get_utxos`, `create_tx`, `broadcast_tx`). Used by `OraclePublisher` for the default DOGE broadcast pipeline.
+- `HubDbBroadcaster.js` — WebSocket subscriber registry that forwards `PriceAggregator` row events to connected indexer hub DB sync clients. Includes backpressure handling (drops connections exceeding `WS_BACKPRESSURE_LIMIT` buffered messages).
+- `sql/oracle_prices.sql` — new table for cross-chain user TOKEN/FIAT oracle prices with `effective_at` column enforcing the 24-hour price lock window.
+- `setChainTip()` / `getChainTip()` in `db.js` — stores the latest BTC/LTC/DOGE chain tip in the `configs` table, used by `OracleRound._executeRound()` to anchor oracle rounds to real BTC block heights (fixes the hardcoded `reference_block=0` bug).
+- New JSON-RPC methods on hub API: `pushchaintip`, `pushpriceround`, `pushoracleprice` — write methods (require API key) for indexers to push chain state and validated PRICE actions to the hub.
+- REST snapshot endpoints: `GET /hub-db/snapshot/price_snapshots` and `GET /hub-db/snapshot/oracle_prices` with `since_id` pagination for incremental bootstrap of indexers' local hub DB copies.
+- WebSocket channel `/hub-db/subscribe` — streams `row:inserted` events for the hub's cross-chain price tables to subscribed indexers. Requires `Authorization: Bearer <HUB_API_KEY>`.
+- Multi-validator signature aggregation in `OracleConsensus.js` — each validator signs the canonical PRICE v0 payload (`JSON.stringify({round, timestamp, sortedPairs})`) during PBFT prepare/commit phases. Signatures travel in PROPOSE/PREPARE/COMMIT messages and collect on `pending.signatures` Map. The `round:finalized` event now carries the collected signatures array so `OraclePublisher` can embed real validator sigs in the published PRICE v0 transaction.
+- `_signPriceV0()`, `_buildPriceV0Payload()`, `_verifyAndStoreSig()` helpers in `OracleConsensus.js` — canonical payload construction matching the indexer's `ed25519.js` format.
+
+### Changed
+- `OracleConsensus.js` — `_storeSnapshot()` and `_storeSkippedRound()` now accept `btcBlockHeight` and `btcBlockTime` parameters, replacing the hardcoded `reference_block=0` and `block_timestamp=Date.now()` values. Cross-node determinism fix: two independent nodes processing the same BTC block height now produce identical oracle snapshots.
+- `OracleConsensus.finalizeRound(round, btcBlockHeight, btcBlockTime)` — accepts and threads BTC chain tip values through PBFT pending rounds to storage and round:finalized events.
+- `OracleRound.js` — `_executeRound()` reads BTC chain tip from `db.getChainTip('BTC')` at the start of each round and passes it through `_scheduleFinalization()` to `OracleConsensus.finalizeRound()`.
+- `PriceFetcher.js` — rewritten to support 3 coins × 12 fiat currencies = **36 pairs per round**. CoinGecko and CoinMarketCap APIs are now called with `vs_currencies` / `convert` parameters for all 12 fiats in a single call. Supported fiats: USD, CAD, AUD, MXN, GBP, JPY, CNY, CHF, BRL, INR, EUR, KRW. New static method `PriceFetcher.getCoinPairs()`.
+- `OracleConsensus._storeSkippedRound()` — now uses `PriceFetcher.getCoinPairs()` for dynamic pair list instead of hardcoded `['BTC/USD', 'LTC/USD', 'DOGE/USD']`.
+- `sql/price_snapshots.sql` — added `source_chain VARCHAR(10)` column (defaults to `DOGE`) to track which chain carried the PRICE v0 transaction, plus `source_action_index BIGINT` for audit. New index on `source_chain`.
+- `RewardTracker.js` — `distributeRewards()` now accepts a `btcBlockHeight` parameter and pushes reward records to the BTC indexer via the new `pushvalidatorrewards` JSON-RPC endpoint. Populates the previously-empty indexer `validator_rewards` table so `CLAIM_REWARDS` can find unclaimed rewards.
+- `XChainHub.start()` — instantiates `PriceAggregator` and `HubDbBroadcaster` (both available in all modes). In validator mode, `startOracle()` also instantiates and starts `OraclePublisher`.
+- Hub `api.js` — now uses an explicit `http.Server` with WebSocket upgrade handler attached (for the hub DB sync channel). New `WRITE_METHODS` entries for the three new push methods.
+
+### Fixed
+- `reference_block` hardcoded to `0` in `_storeSnapshot()` and `_storeSkippedRound()` — now uses the BTC chain tip at the time of round execution. Previously broke cross-node determinism for fee validation and VM oracle queries.
+- `block_timestamp` in price snapshots — now uses the BTC block's `block_time` instead of wall-clock `Date.now()`.
+- `round:finalized` event — now carries `btcBlockHeight`, `btcBlockTime`, and `signatures` fields for downstream consumers.
+- `README.md` — updated version badge to 2.0.12, added tests badge (1,222 passing), coverage badge, test suite breakdown table, expanded scripts table with all test commands, added development dependencies section, added links to new DATABASE.md and OPERATIONS.md documentation
+
+## [2.0.12] - 2026-04-06
+
+### Added
+- Comprehensive regression test suite (195 tests across 7 files) covering:
+  - Consensus PBFT: quorum math, leader rotation, full PRE_PREPARE→PREPARE→COMMIT flow, view change, sequence persistence, replay prevention, single-node fallback, digest determinism
+  - Oracle pipeline: PriceFetcher local median, trimmed median aggregation (15% trim), PBFT finalization, price validation, 8-decimal formatting, single-node fallback
+  - Cross-chain engine: attestation PBFT flow, confirmation thresholds (BTC=3, LTC=3, DOGE=6), chain-pair validator filtering, attestation:finalized events
+  - SwapTracker: auto-progress on attestation finalization, lifecycle management, null safety
+  - ReorgHandler: PBFT reorg consensus, attestation rollback, price snapshot dispute marking, affected chain computation
+  - Governance: proposal lifecycle, vote collection, 2/3+50% quorum tally, parameter change bounds (±50%/±33% normal, ±25%/±20% slashing), 14-day cooldown
+  - P2P & ValidatorIdentity: Ed25519 sign/verify round-trip, envelope signatures, message deduplication, signature enforcement, identity seed validation
+  - Database: circuit breaker open/half-open/closed, parameterized queries, SQL injection prevention, config CRUD hierarchy
+  - Incentives: equal-split reward distribution, slash detection (price deviation >5%, repeated deviation 3+/24h, non-participation 30+ rounds)
+- Three-tier test execution via Mocha `--grep`:
+  - `test:regression:p0` — 78 critical tests (<1s) for every commit
+  - `test:regression:p0p1` — 154 high-priority tests (3s) for PR gating
+  - `test:regression` — full 195-test suite (3s) for nightly/pre-release
+- Regression testing plan document at `reports/XCHAIN_HUB_REGRESSION_TESTING_PLAN.md`
+
+## [2.0.11] - 2026-04-06
+
+### Added
+- Mutation testing infrastructure using StrykerJS
+- `stryker.config.json` — full mutation config targeting all `src/**/*.js` (excludes SQL schemas)
+- `stryker.config.phase1.json` — pilot config targeting `Consensus.js` and `OracleConsensus.js` only
+- `npm run test:mutate` script for full mutation testing
+- `npm run test:mutate:pilot` script for Phase 1 pilot runs
+- `@stryker-mutator/core` and `@stryker-mutator/mocha-runner` devDependencies
+
+## [2.0.10] - 2026-04-06
+
+### Added
+- Chaos engineering test suite (81 tests, 14 files) covering:
+  - Database resilience: circuit breaker lifecycle, flapping connections, pool exhaustion
+  - Oracle fault tolerance: single source failure, total blackout, malformed price data
+  - Consensus disruption: network partition, leader crash, quorum loss
+  - Compound failures: reorg during oracle round, validator churn during consensus
+  - API abuse protection: rate limit saturation, concurrent burst handling
+- Chaos test helpers: experiment runner, steady-state checker, metrics collector
+- `test:chaos` npm script (`mocha --timeout 30000`)
+
+## [2.0.9] - 2026-04-06
+
+### Added
+- Performance and load testing suite (6 test files, 3 helpers) covering:
+  - API query saturation with concurrent blast and ramp-up tests
+  - Oracle round execution timing and degradation under load
+  - P2P WebSocket message flood, dedup cache, and rate limiting verification
+  - MariaDB connection pool stress, mixed read/write concurrency, and saturation
+  - 2-minute soak test with memory leak detection and p95 trend analysis
+  - Dependency degradation scenarios (slow/failed APIs, recovery timing)
+- `test:perf` npm script (`mocha --timeout 300000`)
+- Reusable performance helpers: `Histogram`, `MemoryTracker`, `blast()`, `ramp()`, `seedAll()`
+
+## [2.0.8] - 2026-04-06
+
+### Added
+- API key authentication for write methods via `HUB_API_KEY` env var
+- Rate limiting on JSON-RPC endpoint via `express-rate-limit` (`HUB_API_RATE_LIMIT`, default 100/min)
+- Configurable CORS origin restriction via `CORS_ORIGIN` env var
+- Chain validation (BTC/LTC/DOGE only) on all chain-accepting endpoints
+- Limit parameter validation (positive integer, max 1000) on list endpoints
+- Per-IP connection limit on P2P WebSocket server (`P2P_MAX_CONNECTIONS_PER_IP`, default 3)
+- Per-peer message rate limiting on P2P layer (`P2P_MSG_RATE_LIMIT`, default 100/min)
+- Dedup cache size bound to prevent memory exhaustion (`P2P_DEDUP_CACHE_MAX`, default 100000)
+- Peer address format validation before WebSocket connection
+- Consensus sequence monotonicity check to reject replayed PRE_PREPARE messages
+- Single-node mode warning when `MIN_VALIDATORS` > 1 but no peers connected
+- Minimum submission count for oracle round finalization (`ORACLE_MIN_SUBMISSIONS`, default 1)
+- Price sanity bounds (> 0, < 10M) on oracle submissions, aggregation, and external API responses
+- Max submissions per oracle round (`ORACLE_MAX_SUBMISSIONS_PER_ROUND`, default 200)
+- Cross-chain attestation ID format validation
+- Reorg report parameter validation (chain, height, timestamp) and rate limiting (1 per chain per 60s)
+- Governance voter authorization (must be active validator to vote)
+- Governance parameter name length limit (255 chars) and rationale length limit (2000 chars)
+- Reward participant pubkey validation (must be 64 hex chars)
+- Slash proposal pubkey validation and in-memory deviation array bounds (max 1000)
+- Database query timeout (`DB_QUERY_TIMEOUT`, default 30s)
+- Config structure validation with value length limit (1024 chars) and type coercion
+- Security test suite (72 tests) covering all hardening measures
+- `express-rate-limit` production dependency
+
+### Changed
+- `REQUIRE_SIGNATURES` now defaults to `true` (was `false`) — P2P messages require Ed25519 signatures by default
+- Object query arguments serialized via `JSON.stringify()` instead of `toString()` with warning log
+- Null-safe traversal for CoinGecko and CoinMarketCap API response parsing
+- Invalid JSON on P2P WebSocket now logged at warn level instead of silently discarded
+
+## [2.0.7] - 2026-04-06
+
+### Added
+- Fuzz testing suite (88 properties across 7 test files) using fast-check for property-based testing
+- Shared generator module with 17 composable fast-check arbitraries for prices, submissions, P2P envelopes, hex strings, configs, and governance parameters
+- OracleConsensus fuzz tests: trimmed median aggregation invariants, NaN/Infinity filtering, quorum monotonicity, digest determinism
+- PeerManager fuzz tests: structural robustness against arbitrary JSON, malformed envelope rejection, deduplication correctness, ID uniqueness
+- PriceFetcher fuzz tests: median bounds and immutability, API response parsing robustness, output format validation
+- Consensus PBFT fuzz tests: leader rotation, quorum bounds, digest properties, PrePrepare message validation
+- Governance fuzz tests: change bound enforcement for normal and slashing parameters, tally quorum arithmetic
+- Fee quote fuzz tests: gas arithmetic consistency, round-trip precision, unknown action handling
+- ValidatorIdentity fuzz tests: constructor validation, sign/verify round-trip, mutation detection, cross-key rejection
+
+### Fixed
+- Infinity values leaking through oracle price aggregation — replaced `!isNaN(val)` with `isFinite(val)` in `_aggregate()` filter
+- TypeError crash in PeerManager when receiving non-object JSON (null, number, string) — added type guard after JSON.parse
+- Message ID collisions under high throughput — replaced `Math.random()` with `crypto.randomUUID()` in `_makeId()`
+- Object.prototype pollution in fee quote gas schedule lookup — replaced bracket notation with `hasOwnProperty` check
+
+## [2.0.6] - 2026-04-06
+
+### Added
+- Boundary test suite (266 tests across 14 files) validating behavior at extreme input edges
+- Quorum calculation boundary tests: N=0–100 across Consensus, OracleConsensus, CrossChainEngine, ReorgHandler
+- Trimmed median aggregation boundary tests: trim threshold transitions (N=1–20), outlier handling, float precision, invalid data filtering
+- PriceFetcher boundary tests: zero/negative/NaN/huge API responses, partial responses, dual-source failures
+- Governance boundary tests: exact change bounds (50%/33%/25%/20%), tally quorum arithmetic, cooldown expiry
+- SlashDetector boundary tests: exact 5% deviation threshold, missed rounds at 29/30/31, 24h repeated deviation window pruning
+- Consensus PBFT boundary tests: leader rotation wrap-around, seq/view boundaries, PRE_PREPARE validation, duplicate vote dedup
+- CrossChainEngine boundary tests: chain pair fallback with both orderings, confirmation thresholds per chain, attestation re-finalization
+- ReorgHandler boundary tests: height 0, far-future timestamps, duplicate reorgId dedup
+- RewardTracker boundary tests: division precision at N=1/3/7/100/1000, satoshi-level rounding loss
+- Config management boundary tests: empty coin key filtering, PARAMETER_LIST enforcement, null/undefined/empty value handling
+- Fee quote boundary tests: gas calculation precision, zero/small/large oracle prices, missing oracle data
+- Validator registration boundary tests: pubkey regex edge cases (63/64/65 chars, non-hex), addr validation
+- Database layer boundary tests: DB name regex, circuit breaker state transitions, doQuery argument handling
+- P2P layer boundary tests: malformed envelope rejection, self-connection detection, dedup, signature verification modes
+
+## [2.0.5] - 2026-04-06
+
+### Added
+- End-to-end test suite (64 tests across 8 files) validating full operational pipelines
+- E2E test helpers: cluster manager (multi-hub in-process with real P2P), JSON-RPC client, price API mocks, async polling, DB assertion utilities
+- Oracle E2E tests: price fetch → single-node finalization → JSON-RPC serving, API degradation, round skipping, reward distribution, multi-round persistence
+- Config E2E tests: write/read round-trip, multi-coin updates, overwrite behavior
+- Attestation E2E tests: single-node attestation lifecycle, SWAP initiation and status queries
+- Governance E2E tests: proposal creation, vote casting, tally/pass, rejection with cooldown, change bounds enforcement
+- Reorg E2E tests: rollback cascade (attestation deletion, reorg history), chain isolation
+- Fee quote E2E tests: oracle-fed fee calculation, gas schedule verification, missing data handling
+- API contract E2E tests: all 24 JSON-RPC methods validated, invalid input handling across all endpoints
+- Multi-node E2E tests: 3-node cluster with real WebSocket P2P, PBFT oracle consensus, cross-chain attestation, cross-instance data consistency
+- `npm run test:e2e` script
+
+## [2.0.4] - 2026-04-06
+
+### Added
+- Smoke test suite (24 tests) for quick service health checks
+- Covers env validation, DB schema init, JSON-RPC routing, config round-trip, PriceFetcher with mocked APIs, median calculation, oracle trimmed-median aggregation, circuit breaker state, and graceful handling of disabled subsystems
+- `npm run test:smoke` script with `--bail` flag for fast-fail execution
+
+## [2.0.3] - 2026-04-06
+
+### Added
+- Integration test suite (63 tests across 10 files) covering cross-module data flows
+- Test infrastructure: testDb (real MariaDB setup/teardown), mockExternalApi (nock-based API mocking), testPeerNetwork (WS peer simulation, envelope builder)
+- Oracle pipeline integration tests: price fetching, round lifecycle, persistence precision, reward distribution, slash detection
+- Cross-chain integration tests: attestation PBFT, SWAP auto-progression, reorg rollback cascading writes
+- Consensus integration tests: PBFT config consensus, single-node fallback, timeout/view-change
+- Governance integration tests: proposal lifecycle, rejection, change bounds, cooldown, non-validator rejection
+- JSON-RPC API integration tests: end-to-end Express server with config, validator, price, and fee quote endpoints
+- P2P integration tests: real WebSocket message routing, deduplication, Ed25519 signature verification
+- Resilience integration tests: circuit breaker activation/recovery, DB failure during finalization, concurrent operations
+- `nock` devDependency for HTTP request interception
+- `npm run test:integration` and `npm run test:all` scripts
+
+## [2.0.2] - 2026-04-06
+
+### Added
+- Comprehensive unit test suite (295 tests) covering all 13 source modules
+- Test infrastructure: mocha, chai, sinon, proxyquire devDependencies
+- Shared test helpers: mockHub factory and fixtures (validator sets, sample prices)
+- Tests for: ValidatorIdentity, OracleConsensus (trimmed median, PBFT), Consensus (PBFT, view change), SlashDetector (deviation/participation thresholds), CrossChainEngine (chain-pair filtering, attestation PBFT), PriceFetcher (API mocking), OracleRound, Governance (change bounds, tally logic), ReorgHandler (rollback, consensus), RewardTracker, SwapTracker, PeerManager (dedup, signatures), Database (circuit breaker), XChainHub orchestrator
+
+### Changed
+- `npm test` now runs mocha against `test/unit/**/*.test.js`
+
 ## [2.0.1] - 2026-04-06
 
 ### Changed

@@ -52,7 +52,8 @@ class Database {
             idleTimeout:        60000,
             insertIdAsNumber:   true,
             bigIntAsNumber:     true,
-            minDelayValidation: 3000
+            minDelayValidation: 3000,
+            queryTimeout:       parseInt(process.env.DB_QUERY_TIMEOUT) || 30000
         };
 
         // Setup pool of connections
@@ -256,8 +257,10 @@ class Database {
         if(query){
             if(Array.isArray(args)){
                 for(let i = 0; i < args.length; i++){
-                    if(args[i] !== null && args[i] !== undefined && typeof args[i] === 'object')
-                        args[i] = args[i].toString();
+                    if(args[i] !== null && args[i] !== undefined && typeof args[i] === 'object') {
+                        console.warn('db.doQuery: object arg serialized to JSON at index ' + i);
+                        args[i] = JSON.stringify(args[i]);
+                    }
                 }
             }
             let tx = this.transactionConnection != null;
@@ -290,6 +293,24 @@ class Database {
             config[row.param_name] = row.param_value;
         }
         return config;
+    }
+
+    // Set the latest chain tip for a given coin (block height and block time)
+    // Used by indexers to push their chain tip to the hub for cross-chain reference
+    async setChainTip(coin, blockHeight, blockTime){
+        await this.setParam(coin, 'mainnet', 'chain_tips', 'block_height', String(blockHeight));
+        await this.setParam(coin, 'mainnet', 'chain_tips', 'block_time',   String(blockTime));
+    }
+
+    // Get the latest chain tip for a given coin
+    // Returns: { blockHeight, blockTime } or null if not set
+    async getChainTip(coin){
+        let cfg = await this.getConfig(coin, 'mainnet', 'chain_tips');
+        if(!cfg.block_height) return null;
+        return {
+            blockHeight: parseInt(cfg.block_height),
+            blockTime:   parseInt(cfg.block_time) || 0
+        };
     }
 
     // Get all configs, reconstructed as nested object

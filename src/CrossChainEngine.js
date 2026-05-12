@@ -33,6 +33,9 @@ const XCHAIN_ATTEST_COMMIT  = 'XCHAIN_ATTEST_COMMIT';
 // Confirmation thresholds per chain
 const CONFIRMATIONS = { BTC: 3, LTC: 3, DOGE: 6 };
 
+// Allowed chain names
+const ALLOWED_CHAINS = ['BTC', 'LTC', 'DOGE'];
+
 const DEFAULT_ATTESTATION_TIMEOUT = 60000; // 60 seconds
 
 class CrossChainEngine extends EventEmitter {
@@ -99,6 +102,14 @@ class CrossChainEngine extends EventEmitter {
 
     // Request an attestation — returns a Promise that resolves when consensus is reached
     async requestAttestation(sourceChain, sourceActionIndex, destChain) {
+        if (!ALLOWED_CHAINS.includes(sourceChain))
+            throw new Error('Invalid sourceChain: ' + sourceChain + ' (allowed: ' + ALLOWED_CHAINS.join(', ') + ')');
+        if (!ALLOWED_CHAINS.includes(destChain))
+            throw new Error('Invalid destChain: ' + destChain + ' (allowed: ' + ALLOWED_CHAINS.join(', ') + ')');
+        let idx = parseInt(sourceActionIndex);
+        if (!Number.isInteger(idx) || idx <= 0)
+            throw new Error('sourceActionIndex must be a positive integer');
+
         let attestationId = sourceChain + ':' + sourceActionIndex + ':' + destChain;
         let confirmations = CONFIRMATIONS[sourceChain] || 3;
 
@@ -196,6 +207,7 @@ class CrossChainEngine extends EventEmitter {
     _handlePropose(envelope) {
         let { attestationId, sourceChain, sourceActionIndex, destChain, confirmations, digest } = envelope.data;
         if (!attestationId || !digest) return;
+        if (!/^[A-Z]{2,6}:\d+:[A-Z]{2,6}$/.test(attestationId)) return;
         if (this.finalized.has(attestationId)) return;
 
         // Verify digest

@@ -60,8 +60,10 @@ class OracleRound {
         this._messageHandler = null;
 
         // Config
-        this.roundInterval    = this.config.ORACLE_ROUND_INTERVAL || 600000;     // 10 minutes
-        this.submissionWindow = this.config.ORACLE_SUBMISSION_WINDOW || 180000;   // 3 minutes
+        this.roundInterval          = this.config.ORACLE_ROUND_INTERVAL || 600000;     // 10 minutes
+        this.submissionWindow       = this.config.ORACLE_SUBMISSION_WINDOW || 180000;   // 3 minutes
+        this.maxSubmissionsPerRound  = parseInt(this.config.ORACLE_MAX_SUBMISSIONS_PER_ROUND) || 200;
+        this.priceMax               = 10000000;
     }
 
     // Set the oracle consensus engine (called by XChainHub after both are created)
@@ -143,6 +145,24 @@ class OracleRound {
         this.currentRound++;
         this.roundStartTime = Date.now();
 
+        // Capture the BTC chain tip at the start of this round
+        // This is the deterministic anchor for cross-node price agreement
+        try {
+            let btcTip = await this.db.getChainTip('BTC');
+            if (btcTip) {
+                this.currentBtcBlockHeight = btcTip.blockHeight;
+                this.currentBtcBlockTime   = btcTip.blockTime;
+            } else {
+                // No BTC tip available yet — fall back to round number
+                this.currentBtcBlockHeight = this.currentRound;
+                this.currentBtcBlockTime   = Math.floor(Date.now() / 1000);
+            }
+        } catch (err) {
+            console.warn('Oracle: Failed to read BTC chain tip:', err.message);
+            this.currentBtcBlockHeight = this.currentRound;
+            this.currentBtcBlockTime   = Math.floor(Date.now() / 1000);
+        }
+
         // Prune old submissions (keep current and previous round only)
         this._pruneSubmissions();
 
@@ -195,10 +215,13 @@ class OracleRound {
 
     // Schedule finalization for a round after the submission window
     _scheduleFinalization(round) {
+        // Capture the BTC chain tip values for this round at scheduling time
+        let btcBlockHeight = this.currentBtcBlockHeight;
+        let btcBlockTime   = this.currentBtcBlockTime;
         if (this.finalizationTimer) clearTimeout(this.finalizationTimer);
         this.finalizationTimer = setTimeout(() => {
             if (this.oracleConsensus) {
-                this.oracleConsensus.finalizeRound(round).catch(err => {
+                this.oracleConsensus.finalizeRound(round, btcBlockHeight, btcBlockTime).catch(err => {
                     console.error('Oracle: Finalization error for round ' + round + ':', err.message);
                 });
             }
@@ -231,8 +254,21 @@ class OracleRound {
         let roundSubs = this.submissions.get(round);
         if (roundSubs.has(envelope.sender)) return; // Already have a submission from this sender
 
+        // Enforce max submissions per round
+        if (roundSubs.size >= this.maxSubmissionsPerRound) {
+            console.warn('Oracle: Max submissions per round reached for round ' + round + ' — dropping from ' + envelope.sender);
+            return;
+        }
+
+        // Validate individual prices — filter to positive finite values within bounds
+        let validPrices = prices.filter(p => {
+            let val = parseFloat(p.price);
+            return Number.isFinite(val) && val > 0 && val < this.priceMax;
+        });
+        if (validPrices.length === 0) return;
+
         roundSubs.set(envelope.sender, {
-            prices:    prices,
+            prices:    validPrices,
             sources:   sources || 0,
             timestamp: envelope.timestamp
         });

@@ -32,6 +32,9 @@ const CrossChainEngine  = require('./CrossChainEngine.js');
 const ReorgHandler      = require('./ReorgHandler.js');
 const SwapTracker       = require('./SwapTracker.js');
 const Governance        = require('./Governance.js');
+const PriceAggregator   = require('./PriceAggregator.js');
+const OraclePublisher   = require('./OraclePublisher.js');
+const HubDbBroadcaster  = require('./HubDbBroadcaster.js');
 const PARAMETER_LIST = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass"];
 
 class XChainHub {
@@ -54,6 +57,9 @@ class XChainHub {
         this.reorgHandler     = null;
         this.swapTracker      = null;
         this.governance       = null;
+        this.priceAggregator  = null;
+        this.oraclePublisher  = null;
+        this.hubDbBroadcaster = null;
     }
 
     async start(){
@@ -61,6 +67,15 @@ class XChainHub {
         await this.db.createDatabase();
         await this.db.verifyTables();
         await this.db.runMigrations();
+
+        // PriceAggregator doesn't require P2P/PBFT — always available for receiving on-chain PRICE actions
+        this.priceAggregator = new PriceAggregator(this);
+        // HubDbBroadcaster forwards row inserts from the aggregator to WebSocket subscribers
+        // for the cross-chain hub DB sync channel (used by indexers running in distributed mode)
+        this.hubDbBroadcaster = new HubDbBroadcaster(this.p2pConfig || {});
+        this.priceAggregator.on('row:inserted', (event) => {
+            this.hubDbBroadcaster.broadcastRow(event);
+        });
         console.log('XChain Hub started (MariaDB: ' + this.dbName + ')');
     }
 
@@ -139,8 +154,8 @@ class XChainHub {
                 }
             }
 
-            // Distribute rewards
-            await this.rewardTracker.distributeRewards(event.round, participantPubkeys);
+            // Distribute rewards (passes BTC block height for indexer-side block_index)
+            await this.rewardTracker.distributeRewards(event.round, participantPubkeys, event.btcBlockHeight);
 
             // Check for slashable offenses
             await this.slashDetector.checkRound(
@@ -152,6 +167,13 @@ class XChainHub {
         // Start all oracle subsystems
         await this.oracleConsensus.start();
         await this.oracle.start();
+
+        // Start the Tier 3 publisher (no-op if no broadcast hook is wired up)
+        // The publisher subscribes to round:finalized events and queues finalized rounds
+        // for publishing to the DOGE chain. The actual broadcast transport is wired
+        // by the operator via setBroadcastHook() / setBalanceHook().
+        this.oraclePublisher = new OraclePublisher(this);
+        await this.oraclePublisher.start();
     }
 
     // Get the ValidatorIdentity instance
@@ -278,16 +300,36 @@ class XChainHub {
 
     // Apply config directly to the database
     async applyConfig(json){
+        if (!json || typeof json !== 'object' || Array.isArray(json))
+            throw new Error('Config must be a non-null object');
+
         for(let nextCoin in json){
-            if(nextCoin != ""){
-                for(let nextNetwork in json[nextCoin]){
-                    for(let nextModule in json[nextCoin][nextNetwork]){
-                        for(let nextParam of PARAMETER_LIST){
-                            let nextValue = json[nextCoin][nextNetwork][nextModule][nextParam];
-                            if(nextValue !== null && nextValue !== undefined){
-                                await this.db.setParam(nextCoin, nextNetwork, nextModule, nextParam, nextValue);
-                            }
+            if(nextCoin === '') continue;
+            let coinLevel = json[nextCoin];
+            if (!coinLevel || typeof coinLevel !== 'object') continue;
+
+            for(let nextNetwork in coinLevel){
+                let networkLevel = coinLevel[nextNetwork];
+                if (!networkLevel || typeof networkLevel !== 'object') continue;
+
+                for(let nextModule in networkLevel){
+                    let moduleLevel = networkLevel[nextModule];
+                    if (!moduleLevel || typeof moduleLevel !== 'object') continue;
+
+                    for(let nextParam of PARAMETER_LIST){
+                        let nextValue = moduleLevel[nextParam];
+                        if(nextValue === null || nextValue === undefined) continue;
+
+                        // Enforce string type and length
+                        if (typeof nextValue !== 'string') {
+                            console.warn('XChainHub.applyConfig: non-string value for ' + nextParam + ' — coercing');
+                            nextValue = String(nextValue);
                         }
+                        if (nextValue.length > 1024) {
+                            throw new Error('Config value for ' + nextParam + ' exceeds max length of 1024 chars');
+                        }
+
+                        await this.db.setParam(nextCoin, nextNetwork, nextModule, nextParam, nextValue);
                     }
                 }
             }
@@ -473,8 +515,8 @@ class XChainHub {
         };
         let gasPrice = 0.00001;  // XCHAIN per gas unit
 
-        let gasCost = gasSchedule[action] || 0;
-        if (gasCost === 0) return { error: 'unknown action: ' + action };
+        if (!Object.prototype.hasOwnProperty.call(gasSchedule, action)) return { error: 'unknown action: ' + action };
+        let gasCost = gasSchedule[action];
 
         let xchainAmount = gasCost * gasPrice;
 
