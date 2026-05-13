@@ -412,8 +412,8 @@ class PeerManager extends EventEmitter {
 
     // Connect to an outbound peer
     _connectToPeer(addr) {
-        // Validate peer address format (host:port)
-        if (!/^[\w.\-]+:\d+$/.test(addr)) {
+        // Validate peer address format: optional ws:// or wss:// prefix, then host:port
+        if (!/^(wss?:\/\/)?[\w.\-]+:\d+$/.test(addr)) {
             console.warn('P2P: Invalid peer address format: ' + addr);
             return;
         }
@@ -436,9 +436,10 @@ class PeerManager extends EventEmitter {
         peer.state = 'connecting';
 
         let maxPayload = this.config.P2P_MAX_PAYLOAD || 1048576;
+        let url = /^wss?:\/\//.test(addr) ? addr : 'ws://' + addr;
         let ws;
         try {
-            ws = new WebSocket('ws://' + addr, { maxPayload: maxPayload });
+            ws = new WebSocket(url, { maxPayload: maxPayload });
         } catch (e) {
             console.error('Failed to create WebSocket to ' + addr + ':', e.message);
             this._scheduleReconnect(addr);
