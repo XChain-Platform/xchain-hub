@@ -29,9 +29,13 @@ function createMockHub(overrides = {}) {
         signEnvelope:  sinon.stub().returns('cc'.repeat(64))
     };
 
+    // Default ORACLE_EPOCH_START so OracleRound's constructor doesn't reject
+    // tests that don't care about epoch semantics. Tests that need a specific
+    // anchor can override via p2pConfig.ORACLE_EPOCH_START.
+    let p2pConfigDefaults = { ORACLE_EPOCH_START: 1704067200000 }; // 2024-01-01 UTC
     let hub = {
         db:              overrides.db || db,
-        p2pConfig:       overrides.p2pConfig || {},
+        p2pConfig:       { ...p2pConfigDefaults, ...(overrides.p2pConfig || {}) },
         getPeerManager:  sinon.stub().returns(overrides.peerManager || peerManager),
         getIdentity:     sinon.stub().returns(overrides.identity || identity),
         applyConfig:     sinon.stub().resolves(),

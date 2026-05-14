@@ -25,6 +25,7 @@ function createTestHub(db, validatorAddr) {
     return {
         db: db,
         p2pConfig: {
+            ORACLE_EPOCH_START: 1704067200000,
             ORACLE_ROUND_INTERVAL: 1000,
             ORACLE_SUBMISSION_WINDOW: 500,
             ORACLE_REWARD_PER_ROUND: '10.00000000',

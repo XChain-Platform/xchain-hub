@@ -228,6 +228,7 @@ function createCluster(nodeCount, overrides) {
                     P2P_RECONNECT_MAX:        nodeCount > 1 ? 2000 : 60000,
                     P2P_MSG_DEDUP_TTL:        60000,
                     P2P_MAX_PAYLOAD:          1048576,
+                    ORACLE_EPOCH_START:       1704067200000, // 2024-01-01 UTC, shared across all test hubs
                     ORACLE_ROUND_INTERVAL:    999999999,  // Prevent auto-rounds
                     ORACLE_SUBMISSION_WINDOW:  2000,
                     ORACLE_REWARD_PER_ROUND:  overrides.ORACLE_REWARD_PER_ROUND || '10.00000000',

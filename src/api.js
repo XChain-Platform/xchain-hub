@@ -73,6 +73,10 @@ function validateLimit(limit) {
 
 // Parse optional P2P config (P2P is enabled when P2P_VALIDATOR_ADDR is set)
 const P2P_VALIDATOR_ADDR = process.env.P2P_VALIDATOR_ADDR || '';
+if (P2P_VALIDATOR_ADDR && !process.env.ORACLE_EPOCH_START) {
+    console.error('Missing required environment variable: ORACLE_EPOCH_START (Unix ms timestamp anchoring oracle round numbering; all hubs must share the same value)');
+    process.exit(1);
+}
 const p2pConfig = P2P_VALIDATOR_ADDR ? {
     P2P_PORT:               parseInt(process.env.P2P_PORT) || 10001,
     P2P_HOST:               process.env.P2P_HOST || '0.0.0.0',
@@ -85,6 +89,7 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     P2P_RECONNECT_MAX:      parseInt(process.env.P2P_RECONNECT_MAX) || 60000,
     P2P_MSG_DEDUP_TTL:      parseInt(process.env.P2P_MSG_DEDUP_TTL) || 60000,
     P2P_MAX_PAYLOAD:        parseInt(process.env.P2P_MAX_PAYLOAD) || 1048576,
+    ORACLE_EPOCH_START:     parseInt(process.env.ORACLE_EPOCH_START),
     ORACLE_ROUND_INTERVAL:  parseInt(process.env.ORACLE_ROUND_INTERVAL) || 600000,
     ORACLE_SUBMISSION_WINDOW: parseInt(process.env.ORACLE_SUBMISSION_WINDOW) || 180000,
     ORACLE_REWARD_PER_ROUND: process.env.ORACLE_REWARD_PER_ROUND || '10.00000000',

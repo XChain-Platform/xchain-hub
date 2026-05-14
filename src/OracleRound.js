@@ -43,9 +43,11 @@ class OracleRound {
         this.priceFetcher = new PriceFetcher(this.config);
 
         // Round state
-        this.currentRound    = 0;
-        this.roundStartTime  = 0;
-        this.roundTimer      = null;
+        this.currentRound      = 0;
+        this.lastExecutedRound = -1;   // idempotency guard for time-anchored scheduling
+        this.roundStartTime    = 0;
+        this.roundTimer        = null;
+        this.initialRoundTimer = null;
 
         // Submissions per round: Map<round, Map<sender, { prices, sources, timestamp }>>
         this.submissions = new Map();
@@ -64,6 +66,12 @@ class OracleRound {
         this.submissionWindow       = this.config.ORACLE_SUBMISSION_WINDOW || 180000;   // 3 minutes
         this.maxSubmissionsPerRound  = parseInt(this.config.ORACLE_MAX_SUBMISSIONS_PER_ROUND) || 200;
         this.priceMax               = 10000000;
+
+        // Wall-clock anchor for round numbering. All hubs must agree on this
+        // timestamp so they compute the same round number from the same time.
+        this.epochStart = parseInt(this.config.ORACLE_EPOCH_START);
+        if (!Number.isFinite(this.epochStart))
+            throw new Error('ORACLE_EPOCH_START must be a Unix ms timestamp (every hub in the federation must share the same value)');
     }
 
     // Set the oracle consensus engine (called by XChainHub after both are created)
@@ -77,13 +85,10 @@ class OracleRound {
         this._messageHandler = (envelope) => this._handleMessage(envelope);
         this.peerManager.on('message', this._messageHandler);
 
-        // Start the round timer
+        // Start the round timer — handles both the first run and the aligned cadence
         this._startRoundTimer();
 
         console.log('Oracle round system started (interval: ' + (this.roundInterval / 1000) + 's, window: ' + (this.submissionWindow / 1000) + 's)');
-
-        // Run the first round immediately (after a short delay for peer connections)
-        setTimeout(() => this._executeRound(), 5000);
     }
 
     // Stop the oracle round system
@@ -91,6 +96,10 @@ class OracleRound {
         if (this._messageHandler) {
             this.peerManager.removeListener('message', this._messageHandler);
             this._messageHandler = null;
+        }
+        if (this.initialRoundTimer) {
+            clearTimeout(this.initialRoundTimer);
+            this.initialRoundTimer = null;
         }
         if (this.roundTimer) {
             clearInterval(this.roundTimer);
@@ -133,16 +142,40 @@ class OracleRound {
 
     // --- Private methods ---
 
-    // Start the periodic round timer
+    // Start the periodic round timer, aligned to wall-clock round boundaries
+    // anchored at this.epochStart. If we start mid-round and the submission
+    // window is still open, run the current round immediately after a short
+    // delay to let peer connections settle; otherwise wait until the next
+    // boundary.
     _startRoundTimer() {
-        this.roundTimer = setInterval(() => {
+        let elapsedInRound  = (Date.now() - this.epochStart) % this.roundInterval;
+        let timeToNextRound = this.roundInterval - elapsedInRound;
+
+        let initialDelay = 5000;
+        if (elapsedInRound + initialDelay < this.submissionWindow) {
+            this.initialRoundTimer = setTimeout(() => {
+                this.initialRoundTimer = null;
+                this._executeRound();
+            }, initialDelay);
+        }
+
+        // Align to the next round boundary, then run on a steady interval
+        setTimeout(() => {
             this._executeRound();
-        }, this.roundInterval);
+            this.roundTimer = setInterval(() => this._executeRound(), this.roundInterval);
+        }, timeToNextRound);
     }
 
     // Execute a single round: fetch prices, broadcast submission
     async _executeRound() {
-        this.currentRound++;
+        // Compute the round number from wall-clock time so every hub in the
+        // federation agrees on the round number for the same point in time
+        // (and so a restarted hub resumes at the correct number instead of 1).
+        let newRound = Math.floor((Date.now() - this.epochStart) / this.roundInterval);
+        if (newRound === this.lastExecutedRound) return;
+        this.lastExecutedRound = newRound;
+
+        this.currentRound   = newRound;
         this.roundStartTime = Date.now();
 
         // Capture the BTC chain tip at the start of this round
