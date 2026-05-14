@@ -521,8 +521,11 @@ class PeerManager extends EventEmitter {
     // Start WS ping/pong interval for dead connection detection
     _startPingInterval() {
         this.pingTimer = setInterval(() => {
-            // Ping outbound connections
+            // Ping outbound dialed peers only. Inbound peers also live in this.peers
+            // (after _registerInboundPeer) but are pinged via wss.clients below — pinging
+            // them here as well would race the two loops and terminate the inbound ws.
             for (let [addr, peer] of this.peers) {
+                if (peer.inbound) continue;
                 if (peer.ws && peer.ws.readyState === WebSocket.OPEN) {
                     if (peer.ws._isAlive === false) {
                         console.log('Peer ' + addr + ' failed ping/pong — terminating');
