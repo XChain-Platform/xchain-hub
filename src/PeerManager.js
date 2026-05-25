@@ -339,6 +339,12 @@ class PeerManager extends EventEmitter {
         if (envelope.type === 'HEARTBEAT') {
             this.emit('heartbeat', envelope.sender, envelope.timestamp);
         }
+        // Capability gossip — see CapabilityRegistry / spec 2026-05-24_capability-staking-model.md
+        if (envelope.type === 'CAPABILITY_ACTIVATED' ||
+            envelope.type === 'CAPABILITY_DEACTIVATED' ||
+            envelope.type === 'CAPABILITY_SELF_TEST') {
+            this.emit('capability', envelope);
+        }
 
         // Relay to other peers
         this._relay(envelope, ws);

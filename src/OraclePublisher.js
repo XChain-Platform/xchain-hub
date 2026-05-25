@@ -13,15 +13,16 @@
  *
  **********************************************************************
  *
- * XChain Hub - Oracle Publisher (Tier 3)
+ * XChain Hub - Oracle Publisher (`oracle_publish` capability)
  *
- * Tier 3 validators publish finalized PRICE v0 rounds to the DOGE chain
- * as the immutable backup/audit trail. Leader rotation is deterministic:
- *   leader_index = round % active_tier3_count
+ * Validators with the `oracle_publish` capability active publish finalized
+ * PRICE v0 rounds to the DOGE chain as the immutable backup/audit trail.
+ * Leader rotation is deterministic:
+ *   leader_index = round % active_oracle_publish_count
  *
- * Active Tier 3 validators are sorted by signing_pubkey for stable
- * ordering across all nodes. If the leader misses their window
- * (1 BTC block), the next validator in rotation becomes eligible.
+ * Active validators are sorted by signing_pubkey for stable ordering
+ * across all nodes. If the leader misses their window (1 BTC block),
+ * the next validator in rotation becomes eligible.
  *
  * Failover publishers batch missed rounds. First valid PRICE tx on-chain
  * for a given round wins (and earns the reward).
@@ -167,12 +168,12 @@ class OraclePublisher {
     async onRoundFinalized(event) {
         let round = event.round;
         let myRank = await this._getMyRank(event.btcBlockHeight);
-        if (myRank === null) return; // not a Tier 3 publisher (or stake not active)
+        if (myRank === null) return; // not an active oracle_publish validator (capability not active)
 
-        let tier3Count = await this._getActiveTier3Count(event.btcBlockHeight);
-        if (tier3Count === 0) return;
+        let publisherCount = await this._getActiveOraclePublishCount(event.btcBlockHeight);
+        if (publisherCount === 0) return;
 
-        let leaderRank = round % tier3Count;
+        let leaderRank = round % publisherCount;
         if (leaderRank !== myRank) {
             // Not our turn (yet) — but we may need to take over later if leader fails
             return;
@@ -195,45 +196,36 @@ class OraclePublisher {
         await this._processQueue();
     }
 
-    // Determine this node's rank in the sorted Tier 3 validator list, or null if not a publisher
-    // Sort order: signing_pubkey ascending (deterministic across all nodes)
+    // Determine this node's rank in the sorted oracle_publish validator list, or null if not active
+    // Sort order: signing_pubkey ascending (deterministic across all nodes that share the active set)
     async _getMyRank(blockIndex) {
         if (!this.identity) return null;
-        let myPubkey = this.identity.getPubkeyHex();
-        let pubkeys = await this._getActiveTier3Pubkeys(blockIndex);
+        let myPubkey = String(this.identity.getPubkeyHex()).toLowerCase();
+        let pubkeys = await this._getActiveOraclePublishPubkeys(blockIndex);
         let idx = pubkeys.indexOf(myPubkey);
         return idx >= 0 ? idx : null;
     }
 
-    // Get the count of active Tier 3 validators at a given BTC block height
-    async _getActiveTier3Count(blockIndex) {
-        let pubkeys = await this._getActiveTier3Pubkeys(blockIndex);
+    // Get the count of active oracle_publish validators
+    async _getActiveOraclePublishCount(blockIndex) {
+        let pubkeys = await this._getActiveOraclePublishPubkeys(blockIndex);
         return pubkeys.length;
     }
 
-    // Get the sorted list of active Tier 3 validator signing pubkeys at a given BTC block height
-    // Reads from the synced `stakes` table in the hub's local copy of indexer state
-    // Returns: array of 64-hex pubkey strings, sorted ascending
-    async _getActiveTier3Pubkeys(blockIndex) {
-        // The hub's local copy of the BTC indexer's stakes table is populated via xchain-indexer-sync
-        // (Phase 3.12). For now, return an empty list if the table doesn't exist or is empty.
+    // Get the sorted list of active oracle_publish validator signing pubkeys.
+    // Reads from the hub's local CapabilityRegistry (validator_capabilities table),
+    // which is updated by self-tests + peer activation gossip.
+    // Returns: array of 64-hex pubkey strings, sorted ascending.
+    //
+    // Note: leader rotation determinism depends on all hubs sharing the same
+    // active set. Phase 0+ should snapshot the set at on-chain block boundaries
+    // to harden against gossip-latency divergence (see spec §6).
+    async _getActiveOraclePublishPubkeys(blockIndex) {
+        if (!this.hub || !this.hub.capabilityRegistry) return [];
         try {
-            let query = `SELECT ip.pubkey
-                         FROM stakes s
-                         INNER JOIN index_pubkeys ip ON ip.id = s.signing_pubkey_id
-                         INNER JOIN index_statuses st ON st.id = s.status_id
-                         WHERE s.tier = 3 AND st.status = 'valid'`;
-            let args = [];
-            if (blockIndex !== undefined && blockIndex !== null) {
-                query += ' AND s.activation_block <= ? AND (s.deactivation_block IS NULL OR s.deactivation_block > ?)';
-                args.push(blockIndex);
-                args.push(blockIndex);
-            }
-            query += ' ORDER BY ip.pubkey ASC';
-            let rows = await this.db.doQuery(query, args);
-            return rows.map(r => String(r.pubkey).toLowerCase());
+            let pubkeys = await this.hub.capabilityRegistry.getActiveValidators('oracle_publish');
+            return pubkeys.map(p => String(p).toLowerCase()).sort();
         } catch (err) {
-            // Table not present in hub DB yet (selective sync not configured)
             return [];
         }
     }

@@ -20,21 +20,23 @@
  *
  ********************************************************************/
 
-const Database          = require('./db.js');
-const PeerManager       = require('./PeerManager.js');
-const Consensus         = require('./Consensus.js');
-const ValidatorIdentity = require('./ValidatorIdentity.js');
-const OracleConsensus   = require('./OracleConsensus.js');
-const OracleRound       = require('./OracleRound.js');
-const RewardTracker     = require('./RewardTracker.js');
-const SlashDetector     = require('./SlashDetector.js');
-const CrossChainEngine  = require('./CrossChainEngine.js');
-const ReorgHandler      = require('./ReorgHandler.js');
-const SwapTracker       = require('./SwapTracker.js');
-const Governance        = require('./Governance.js');
-const PriceAggregator   = require('./PriceAggregator.js');
-const OraclePublisher   = require('./OraclePublisher.js');
-const HubDbBroadcaster  = require('./HubDbBroadcaster.js');
+const Database           = require('./db.js');
+const PeerManager        = require('./PeerManager.js');
+const Consensus          = require('./Consensus.js');
+const ValidatorIdentity  = require('./ValidatorIdentity.js');
+const OracleConsensus    = require('./OracleConsensus.js');
+const OracleRound        = require('./OracleRound.js');
+const RewardTracker      = require('./RewardTracker.js');
+const SlashDetector      = require('./SlashDetector.js');
+const CrossChainEngine   = require('./CrossChainEngine.js');
+const ReorgHandler       = require('./ReorgHandler.js');
+const SwapTracker        = require('./SwapTracker.js');
+const Governance         = require('./Governance.js');
+const PriceAggregator    = require('./PriceAggregator.js');
+const OraclePublisher    = require('./OraclePublisher.js');
+const HubDbBroadcaster   = require('./HubDbBroadcaster.js');
+const CapabilityRegistry = require('./CapabilityRegistry.js');
+const fs                 = require('fs');
 const PARAMETER_LIST = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass"];
 
 class XChainHub {
@@ -60,6 +62,10 @@ class XChainHub {
         this.priceAggregator  = null;
         this.oraclePublisher  = null;
         this.hubDbBroadcaster = null;
+        this.capabilityRegistry      = null;
+        this._capabilityRecheckTimer = null;
+        this._capabilityConfigWatcher = null;
+        this._latestBlockIndex        = null;  // most recent observed BTC block index (for capability gossip block_at)
     }
 
     async start(){
@@ -401,10 +407,9 @@ class XChainHub {
     async _loadChainPairValidators(){
         let chainPairMap = new Map();
         try {
-            // First, try to add 'chains' and 'tier' columns if they don't exist
-            // (migration from Phase 2C validators table to Phase 4C)
+            // Ensure the 'chains' column exists. (The 'tier' column was dropped in the
+            // capability-staking refactor — 2026-05-24_capability-staking-model.md.)
             await this.db.doQuery("ALTER TABLE validators ADD COLUMN chains VARCHAR(50) DEFAULT NULL").catch(() => {});
-            await this.db.doQuery("ALTER TABLE validators ADD COLUMN tier TINYINT UNSIGNED DEFAULT NULL").catch(() => {});
 
             let rows = await this.db.doQuery(
                 "SELECT signing_pubkey, addr, chains FROM validators WHERE status = 'active' ORDER BY signing_pubkey"
@@ -552,7 +557,151 @@ class XChainHub {
         return result;
     }
 
+    /*****************************************************************
+     * Capability tracking
+     *
+     * Initializes CapabilityRegistry, runs initial self-tests for this
+     * hub's identity, schedules periodic re-checks, optionally watches
+     * a config file for hot-reload, and wires peer-capability gossip
+     * into the local registry.
+     *
+     * Safe to call without P2P or without an identity — those subsystems
+     * just no-op accordingly.
+     *
+     * Spec: claude/reports/specs/2026-05-24_capability-staking-model.md
+     ****************************************************************/
+    async startCapabilities(configFilePath){
+        this.capabilityRegistry = new CapabilityRegistry(this);
+
+        // Subscribe to peer capability messages (only meaningful if P2P is active)
+        if(this.peerManager){
+            this.peerManager.on('capability', (envelope) => {
+                this._handleCapabilityMessage(envelope).catch(e => {
+                    console.error('Capability message handler error:', e && e.message ? e.message : e);
+                });
+            });
+        }
+
+        // Run initial self-tests for this hub's identity
+        if(this.identity){
+            let pubkey = this.identity.getPubkeyHex();
+            await this._runOwnCapabilityCheck(pubkey);
+
+            // Periodic re-check
+            let intervalMs = (this.p2pConfig && this.p2pConfig.CAPABILITY_RECHECK_MS) ? this.p2pConfig.CAPABILITY_RECHECK_MS : 60000;
+            this._capabilityRecheckTimer = setInterval(() => {
+                this._runOwnCapabilityCheck(pubkey).catch(e => {
+                    console.error('Capability re-check failed:', e && e.message ? e.message : e);
+                });
+            }, intervalMs);
+
+            // Watch config file for hot-reload (optional)
+            if(configFilePath && fs.existsSync(configFilePath)){
+                try {
+                    this._capabilityConfigWatcher = fs.watch(configFilePath, { persistent: false }, () => {
+                        // Debounce: fs.watch fires multiple times per change
+                        if(this._capabilityConfigDebounce) clearTimeout(this._capabilityConfigDebounce);
+                        this._capabilityConfigDebounce = setTimeout(() => {
+                            this._runOwnCapabilityCheck(pubkey).catch(e => {
+                                console.error('Capability config-watch re-check failed:', e && e.message ? e.message : e);
+                            });
+                        }, 500);
+                    });
+                    console.log('Capability config watcher attached to ' + configFilePath);
+                } catch(e){
+                    console.warn('Could not attach capability config watcher to ' + configFilePath + ': ' + e.message);
+                }
+            }
+        }
+
+        console.log('Capability registry initialized' + (this.identity ? ' (identity: ' + this.identity.getPubkeyHex().substring(0,16) + '...)' : ' (no identity — peer-receive only)'));
+    }
+
+    // Called by external integration when this hub's on-chain stake amount changes.
+    // Triggers qualification recompute + activation gossip if active state changes.
+    async refreshOwnQualification(stakeAmount, blockIndex){
+        if(!this.identity || !this.capabilityRegistry) return;
+        let pubkey = this.identity.getPubkeyHex();
+        this._latestBlockIndex = blockIndex || this._latestBlockIndex;
+        let amount = String(stakeAmount || '0');
+        for(let cap of this.capabilityRegistry.getCapabilities()){
+            let minStake = this.capabilityRegistry.getMinStake(cap) || '0';
+            let qualified = this._compareDecimal(amount, minStake) >= 0;
+            await this.capabilityRegistry.setQualification(pubkey, cap, qualified, blockIndex);
+        }
+        await this._broadcastOwnCapabilityState(pubkey);
+    }
+
+    // Combined own-state update: self-test + qualification (qualification reuses cached amount if available) + broadcast
+    async _runOwnCapabilityCheck(pubkey){
+        if(!this.capabilityRegistry) return;
+        await this.capabilityRegistry.runAllSelfTests(pubkey);
+        await this._broadcastOwnCapabilityState(pubkey);
+    }
+
+    // Broadcast current activation state for every capability owned by this pubkey
+    async _broadcastOwnCapabilityState(pubkey){
+        if(!this.peerManager || !this.identity || !this.capabilityRegistry) return;
+        for(let cap of this.capabilityRegistry.getCapabilities()){
+            let active = await this.capabilityRegistry.isActive(pubkey, cap);
+            let data = {
+                pubkey:     pubkey,
+                capability: cap,
+                block_at:   this._latestBlockIndex
+            };
+            if(!active){
+                let state = await this.capabilityRegistry.getState(pubkey, cap);
+                if(state && state.self_test_msg) data.reason = state.self_test_msg;
+            }
+            this.peerManager.broadcast(active ? 'CAPABILITY_ACTIVATED' : 'CAPABILITY_DEACTIVATED', data);
+        }
+    }
+
+    // Apply an inbound peer capability message to the local registry.
+    // Trust model: the gossip envelope is already sig-verified by PeerManager.
+    // We additionally require the data.pubkey to match the sender's known pubkey
+    // (operator A cannot claim capabilities for operator B's pubkey).
+    async _handleCapabilityMessage(envelope){
+        if(!this.capabilityRegistry) return;
+        let data = envelope.data || {};
+        if(!data.pubkey || !data.capability) return;
+        // Verify the claimed pubkey matches the sender's registered pubkey
+        let senderPubkey = this.peerManager && this.peerManager.validatorPubkeys
+            ? this.peerManager.validatorPubkeys.get(envelope.sender) : null;
+        if(senderPubkey && String(data.pubkey).toLowerCase() !== String(senderPubkey).toLowerCase()){
+            console.warn('Capability message from ' + envelope.sender + ' claims pubkey ' + data.pubkey + ' but sender is registered as ' + senderPubkey + ' — dropping');
+            return;
+        }
+        if(envelope.type === 'CAPABILITY_SELF_TEST'){
+            await this.capabilityRegistry.setSelfTestResult(data.pubkey, data.capability, !!data.ok, data.reason || null);
+        } else if(envelope.type === 'CAPABILITY_ACTIVATED'){
+            // Peer claims activation. We accept their self-test claim and their qualification claim
+            // (the on-chain stake amount could be independently verified via indexer query — Phase 0+
+            // defers that. Slashing-for-failure is the deterrent against false activation claims.)
+            await this.capabilityRegistry.setSelfTestResult(data.pubkey, data.capability, true, null);
+            await this.capabilityRegistry.setQualification(data.pubkey, data.capability, true, data.block_at || null);
+            await this.capabilityRegistry.setEnabled(data.pubkey, data.capability, true);
+        } else if(envelope.type === 'CAPABILITY_DEACTIVATED'){
+            // Peer reports deactivation. Mark self_test as failed with reason so we route away.
+            await this.capabilityRegistry.setSelfTestResult(data.pubkey, data.capability, false, data.reason || 'peer reported deactivation');
+        }
+    }
+
+    // Decimal comparison via parseFloat. Stake amounts are bounded well within the
+    // safe integer range for typical staking magnitudes (XCHAIN with 8 decimals).
+    _compareDecimal(a, b){
+        let aNum = parseFloat(a);
+        let bNum = parseFloat(b);
+        if(isNaN(aNum) || isNaN(bNum)) return 0;
+        if(aNum < bNum) return -1;
+        if(aNum > bNum) return 1;
+        return 0;
+    }
+
     async close(){
+        if(this._capabilityRecheckTimer){ clearInterval(this._capabilityRecheckTimer); this._capabilityRecheckTimer = null; }
+        if(this._capabilityConfigDebounce){ clearTimeout(this._capabilityConfigDebounce); this._capabilityConfigDebounce = null; }
+        if(this._capabilityConfigWatcher){ try { this._capabilityConfigWatcher.close(); } catch(e){} this._capabilityConfigWatcher = null; }
         if(this.governance)       await this.governance.stop();
         if(this.reorgHandler)     await this.reorgHandler.stop();
         if(this.crossChain)       await this.crossChain.stop();
