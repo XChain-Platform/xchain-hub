@@ -38,9 +38,10 @@ const HubDbBroadcaster   = require('./HubDbBroadcaster.js');
 const CapabilityRegistry = require('./CapabilityRegistry.js');
 const CapabilitySnapshot = require('./CapabilitySnapshot.js');
 const ProviderRegistry      = require('./ProviderRegistry.js');
-const AttestationRound      = require('./AttestationRound.js');
-const AttestationConsensus  = require('./AttestationConsensus.js');
-const AttestationPublisher  = require('./AttestationPublisher.js');
+const AttestationRound       = require('./AttestationRound.js');
+const AttestationConsensus   = require('./AttestationConsensus.js');
+const AttestationPublisher   = require('./AttestationPublisher.js');
+const AttestationSpotChecker = require('./AttestationSpotChecker.js');
 const fs                 = require('fs');
 const axios              = require('axios');
 const PARAMETER_LIST = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass"];
@@ -74,6 +75,7 @@ class XChainHub {
         this.attestationRound        = null;
         this.attestationConsensus    = null;
         this.attestationPublisher    = null;
+        this.attestationSpotChecker  = null;
         this._capabilityRecheckTimer = null;
         this._capabilityConfigWatcher = null;
         this._stakePollTimer          = null;
@@ -217,11 +219,13 @@ class XChainHub {
         this.attestationRound     = new AttestationRound(this, this.providerRegistry);
         this.attestationRound.setConsensus(this.attestationConsensus);
 
-        this.attestationPublisher = new AttestationPublisher(this);
+        this.attestationPublisher  = new AttestationPublisher(this);
+        this.attestationSpotChecker = new AttestationSpotChecker(this, this.providerRegistry);
 
         await this.attestationConsensus.start();
         await this.attestationRound.start();
         await this.attestationPublisher.start();
+        await this.attestationSpotChecker.start();
 
         // Hot-reload provider registry on governance proposal finalization.
         // No-op if governance isn't started or doesn't emit this event.
@@ -239,6 +243,7 @@ class XChainHub {
     getAttestationRound(){       return this.attestationRound; }
     getAttestationConsensus(){   return this.attestationConsensus; }
     getAttestationPublisher(){   return this.attestationPublisher; }
+    getAttestationSpotChecker(){ return this.attestationSpotChecker; }
     getProviderRegistry(){       return this.providerRegistry; }
 
     // Start the cross-chain attestation engine (no-op if P2P is not active)
