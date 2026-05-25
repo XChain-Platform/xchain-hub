@@ -40,6 +40,29 @@ const DEFAULTS = {
         per_call_base_fee_xchain: '0.01',
         deadline_window_blocks: 100,
         additional_config:      {}
+    },
+    // Spec: claude/reports/specs/2026-05-24_llm-attestation-provider.md §3
+    llm: {
+        provider_id:            'llm',
+        version:                1,
+        consensus_strategy:     'judge_model',
+        max_request_bytes:      8192,
+        max_response_bytes:     16384,
+        allowed_redundancy:     [1, 3, 5],
+        min_stake_xchain:       '25000',
+        per_call_base_fee_xchain: '0.50',
+        deadline_window_blocks: 20,
+        additional_config: {
+            approved_models: [
+                'claude-sonnet-4-6',
+                'claude-opus-4-7'
+            ],
+            judge_model:                 'claude-haiku-4-5',
+            judge_equivalence_threshold: 0.85,
+            max_completion_tokens:       1024,
+            default_temperature:         0,
+            prompt_envelope_version:     1
+        }
     }
 };
 
@@ -97,6 +120,15 @@ class ProviderRegistry {
 
     async hotReload(){
         await this.load();
+        // Re-inject updated config into any already-loaded modules so a
+        // governance proposal's effect (e.g. new approved_models for llm)
+        // doesn't require a hub restart.
+        for (let [providerId, mod] of this.modules){
+            if (typeof mod._setConfig === 'function'){
+                try { mod._setConfig(this.providers.get(providerId)); }
+                catch (e) { console.warn('ProviderRegistry: _setConfig (reload) failed for ' + providerId + ' — ' + e.message); }
+            }
+        }
     }
 
     // Whether a provider id is known and active
@@ -112,11 +144,19 @@ class ProviderRegistry {
     // Lazy-load the provider module (fetch + agree + healthCheck). Returns null
     // if no module exists for the given id (e.g. governance registered a provider
     // whose code isn't deployed on this hub yet — that's an operator config issue).
+    //
+    // If the module exports a `_setConfig(def)` hook, the loaded def is injected
+    // so governance-controlled `additional_config` reaches the module without a
+    // hub restart. (LLM uses this for `approved_models`, `judge_model`, etc.)
     getModule(providerId){
         if (!this.providers.has(providerId)) return null;
         if (this.modules.has(providerId)) return this.modules.get(providerId);
         try {
             let mod = require('./providers/' + providerId + '.js');
+            if (typeof mod._setConfig === 'function'){
+                try { mod._setConfig(this.providers.get(providerId)); }
+                catch (e) { console.warn('ProviderRegistry: _setConfig failed for ' + providerId + ' — ' + e.message); }
+            }
             this.modules.set(providerId, mod);
             return mod;
         } catch (e) {

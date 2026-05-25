@@ -15,11 +15,16 @@
  *
  ********************************************************************/
 
-// Providers this self-test knows how to probe. Adding a new provider type
-// (e.g. 'llm') goes here. Each module must export `healthCheck() -> { ok, error? }`.
+// Providers this self-test knows how to probe. Each module must export
+// `healthCheck() -> { ok, error? }`. http_get is always probed; llm is
+// only probed when ANTHROPIC_API_KEY is configured so a stack that hasn't
+// opted in to the LLM provider doesn't flag the capability as unhealthy.
 const PROVIDER_PROBES = {
     http_get: require('../providers/http_get.js')
 };
+if (process.env.ANTHROPIC_API_KEY){
+    PROVIDER_PROBES.llm = require('../providers/llm.js');
+}
 
 exports.selfTest = async (config) => {
     let entry     = (config && config.attestation) || {};

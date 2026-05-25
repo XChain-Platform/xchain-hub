@@ -162,7 +162,8 @@ class AttestationConsensus extends EventEmitter {
         }
 
         // For single-validator stacks (N=1) we already have everything we need
-        this._maybeAdvanceFromProposals(rid);
+        this._maybeAdvanceFromProposals(rid).catch(e =>
+            console.error('AttestationConsensus: advance error for ' + rid.substring(0,16) + '...: ' + (e && e.message ? e.message : e)));
     }
 
     _handleMessage(envelope){
@@ -206,16 +207,22 @@ class AttestationConsensus extends EventEmitter {
             pending.proposals.set(senderPubkey, { body: body, meta: meta, sig: String(d.sig) });
         }
 
-        this._maybeAdvanceFromProposals(rid);
+        this._maybeAdvanceFromProposals(rid).catch(e =>
+            console.error('AttestationConsensus: advance error for ' + rid.substring(0,16) + '...: ' + (e && e.message ? e.message : e)));
     }
 
     // Once enough proposals are in, run provider.agree() to pick a winner and
     // transition to PREPARE phase. Idempotent — extra proposals after a winner
     // is picked are validated against the winner and their sigs collected.
-    _maybeAdvanceFromProposals(rid){
+    //
+    // provider.agree() may be sync (http_get returns the winner immediately)
+    // or async (llm runs judge_model via an API call). We always await it via
+    // Promise.resolve so both shapes work.
+    async _maybeAdvanceFromProposals(rid){
         let pending = this.pending.get(rid);
         if(!pending || pending.finalized) return;
         if(pending.winner) return;  // Already advanced; new proposals handled in PREPARE
+        if(pending._agreeing) return;  // judge_model API call in flight — don't fire twice
 
         // Wait until we have at least REDUNDANCY proposals (or all responsible
         // validators have submitted). Single-validator collapses to immediate.
@@ -229,7 +236,19 @@ class AttestationConsensus extends EventEmitter {
             return;
         }
         let proposalsArr = [...pending.proposals.values()];
-        let winner = providerModule.agree(proposalsArr);
+        pending._agreeing = true;
+        let winner;
+        try {
+            winner = await Promise.resolve(providerModule.agree(proposalsArr));
+        } catch (e) {
+            console.warn('AttestationConsensus: agree() threw for ' + rid.substring(0,16) + '...: ' + (e && e.message ? e.message : e));
+            winner = null;
+        }
+        pending._agreeing = false;
+
+        // Round could have been pruned/finalized while we awaited (rare but possible)
+        if(!this.pending.has(rid) || pending.finalized) return;
+
         if(!winner){
             console.log('AttestationConsensus: no consensus on ' + rid.substring(0,16) + '... (' + proposalsArr.length + ' proposals diverged)');
             // STATUS=no_quorum response is published in Phase 4. For now, let

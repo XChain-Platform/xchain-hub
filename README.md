@@ -109,6 +109,22 @@ Consumers try each endpoint in order and fall back to the next if one is unreach
 | `COINGECKO_API_KEY` | — | CoinGecko API key |
 | `COINMARKETCAP_API_KEY` | — | CoinMarketCap API key (enables second price source) |
 
+### External Attestation Framework (optional)
+
+| Variable | Default | Description |
+|---|---|---|
+| `ATTESTATION_POLL_MS` | `15000` | How often AttestationRound polls the BTC indexer for new pending requests |
+| `ATTESTATION_CONFIRMATIONS` | `3` | BTC blocks of confirmation before initiating an external provider fetch (reorg safety) |
+| `ATTESTATION_FETCH_TIMEOUT` | `10000` | Per-request provider fetch timeout (ms) |
+| `ATTESTATION_ROUND_TIMEOUT_MS` | `120000` | PBFT round lifetime before in-memory state is dropped |
+| `ATTESTATION_QUEUE_PATH` | `./data/attestation-queue.jsonl` | FSYNC queue for in-flight ATTESTATION_RESPONSE broadcasts |
+| `BTC_ENCODER_URL` | — | xchain-encoder JSON-RPC URL for AttestationPublisher's default broadcast pipeline |
+| `BTC_ENCODER_API_KEY` | — | API key for the BTC encoder |
+| `BTC_ADDRESS` | — | BTC address that pays the on-chain ATTESTATION_RESPONSE broadcast fee |
+| `BTC_PUBKEY_HEX` | — | Pubkey hex for the BTC_ADDRESS (encoder needs both for PSBT construction) |
+| `ANTHROPIC_API_KEY` | — | Required to serve the `llm` provider. Without it, the LLM probe in `selfTest('attestation')` is skipped and the validator silently opts out of LLM requests. |
+| `LLM_DEFAULT_MODEL` | first of `approved_models` | LLM model this validator chooses when serving requests. Falls back to registry default if not in `approved_models`. |
+
 See [Configuration](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/CONFIGURATION.md) for the full list of 30+ environment variables.
 
 ## Scripts
