@@ -16,7 +16,7 @@
  * XChain Hub - Database Class
  *
  * This file handles connecting to MariaDB and running SQL queries.
- * Adapted from xchain-indexer-sync/src/db.js — connection pool,
+ * Adapted from xchain-sync/src/db.js — connection pool,
  * circuit breaker, and hub-specific config storage methods.
  *
  ********************************************************************/

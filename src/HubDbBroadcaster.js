@@ -20,7 +20,7 @@
  * to all connected indexers' local hub DB sync clients.
  *
  * This is the cross-chain infrastructure sync channel — separate from the
- * per-chain indexer DB sync channel in xchain-indexer-sync. Indexers
+ * per-chain indexer DB sync channel in xchain-sync. Indexers
  * subscribe to receive new price_snapshots / oracle_prices rows in real
  * time and apply them to their local hub DB copy.
  *
