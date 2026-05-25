@@ -663,6 +663,33 @@ class XChainHub {
         await this.refreshOwnQualification(result.amount, result.block_index);
     }
 
+    // Resolve the latest BTC block index. Priority:
+    //   1. hub.db.getChainTip('BTC') — populated by indexer pushChainTip
+    //      when the indexer is configured with HUB_API_URL.
+    //   2. Direct getlatestblock JSON-RPC call to the BTC indexer — covers
+    //      stacks where the chain-tip-push isn't wired (e.g. local regtest
+    //      development) so block-boundary snapshotting Just Works.
+    // Returns null when both paths fail.
+    async _resolveBtcLatestBlock(){
+        try {
+            let tip = await this.db.getChainTip('BTC');
+            if(tip && tip.blockHeight) return tip.blockHeight;
+        } catch (_) { /* hub db down? fall through */ }
+        let url = await this._resolveBtcIndexerUrl();
+        if(!url) return null;
+        try {
+            let res = await axios.post(url, {
+                jsonrpc: '2.0', id: Date.now(),
+                method: 'getlatestblock', params: {}
+            }, { timeout: 5000 });
+            let result = res && res.data && res.data.result;
+            if(!result || result.error) return null;
+            return Number(result.block_index) || null;
+        } catch (_) {
+            return null;
+        }
+    }
+
     // Resolve the BTC indexer JSON-RPC URL. Priority:
     //   1. BTC_INDEXER_API_URL env var (explicit operator override)
     //   2. Hub's own configs table (populated by xchain-node's updateconfig push)

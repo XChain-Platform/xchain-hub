@@ -208,10 +208,10 @@ class Consensus {
         if (!this.hub || !this.hub.capabilitySnapshot) return null;
         let blockHeight = blockHeightOverride;
         if (blockHeight === undefined || blockHeight === null) {
-            try {
-                let tip = await this.hub.db.getChainTip('BTC');
-                if (tip && tip.blockHeight) blockHeight = tip.blockHeight;
-            } catch (_) { /* no tip available */ }
+            // _resolveBtcLatestBlock checks hub.db.getChainTip first, then
+            // falls back to a direct getlatestblock call against the BTC
+            // indexer. So this works whether or not chain-tip-push is wired.
+            blockHeight = await this.hub._resolveBtcLatestBlock();
         }
         if (!blockHeight) return null;
         return this.hub.capabilitySnapshot.getActiveValidatorSnapshot(blockHeight);
