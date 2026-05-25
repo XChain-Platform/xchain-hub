@@ -295,17 +295,23 @@ class Database {
         return config;
     }
 
-    // Set the latest chain tip for a given coin (block height and block time)
-    // Used by indexers to push their chain tip to the hub for cross-chain reference
-    async setChainTip(coin, blockHeight, blockTime){
-        await this.setParam(coin, 'mainnet', 'chain_tips', 'block_height', String(blockHeight));
-        await this.setParam(coin, 'mainnet', 'chain_tips', 'block_time',   String(blockTime));
+    // Set the latest chain tip for a given coin + network (block height + time)
+    // Used by indexers to push their chain tip to the hub for cross-chain reference.
+    // Network defaults to 'mainnet' for back-compat with older indexers that
+    // don't pass it (single-network hubs continue to work unchanged).
+    async setChainTip(coin, network, blockHeight, blockTime){
+        let net = network || 'mainnet';
+        await this.setParam(coin, net, 'chain_tips', 'block_height', String(blockHeight));
+        await this.setParam(coin, net, 'chain_tips', 'block_time',   String(blockTime));
     }
 
-    // Get the latest chain tip for a given coin
-    // Returns: { blockHeight, blockTime } or null if not set
-    async getChainTip(coin){
-        let cfg = await this.getConfig(coin, 'mainnet', 'chain_tips');
+    // Get the latest chain tip for a given coin + network.
+    // Network defaults to 'mainnet' for back-compat (single-network hubs work
+    // unchanged). Multi-network hubs must pass the network explicitly.
+    // Returns: { blockHeight, blockTime } or null if not set.
+    async getChainTip(coin, network){
+        let net = network || 'mainnet';
+        let cfg = await this.getConfig(coin, net, 'chain_tips');
         if(!cfg.block_height) return null;
         return {
             blockHeight: parseInt(cfg.block_height),

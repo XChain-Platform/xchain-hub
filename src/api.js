@@ -219,7 +219,8 @@ async function startApi(){
         },
 
         // Push a chain tip update from an indexer (used to anchor oracle rounds to BTC block height)
-        async pushchaintip({coin, block_height, block_time}){
+        // Network is optional for back-compat with older indexers; defaults to 'mainnet'.
+        async pushchaintip({coin, network, block_height, block_time}){
             if(!coin) return {error: "coin is required"};
             let chainErr = validateChain(coin);
             if (chainErr) return chainErr;
@@ -228,7 +229,7 @@ async function startApi(){
             if(block_time === undefined || block_time === null)
                 return {error: "block_time is required"};
             try {
-                await hub.db.setChainTip(coin, parseInt(block_height), parseInt(block_time));
+                await hub.db.setChainTip(coin, network, parseInt(block_height), parseInt(block_time));
                 return {status: "success"};
             } catch (err) {
                 return {error: err.message || "error pushing chain tip"};

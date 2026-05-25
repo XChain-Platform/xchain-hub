@@ -179,9 +179,12 @@ class OracleRound {
         this.roundStartTime = Date.now();
 
         // Capture the BTC chain tip at the start of this round
-        // This is the deterministic anchor for cross-node price agreement
+        // This is the deterministic anchor for cross-node price agreement.
+        // Network is resolved via the hub helper so this works whether the
+        // hub serves mainnet, testnet, or regtest BTC indexers.
         try {
-            let btcTip = await this.db.getChainTip('BTC');
+            let network = await this.hub._resolveBtcNetwork();
+            let btcTip = await this.db.getChainTip('BTC', network);
             if (btcTip) {
                 this.currentBtcBlockHeight = btcTip.blockHeight;
                 this.currentBtcBlockTime   = btcTip.blockTime;

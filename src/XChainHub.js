@@ -664,15 +664,18 @@ class XChainHub {
     }
 
     // Resolve the latest BTC block index. Priority:
-    //   1. hub.db.getChainTip('BTC') — populated by indexer pushChainTip
-    //      when the indexer is configured with HUB_API_URL.
+    //   1. hub.db.getChainTip('BTC', <network>) — populated by indexer
+    //      pushChainTip when the indexer is configured with HUB_API_URL.
+    //      Network is the same one _resolveBtcIndexerUrl picks (so we
+    //      consult the matching tip).
     //   2. Direct getlatestblock JSON-RPC call to the BTC indexer — covers
     //      stacks where the chain-tip-push isn't wired (e.g. local regtest
     //      development) so block-boundary snapshotting Just Works.
     // Returns null when both paths fail.
     async _resolveBtcLatestBlock(){
+        let network = await this._resolveBtcNetwork();
         try {
-            let tip = await this.db.getChainTip('BTC');
+            let tip = await this.db.getChainTip('BTC', network);
             if(tip && tip.blockHeight) return tip.blockHeight;
         } catch (_) { /* hub db down? fall through */ }
         let url = await this._resolveBtcIndexerUrl();
@@ -688,6 +691,25 @@ class XChainHub {
         } catch (_) {
             return null;
         }
+    }
+
+    // Which BTC network does this hub talk to? Looks at the hub's own
+    // configs table for an installed BTC indexer. Single-network hubs
+    // (the common case) return whichever network is installed.
+    // Multi-network hubs (rare) get the first match per the preference
+    // order, matching _resolveBtcIndexerUrl.
+    // Defaults to 'mainnet' for safety when no configs are loaded yet.
+    async _resolveBtcNetwork(){
+        if(!this.db) return 'mainnet';
+        let configs;
+        try { configs = await this.db.getAllConfigs(); }
+        catch { return 'mainnet'; }
+        let btc = configs && configs['bitcoin'];
+        if(!btc) return 'mainnet';
+        for(let net of ['regtest', 'testnet', 'mainnet']){
+            if(btc[net] && btc[net]['xchain-indexer']) return net;
+        }
+        return 'mainnet';
     }
 
     // Resolve the BTC indexer JSON-RPC URL. Priority:
