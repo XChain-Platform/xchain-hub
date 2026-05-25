@@ -81,6 +81,44 @@ class CapabilitySnapshot {
         }
     }
 
+    // Whole-federation snapshot — every pubkey with ANY active stake at the
+    // block, regardless of capability. Used by Consensus (config-change PBFT)
+    // where quorum is over all stakers, not a capability subset. Cache key is
+    // disjoint from capability snapshots (capability='*').
+    async getActiveValidatorSnapshot(blockIndex) {
+        if (blockIndex === undefined || blockIndex === null) return null;
+        let key = '*:' + blockIndex;
+        let cached = this.cache.get(key);
+        let now = Date.now();
+        if (cached && cached.expiresAt > now) return cached;
+
+        let url = await this.hub._resolveBtcIndexerUrl();
+        if (!url) return null;
+
+        try {
+            let res = await axios.post(url, {
+                jsonrpc: '2.0',
+                id:      now,
+                method:  'getactivevalidators',
+                params:  { block_index: blockIndex }
+            }, { timeout: 5000 });
+            let result = res && res.data && res.data.result;
+            if (!result || result.error) return null;
+            let snapshot = {
+                capability:  '*',
+                blockIndex:  result.block_index,
+                count:       result.count,
+                validators:  result.validators || [],
+                expiresAt:   now + this.cacheTtlMs
+            };
+            this.cache.set(key, snapshot);
+            this._prune(now);
+            return snapshot;
+        } catch (err) {
+            return null;
+        }
+    }
+
     // Standard PBFT quorum: 2 * floor((N - 1) / 3) + 1
     // Returns 0 when N <= 1 (single-node mode — caller bypasses consensus).
     getQuorum(snapshot) {

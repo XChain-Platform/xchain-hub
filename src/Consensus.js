@@ -113,8 +113,19 @@ class Consensus {
 
     // Propose a config change — returns a Promise that resolves when consensus is reached
     async propose(config) {
+        // Lock the validator-set snapshot at the current BTC chain tip so
+        // every hub in the federation computes the same quorum for this
+        // config-change round. Whole-federation snapshot (not capability-
+        // scoped) because config changes affect every staker equally.
+        // Falls back to live _getQuorum() when the indexer or BTC tip
+        // can't be resolved (graceful degradation; same behavior as before
+        // the snapshot wiring landed).
+        let snapshot = await this._lockSnapshot();
+        let quorum = snapshot
+            ? this.hub.capabilitySnapshot.getQuorum(snapshot)
+            : this._getQuorum();
+
         // Single-node fallback: no peers connected → apply directly
-        let quorum = this._getQuorum();
         if (quorum === 0) {
             if (this.minValidators > 1) {
                 console.warn('Consensus: Operating in single-node mode — MIN_VALIDATORS=' + this.minValidators + ' but quorum is 0');
@@ -147,7 +158,14 @@ class Consensus {
                 applied:  false,
                 timer:    null,
                 resolve:  resolve,
-                reject:   reject
+                reject:   reject,
+                // Snapshot of the federation validator set at the BTC tip
+                // at PROPOSE time. PREPARE/COMMIT checks read pending.quorum
+                // so the entire round uses the same N even when on-chain
+                // stake state drifts mid-round.
+                snapshot:       snapshot || null,
+                quorum:         quorum,
+                btcBlockHeight: snapshot ? snapshot.blockIndex : null
             };
 
             // Add own PREPARE vote
@@ -167,11 +185,14 @@ class Consensus {
                 }
             }, this.timeout);
 
-            // Broadcast PRE_PREPARE with the full config
+            // Broadcast PRE_PREPARE with the full config + the BTC block
+            // height the leader snapshotted at, so followers can resolve the
+            // same validator set at the same block boundary.
             this.peerManager.broadcast(PBFT_PRE_PREPARE, {
-                seq:          seq,
-                configDigest: digest,
-                config:       config
+                seq:            seq,
+                configDigest:   digest,
+                config:         config,
+                btcBlockHeight: proposal.btcBlockHeight
             });
 
             // Check if we already have quorum (unlikely but handles edge case)
@@ -179,12 +200,38 @@ class Consensus {
         });
     }
 
+    // Acquire the federation validator-set snapshot at the current BTC tip.
+    // Used by both the leader (in propose) and followers (in _handlePrePrepare)
+    // — the leader stamps its tip into the PRE_PREPARE envelope so followers
+    // call this with the matching blockIndex.
+    async _lockSnapshot(blockHeightOverride) {
+        if (!this.hub || !this.hub.capabilitySnapshot) return null;
+        let blockHeight = blockHeightOverride;
+        if (blockHeight === undefined || blockHeight === null) {
+            try {
+                let tip = await this.hub.db.getChainTip('BTC');
+                if (tip && tip.blockHeight) blockHeight = tip.blockHeight;
+            } catch (_) { /* no tip available */ }
+        }
+        if (!blockHeight) return null;
+        return this.hub.capabilitySnapshot.getActiveValidatorSnapshot(blockHeight);
+    }
+
     // --- Private methods ---
 
     // Handle incoming P2P messages
     _handleMessage(envelope) {
         switch (envelope.type) {
-            case PBFT_PRE_PREPARE: this._handlePrePrepare(envelope); break;
+            case PBFT_PRE_PREPARE:
+                // _handlePrePrepare is async because it locks the validator-set
+                // snapshot at the leader-stamped block boundary via an indexer
+                // call. Errors are caught and logged — never bubble up to the
+                // gossip layer.
+                this._handlePrePrepare(envelope).catch(err =>
+                    console.error('Consensus: PRE_PREPARE handler error for seq ' +
+                        (envelope && envelope.data && envelope.data.seq) + ':',
+                        err && err.message ? err.message : err));
+                break;
             case PBFT_PREPARE:     this._handlePrepare(envelope);    break;
             case PBFT_COMMIT:      this._handleCommit(envelope);     break;
             case PBFT_VIEW_CHANGE: this._handleViewChange(envelope); break;
@@ -193,8 +240,8 @@ class Consensus {
     }
 
     // Handle PRE_PREPARE: validate and respond with PREPARE
-    _handlePrePrepare(envelope) {
-        let { seq, configDigest, config } = envelope.data;
+    async _handlePrePrepare(envelope) {
+        let { seq, configDigest, config, btcBlockHeight } = envelope.data;
 
         // Validate
         if (!seq || !configDigest || !config) return;
@@ -215,6 +262,15 @@ class Consensus {
 
         // If we already have this proposal, don't create a duplicate
         if (!this.pendingProposals.has(seq)) {
+            // Lock the federation validator-set snapshot at the SAME block
+            // the leader snapshotted at (stamped into the PRE_PREPARE
+            // envelope). Follower quorum-checks use proposal.quorum, so we
+            // stay in lockstep with the leader for the whole round.
+            let snapshot = await this._lockSnapshot(btcBlockHeight);
+            let quorum = snapshot
+                ? this.hub.capabilitySnapshot.getQuorum(snapshot)
+                : this._getQuorum();
+
             // Create a follower proposal (no resolve/reject — we didn't initiate it)
             let proposal = {
                 config:   config,
@@ -225,7 +281,10 @@ class Consensus {
                 applied:  false,
                 timer:    null,
                 resolve:  null,
-                reject:   null
+                reject:   null,
+                snapshot:       snapshot || null,
+                quorum:         quorum,
+                btcBlockHeight: btcBlockHeight || null
             };
 
             // Set cleanup timeout (follower proposals expire too)
@@ -279,7 +338,10 @@ class Consensus {
         let proposal = this.pendingProposals.get(seq);
         if (!proposal || proposal.resolved) return;
 
-        let quorum = this._getQuorum();
+        // Use the round's locked quorum (federation snapshot at the BTC
+        // block boundary), not a live recompute — keeps every hub in
+        // lockstep across the round.
+        let quorum = (typeof proposal.quorum === 'number') ? proposal.quorum : this._getQuorum();
         if (proposal.prepares.size >= quorum) {
             // Only broadcast COMMIT once
             if (!proposal._commitSent) {
@@ -322,7 +384,8 @@ class Consensus {
         let proposal = this.pendingProposals.get(seq);
         if (!proposal || proposal.applied) return;
 
-        let quorum = this._getQuorum();
+        // Same locked quorum as _checkPrepareQuorum — see comment there.
+        let quorum = (typeof proposal.quorum === 'number') ? proposal.quorum : this._getQuorum();
         if (proposal.commits.size >= quorum) {
             proposal.applied = true;
 
@@ -426,16 +489,16 @@ class Consensus {
         return leader && leader.addr === this.peerManager.validatorAddr;
     }
 
-    // Calculate quorum size
-    //
-    // NOT YET BLOCK-BOUNDARY SNAPSHOTTED — config-change PBFT is user-initiated
-    // and has no natural block tie-in like oracle rounds. OracleConsensus uses
-    // hub.capabilitySnapshot.getSnapshot('price', btcBlockHeight); see
-    // capability-staking-model.md §6. To extend snapshotting here, settle on a
-    // block-binding policy first (e.g. tip-at-propose-time stamped into the
-    // PROPOSE envelope so followers snapshot at the same block), then thread
-    // (snapshot, quorum) into the pending-proposal object the same way
-    // OracleConsensus does.
+    // Calculate quorum size — legacy live-set computation, used as a
+    // fallback when a federation snapshot can't be acquired (no BTC tip
+    // available, indexer unreachable, etc.). The normal path is:
+    //   1. Leader calls _lockSnapshot() at PROPOSE → snapshot at BTC tip.
+    //   2. Leader stamps btcBlockHeight into the PRE_PREPARE envelope.
+    //   3. Followers call _lockSnapshot(btcBlockHeight) — same block, same
+    //      validator set, same quorum.
+    //   4. PREPARE/COMMIT checks use proposal.quorum (cached), not this.
+    // Whole-federation snapshot (not capability-scoped) because config
+    // changes affect every staker equally. See capability-staking-model.md §6.
     _getQuorum() {
         // Use validator set if available, otherwise fall back to live peer count
         let N;
