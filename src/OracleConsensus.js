@@ -117,8 +117,18 @@ class OracleConsensus extends EventEmitter {
             return;
         }
 
-        // Single-node fallback: no peers → store directly
-        let quorum = this._getQuorum();
+        // Lock the validator-set snapshot at the round's block boundary so
+        // every hub computes the same quorum for this round, even when stake
+        // state drifts mid-round. Spec: capability-staking-model.md §6.
+        // Falls back to the live validator-set count when the indexer is
+        // unreachable (graceful degradation; same behavior as before the
+        // snapshot wiring landed).
+        let snapshot = this.hub.capabilitySnapshot
+            ? await this.hub.capabilitySnapshot.getSnapshot('price', btcBlockHeight)
+            : null;
+        let quorum = snapshot
+            ? this.hub.capabilitySnapshot.getQuorum(snapshot)
+            : this._getQuorum();
         if (quorum === 0) {
             let aggregated = this._aggregateAll(submissions);
             // Sign locally and embed in the proof so the publisher can include the sig in PRICE v0
@@ -144,7 +154,7 @@ class OracleConsensus extends EventEmitter {
         let isLeader = leader && leader.addr === myAddr;
 
         if (isLeader) {
-            this._proposeRound(round, submissions, false, btcBlockHeight, btcBlockTime);
+            this._proposeRound(round, submissions, false, btcBlockHeight, btcBlockTime, snapshot, quorum);
             return;
         }
 
@@ -168,12 +178,15 @@ class OracleConsensus extends EventEmitter {
             if (this.pendingRounds.has(round) || this.finalized.has(round)) return;
             let subs = this.oracleRound.getSubmissions(round);
             if (!subs || subs.size === 0) return;
-            this._proposeRound(round, subs, true, btcBlockHeight, btcBlockTime);
+            this._proposeRound(round, subs, true, btcBlockHeight, btcBlockTime, snapshot, quorum);
         }, FALLBACK_GRACE_MS);
     }
 
-    // Propose a round (used both by the real leader and the fallback proposer)
-    _proposeRound(round, submissions, isFallback, btcBlockHeight, btcBlockTime) {
+    // Propose a round (used both by the real leader and the fallback proposer).
+    // snapshot + quorum are captured in finalizeRound() at the block boundary
+    // and threaded through so the entire round uses the same locked validator
+    // set. Without the snapshot, falls back to live _getQuorum() per legacy.
+    _proposeRound(round, submissions, isFallback, btcBlockHeight, btcBlockTime, snapshot, quorum) {
         let aggregated = this._aggregateAll(submissions);
         if (aggregated.length === 0) {
             this._storeSkippedRound(round, btcBlockHeight, btcBlockTime).catch(err =>
@@ -198,7 +211,13 @@ class OracleConsensus extends EventEmitter {
             commits:        new Set(),
             signatures:     new Map(),  // pubkey (hex) -> sig (hex)
             finalized:      false,
-            timer:          null
+            timer:          null,
+            // Snapshot of the validator set at this round's block boundary.
+            // Locked here so _checkPrepareQuorum/_checkCommitQuorum compute
+            // against the same N for the round's full lifecycle, even when
+            // on-chain stake state changes mid-round (capability-staking spec §6).
+            snapshot:       snapshot || null,
+            quorum:         (typeof quorum === 'number' && quorum >= 0) ? quorum : this._getQuorum()
         };
 
         // Add own PREPARE vote and signature
@@ -235,13 +254,21 @@ class OracleConsensus extends EventEmitter {
 
     _handleMessage(envelope) {
         switch (envelope.type) {
-            case ORACLE_PROPOSE: this._handlePropose(envelope); break;
+            case ORACLE_PROPOSE:
+                // _handlePropose is async because it locks the validator-set
+                // snapshot at the round's block boundary via an indexer call.
+                // Errors are caught and logged — never bubble up to the gossip layer.
+                this._handlePropose(envelope).catch(err =>
+                    console.error('Oracle: PROPOSE handler error for round ' +
+                        (envelope && envelope.data && envelope.data.round) + ':',
+                        err && err.message ? err.message : err));
+                break;
             case ORACLE_PREPARE: this._handlePrepare(envelope); break;
             case ORACLE_COMMIT:  this._handleCommit(envelope);  break;
         }
     }
 
-    _handlePropose(envelope) {
+    async _handlePropose(envelope) {
         let { round, prices, digest, btcBlockHeight, btcBlockTime, sig_pubkey, sig } = envelope.data;
         if (!round || !prices || !digest) return;
         if (this.finalized.has(round)) return;
@@ -280,18 +307,29 @@ class OracleConsensus extends EventEmitter {
                 ' for round ' + round + ' (leader ' + (leader ? leader.addr : 'unknown') + ' has no submission)');
         }
 
-        // Create or update pending round
+        // Create or update pending round. The validator-set snapshot is locked
+        // at the round's block boundary (same snapshot the leader used in
+        // finalizeRound) so PREPARE/COMMIT checks use the same N on every hub.
         if (!this.pendingRounds.has(round)) {
+            let blockHeight = btcBlockHeight || round;
+            let snapshot = this.hub.capabilitySnapshot
+                ? await this.hub.capabilitySnapshot.getSnapshot('price', blockHeight)
+                : null;
+            let quorum = snapshot
+                ? this.hub.capabilitySnapshot.getQuorum(snapshot)
+                : this._getQuorum();
             let pending = {
                 round:          round,
                 prices:         prices,
                 digest:         digest,
-                btcBlockHeight: btcBlockHeight || round,
+                btcBlockHeight: blockHeight,
                 btcBlockTime:   btcBlockTime   || Math.floor(Date.now() / 1000),
                 prepares:       new Set(),
                 commits:        new Set(),
                 signatures:     new Map(),  // pubkey (hex) -> sig (hex)
                 finalized:      false,
+                snapshot:       snapshot || null,
+                quorum:         quorum,
                 timer:          setTimeout(() => {
                     this.pendingRounds.delete(round);
                 }, this.finalizationTimeout)
@@ -353,7 +391,9 @@ class OracleConsensus extends EventEmitter {
         let pending = this.pendingRounds.get(round);
         if (!pending || pending.finalized) return;
 
-        let quorum = this._getQuorum();
+        // Use the round's locked quorum (snapshot at the block boundary),
+        // not a live recompute — keeps every hub in lockstep across the round.
+        let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
         if (pending.prepares.size >= quorum && !pending._commitSent) {
             pending._commitSent = true;
             pending.commits.add(this.peerManager.validatorAddr);
@@ -380,7 +420,8 @@ class OracleConsensus extends EventEmitter {
         let pending = this.pendingRounds.get(round);
         if (!pending || pending.finalized) return;
 
-        let quorum = this._getQuorum();
+        // Same locked quorum as _checkPrepareQuorum — see comment there.
+        let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
         if (pending.commits.size >= quorum) {
             pending.finalized = true;
             if (pending.timer) clearTimeout(pending.timer);

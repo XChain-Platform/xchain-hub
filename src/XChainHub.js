@@ -36,7 +36,9 @@ const PriceAggregator    = require('./PriceAggregator.js');
 const OraclePublisher    = require('./OraclePublisher.js');
 const HubDbBroadcaster   = require('./HubDbBroadcaster.js');
 const CapabilityRegistry = require('./CapabilityRegistry.js');
+const CapabilitySnapshot = require('./CapabilitySnapshot.js');
 const fs                 = require('fs');
+const axios              = require('axios');
 const PARAMETER_LIST = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass"];
 
 class XChainHub {
@@ -63,8 +65,10 @@ class XChainHub {
         this.oraclePublisher  = null;
         this.hubDbBroadcaster = null;
         this.capabilityRegistry      = null;
+        this.capabilitySnapshot      = new CapabilitySnapshot(this);  // available pre-startCapabilities so consensus engines can use it from start()
         this._capabilityRecheckTimer = null;
         this._capabilityConfigWatcher = null;
+        this._stakePollTimer          = null;
         this._latestBlockIndex        = null;  // most recent observed BTC block index (for capability gossip block_at)
     }
 
@@ -612,9 +616,77 @@ class XChainHub {
                     console.warn('Could not attach capability config watcher to ' + configFilePath + ': ' + e.message);
                 }
             }
+
+            // Poll the BTC indexer for own on-chain stake amount and feed it
+            // into refreshOwnQualification so qualification flags track on-chain
+            // STAKE/UNSTAKE without manual intervention. URL resolves from env
+            // first, then the hub's own configs table (populated by xchain-node).
+            // No-op + no timer attached when no URL can be resolved.
+            let initialUrl = await this._resolveBtcIndexerUrl();
+            if(initialUrl){
+                this._pollOwnStake(pubkey).catch(e => {
+                    console.error('Initial stake poll failed:', e && e.message ? e.message : e);
+                });
+                let stakePollMs = (this.p2pConfig && this.p2pConfig.STAKE_POLL_MS) ? this.p2pConfig.STAKE_POLL_MS : 60000;
+                this._stakePollTimer = setInterval(() => {
+                    this._pollOwnStake(pubkey).catch(e => {
+                        console.error('Stake poll failed:', e && e.message ? e.message : e);
+                    });
+                }, stakePollMs);
+                console.log('Stake-amount poll attached to ' + initialUrl + ' (every ' + stakePollMs + 'ms)');
+            } else {
+                console.log('Stake-amount poll disabled (no BTC indexer URL: set BTC_INDEXER_API_URL or push via updateconfig)');
+            }
         }
 
         console.log('Capability registry initialized' + (this.identity ? ' (identity: ' + this.identity.getPubkeyHex().substring(0,16) + '...)' : ' (no identity — peer-receive only)'));
+    }
+
+    // Query the BTC indexer for own pubkey's current active stake amount + latest
+    // block index, then feed both into refreshOwnQualification. Best-effort —
+    // network/indexer failures are logged but do not change state.
+    async _pollOwnStake(pubkey){
+        let url = await this._resolveBtcIndexerUrl();
+        if(!url) return;
+        let body = {
+            jsonrpc: '2.0',
+            id:      Date.now(),
+            method:  'getownstake',
+            params:  { pubkey: pubkey }
+        };
+        let res = await axios.post(url, body, { timeout: 5000 });
+        let result = res && res.data && res.data.result;
+        if(!result || result.error){
+            // Indexer either not ready or returned a structured error. Don't change state.
+            return;
+        }
+        await this.refreshOwnQualification(result.amount, result.block_index);
+    }
+
+    // Resolve the BTC indexer JSON-RPC URL. Priority:
+    //   1. BTC_INDEXER_API_URL env var (explicit operator override)
+    //   2. Hub's own configs table (populated by xchain-node's updateconfig push)
+    // Returns null when neither yields a usable URL.
+    async _resolveBtcIndexerUrl(){
+        if(process.env.BTC_INDEXER_API_URL) return process.env.BTC_INDEXER_API_URL;
+        if(!this.db) return null;
+        let configs;
+        try { configs = await this.db.getAllConfigs(); }
+        catch { return null; }
+        let btc = configs && configs['bitcoin'];
+        if(!btc) return null;
+        // Prefer regtest > testnet > mainnet so dev loops Just Work. Production
+        // deployments should set BTC_INDEXER_API_URL explicitly.
+        for(let net of ['regtest', 'testnet', 'mainnet']){
+            let netConfig = btc[net];
+            if(!netConfig) continue;
+            // xchain-node's updateconfig push uses nested {host, port, ...} under the module key
+            let nested = netConfig['xchain-indexer'];
+            let host = (nested && nested['host']) || netConfig['INDEXER_HOST'];
+            let port = (nested && nested['port']) || netConfig['INDEXER_API_PORT'];
+            if(host && port) return 'http://' + host + ':' + port;
+        }
+        return null;
     }
 
     // Called by external integration when this hub's on-chain stake amount changes.

@@ -427,6 +427,15 @@ class Consensus {
     }
 
     // Calculate quorum size
+    //
+    // NOT YET BLOCK-BOUNDARY SNAPSHOTTED — config-change PBFT is user-initiated
+    // and has no natural block tie-in like oracle rounds. OracleConsensus uses
+    // hub.capabilitySnapshot.getSnapshot('price', btcBlockHeight); see
+    // capability-staking-model.md §6. To extend snapshotting here, settle on a
+    // block-binding policy first (e.g. tip-at-propose-time stamped into the
+    // PROPOSE envelope so followers snapshot at the same block), then thread
+    // (snapshot, quorum) into the pending-proposal object the same way
+    // OracleConsensus does.
     _getQuorum() {
         // Use validator set if available, otherwise fall back to live peer count
         let N;

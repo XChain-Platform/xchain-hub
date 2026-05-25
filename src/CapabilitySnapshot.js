@@ -1,0 +1,111 @@
+/*********************************************************************
+ *
+ * Copyright © 2025 Dankest, LLC
+ * Based on XChain Platform by Dankest, LLC – https://dankest.llc
+ *
+ * Licensed under the Dankest Community License (Apache License 2.0 + Additional Terms).
+ * You may not use this file except in compliance with that License.
+ *
+ * This software is provided "AS IS", without warranties or conditions of any kind.
+ *
+ **********************************************************************
+ *
+ * XChain Hub - CapabilitySnapshot
+ *
+ * Locks the validator set for a capability at a block-boundary so every
+ * hub in the federation computes the same PBFT quorum for a given round,
+ * even when on-chain stake state drifts mid-round.
+ *
+ * Source of truth is the BTC indexer: every hub independently queries
+ * the same blockIndex and arrives at the same validator set (because
+ * stake state at block N is on-chain-deterministic).
+ *
+ * Self-test / enabled flags are NOT part of the snapshot — those are
+ * local-per-hub. A validator whose self-test fails simply doesn't
+ * participate in the round and gets slashed for non-participation; N
+ * still includes it. This is what makes the snapshot cross-hub
+ * deterministic.
+ *
+ * Spec: claude/reports/specs/2026-05-24_capability-staking-model.md §6
+ *
+ ********************************************************************/
+
+const axios = require('axios');
+
+class CapabilitySnapshot {
+
+    constructor(hub) {
+        this.hub = hub;
+        // (capability:blockIndex) → { validators: [{pubkey, amount}], count, blockIndex, capability, expiresAt }
+        this.cache = new Map();
+        // How long to keep a snapshot. 60s default — enough to span a PBFT round.
+        this.cacheTtlMs = 60 * 1000;
+    }
+
+    // Fetch (or read from cache) the deterministic validator set for the given
+    // capability at the given block boundary. Returns:
+    //   { validators: [{pubkey, amount}, ...], count, blockIndex, capability }
+    // Returns null when the indexer can't be reached or returns an error.
+    async getSnapshot(capability, blockIndex) {
+        if (blockIndex === undefined || blockIndex === null) return null;
+        let key = capability + ':' + blockIndex;
+        let cached = this.cache.get(key);
+        let now = Date.now();
+        if (cached && cached.expiresAt > now) return cached;
+
+        let url = await this.hub._resolveBtcIndexerUrl();
+        if (!url) return null;
+
+        try {
+            let res = await axios.post(url, {
+                jsonrpc: '2.0',
+                id:      now,
+                method:  'getcapabilityvalidators',
+                params:  { capability: capability, block_index: blockIndex }
+            }, { timeout: 5000 });
+            let result = res && res.data && res.data.result;
+            if (!result || result.error) return null;
+            let snapshot = {
+                capability:  result.capability,
+                blockIndex:  result.block_index,
+                count:       result.count,
+                validators:  result.validators || [],
+                expiresAt:   now + this.cacheTtlMs
+            };
+            this.cache.set(key, snapshot);
+            this._prune(now);
+            return snapshot;
+        } catch (err) {
+            // Indexer unreachable / down — caller falls back to local validator set.
+            return null;
+        }
+    }
+
+    // Standard PBFT quorum: 2 * floor((N - 1) / 3) + 1
+    // Returns 0 when N <= 1 (single-node mode — caller bypasses consensus).
+    getQuorum(snapshot) {
+        if (!snapshot) return 0;
+        let N = snapshot.count;
+        if (N <= 1) return 0;
+        return 2 * Math.floor((N - 1) / 3) + 1;
+    }
+
+    // Whether a pubkey appears in the snapshot's validator set.
+    // PBFT participants use this to decide whether to count incoming votes.
+    isInSnapshot(snapshot, pubkey) {
+        if (!snapshot || !pubkey) return false;
+        let target = String(pubkey).toLowerCase();
+        for (let v of snapshot.validators) {
+            if (String(v.pubkey).toLowerCase() === target) return true;
+        }
+        return false;
+    }
+
+    _prune(now) {
+        for (let [k, v] of this.cache) {
+            if (v.expiresAt <= now) this.cache.delete(k);
+        }
+    }
+}
+
+module.exports = CapabilitySnapshot;
