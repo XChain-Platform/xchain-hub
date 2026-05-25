@@ -130,6 +130,10 @@ async function startApi(){
     // Start governance engine (no-op if P2P is not active)
     await hub.startGovernance();
 
+    // Start the External Attestation Framework subsystems (no-op if P2P is not active).
+    // Sits after governance so ProviderRegistry's hot-reload hook can attach.
+    await hub.startAttestation();
+
     // Create the app
     const app = express();
 

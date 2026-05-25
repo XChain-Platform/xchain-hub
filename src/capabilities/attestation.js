@@ -2,38 +2,51 @@
  *
  * XChain Hub - Capability Self-Test: attestation
  *
- * Determines whether this hub is operationally ready to serve
- * attestation requests. Validates that at least one provider is
- * available. Providers live in xchain-hub/src/providers/ (added by the
- * attestation framework — see specs/2026-05-24_external-attestation-framework.md).
+ * Determines whether this hub is operationally ready to serve attestation
+ * requests. Probes the built-in provider modules' healthCheck() to verify
+ * the hub can actually reach the upstream services each provider relies on.
  *
  * Config shape:
- *   { attestation: { providers: { http_get: {}, llm: { api_key: '...' } } } }
+ *   { attestation: { providers: { http_get: false } } }
+ *     - omit a key to enable the provider (the common case)
+ *     - set a key to `false` to opt out of a provider on this hub
  *
- * Phase 0 keeps this lightweight: http_get is implicitly available (no
- * config needed); llm requires api_key. Phase 1 adds richer per-provider
- * probes via the provider modules themselves.
+ * Spec: claude/reports/specs/2026-05-24_external-attestation-framework.md (§8)
  *
  ********************************************************************/
 
+// Providers this self-test knows how to probe. Adding a new provider type
+// (e.g. 'llm') goes here. Each module must export `healthCheck() -> { ok, error? }`.
+const PROVIDER_PROBES = {
+    http_get: require('../providers/http_get.js')
+};
+
 exports.selfTest = async (config) => {
-    let entry = (config && config.attestation) || {};
-    let providers = entry.providers || {};
-    let active = [];
+    let entry     = (config && config.attestation) || {};
+    let optouts   = entry.providers || {};
+    let active    = [];
+    let failed    = [];
 
-    // http_get: implicitly available — needs only outbound HTTPS
-    // If operator has explicitly disabled http_get via providers.http_get = false, skip it
-    if (providers.http_get !== false) {
-        active.push('http_get');
-    }
-
-    // llm: requires api_key
-    if (providers.llm && providers.llm.api_key) {
-        active.push('llm');
+    for (let id of Object.keys(PROVIDER_PROBES)) {
+        if (optouts[id] === false) continue;
+        let mod = PROVIDER_PROBES[id];
+        if (!mod || typeof mod.healthCheck !== 'function') {
+            failed.push(id + ': no healthCheck()');
+            continue;
+        }
+        try {
+            let r = await mod.healthCheck();
+            if (r && r.ok) active.push(id);
+            else            failed.push(id + ': ' + (r && r.error ? r.error : 'unknown'));
+        } catch (e) {
+            failed.push(id + ': probe threw ' + (e && e.message ? e.message : String(e)));
+        }
     }
 
     if (active.length === 0) {
-        return { ok: false, reason: 'no attestation providers available' };
+        return { ok: false, reason: 'no attestation providers healthy: ' + failed.join('; ') };
     }
-    return { ok: true, providers: active };
+    let res = { ok: true, providers: active };
+    if (failed.length > 0) res.failed = failed;
+    return res;
 };

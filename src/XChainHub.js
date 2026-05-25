@@ -37,6 +37,10 @@ const OraclePublisher    = require('./OraclePublisher.js');
 const HubDbBroadcaster   = require('./HubDbBroadcaster.js');
 const CapabilityRegistry = require('./CapabilityRegistry.js');
 const CapabilitySnapshot = require('./CapabilitySnapshot.js');
+const ProviderRegistry      = require('./ProviderRegistry.js');
+const AttestationRound      = require('./AttestationRound.js');
+const AttestationConsensus  = require('./AttestationConsensus.js');
+const AttestationPublisher  = require('./AttestationPublisher.js');
 const fs                 = require('fs');
 const axios              = require('axios');
 const PARAMETER_LIST = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass"];
@@ -66,6 +70,10 @@ class XChainHub {
         this.hubDbBroadcaster = null;
         this.capabilityRegistry      = null;
         this.capabilitySnapshot      = new CapabilitySnapshot(this);  // available pre-startCapabilities so consensus engines can use it from start()
+        this.providerRegistry        = null;
+        this.attestationRound        = null;
+        this.attestationConsensus    = null;
+        this.attestationPublisher    = null;
         this._capabilityRecheckTimer = null;
         this._capabilityConfigWatcher = null;
         this._stakePollTimer          = null;
@@ -195,6 +203,43 @@ class XChainHub {
     getOracle(){
         return this.oracle;
     }
+
+    // Start the External Attestation Framework subsystems (no-op if P2P is not active).
+    // ProviderRegistry → AttestationConsensus → AttestationRound → AttestationPublisher.
+    // Mirrors startOracle()'s shape; intended to be called after startGovernance.
+    async startAttestation(){
+        if(!this.peerManager) return;
+
+        this.providerRegistry = new ProviderRegistry(this);
+        await this.providerRegistry.load();
+
+        this.attestationConsensus = new AttestationConsensus(this, this.providerRegistry);
+        this.attestationRound     = new AttestationRound(this, this.providerRegistry);
+        this.attestationRound.setConsensus(this.attestationConsensus);
+
+        this.attestationPublisher = new AttestationPublisher(this);
+
+        await this.attestationConsensus.start();
+        await this.attestationRound.start();
+        await this.attestationPublisher.start();
+
+        // Hot-reload provider registry on governance proposal finalization.
+        // No-op if governance isn't started or doesn't emit this event.
+        if(this.governance && typeof this.governance.on === 'function'){
+            this.governance.on('proposal:finalized', () => {
+                this.providerRegistry.hotReload().catch(e =>
+                    console.error('ProviderRegistry hot-reload failed:', e && e.message ? e.message : e));
+            });
+        }
+
+        console.log('Attestation framework started (providers: ' + this.providerRegistry.listProviderIds().join(', ') + ')');
+    }
+
+    // Accessors
+    getAttestationRound(){       return this.attestationRound; }
+    getAttestationConsensus(){   return this.attestationConsensus; }
+    getAttestationPublisher(){   return this.attestationPublisher; }
+    getProviderRegistry(){       return this.providerRegistry; }
 
     // Start the cross-chain attestation engine (no-op if P2P is not active)
     async startCrossChain(){
