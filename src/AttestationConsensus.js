@@ -65,6 +65,18 @@ class AttestationConsensus extends EventEmitter {
         // Already-finalized requests (prevents double-publish on re-receipt)
         this.finalized = new Set();
 
+        // Early-arrival buffer. With staggered hub polls, the first proposer's
+        // PROPOSE often reaches peers before they start their own round —
+        // _handlePropose silently returns at `if(!pending)`, losing the vote.
+        // Buffer envelopes here keyed by rid and drain in propose() once
+        // pending exists. Bounded TTL prevents leaks if pending never starts.
+        // Map<rid, Array<envelope>>
+        this.earlyMessages = new Map();
+        // Map<rid, expiresAtMs>
+        this.earlyMessageTtl = new Map();
+        this.earlyMessageTtlMs = 60 * 1000;
+        this.earlyMessageMaxPerRid = 32;
+
         this._messageHandler = null;
         this.roundTimeoutMs  = parseInt(this.config.ATTESTATION_ROUND_TIMEOUT_MS) || DEFAULT_ROUND_TIMEOUT_MS;
     }
@@ -88,6 +100,40 @@ class AttestationConsensus extends EventEmitter {
             if(p.timer) clearTimeout(p.timer);
         }
         this.pending.clear();
+        this.earlyMessages.clear();
+        this.earlyMessageTtl.clear();
+    }
+
+    _pruneEarlyMessages(now){
+        for(let [rid, expiresAt] of this.earlyMessageTtl){
+            if(expiresAt <= now){
+                this.earlyMessages.delete(rid);
+                this.earlyMessageTtl.delete(rid);
+            }
+        }
+    }
+
+    _bufferEarlyMessage(rid, envelope){
+        let now = Date.now();
+        this._pruneEarlyMessages(now);
+        let arr = this.earlyMessages.get(rid);
+        if(!arr){
+            arr = [];
+            this.earlyMessages.set(rid, arr);
+        }
+        if(arr.length >= this.earlyMessageMaxPerRid) return;
+        arr.push(envelope);
+        this.earlyMessageTtl.set(rid, now + this.earlyMessageTtlMs);
+    }
+
+    _drainEarlyMessages(rid){
+        let arr = this.earlyMessages.get(rid);
+        if(!arr) return;
+        this.earlyMessages.delete(rid);
+        this.earlyMessageTtl.delete(rid);
+        for(let env of arr){
+            this._handleMessage(env);
+        }
     }
 
     // Called by AttestationRound after it fetches the body for a request.
@@ -161,6 +207,12 @@ class AttestationConsensus extends EventEmitter {
             });
         }
 
+        // Replay messages that arrived before our round was set up. With
+        // staggered hub polls, the first proposer's PROPOSE typically lands
+        // before peers create their pending entry — without this drain,
+        // _handlePropose's `if(!pending) return` loses those votes.
+        this._drainEarlyMessages(rid);
+
         // For single-validator stacks (N=1) we already have everything we need
         this._maybeAdvanceFromProposals(rid).catch(e =>
             console.error('AttestationConsensus: advance error for ' + rid.substring(0,16) + '...: ' + (e && e.message ? e.message : e)));
@@ -180,7 +232,13 @@ class AttestationConsensus extends EventEmitter {
         let rid = String(d.requestId).toLowerCase();
         if(this.finalized.has(rid)) return;
         let pending = this.pending.get(rid);
-        if(!pending) return;  // Not a request we're tracking (we're not responsible)
+        if(!pending){
+            // Round not started yet — buffer for drain in propose(). Without
+            // this, the first proposer's PROPOSE is lost to peers whose
+            // _startRound hasn't run yet, and PBFT can't reach 2f+1.
+            this._bufferEarlyMessage(rid, envelope);
+            return;
+        }
 
         let senderPubkey = String(d.sig_pubkey || '').toLowerCase();
         if(!senderPubkey) return;
@@ -292,7 +350,10 @@ class AttestationConsensus extends EventEmitter {
         let rid = String(d.requestId).toLowerCase();
         if(this.finalized.has(rid)) return;
         let pending = this.pending.get(rid);
-        if(!pending) return;
+        if(!pending){
+            this._bufferEarlyMessage(rid, envelope);
+            return;
+        }
 
         let senderPubkey = String(d.sig_pubkey || '').toLowerCase();
         if(!pending.responsible.some(v => v.pubkey === senderPubkey)) return;
@@ -368,7 +429,11 @@ class AttestationConsensus extends EventEmitter {
         let rid = String(d.requestId).toLowerCase();
         if(this.finalized.has(rid)) return;
         let pending = this.pending.get(rid);
-        if(!pending || !pending.winner) return;
+        if(!pending){
+            this._bufferEarlyMessage(rid, envelope);
+            return;
+        }
+        if(!pending.winner) return;
 
         let senderPubkey = String(d.sig_pubkey || '').toLowerCase();
         if(!pending.responsible.some(v => v.pubkey === senderPubkey)) return;
