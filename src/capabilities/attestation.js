@@ -17,12 +17,16 @@
 
 // Providers this self-test knows how to probe. Each module must export
 // `healthCheck() -> { ok, error? }`. http_get is always probed; llm is
-// only probed when ANTHROPIC_API_KEY is configured so a stack that hasn't
-// opted in to the LLM provider doesn't flag the capability as unhealthy.
+// only probed when ANY supported credential path resolves (CLAUDE_CONFIG_DIR,
+// CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, or the default isolated dir),
+// so a stack that hasn't opted in to LLM doesn't flag the capability as
+// unhealthy.
+const { resolveHubLlmAuth } = require('../lib/hub-credentials');
+
 const PROVIDER_PROBES = {
     http_get: require('../providers/http_get.js')
 };
-if (process.env.ANTHROPIC_API_KEY){
+if (resolveHubLlmAuth().ok){
     PROVIDER_PROBES.llm = require('../providers/llm.js');
 }
 

@@ -27,17 +27,26 @@
  *   agree(proposals)         -> Promise<{ body, meta } | null>
  *   healthCheck()            -> Promise<{ ok, error? }>
  *
- * `agree` is async on this provider: redundancy>=3 consensus uses a
- * `judge_model` API call (spec §6.2). For redundancy=1 the single
- * proposal is returned trivially (spec §6.1).
+ * Two transports are supported and resolved at call time per the operator's
+ * configured credentials (see lib/hub-credentials.js):
  *
- * No SDK dependency — direct HTTPS to api.anthropic.com keeps hub deps
- * minimal. Switch to @anthropic-ai/sdk if/when we add prompt caching or
- * streaming, neither of which is in this provider's v1 scope.
+ *   `claude_spawn`  — shells out to the `claude` CLI. Preferred. Auth
+ *                     inherits from CLAUDE_CONFIG_DIR (auto-refreshing
+ *                     refresh token written by `claude login`) or
+ *                     CLAUDE_CODE_OAUTH_TOKEN. Cost model: Claude Code
+ *                     subscription. Determinism: CLI does not expose
+ *                     temperature; redundancy>=3 still converges via the
+ *                     judge_model agreement check.
+ *
+ *   `anthropic_api` — direct HTTPS to api.anthropic.com using
+ *                     ANTHROPIC_API_KEY. Pay-per-token API billing.
+ *                     Supports temperature=0 explicitly.
  *
  ********************************************************************/
 
 const https = require('https');
+const { resolveHubLlmAuth } = require('../lib/hub-credentials');
+const { runClaudePrint } = require('../lib/claude-spawn');
 
 // Provider-def-injected configuration. ProviderRegistry calls _setConfig
 // after loading the def from the configs table; these defaults are the
@@ -62,17 +71,13 @@ exports._setConfig = (def) => {
     if (Number(ac.prompt_envelope_version)) PROMPT_ENVELOPE_VERSION = Number(ac.prompt_envelope_version);
 };
 
-// Issue an Anthropic API call against the user-supplied prompt envelope.
+// Issue an LLM call against the user-supplied prompt envelope.
 // Returns { body: Buffer(response_text_utf8), meta: <model_used> }.
 //
 // Envelope shape (spec §4):
-//   { prompt: string, system?: string, max_tokens?: number, format?: 'text'|'json_object', temperature?: number }
-//
-// Approved-model selection (spec §5):
-//   LLM_DEFAULT_MODEL env override, falling back to APPROVED_MODELS[0].
-//   If the env value isn't in APPROVED_MODELS, fall back rather than serve
-//   an unauthorized model (the response would fail signature consensus
-//   anyway since other validators would use a different model).
+//   { prompt: string, system?: string, max_tokens?: number,
+//     format?: 'text'|'json_object', temperature?: number,
+//     envelope_version?: number }
 exports.fetch = async (payload, options) => {
     options = options || {};
     let envelope;
@@ -84,39 +89,25 @@ exports.fetch = async (payload, options) => {
     if (envelope.envelope_version !== undefined && Number(envelope.envelope_version) > PROMPT_ENVELOPE_VERSION)
         throw new Error('llm: unsupported envelope_version (got ' + envelope.envelope_version + ', max ' + PROMPT_ENVELOPE_VERSION + ')');
 
-    let defaultModel = process.env.LLM_DEFAULT_MODEL || APPROVED_MODELS[0];
-    if (APPROVED_MODELS.indexOf(defaultModel) === -1) defaultModel = APPROVED_MODELS[0];
+    let model = process.env.LLM_DEFAULT_MODEL || APPROVED_MODELS[0];
+    if (APPROVED_MODELS.indexOf(model) === -1) model = APPROVED_MODELS[0];
 
     let maxTokens   = Math.min(Number(envelope.max_tokens) || MAX_TOKENS_DEFAULT, MAX_TOKENS_DEFAULT);
     let temperature = (typeof envelope.temperature === 'number') ? envelope.temperature : DEFAULT_TEMPERATURE;
-    // For redundancy >= 3 the framework will run judge_model; temperature 0
-    // is the highest-determinism choice. Currently the provider doesn't see
-    // redundancy here (that decision is at the consensus layer); validators
-    // always fetch at the envelope/default temperature and judge_model
-    // declares semantic equivalence.
 
-    let reqBody = {
-        model:       defaultModel,
-        max_tokens:  maxTokens,
-        temperature: temperature,
-        messages:    [{ role: 'user', content: envelope.prompt }]
-    };
-    if (envelope.system) reqBody.system = envelope.system;
+    const text = await _runLlm({
+        prompt:      envelope.prompt,
+        system:      envelope.system,
+        model,
+        maxTokens,
+        temperature,
+        timeoutMs:   options.timeoutMs
+    });
 
-    let result = await callAnthropic('/v1/messages', reqBody, options);
-
-    // Concatenate any text segments — Anthropic returns content as an array of typed blocks
-    let text = '';
-    if (Array.isArray(result.content)){
-        for (let c of result.content){
-            if (c.type === 'text' && typeof c.text === 'string') text += c.text;
-        }
-    }
-    if (text.length === 0) throw new Error('llm: Anthropic API returned empty text content');
-
+    if (!text || text.length === 0) throw new Error('llm: returned empty text');
     return {
         body: Buffer.from(text, 'utf8'),
-        meta: defaultModel
+        meta: model
     };
 };
 
@@ -134,33 +125,25 @@ exports.agree = async (proposals) => {
     }
 
     let candidates = proposals.map(p => Buffer.isBuffer(p.body) ? p.body.toString('utf8') : String(p.body || ''));
-    let judgePrompt = buildJudgePrompt(candidates);
+    let judgePrompt = _buildJudgePrompt(candidates);
 
-    let reqBody = {
-        model:       JUDGE_MODEL,
-        max_tokens:  256,
-        temperature: 0,
-        messages:    [{ role: 'user', content: judgePrompt }]
-    };
-
-    let result;
+    let judgeText;
     try {
-        result = await callAnthropic('/v1/messages', reqBody, {});
-    } catch (e) {
+        judgeText = await _runLlm({
+            prompt:      judgePrompt,
+            model:       JUDGE_MODEL,
+            maxTokens:   256,
+            temperature: 0
+        });
+    } catch (_) {
         // Judge unreachable — defer to no_quorum. Validators will retry on
         // the next request. (Spec §6.4 ack residual risk.)
         return null;
     }
 
-    let judgeText = '';
-    if (Array.isArray(result.content)){
-        for (let c of result.content){
-            if (c.type === 'text' && typeof c.text === 'string') judgeText += c.text;
-        }
-    }
     if (!judgeText) return null;
 
-    // Judge may wrap output in markdown/prose; extract the first {...} JSON object
+    // Judge may wrap output in markdown/prose; extract the first {...} JSON object.
     let judgement;
     try {
         let m = judgeText.match(/\{[\s\S]*?\}/);
@@ -170,33 +153,73 @@ exports.agree = async (proposals) => {
         return null;
     }
 
-    if (judgement.equivalent === true && judgement.canonical_index !== null && judgement.canonical_index !== undefined){
+    if (judgement.equivalent === true && judgement.canonical_index !== null && judgement.canonical_index !== undefined) {
         let idx = Number(judgement.canonical_index) - 1;  // judge prompt is 1-indexed
-        if (Number.isInteger(idx) && idx >= 0 && idx < proposals.length){
+        if (Number.isInteger(idx) && idx >= 0 && idx < proposals.length) {
             return { body: proposals[idx].body, meta: proposals[idx].meta };
         }
     }
     return null;
 };
 
-// Capability self-test probe. Confirms API key is configured. Avoids
-// burning the API quota on a real completion (a missing key is the only
-// fixed failure mode this probe needs to catch at startup).
+// Capability self-test probe. Confirms at least one credential path is
+// configured. Avoids burning quota on a real completion at startup — a
+// missing/misconfigured credential is the only fixed failure mode this
+// probe needs to catch.
 exports.healthCheck = async () => {
-    let apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) return { ok: false, error: 'ANTHROPIC_API_KEY not configured' };
-    return { ok: true, status: 'key-present' };
+    const auth = resolveHubLlmAuth();
+    if (!auth.ok) return { ok: false, error: auth.detail || auth.reason || 'no_credential_configured' };
+    return { ok: true, transport: auth.transport, source: auth.source };
 };
 
 // ---------- internals ----------
 
-function buildJudgePrompt(candidates){
+// Pick the configured transport and execute the LLM call.
+// Returns the response text (string). Throws on transport-level failure.
+async function _runLlm({ prompt, system, model, maxTokens, temperature, timeoutMs }) {
+    const auth = resolveHubLlmAuth();
+    if (!auth.ok) throw new Error('llm: ' + (auth.detail || auth.reason || 'no credentials'));
+
+    if (auth.transport === 'claude_spawn') {
+        // The CLI doesn't expose temperature or a hard max-tokens cap;
+        // redundancy>=3's judge_model step is what converges spreads.
+        const { result } = await runClaudePrint({
+            prompt,
+            model,
+            systemPrompt: system,
+            timeoutMs:    timeoutMs || 60000
+        });
+        return result;
+    }
+
+    if (auth.transport === 'anthropic_api') {
+        const reqBody = {
+            model,
+            max_tokens:  maxTokens,
+            temperature,
+            messages:    [{ role: 'user', content: prompt }]
+        };
+        if (system) reqBody.system = system;
+        const result = await _callAnthropic('/v1/messages', reqBody, auth.apiKey, { timeoutMs });
+        let text = '';
+        if (Array.isArray(result.content)) {
+            for (let c of result.content) {
+                if (c.type === 'text' && typeof c.text === 'string') text += c.text;
+            }
+        }
+        return text;
+    }
+
+    throw new Error('llm: unsupported transport ' + auth.transport);
+}
+
+function _buildJudgePrompt(candidates) {
     let lines = [
         'You are an evaluator. Determine whether the candidate responses below are SEMANTICALLY EQUIVALENT.',
         '',
         'Candidate responses:'
     ];
-    for (let i = 0; i < candidates.length; i++){
+    for (let i = 0; i < candidates.length; i++) {
         lines.push((i + 1) + '. ' + candidates[i]);
     }
     lines.push('');
@@ -209,17 +232,14 @@ function buildJudgePrompt(candidates){
     return lines.join('\n');
 }
 
-async function callAnthropic(apiPath, body, options){
-    let apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) throw new Error('llm: ANTHROPIC_API_KEY not configured');
-
+async function _callAnthropic(apiPath, body, apiKey, options) {
     let timeoutMs = Number(options && options.timeoutMs) || 30000;
     let data = JSON.stringify(body);
 
     return await new Promise((resolve, reject) => {
         let settled = false;
-        let safeResolve = (v) => { if (!settled){ settled = true; resolve(v); } };
-        let safeReject  = (e) => { if (!settled){ settled = true; reject(e); } };
+        let safeResolve = (v) => { if (!settled) { settled = true; resolve(v); } };
+        let safeReject  = (e) => { if (!settled) { settled = true; reject(e); } };
 
         let req = https.request({
             method:   'POST',
@@ -239,7 +259,7 @@ async function callAnthropic(apiPath, body, options){
                 let str = Buffer.concat(chunks).toString('utf8');
                 try {
                     let json = JSON.parse(str);
-                    if (json.type === 'error' || json.error){
+                    if (json.type === 'error' || json.error) {
                         let msg = (json.error && json.error.message) ? json.error.message : JSON.stringify(json);
                         safeReject(new Error('llm: Anthropic API: ' + msg));
                         return;
