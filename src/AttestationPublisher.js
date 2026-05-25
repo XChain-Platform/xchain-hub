@@ -144,17 +144,22 @@ class AttestationPublisher {
     }
 
     // Build the pipe-delimited ATTESTATION_RESPONSE wire format that the
-    // indexer's attestation_response handler parses. Response body is
-    // converted to UTF-8 text for the wire (Phase 2-3 limitation: binary
-    // responses are not preserved through this transform).
+    // indexer's attestation_response handler parses. Response body travels
+    // as base64 so binary payloads round-trip losslessly through the
+    // pipe-delimited format and so the indexer's signature verification
+    // hashes the same bytes the hub signed.
     buildAttestationResponseWire({ requestId, providerId, responseBody, status, meta, signatures }){
-        let bodyStr = Buffer.isBuffer(responseBody) ? responseBody.toString('utf8') : String(responseBody || '');
+        let bodyBuf;
+        if (Buffer.isBuffer(responseBody))      bodyBuf = responseBody;
+        else if (responseBody == null)          bodyBuf = Buffer.alloc(0);
+        else                                    bodyBuf = Buffer.from(String(responseBody), 'utf8');
+        let bodyB64 = bodyBuf.toString('base64');
         let parts = [
             'ATTESTATION_RESPONSE',
             '0',
             String(requestId).toLowerCase(),
             String(providerId),
-            bodyStr,
+            bodyB64,
             String(status),
             String(meta || ''),
             String(signatures.length)
