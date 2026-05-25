@@ -192,6 +192,37 @@ class SlashDetector {
         let query = "SELECT * FROM slash_proposals WHERE validator_pubkey = ? ORDER BY created_at DESC LIMIT 50";
         return await this.db.doQuery(query, [validatorPubkey]);
     }
+
+    // Record an attestation-divergence offense: a validator's PROPOSE body
+    // didn't match the quorum-agreed winner. Only meaningful for providers
+    // using byte_equality consensus — for judge_model providers, the winner
+    // is one of many semantically-equivalent candidates and "not the winner"
+    // doesn't imply "wrong". The caller filters by provider strategy.
+    //
+    // `requestId` is used as the round key. Evidence captures the request
+    // metadata, validator's proposed body hash, and the winning body hash.
+    //
+    // Spec: claude/reports/specs/2026-05-24_external-attestation-framework.md §8.3
+    async recordAttestationDivergence(validatorPubkey, requestId, providerId, proposedBodyHash, winnerBodyHash){
+        if(!validatorPubkey || !requestId) return;
+        let pk = String(validatorPubkey).toLowerCase();
+        if(!/^[0-9a-fA-F]{64}$/.test(pk)){
+            console.warn('SlashDetector: Invalid pubkey for attestation divergence — skipping');
+            return;
+        }
+        let evidence = JSON.stringify({
+            requestId:        String(requestId).toLowerCase(),
+            providerId:       String(providerId || ''),
+            proposedBodyHash: String(proposedBodyHash || ''),
+            winnerBodyHash:   String(winnerBodyHash || '')
+        });
+        // requestId is hex; lift the first 8 chars as a round-equivalent
+        // pseudo-counter so existing slash_proposals.round_number column is
+        // populated with something monotonic-ish per offense (cosmetic — the
+        // unique signal is validator_pubkey + offense_type + evidence).
+        let pseudoRound = parseInt(String(requestId).substring(0, 8), 16) || 0;
+        await this._recordSlashProposal(pk, 'attestation_divergence', pseudoRound, evidence);
+    }
 }
 
 module.exports = SlashDetector;

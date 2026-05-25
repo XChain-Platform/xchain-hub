@@ -317,12 +317,26 @@ class AttestationConsensus extends EventEmitter {
         pending.winner = winner;
         pending.status = 'ok';
 
-        // Walk back through the proposals and collect any sigs that match the winner
+        // Walk back through the proposals and collect any sigs that match the winner.
+        // Proposals that diverge from the winner are slash candidates for
+        // byte_equality providers (e.g. http_get) — for judge_model the
+        // winner is one of many semantically-equivalent candidates, so
+        // non-match doesn't imply wrong.
         let winnerHash = crypto.createHash('sha256').update(winner.body).digest();
+        let winnerHashHex = winnerHash.toString('hex');
+        let providerDef = this.providerRegistry.getDef(pending.providerId);
+        let strategy = providerDef && providerDef.consensus_strategy;
         for(let [pubkey, p] of pending.proposals){
             let pHash = crypto.createHash('sha256').update(p.body).digest();
-            if(Buffer.compare(pHash, winnerHash) === 0 && p.meta === winner.meta){
+            let matchesWinner = (Buffer.compare(pHash, winnerHash) === 0 && p.meta === winner.meta);
+            if(matchesWinner){
                 pending.signatures.set(pubkey, p.sig);
+            } else if(strategy === 'byte_equality' && this.hub.slashDetector){
+                // Diverged proposal under byte_equality — record as slash candidate.
+                // Best-effort; failures don't disrupt the round.
+                this.hub.slashDetector.recordAttestationDivergence(
+                    pubkey, rid, pending.providerId, pHash.toString('hex'), winnerHashHex
+                ).catch(e => console.warn('AttestationConsensus: divergence record failed: ' + (e && e.message ? e.message : e)));
             }
         }
 
