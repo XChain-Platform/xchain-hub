@@ -179,7 +179,9 @@ class AttestationRound {
         let leaderPubkey = responsible[0] ? responsible[0].pubkey : null;
         let amResponsible = responsible.some(v => v.pubkey === myPubkey);
         if(!amResponsible){
-            // Not in the responsible set. Stay out of this round.
+            // Not in the responsible set — log so operators can distinguish "saw and skipped" from "never polled".
+            console.log('AttestationRound: skipping ' + rid.substring(0,16) + '... — not responsible at block ' + snapshotBlk +
+                        ' (snapshot=' + snapshot.validators.length + ', leader=' + (leaderPubkey ? leaderPubkey.substring(0,16) + '...' : 'none') + ')');
             return;
         }
         let amLeader = (leaderPubkey === myPubkey);
