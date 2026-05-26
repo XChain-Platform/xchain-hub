@@ -25,16 +25,19 @@ Decentralized config oracle, price oracle, and cross-chain coordinator for the X
 - **Decentralized price oracle** — validators fetch prices from CoinGecko and CoinMarketCap, aggregate via trimmed median, finalize via PBFT consensus
 - **Fee quotes** — gas → XCHAIN → native coin conversion using live oracle prices
 - **Cross-chain attestation** — PBFT-based attestation for cross-chain actions with per-chain-pair validator filtering
+- **External attestation framework** — contracts emit `ATTESTATION_REQUEST` (via `xchain.attestation` VM namespace); validators in the responsible-set fetch from the named provider, reach PBFT consensus, and publish `ATTESTATION_RESPONSE` on-chain. Built-in providers: `http_get` (byte-equality) and `llm` (Claude judge-model)
+- **Capability-based staking** — four independent capabilities (`price`, `cross_chain`, `oracle_publish`, `attestation`) auto-qualify per validator based on aggregate stake amount vs governance-configurable `min_stake[capability]`; per-capability self-tests gate local participation
+- **Block-boundary quorum snapshot** — every PBFT round locks N at a specific `block_index` via the indexer, so the qualified validator set is deterministic federation-wide even as stake drifts
 - **SWAP lifecycle tracking** — tracks cross-chain swaps through initiated → attested → executed → settled
 - **Reorg propagation** — cross-chain reorg detection, hub rollback, and coordinated chain rollback via PBFT consensus
 - **Governance** — off-chain PBFT voting for parameter changes (7-day voting period, 2/3+ approval, 50% quorum)
-- **Reward tracking** — per-round XCHAIN rewards for oracle participants
-- **Slash detection** — price deviation (>5%), repeated deviation (3+ in 24h), and non-participation (30+ missed rounds)
+- **Reward tracking** — per-round XCHAIN rewards for oracle participants; cross-hub `pushvalidatorrewards` to indexer for persistence
+- **Slash detection** — price deviation (>5%), repeated deviation (3+ in 24h), non-participation (30+ missed rounds), and attestation divergence (byte_equality providers)
 - **Leader rotation** — deterministic per-sequence leader with view change on timeout
 - **Multi-instance** — multiple hub instances against shared MariaDB with consumer fallback
 - **Single-node fallback** — all consensus operations apply directly when no peers are connected
-- **MariaDB storage** — 13 relational tables with circuit breaker and exponential backoff
-- **1,222 tests** — unit, integration, e2e, fuzz, chaos, boundary, smoke, regression, performance
+- **Network-aware chain tips** — `pushchaintip` carries `network` (mainnet/testnet/regtest); consensus anchors against the matching tip with fallback to indexer's `getlatestblock`
+- **MariaDB storage** — 15 relational tables with circuit breaker and exponential backoff
 - **Docker-ready** — Dockerfile for containerized deployment via xchain-node
 
 ## Documentation
@@ -177,25 +180,29 @@ All methods are called via HTTP POST with JSON-RPC 2.0 format. See [API Referenc
 | Reorgs | `reportreorg`, `getreorghistory` |
 | Governance | `propose`, `vote`, `getproposals`, `getproposal` |
 
+The hub also calls **indexer** RPCs (`getownstake`, `getactivevalidators`, `getcapabilityvalidators`, `getpendingattestation_requests`, `getlatestblock`) and posts back to it (`pushchaintip`, `pushvalidatorrewards`, `pushpriceround`, `pushoracleprice`).
+
 ## Database Schema
 
-The hub uses 13 MariaDB tables (auto-created on startup):
+The hub uses 15 MariaDB tables (auto-created on startup):
 
 | Table | Purpose |
 |---|---|
 | `configs` | Service config parameters per coin/network/module |
-| `validators` | Active validators with signing pubkey, address, chains, tier |
+| `validators` | Active validators with signing pubkey, address, chains |
 | `consensus_state` | PBFT sequence number persistence |
 | `p2p_peers` | Known P2P peers and last-seen timestamps |
-| `oracle_submissions` | Per-validator price submissions per round |
+| `oracle_submissions` | Per-validator PRICE v0 submissions per round |
+| `oracle_prices` | User-published PRICE v1 oracle rows (per source_address × coin/tick/fiat) |
 | `price_snapshots` | Finalized price data per round per coin pair |
 | `attestations` | Cross-chain attestation records |
 | `swap_records` | SWAP lifecycle tracking |
 | `reorg_attestations` | Confirmed blockchain reorg events |
 | `governance_proposals` | Parameter change proposals |
 | `governance_votes` | Validator votes on proposals |
-| `slash_proposals` | Detected validator misbehavior |
+| `slash_proposals` | Detected validator misbehavior (price deviation, non-participation, attestation divergence) |
 | `validator_rewards` | Per-round oracle reward accounting |
+| `validator_capabilities` | Per-pubkey × capability state — `qualified`, `self_test_ok`, `enabled`, `qualified_at_block` |
 
 ## Dependencies
 
