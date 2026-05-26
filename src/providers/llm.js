@@ -166,8 +166,8 @@ exports.agree = async (proposals) => {
 // configured. Avoids burning quota on a real completion at startup — a
 // missing/misconfigured credential is the only fixed failure mode this
 // probe needs to catch.
-exports.healthCheck = async () => {
-    const auth = resolveHubLlmAuth();
+exports.healthCheck = async (ctx) => {
+    const auth = resolveHubLlmAuth(ctx);
     if (!auth.ok) return { ok: false, error: auth.detail || auth.reason || 'no_credential_configured' };
     return { ok: true, transport: auth.transport, source: auth.source };
 };

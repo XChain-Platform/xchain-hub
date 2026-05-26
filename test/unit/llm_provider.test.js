@@ -29,6 +29,13 @@
 'use strict';
 
 const { expect } = require('chai');
+const path = require('path');
+const os = require('os');
+
+// Guaranteed-nonexistent default-config-dir path, so resolveHubLlmAuth's
+// final fallback to ~/.claude-xchain-hub doesn't bleed real operator state
+// into env-cleared scenarios.
+const HERMETIC_DEFAULT_DIR = path.join(os.tmpdir(), 'llm-provider-test-noexist-' + process.pid);
 
 function _withEnv(extra, fn){
     const saved = {};
@@ -62,7 +69,7 @@ describe('llm provider — healthCheck', function () {
     it('reports ok:false when no credentials are configured', async function () {
         const result = await _withEnv({}, async () => {
             const llm = _reloadProvider();
-            return await llm.healthCheck();
+            return await llm.healthCheck({ defaultConfigDir: HERMETIC_DEFAULT_DIR });
         });
         expect(result.ok).to.equal(false);
         expect(result.error).to.be.a('string');
@@ -71,7 +78,7 @@ describe('llm provider — healthCheck', function () {
     it('reports ok:true with transport=anthropic_api when ANTHROPIC_API_KEY is set', async function () {
         const result = await _withEnv({ ANTHROPIC_API_KEY: 'sk-test' }, async () => {
             const llm = _reloadProvider();
-            return await llm.healthCheck();
+            return await llm.healthCheck({ defaultConfigDir: HERMETIC_DEFAULT_DIR });
         });
         expect(result.ok).to.equal(true);
         expect(result.transport).to.equal('anthropic_api');
