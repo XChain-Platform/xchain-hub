@@ -25,7 +25,7 @@ Decentralized config oracle, price oracle, and cross-chain coordinator for the X
 - **Decentralized price oracle** — validators fetch prices from CoinGecko and CoinMarketCap, aggregate via trimmed median, finalize via PBFT consensus
 - **Fee quotes** — gas → XCHAIN → native coin conversion using live oracle prices
 - **Cross-chain attestation** — PBFT-based attestation for cross-chain actions with per-chain-pair validator filtering
-- **External attestation framework** — contracts emit `ATTESTATION_REQUEST` (via `xchain.attestation` VM namespace); validators in the responsible-set fetch from the named provider, reach PBFT consensus, and publish `ATTESTATION_RESPONSE` on-chain. Built-in providers: `http_get` (byte-equality) and `llm` (Claude judge-model)
+- **External attestation framework** — contracts emit `ATTEST` v0 (request, via `xchain.attestation` VM namespace); validators in the responsible-set fetch from the named provider, reach PBFT consensus, and publish `ATTEST` v1 (response) on-chain. Built-in providers: `http_get` (byte-equality) and `llm` (Claude judge-model)
 - **Capability-based staking** — four independent capabilities (`price`, `cross_chain`, `oracle_publish`, `attestation`) auto-qualify per validator based on aggregate stake amount vs governance-configurable `min_stake[capability]`; per-capability self-tests gate local participation
 - **Block-boundary quorum snapshot** — every PBFT round locks N at a specific `block_index` via the indexer, so the qualified validator set is deterministic federation-wide even as stake drifts
 - **SWAP lifecycle tracking** — tracks cross-chain swaps through initiated → attested → executed → settled
@@ -120,10 +120,10 @@ Consumers try each endpoint in order and fall back to the next if one is unreach
 | `ATTESTATION_CONFIRMATIONS` | `3` | BTC blocks of confirmation before initiating an external provider fetch (reorg safety) |
 | `ATTESTATION_FETCH_TIMEOUT` | `10000` | Per-request provider fetch timeout (ms) |
 | `ATTESTATION_ROUND_TIMEOUT_MS` | `120000` | PBFT round lifetime before in-memory state is dropped |
-| `ATTESTATION_QUEUE_PATH` | `./data/attestation-queue.jsonl` | FSYNC queue for in-flight ATTESTATION_RESPONSE broadcasts |
+| `ATTESTATION_QUEUE_PATH` | `./data/attestation-queue.jsonl` | FSYNC queue for in-flight ATTEST v1 (response) broadcasts |
 | `BTC_ENCODER_URL` | — | xchain-encoder JSON-RPC URL for AttestationPublisher's default broadcast pipeline |
 | `BTC_ENCODER_API_KEY` | — | API key for the BTC encoder |
-| `BTC_ADDRESS` | — | BTC address that pays the on-chain ATTESTATION_RESPONSE broadcast fee |
+| `BTC_ADDRESS` | — | BTC address that pays the on-chain ATTEST v1 (response) broadcast fee |
 | `BTC_PUBKEY_HEX` | — | Pubkey hex for the BTC_ADDRESS (encoder needs both for PSBT construction) |
 | `ANTHROPIC_API_KEY` | — | Required to serve the `llm` provider. Without it, the LLM probe in `selfTest('attestation')` is skipped and the validator silently opts out of LLM requests. |
 | `LLM_DEFAULT_MODEL` | first of `approved_models` | LLM model this validator chooses when serving requests. Falls back to registry default if not in `approved_models`. |

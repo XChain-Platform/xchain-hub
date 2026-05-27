@@ -17,12 +17,12 @@
  *
  * Subscribes to AttestationConsensus 'request:finalized' events and, when
  * this validator is the leader for the round, builds the on-chain
- * ATTESTATION_RESPONSE wire payload and broadcasts it via an operator-
+ * ATTEST v1 (response) wire payload and broadcasts it via an operator-
  * provided hook. Followers' publishers are no-ops per request (only the
  * leader broadcasts to avoid duplicate-tx waste).
  *
- * Wire format (parsed by xchain-indexer/src/actions/attestation_response.js):
- *   ATTESTATION_RESPONSE|0|REQUEST_ID|PROVIDER_ID|RESPONSE_PAYLOAD|STATUS|META|
+ * Wire format (parsed by xchain-indexer/src/actions/attest.js):
+ *   ATTEST|1|REQUEST_ID|PROVIDER_ID|RESPONSE_PAYLOAD|STATUS|META|
  *     SIG_COUNT|PUBKEY1|SIG1|PUBKEY2|SIG2|...
  *
  * Broadcast strategy (mirrors OraclePublisher.js):
@@ -143,11 +143,11 @@ class AttestationPublisher {
         }
     }
 
-    // Build the pipe-delimited ATTESTATION_RESPONSE wire format that the
-    // indexer's attestation_response handler parses. Response body travels
-    // as base64 so binary payloads round-trip losslessly through the
-    // pipe-delimited format and so the indexer's signature verification
-    // hashes the same bytes the hub signed.
+    // Build the pipe-delimited ATTEST v1 (response) wire format that the
+    // indexer's attest handler parses. Response body travels as base64 so
+    // binary payloads round-trip losslessly through the pipe-delimited
+    // format and so the indexer's signature verification hashes the same
+    // bytes the hub signed.
     buildAttestationResponseWire({ requestId, providerId, responseBody, status, meta, signatures }){
         let bodyBuf;
         if (Buffer.isBuffer(responseBody))      bodyBuf = responseBody;
@@ -155,8 +155,8 @@ class AttestationPublisher {
         else                                    bodyBuf = Buffer.from(String(responseBody), 'utf8');
         let bodyB64 = bodyBuf.toString('base64');
         let parts = [
-            'ATTESTATION_RESPONSE',
-            '0',
+            'ATTEST',
+            '1',
             String(requestId).toLowerCase(),
             String(providerId),
             bodyB64,

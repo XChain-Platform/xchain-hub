@@ -29,7 +29,7 @@
  *        broadcast ATTEST_COMMIT.
  *   ATTEST_COMMIT handler
  *     -> collect commits; on quorum, emit 'request:finalized' for the
- *        publisher to ship the on-chain ATTESTATION_RESPONSE.
+ *        publisher to ship the on-chain ATTEST v1 (response).
  *
  * Validator-set snapshot is locked at the request's block_index via
  * CapabilitySnapshot — every hub computes the same quorum N for the round.

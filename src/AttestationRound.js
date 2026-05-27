@@ -17,7 +17,7 @@
  *
  * Per-request lifecycle on the validator side of the External Attestation
  * Framework. Unlike OracleRound (wall-clock cadence), AttestationRound is
- * event-driven — it polls the indexer for new ATTESTATION_REQUESTs in
+ * event-driven — it polls the indexer for new ATTEST v0 (request) rows in
  * 'pending' status, decides whether this validator is in the request's
  * responsible set, fetches the payload via the provider module, and gossips
  * an ATTEST_PROPOSE for AttestationConsensus to drive to quorum.
@@ -151,7 +151,7 @@ class AttestationRound {
         let snapshotBlk  = Number(request.block_index);
         let myPubkey     = this.identity.getPubkeyHex().toLowerCase();
 
-        // Provider known? (governance might have ATTESTATION_REQUEST whose
+        // Provider known? (governance might have ATTEST v0 (request) whose
         // provider is governance-defined but not deployed locally.)
         if(!this.providerRegistry.isKnown(providerId)){
             console.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... — provider ' + providerId + ' unknown');

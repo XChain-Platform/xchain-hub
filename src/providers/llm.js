@@ -17,7 +17,7 @@
  *
  * Implements the External Attestation Framework provider interface for LLM
  * calls. Validators with the `attestation` capability staked at MIN_STAKE
- * for the llm provider tier can serve ATTESTATION_REQUESTs with
+ * for the llm provider tier can serve ATTEST v0 (request) rows with
  * provider_id='llm'.
  *
  * Spec: claude/reports/specs/2026-05-24_llm-attestation-provider.md

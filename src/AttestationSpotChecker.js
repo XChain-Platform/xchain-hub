@@ -13,7 +13,7 @@
  * XChain Hub - Attestation Spot-Checker
  *
  * Privately holds the expected-response patterns for synthetic
- * ATTESTATION_REQUESTs that the platform injects to verify validator
+ * ATTEST v0 (request) rows that the platform injects to verify validator
  * honesty. Validators don't know which requests are spot-checks (the
  * pattern is only known to the platform).
  *
@@ -27,7 +27,7 @@
  * Phase status:
  *   - Queue + comparator: shipped here (data plumbing for §8.1).
  *   - Synthetic-request *injection* (hub-driven creation of platform
- *     ATTESTATION_REQUESTs with a known prompt): NOT YET — requires a
+ *     ATTEST v0 (request) rows with a known prompt): NOT YET — requires a
  *     platform-owned contract + scheduler design that's out of scope
  *     for this module. Operators / tests can populate the queue
  *     manually via `register()` until that lands.
@@ -90,7 +90,7 @@ class AttestationSpotChecker {
 
     // Register a synthetic request as a spot-check. Called by the
     // (future) injection scheduler immediately after the synthetic
-    // ATTESTATION_REQUEST is broadcast. `expectedPattern` is the rubric
+    // ATTEST v0 (request) is broadcast. `expectedPattern` is the rubric
     // passed to the provider's judge step — string for now.
     register(requestId, providerId, expectedPattern){
         let rid = String(requestId || '').toLowerCase();

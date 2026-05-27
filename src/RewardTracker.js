@@ -16,8 +16,8 @@
  * XChain Hub - Reward Tracker
  *
  * Tracks validator participation in oracle rounds and distributes
- * XCHAIN rewards. Rewards are recorded in the hub DB and claimable
- * via CLAIM_REWARDS action on the BTC chain.
+ * XCHAIN rewards. Rewards are recorded in the hub DB and collectable
+ * via COLLECT action on the BTC chain.
  *
  ********************************************************************/
 
@@ -68,7 +68,7 @@ class RewardTracker {
 
         console.log('Rewards: Round ' + round + ' — ' + perValidator + ' XCHAIN each to ' + validParticipants.length + ' validators');
 
-        // Push rewards to the BTC indexer so CLAIM_REWARDS can find them (best-effort)
+        // Push rewards to the BTC indexer so COLLECT can find them (best-effort)
         this._pushRewardsToBtcIndexer(round, validParticipants, perValidator, btcBlockHeight || round)
             .catch(e => console.warn('Rewards: failed to push to BTC indexer:', e.message));
     }
