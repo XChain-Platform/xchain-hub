@@ -14,6 +14,7 @@ describe('XChainHub', function () {
         mockDb   = {
             doQuery:     sinon.stub().resolves([]),
             setParam:    sinon.stub().resolves(),
+            setParams:   sinon.stub().resolves(0),
             getConfig:   sinon.stub().resolves({}),
             getAllConfigs: sinon.stub().resolves({}),
             createDatabase: sinon.stub().resolves(true),
@@ -54,7 +55,7 @@ describe('XChainHub', function () {
     // -----------------------------------------------------------------
 
     describe('applyConfig()', function () {
-        it('iterates nested config and calls setParam for each value', async function () {
+        it('collects nested config and batches via a single setParams call', async function () {
             let hub = new XChainHub('host', 3306, 'db', 'user', 'pass', null);
             hub.db = mockDb;
 
@@ -71,9 +72,12 @@ describe('XChainHub', function () {
 
             await hub.applyConfig(config);
 
-            expect(mockDb.setParam.callCount).to.equal(2);
-            expect(mockDb.setParam.calledWith('BTC', 'mainnet', 'indexer', 'host', 'idx-host')).to.be.true;
-            expect(mockDb.setParam.calledWith('BTC', 'mainnet', 'indexer', 'port', '3309')).to.be.true;
+            expect(mockDb.setParams.calledOnce).to.be.true;
+            expect(mockDb.setParam.called).to.be.false;
+            let rows = mockDb.setParams.getCall(0).args[0];
+            expect(rows).to.have.length(2);
+            expect(rows).to.deep.include({ coin: 'BTC', network: 'mainnet', module: 'indexer', paramName: 'host', paramValue: 'idx-host' });
+            expect(rows).to.deep.include({ coin: 'BTC', network: 'mainnet', module: 'indexer', paramName: 'port', paramValue: '3309' });
         });
 
         it('skips invalid parameter names', async function () {
@@ -92,10 +96,18 @@ describe('XChainHub', function () {
             };
 
             await hub.applyConfig(config);
-            // Only 'host' should be applied, not 'invalid_param'
-            let calledParams = mockDb.setParam.getCalls().map(c => c.args[3]);
-            expect(calledParams).to.include('host');
-            expect(calledParams).to.not.include('invalid_param');
+            let rows = mockDb.setParams.getCall(0).args[0];
+            let paramNames = rows.map(r => r.paramName);
+            expect(paramNames).to.include('host');
+            expect(paramNames).to.not.include('invalid_param');
+        });
+
+        it('is a no-op (no DB write) when config has no recognized params', async function () {
+            let hub = new XChainHub('host', 3306, 'db', 'user', 'pass', null);
+            hub.db = mockDb;
+
+            await hub.applyConfig({ BTC: { mainnet: { indexer: { invalid_param: 'x' } } } });
+            expect(mockDb.setParams.called).to.be.false;
         });
     });
 

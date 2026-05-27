@@ -284,6 +284,24 @@ class Database {
         await this.doQuery(query, [coin, network, module, paramName, paramValue, paramValue]);
     }
 
+    // Batched upsert. rows: [{coin, network, module, paramName, paramValue}, ...]
+    // Single round-trip — keeps xchain-node's precheck push (3 coins × 3 networks
+    // × ~6 modules × ~7 params ≈ 378 rows) under one second instead of one
+    // INSERT per row.
+    async setParams(rows){
+        if(!rows || rows.length === 0) return 0;
+        let placeholders = rows.map(() => '(?, ?, ?, ?, ?)').join(', ');
+        let query = `INSERT INTO configs (coin, network, module, param_name, param_value)
+                     VALUES ${placeholders}
+                     ON DUPLICATE KEY UPDATE param_value = VALUES(param_value), updated_at = NOW()`;
+        let args = [];
+        for(let r of rows){
+            args.push(r.coin, r.network, r.module, r.paramName, r.paramValue);
+        }
+        await this.doQuery(query, args);
+        return rows.length;
+    }
+
     // Get config for a specific coin/network/module
     async getConfig(coin, network, module){
         let query = "SELECT param_name, param_value FROM configs WHERE coin = ? AND network = ? AND module = ?";

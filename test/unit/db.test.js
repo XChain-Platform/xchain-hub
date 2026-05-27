@@ -170,6 +170,41 @@ describe('Database', function () {
         });
     });
 
+    describe('setParams()', function () {
+        let db;
+        beforeEach(function () { db = new Database('h', 3306, 'db', 'u', 'p'); });
+
+        it('executes a single multi-row upsert', async function () {
+            mockConn.query.resolves([]);
+            let n = await db.setParams([
+                { coin: 'BTC', network: 'mainnet', module: 'indexer', paramName: 'host', paramValue: 'h1' },
+                { coin: 'BTC', network: 'mainnet', module: 'indexer', paramName: 'port', paramValue: '3309' },
+                { coin: 'LTC', network: 'testnet', module: 'encoder', paramName: 'host', paramValue: 'h2' }
+            ]);
+            expect(n).to.equal(3);
+            expect(mockConn.query.calledOnce).to.be.true;
+            let [sql, args] = mockConn.query.getCall(0).args;
+            expect(sql).to.include('INSERT INTO configs');
+            expect(sql).to.include('ON DUPLICATE KEY UPDATE');
+            expect(sql).to.include('VALUES(param_value)');
+            // 3 rows × 5 placeholders each
+            expect(args).to.have.length(15);
+            expect(args.slice(0, 5)).to.deep.equal(['BTC', 'mainnet', 'indexer', 'host', 'h1']);
+        });
+
+        it('is a no-op on empty input', async function () {
+            let n = await db.setParams([]);
+            expect(n).to.equal(0);
+            expect(mockConn.query.called).to.be.false;
+        });
+
+        it('is a no-op on null/undefined input', async function () {
+            expect(await db.setParams(null)).to.equal(0);
+            expect(await db.setParams(undefined)).to.equal(0);
+            expect(mockConn.query.called).to.be.false;
+        });
+    });
+
     describe('getConfig()', function () {
         let db;
         beforeEach(function () { db = new Database('h', 3306, 'db', 'u', 'p'); });

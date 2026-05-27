@@ -363,6 +363,7 @@ class XChainHub {
         if (!json || typeof json !== 'object' || Array.isArray(json))
             throw new Error('Config must be a non-null object');
 
+        let rows = [];
         for(let nextCoin in json){
             if(nextCoin === '') continue;
             let coinLevel = json[nextCoin];
@@ -389,10 +390,20 @@ class XChainHub {
                             throw new Error('Config value for ' + nextParam + ' exceeds max length of 1024 chars');
                         }
 
-                        await this.db.setParam(nextCoin, nextNetwork, nextModule, nextParam, nextValue);
+                        rows.push({
+                            coin:       nextCoin,
+                            network:    nextNetwork,
+                            module:     nextModule,
+                            paramName:  nextParam,
+                            paramValue: nextValue
+                        });
                     }
                 }
             }
+        }
+
+        if(rows.length > 0){
+            await this.db.setParams(rows);
         }
     }
 
