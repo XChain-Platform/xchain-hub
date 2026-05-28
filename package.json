@@ -1,7 +1,7 @@
 {
   "name": "xchain-hub",
   "description": "Config oracle and cross-chain coordinator for the XChain Platform. Stores service configs in MariaDB and serves them via JSON-RPC.",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "license": "SEE LICENSE IN LICENSE.md",
   "repository": {
     "type": "git",
@@ -45,6 +45,7 @@
     "sinon": "^21.0.3"
   },
   "overrides": {
+    "qs": "^6.15.2",
     "serialize-javascript": "^7.0.5",
     "diff": "^8.0.3",
     "tmp": "^0.2.7",
