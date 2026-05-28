@@ -78,6 +78,27 @@ class HubDbBroadcaster {
         }
     }
 
+    // Broadcast a reorg retraction to all subscribers so they prune their local
+    // price-table copies. event: { table, source_chain, from_action_index }
+    broadcastDeletion(event) {
+        if (this.subscribers.size === 0) return;
+        let message;
+        try {
+            message = JSON.stringify({
+                type:              'row:deleted',
+                table:             event.table,
+                source_chain:      event.source_chain,
+                from_action_index: event.from_action_index
+            }, bigIntReplacer);
+        } catch (e) {
+            console.error('HubDbBroadcaster: serialization error:', e.message);
+            return;
+        }
+        for (let ws of this.subscribers) {
+            this._send(ws, message);
+        }
+    }
+
     // Send a message with backpressure handling
     _send(ws, message) {
         if (ws.readyState !== WebSocket.OPEN) return;

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-05-28
+
+### Added
+- New JSON-RPC method `pushpricereorg` (write — requires API key) — an indexer calls this after a block rollback to retract price rows seeded from rolled-back PRICE actions. Params: `{ source_chain, from_action_index }`. The hub previously only invalidated price snapshots on a separate PBFT reorg attestation (`ReorgHandler`), which never arrives for non-PBFT reorgs, leaving never-finalized prices in `price_snapshots` / `oracle_prices` indefinitely.
+- `PriceAggregator.retractFromActionIndex(sourceChain, fromActionIndex)` — deletes `price_snapshots` rows (keyed by `source_action_index`) and `oracle_prices` rows (keyed by `action_index`) for the given chain at or above the supplied action index, and emits `row:deleted` events with the deletion filter. Returns per-table deleted-row counts.
+- `HubDbBroadcaster.broadcastDeletion(event)` — forwards `row:deleted` retraction events (`{ table, source_chain, from_action_index }`) over the `/hub-db/subscribe` WebSocket channel so distributed indexers prune their local `price_snapshots` / `oracle_prices` copies, mirroring the existing `row:inserted` broadcast path.
+
+### Changed
+- `XChainHub` — wires `PriceAggregator`'s new `row:deleted` event to `HubDbBroadcaster.broadcastDeletion`, alongside the existing `row:inserted` → `broadcastRow` wiring.
+
 ## [2.1.0] - 2026-04-08
 
 ### Added

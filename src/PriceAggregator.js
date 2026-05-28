@@ -170,6 +170,60 @@ class PriceAggregator extends EventEmitter {
         console.log('PriceAggregator: accepted PRICE v1 from ' + priceData.source_address + ' (' + priceData.coin + '/' + priceData.tick + '/' + priceData.fiat + ' = ' + priceData.value + ', effective_at=' + effectiveAt + ')');
         return { accepted: true };
     }
+
+    // Retract price rows seeded from PRICE actions that an indexer rolled back
+    // during a reorg. The indexer pushes the source chain plus the lowest
+    // rolled-back action_index; we delete every row tagged with that chain whose
+    // source action_index is >= that value, across both price tables.
+    //
+    // This is the indexer-driven counterpart to ReorgHandler, which only reacts
+    // to a separate PBFT reorg attestation. PBFT attestations never arrive for
+    // non-PBFT reorgs, so without this path orphaned prices would survive
+    // indefinitely and feed getLatestPrice / getOracleDataForVM / fee validation.
+    //
+    // sourceChain:     BTC | LTC | DOGE
+    // fromActionIndex: lowest rolled-back action_index (inclusive)
+    // Returns { retracted: { price_snapshots, oracle_prices } } with deleted row counts.
+    async retractFromActionIndex(sourceChain, fromActionIndex) {
+        let from = parseInt(fromActionIndex);
+        if (!Number.isFinite(from) || from < 0) {
+            return { error: 'invalid from_action_index' };
+        }
+
+        // price_snapshots tracks the PRICE v0 round action via source_action_index
+        let snapResult = await this.db.doQuery(
+            'DELETE FROM price_snapshots WHERE source_chain = ? AND source_action_index >= ?',
+            [sourceChain, from]
+        );
+        // oracle_prices tracks the PRICE v1 oracle action via action_index
+        let oracleResult = await this.db.doQuery(
+            'DELETE FROM oracle_prices WHERE source_chain = ? AND action_index >= ?',
+            [sourceChain, from]
+        );
+
+        let snapDeleted   = (snapResult   && snapResult.affectedRows   !== undefined) ? Number(snapResult.affectedRows)   : 0;
+        let oracleDeleted = (oracleResult && oracleResult.affectedRows !== undefined) ? Number(oracleResult.affectedRows) : 0;
+
+        // Tell the hub DB sync channel to mirror these deletes so distributed
+        // indexers prune their local price-table copies too.
+        if (snapDeleted > 0) {
+            this.emit('row:deleted', {
+                table:             'price_snapshots',
+                source_chain:      sourceChain,
+                from_action_index: from
+            });
+        }
+        if (oracleDeleted > 0) {
+            this.emit('row:deleted', {
+                table:             'oracle_prices',
+                source_chain:      sourceChain,
+                from_action_index: from
+            });
+        }
+
+        console.log('PriceAggregator: retracted ' + snapDeleted + ' price_snapshots + ' + oracleDeleted + ' oracle_prices rows from ' + sourceChain + ' (action_index >= ' + from + ')');
+        return { retracted: { price_snapshots: snapDeleted, oracle_prices: oracleDeleted } };
+    }
 }
 
 module.exports = PriceAggregator;

@@ -53,7 +53,7 @@ const ALLOWED_CHAINS = new Set(['BTC', 'LTC', 'DOGE']);
 const WRITE_METHODS  = new Set([
     'updateconfig', 'registervalidator', 'syncvalidators',
     'propose', 'vote', 'requestattestation', 'reportreorg', 'initiateswap',
-    'pushchaintip', 'pushpriceround', 'pushoracleprice'
+    'pushchaintip', 'pushpriceround', 'pushoracleprice', 'pushpricereorg'
 ]);
 
 function validateChain(chain) {
@@ -288,6 +288,25 @@ async function startApi(){
                 return result;
             } catch (err) {
                 return {error: err.message || "error processing oracle price"};
+            }
+        },
+
+        // Retract price rows after an indexer rolled back PRICE actions in a reorg.
+        // The indexer pushes the source chain plus the lowest rolled-back action_index;
+        // the hub prunes every price_snapshots / oracle_prices row for that chain whose
+        // source action_index is >= that value, then broadcasts the deletions so
+        // distributed indexers prune their local copies too.
+        async pushpricereorg({source_chain, from_action_index}){
+            if(!source_chain) return {error: "source_chain is required"};
+            let chainErr = validateChain(source_chain);
+            if (chainErr) return chainErr;
+            if(from_action_index === undefined || from_action_index === null)
+                return {error: "from_action_index is required"};
+            if(!hub.priceAggregator) return {error: "price aggregator not ready"};
+            try {
+                return await hub.priceAggregator.retractFromActionIndex(source_chain, from_action_index);
+            } catch (err) {
+                return {error: err.message || "error retracting prices"};
             }
         },
 

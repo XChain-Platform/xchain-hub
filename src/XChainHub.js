@@ -96,6 +96,9 @@ class XChainHub {
         this.priceAggregator.on('row:inserted', (event) => {
             this.hubDbBroadcaster.broadcastRow(event);
         });
+        this.priceAggregator.on('row:deleted', (event) => {
+            this.hubDbBroadcaster.broadcastDeletion(event);
+        });
         console.log('XChain Hub started (MariaDB: ' + this.dbName + ')');
     }
 
