@@ -249,7 +249,7 @@ describe('Governance', function () {
             hub.db.doQuery.onSecondCall().resolves(); // UPDATE
 
             let emitted = null;
-            gov.on('proposal:passed', (d) => { emitted = d; });
+            gov.on('proposal:finalized', (d) => { emitted = d; });
 
             await gov._tallyProposal({
                 proposal_id: 'gov:P:1', parameter: 'P',
@@ -273,7 +273,7 @@ describe('Governance', function () {
             hub.db.doQuery.onSecondCall().resolves();
 
             let emitted = false;
-            gov.on('proposal:passed', () => { emitted = true; });
+            gov.on('proposal:finalized', () => { emitted = true; });
 
             await gov._tallyProposal({ proposal_id: 'gov:P:1', parameter: 'P' });
 

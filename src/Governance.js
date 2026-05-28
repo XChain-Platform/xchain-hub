@@ -271,6 +271,25 @@ class Governance extends EventEmitter {
 
     // --- Tally logic ---
 
+    // Deterministic leader for a proposal. Mirrors OracleConsensus._getLeader
+    // (modular index into the validator set) but, since governance has no
+    // sequential round counter, derives the round from a hash of the immutable
+    // proposal_id. Every hub computes the same leader for a given proposal.
+    _getProposalLeader(proposalId) {
+        if (this.validatorSet.length === 0) return null;
+        let round = crypto.createHash('sha256').update(proposalId).digest().readUInt32BE(0);
+        return this.validatorSet[round % this.validatorSet.length];
+    }
+
+    // True if this hub is the deterministic leader responsible for tallying the
+    // given proposal. A hub with no validator set (standalone / dev) falls back
+    // to tallying locally so single-node operation is unaffected.
+    _isTallyLeader(proposalId) {
+        if (this.validatorSet.length === 0) return true;
+        let leader = this._getProposalLeader(proposalId);
+        return !!leader && leader.addr === this.peerManager.validatorAddr;
+    }
+
     // Check for proposals whose voting period has ended and tally them
     async _checkExpiredProposals() {
         try {
@@ -279,6 +298,12 @@ class Governance extends EventEmitter {
             );
 
             for (let proposal of expired) {
+                // Only the deterministic leader for this proposal tallies and
+                // broadcasts the result; followers accept the GOV_RESULT broadcast
+                // as authoritative. This prevents two hubs from independently
+                // tallying with different gossip-delivered vote counts and reaching
+                // contradictory passed/failed conclusions (split-brain).
+                if (!this._isTallyLeader(proposal.proposal_id)) continue;
                 await this._tallyProposal(proposal);
             }
         } catch (e) {
@@ -307,7 +332,7 @@ class Governance extends EventEmitter {
         let newStatus = approved ? 'passed' : 'failed';
 
         await this.db.doQuery(
-            "UPDATE governance_proposals SET status = ?, applied_at = NOW() WHERE proposal_id = ?",
+            "UPDATE governance_proposals SET status = ?, applied_at = NOW() WHERE proposal_id = ? AND status = 'voting'",
             [newStatus, proposal.proposal_id]
         );
 
@@ -322,7 +347,7 @@ class Governance extends EventEmitter {
             ' (' + approvals + '/' + totalVotes + ' approve, ' + validatorCount + ' validators)');
 
         if (approved) {
-            this.emit('proposal:passed', {
+            this.emit('proposal:finalized', {
                 proposalId: proposal.proposal_id,
                 parameter:  proposal.parameter,
                 oldValue:   proposal.current_value,

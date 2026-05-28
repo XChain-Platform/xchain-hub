@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.3] - 2026-05-28
+
+### Fixed
+- Governance proposal tallying is now performed by a single deterministic leader per proposal rather than independently on every hub. Because validator votes propagate via P2P gossip with variable latency, two hubs could previously tally the same expired proposal at different moments with different vote counts and reach contradictory `passed`/`failed` conclusions, leaving governance state split-brain across the federation. The leader is chosen deterministically from the active validator set (hash of the proposal id, same modular-index pattern as oracle consensus); followers accept the broadcast `GOV_RESULT` as authoritative. Standalone hubs with no validator set still tally locally.
+- `_tallyProposal` now guards its status write with `AND status = 'voting'`, so a stale or duplicate result broadcast cannot overwrite an already-finalized proposal.
+- Governance now emits `proposal:finalized` (previously `proposal:passed`) to match the attestation provider-registry hot-reload listener in `XChainHub`. The mismatch meant a passed proposal never triggered the runtime provider-config reload; the reload now fires as intended.
+
 ## [2.2.2] - 2026-05-28
 
 ### Fixed

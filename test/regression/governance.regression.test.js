@@ -119,7 +119,7 @@ describe('Regression: Governance', function () {
             hub.db.doQuery.onSecondCall().resolves();
 
             let emitted = null;
-            gov.on('proposal:passed', (d) => { emitted = d; });
+            gov.on('proposal:finalized', (d) => { emitted = d; });
 
             await gov._tallyProposal({
                 proposal_id: 'gov:P:1', parameter: 'P',
