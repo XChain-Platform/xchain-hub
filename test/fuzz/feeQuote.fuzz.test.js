@@ -12,9 +12,12 @@ describe('Fuzz: XChainHub.getFeeQuote()', function () {
 
     // Known actions in the gas schedule
     const KNOWN_ACTIONS = [
-        'ISSUE', 'ISSUE_SUBTOKEN', 'EXPIRATION_PER_DAY',
+        'ISSUE', 'ISSUE_SUBTOKEN', 'EXPIRATION_PER_DAY', 'OWNERSHIP_ESCROW',
         'AIRDROP_PER_RECIPIENT', 'DIVIDEND_PER_RECIPIENT',
-        'VM_EXECUTE_BASE', 'VM_DEPLOY_BASE'
+        'VM_EXECUTE_BASE', 'VM_DEPLOY_BASE', 'VM_DEPLOY_PER_BYTE',
+        'VM_STATE_READ', 'VM_STATE_WRITE', 'VM_STATE_DELETE',
+        'VM_ORACLE_READ', 'VM_CROSSCHAIN_READ', 'VM_ATTEST_REQUEST',
+        'VM_EMISSION', 'VM_COMPUTATION'
     ];
 
     beforeEach(function () {

@@ -579,14 +579,41 @@ class XChainHub {
     // Calculate a fee quote: gas cost → XCHAIN → native coin
     // action: string (e.g., 'ISSUE'), chain: string (e.g., 'BTC'), params: object
     async getFeeQuote(action, chain) {
-        // Gas schedule (same as indexer config)
+        // Gas schedule — mirrors the canonical per-chain fee schedule. BTC
+        // carries the full set; the VM_ATTEST_REQUEST entry is only metered on
+        // chains where the attestation framework is active. Every other entry
+        // shares identical gas values across chains.
         let gasSchedule = {
-            ISSUE: 100000, ISSUE_SUBTOKEN: 50000,
-            EXPIRATION_PER_DAY: 550,
-            AIRDROP_PER_RECIPIENT: 100, DIVIDEND_PER_RECIPIENT: 100,
-            VM_EXECUTE_BASE: 1000, VM_DEPLOY_BASE: 100000
+            ISSUE:                  100000,
+            ISSUE_SUBTOKEN:         50000,
+            EXPIRATION_PER_DAY:     550,
+            OWNERSHIP_ESCROW:       50000,
+            AIRDROP_PER_RECIPIENT:  100,
+            DIVIDEND_PER_RECIPIENT: 100,
+            VM_EXECUTE_BASE:        1000,
+            VM_DEPLOY_BASE:         100000,
+            VM_DEPLOY_PER_BYTE:     10,
+            VM_STATE_READ:          100,
+            VM_STATE_WRITE:         200,
+            VM_STATE_DELETE:        100,
+            VM_ORACLE_READ:         100,
+            VM_CROSSCHAIN_READ:     100,
+            VM_ATTEST_REQUEST:      5000,
+            VM_EMISSION:            500,
+            VM_COMPUTATION:         1
         };
-        let gasPrice = 0.00001;  // XCHAIN per gas unit
+
+        // Gas price (XCHAIN per gas unit). Sourced from the config store so it
+        // can be tuned per-chain without a code change; falls back to the
+        // protocol default when no override is present (or the store is down).
+        let gasPrice = 0.00001;
+        try {
+            let chainCfg = await this.db.getConfig(chain, 'mainnet', 'chain');
+            if (chainCfg && chainCfg.GAS_PRICE) {
+                let parsed = parseFloat(chainCfg.GAS_PRICE);
+                if (parsed > 0) gasPrice = parsed;
+            }
+        } catch (_) { /* config store unavailable — keep protocol default */ }
 
         if (!Object.prototype.hasOwnProperty.call(gasSchedule, action)) return { error: 'unknown action: ' + action };
         let gasCost = gasSchedule[action];

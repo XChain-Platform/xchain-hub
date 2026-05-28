@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.2] - 2026-05-28
+
+### Fixed
+- `getFeeQuote` now carries the full 17-entry gas schedule (previously 7). Fee quotes for `OWNERSHIP_ESCROW`, `VM_DEPLOY_PER_BYTE`, `VM_STATE_READ`/`VM_STATE_WRITE`/`VM_STATE_DELETE`, `VM_ORACLE_READ`, `VM_CROSSCHAIN_READ`, `VM_ATTEST_REQUEST`, `VM_EMISSION`, and `VM_COMPUTATION` now return a numeric fee instead of an `unknown action` error.
+
+### Changed
+- `getFeeQuote` sources the gas price from the config store (per-chain, `chain` module), falling back to the protocol default `0.00001` when no override is present or the store is unavailable, instead of a hardcoded constant.
+
 ## [2.2.1] - 2026-05-28
 
 ### Security

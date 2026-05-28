@@ -23,7 +23,7 @@ const WINDOW_MS        = 15000;  // 15-second measurement windows
 
 const METHOD_MIX = [
     { weight: 40, value: { method: 'getprice',          params: { coin_pair: 'BTC/USD' } } },
-    { weight: 20, value: { method: 'getfeequote',       params: { action: 'SEND', chain: 'BTC' } } },
+    { weight: 20, value: { method: 'getfeequote',       params: { action: 'ISSUE', chain: 'BTC' } } },
     { weight: 15, value: { method: 'getpricesnapshots',  params: { limit: 50 } } },
     { weight: 10, value: { method: 'getallconfigs',      params: {} } },
     { weight: 10, value: { method: 'getvalidators',      params: {} } },

@@ -19,7 +19,7 @@ const { blast, ramp, weightedPick } = require('./helpers/concurrent');
 // Weighted method distribution matching real-world query patterns
 const METHOD_MIX = [
     { weight: 40, value: { method: 'getprice',          params: { coin_pair: 'BTC/USD' } } },
-    { weight: 20, value: { method: 'getfeequote',       params: { action: 'SEND', chain: 'BTC' } } },
+    { weight: 20, value: { method: 'getfeequote',       params: { action: 'ISSUE', chain: 'BTC' } } },
     { weight: 15, value: { method: 'getpricesnapshots',  params: { limit: 50 } } },
     { weight: 10, value: { method: 'getallconfigs',      params: {} } },
     { weight: 10, value: { method: 'getattestations',    params: { status: 'confirmed', limit: 20 } } },
@@ -71,7 +71,7 @@ describe('Performance: API Query Saturation', function () {
         let methods = [
             { name: 'ping',              params: {} },
             { name: 'getprice',          params: { coin_pair: 'BTC/USD' } },
-            { name: 'getfeequote',       params: { action: 'SEND', chain: 'BTC' } },
+            { name: 'getfeequote',       params: { action: 'ISSUE', chain: 'BTC' } },
             { name: 'getpricesnapshots',  params: { limit: 50 } },
             { name: 'getpricesnapshots',  params: { limit: 1000 } },
             { name: 'getallconfigs',      params: {} },
