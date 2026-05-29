@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.4] - 2026-05-29
+
+### Fixed
+- The publisher default-broadcast pipelines (`AttestationPublisher` for ATTEST v1 responses, `OraclePublisher` for PRICE v0 publications) passed the raw hex public key as the encoder's `pubkey` field. The encoder's P2SH path runs `bitcoin.address.fromBase58Check()` on that field, which throws for a hex string — so every on-chain broadcast through the default pipeline crashed at runtime. Both publishers now pass their base58check address (`btcAddress` / `dogeAddress`). Added unit coverage that exercises `_defaultBroadcast` directly with a mock encoder, closing a gap where the e2e harness's custom broadcast hook bypassed this path entirely.
+
 ## [2.2.3] - 2026-05-28
 
 ### Fixed

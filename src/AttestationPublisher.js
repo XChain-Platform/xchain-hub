@@ -183,7 +183,9 @@ class AttestationPublisher {
         }
         let psbtResult = await this.encoder.createTx({
             utxos:    utxos,
-            pubkey:   this.btcPubkeyHex,
+            // The encoder's P2SH path runs bitcoin.address.fromBase58Check() on this
+            // field, so it must be the base58check address — not the raw hex pubkey.
+            pubkey:   this.btcAddress,
             data:     payload,
             change:   this.btcAddress,
             encoding: 'p2sh'  // response payloads can exceed 80-byte OP_RETURN

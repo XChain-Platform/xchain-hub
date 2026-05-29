@@ -115,7 +115,9 @@ class OraclePublisher {
         // so we use P2SH encoding which is what xchain-encoder supports for large payloads.
         let psbtResult = await this.encoder.createTx({
             utxos:    utxos,
-            pubkey:   this.dogePubkeyHex,
+            // The encoder's P2SH path runs bitcoin.address.fromBase58Check() on this
+            // field, so it must be the base58check address — not the raw hex pubkey.
+            pubkey:   this.dogeAddress,
             data:     payload,
             change:   this.dogeAddress,
             encoding: 'p2sh'
