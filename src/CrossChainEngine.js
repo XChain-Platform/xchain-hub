@@ -143,6 +143,10 @@ class CrossChainEngine extends EventEmitter {
             let pending = {
                 attestationId, sourceChain, sourceActionIndex: parseInt(sourceActionIndex),
                 destChain, confirmations, digest,
+                // Lock the quorum at round-start so every PREPARE/COMMIT check
+                // for this attestation uses a consistent threshold, even if the
+                // validator set changes mid-round. Mirrors Consensus/OracleConsensus.
+                quorum,
                 prepares: new Set(),
                 commits:  new Set(),
                 finalized: false,
@@ -222,6 +226,9 @@ class CrossChainEngine extends EventEmitter {
             this.pendingAttestations.set(attestationId, {
                 attestationId, sourceChain, sourceActionIndex, destChain,
                 confirmations, digest,
+                // Lock quorum at PROPOSE time from the validator set we hold now,
+                // so prepare/commit checks stay consistent for the whole round.
+                quorum: this._getQuorum(sourceChain, destChain),
                 prepares: new Set(),
                 commits:  new Set(),
                 finalized: false,
@@ -270,7 +277,9 @@ class CrossChainEngine extends EventEmitter {
         let pending = this.pendingAttestations.get(attestationId);
         if (!pending || pending.finalized) return;
 
-        let quorum = this._getQuorum();
+        // Use the round's locked quorum (captured at attestation creation),
+        // not a live recompute — keeps every hub in lockstep across the round.
+        let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
         if (pending.prepares.size >= quorum && !pending._commitSent) {
             pending._commitSent = true;
             pending.commits.add(this.peerManager.validatorAddr);
@@ -288,7 +297,8 @@ class CrossChainEngine extends EventEmitter {
         let pending = this.pendingAttestations.get(attestationId);
         if (!pending || pending.finalized) return;
 
-        let quorum = this._getQuorum();
+        // Same locked quorum as _checkPrepareQuorum — see comment there.
+        let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
         if (pending.commits.size >= quorum) {
             pending.finalized = true;
             if (pending.timer) clearTimeout(pending.timer);

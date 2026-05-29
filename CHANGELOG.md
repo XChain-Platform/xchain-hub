@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.8] - 2026-05-29
+
+### Fixed
+- `CrossChainEngine` now locks the PBFT quorum threshold into each pending attestation when the round is created, instead of re-deriving it live on every prepare/commit check. Both `_checkPrepareQuorum` and `_checkCommitQuorum` previously called `_getQuorum()` against the current in-memory `validatorSet`, so if a hub's validator set changed mid-round (e.g. two hubs holding different sets at startup, or a set update arriving between phases), two hubs could compute different thresholds for the same attestation round — one would commit while the other waited forever, silently diverging the federation with no error surface. The quorum is now captured at attestation creation time on both the leader path (`requestAttestation`) and the follower path (`_handlePropose`, using the chain-pair-aware count from the PROPOSE), and both quorum checks read that locked value (falling back to a live recompute only if the field is absent, for backward compatibility with in-flight rounds). This brings `CrossChainEngine` in line with the round-start quorum locking already enforced by `Consensus` and `OracleConsensus`.
+
 ## [2.2.7] - 2026-05-29
 
 ### Fixed

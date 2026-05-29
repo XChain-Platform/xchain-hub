@@ -325,4 +325,102 @@ describe('CrossChainEngine', function () {
             expect(result).to.be.null;
         });
     });
+
+    // -----------------------------------------------------------------
+    // Quorum locking — consensus-divergence regression
+    //
+    // The quorum threshold for a PBFT round must be captured when the
+    // pending attestation is created, NOT re-derived live on every
+    // prepare/commit check. If the validator set changes mid-round, two
+    // hubs holding different in-memory sets would otherwise compute
+    // different thresholds for the same round — one commits, the other
+    // stalls forever, and the federation diverges.
+    // -----------------------------------------------------------------
+
+    describe('quorum locking', function () {
+
+        it('locks quorum into the pending object on the leader (PROPOSE) path', async function () {
+            engine.setValidatorSet(VALIDATORS_4); // N=4 → quorum=3
+            // seq increments to 1 → leader = VALIDATORS_4[1 % 4]
+            pm.validatorAddr = VALIDATORS_4[1].addr;
+
+            engine.requestAttestation('BTC', 1, 'LTC'); // fire-and-forget; resolves on quorum
+            let pending = engine.pendingAttestations.get('BTC:1:LTC');
+            expect(pending).to.exist;
+            expect(pending.quorum).to.equal(3);
+        });
+
+        it('locks quorum into the pending object on the follower (handlePropose) path', function () {
+            engine.setValidatorSet(VALIDATORS_4); // N=4 → quorum=3
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+            let attestationId = 'BTC:1:LTC';
+            let digest = engine._digest(attestationId, 3);
+
+            engine._handlePropose({
+                sender: VALIDATORS_4[1].addr,
+                data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
+                        destChain: 'LTC', confirmations: 3, digest }
+            });
+
+            expect(engine.pendingAttestations.get(attestationId).quorum).to.equal(3);
+        });
+
+        it('commits at the round-start quorum even after validatorSet GROWS mid-round', function () {
+            // Round starts with N=4 (quorum=3). A larger set synced mid-round
+            // would yield quorum=5 live — which would wrongly stall this node.
+            engine.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+            let attestationId = 'BTC:1:LTC';
+            let digest = engine._digest(attestationId, 3);
+
+            engine._handlePropose({
+                sender: VALIDATORS_4[1].addr,
+                data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
+                        destChain: 'LTC', confirmations: 3, digest }
+            });
+            // After PROPOSE: prepares = {self, sender} = 2; one PREPARE broadcast.
+            pm.broadcast.resetHistory();
+
+            // Validator set GROWS mid-round — live quorum would now be 5.
+            engine.setValidatorSet(VALIDATORS_7);
+
+            // Third prepare arrives → 3 prepares. Locked quorum=3 → COMMIT must fire.
+            engine._handlePrepare({
+                sender: VALIDATORS_4[2].addr,
+                data: { attestationId, digest }
+            });
+
+            expect(pm.broadcast.called).to.be.true;
+            expect(pm.broadcast.getCall(0).args[0]).to.equal('XCHAIN_ATTEST_COMMIT');
+        });
+
+        it('does NOT commit early if validatorSet SHRINKS mid-round', function () {
+            // Round starts with N=7 (quorum=5). A shrunk set synced mid-round
+            // would yield quorum=1 live — which would wrongly commit too early.
+            engine.setValidatorSet(VALIDATORS_7);
+            pm.validatorAddr = VALIDATORS_7[0].addr;
+            let attestationId = 'BTC:1:LTC';
+            let digest = engine._digest(attestationId, 3);
+
+            engine._handlePropose({
+                sender: VALIDATORS_7[1].addr,
+                data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
+                        destChain: 'LTC', confirmations: 3, digest }
+            });
+            pm.broadcast.resetHistory();
+
+            // Validator set SHRINKS mid-round — live quorum would now be 1.
+            engine.setValidatorSet([makeValidator(0)]);
+
+            // Third prepare → 3 prepares. Locked quorum=5 → still NOT met, no COMMIT.
+            engine._handlePrepare({
+                sender: VALIDATORS_7[2].addr,
+                data: { attestationId, digest }
+            });
+
+            let commitBroadcast = pm.broadcast.getCalls()
+                .some(c => c.args[0] === 'XCHAIN_ATTEST_COMMIT');
+            expect(commitBroadcast).to.be.false;
+        });
+    });
 });
