@@ -232,13 +232,17 @@ class OracleConsensus extends EventEmitter {
             }
         }, this.finalizationTimeout);
 
-        // Broadcast ORACLE_PROPOSE (includes proposer's signature on the canonical PRICE v0 payload)
+        // Broadcast ORACLE_PROPOSE (includes proposer's signature on the canonical PRICE v0 payload).
+        // submissionKeys carries the proposer's own view of the submission set (sorted) so receivers
+        // can validate fallback-proposer legitimacy against the same view the proposer elected itself
+        // from, rather than their own gossip-divergent local map (see _handlePropose).
         this.peerManager.broadcast(ORACLE_PROPOSE, {
             round:          round,
             prices:         aggregated,
             digest:         digest,
             btcBlockHeight: btcBlockHeight,
             btcBlockTime:   btcBlockTime,
+            submissionKeys: [...submissions.keys()].sort(),
             sig_pubkey:     mySig ? mySig.pubkey : null,
             sig:            mySig ? mySig.sig    : null
         });
@@ -269,7 +273,7 @@ class OracleConsensus extends EventEmitter {
     }
 
     async _handlePropose(envelope) {
-        let { round, prices, digest, btcBlockHeight, btcBlockTime, sig_pubkey, sig } = envelope.data;
+        let { round, prices, digest, btcBlockHeight, btcBlockTime, sig_pubkey, sig, submissionKeys } = envelope.data;
         if (!round || !prices || !digest) return;
         if (this.finalized.has(round)) return;
 
@@ -281,19 +285,35 @@ class OracleConsensus extends EventEmitter {
         }
 
         // Accept PROPOSE if sender is the deterministic leader OR an authorized
-        // fallback (lowest-addr submitter when the leader has no submission in
-        // our local view). The fallback path salvages rounds where the leader's
-        // price fetch failed but other hubs have prices.
+        // fallback (lowest-addr submitter when the leader has no submission).
+        // The fallback path salvages rounds where the leader's price fetch
+        // failed but other hubs have prices.
         let leader       = this._getLeader(round);
         let submissions  = this.oracleRound.getSubmissions(round);
         let isRealLeader = leader && leader.addr === envelope.sender;
         let isFallback   = false;
 
-        if (!isRealLeader && submissions && submissions.size > 0) {
-            let leaderSubmitted = leader && submissions.has(leader.addr);
-            if (!leaderSubmitted) {
-                let fallbackAddr = [...submissions.keys()].sort()[0];
-                if (fallbackAddr === envelope.sender) isFallback = true;
+        if (!isRealLeader) {
+            // Validate the fallback proposer against the proposer's own view of
+            // the submission set (piggybacked on the PROPOSE as submissionKeys),
+            // NOT our local gossip map. Gossip delivery is async, so our map may
+            // have seen a different subset of submitters at this instant —
+            // electing a fallback from our own divergent view rejects a
+            // legitimate proposer and stalls the round until the finalization
+            // timeout. The proposer's view is the only one that can
+            // authoritatively explain why it elected itself.
+            //
+            // Backward-compat: older peers don't send submissionKeys, so fall
+            // back to the local map (the previous, divergence-prone behavior).
+            let keys = Array.isArray(submissionKeys) && submissionKeys.length > 0
+                ? submissionKeys.slice()
+                : (submissions ? [...submissions.keys()] : []);
+            if (keys.length > 0) {
+                let leaderSubmitted = leader && keys.includes(leader.addr);
+                if (!leaderSubmitted) {
+                    let fallbackAddr = keys.sort()[0];
+                    if (fallbackAddr === envelope.sender) isFallback = true;
+                }
             }
         }
 

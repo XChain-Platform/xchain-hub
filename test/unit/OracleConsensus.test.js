@@ -430,4 +430,153 @@ describe('OracleConsensus', function () {
             expect(oc.pendingRounds.get(1).prepares.size).to.equal(1);
         });
     });
+
+    // -----------------------------------------------------------------
+    // Fallback proposer — submission-set piggyback
+    //
+    // The deterministic leader sometimes has no submission for a round
+    // (e.g. its price fetch failed). In that case the lowest-addr submitter
+    // takes over as fallback proposer. Because gossip delivery is async,
+    // different hubs may have seen different subsets of submitters at the
+    // moment of election — so a hub validating a fallback PROPOSE against its
+    // OWN local map can compute a different "lowest" than the proposer did,
+    // reject the legitimate proposer, and stall the round until the
+    // finalization timeout. The proposer therefore piggybacks the sorted
+    // submission keys it used (submissionKeys) on the PROPOSE; receivers
+    // validate against that, not their divergent local map.
+    // -----------------------------------------------------------------
+
+    describe('fallback proposer — submission-set piggyback', function () {
+
+        afterEach(function () {
+            for (let [, pending] of oc.pendingRounds) {
+                if (pending.timer) clearTimeout(pending.timer);
+            }
+        });
+
+        it('_proposeRound attaches the sorted submission keys to PROPOSE', function () {
+            oc.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[3].addr;
+
+            // Submitters arrive out of order in the map; submissionKeys must be sorted.
+            let entries = [
+                { sender: VALIDATORS_4[3].addr, prices: [{ coinPair: 'BTC/USD', price: '100000' }] },
+                { sender: VALIDATORS_4[1].addr, prices: [{ coinPair: 'BTC/USD', price: '100002' }] }
+            ];
+            let subs = buildSubmissions(entries);
+
+            oc._proposeRound(7, subs, true, 100, 1700000000, null, 3);
+
+            let [type, data] = pm.broadcast.getCall(0).args;
+            expect(type).to.equal('ORACLE_PROPOSE');
+            expect(data.submissionKeys).to.deep.equal(
+                [VALIDATORS_4[1].addr, VALIDATORS_4[3].addr].sort()
+            );
+        });
+
+        it('finalizeRound (leader path) includes submissionKeys in PROPOSE', async function () {
+            oc.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr; // leader for round 0
+
+            let entries = [
+                { sender: VALIDATORS_4[0].addr, prices: [{ coinPair: 'BTC/USD', price: '100000' }] },
+                { sender: VALIDATORS_4[1].addr, prices: [{ coinPair: 'BTC/USD', price: '100002' }] }
+            ];
+            oracleRound.getSubmissions.returns(buildSubmissions(entries));
+
+            await oc.finalizeRound(0);
+
+            let [type, data] = pm.broadcast.getCall(0).args;
+            expect(type).to.equal('ORACLE_PROPOSE');
+            expect(data.submissionKeys).to.deep.equal(
+                [VALIDATORS_4[0].addr, VALIDATORS_4[1].addr].sort()
+            );
+        });
+
+        it('accepts a fallback PROPOSE validated against piggybacked keys even when the local map diverges', async function () {
+            // We are validator-2 ("Hub A"). Our local gossip view is {v2, v4},
+            // whose lowest is v2 (ourselves) — so WITHOUT the piggyback we would
+            // reject v4's PROPOSE as "non-leader" and the round would stall.
+            oc.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[1].addr;
+
+            // Round 4 leader is v1 (4 % 4 = 0), which did not submit in any view → fallback applies.
+            let prices = [{ coinPair: 'BTC/USD', price: '100000.00000000' }];
+            let digest = oc._digest(4, prices);
+
+            oracleRound.getSubmissions.returns(buildSubmissions([
+                { sender: VALIDATORS_4[1].addr, prices },
+                { sender: VALIDATORS_4[3].addr, prices }
+            ]));
+
+            // Proposer v4 ("Hub D") only saw its own submission when it elected itself.
+            await oc._handlePropose({
+                sender: VALIDATORS_4[3].addr,
+                data: {
+                    round:          4,
+                    prices,
+                    digest,
+                    submissionKeys: [VALIDATORS_4[3].addr]
+                }
+            });
+
+            expect(oc.pendingRounds.has(4)).to.be.true;
+            expect(pm.broadcast.called).to.be.true;
+            let [type] = pm.broadcast.getCall(0).args;
+            expect(type).to.equal('ORACLE_PREPARE');
+        });
+
+        it('rejects a fallback PROPOSE when piggybacked keys do not make the sender the lowest', async function () {
+            oc.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[1].addr;
+
+            let prices = [{ coinPair: 'BTC/USD', price: '100000.00000000' }];
+            let digest = oc._digest(4, prices);
+
+            oracleRound.getSubmissions.returns(buildSubmissions([
+                { sender: VALIDATORS_4[2].addr, prices },
+                { sender: VALIDATORS_4[3].addr, prices }
+            ]));
+
+            // v4 proposes but its own claimed set says v3 is the lowest submitter,
+            // so v4 is not a legitimate fallback — must be rejected.
+            await oc._handlePropose({
+                sender: VALIDATORS_4[3].addr,
+                data: {
+                    round:          4,
+                    prices,
+                    digest,
+                    submissionKeys: [VALIDATORS_4[2].addr, VALIDATORS_4[3].addr]
+                }
+            });
+
+            expect(oc.pendingRounds.has(4)).to.be.false;
+            expect(pm.broadcast.called).to.be.false;
+        });
+
+        it('falls back to the local map (legacy behavior) when submissionKeys is absent', async function () {
+            // Same divergent setup as the acceptance test, but the PROPOSE omits
+            // submissionKeys (older peer). With only the local map {v2, v4} to go
+            // on, the lowest is v2 (not the sender v4), so the PROPOSE is rejected —
+            // documenting the pre-fix behavior that rolling upgrades preserve.
+            oc.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[1].addr;
+
+            let prices = [{ coinPair: 'BTC/USD', price: '100000.00000000' }];
+            let digest = oc._digest(4, prices);
+
+            oracleRound.getSubmissions.returns(buildSubmissions([
+                { sender: VALIDATORS_4[1].addr, prices },
+                { sender: VALIDATORS_4[3].addr, prices }
+            ]));
+
+            await oc._handlePropose({
+                sender: VALIDATORS_4[3].addr,
+                data: { round: 4, prices, digest }
+            });
+
+            expect(oc.pendingRounds.has(4)).to.be.false;
+            expect(pm.broadcast.called).to.be.false;
+        });
+    });
 });

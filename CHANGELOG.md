@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.5] - 2026-05-29
+
+### Fixed
+- Oracle fallback-proposer election no longer diverges across hubs under uneven gossip delivery. When the deterministic round leader has no submission, the lowest-addr submitter takes over as fallback proposer. Previously both the proposer (`finalizeRound`) and every validator (`_handlePropose`) derived that proposer independently from their own in-memory submissions map — and because submissions propagate via gossip with variable latency, two hubs could have seen different subsets of submitters at election time and computed different fallback proposers. A validator that elected a different fallback than the actual proposer rejected the proposer's `ORACLE_PROPOSE` as "non-leader", stalling the round until the 120 s finalization timeout. The proposer now piggybacks the sorted submission keys it elected itself from (`submissionKeys`) on the `ORACLE_PROPOSE` message, and validators verify fallback legitimacy against that authoritative view rather than their own divergent local map. Backward-compatible: messages without `submissionKeys` (older peers) fall back to the prior local-map behavior, so rolling upgrades are safe.
+
 ## [2.2.4] - 2026-05-29
 
 ### Fixed
