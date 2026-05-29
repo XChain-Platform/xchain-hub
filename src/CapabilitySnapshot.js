@@ -56,12 +56,25 @@ class CapabilitySnapshot {
         let url = await this.hub._resolveBtcIndexerUrl();
         if (!url) return null;
 
+        // The hub is the authoritative source of the MIN_STAKE threshold for its
+        // own federation queries: passing it here makes the validator set depend
+        // only on on-chain stake state + this hub's governance view, not on the
+        // indexer's local config (which can drift between independently-operated
+        // indexers and silently break cross-hub snapshot determinism). When the
+        // registry isn't ready yet (snapshot exists pre-startCapabilities), we
+        // omit the field and the indexer falls back to its local config.
+        let minStake = (this.hub.capabilityRegistry && typeof this.hub.capabilityRegistry.getMinStake === 'function')
+            ? this.hub.capabilityRegistry.getMinStake(capability)
+            : null;
+        let params = { capability: capability, block_index: blockIndex };
+        if (minStake !== null && minStake !== undefined) params.min_stake = String(minStake);
+
         try {
             let res = await axios.post(url, {
                 jsonrpc: '2.0',
                 id:      now,
                 method:  'getcapabilityvalidators',
-                params:  { capability: capability, block_index: blockIndex }
+                params:  params
             }, { timeout: 5000 });
             let result = res && res.data && res.data.result;
             if (!result || result.error) return null;

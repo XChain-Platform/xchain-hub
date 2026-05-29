@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.7] - 2026-05-29
+
+### Fixed
+- `CapabilitySnapshot` now sends the hub's own governance-sourced `MIN_STAKE` threshold (`CapabilityRegistry.getMinStake()`) as a `min_stake` field in the `getcapabilityvalidators` RPC, making the hub the authoritative source of the threshold for its federation snapshot queries. Previously the call carried only `{capability, block_index}`, so the BTC indexer applied the `MIN_STAKE` from its *own* local config file when building the `HAVING` filter. Two hubs pointing at independently-operated indexers whose configs had drifted (or one indexer updated mid-round) would receive different validator sets for the same block — different `N`, different PBFT quorum thresholds — silently breaking the cross-hub determinism the snapshot guarantees, manifesting as deadlock or false quorum with no error surface. The threshold now depends only on on-chain stake state plus this hub's governance view, not on indexer config. When the capability registry isn't ready yet (the snapshot exists before `startCapabilities()`), the field is omitted and the indexer falls back to its local config as before. Requires the companion indexer change that honours the supplied threshold; older indexers ignore the extra field and continue using local config.
+
 ## [2.2.6] - 2026-05-29
 
 ### Fixed
