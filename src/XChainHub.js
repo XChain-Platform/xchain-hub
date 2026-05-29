@@ -912,6 +912,7 @@ class XChainHub {
 
     async close(){
         if(this._capabilityRecheckTimer){ clearInterval(this._capabilityRecheckTimer); this._capabilityRecheckTimer = null; }
+        if(this._stakePollTimer){ clearInterval(this._stakePollTimer); this._stakePollTimer = null; }
         if(this._capabilityConfigDebounce){ clearTimeout(this._capabilityConfigDebounce); this._capabilityConfigDebounce = null; }
         if(this._capabilityConfigWatcher){ try { this._capabilityConfigWatcher.close(); } catch(e){} this._capabilityConfigWatcher = null; }
         if(this.governance)       await this.governance.stop();

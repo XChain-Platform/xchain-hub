@@ -40,6 +40,8 @@ const XChainHub  = require('./XChainHub');
 const jsonRouter = require('express-json-rpc-router');
 const http      = require('http');
 const WebSocket = require('ws');
+const crypto    = require('crypto');
+const geoip     = require('geoip-lite');   // self-contained country/region DB; we read only country + region
 
 const HUB_PORT = process.env.HUB_PORT;
 const HUB_HOST = process.env.HUB_HOST || '0.0.0.0';
@@ -48,6 +50,16 @@ const HUB_HOST = process.env.HUB_HOST || '0.0.0.0';
 const HUB_API_KEY        = process.env.HUB_API_KEY || '';
 const HUB_API_RATE_LIMIT = parseInt(process.env.HUB_API_RATE_LIMIT) || 100;
 const CORS_ORIGIN        = process.env.CORS_ORIGIN || false;
+
+// Usage telemetry (anonymous install pings from xchain-node operators).
+// Enabled by default on the central hub; an operator's local hub can refuse pings
+// by setting TELEMETRY_ENABLED=false. Rows older than TELEMETRY_RETENTION_DAYS are pruned daily.
+const TELEMETRY_ENABLED        = (process.env.TELEMETRY_ENABLED || 'true').toLowerCase() !== 'false';
+const TELEMETRY_RETENTION_DAYS = parseInt(process.env.TELEMETRY_RETENTION_DAYS) || 90;
+// Secret salt for the one-way IP hash. The connecting IP is NEVER stored — at ingest we
+// derive a coarse country/region and a keyed HMAC, then discard the IP. Without a salt set,
+// ip_hash is left null (we never store an unsalted hash, which would be trivially reversible).
+const TELEMETRY_IP_SALT        = process.env.TELEMETRY_IP_SALT || '';
 
 const ALLOWED_CHAINS = new Set(['BTC', 'LTC', 'DOGE']);
 const WRITE_METHODS  = new Set([
@@ -136,6 +148,13 @@ async function startApi(){
 
     // Create the app
     const app = express();
+
+    // The hub sits behind Apache (and Cloudflare proxy is OFF for it), so honour
+    // X-Forwarded-For to recover the real client IP. For telemetry the IP is only
+    // used transiently to derive a coarse country/region + keyed hash and is never
+    // stored. If a future deployment exposes the hub directly, req.ip falls back to
+    // the socket address.
+    app.set('trust proxy', true);
 
     // Security and parsing middleware
     app.use(helmet());
@@ -550,6 +569,75 @@ async function startApi(){
         }
     });
 
+    // POST /telemetry — anonymous usage ping receiver for xchain-node operators.
+    // The connecting IP is NEVER stored. At ingest we derive a coarse country/region and a
+    // keyed one-way hash from it, then discard the IP. The body is never trusted for IP.
+    // Fire-and-forget: always returns quickly; a bad body or DB hiccup never errors the client.
+    const TELEMETRY_EVENTS = new Set(['install', 'update', 'start', 'heartbeat']);
+    const clampStr = (v, max) => (typeof v === 'string' ? v.slice(0, max) : null);
+
+    if (TELEMETRY_ENABLED && !TELEMETRY_IP_SALT)
+        console.log('Telemetry: TELEMETRY_IP_SALT not set — ip_hash will be null (country/region still recorded)');
+
+    // Normalize, then derive only non-identifying values from the connecting IP. The raw IP
+    // is used here and never returned or stored.
+    function anonymizeIp(rawIp) {
+        let ip = String(rawIp || '').replace(/^::ffff:/, '');   // unwrap IPv4-mapped IPv6
+        let geo = null;
+        try { geo = geoip.lookup(ip); } catch (e) { geo = null; }
+        let country = geo && geo.country ? String(geo.country).slice(0, 2) : null;
+        let region  = geo && geo.region  ? String(geo.region).slice(0, 16) : null;
+        let ipHash  = TELEMETRY_IP_SALT
+            ? crypto.createHmac('sha256', TELEMETRY_IP_SALT).update(ip).digest('hex')
+            : null;
+        return { country, region, ipHash };
+    }
+
+    app.post('/telemetry', async (req, res) => {
+        if (!TELEMETRY_ENABLED) return res.json({ status: 'disabled' });
+        try {
+            let b = req.body || {};
+
+            // install_id is the only required field; without it we can't dedupe installs.
+            let installId = clampStr(b.install_id, 36);
+            if (!installId) return res.status(400).json({ error: 'install_id is required' });
+
+            // Derive country/region/hash from the connection, then the IP is gone.
+            let { country, region, ipHash } = anonymizeIp(req.ip || req.socket.remoteAddress);
+            let event = TELEMETRY_EVENTS.has(b.event) ? b.event : 'heartbeat';
+
+            // Cap the module list defensively (a real install has well under 100 entries).
+            let modules = Array.isArray(b.modules) ? b.modules.slice(0, 100).map(m => ({
+                module:  clampStr(m && m.module, 64),
+                coin:    clampStr(m && m.coin, 16),
+                network: clampStr(m && m.network, 24),
+                version: clampStr(m && m.version, 32),
+                running: !!(m && m.running)
+            })) : [];
+
+            let query = `INSERT INTO telemetry_pings
+                         (install_id, country, region, ip_hash, node_version, os_platform, os_release, arch, docker_version, modules, event)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+            await hub.db.doQuery(query, [
+                installId,
+                country,
+                region,
+                ipHash,
+                clampStr(b.node_version, 32),
+                clampStr(b.os_platform, 32),
+                clampStr(b.os_release, 64),
+                clampStr(b.arch, 16),
+                clampStr(b.docker_version, 32),
+                JSON.stringify(modules),
+                event
+            ]);
+            res.json({ status: 'success' });
+        } catch (err) {
+            // Never surface telemetry failures to the client.
+            res.json({ status: 'success' });
+        }
+    });
+
     // Allow JSON-RPC requests
     app.use(jsonRouter({methods: jsonRpcController}));
 
@@ -585,6 +673,24 @@ async function startApi(){
         });
     });
 
+    // Daily telemetry retention sweep — prune pings older than the retention window.
+    // Runs once shortly after startup, then every 24h. No-op when telemetry is disabled.
+    let telemetryCleanupInterval = null;
+    if (TELEMETRY_ENABLED) {
+        const pruneTelemetry = async () => {
+            try {
+                let result = await hub.db.doQuery(
+                    'DELETE FROM telemetry_pings WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)',
+                    [TELEMETRY_RETENTION_DAYS]
+                );
+                let deleted = result && result.affectedRows ? Number(result.affectedRows) : 0;
+                if (deleted > 0) console.log('Telemetry retention: pruned ' + deleted + ' rows older than ' + TELEMETRY_RETENTION_DAYS + ' days');
+            } catch (e) { /* best-effort; never crash the hub over retention */ }
+        };
+        setTimeout(pruneTelemetry, 60 * 1000);
+        telemetryCleanupInterval = setInterval(pruneTelemetry, 24 * 60 * 60 * 1000);
+    }
+
     // Periodic ping to detect dead WebSocket connections
     const pingInterval = setInterval(() => {
         if (!hub.hubDbBroadcaster) return;
@@ -600,8 +706,55 @@ async function startApi(){
         console.log('Hub DB sync WebSocket available at ws://' + HUB_HOST + ':' + HUB_PORT + '/hub-db/subscribe');
     });
 
-    // Graceful shutdown
-    process.on('SIGTERM', () => { clearInterval(pingInterval); server.close(); });
+    // Graceful shutdown — release every timer, socket, and the DB pool, then exit.
+    // Previously this only called server.close(), which leaves the MariaDB pool (and
+    // hub timers) keeping the event loop alive, so the process never actually exited.
+    let shuttingDown = false;
+    async function shutdown(signal) {
+        if (shuttingDown) return;          // ignore a second signal
+        shuttingDown = true;
+        console.log('Received ' + signal + ' — shutting down hub...');
+
+        // Stop the periodic work owned by this file.
+        clearInterval(pingInterval);
+        if (telemetryCleanupInterval) clearInterval(telemetryCleanupInterval);
+
+        // Backstop: if any close hangs, exit anyway rather than linger forever.
+        const forceTimer = setTimeout(() => {
+            console.error('Shutdown timed out after 10s — forcing exit');
+            process.exit(1);
+        }, 10000);
+        forceTimer.unref();
+
+        try {
+            // Close hub-db WebSocket subscribers + the WS server.
+            if (hub.hubDbBroadcaster) {
+                for (let ws of hub.hubDbBroadcaster.subscribers) {
+                    try { ws.close(1001, 'shutting down'); } catch (e) { /* ignore */ }
+                }
+            }
+            try { wss.close(); } catch (e) { /* ignore */ }
+
+            // Stop accepting HTTP connections; force-close lingering keep-alives so
+            // server.close() resolves promptly (Node >= 18.2).
+            await new Promise((resolve) => {
+                server.close(resolve);
+                if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
+            });
+
+            // Release hub-owned resources: P2P, consensus/oracle timers, capability +
+            // stake-poll timers, config watcher, and the MariaDB pool.
+            await hub.close();
+        } catch (e) {
+            console.error('Error during shutdown:', e && e.message ? e.message : e);
+        } finally {
+            clearTimeout(forceTimer);
+            process.exit(0);
+        }
+    }
+
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT',  () => shutdown('SIGINT'));
 }
 
 startApi();
