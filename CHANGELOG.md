@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.6] - 2026-05-29
+
+### Fixed
+- Capability `MIN_STAKE` thresholds approved by governance now take effect across the federation without a hub restart. `CapabilityRegistry.capConfig` was seeded once from `p2pConfig.CAPABILITIES` at startup and never refreshed, so `getMinStake()` kept returning the startup value for the life of the process. A passed governance proposal that raised or lowered a capability's stake threshold therefore only applied to freshly-restarted nodes — long-running nodes kept the old threshold and computed a different qualified-validator set, splitting PBFT quorum membership (oracle, cross-chain, attestation) across the federation until every hub was restarted. `XChainHub.startAttestation()` now also listens for `proposal:finalized` and, for parameters named `CAPABILITY_<CAP>_MIN_STAKE` (e.g. `CAPABILITY_PRICE_MIN_STAKE`, `CAPABILITY_CROSS_CHAIN_MIN_STAKE`), applies the new value to the in-memory config via `CapabilityRegistry._applyGovernanceChange()` and re-evaluates this node's own qualification against the new threshold (using the most recent observed on-chain stake amount; the periodic stake poll reconciles on its next tick). Mirrors the existing `ProviderRegistry.hotReload()` wiring on the same event.
+
 ## [2.2.5] - 2026-05-29
 
 ### Fixed

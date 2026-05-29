@@ -80,6 +80,7 @@ class XChainHub {
         this._capabilityConfigWatcher = null;
         this._stakePollTimer          = null;
         this._latestBlockIndex        = null;  // most recent observed BTC block index (for capability gossip block_at)
+        this._latestStakeAmount       = null;  // most recent observed own on-chain stake amount (for threshold re-evaluation)
     }
 
     async start(){
@@ -236,6 +237,17 @@ class XChainHub {
             this.governance.on('proposal:finalized', () => {
                 this.providerRegistry.hotReload().catch(e =>
                     console.error('ProviderRegistry hot-reload failed:', e && e.message ? e.message : e));
+            });
+
+            // Hot-reload capability thresholds on governance proposal finalization.
+            // A passed proposal that changes a capability's MIN_STAKE updates the
+            // in-memory capConfig and re-evaluates this node's own qualification, so
+            // long-running nodes converge on the new threshold with freshly-started
+            // peers — keeping the qualified validator set deterministic across the
+            // federation without a hub restart. No-op for non-capability params.
+            this.governance.on('proposal:finalized', (ev) => {
+                this._applyCapabilityGovernanceChange(ev).catch(e =>
+                    console.error('Capability config hot-reload failed:', e && e.message ? e.message : e));
             });
         }
 
@@ -836,12 +848,42 @@ class XChainHub {
         let pubkey = this.identity.getPubkeyHex();
         this._latestBlockIndex = blockIndex || this._latestBlockIndex;
         let amount = String(stakeAmount || '0');
+        this._latestStakeAmount = amount;
         for(let cap of this.capabilityRegistry.getCapabilities()){
             let minStake = this.capabilityRegistry.getMinStake(cap) || '0';
             let qualified = this._compareDecimal(amount, minStake) >= 0;
             await this.capabilityRegistry.setQualification(pubkey, cap, qualified, blockIndex);
         }
         await this._broadcastOwnCapabilityState(pubkey);
+    }
+
+    // Map a finalized governance proposal onto the in-memory capability config
+    // and re-evaluate this node's own qualification against the new threshold.
+    // Recognizes parameters named CAPABILITY_<CAP>_MIN_STAKE (e.g.
+    // CAPABILITY_PRICE_MIN_STAKE, CAPABILITY_CROSS_CHAIN_MIN_STAKE). Any other
+    // parameter is ignored here — it's owned by a different subsystem.
+    async _applyCapabilityGovernanceChange(ev){
+        if(!ev || !ev.parameter || !this.capabilityRegistry) return;
+        let parsed = this._parseCapabilityParameter(ev.parameter);
+        if(!parsed) return;
+        this.capabilityRegistry._applyGovernanceChange(parsed.capability, parsed.parameterKey, String(ev.newValue));
+        // Re-evaluate own qualification immediately against the new threshold,
+        // using the most recent observed on-chain stake amount. The periodic
+        // stake poll (_pollOwnStake) reconciles with fresh on-chain truth on its
+        // next tick; doing it here too closes the window without waiting for it.
+        await this.refreshOwnQualification(this._latestStakeAmount, this._latestBlockIndex);
+    }
+
+    // Parse a governance parameter name of the form CAPABILITY_<CAP>_MIN_STAKE
+    // into { capability, parameterKey }, where <CAP> is the uppercased capability
+    // name (price → PRICE, cross_chain → CROSS_CHAIN). Returns null for any
+    // parameter that isn't a known-capability MIN_STAKE field.
+    _parseCapabilityParameter(parameter){
+        let m = /^CAPABILITY_(.+)_MIN_STAKE$/.exec(String(parameter || ''));
+        if(!m) return null;
+        let capability = m[1].toLowerCase();
+        if(!this.capabilityRegistry || this.capabilityRegistry.getCapabilities().indexOf(capability) === -1) return null;
+        return { capability: capability, parameterKey: 'MIN_STAKE' };
     }
 
     // Combined own-state update: self-test + qualification (qualification reuses cached amount if available) + broadcast

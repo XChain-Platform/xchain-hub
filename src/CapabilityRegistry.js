@@ -87,6 +87,26 @@ class CapabilityRegistry {
      * State mutations (called by qualification sync + self-tests + operator config)
      ****************************************************************/
 
+    // Apply a governance-approved parameter change to the in-memory capability
+    // config — the object getMinStake() reads from. capConfig is seeded from
+    // p2pConfig.CAPABILITIES at startup and would otherwise stay frozen for the
+    // life of the process, so a passed proposal (e.g. raising a capability's
+    // MIN_STAKE) would only take effect after a restart. Calling this keeps
+    // long-running nodes in sync with freshly-started peers, so the federation
+    // computes the same qualified validator set from the same thresholds.
+    //
+    // The common case is parameterKey === 'MIN_STAKE'. This only mutates config;
+    // re-evaluating this node's own qualification against the new threshold is
+    // the caller's responsibility, because the on-chain stake amount lives on
+    // the hub (see XChainHub.refreshOwnQualification).
+    _applyGovernanceChange(capability, parameterKey, newValue) {
+        if (KNOWN_CAPABILITIES.indexOf(capability) === -1)
+            throw new Error('unknown capability: ' + capability);
+        if (!this.capConfig[capability]) this.capConfig[capability] = {};
+        this.capConfig[capability][parameterKey] = newValue;
+        return this.capConfig[capability][parameterKey];
+    }
+
     // Upsert qualified flag for (pubkey, capability)
     async setQualification(pubkey, capability, qualified, blockIndex) {
         if (KNOWN_CAPABILITIES.indexOf(capability) === -1)

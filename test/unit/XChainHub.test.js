@@ -228,4 +228,64 @@ describe('XChainHub', function () {
             expect(result).to.not.be.null;
         });
     });
+
+    // -----------------------------------------------------------------
+    // Governance-driven capability config hot-reload
+    // -----------------------------------------------------------------
+
+    describe('capability governance hot-reload', function () {
+        const CapabilityRegistry = require('../../src/CapabilityRegistry');
+        let hub;
+
+        beforeEach(function () {
+            mockDb.getConnection = sinon.stub().resolves(mockConn);
+            hub = new XChainHub('host', 3306, 'db', 'user', 'pass',
+                { CAPABILITIES: { price: { MIN_STAKE: '10000' } } });
+            hub.db = mockDb;
+            hub.capabilityRegistry = new CapabilityRegistry(hub);
+            hub.identity = { getPubkeyHex: () => 'aa'.repeat(33) };
+        });
+
+        it('_parseCapabilityParameter recognizes CAPABILITY_<CAP>_MIN_STAKE', function () {
+            expect(hub._parseCapabilityParameter('CAPABILITY_PRICE_MIN_STAKE'))
+                .to.deep.equal({ capability: 'price', parameterKey: 'MIN_STAKE' });
+            expect(hub._parseCapabilityParameter('CAPABILITY_CROSS_CHAIN_MIN_STAKE'))
+                .to.deep.equal({ capability: 'cross_chain', parameterKey: 'MIN_STAKE' });
+        });
+
+        it('_parseCapabilityParameter returns null for non-capability params', function () {
+            expect(hub._parseCapabilityParameter('ORACLE_ROUND_INTERVAL')).to.be.null;
+            expect(hub._parseCapabilityParameter('CAPABILITY_BOGUS_MIN_STAKE')).to.be.null;
+            expect(hub._parseCapabilityParameter('')).to.be.null;
+        });
+
+        it('mutates capConfig in place on a finalized capability proposal', async function () {
+            expect(hub.capabilityRegistry.getMinStake('price')).to.equal('10000');
+            await hub._applyCapabilityGovernanceChange({
+                parameter: 'CAPABILITY_PRICE_MIN_STAKE', oldValue: '10000', newValue: '25000'
+            });
+            expect(hub.capabilityRegistry.getMinStake('price')).to.equal('25000');
+        });
+
+        it('re-evaluates own qualification against the new threshold', async function () {
+            let setQual = sinon.spy(hub.capabilityRegistry, 'setQualification');
+            hub._latestStakeAmount = '15000';   // between old (10000) and new (25000) thresholds
+            await hub._applyCapabilityGovernanceChange({
+                parameter: 'CAPABILITY_PRICE_MIN_STAKE', oldValue: '10000', newValue: '25000'
+            });
+            // 15000 < 25000 → no longer qualified for price under the raised threshold
+            let priceCall = setQual.getCalls().find(c => c.args[1] === 'price');
+            expect(priceCall, 'setQualification called for price').to.exist;
+            expect(priceCall.args[2]).to.equal(false);
+        });
+
+        it('ignores non-capability proposals', async function () {
+            let setQual = sinon.spy(hub.capabilityRegistry, 'setQualification');
+            await hub._applyCapabilityGovernanceChange({
+                parameter: 'ORACLE_ROUND_INTERVAL', oldValue: '600000', newValue: '900000'
+            });
+            expect(setQual.called).to.be.false;
+            expect(hub.capabilityRegistry.getMinStake('price')).to.equal('10000');
+        });
+    });
 });
