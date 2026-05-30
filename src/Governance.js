@@ -337,7 +337,7 @@ class Governance extends EventEmitter {
             try {
                 await this._tallyProposal(proposal);
             } catch (e) {
-                console.error('Governance: tally failed for proposal ' + proposal.proposal_id + ':', e.message);
+                console.error('Governance: tally failed for proposal ' + proposal.proposal_id + ':', e);
             }
         }
     }
