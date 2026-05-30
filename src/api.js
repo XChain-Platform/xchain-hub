@@ -45,6 +45,7 @@ const geoip     = require('geoip-lite');   // self-contained country/region DB; 
 
 const HUB_PORT = process.env.HUB_PORT;
 const HUB_HOST = process.env.HUB_HOST || '0.0.0.0';
+const HUB_DB_KEEPALIVE_INTERVAL = parseInt(process.env.HUB_DB_KEEPALIVE_INTERVAL) || 30000;
 
 // Security constants
 const HUB_API_KEY        = process.env.HUB_API_KEY || '';
@@ -96,8 +97,10 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     P2P_VALIDATOR_ADDR:     P2P_VALIDATOR_ADDR,
     SIGNING_PRIVKEY_HEX:    process.env.SIGNING_PRIVKEY_HEX || '',
     REQUIRE_SIGNATURES:     (process.env.REQUIRE_SIGNATURES || 'true').toLowerCase() !== 'false',
-    P2P_HEARTBEAT_INTERVAL: parseInt(process.env.P2P_HEARTBEAT_INTERVAL) || 15000,
-    P2P_RECONNECT_BASE:     parseInt(process.env.P2P_RECONNECT_BASE) || 2000,
+    P2P_HEARTBEAT_INTERVAL:    parseInt(process.env.P2P_HEARTBEAT_INTERVAL) || 15000,
+    P2P_DEDUP_PRUNE_INTERVAL:  parseInt(process.env.P2P_DEDUP_PRUNE_INTERVAL) || 30000,
+    P2P_WS_PING_INTERVAL:      parseInt(process.env.P2P_WS_PING_INTERVAL) || 30000,
+    P2P_RECONNECT_BASE:        parseInt(process.env.P2P_RECONNECT_BASE) || 2000,
     P2P_RECONNECT_MAX:      parseInt(process.env.P2P_RECONNECT_MAX) || 60000,
     P2P_MSG_DEDUP_TTL:      parseInt(process.env.P2P_MSG_DEDUP_TTL) || 60000,
     P2P_MAX_PAYLOAD:        parseInt(process.env.P2P_MAX_PAYLOAD) || 1048576,
@@ -780,7 +783,7 @@ async function startApi(){
                 try { ws.ping(); } catch (e) { /* ignore */ }
             }
         }
-    }, 30000);
+    }, HUB_DB_KEEPALIVE_INTERVAL);
 
     server.listen(HUB_PORT, HUB_HOST, () => {
         console.log('Hub API listening on ' + HUB_HOST + ':' + HUB_PORT);

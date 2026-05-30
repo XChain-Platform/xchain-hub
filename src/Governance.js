@@ -58,7 +58,8 @@ class Governance extends EventEmitter {
         this._tallyTimer = null;
 
         // Config
-        this.votingPeriod = parseInt(process.env.GOV_VOTING_PERIOD) || (7 * 24 * 60 * 60 * 1000); // 7 days
+        this.votingPeriod  = parseInt(process.env.GOV_VOTING_PERIOD)       || (7 * 24 * 60 * 60 * 1000); // 7 days
+        this.tallyInterval = parseInt(process.env.GOVERNANCE_TALLY_INTERVAL) || 60000;
     }
 
     setValidatorSet(validators) {
@@ -69,8 +70,8 @@ class Governance extends EventEmitter {
         this._messageHandler = (envelope) => this._handleMessage(envelope);
         this.peerManager.on('message', this._messageHandler);
 
-        // Periodically check for proposals that need tallying (every 60s)
-        this._tallyTimer = setInterval(() => this._checkExpiredProposals(), 60000);
+        // Periodically check for proposals that need tallying
+        this._tallyTimer = setInterval(() => this._checkExpiredProposals(), this.tallyInterval);
 
         console.log('Governance engine started (voting period: ' + (this.votingPeriod / 86400000).toFixed(1) + ' days)');
     }

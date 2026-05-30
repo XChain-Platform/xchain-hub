@@ -521,7 +521,7 @@ class PeerManager extends EventEmitter {
             for (let [id, expiresAt] of this.seenIds) {
                 if (now >= expiresAt) this.seenIds.delete(id);
             }
-        }, 30000);
+        }, this.config.P2P_DEDUP_PRUNE_INTERVAL || 30000);
     }
 
     // Start WS ping/pong interval for dead connection detection
@@ -554,7 +554,7 @@ class PeerManager extends EventEmitter {
                     ws.ping();
                 });
             }
-        }, 30000);
+        }, this.config.P2P_WS_PING_INTERVAL || 30000);
     }
 
     // Add a message ID to the dedup cache, enforcing the size bound
