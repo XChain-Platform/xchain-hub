@@ -97,6 +97,44 @@ describe('OracleRound', function () {
 
             expect(pm.broadcast.called).to.be.false;
         });
+
+        it('increments consecutiveSkippedRounds on fetch failure', async function () {
+            mockPriceFetcher.fetchPrices.rejects(new Error('API down'));
+            await or._executeRound();
+
+            expect(or.consecutiveSkippedRounds).to.equal(1);
+            expect(or.lastSuccessfulRoundTime).to.be.null;
+        });
+
+        it('increments consecutiveSkippedRounds on empty price set', async function () {
+            mockPriceFetcher.fetchPrices.resolves([]);
+            await or._executeRound();
+
+            expect(or.consecutiveSkippedRounds).to.equal(1);
+            expect(or.lastSuccessfulRoundTime).to.be.null;
+        });
+
+        it('resets consecutiveSkippedRounds and sets lastSuccessfulRoundTime on success', async function () {
+            // Simulate prior skips
+            mockPriceFetcher.fetchPrices.rejects(new Error('API down'));
+            await or._executeRound();
+            expect(or.consecutiveSkippedRounds).to.equal(1);
+
+            // Force idempotency guard to allow a second execution
+            or.lastExecutedRound = -1;
+
+            // Now a successful round
+            mockPriceFetcher.fetchPrices.resolves([
+                { coinPair: 'BTC/USD', price: '100000.00000000', sources: 2 }
+            ]);
+            let before = Date.now();
+            await or._executeRound();
+            let after = Date.now();
+
+            expect(or.consecutiveSkippedRounds).to.equal(0);
+            expect(or.lastSuccessfulRoundTime).to.be.at.least(before);
+            expect(or.lastSuccessfulRoundTime).to.be.at.most(after);
+        });
     });
 
     // -----------------------------------------------------------------
@@ -153,12 +191,27 @@ describe('OracleRound', function () {
     // -----------------------------------------------------------------
 
     describe('getSubmissionsInfo()', function () {
-        it('returns info object', async function () {
+        it('returns info object with core fields', async function () {
             await or._executeRound();
             let info = await or.getSubmissionsInfo();
             expect(info).to.have.property('currentRound');
             expect(info).to.have.property('roundInterval');
             expect(info).to.have.property('submissionWindow');
+        });
+
+        it('includes consecutiveSkippedRounds and lastSuccessfulRoundTime', async function () {
+            await or._executeRound();
+            let info = await or.getSubmissionsInfo();
+            expect(info).to.have.property('consecutiveSkippedRounds').that.equals(0);
+            expect(info).to.have.property('lastSuccessfulRoundTime').that.is.a('number');
+        });
+
+        it('reflects skipped count when rounds fail', async function () {
+            mockPriceFetcher.fetchPrices.rejects(new Error('feed down'));
+            await or._executeRound();
+            let info = await or.getSubmissionsInfo();
+            expect(info.consecutiveSkippedRounds).to.equal(1);
+            expect(info.lastSuccessfulRoundTime).to.be.null;
         });
     });
 });

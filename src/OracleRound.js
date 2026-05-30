@@ -73,6 +73,10 @@ class OracleRound {
         this.chainTipFallbackActive        = false;
         this._startTime                    = Date.now();
 
+        // Skipped-round tracking
+        this.consecutiveSkippedRounds = 0;
+        this.lastSuccessfulRoundTime  = null;
+
         // Wall-clock anchor for round numbering. All hubs must agree on this
         // timestamp so they compute the same round number from the same time.
         this.epochStart = parseInt(this.config.ORACLE_EPOCH_START);
@@ -154,17 +158,19 @@ class OracleRound {
         }
 
         return {
-            currentRound:          this.currentRound,
-            roundStartTime:        this.roundStartTime,
-            roundInterval:         this.roundInterval,
-            submissionWindow:      this.submissionWindow,
-            submissions:           info,
-            skippedRounds:         skippedRounds,
-            skippedCount:          skippedRounds.length,
-            btcBlockHeight:        this.currentBtcBlockHeight != null ? this.currentBtcBlockHeight : null,
-            usingFallback:         this.chainTipFallbackActive,
-            chainTipFetchFailures: this.chainTipFetchFailures,
-            lastChainTipFetchAt:   this.lastSuccessfulChainTipFetchAt
+            currentRound:             this.currentRound,
+            roundStartTime:           this.roundStartTime,
+            roundInterval:            this.roundInterval,
+            submissionWindow:         this.submissionWindow,
+            submissions:              info,
+            skippedRounds:            skippedRounds,
+            skippedCount:             skippedRounds.length,
+            consecutiveSkippedRounds: this.consecutiveSkippedRounds,
+            lastSuccessfulRoundTime:  this.lastSuccessfulRoundTime,
+            btcBlockHeight:           this.currentBtcBlockHeight != null ? this.currentBtcBlockHeight : null,
+            usingFallback:            this.chainTipFallbackActive,
+            chainTipFetchFailures:    this.chainTipFetchFailures,
+            lastChainTipFetchAt:      this.lastSuccessfulChainTipFetchAt
                 ? new Date(this.lastSuccessfulChainTipFetchAt).toISOString()
                 : null
         };
@@ -264,6 +270,7 @@ class OracleRound {
             // has prices, OracleConsensus writes a 'skipped' price_snapshots row
             // instead of the round vanishing without a trace.
             this._scheduleFinalization(this.currentRound);
+            this.consecutiveSkippedRounds++;
             return;
         }
 
@@ -271,6 +278,7 @@ class OracleRound {
             console.warn('Oracle: No prices available for round ' + this.currentRound);
             // Same rationale as the fetch-failure path above — record the gap.
             this._scheduleFinalization(this.currentRound);
+            this.consecutiveSkippedRounds++;
             return;
         }
 
@@ -297,6 +305,9 @@ class OracleRound {
 
         // Persist to DB (fire and forget)
         this._persistSubmissions(this.currentRound, myAddr, prices);
+
+        this.consecutiveSkippedRounds = 0;
+        this.lastSuccessfulRoundTime  = Date.now();
 
         // Schedule finalization after the submission window closes
         this._scheduleFinalization(this.currentRound);
