@@ -73,6 +73,29 @@ class Database {
         return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
+    // Throw immediately on errors that retrying will never fix (bad credentials,
+    // missing privilege). Transient errors (DB still booting, connection refused)
+    // are NOT fatal — callers keep waiting on those. Without this, a misconfigured
+    // DB user (e.g. one lacking CREATE DATABASE) makes startup hang forever on a
+    // 5s retry loop instead of surfacing the real problem.
+    _failFastIfFatal(e, action){
+        const FATAL = new Set([
+            'ER_ACCESS_DENIED_ERROR',          // wrong user/password
+            'ER_DBACCESS_DENIED_ERROR',        // user has no rights on this database
+            'ER_SPECIFIC_ACCESS_DENIED_ERROR', // user lacks a required privilege (e.g. CREATE)
+            'ER_PASSWORD_NO_MATCH'
+        ]);
+        if(e && FATAL.has(e.code)){
+            throw new Error(
+                'Fatal DB error while ' + action + ' (' + e.code + '): the configured DB user (' +
+                this.user + '@' + this.host + ':' + this.port + ') lacks the required privilege. ' +
+                'Check HUB_DB_USER/HUB_DB_PASS and that the user has CREATE DATABASE (for first-run) ' +
+                'or pre-create the hub database and grant ALL on it. ' +
+                'Retrying will not fix a credentials/privilege error.'
+            );
+        }
+    }
+
     // Verify a database exists
     async verifyDatabase(){
         let connectionParams = {
@@ -88,6 +111,7 @@ class Database {
                 await db.end();
                 return results.length > 0;
             } catch (e){
+                this._failFastIfFatal(e, 'checking database existence');
                 console.log('Database connection error:', e.code || 'unknown');
                 console.log("Error checking if " + this.dbName + " exists. Trying again in 5 seconds...");
                 await this._sleep(5000);
@@ -111,6 +135,7 @@ class Database {
                 await db.end();
                 return true;
             } catch(e){
+                this._failFastIfFatal(e, 'creating the database');
                 console.log("Database creation error:", e.code || 'unknown');
                 console.log("Error creating " + this.dbName + ". Trying again in 5 seconds...");
                 await this._sleep(5000);

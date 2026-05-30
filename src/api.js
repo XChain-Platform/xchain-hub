@@ -149,6 +149,13 @@ async function startApi(){
     // Sits after governance so ProviderRegistry's hot-reload hook can attach.
     await hub.startAttestation();
 
+    // Start the capability registry: runs per-capability self-tests, polls the
+    // indexer for this validator's on-chain stake, and maintains qualification.
+    // Previously this was never called, leaving self-tests, stake tracking, and
+    // qualification dormant. HUB_CAPABILITY_CONFIG points at the JSON config that
+    // supplies MIN_STAKE thresholds and the per-capability self-test config blocks.
+    await hub.startCapabilities(process.env.HUB_CAPABILITY_CONFIG || null);
+
     // Create the app
     const app = express();
 
@@ -189,9 +196,18 @@ async function startApi(){
     // JSON-RPC methods
     const jsonRpcController = {
 
-        // Health check
-        async ping() {
-            return {status: "success"};
+        // Health check — probes the DB pool so a broken connection is surfaced here
+        async ping(params, {res}) {
+            try {
+                await Promise.race([
+                    hub.db.doQuery('SELECT 1', []),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))
+                ]);
+                return {status: "success", db: true};
+            } catch (err) {
+                res.status(503);
+                return {status: "degraded", db: false};
+            }
         },
 
         // Get all service configs

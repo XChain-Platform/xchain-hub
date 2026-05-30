@@ -731,7 +731,43 @@ class XChainHub {
      *
      * Spec: claude/reports/specs/2026-05-24_capability-staking-model.md
      ****************************************************************/
+    // Read + merge the capability config JSON into p2pConfig so the self-test
+    // modules and CapabilityRegistry see operator-supplied MIN_STAKE thresholds
+    // (CAPABILITIES) and per-capability config blocks (price.sources,
+    // cross_chain.chains, oracle_publish.doge_*). Used both at startup and on
+    // hot-reload. Throws on read/parse errors (callers decide how loud to be).
+    _loadCapabilityConfigFile(configFilePath){
+        let parsed = JSON.parse(fs.readFileSync(configFilePath, 'utf8'));
+        if(!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+            throw new Error('capability config must be a JSON object');
+        if(!this.p2pConfig) this.p2pConfig = {};
+        const KEYS = ['CAPABILITIES', 'DISABLED_CAPABILITIES', 'price', 'cross_chain',
+                      'oracle_publish', 'attestation', 'CAPABILITY_RECHECK_MS', 'STAKE_POLL_MS'];
+        for(let k of KEYS){
+            if(k in parsed) this.p2pConfig[k] = parsed[k];
+        }
+        // Keep a live registry's view in sync so hot-reload applies without a restart.
+        if(this.capabilityRegistry){
+            this.capabilityRegistry.capConfig = this.p2pConfig.CAPABILITIES || {};
+            this.capabilityRegistry.disabled  = new Set(this.p2pConfig.DISABLED_CAPABILITIES || []);
+        }
+        console.log('Loaded capability config from ' + configFilePath +
+            ' (thresholds: ' + Object.keys(this.p2pConfig.CAPABILITIES || {}).join(', ') + ')');
+    }
+
     async startCapabilities(configFilePath){
+        // Load operator-supplied capability config (MIN_STAKE thresholds + the
+        // per-capability self-test config blocks) BEFORE constructing the registry,
+        // which snapshots p2pConfig.CAPABILITIES at construction time. Without this,
+        // the self-tests read an empty config and every config-bearing capability
+        // (price/cross_chain/oracle_publish) fails with "config missing".
+        if(configFilePath){
+            try {
+                this._loadCapabilityConfigFile(configFilePath);
+            } catch(e){
+                console.warn('Could not load capability config from ' + configFilePath + ': ' + (e && e.message ? e.message : e));
+            }
+        }
         this.capabilityRegistry = new CapabilityRegistry(this);
 
         // Subscribe to peer capability messages (only meaningful if P2P is active)
@@ -763,6 +799,12 @@ class XChainHub {
                         // Debounce: fs.watch fires multiple times per change
                         if(this._capabilityConfigDebounce) clearTimeout(this._capabilityConfigDebounce);
                         this._capabilityConfigDebounce = setTimeout(() => {
+                            // Re-read the file contents into p2pConfig + the live
+                            // registry so an edit actually changes thresholds/config —
+                            // previously the watcher only re-ran self-tests against the
+                            // stale in-memory config, so file edits had no effect.
+                            try { this._loadCapabilityConfigFile(configFilePath); }
+                            catch(e){ console.warn('Capability config reload failed: ' + (e && e.message ? e.message : e)); }
                             this._runOwnCapabilityCheck(pubkey).catch(e => {
                                 console.error('Capability config-watch re-check failed:', e);
                             });
@@ -917,8 +959,25 @@ class XChainHub {
         let amount = String(stakeAmount || '0');
         this._latestStakeAmount = amount;
         for(let cap of this.capabilityRegistry.getCapabilities()){
-            let minStake = this.capabilityRegistry.getMinStake(cap) || '0';
-            let qualified = this._compareDecimal(amount, minStake) >= 0;
+            let minStake = this.capabilityRegistry.getMinStake(cap);
+            let qualified;
+            if(minStake === null || minStake === undefined){
+                // No MIN_STAKE configured for this capability. Fail CLOSED — do not
+                // default the threshold to '0', which would qualify an unstaked node
+                // for everything and diverge from the indexer's authoritative
+                // (governance) threshold used to lock quorum N. A capability with no
+                // configured threshold simply stays inactive until one is supplied.
+                qualified = false;
+                if(!this._warnedMissingMinStake) this._warnedMissingMinStake = new Set();
+                if(!this._warnedMissingMinStake.has(cap)){
+                    console.warn('Capability "' + cap + '": no MIN_STAKE configured ' +
+                        '(set CAPABILITIES.' + cap + '.MIN_STAKE in HUB_CAPABILITY_CONFIG) — ' +
+                        'treating as NOT qualified until a threshold is provided.');
+                    this._warnedMissingMinStake.add(cap);
+                }
+            } else {
+                qualified = this._compareDecimal(amount, minStake) >= 0;
+            }
             await this.capabilityRegistry.setQualification(pubkey, cap, qualified, blockIndex);
         }
         await this._broadcastOwnCapabilityState(pubkey);

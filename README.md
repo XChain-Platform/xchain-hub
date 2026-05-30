@@ -109,8 +109,40 @@ Consumers try each endpoint in order and fall back to the next if one is unreach
 | `P2P_PORT` | `10001` | WebSocket P2P listen port |
 | `SEED_NODES` | — | Comma-separated peer addresses |
 | `SIGNING_PRIVKEY_HEX` | — | 64-hex-char Ed25519 private key seed |
+| `ORACLE_EPOCH_START` | — | Oracle round-numbering anchor (Unix ms). **Required in validator mode** and must be identical across the federation. |
+| `HUB_CAPABILITY_CONFIG` | — | Path to the capability config JSON (see below). Required for `price`/`cross_chain`/`oracle_publish` to pass their self-tests and for `MIN_STAKE` qualification thresholds. |
 | `COINGECKO_API_KEY` | — | CoinGecko API key |
 | `COINMARKETCAP_API_KEY` | — | CoinMarketCap API key (enables second price source) |
+
+### Capability Configuration (`HUB_CAPABILITY_CONFIG`)
+
+In validator mode the hub runs a self-test per capability and tracks on-chain
+stake to decide which capabilities it is qualified + ready to serve. The config
+file supplies the `MIN_STAKE` qualification thresholds **and** the per-capability
+self-test config blocks. Without it, `price`/`cross_chain`/`oracle_publish`
+self-tests fail ("config missing"), and capabilities have no `MIN_STAKE` so they
+stay **inactive** (the hub now fails closed rather than qualifying at a 0 threshold).
+The file is hot-reloaded — edits apply without a restart.
+
+```json
+{
+  "CAPABILITIES": {
+    "price":          { "MIN_STAKE": "1000.00000000" },
+    "cross_chain":    { "MIN_STAKE": "1000.00000000" },
+    "oracle_publish": { "MIN_STAKE": "500.00000000"  },
+    "attestation":    { "MIN_STAKE": "1000.00000000" }
+  },
+  "DISABLED_CAPABILITIES": [],
+  "price":          { "sources": ["coingecko"], "fiats": ["USD"] },
+  "cross_chain":    { "chains": { "BTC": { "rpc": "http://node:8332" } } },
+  "oracle_publish": { "doge_address": "D...", "doge_wallet": "/path/to/wallet.dat" },
+  "attestation":    { "providers": {} }
+}
+```
+
+> Easiest path: run `xchain-node validator init`, which generates your signing
+> key, prints the **pubkey to stake to**, and writes a starter
+> `capabilities.json` that `xchain-node install` mounts into the hub container.
 
 ### External Attestation Framework (optional)
 
