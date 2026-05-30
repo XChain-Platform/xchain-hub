@@ -22,13 +22,25 @@ const XChainHub = proxyquire('../../../src/XChainHub', {
     './Governance.js':       function() {}
 });
 
+// applyConfig batches every collected param into a single db.setParams(rows)
+// call (rows are {coin, network, module, paramName, paramValue}); it does not
+// call setParams at all when no recognized params are present. These helpers
+// read the batched rows so the boundary assertions stay value-focused.
+function batchedRows() {
+    if (!mockDb.setParams.called) return [];
+    return mockDb.setParams.getCall(0).args[0];
+}
+function paramNamesWritten() {
+    return batchedRows().map(r => r.paramName);
+}
+
 describe('Boundary: Config Management', function () {
 
     let hub;
 
     beforeEach(function () {
         mockDb = {
-            setParam:       sinon.stub().resolves(),
+            setParams:      sinon.stub().resolves(0),
             getAllConfigs:   sinon.stub().resolves({}),
             doQuery:        sinon.stub().resolves([]),
             createDatabase: sinon.stub().resolves(),
@@ -54,10 +66,10 @@ describe('Boundary: Config Management', function () {
                 '': { mainnet: { decoder: { host: 'localhost' } } }
             };
             await hub.applyConfig(json);
-            expect(mockDb.setParam.callCount).to.equal(0);
+            expect(mockDb.setParams.called).to.be.false;
         });
 
-        it('calls setParam once per known parameter present in the module', async function () {
+        it('batches one row per known parameter present in the module', async function () {
             const json = {
                 BTC: {
                     mainnet: {
@@ -75,13 +87,16 @@ describe('Boundary: Config Management', function () {
                 }
             };
             await hub.applyConfig(json);
-            expect(mockDb.setParam.callCount).to.equal(8);
-            // Spot-check first and last calls
-            expect(mockDb.setParam.firstCall.args).to.deep.equal(['BTC', 'mainnet', 'decoder', 'host', 'localhost']);
-            expect(mockDb.setParam.lastCall.args).to.deep.equal(['BTC', 'mainnet', 'decoder', 'pass', 'secret']);
+            expect(mockDb.setParams.calledOnce).to.be.true;
+            const rows = batchedRows();
+            expect(rows).to.have.length(8);
+            // Spot-check first and last rows (PARAMETER_LIST order; non-string
+            // values are coerced to strings before batching)
+            expect(rows[0]).to.deep.equal({ coin: 'BTC', network: 'mainnet', module: 'decoder', paramName: 'host', paramValue: 'localhost' });
+            expect(rows[rows.length - 1]).to.deep.equal({ coin: 'BTC', network: 'mainnet', module: 'decoder', paramName: 'pass', paramValue: 'secret' });
         });
 
-        it('silently ignores unknown parameter names not in PARAMETER_LIST', async function () {
+        it('silently ignores unknown parameter names not in the allowlist', async function () {
             const json = {
                 BTC: {
                     mainnet: {
@@ -95,8 +110,9 @@ describe('Boundary: Config Management', function () {
             };
             await hub.applyConfig(json);
             // Only 'host' is in PARAMETER_LIST
-            expect(mockDb.setParam.callCount).to.equal(1);
-            expect(mockDb.setParam.firstCall.args[3]).to.equal('host');
+            const rows = batchedRows();
+            expect(rows).to.have.length(1);
+            expect(rows[0].paramName).to.equal('host');
         });
 
         it('skips parameters whose value is null', async function () {
@@ -108,10 +124,11 @@ describe('Boundary: Config Management', function () {
                 }
             };
             await hub.applyConfig(json);
-            // null host skipped, port written
-            expect(mockDb.setParam.callCount).to.equal(1);
-            expect(mockDb.setParam.firstCall.args[3]).to.equal('port');
-            expect(mockDb.setParam.firstCall.args[4]).to.equal('8332');
+            // null host skipped, port written (coerced to string)
+            const rows = batchedRows();
+            expect(rows).to.have.length(1);
+            expect(rows[0].paramName).to.equal('port');
+            expect(rows[0].paramValue).to.equal('8332');
         });
 
         it('skips parameters whose value is undefined', async function () {
@@ -124,8 +141,9 @@ describe('Boundary: Config Management', function () {
             };
             await hub.applyConfig(json);
             // undefined host skipped, port written
-            expect(mockDb.setParam.callCount).to.equal(1);
-            expect(mockDb.setParam.firstCall.args[3]).to.equal('port');
+            const rows = batchedRows();
+            expect(rows).to.have.length(1);
+            expect(rows[0].paramName).to.equal('port');
         });
 
         it('does NOT skip a parameter whose value is an empty string', async function () {
@@ -137,17 +155,18 @@ describe('Boundary: Config Management', function () {
                 }
             };
             await hub.applyConfig(json);
-            expect(mockDb.setParam.callCount).to.equal(1);
-            expect(mockDb.setParam.firstCall.args[4]).to.equal('');
+            const rows = batchedRows();
+            expect(rows).to.have.length(1);
+            expect(rows[0].paramValue).to.equal('');
         });
 
-        it('makes no setParam calls for an empty config object', async function () {
+        it('makes no DB write for an empty config object', async function () {
             await hub.applyConfig({});
-            expect(mockDb.setParam.callCount).to.equal(0);
+            expect(mockDb.setParams.called).to.be.false;
         });
 
-        it('handles multiple coins, networks, and modules and produces the correct total call count', async function () {
-            // 2 coins × 2 networks × 2 modules × 2 params each = 16 calls
+        it('handles multiple coins, networks, and modules and produces the correct total row count', async function () {
+            // 2 coins × 2 networks × 2 modules × 2 params each = 16 rows
             const json = {
                 BTC: {
                     mainnet: {
@@ -171,7 +190,8 @@ describe('Boundary: Config Management', function () {
                 }
             };
             await hub.applyConfig(json);
-            expect(mockDb.setParam.callCount).to.equal(16);
+            expect(mockDb.setParams.calledOnce).to.be.true;
+            expect(batchedRows()).to.have.length(16);
         });
 
         it('only writes params that are present when a module has a partial parameter set', async function () {
@@ -183,11 +203,9 @@ describe('Boundary: Config Management', function () {
                 }
             };
             await hub.applyConfig(json);
-            expect(mockDb.setParam.callCount).to.equal(2);
             // PARAMETER_LIST order: host, port, service_port, db_host, db_port, name, user, pass
             // So db_host comes before name
-            const paramNames = mockDb.setParam.args.map(a => a[3]);
-            expect(paramNames).to.deep.equal(['db_host', 'name']);
+            expect(paramNamesWritten()).to.deep.equal(['db_host', 'name']);
         });
 
     });
@@ -203,7 +221,8 @@ describe('Boundary: Config Management', function () {
             const json = { BTC: { mainnet: { decoder: { host: 'localhost' } } } };
             const result = await hub.addParametersFromJson(json);
             expect(result).to.equal(true);
-            expect(mockDb.setParam.callCount).to.equal(1);
+            expect(mockDb.setParams.calledOnce).to.be.true;
+            expect(batchedRows()).to.have.length(1);
         });
 
         it('delegates to consensus.propose and skips applyConfig when consensus is active', async function () {
@@ -214,14 +233,14 @@ describe('Boundary: Config Management', function () {
             expect(result).to.equal(true);
             expect(proposeSpy.calledOnce).to.be.true;
             expect(proposeSpy.firstCall.args[0]).to.deep.equal(json);
-            expect(mockDb.setParam.callCount).to.equal(0);
+            expect(mockDb.setParams.called).to.be.false;
         });
 
         it('returns true for an empty config object', async function () {
             hub.consensus = null;
             const result = await hub.addParametersFromJson({});
             expect(result).to.equal(true);
-            expect(mockDb.setParam.callCount).to.equal(0);
+            expect(mockDb.setParams.called).to.be.false;
         });
 
     });

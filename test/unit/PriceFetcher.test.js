@@ -161,19 +161,25 @@ describe('PriceFetcher', function () {
         it('returns median from both sources', async function () {
             pf = new PriceFetcher({ COINMARKETCAP_API_KEY: 'key' });
 
-            // CoinGecko call
-            axiosStub.get.onFirstCall().resolves({
-                data: { bitcoin: { usd: 100000 }, litecoin: { usd: 80 }, dogecoin: { usd: 0.14 } }
-            });
-            // CoinMarketCap call
-            axiosStub.get.onSecondCall().resolves({
-                data: {
-                    data: {
-                        BTC: { quote: { USD: { price: 100010 } } },
-                        LTC: { quote: { USD: { price: 82 } } },
-                        DOGE: { quote: { USD: { price: 0.16 } } }
-                    }
+            // Stub by URL so order doesn't matter (CoinGecko has a random jitter delay)
+            axiosStub.get.callsFake(function (url) {
+                if (url.includes('api.coingecko.com')) {
+                    return Promise.resolve({
+                        data: { bitcoin: { usd: 100000 }, litecoin: { usd: 80 }, dogecoin: { usd: 0.14 } }
+                    });
                 }
+                if (url.includes('coinmarketcap.com')) {
+                    return Promise.resolve({
+                        data: {
+                            data: {
+                                BTC: { quote: { USD: { price: 100010 } } },
+                                LTC: { quote: { USD: { price: 82 } } },
+                                DOGE: { quote: { USD: { price: 0.16 } } }
+                            }
+                        }
+                    });
+                }
+                return Promise.reject(new Error('unexpected URL: ' + url));
             });
 
             let prices = await pf.fetchPrices();
@@ -187,10 +193,18 @@ describe('PriceFetcher', function () {
         it('returns prices from single source when other fails', async function () {
             pf = new PriceFetcher({ COINMARKETCAP_API_KEY: 'key' });
 
-            axiosStub.get.onFirstCall().resolves({
-                data: { bitcoin: { usd: 99000 }, litecoin: { usd: 78 }, dogecoin: { usd: 0.13 } }
+            // CoinGecko succeeds; CMC fails. Stub by URL for order-independence.
+            axiosStub.get.callsFake(function (url) {
+                if (url.includes('api.coingecko.com')) {
+                    return Promise.resolve({
+                        data: { bitcoin: { usd: 99000 }, litecoin: { usd: 78 }, dogecoin: { usd: 0.13 } }
+                    });
+                }
+                if (url.includes('coinmarketcap.com')) {
+                    return Promise.reject(new Error('CMC down'));
+                }
+                return Promise.reject(new Error('unexpected URL: ' + url));
             });
-            axiosStub.get.onSecondCall().rejects(new Error('CMC down'));
 
             let prices = await pf.fetchPrices();
             expect(prices).to.have.lengthOf(3);

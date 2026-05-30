@@ -22,7 +22,11 @@ describe('CapabilitySnapshot', function () {
     function makeHub(registry) {
         return {
             capabilityRegistry: registry,
-            _resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc'
+            _resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
+            // getSnapshot attaches indexer auth headers to the RPC call; the real
+            // hub builds these from BTC_INDEXER_API_KEY. Tests don't care about the
+            // header value, only that the call is made — return an empty object.
+            _btcIndexerHeaders: () => ({})
         };
     }
 

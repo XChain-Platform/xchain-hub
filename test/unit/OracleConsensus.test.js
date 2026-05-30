@@ -370,6 +370,7 @@ describe('OracleConsensus', function () {
                 prices, digest,
                 prepares: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr]),
                 commits: new Set(),
+                signatures: new Map(),
                 finalized: false, timer: null
             });
 
@@ -395,6 +396,7 @@ describe('OracleConsensus', function () {
                 prices, digest,
                 prepares: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr, VALIDATORS_4[2].addr]),
                 commits:  new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr]),
+                signatures: new Map(),
                 finalized: false, timer: null, _commitSent: true
             });
 

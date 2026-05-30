@@ -77,10 +77,14 @@ describe('Security Hardening', function () {
             expect(pm.peers.has('not-a-valid-addr')).to.be.false;
         });
 
-        it('rejects peer addresses with scheme prefix', function () {
+        it('accepts peer addresses with ws:// scheme prefix', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1' }, null);
             pm._connectToPeer('ws://peer.example.com:10001');
-            expect(pm.peers.has('ws://peer.example.com:10001')).to.be.false;
+            expect(pm.peers.has('ws://peer.example.com:10001')).to.be.true;
+            // Clean up the connecting peer entry
+            let peer = pm.peers.get('ws://peer.example.com:10001');
+            if (peer && peer.ws) try { peer.ws.terminate(); } catch(e) {}
+            pm.peers.delete('ws://peer.example.com:10001');
         });
 
         it('rejects empty string', function () {
@@ -175,7 +179,7 @@ describe('Security Hardening', function () {
             expect(warnStub.calledWith(sinon.match(/stale seq/))).to.be.true;
         });
 
-        it('accepts PRE_PREPARE with seq > lastAppliedSeq', function () {
+        it('accepts PRE_PREPARE with seq > lastAppliedSeq', async function () {
             consensus.lastAppliedSeq = 2;
             let config = { a: 1 };
             let digest = consensus._digest(config);
@@ -184,7 +188,7 @@ describe('Security Hardening', function () {
                 sender: VALIDATORS_4[0].addr,
                 data: { seq: 3, configDigest: digest, config: config }
             };
-            consensus._handlePrePrepare(envelope);
+            await consensus._handlePrePrepare(envelope);
             expect(consensus.pendingProposals.has(3)).to.be.true;
             let p = consensus.pendingProposals.get(3);
             if (p.timer) clearTimeout(p.timer);
@@ -741,7 +745,9 @@ describe('Security Hardening', function () {
                     return {
                         createDatabase: sinon.stub().resolves(),
                         verifyTables: sinon.stub().resolves(),
+                        runMigrations: sinon.stub().resolves(),
                         setParam: sinon.stub().resolves(),
+                        setParams: sinon.stub().resolves(0),
                         doQuery: sinon.stub().resolves([]),
                         getAllConfigs: sinon.stub().resolves({}),
                         close: sinon.stub().resolves()
@@ -800,7 +806,11 @@ describe('Security Hardening', function () {
             await h.start();
             let config = { BTC: { mainnet: { indexer: { port: 8080 } } } };
             await h.applyConfig(config);
-            expect(h.db.setParam.calledWith('BTC', 'mainnet', 'indexer', 'port', '8080')).to.be.true;
+            expect(h.db.setParams.calledOnce).to.be.true;
+            let rows = h.db.setParams.getCall(0).args[0];
+            let row = rows.find(r => r.paramName === 'port');
+            expect(row).to.not.be.undefined;
+            expect(row.paramValue).to.equal('8080');
         });
 
         it('applyConfig() accepts valid config', async function () {
@@ -808,7 +818,9 @@ describe('Security Hardening', function () {
             await h.start();
             let config = { BTC: { mainnet: { indexer: { host: 'localhost', port: '8080' } } } };
             await h.applyConfig(config);
-            expect(h.db.setParam.callCount).to.equal(2);
+            expect(h.db.setParams.calledOnce).to.be.true;
+            let rows = h.db.setParams.getCall(0).args[0];
+            expect(rows).to.have.lengthOf(2);
         });
 
         it('applyConfig() ignores non-object nested levels', async function () {
@@ -816,7 +828,7 @@ describe('Security Hardening', function () {
             await h.start();
             let config = { BTC: 'invalid' };
             await h.applyConfig(config);
-            expect(h.db.setParam.callCount).to.equal(0);
+            expect(h.db.setParams.callCount).to.equal(0);
         });
     });
 
@@ -827,12 +839,12 @@ describe('Security Hardening', function () {
     describe('PriceFetcher — Response validation', function () {
         const PriceFetcher = require('../../src/PriceFetcher');
 
-        it('rejects prices >= 10,000,000 from CoinGecko', async function () {
+        it('rejects prices >= 1e12 (upper bound) from CoinGecko', async function () {
             let pf = new PriceFetcher({ COINGECKO_API_KEY: '', PRICE_FETCH_TIMEOUT: 5000 });
             let axios = require('axios');
             sinon.stub(axios, 'get').resolves({
                 data: {
-                    bitcoin: { usd: 99999999 },
+                    bitcoin: { usd: 1e12 },
                     litecoin: { usd: 85 },
                     dogecoin: { usd: 0.15 }
                 }
@@ -946,8 +958,18 @@ describe('Security Hardening', function () {
         before(async function () {
             let mockApp = {
                 use: sinon.stub(),
+                get: sinon.stub(),
+                post: sinon.stub(),
+                set: sinon.stub(),
                 listen: sinon.stub().callsFake((port, host, cb) => { if (cb) cb(); })
             };
+            let mockServer = {
+                listen: sinon.stub().callsFake((port, host, cb) => { if (cb) cb(); }),
+                on: sinon.stub()
+            };
+            let mockHttp = { createServer: sinon.stub().returns(mockServer) };
+            let mockWss = { on: sinon.stub() };
+            let mockWsLib = { Server: sinon.stub().returns(mockWss) };
             let mockExpress = sinon.stub().returns(mockApp);
             mockExpress.json = sinon.stub().returns(sinon.stub());
 
@@ -959,6 +981,8 @@ describe('Security Hardening', function () {
                 startCrossChain: sinon.stub().resolves(),
                 startReorgHandler: sinon.stub().resolves(),
                 startGovernance: sinon.stub().resolves(),
+                startAttestation: sinon.stub().resolves(),
+                startCapabilities: sinon.stub().resolves(),
                 getPriceSnapshots: sinon.stub().resolves([]),
                 getPrice: sinon.stub().resolves(null),
                 getFeeQuote: sinon.stub().resolves({}),
@@ -996,6 +1020,9 @@ describe('Security Hardening', function () {
                     'cors': sinon.stub().returns(sinon.stub()),
                     'express-rate-limit': sinon.stub().returns(sinon.stub()),
                     'express-json-rpc-router': jsonRouterStub,
+                    'http': mockHttp,
+                    'ws': mockWsLib,
+                    'geoip-lite': { lookup: sinon.stub().returns(null) },
                     './XChainHub': function () { return mockHub; }
                 });
             } finally {

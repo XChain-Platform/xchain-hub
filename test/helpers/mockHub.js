@@ -11,8 +11,13 @@ function createMockHub(overrides = {}) {
     let db = {
         doQuery: sinon.stub().resolves([]),
         setParam: sinon.stub().resolves(),
+        setParams: sinon.stub().resolves(0),
         getConfig: sinon.stub().resolves({}),
         getAllConfigs: sinon.stub().resolves({}),
+        // OracleRound reads the BTC chain tip to anchor each round. Default to
+        // null (tip unavailable) so the round falls back to its round-number
+        // anchor without throwing; tests needing a real tip override this.
+        getChainTip: sinon.stub().resolves(null),
         close: sinon.stub().resolves()
     };
 
@@ -41,7 +46,12 @@ function createMockHub(overrides = {}) {
         applyConfig:     sinon.stub().resolves(),
         getOracle:       sinon.stub().returns(null),
         getConsensus:    sinon.stub().returns(null),
-        getCrossChain:   sinon.stub().returns(null)
+        getCrossChain:   sinon.stub().returns(null),
+        // OracleRound._executeRound resolves the BTC network via the hub before
+        // reading the chain tip to anchor a round; default to mainnet. Tests that
+        // exercise chain-tip-fallback behaviour can override this stub.
+        _resolveBtcNetwork:      sinon.stub().resolves('mainnet'),
+        _resolveBtcLatestBlock:  sinon.stub().resolves(null)
     };
 
     // Expose the raw stubs for easy test access

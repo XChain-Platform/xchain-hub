@@ -182,10 +182,10 @@ describe('Boundary: Consensus (PBFT)', function () {
             expect(consensus.pendingProposals.size).to.equal(0);
         });
 
-        it('accepts valid PRE_PREPARE with correct digest', function () {
+        it('accepts valid PRE_PREPARE with correct digest', async function () {
             let config = { x: 1 };
             let digest = consensus._digest(config);
-            consensus._handlePrePrepare({
+            await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
                 data: { seq: 5, configDigest: digest, config }
             });

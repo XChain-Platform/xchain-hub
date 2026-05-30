@@ -166,6 +166,9 @@ describe('Consensus (PBFT)', function () {
 
             let promise = consensus.propose({ cfg: 1 });
 
+            // Wait for the async _lockSnapshot to resolve before checking broadcast
+            await new Promise(r => setImmediate(r));
+
             // Should have broadcast PRE_PREPARE as first call
             expect(pm.broadcast.called).to.be.true;
             let [type, data] = pm.broadcast.getCall(0).args;
@@ -197,11 +200,11 @@ describe('Consensus (PBFT)', function () {
             pm.validatorAddr = VALIDATORS_4[0].addr;
         });
 
-        it('PRE_PREPARE creates follower proposal and broadcasts PREPARE', function () {
+        it('PRE_PREPARE creates follower proposal and broadcasts PREPARE', async function () {
             let config = { x: 1 };
             let digest = consensus._digest(config);
 
-            consensus._handlePrePrepare({
+            await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
                 data: { seq: 5, configDigest: digest, config }
             });

@@ -162,14 +162,20 @@ describe('Boundary: PriceFetcher', function () {
         it('CoinGecko fails, CMC succeeds → results come from CMC only', async function () {
             let fetcher = makeFetcher({ COINMARKETCAP_API_KEY: 'fake-key' });
 
-            // First call = CoinGecko (rejects), second call = CMC (resolves)
-            axiosStub.get
-                .onFirstCall().rejects(new Error('CoinGecko down'))
-                .onSecondCall().resolves({ data: { data: {
-                    BTC:  { quote: { USD: { price: 99000 } } },
-                    LTC:  { quote: { USD: { price: 77 } } },
-                    DOGE: { quote: { USD: { price: 0.07 } } }
-                }}});
+            // Stub by URL so order doesn't matter (CoinGecko has a random jitter delay)
+            axiosStub.get.callsFake(function (url) {
+                if (url.includes('api.coingecko.com')) {
+                    return Promise.reject(new Error('CoinGecko down'));
+                }
+                if (url.includes('coinmarketcap.com')) {
+                    return Promise.resolve({ data: { data: {
+                        BTC:  { quote: { USD: { price: 99000 } } },
+                        LTC:  { quote: { USD: { price: 77 } } },
+                        DOGE: { quote: { USD: { price: 0.07 } } }
+                    }}});
+                }
+                return Promise.reject(new Error('unexpected URL: ' + url));
+            });
 
             let prices = await fetcher.fetchPrices();
             let btc = prices.find(p => p.coinPair === 'BTC/USD');
@@ -182,14 +188,21 @@ describe('Boundary: PriceFetcher', function () {
             // CoinGecko returns valid prices; CMC returns a response where all quote paths are absent
             let fetcher = makeFetcher({ COINMARKETCAP_API_KEY: 'fake-key' });
 
-            axiosStub.get
-                .onFirstCall().resolves(cgBody(100000, 80, 0.08))   // CoinGecko OK
-                .onSecondCall().resolves({ data: { data: {
-                    // each symbol exists but has no quote.USD
-                    BTC:  { quote: {} },
-                    LTC:  { quote: {} },
-                    DOGE: { quote: {} }
-                }}});
+            // Stub by URL so order doesn't matter (CoinGecko has a random jitter delay)
+            axiosStub.get.callsFake(function (url) {
+                if (url.includes('api.coingecko.com')) {
+                    return Promise.resolve(cgBody(100000, 80, 0.08));
+                }
+                if (url.includes('coinmarketcap.com')) {
+                    return Promise.resolve({ data: { data: {
+                        // each symbol exists but has no quote.USD
+                        BTC:  { quote: {} },
+                        LTC:  { quote: {} },
+                        DOGE: { quote: {} }
+                    }}});
+                }
+                return Promise.reject(new Error('unexpected URL: ' + url));
+            });
 
             let prices = await fetcher.fetchPrices();
             let btc = prices.find(p => p.coinPair === 'BTC/USD');
@@ -219,13 +232,20 @@ describe('Boundary: PriceFetcher', function () {
         it('two sources agree → median equals that price, sources=2', async function () {
             let fetcher = makeFetcher({ COINMARKETCAP_API_KEY: 'fake-key' });
 
-            axiosStub.get
-                .onFirstCall().resolves(cgBody(100000, 80, 0.08))
-                .onSecondCall().resolves({ data: { data: {
-                    BTC:  { quote: { USD: { price: 100000 } } },
-                    LTC:  { quote: { USD: { price: 80 } } },
-                    DOGE: { quote: { USD: { price: 0.08 } } }
-                }}});
+            // Stub by URL so order doesn't matter (CoinGecko has a random jitter delay)
+            axiosStub.get.callsFake(function (url) {
+                if (url.includes('api.coingecko.com')) {
+                    return Promise.resolve(cgBody(100000, 80, 0.08));
+                }
+                if (url.includes('coinmarketcap.com')) {
+                    return Promise.resolve({ data: { data: {
+                        BTC:  { quote: { USD: { price: 100000 } } },
+                        LTC:  { quote: { USD: { price: 80 } } },
+                        DOGE: { quote: { USD: { price: 0.08 } } }
+                    }}});
+                }
+                return Promise.reject(new Error('unexpected URL: ' + url));
+            });
 
             let prices = await fetcher.fetchPrices();
             let btc = prices.find(p => p.coinPair === 'BTC/USD');
@@ -236,13 +256,20 @@ describe('Boundary: PriceFetcher', function () {
         it('two sources differ → median is the average of the two values', async function () {
             let fetcher = makeFetcher({ COINMARKETCAP_API_KEY: 'fake-key' });
 
-            axiosStub.get
-                .onFirstCall().resolves(cgBody(100000, 80, 0.08))
-                .onSecondCall().resolves({ data: { data: {
-                    BTC:  { quote: { USD: { price: 100002 } } },
-                    LTC:  { quote: { USD: { price: 82 } } },
-                    DOGE: { quote: { USD: { price: 0.10 } } }
-                }}});
+            // Stub by URL so order doesn't matter (CoinGecko has a random jitter delay)
+            axiosStub.get.callsFake(function (url) {
+                if (url.includes('api.coingecko.com')) {
+                    return Promise.resolve(cgBody(100000, 80, 0.08));
+                }
+                if (url.includes('coinmarketcap.com')) {
+                    return Promise.resolve({ data: { data: {
+                        BTC:  { quote: { USD: { price: 100002 } } },
+                        LTC:  { quote: { USD: { price: 82 } } },
+                        DOGE: { quote: { USD: { price: 0.10 } } }
+                    }}});
+                }
+                return Promise.reject(new Error('unexpected URL: ' + url));
+            });
 
             let prices = await fetcher.fetchPrices();
             let btc = prices.find(p => p.coinPair === 'BTC/USD');
