@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `src/api.js` — new `health` JSON-RPC method. Like `ping` it probes the database, but it additionally reports the DB circuit-breaker state (`dbCircuit`), so an operator can distinguish a healthy hub from one that is up but stalled waiting on a tripped database connection. Returns HTTP 503 when the database is unreachable or the breaker is open. Purely additive — `ping` is unchanged.
+
 ## [2.2.12] - 2026-05-29
 
 ### Fixed

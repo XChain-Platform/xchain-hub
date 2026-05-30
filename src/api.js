@@ -210,6 +210,31 @@ async function startApi(){
             }
         },
 
+        // Like ping, but also reports the DB circuit-breaker state. The breaker
+        // trips open after repeated connection failures and rejects queries during
+        // its cooldown; exposing it lets an operator distinguish a healthy hub from
+        // one that is up but stalled waiting on a tripped database connection.
+        async health(params, {res}) {
+            let dbOk = false;
+            try {
+                await Promise.race([
+                    hub.db.doQuery('SELECT 1', []),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))
+                ]);
+                dbOk = true;
+            } catch (err) {
+                dbOk = false;
+            }
+            let dbCircuit = hub.db ? hub.db.circuitState : null;
+            let healthy = dbOk && dbCircuit !== 'open';
+            if(!healthy) res.status(503);
+            return {
+                status:    healthy ? "healthy" : "degraded",
+                db:        dbOk,
+                dbCircuit: dbCircuit
+            };
+        },
+
         // Get all service configs
         async getallconfigs() {
             try {
