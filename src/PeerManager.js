@@ -115,7 +115,7 @@ class PeerManager extends EventEmitter {
                 console.log('Inbound ws closed from ' + (ws._peerAddr || 'unknown') + ' (code=' + code + ', reason="' + reasonStr + '")');
                 this._removeInboundPeer(ws);
             });
-            ws.on('error', (e) => console.error('Inbound peer error:', e.message));
+            ws.on('error', (e) => console.error('Inbound peer error:', e));
         });
 
         // Bind server
@@ -278,7 +278,7 @@ class PeerManager extends EventEmitter {
         try {
             envelope = JSON.parse(rawData);
         } catch (e) {
-            console.warn('P2P: Invalid JSON from peer:', e.message);
+            console.warn('P2P: Invalid JSON from peer:', e);
             return;
         }
 
@@ -447,7 +447,7 @@ class PeerManager extends EventEmitter {
         try {
             ws = new WebSocket(url, { maxPayload: maxPayload });
         } catch (e) {
-            console.error('Failed to create WebSocket to ' + addr + ':', e.message);
+            console.error('Failed to create WebSocket to ' + addr + ':', e);
             this._scheduleReconnect(addr);
             return;
         }
@@ -585,7 +585,7 @@ class PeerManager extends EventEmitter {
                      VALUES (?, ?, NOW(), ?)
                      ON DUPLICATE KEY UPDATE validator_id = ?, last_seen_at = NOW()`;
         this.db.doQuery(query, [addr, validatorId, isSeed ? 1 : 0, validatorId])
-            .catch(e => console.error('Error recording peer:', e.message));
+            .catch(e => console.error('Error recording peer:', e));
     }
 }
 

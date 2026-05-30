@@ -63,14 +63,14 @@ class RewardTracker {
             let query = `INSERT IGNORE INTO validator_rewards (validator_pubkey, round_number, reward_type, amount)
                          VALUES (?, ?, 'oracle_round', ?)`;
             await this.db.doQuery(query, [pubkey, round, perValidator])
-                .catch(e => console.error('Error recording reward for ' + pubkey + ':', e.message));
+                .catch(e => console.error('Error recording reward for ' + pubkey + ':', e));
         }
 
         console.log('Rewards: Round ' + round + ' — ' + perValidator + ' XCHAIN each to ' + validParticipants.length + ' validators');
 
         // Push rewards to the BTC indexer so COLLECT can find them (best-effort)
         this._pushRewardsToBtcIndexer(round, validParticipants, perValidator, btcBlockHeight || round)
-            .catch(e => console.warn('Rewards: failed to push to BTC indexer:', e.message));
+            .catch(e => console.warn('Rewards: failed to push to BTC indexer:', e));
     }
 
     // Push validator rewards to the BTC indexer's local DB via JSON-RPC

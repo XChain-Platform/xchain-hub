@@ -171,7 +171,7 @@ class SlashDetector {
         let query = `INSERT INTO slash_proposals (validator_pubkey, offense_type, round_number, evidence)
                      VALUES (?, ?, ?, ?)`;
         await this.db.doQuery(query, [validatorPubkey, offenseType, round, evidence])
-            .catch(e => console.error('Error recording slash proposal:', e.message));
+            .catch(e => console.error('Error recording slash proposal:', e));
     }
 
     // Resolve a validator addr to their pubkey

@@ -830,7 +830,7 @@ async function startApi(){
             // stake-poll timers, config watcher, and the MariaDB pool.
             await hub.close();
         } catch (e) {
-            console.error('Error during shutdown:', e && e.message ? e.message : e);
+            console.error('Error during shutdown:', e);
         } finally {
             clearTimeout(forceTimer);
             process.exit(0);

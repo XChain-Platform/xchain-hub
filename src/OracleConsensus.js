@@ -616,7 +616,7 @@ class OracleConsensus extends EventEmitter {
             let sigHex  = identity.sign(payload);
             return { pubkey: identity.getPubkeyHex(), sig: sigHex };
         } catch (e) {
-            console.warn('Oracle: failed to sign PRICE v0 payload:', e.message);
+            console.warn('Oracle: failed to sign PRICE v0 payload:', e);
             return null;
         }
     }
@@ -642,7 +642,7 @@ class OracleConsensus extends EventEmitter {
                 return false;
             }
         } catch (e) {
-            console.warn('Oracle: signature verification error:', e.message);
+            console.warn('Oracle: signature verification error:', e);
             return false;
         }
     }

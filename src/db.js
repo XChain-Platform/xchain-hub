@@ -183,7 +183,7 @@ class Database {
             await db.query('ALTER TABLE ' + table + ' ADD UNIQUE KEY ' + indexName + ' ' + indexColumns);
             console.log('Migration: added UNIQUE KEY ' + indexName + ' on ' + table);
         } catch(e){
-            console.error('Migration error on ' + table + ': ' + (e.message || e));
+            console.error('Migration error on ' + table + ':', e);
         } finally {
             await db.release();
         }

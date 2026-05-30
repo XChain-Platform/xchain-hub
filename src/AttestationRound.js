@@ -97,10 +97,10 @@ class AttestationRound {
         this._messageHandler = (env) => this._handleMessage(env);
         this.peerManager.on('message', this._messageHandler);
         this._pollTimer = setInterval(() => {
-            this._pollPending().catch(e => console.error('AttestationRound: poll error:', e && e.message ? e.message : e));
+            this._pollPending().catch(e => console.error('AttestationRound: poll error:', e));
         }, this.pollMs);
         // Kick the first poll without waiting for the interval
-        this._pollPending().catch(e => console.error('AttestationRound: initial poll error:', e && e.message ? e.message : e));
+        this._pollPending().catch(e => console.error('AttestationRound: initial poll error:', e));
         console.log('AttestationRound: started (poll=' + this.pollMs + 'ms, confirmations=' + this.confirmations + ')');
     }
 
@@ -147,7 +147,7 @@ class AttestationRound {
                 params:  params
             }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
         } catch (e) {
-            console.warn('AttestationRound: poll failed — ' + (e && e.message ? e.message : e));
+            console.warn('AttestationRound: poll failed —', e);
             return;
         }
 

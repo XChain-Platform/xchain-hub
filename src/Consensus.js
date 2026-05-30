@@ -532,7 +532,7 @@ class Consensus {
                 this.lastAppliedSeq = this.seq;
             }
         } catch (e) {
-            console.error('Error loading consensus sequence:', e.message);
+            console.error('Error loading consensus sequence:', e);
         }
     }
 
@@ -544,7 +544,7 @@ class Consensus {
                 ['last_seq', String(seq), String(seq)]
             );
         } catch (e) {
-            console.error('Error saving consensus sequence:', e.message);
+            console.error('Error saving consensus sequence:', e);
         }
     }
 }

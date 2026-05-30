@@ -87,7 +87,7 @@ class HubDbBroadcaster {
         try {
             message = JSON.stringify({ type: 'row:inserted', table: event.table, row: event.row }, bigIntReplacer);
         } catch (e) {
-            console.error('HubDbBroadcaster: serialization error:', e.message);
+            console.error('HubDbBroadcaster: serialization error:', e);
             return;
         }
         for (let ws of this.subscribers) {
@@ -108,7 +108,7 @@ class HubDbBroadcaster {
                 from_action_index: event.from_action_index
             }, bigIntReplacer);
         } catch (e) {
-            console.error('HubDbBroadcaster: serialization error:', e.message);
+            console.error('HubDbBroadcaster: serialization error:', e);
             return;
         }
         for (let ws of this.subscribers) {
@@ -133,7 +133,7 @@ class HubDbBroadcaster {
         try {
             ws.send(message);
         } catch (e) {
-            console.warn('HubDbBroadcaster: send error:', e.message);
+            console.warn('HubDbBroadcaster: send error:', e);
             this.removeSubscriber(ws);
         }
     }

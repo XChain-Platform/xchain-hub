@@ -73,7 +73,7 @@ class AttestationPublisher {
             fs.mkdirSync(path.dirname(this.queuePath), { recursive: true });
             if (!fs.existsSync(this.queuePath)) fs.writeFileSync(this.queuePath, '');
         } catch (e) {
-            console.warn('AttestationPublisher: queue file unwritable at ' + this.queuePath + ': ' + e.message);
+            console.warn('AttestationPublisher: queue file unwritable at ' + this.queuePath + ':', e);
         }
 
         // Subscribe to consensus finalization

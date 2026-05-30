@@ -27,12 +27,16 @@ describe('Boundary: Fee Quote Calculation', function () {
 
     beforeEach(function () {
         mockDb = {
-            doQuery:        sinon.stub().resolves([]),
+            doQuery:        sinon.stub(),
             setParam:       sinon.stub().resolves(),
             createDatabase: sinon.stub().resolves(),
             verifyTables:   sinon.stub().resolves(),
             close:          sinon.stub().resolves()
         };
+        // Default: XCHAIN/USD = $1.00 (first doQuery call), no coin/USD (second call onward)
+        mockDb.doQuery
+            .onFirstCall().resolves([{ price: '1.00', status: 'finalized' }])
+            .resolves([]);
         hub = new XChainHub('host', 3306, 'test_db', 'user', 'pass');
         hub.db = mockDb;
     });
@@ -101,38 +105,81 @@ describe('Boundary: Fee Quote Calculation', function () {
 
     describe('oracle price boundaries', function () {
 
-        it('no oracle price → nativeCoinAmount fields omitted', async function () {
-            // getPrice returns null for both
+        it('XCHAIN/USD unavailable → throws with descriptive error', async function () {
+            mockDb.doQuery.resetBehavior();
             mockDb.doQuery.resolves([]);
+            let threw = false;
+            try {
+                await hub.getFeeQuote('ISSUE', 'BTC');
+            } catch (e) {
+                threw = true;
+                expect(e.message).to.match(/XCHAIN\/USD oracle price unavailable/);
+            }
+            expect(threw, 'expected getFeeQuote to throw').to.equal(true);
+        });
+
+        it('XCHAIN/USD = 0 → throws (zero price guard)', async function () {
+            mockDb.doQuery.resetBehavior();
+            mockDb.doQuery
+                .onFirstCall().resolves([{ price: '0', status: 'finalized' }])
+                .resolves([]);
+            let threw = false;
+            try {
+                await hub.getFeeQuote('ISSUE', 'BTC');
+            } catch (e) {
+                threw = true;
+                expect(e.message).to.match(/zero or negative/);
+            }
+            expect(threw, 'expected getFeeQuote to throw').to.equal(true);
+        });
+
+        it('XCHAIN/USD available, no coin/USD → result includes xchainUsd but no nativeCoinAmount', async function () {
+            // Default beforeEach: XCHAIN/USD = 1.00, coin/USD = null
             let result = await hub.getFeeQuote('ISSUE', 'BTC');
+            expect(result.xchainUsd).to.equal('1.00000000');
             expect(result.nativeCoinAmount).to.be.undefined;
             expect(result.feeUsd).to.be.undefined;
         });
 
         it('coin price = 0 → nativeCoinAmount fields omitted (division guard)', async function () {
-            // First call: XCHAIN/BTC → null, second: BTC/USD → price=0
+            mockDb.doQuery.resetBehavior();
             mockDb.doQuery
-                .onFirstCall().resolves([])
+                .onFirstCall().resolves([{ price: '1.00', status: 'finalized' }])
                 .onSecondCall().resolves([{ price: '0', status: 'finalized' }]);
             let result = await hub.getFeeQuote('ISSUE', 'BTC');
+            expect(result.xchainUsd).to.equal('1.00000000');
             expect(result.nativeCoinAmount).to.be.undefined;
         });
 
         it('valid coin price → nativeCoinAmount computed', async function () {
-            // XCHAIN/BTC → null, BTC/USD → 100000
+            // XCHAIN/USD = 2.00, BTC/USD = 100000
+            // xchainAmount = 1.0, feeUsd = 2.0, nativeCoinAmount = 2.0 / 100000 = 0.00002
+            mockDb.doQuery.resetBehavior();
             mockDb.doQuery
-                .onFirstCall().resolves([])
+                .onFirstCall().resolves([{ price: '2.00', status: 'finalized' }])
                 .onSecondCall().resolves([{ price: '100000', status: 'finalized' }]);
             let result = await hub.getFeeQuote('ISSUE', 'BTC');
-            // xchainAmount = 1.0, xchainUsd = 1.0, feeUsd = 1.0, coinUsd = 100000
-            // nativeCoinAmount = 1.0 / 100000 = 0.00001
+            expect(result.nativeCoinAmount).to.equal('0.00002000');
+            expect(result.xchainUsd).to.equal('2.00000000');
+            expect(result.feeUsd).to.equal('2.00000000');
+            expect(result.coinUsd).to.equal('100000.00000000');
+        });
+
+        it('XCHAIN/USD = 1.00, coin price = 100000 → nativeCoinAmount = 0.00001000', async function () {
+            // Regression: verifies the $1 oracle result matches the former hardcoded placeholder
+            mockDb.doQuery.resetBehavior();
+            mockDb.doQuery
+                .onFirstCall().resolves([{ price: '1.00', status: 'finalized' }])
+                .onSecondCall().resolves([{ price: '100000', status: 'finalized' }]);
+            let result = await hub.getFeeQuote('ISSUE', 'BTC');
             expect(result.nativeCoinAmount).to.equal('0.00001000');
             expect(result.coinUsd).to.equal('100000.00000000');
         });
 
         it('very small coin price → large nativeCoinAmount', async function () {
+            mockDb.doQuery.resetBehavior();
             mockDb.doQuery
-                .onFirstCall().resolves([])
+                .onFirstCall().resolves([{ price: '1.00', status: 'finalized' }])
                 .onSecondCall().resolves([{ price: '0.00000001', status: 'finalized' }]);
             let result = await hub.getFeeQuote('ISSUE', 'BTC');
             // nativeCoinAmount = 1.0 / 0.00000001 = 100000000
@@ -140,8 +187,9 @@ describe('Boundary: Fee Quote Calculation', function () {
         });
 
         it('very large coin price → very small nativeCoinAmount', async function () {
+            mockDb.doQuery.resetBehavior();
             mockDb.doQuery
-                .onFirstCall().resolves([])
+                .onFirstCall().resolves([{ price: '1.00', status: 'finalized' }])
                 .onSecondCall().resolves([{ price: '1000000', status: 'finalized' }]);
             let result = await hub.getFeeQuote('ISSUE', 'BTC');
             // nativeCoinAmount = 1.0 / 1000000 = 0.000001

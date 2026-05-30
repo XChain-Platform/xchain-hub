@@ -238,7 +238,7 @@ class XChainHub {
         if(this.governance && typeof this.governance.on === 'function'){
             this.governance.on('proposal:finalized', () => {
                 this.providerRegistry.hotReload().catch(e =>
-                    console.error('ProviderRegistry hot-reload failed:', e && e.message ? e.message : e));
+                    console.error('ProviderRegistry hot-reload failed:', e));
             });
 
             // Hot-reload capability thresholds on governance proposal finalization.
@@ -249,7 +249,7 @@ class XChainHub {
             // federation without a hub restart. No-op for non-capability params.
             this.governance.on('proposal:finalized', (ev) => {
                 this._applyCapabilityGovernanceChange(ev).catch(e =>
-                    console.error('Capability config hot-reload failed:', e && e.message ? e.message : e));
+                    console.error('Capability config hot-reload failed:', e));
             });
         }
 
@@ -512,7 +512,7 @@ class XChainHub {
             }
             this.peerManager.setValidatorPubkeys(pubkeyMap);
         } catch(e){
-            console.error('Error loading validator pubkeys:', e.message);
+            console.error('Error loading validator pubkeys:', e);
         }
     }
 
@@ -524,7 +524,7 @@ class XChainHub {
             );
             return rows.map(r => ({ pubkey: r.signing_pubkey, addr: r.addr }));
         } catch(e){
-            console.error('Error loading validator set:', e.message);
+            console.error('Error loading validator set:', e);
             return [];
         }
     }
@@ -560,7 +560,7 @@ class XChainHub {
                 }
             }
         } catch(e) {
-            console.error('Error loading chain-pair validators:', e.message);
+            console.error('Error loading chain-pair validators:', e);
         }
         return chainPairMap;
     }
@@ -681,27 +681,33 @@ class XChainHub {
         let xchainAmount = gasCost * gasPrice;
 
         // Get XCHAIN/USD and chain/USD prices from latest snapshots
-        let xchainPrice = await this.getPrice('XCHAIN/BTC');
-        let coinPrice   = await this.getPrice(chain + '/USD');
+        let xchainPriceRow = await this.getPrice('XCHAIN/USD');
+        let coinPrice      = await this.getPrice(chain + '/USD');
+
+        if (!xchainPriceRow || !xchainPriceRow.price) {
+            throw new Error('XCHAIN/USD oracle price unavailable — cannot compute fee quote');
+        }
+        let xchainUsd = parseFloat(xchainPriceRow.price);
+        if (xchainUsd <= 0) {
+            throw new Error('XCHAIN/USD oracle price is zero or negative — cannot compute fee quote');
+        }
 
         let result = {
             action:       action,
             chain:        chain,
             gasCost:      gasCost,
             gasPrice:     gasPrice.toFixed(8),
-            xchainAmount: xchainAmount.toFixed(8)
+            xchainAmount: xchainAmount.toFixed(8),
+            xchainUsd:    xchainUsd.toFixed(8)
         };
 
-        // If we have oracle prices, compute the native coin amount
+        // If we have the coin/USD price, compute the native coin amount
         if (coinPrice && coinPrice.price) {
             let coinUsd = parseFloat(coinPrice.price);
             if (coinUsd > 0) {
-                // For now, use a simple XCHAIN = $1 placeholder until XCHAIN/USD oracle is live
-                let xchainUsd = 1.0;
                 let feeUsd = xchainAmount * xchainUsd;
                 let nativeCoinAmount = feeUsd / coinUsd;
 
-                result.xchainUsd        = xchainUsd.toFixed(8);
                 result.feeUsd           = feeUsd.toFixed(8);
                 result.coinUsd          = coinUsd.toFixed(8);
                 result.nativeCoinAmount = nativeCoinAmount.toFixed(8);
@@ -732,7 +738,7 @@ class XChainHub {
         if(this.peerManager){
             this.peerManager.on('capability', (envelope) => {
                 this._handleCapabilityMessage(envelope).catch(e => {
-                    console.error('Capability message handler error:', e && e.message ? e.message : e);
+                    console.error('Capability message handler error:', e);
                 });
             });
         }
@@ -746,7 +752,7 @@ class XChainHub {
             let intervalMs = (this.p2pConfig && this.p2pConfig.CAPABILITY_RECHECK_MS) ? this.p2pConfig.CAPABILITY_RECHECK_MS : 60000;
             this._capabilityRecheckTimer = setInterval(() => {
                 this._runOwnCapabilityCheck(pubkey).catch(e => {
-                    console.error('Capability re-check failed:', e && e.message ? e.message : e);
+                    console.error('Capability re-check failed:', e);
                 });
             }, intervalMs);
 
@@ -758,13 +764,13 @@ class XChainHub {
                         if(this._capabilityConfigDebounce) clearTimeout(this._capabilityConfigDebounce);
                         this._capabilityConfigDebounce = setTimeout(() => {
                             this._runOwnCapabilityCheck(pubkey).catch(e => {
-                                console.error('Capability config-watch re-check failed:', e && e.message ? e.message : e);
+                                console.error('Capability config-watch re-check failed:', e);
                             });
                         }, 500);
                     });
                     console.log('Capability config watcher attached to ' + configFilePath);
                 } catch(e){
-                    console.warn('Could not attach capability config watcher to ' + configFilePath + ': ' + e.message);
+                    console.warn('Could not attach capability config watcher to ' + configFilePath + ':', e);
                 }
             }
 
@@ -776,12 +782,12 @@ class XChainHub {
             let initialUrl = await this._resolveBtcIndexerUrl();
             if(initialUrl){
                 this._pollOwnStake(pubkey).catch(e => {
-                    console.error('Initial stake poll failed:', e && e.message ? e.message : e);
+                    console.error('Initial stake poll failed:', e);
                 });
                 let stakePollMs = (this.p2pConfig && this.p2pConfig.STAKE_POLL_MS) ? this.p2pConfig.STAKE_POLL_MS : 60000;
                 this._stakePollTimer = setInterval(() => {
                     this._pollOwnStake(pubkey).catch(e => {
-                        console.error('Stake poll failed:', e && e.message ? e.message : e);
+                        console.error('Stake poll failed:', e);
                     });
                 }, stakePollMs);
                 console.log('Stake-amount poll attached to ' + initialUrl + ' (every ' + stakePollMs + 'ms)');

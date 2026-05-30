@@ -110,11 +110,11 @@ class ProviderRegistry {
                     if (!def.provider_id) def.provider_id = providerId;
                     this.providers.set(providerId, def);
                 } catch (e) {
-                    console.warn('ProviderRegistry: bad JSON for ATTESTATION_PROVIDER:' + providerId + ' — ' + e.message);
+                    console.warn('ProviderRegistry: bad JSON for ATTESTATION_PROVIDER:' + providerId + ' —', e);
                 }
             }
         } catch (e) {
-            console.warn('ProviderRegistry: failed to read configs table — ' + e.message);
+            console.warn('ProviderRegistry: failed to read configs table —', e);
         }
     }
 
@@ -126,7 +126,7 @@ class ProviderRegistry {
         for (let [providerId, mod] of this.modules){
             if (typeof mod._setConfig === 'function'){
                 try { mod._setConfig(this.providers.get(providerId)); }
-                catch (e) { console.warn('ProviderRegistry: _setConfig (reload) failed for ' + providerId + ' — ' + e.message); }
+                catch (e) { console.warn('ProviderRegistry: _setConfig (reload) failed for ' + providerId + ' —', e); }
             }
         }
     }
@@ -155,12 +155,12 @@ class ProviderRegistry {
             let mod = require('./providers/' + providerId + '.js');
             if (typeof mod._setConfig === 'function'){
                 try { mod._setConfig(this.providers.get(providerId)); }
-                catch (e) { console.warn('ProviderRegistry: _setConfig failed for ' + providerId + ' — ' + e.message); }
+                catch (e) { console.warn('ProviderRegistry: _setConfig failed for ' + providerId + ' —', e); }
             }
             this.modules.set(providerId, mod);
             return mod;
         } catch (e) {
-            console.warn('ProviderRegistry: module load failed for ' + providerId + ' — ' + e.message);
+            console.warn('ProviderRegistry: module load failed for ' + providerId + ' —', e);
             return null;
         }
     }

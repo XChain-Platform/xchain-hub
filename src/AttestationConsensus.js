@@ -336,7 +336,7 @@ class AttestationConsensus extends EventEmitter {
                 // Best-effort; failures don't disrupt the round.
                 this.hub.slashDetector.recordAttestationDivergence(
                     pubkey, rid, pending.providerId, pHash.toString('hex'), winnerHashHex
-                ).catch(e => console.warn('AttestationConsensus: divergence record failed: ' + (e && e.message ? e.message : e)));
+                ).catch(e => console.warn('AttestationConsensus: divergence record failed:', e));
             }
         }
 
@@ -518,7 +518,7 @@ class AttestationConsensus extends EventEmitter {
             let canonical = this._buildCanonical(requestId, providerId, body, status, meta);
             return this.identity.sign(canonical.toString('utf8'));
         } catch (e) {
-            console.warn('AttestationConsensus: sign failed: ' + e.message);
+            console.warn('AttestationConsensus: sign failed:', e);
             return null;
         }
     }

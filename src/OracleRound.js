@@ -406,7 +406,7 @@ class OracleRound {
             let query = `INSERT IGNORE INTO oracle_submissions (round_number, coin_pair, validator_pubkey, price, sources)
                          VALUES (?, ?, ?, ?, ?)`;
             this.db.doQuery(query, [round, p.coinPair, validatorPubkey, p.price, p.sources])
-                .catch(e => console.error('Oracle: Error persisting submission:', e.message));
+                .catch(e => console.error('Oracle: Error persisting submission:', e));
         }
     }
 

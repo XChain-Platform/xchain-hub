@@ -144,21 +144,21 @@ class OraclePublisher {
         try {
             fs.mkdirSync(dir, { recursive: true });
         } catch (e) {
-            console.warn('OraclePublisher: failed to create queue directory ' + dir + ':', e.message);
+            console.warn('OraclePublisher: failed to create queue directory ' + dir + ':', e);
         }
 
         // Touch queue file
         try {
             if (!fs.existsSync(this.queuePath)) fs.writeFileSync(this.queuePath, '');
         } catch (e) {
-            console.warn('OraclePublisher: queue file unwritable at ' + this.queuePath + ':', e.message);
+            console.warn('OraclePublisher: queue file unwritable at ' + this.queuePath + ':', e);
         }
 
         // Subscribe to oracle finalization events
         if (this.hub.oracleConsensus) {
             this.hub.oracleConsensus.on('round:finalized', (event) => {
                 this.onRoundFinalized(event).catch(err => {
-                    console.error('OraclePublisher: onRoundFinalized error:', err.message);
+                    console.error('OraclePublisher: onRoundFinalized error:', err);
                 });
             });
         }
@@ -256,7 +256,7 @@ class OraclePublisher {
             let sigHex  = this.identity.sign(payload);
             return [{ pubkey: this.identity.getPubkeyHex(), sig: sigHex }];
         } catch (e) {
-            console.warn('OraclePublisher: failed to build local sig:', e.message);
+            console.warn('OraclePublisher: failed to build local sig:', e);
             return [];
         }
     }
@@ -302,7 +302,7 @@ class OraclePublisher {
             fs.fsyncSync(fd);
             fs.closeSync(fd);
         } catch (e) {
-            console.error('OraclePublisher: failed to enqueue round ' + round.round + ':', e.message);
+            console.error('OraclePublisher: failed to enqueue round ' + round.round + ':', e);
             // Fail loud — refuse to ack if queue is unwritable
             throw e;
         }
@@ -329,7 +329,7 @@ class OraclePublisher {
             fs.fsyncSync(fd);
             fs.closeSync(fd);
         } catch (e) {
-            console.error('OraclePublisher: failed to rewrite queue:', e.message);
+            console.error('OraclePublisher: failed to rewrite queue:', e);
         }
     }
 

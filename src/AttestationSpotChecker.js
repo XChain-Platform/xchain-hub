@@ -201,7 +201,7 @@ class AttestationSpotChecker {
             });
             let pseudoRound = parseInt(String(requestId).substring(0, 8), 16) || 0;
             this.hub.slashDetector._recordSlashProposal(pk, 'attestation_spot_check_failure', pseudoRound, evidence)
-                .catch(e => console.warn('AttestationSpotChecker: slash record failed: ' + (e && e.message ? e.message : e)));
+                .catch(e => console.warn('AttestationSpotChecker: slash record failed:', e));
         }
     }
 
