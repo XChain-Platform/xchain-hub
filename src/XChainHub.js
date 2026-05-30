@@ -765,7 +765,7 @@ class XChainHub {
             try {
                 this._loadCapabilityConfigFile(configFilePath);
             } catch(e){
-                console.warn('Could not load capability config from ' + configFilePath + ': ' + (e && e.message ? e.message : e));
+                console.warn('Could not load capability config from ' + configFilePath + ': ', e);
             }
         }
         this.capabilityRegistry = new CapabilityRegistry(this);
@@ -804,7 +804,7 @@ class XChainHub {
                             // previously the watcher only re-ran self-tests against the
                             // stale in-memory config, so file edits had no effect.
                             try { this._loadCapabilityConfigFile(configFilePath); }
-                            catch(e){ console.warn('Capability config reload failed: ' + (e && e.message ? e.message : e)); }
+                            catch(e){ console.warn('Capability config reload failed: ', e); }
                             this._runOwnCapabilityCheck(pubkey).catch(e => {
                                 console.error('Capability config-watch re-check failed:', e);
                             });
