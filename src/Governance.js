@@ -314,22 +314,31 @@ class Governance extends EventEmitter {
 
     // Check for proposals whose voting period has ended and tally them
     async _checkExpiredProposals() {
+        let expired;
         try {
-            let expired = await this.db.doQuery(
+            expired = await this.db.doQuery(
                 "SELECT * FROM governance_proposals WHERE status = 'voting' AND voting_end <= NOW()"
             );
-
-            for (let proposal of expired) {
-                // Only the deterministic leader for this proposal tallies and
-                // broadcasts the result; followers accept the GOV_RESULT broadcast
-                // as authoritative. This prevents two hubs from independently
-                // tallying with different gossip-delivered vote counts and reaching
-                // contradictory passed/failed conclusions (split-brain).
-                if (!this._isTallyLeader(proposal.proposal_id)) continue;
-                await this._tallyProposal(proposal);
-            }
         } catch (e) {
-            // Silent — tally check runs on a timer, don't crash
+            // Tally check runs on a timer, so don't crash — but log the error.
+            // A systematic failure here (schema drift, column mismatch) would
+            // otherwise freeze every proposal in 'voting' state with no signal.
+            console.error('Governance tally error:', e.message, e);
+            return;
+        }
+
+        for (let proposal of expired) {
+            // Only the deterministic leader for this proposal tallies and
+            // broadcasts the result; followers accept the GOV_RESULT broadcast
+            // as authoritative. This prevents two hubs from independently
+            // tallying with different gossip-delivered vote counts and reaching
+            // contradictory passed/failed conclusions (split-brain).
+            if (!this._isTallyLeader(proposal.proposal_id)) continue;
+            try {
+                await this._tallyProposal(proposal);
+            } catch (e) {
+                console.error('Governance: tally failed for proposal ' + proposal.proposal_id + ':', e.message);
+            }
         }
     }
 
