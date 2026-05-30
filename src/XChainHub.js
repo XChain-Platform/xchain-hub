@@ -1055,11 +1055,28 @@ class XChainHub {
         if(envelope.type === 'CAPABILITY_SELF_TEST'){
             await this.capabilityRegistry.setSelfTestResult(data.pubkey, data.capability, !!data.ok, data.reason || null);
         } else if(envelope.type === 'CAPABILITY_ACTIVATED'){
-            // Peer claims activation. We accept their self-test claim and their qualification claim
-            // (the on-chain stake amount could be independently verified via indexer query — Phase 0+
-            // defers that. Slashing-for-failure is the deterrent against false activation claims.)
+            // Peer claims activation. The self-test is a local-readiness claim and only
+            // matters alongside qualification, so we accept it as-is. The qualification
+            // claim is stake-backed, so verify it against the indexer's authoritative
+            // stake snapshot at the claimed block before trusting it — a peer must not be
+            // able to advertise a capability it isn't actually staked for. If the indexer
+            // can't be consulted (no block in the message, or indexer unreachable) we fall
+            // back to accepting the claim to preserve liveness; slashing-for-failure stays
+            // the backstop.
             await this.capabilityRegistry.setSelfTestResult(data.pubkey, data.capability, true, null);
-            await this.capabilityRegistry.setQualification(data.pubkey, data.capability, true, data.block_at || null);
+            let qualified = true;
+            try {
+                let snap = (this.capabilitySnapshot && data.block_at !== undefined && data.block_at !== null)
+                    ? await this.capabilitySnapshot.getSnapshot(data.capability, data.block_at)
+                    : null;
+                if(snap && !this.capabilitySnapshot.isInSnapshot(snap, data.pubkey)){
+                    console.warn('Capability activation from ' + envelope.sender + ' for "' + data.capability +
+                        '" rejected: pubkey ' + data.pubkey + ' is not in the indexer stake snapshot at block ' +
+                        data.block_at + ' (claimed qualification it is not staked for).');
+                    qualified = false;
+                }
+            } catch(e){ /* indexer hiccup — fall back to accepting (liveness) */ }
+            await this.capabilityRegistry.setQualification(data.pubkey, data.capability, qualified, data.block_at || null);
             await this.capabilityRegistry.setEnabled(data.pubkey, data.capability, true);
         } else if(envelope.type === 'CAPABILITY_DEACTIVATED'){
             // Peer reports deactivation. Mark self_test as failed with reason so we route away.
