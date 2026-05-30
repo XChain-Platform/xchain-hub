@@ -77,6 +77,11 @@ class OracleRound {
         this.consecutiveSkippedRounds = 0;
         this.lastSuccessfulRoundTime  = null;
 
+        // Cumulative count of rounds where the price fetch threw. Unlike
+        // consecutiveSkippedRounds (a gauge that resets on the next success),
+        // this only ever grows, giving operators a real-time miss-rate signal.
+        this.fetchFailures = 0;
+
         // Wall-clock anchor for round numbering. All hubs must agree on this
         // timestamp so they compute the same round number from the same time.
         this.epochStart = parseInt(this.config.ORACLE_EPOCH_START);
@@ -166,6 +171,7 @@ class OracleRound {
             skippedRounds:            skippedRounds,
             skippedCount:             skippedRounds.length,
             consecutiveSkippedRounds: this.consecutiveSkippedRounds,
+            oracle_fetch_failures:    this.fetchFailures,
             lastSuccessfulRoundTime:  this.lastSuccessfulRoundTime,
             btcBlockHeight:           this.currentBtcBlockHeight != null ? this.currentBtcBlockHeight : null,
             usingFallback:            this.chainTipFallbackActive,
@@ -264,6 +270,7 @@ class OracleRound {
         try {
             prices = await this.priceFetcher.fetchPrices();
         } catch (err) {
+            this.fetchFailures++;
             console.error('Oracle: Price fetch failed for round ' + this.currentRound + ':', err);
             // Still schedule finalization so the round leaves a durable record.
             // If peers gossiped submissions the round can be salvaged; if nobody
