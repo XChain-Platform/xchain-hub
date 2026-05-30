@@ -214,16 +214,31 @@ class OraclePublisher {
         return pubkeys.length;
     }
 
-    // Get the sorted list of active oracle_publish validator signing pubkeys.
-    // Reads from the hub's local CapabilityRegistry (validator_capabilities table),
-    // which is updated by self-tests + peer activation gossip.
+    // Get the sorted list of active oracle_publish validator signing pubkeys at
+    // the given block boundary. Uses the on-chain snapshot (via CapabilitySnapshot)
+    // so every hub that has processed identical on-chain data through blockIndex
+    // returns the same array — regardless of when gossip messages arrived.
+    // Falls back to the live local registry when the indexer is unreachable.
     // Returns: array of 64-hex pubkey strings, sorted ascending.
-    //
-    // Note: leader rotation determinism depends on all hubs sharing the same
-    // active set. Phase 0+ should snapshot the set at on-chain block boundaries
-    // to harden against gossip-latency divergence (see spec §6).
     async _getActiveOraclePublishPubkeys(blockIndex) {
-        if (!this.hub || !this.hub.capabilityRegistry) return [];
+        if (!this.hub) return [];
+
+        // Primary: deterministic on-chain snapshot at blockIndex
+        if (this.hub.capabilitySnapshot && blockIndex !== undefined && blockIndex !== null) {
+            try {
+                let snapshot = await this.hub.capabilitySnapshot.getSnapshot('oracle_publish', blockIndex);
+                if (snapshot && Array.isArray(snapshot.validators)) {
+                    return snapshot.validators
+                        .map(v => String(v.pubkey).toLowerCase())
+                        .sort();
+                }
+            } catch (err) {
+                // fall through to live registry below
+            }
+        }
+
+        // Fallback: live local registry (used when indexer is unreachable)
+        if (!this.hub.capabilityRegistry) return [];
         try {
             let pubkeys = await this.hub.capabilityRegistry.getActiveValidators('oracle_publish');
             return pubkeys.map(p => String(p).toLowerCase()).sort();

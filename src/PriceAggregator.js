@@ -66,15 +66,20 @@ class PriceAggregator extends EventEmitter {
         let sourceActionIndex = roundData.action_index || null;
 
         // Insert one row per pair
+        // Capture a single hub-side timestamp before the loop so all pairs in this round
+        // share the same created_at and it propagates to operators via the WS broadcast row.
+        let createdAt = new Date();
         let insertedRows = [];
         for (let p of roundData.pairs) {
             if (!p || !p.pair || !p.price) continue;
             let query = `INSERT INTO price_snapshots
                 (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
-                 validator_count, consensus_round, consensus_proof, status, source_chain, source_action_index)
-                VALUES (?, ?, ?, ?, 'BTC', ?, ?, 1, ?, 'finalized', ?, ?)`;
+                 validator_count, consensus_round, consensus_proof, status, source_chain, source_action_index,
+                 created_at)
+                VALUES (?, ?, ?, ?, 'BTC', ?, ?, 1, ?, 'finalized', ?, ?, ?)`;
             let args = [round, p.pair, p.price, referenceBlock, timestamp,
-                        validatorCount, proofJson, sourceChain || 'DOGE', sourceActionIndex];
+                        validatorCount, proofJson, sourceChain || 'DOGE', sourceActionIndex,
+                        createdAt];
             try {
                 await this.db.doQuery(query, args);
                 insertedRows.push({
@@ -89,7 +94,8 @@ class PriceAggregator extends EventEmitter {
                     consensus_proof:     proofJson,
                     status:              'finalized',
                     source_chain:        sourceChain || 'DOGE',
-                    source_action_index: sourceActionIndex
+                    source_action_index: sourceActionIndex,
+                    created_at:          createdAt
                 });
             } catch (err) {
                 console.error('PriceAggregator: error inserting snapshot for round ' + round + ' pair ' + p.pair + ':', err.message);
