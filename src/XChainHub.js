@@ -194,7 +194,7 @@ class XChainHub {
         await this.oracleConsensus.start();
         await this.oracle.start();
 
-        // Start the Tier 3 publisher (no-op if no broadcast hook is wired up)
+        // Start the oracle_publish capability publisher (no-op if no broadcast hook is wired up)
         // The publisher subscribes to round:finalized events and queues finalized rounds
         // for publishing to the DOGE chain. The actual broadcast transport is wired
         // by the operator via setBroadcastHook() / setBalanceHook().
@@ -270,7 +270,7 @@ class XChainHub {
         let validators = await this._loadValidatorSet();
         this.crossChain.setValidatorSet(validators);
 
-        // Load per-chain-pair validator sets for Tier 2 filtering
+        // Load per-chain-pair validator sets for cross_chain capability filtering
         let chainPairMap = await this._loadChainPairValidators();
         this.crossChain.setChainPairValidators(chainPairMap);
 
