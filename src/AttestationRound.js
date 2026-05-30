@@ -41,6 +41,7 @@ const ATTEST_PROPOSE = 'ATTEST_PROPOSE';
 const DEFAULT_POLL_MS         = 15000;  // how often to poll the indexer for new pending requests
 const DEFAULT_CONFIRMATIONS   = 3;      // BTC blocks of confirmation before initiating fetch (spec §14)
 const DEFAULT_FETCH_TIMEOUT   = 10000;  // ms — provider fetch timeout
+const POLL_LIMIT              = 100;    // max pending requests fetched per poll page (cursor advances across pages)
 
 class AttestationRound {
 
@@ -56,8 +57,18 @@ class AttestationRound {
         //   { request, role: 'leader'|'follower'|'inactive', fetchedAt, proposed: bool }
         this.rounds = new Map();
 
-        // Requests we've already evaluated (don't re-poll forever). Cleared on rollback hooks.
-        this.seen = new Set();
+        // Requests we've already evaluated, as request_id -> last-evaluated
+        // timestamp (ms). A Map rather than a Set so entries can be evicted
+        // after `retryAfterMs`: a request skipped for a transient reason
+        // (provider not yet registered, empty capability snapshot) becomes
+        // eligible for re-evaluation once the window lapses, instead of being
+        // suppressed for the whole process lifetime. Also bounds memory —
+        // a plain Set grew monotonically with historical request volume.
+        this.seen = new Map();
+
+        // Keyset cursor for paging through pending requests across poll cycles.
+        // null = start a fresh sweep from the oldest pending request.
+        this.pollCursor = null;
 
         // AttestationConsensus instance — set via setConsensus after creation
         this.consensus = null;
@@ -68,6 +79,10 @@ class AttestationRound {
         this.pollMs         = parseInt(this.config.ATTESTATION_POLL_MS)        || DEFAULT_POLL_MS;
         this.confirmations  = parseInt(this.config.ATTESTATION_CONFIRMATIONS)  || DEFAULT_CONFIRMATIONS;
         this.fetchTimeoutMs = parseInt(this.config.ATTESTATION_FETCH_TIMEOUT)  || DEFAULT_FETCH_TIMEOUT;
+        // How long a request stays in `seen` before it can be re-evaluated.
+        // Defaults to 5 poll cycles so transient skips clear quickly while
+        // still suppressing the steady-state re-poll of confirmed work.
+        this.retryAfterMs   = parseInt(this.config.ATTESTATION_RETRY_AFTER_MS) || (5 * this.pollMs);
     }
 
     setConsensus(consensus){
@@ -100,6 +115,7 @@ class AttestationRound {
         }
         this.rounds.clear();
         this.seen.clear();
+        this.pollCursor = null;
     }
 
     // Poll the BTC indexer for pending attestation_requests. For each new row
@@ -110,12 +126,25 @@ class AttestationRound {
         let url = await this._resolveBtcIndexerUrl();
         if(!url) return;
 
+        // Drop `seen` entries older than the retry window so transiently-skipped
+        // requests can be re-evaluated once their blocking condition clears.
+        this._evictStaleSeen();
+
+        // Page forward from where the last poll left off. When the cursor is
+        // null this requests the oldest page; otherwise it asks the indexer for
+        // rows strictly after the last (block_index, action_index) we saw.
+        let params = { limit: POLL_LIMIT };
+        if(this.pollCursor){
+            params.after_block_index  = this.pollCursor.block_index;
+            params.after_action_index = this.pollCursor.action_index;
+        }
+
         let res;
         try {
             res = await axios.post(url, {
                 jsonrpc: '2.0', id: Date.now(),
                 method:  'getpendingattestation_requests',
-                params:  { limit: 100 }
+                params:  params
             }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
         } catch (e) {
             console.warn('AttestationRound: poll failed — ' + (e && e.message ? e.message : e));
@@ -135,10 +164,35 @@ class AttestationRound {
             // any external API call (spec §14 — avoids paying for reorg'd work).
             if(Number(req.block_index) + this.confirmations > latestBlock) continue;
 
-            this.seen.add(rid);
+            this.seen.set(rid, Date.now());
             this._startRound(req).catch(e =>
                 console.error('AttestationRound: start failed for ' + rid.substring(0,16) + '...: ' + (e && e.message ? e.message : e))
             );
+        }
+
+        // Advance the cursor to the last (highest-ordered) row in this page so
+        // the next poll continues past it. A short page (< POLL_LIMIT) means we
+        // reached the tail of the queue, so reset to null to restart the sweep
+        // from the oldest pending request next cycle. Resetting also lets any
+        // row we cursored past but didn't act on (e.g. not yet confirmed) be
+        // re-seen on the next sweep.
+        if(requests.length > 0){
+            let last = requests[requests.length - 1];
+            this.pollCursor = { block_index: Number(last.block_index), action_index: Number(last.action_index) };
+        }
+        if(requests.length < POLL_LIMIT){
+            if(this.pollCursor) console.log('AttestationRound: reached end of pending queue — restarting sweep next poll');
+            this.pollCursor = null;
+        }
+    }
+
+    // Remove `seen` entries whose last-evaluated timestamp is older than the
+    // retry window, so a request previously skipped for a transient reason is
+    // treated as new again on the next poll.
+    _evictStaleSeen(){
+        let cutoff = Date.now() - this.retryAfterMs;
+        for(let [rid, ts] of this.seen){
+            if(ts < cutoff) this.seen.delete(rid);
         }
     }
 

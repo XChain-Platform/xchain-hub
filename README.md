@@ -119,6 +119,7 @@ Consumers try each endpoint in order and fall back to the next if one is unreach
 | `ATTESTATION_POLL_MS` | `15000` | How often AttestationRound polls the BTC indexer for new pending requests |
 | `ATTESTATION_CONFIRMATIONS` | `3` | BTC blocks of confirmation before initiating an external provider fetch (reorg safety) |
 | `ATTESTATION_FETCH_TIMEOUT` | `10000` | Per-request provider fetch timeout (ms) |
+| `ATTESTATION_RETRY_AFTER_MS` | `5 × ATTESTATION_POLL_MS` | How long an evaluated request is suppressed from re-polling before it can be re-evaluated (lets transiently-skipped requests retry) |
 | `ATTESTATION_ROUND_TIMEOUT_MS` | `120000` | PBFT round lifetime before in-memory state is dropped |
 | `ATTESTATION_QUEUE_PATH` | `./data/attestation-queue.jsonl` | FSYNC queue for in-flight ATTEST v1 (response) broadcasts |
 | `BTC_ENCODER_URL` | — | xchain-encoder JSON-RPC URL for AttestationPublisher's default broadcast pipeline |

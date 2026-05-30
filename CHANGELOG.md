@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.11] - 2026-05-29
+
+### Fixed
+- `AttestationRound` no longer starves newer attestation requests under a sustained backlog, and no longer leaks memory by remembering every request it has ever evaluated. The poller previously asked the indexer for the oldest 100 pending requests every cycle (`getpendingattestation_requests` with a fixed `limit: 100`, ordered `block_index ASC`); whenever 100+ requests were pending, any newer request was permanently invisible until the oldest 100 drained. The poller now sends a keyset cursor (`after_block_index` / `after_action_index`) and pages forward through the entire pending set across cycles, restarting the sweep from the oldest request once it reaches the tail (a short page). Separately, the `seen` set — which suppressed re-evaluation of already-processed requests — was a `Set` that grew for the whole process lifetime and never released requests skipped for transient reasons (provider not yet registered, empty capability snapshot), so those requests were silently dropped until a restart. It is now a timestamped `Map` whose entries are evicted after `ATTESTATION_RETRY_AFTER_MS` (default `5 × ATTESTATION_POLL_MS`), bounding memory and letting transiently-skipped requests retry once the blocking condition clears. Companion to the indexer change (≥ 2.7.10) that adds the optional cursor parameters to `getpendingattestation_requests`.
+
 ## [2.2.10] - 2026-05-29
 
 ### Changed
