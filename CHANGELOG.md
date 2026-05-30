@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.9] - 2026-05-29
+
+### Security
+- Hub→indexer federation read calls now attach the `x-api-key` header (sourced from `BTC_INDEXER_API_KEY`, the same env var `RewardTracker` already uses for reward pushes) so they authenticate against the indexer's API-key gate. A new `XChainHub._btcIndexerHeaders()` helper builds the header set; `XChainHub._pollOwnStake` (`getownstake`), `CapabilitySnapshot.getSnapshot` (`getcapabilityvalidators`), `CapabilitySnapshot.getActiveValidatorSnapshot` (`getactivevalidators`), and `AttestationRound._pollPending` (`getpendingattestation_requests`) all route through it. Companion to the indexer change that gates those four read methods; previously they were unauthenticated, exposing the staked validator set and the pending attestation work queue to any host with network access to the indexer port. When `BTC_INDEXER_API_KEY` is unset the header is omitted and behaviour is unchanged (single-host setups where the indexer runs no key). `getlatestblock` is intentionally left ungated — it returns only a block height and is not part of the protected set.
+
 ## [2.2.8] - 2026-05-29
 
 ### Fixed

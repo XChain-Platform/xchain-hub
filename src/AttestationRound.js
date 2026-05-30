@@ -116,7 +116,7 @@ class AttestationRound {
                 jsonrpc: '2.0', id: Date.now(),
                 method:  'getpendingattestation_requests',
                 params:  { limit: 100 }
-            }, { timeout: 5000 });
+            }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
         } catch (e) {
             console.warn('AttestationRound: poll failed — ' + (e && e.message ? e.message : e));
             return;

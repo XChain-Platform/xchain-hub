@@ -757,7 +757,7 @@ class XChainHub {
             method:  'getownstake',
             params:  { pubkey: pubkey }
         };
-        let res = await axios.post(url, body, { timeout: 5000 });
+        let res = await axios.post(url, body, { headers: this._btcIndexerHeaders(), timeout: 5000 });
         let result = res && res.data && res.data.result;
         if(!result || result.error){
             // Indexer either not ready or returned a structured error. Don't change state.
@@ -813,6 +813,18 @@ class XChainHub {
             if(btc[net] && btc[net]['xchain-indexer']) return net;
         }
         return 'mainnet';
+    }
+
+    // Build request headers for BTC indexer JSON-RPC calls. Attaches the
+    // x-api-key header when BTC_INDEXER_API_KEY is configured so federation
+    // read/write calls authenticate against the indexer's API-key gate. The
+    // same env var RewardTracker uses for reward pushes — one shared key for
+    // all hub→indexer traffic.
+    _btcIndexerHeaders(){
+        let headers = { 'Content-Type': 'application/json' };
+        let key = process.env.BTC_INDEXER_API_KEY || '';
+        if(key) headers['x-api-key'] = key;
+        return headers;
     }
 
     // Resolve the BTC indexer JSON-RPC URL. Priority:

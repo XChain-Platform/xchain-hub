@@ -75,7 +75,7 @@ class CapabilitySnapshot {
                 id:      now,
                 method:  'getcapabilityvalidators',
                 params:  params
-            }, { timeout: 5000 });
+            }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
             let result = res && res.data && res.data.result;
             if (!result || result.error) return null;
             let snapshot = {
@@ -114,7 +114,7 @@ class CapabilitySnapshot {
                 id:      now,
                 method:  'getactivevalidators',
                 params:  { block_index: blockIndex }
-            }, { timeout: 5000 });
+            }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
             let result = res && res.data && res.data.result;
             if (!result || result.error) return null;
             let snapshot = {
