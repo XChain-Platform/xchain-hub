@@ -268,7 +268,7 @@ class Database {
             try {
                 results = await db.query(query, args);
             } catch (error){
-                console.error('Error running database query:', error.message || error);
+                console.error('Error running database query:', error);
                 if(tx) throw error;
             }
             if(!tx) await db.release();

@@ -157,7 +157,7 @@ class AttestationSpotChecker {
                 { body: expectedBody,  meta: String(event.meta || '') }
             ]));
         } catch (e) {
-            console.warn('AttestationSpotChecker: judge call threw for ' + rid.substring(0, 16) + '...: ' + (e && e.message ? e.message : e));
+            console.warn('AttestationSpotChecker: judge call threw for ' + rid.substring(0, 16) + '...: ', e);
             return;
         }
 

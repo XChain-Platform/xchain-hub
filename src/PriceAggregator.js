@@ -98,7 +98,7 @@ class PriceAggregator extends EventEmitter {
                     created_at:          createdAt
                 });
             } catch (err) {
-                console.error('PriceAggregator: error inserting snapshot for round ' + round + ' pair ' + p.pair + ':', err.message);
+                console.error('PriceAggregator: error inserting snapshot for round ' + round + ' pair ' + p.pair + ':', err);
                 return { accepted: false, reason: 'db error' };
             }
         }
@@ -151,7 +151,7 @@ class PriceAggregator extends EventEmitter {
         try {
             await this.db.doQuery(query, args);
         } catch (err) {
-            console.error('PriceAggregator: error inserting oracle price:', err.message);
+            console.error('PriceAggregator: error inserting oracle price:', err);
             return { accepted: false, reason: 'db error' };
         }
 

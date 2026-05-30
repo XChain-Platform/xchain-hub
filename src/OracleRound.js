@@ -150,7 +150,7 @@ class OracleRound {
             skippedRounds = rows.map(r => Number(r.round_number));
         } catch (err) {
             // Non-fatal — diagnostics still return the in-memory state if the read fails
-            console.warn('Oracle: failed to read skipped rounds for diagnostics:', err.message);
+            console.warn('Oracle: failed to read skipped rounds for diagnostics:', err);
         }
 
         return {
@@ -237,9 +237,9 @@ class OracleRound {
             this.chainTipFetchFailures++;
             if (!this.chainTipFallbackActive) this.chainTipFallbackActive = true;
             if (this.chainTipFetchFailures > 1) {
-                console.error('Oracle: Failed to read BTC chain tip (failure ' + this.chainTipFetchFailures + '):', err.message);
+                console.error('Oracle: Failed to read BTC chain tip (failure ' + this.chainTipFetchFailures + '):', err);
             } else {
-                console.warn('Oracle: Failed to read BTC chain tip:', err.message);
+                console.warn('Oracle: Failed to read BTC chain tip:', err);
             }
             this.currentBtcBlockHeight = this.currentRound;
             this.currentBtcBlockTime   = Math.floor(Date.now() / 1000);
@@ -258,7 +258,7 @@ class OracleRound {
         try {
             prices = await this.priceFetcher.fetchPrices();
         } catch (err) {
-            console.error('Oracle: Price fetch failed for round ' + this.currentRound + ':', err.message);
+            console.error('Oracle: Price fetch failed for round ' + this.currentRound + ':', err);
             // Still schedule finalization so the round leaves a durable record.
             // If peers gossiped submissions the round can be salvaged; if nobody
             // has prices, OracleConsensus writes a 'skipped' price_snapshots row

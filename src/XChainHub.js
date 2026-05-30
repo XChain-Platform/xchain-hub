@@ -845,7 +845,8 @@ class XChainHub {
             let result = res && res.data && res.data.result;
             if(!result || result.error) return null;
             return Number(result.block_index) || null;
-        } catch (_) {
+        } catch (err) {
+            console.error('XChainHub: failed to resolve BTC latest block from indexer:', err);
             return null;
         }
     }
@@ -860,7 +861,7 @@ class XChainHub {
         if(!this.db) return 'mainnet';
         let configs;
         try { configs = await this.db.getAllConfigs(); }
-        catch { return 'mainnet'; }
+        catch (err) { console.error('XChainHub: failed to resolve BTC network from configs:', err); return 'mainnet'; }
         let btc = configs && configs['bitcoin'];
         if(!btc) return 'mainnet';
         for(let net of ['regtest', 'testnet', 'mainnet']){
@@ -890,7 +891,7 @@ class XChainHub {
         if(!this.db) return null;
         let configs;
         try { configs = await this.db.getAllConfigs(); }
-        catch { return null; }
+        catch (err) { console.error('XChainHub: failed to resolve BTC indexer URL from configs:', err); return null; }
         let btc = configs && configs['bitcoin'];
         if(!btc) return null;
         // Prefer regtest > testnet > mainnet so dev loops Just Work. Production

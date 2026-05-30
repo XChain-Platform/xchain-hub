@@ -243,6 +243,7 @@ class OraclePublisher {
             let pubkeys = await this.hub.capabilityRegistry.getActiveValidators('oracle_publish');
             return pubkeys.map(p => String(p).toLowerCase()).sort();
         } catch (err) {
+            console.error('OraclePublisher: failed to fetch active validators:', err);
             return [];
         }
     }
@@ -367,7 +368,7 @@ class OraclePublisher {
                 // Successfully published — drop from queue (do not add to remaining)
             } catch (err) {
                 entry.attempts++;
-                console.error('OraclePublisher: publish failed for round ' + entry.round + ' (attempt ' + entry.attempts + '/' + this.maxAttempts + '): ' + err.message);
+                console.error('OraclePublisher: publish failed for round ' + entry.round + ' (attempt ' + entry.attempts + '/' + this.maxAttempts + '): ', err);
                 if (balance !== null && balance < 0.01) {
                     console.error('OraclePublisher: insufficient DOGE balance for round ' + entry.round);
                 }
@@ -387,7 +388,7 @@ class OraclePublisher {
             try {
                 balance = await this.getBalanceFn();
             } catch (err) {
-                console.warn('OraclePublisher: custom balance check failed:', err.message);
+                console.warn('OraclePublisher: custom balance check failed:', err);
                 return null;
             }
         } else if (this.encoder && this.dogeAddress) {
@@ -403,7 +404,7 @@ class OraclePublisher {
                     balance = total;
                 }
             } catch (err) {
-                console.warn('OraclePublisher: encoder balance check failed:', err.message);
+                console.warn('OraclePublisher: encoder balance check failed:', err);
                 return null;
             }
         }

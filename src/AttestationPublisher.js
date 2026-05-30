@@ -139,7 +139,7 @@ class AttestationPublisher {
             }
             console.log('AttestationPublisher: broadcast ' + event.requestId.substring(0,16) + '... txid=' + (result && result.txid ? result.txid : '?'));
         } catch (e) {
-            console.error('AttestationPublisher: broadcast failed for ' + event.requestId.substring(0,16) + '...: ' + (e && e.message ? e.message : e));
+            console.error('AttestationPublisher: broadcast failed for ' + event.requestId.substring(0,16) + '...: ', e);
         }
     }
 

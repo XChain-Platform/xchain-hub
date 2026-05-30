@@ -188,7 +188,7 @@ class PriceFetcher {
             }
             return prices;
         } catch (err) {
-            console.warn('CoinMarketCap fetch failed:', err.message);
+            console.warn('CoinMarketCap fetch failed:', err);
             return null;
         }
     }

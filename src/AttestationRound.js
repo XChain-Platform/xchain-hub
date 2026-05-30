@@ -251,7 +251,7 @@ class AttestationRound {
                 timeoutMs:        this.fetchTimeoutMs
             });
         } catch (e) {
-            console.warn('AttestationRound: fetch failed for ' + rid.substring(0,16) + '...: ' + e.message);
+            console.warn('AttestationRound: fetch failed for ' + rid.substring(0,16) + '...: ', e);
             // Persist 'inactive' so we don't retry the same broken URL forever.
             this.rounds.set(rid, { request, role: amLeader ? 'leader' : 'follower', error: e.message });
             return;

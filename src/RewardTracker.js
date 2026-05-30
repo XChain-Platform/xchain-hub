@@ -94,7 +94,7 @@ class RewardTracker {
         try {
             await axios.post(this.btcIndexerApiUrl, body, { headers: headers, timeout: 5000 });
         } catch (err) {
-            console.warn('Rewards: BTC indexer push failed:', err.message);
+            console.warn('Rewards: BTC indexer push failed:', err);
         }
     }
 

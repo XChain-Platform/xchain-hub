@@ -299,7 +299,7 @@ class AttestationConsensus extends EventEmitter {
         try {
             winner = await Promise.resolve(providerModule.agree(proposalsArr));
         } catch (e) {
-            console.warn('AttestationConsensus: agree() threw for ' + rid.substring(0,16) + '...: ' + (e && e.message ? e.message : e));
+            console.warn('AttestationConsensus: agree() threw for ' + rid.substring(0,16) + '...: ', e);
             winner = null;
         }
         pending._agreeing = false;
