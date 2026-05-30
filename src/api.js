@@ -638,6 +638,81 @@ async function startApi(){
         }
     });
 
+    // GET /telemetry/summary — anonymous, aggregate-only census of node operators.
+    // Returns DISTRIBUTION COUNTS ONLY (by version / OS / country / arch / running
+    // module). Never returns install_id, ip_hash, region, or any per-install row —
+    // only group tallies derived from the latest ping per install in the window.
+    // Read-only; safe to expose to the operator dashboard.
+    app.get('/telemetry/summary', async (req, res) => {
+        if (!TELEMETRY_ENABLED) return res.json({ enabled: false });
+        try {
+            // Bounded integer window (sanitised → safe to inline; not a bound param
+            // because MariaDB won't bind inside an INTERVAL literal cleanly).
+            let days = req.query.days ? parseInt(req.query.days, 10) : 30;
+            if (!Number.isFinite(days) || days < 1) days = 30;
+            if (days > 365) days = 365;
+
+            // Latest ping per install within the window. install_id is used only to
+            // dedupe + group here; it is dropped before the response.
+            let rows = await hub.db.doQuery(
+                `SELECT t.install_id, t.country, t.node_version, t.os_platform, t.arch, t.docker_version, t.modules
+                   FROM telemetry_pings t
+                   JOIN (
+                     SELECT install_id, MAX(created_at) AS mx
+                       FROM telemetry_pings
+                      WHERE created_at > (NOW() - INTERVAL ${days} DAY)
+                      GROUP BY install_id
+                   ) l ON t.install_id = l.install_id AND t.created_at = l.mx
+                  LIMIT 50000`,
+                []
+            );
+
+            const tally = (arr, key) => {
+                const m = new Map();
+                for (const v of arr) {
+                    const k = (v === null || v === undefined || v === '') ? 'unknown' : String(v);
+                    m.set(k, (m.get(k) || 0) + 1);
+                }
+                return [...m.entries()].map(([key, count]) => ({ key, count })).sort((a, b) => b.count - a.count);
+            };
+
+            // Running-module distribution: count installs running each module.
+            const moduleCounts = new Map();
+            for (const r of rows) {
+                let mods = [];
+                try { mods = Array.isArray(r.modules) ? r.modules : JSON.parse(r.modules || '[]'); } catch (e) { mods = []; }
+                const seen = new Set();
+                for (const m of mods) {
+                    if (!m || !m.module || !m.running) continue;
+                    if (seen.has(m.module)) continue;   // count an install once per module
+                    seen.add(m.module);
+                    moduleCounts.set(m.module, (moduleCounts.get(m.module) || 0) + 1);
+                }
+            }
+
+            // Total pings over the window (activity volume, not unique installs).
+            let pingRow = await hub.db.doQuery(
+                `SELECT COUNT(*) AS c FROM telemetry_pings WHERE created_at > (NOW() - INTERVAL ${days} DAY)`,
+                []
+            );
+
+            res.json({
+                enabled: true,
+                window_days: days,
+                operators: rows.length,
+                pings: pingRow && pingRow[0] ? Number(pingRow[0].c) : null,
+                byVersion: tally(rows.map(r => r.node_version), 'node_version'),
+                byOs:      tally(rows.map(r => r.os_platform), 'os_platform'),
+                byCountry: tally(rows.map(r => r.country), 'country'),
+                byArch:    tally(rows.map(r => r.arch), 'arch'),
+                byDocker:  tally(rows.map(r => r.docker_version), 'docker_version'),
+                modules:   [...moduleCounts.entries()].map(([key, count]) => ({ key, count })).sort((a, b) => b.count - a.count),
+            });
+        } catch (err) {
+            res.status(500).json({ error: err.message || 'telemetry summary error' });
+        }
+    });
+
     // Allow JSON-RPC requests
     app.use(jsonRouter({methods: jsonRpcController}));
 
