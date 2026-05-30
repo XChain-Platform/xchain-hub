@@ -2,8 +2,9 @@ FROM node:latest
 
 RUN mkdir /XChainHub/
 COPY ./package.json /XChainHub/package.json
+COPY ./package-lock.json /XChainHub/package-lock.json
 WORKDIR /XChainHub
-RUN npm install
+RUN npm ci
 
 COPY ./src /XChainHub/src
 COPY ./.en[v] /XChainHub/.env
