@@ -1008,15 +1008,35 @@ class XChainHub {
         }
     }
 
-    // Decimal comparison via parseFloat. Stake amounts are bounded well within the
-    // safe integer range for typical staking magnitudes (XCHAIN with 8 decimals).
+    // Exact decimal string comparison. Aggregated stake amounts can exceed the
+    // float64 safe-integer range (the indexer returns DECIMAL(30,8) sums), so
+    // parseFloat would silently round two distinct amounts to the same value and
+    // mis-qualify an underweight validator. We compare the decimal digits directly
+    // instead. Returns -1, 0, or 1 (0 for any unparseable operand).
     _compareDecimal(a, b){
-        let aNum = parseFloat(a);
-        let bNum = parseFloat(b);
-        if(isNaN(aNum) || isNaN(bNum)) return 0;
-        if(aNum < bNum) return -1;
-        if(aNum > bNum) return 1;
-        return 0;
+        let pa = this._parseDecimalParts(a);
+        let pb = this._parseDecimalParts(b);
+        if(!pa || !pb) return 0;
+        if(pa.neg !== pb.neg) return pa.neg ? -1 : 1;
+        let scale = Math.max(pa.frac.length, pb.frac.length);
+        let ai = BigInt(pa.int + pa.frac.padEnd(scale, '0'));
+        let bi = BigInt(pb.int + pb.frac.padEnd(scale, '0'));
+        let cmp = ai < bi ? -1 : (ai > bi ? 1 : 0);
+        return pa.neg ? -cmp : cmp;
+    }
+
+    // Parse a decimal string into { neg, int, frac } digit strings, or null if the
+    // value is not a finite decimal number.
+    _parseDecimalParts(v){
+        let s = String(v == null ? '' : v).trim();
+        if(!/^[+-]?(\d+\.?\d*|\.\d+)$/.test(s)) return null;
+        let neg = s[0] === '-';
+        if(s[0] === '+' || s[0] === '-') s = s.slice(1);
+        let dot = s.indexOf('.');
+        let int  = (dot === -1 ? s : s.slice(0, dot)) || '0';
+        let frac = dot === -1 ? '' : s.slice(dot + 1);
+        if(/^0*$/.test(int) && /^0*$/.test(frac)) neg = false;
+        return { neg: neg, int: int, frac: frac };
     }
 
     async close(){

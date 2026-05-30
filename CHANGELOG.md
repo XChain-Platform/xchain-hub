@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.12] - 2026-05-29
+
+### Fixed
+- Capability-staking qualification now compares stake amounts exactly instead of through `parseFloat`, eliminating a latent precision defect that could mis-qualify a validator. `XChainHub._compareDecimal` previously coerced both decimal-string operands to float64, which carries only ~15–16 significant decimal digits; an aggregated stake from the indexer (`SUM(CAST(s.amount AS DECIMAL(30,8)))`) with 8+ significant integer digits and 8 decimal places exhausts the float64 mantissa, so two amounts differing only in their least-significant satoshi (e.g. `90071992.00000001` vs `90071992.00000002`) collapsed to the same float and compared equal. Because qualification uses `_compareDecimal(amount, minStake) >= 0`, an underweight validator could be marked `qualified`, and that activation is gossipped to federation peers who accept it without re-running the comparison. The method now compares the decimal strings digit-for-digit via `BigInt` (sign + integer/fraction parts, fraction zero-padded to a common scale), returning `-1`/`0`/`1` with `0` for any unparseable operand — exact at any magnitude, no new dependency.
+- `Governance._validateChangeBounds` evaluates parameter bounds-change ratios exactly for the same reason. The increase/decrease checks previously computed `(proposed - current) / current` in float64; on large parameter values the subtraction could round before the comparison. The thresholds (whole-percent: 50/33% normal, 25/20% slashing) are now compared by exact `BigInt` cross-multiplication that preserves the original sign-sensitive behaviour for negative current values; the float ratio is retained only to render the percentage in the error message.
+
 ## [2.2.11] - 2026-05-29
 
 ### Fixed

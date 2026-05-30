@@ -39,6 +39,27 @@ const COOLDOWN_DAYS        = 14;    // Days before re-proposing a rejected param
 
 const SLASHING_PARAMS = ['SLASH_DEVIATION_THRESHOLD', 'SLASH_MISSED_ROUNDS_THRESHOLD'];
 
+// Parse a decimal string into { neg, int, frac } digit strings, or null if it is
+// not a finite decimal. Used for exact (non-float) bounds comparison so large
+// parameter values aren't rounded past the float64 safe-integer range.
+function parseDecimalParts(v){
+    let s = String(v == null ? '' : v).trim();
+    if(!/^[+-]?(\d+\.?\d*|\.\d+)$/.test(s)) return null;
+    let neg = s[0] === '-';
+    if(s[0] === '+' || s[0] === '-') s = s.slice(1);
+    let dot = s.indexOf('.');
+    let int  = (dot === -1 ? s : s.slice(0, dot)) || '0';
+    let frac = dot === -1 ? '' : s.slice(dot + 1);
+    if(/^0*$/.test(int) && /^0*$/.test(frac)) neg = false;
+    return { neg: neg, int: int, frac: frac };
+}
+
+// Render parsed decimal parts as a signed BigInt scaled to `scale` fraction digits.
+function toScaledBigInt(parts, scale){
+    let v = BigInt(parts.int + parts.frac.padEnd(scale, '0'));
+    return parts.neg ? -v : v;
+}
+
 class Governance extends EventEmitter {
 
     constructor(hub) {
@@ -361,20 +382,39 @@ class Governance extends EventEmitter {
 
     _validateChangeBounds(parameter, currentValue, proposedValue) {
         // Only validate numeric parameters
-        let current  = parseFloat(currentValue);
-        let proposed = parseFloat(proposedValue);
-        if (isNaN(current) || isNaN(proposed) || current === 0) return;
+        let cur  = parseDecimalParts(currentValue);
+        let prop = parseDecimalParts(proposedValue);
+        if (!cur || !prop) return;
 
-        let changeRatio = (proposed - current) / current;
+        let scale = Math.max(cur.frac.length, prop.frac.length);
+        let C = toScaledBigInt(cur, scale);
+        let P = toScaledBigInt(prop, scale);
+        if (C === 0n) return;
+
         let isSlashParam = SLASHING_PARAMS.includes(parameter);
-
         let maxIncrease = isSlashParam ? MAX_SLASH_INCREASE : MAX_INCREASE;
         let maxDecrease = isSlashParam ? MAX_SLASH_DECREASE : MAX_DECREASE;
 
-        if (changeRatio > maxIncrease) {
+        // changeRatio = (P - C) / C, evaluated exactly via cross-multiplication so
+        // large parameter values aren't rounded by float64. The thresholds are
+        // whole-percent, so express them as integer percentages and compare
+        // N*100 against pct*C. Multiplying through by C flips the inequality when
+        // C < 0, which preserves the original sign-sensitive behaviour.
+        let N      = P - C;
+        let n100   = N * 100n;
+        let incPct = BigInt(Math.round(maxIncrease * 100));
+        let decPct = BigInt(Math.round(maxDecrease * 100));
+        let positive = C > 0n;
+        let exceedsIncrease = positive ? (n100 > incPct * C) : (n100 < incPct * C);
+        let exceedsDecrease = positive ? (n100 < -decPct * C) : (n100 > -decPct * C);
+
+        // Float ratio is fine for the human-readable percentage in the message.
+        let changeRatio = Number(N) / Number(C);
+
+        if (exceedsIncrease) {
             throw new Error('Proposed increase (' + (changeRatio * 100).toFixed(1) + '%) exceeds maximum (' + (maxIncrease * 100) + '%)');
         }
-        if (changeRatio < -maxDecrease) {
+        if (exceedsDecrease) {
             throw new Error('Proposed decrease (' + (Math.abs(changeRatio) * 100).toFixed(1) + '%) exceeds maximum (' + (maxDecrease * 100) + '%)');
         }
     }
