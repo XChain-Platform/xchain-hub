@@ -80,7 +80,7 @@ describe('XChainHub', function () {
             expect(rows).to.deep.include({ coin: 'BTC', network: 'mainnet', module: 'indexer', paramName: 'port', paramValue: '3309' });
         });
 
-        it('skips invalid parameter names', async function () {
+        it('skips keys outside the combined allowlist, accepts known operational params', async function () {
             let hub = new XChainHub('host', 3306, 'db', 'user', 'pass', null);
             hub.db = mockDb;
 
@@ -88,7 +88,8 @@ describe('XChainHub', function () {
                 BTC: {
                     mainnet: {
                         indexer: {
-                            host: 'localhost',
+                            host:          'localhost',
+                            GAS_PRICE:     '0.00002',
                             invalid_param: 'should-be-skipped'
                         }
                     }
@@ -99,7 +100,52 @@ describe('XChainHub', function () {
             let rows = mockDb.setParams.getCall(0).args[0];
             let paramNames = rows.map(r => r.paramName);
             expect(paramNames).to.include('host');
+            expect(paramNames).to.include('GAS_PRICE');
             expect(paramNames).to.not.include('invalid_param');
+        });
+
+        it('stores GAS_PRICE as a flat scalar string', async function () {
+            let hub = new XChainHub('host', 3306, 'db', 'user', 'pass', null);
+            hub.db = mockDb;
+
+            await hub.applyConfig({
+                BTC: { mainnet: { 'xchain-indexer': { GAS_PRICE: '0.00002' } } }
+            });
+
+            let rows = mockDb.setParams.getCall(0).args[0];
+            let row = rows.find(r => r.paramName === 'GAS_PRICE');
+            expect(row).to.exist;
+            expect(row.paramValue).to.equal('0.00002');
+        });
+
+        it('serializes GAS_SCHEDULE object to JSON string', async function () {
+            let hub = new XChainHub('host', 3306, 'db', 'user', 'pass', null);
+            hub.db = mockDb;
+
+            let schedule = { ISSUE: 100000, ISSUE_SUBTOKEN: 50000 };
+            await hub.applyConfig({
+                BTC: { mainnet: { 'xchain-indexer': { GAS_SCHEDULE: schedule } } }
+            });
+
+            let rows = mockDb.setParams.getCall(0).args[0];
+            let row = rows.find(r => r.paramName === 'GAS_SCHEDULE');
+            expect(row).to.exist;
+            expect(row.paramValue).to.equal(JSON.stringify(schedule));
+        });
+
+        it('stores GAS_SCHEDULE already serialized as a string unchanged', async function () {
+            let hub = new XChainHub('host', 3306, 'db', 'user', 'pass', null);
+            hub.db = mockDb;
+
+            let serialized = '{"ISSUE":100000}';
+            await hub.applyConfig({
+                BTC: { mainnet: { 'xchain-indexer': { GAS_SCHEDULE: serialized } } }
+            });
+
+            let rows = mockDb.setParams.getCall(0).args[0];
+            let row = rows.find(r => r.paramName === 'GAS_SCHEDULE');
+            expect(row).to.exist;
+            expect(row.paramValue).to.equal(serialized);
         });
 
         it('is a no-op (no DB write) when config has no recognized params', async function () {

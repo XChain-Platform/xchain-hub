@@ -48,6 +48,8 @@ const https = require('https');
 const { resolveHubLlmAuth } = require('../lib/hub-credentials');
 const { runClaudePrint } = require('../lib/claude-spawn');
 
+const _tokenUsage = { inputTokens: 0, outputTokens: 0, calls: 0 };
+
 // Provider-def-injected configuration. ProviderRegistry calls _setConfig
 // after loading the def from the configs table; these defaults are the
 // spec §3 fallbacks for first-startup before any governance proposal.
@@ -169,7 +171,7 @@ exports.agree = async (proposals) => {
 exports.healthCheck = async (ctx) => {
     const auth = resolveHubLlmAuth(ctx);
     if (!auth.ok) return { ok: false, error: auth.detail || auth.reason || 'no_credential_configured' };
-    return { ok: true, transport: auth.transport, source: auth.source };
+    return { ok: true, transport: auth.transport, source: auth.source, tokenUsage: { ..._tokenUsage } };
 };
 
 // ---------- internals ----------
@@ -263,6 +265,11 @@ async function _callAnthropic(apiPath, body, apiKey, options) {
                         let msg = (json.error && json.error.message) ? json.error.message : JSON.stringify(json);
                         safeReject(new Error('llm: Anthropic API: ' + msg));
                         return;
+                    }
+                    if (json.usage) {
+                        _tokenUsage.inputTokens  += json.usage.input_tokens  ?? 0;
+                        _tokenUsage.outputTokens += json.usage.output_tokens ?? 0;
+                        _tokenUsage.calls        += 1;
                     }
                     safeResolve(json);
                 } catch (e) {

@@ -33,14 +33,19 @@ const bigIntReplacer = (k, v) => typeof v === 'bigint' ? v.toString() : v;
 
 class HubDbBroadcaster {
 
-    constructor(config) {
+    constructor(config, db) {
         this.config = config || {};
+        this.db     = db || null;      // Optional hub DB — used to stamp max IDs in the ready message
         this.subscribers = new Set();  // Set<ws>
         this.maxBufferedMessages = parseInt(this.config.WS_BACKPRESSURE_LIMIT || 50);
     }
 
-    // Add a new subscriber WebSocket
-    addSubscriber(ws) {
+    // Add a new subscriber WebSocket. Sends a 'ready' acknowledgement once the
+    // subscriber is registered so the client knows its subscription is active.
+    // Includes the current per-table max row IDs (when a DB connection is available)
+    // so the client can detect and fill any narrow gap between the subscription point
+    // and its subsequent REST bootstrap response.
+    async addSubscriber(ws) {
         this.subscribers.add(ws);
         ws._hubBuffered = 0;
 
@@ -48,9 +53,21 @@ class HubDbBroadcaster {
         ws.on('error', () => this.removeSubscriber(ws));
 
         console.log('HubDbBroadcaster: subscriber added (' + this.subscribers.size + ' total)');
-        // Send a ready event so the client knows it's connected
+
+        let maxIds = {};
+        if (this.db) {
+            try {
+                let ps = await this.db.doQuery('SELECT MAX(id) AS max_id FROM price_snapshots');
+                maxIds.price_snapshots = (ps.length > 0 && ps[0].max_id != null) ? Number(ps[0].max_id) : 0;
+            } catch (e) { /* table may not exist yet */ }
+            try {
+                let op = await this.db.doQuery('SELECT MAX(id) AS max_id FROM oracle_prices');
+                maxIds.oracle_prices = (op.length > 0 && op[0].max_id != null) ? Number(op[0].max_id) : 0;
+            } catch (e) { /* table may not exist yet */ }
+        }
+
         try {
-            ws.send(JSON.stringify({ type: 'ready' }));
+            ws.send(JSON.stringify({ type: 'ready', max_ids: maxIds }));
         } catch (e) { /* ignore */ }
     }
 

@@ -195,7 +195,7 @@ describe('Smoke: xchain-hub', function () {
                 async getoraclesubmissions() {
                     let oracle = hub.getOracle();
                     if (!oracle) return { error: 'oracle not active' };
-                    return oracle.getSubmissionsInfo();
+                    return await oracle.getSubmissionsInfo();
                 },
 
                 async getattestations({ status, limit }) {

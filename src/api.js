@@ -215,7 +215,7 @@ async function startApi(){
         async getoraclesubmissions(){
             let oracle = hub.getOracle();
             if(!oracle) return {error: "oracle not active"};
-            return oracle.getSubmissionsInfo();
+            return await oracle.getSubmissionsInfo();
         },
 
         // Get recent finalized price snapshots
@@ -367,6 +367,12 @@ async function startApi(){
             } catch (err) {
                 return {error: "error fetching validator status"};
             }
+        },
+
+        // Get attestation round throughput counters for this validator
+        async getattestationstats(){
+            if(!hub.attestationRound) return {error: "attestation subsystem not active"};
+            return hub.attestationRound.getStats();
         },
 
         // Get fee quote (gas → XCHAIN → native coin)

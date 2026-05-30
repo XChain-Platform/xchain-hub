@@ -44,7 +44,9 @@ const AttestationPublisher   = require('./AttestationPublisher.js');
 const AttestationSpotChecker = require('./AttestationSpotChecker.js');
 const fs                 = require('fs');
 const axios              = require('axios');
-const PARAMETER_LIST = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass"];
+const PARAMETER_LIST     = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass"];
+const OPERATIONAL_PARAMS = new Set(["GAS_PRICE", "FEE_PAYMENT_MODE", "ACTIVATION_DELAY_BLOCKS", "EXPIRATION_FEE_PER_DAY"]);
+const JSON_BLOB_PARAMS   = new Set(["GAS_SCHEDULE", "STAKING"]);
 
 class XChainHub {
     constructor(dbHost, dbPort, dbName, dbUser, dbPass, p2pConfig) {
@@ -93,7 +95,7 @@ class XChainHub {
         this.priceAggregator = new PriceAggregator(this);
         // HubDbBroadcaster forwards row inserts from the aggregator to WebSocket subscribers
         // for the cross-chain hub DB sync channel (used by indexers running in distributed mode)
-        this.hubDbBroadcaster = new HubDbBroadcaster(this.p2pConfig || {});
+        this.hubDbBroadcaster = new HubDbBroadcaster(this.p2pConfig || {}, this.db);
         this.priceAggregator.on('row:inserted', (event) => {
             this.hubDbBroadcaster.broadcastRow(event);
         });
@@ -392,6 +394,7 @@ class XChainHub {
                     let moduleLevel = networkLevel[nextModule];
                     if (!moduleLevel || typeof moduleLevel !== 'object') continue;
 
+                    // Service-location params (original 8-key allowlist — preserved unchanged)
                     for(let nextParam of PARAMETER_LIST){
                         let nextValue = moduleLevel[nextParam];
                         if(nextValue === null || nextValue === undefined) continue;
@@ -399,6 +402,51 @@ class XChainHub {
                         // Enforce string type and length
                         if (typeof nextValue !== 'string') {
                             console.warn('XChainHub.applyConfig: non-string value for ' + nextParam + ' — coercing');
+                            nextValue = String(nextValue);
+                        }
+                        if (nextValue.length > 1024) {
+                            throw new Error('Config value for ' + nextParam + ' exceeds max length of 1024 chars');
+                        }
+
+                        rows.push({
+                            coin:       nextCoin,
+                            network:    nextNetwork,
+                            module:     nextModule,
+                            paramName:  nextParam,
+                            paramValue: nextValue
+                        });
+                    }
+
+                    // Flat scalar operational params (GAS_PRICE, FEE_PAYMENT_MODE, etc.)
+                    for(let nextParam of OPERATIONAL_PARAMS){
+                        let nextValue = moduleLevel[nextParam];
+                        if(nextValue === null || nextValue === undefined) continue;
+
+                        if (typeof nextValue !== 'string') {
+                            console.warn('XChainHub.applyConfig: non-string value for ' + nextParam + ' — coercing');
+                            nextValue = String(nextValue);
+                        }
+                        if (nextValue.length > 1024) {
+                            throw new Error('Config value for ' + nextParam + ' exceeds max length of 1024 chars');
+                        }
+
+                        rows.push({
+                            coin:       nextCoin,
+                            network:    nextNetwork,
+                            module:     nextModule,
+                            paramName:  nextParam,
+                            paramValue: nextValue
+                        });
+                    }
+
+                    // JSON blob params (GAS_SCHEDULE, STAKING) — serialized to a JSON string
+                    for(let nextParam of JSON_BLOB_PARAMS){
+                        let nextValue = moduleLevel[nextParam];
+                        if(nextValue === null || nextValue === undefined) continue;
+
+                        if (typeof nextValue === 'object') {
+                            nextValue = JSON.stringify(nextValue);
+                        } else if (typeof nextValue !== 'string') {
                             nextValue = String(nextValue);
                         }
                         if (nextValue.length > 1024) {

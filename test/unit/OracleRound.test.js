@@ -155,7 +155,7 @@ describe('OracleRound', function () {
     describe('getSubmissionsInfo()', function () {
         it('returns info object', async function () {
             await or._executeRound();
-            let info = or.getSubmissionsInfo();
+            let info = await or.getSubmissionsInfo();
             expect(info).to.have.property('currentRound');
             expect(info).to.have.property('roundInterval');
             expect(info).to.have.property('submissionWindow');

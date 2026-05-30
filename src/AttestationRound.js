@@ -302,6 +302,20 @@ class AttestationRound {
         return this.rounds.get(String(requestId).toLowerCase()) || null;
     }
 
+    getStats(){
+        let proposed = 0, failed = 0;
+        for(let [, entry] of this.rounds){
+            if(entry.error) failed++;
+            else proposed++;
+        }
+        return {
+            seen_count:      this.seen.size,
+            in_flight_count: this.seen.size - this.rounds.size,  // seen but _startRound not yet resolved
+            proposed_count:  proposed,
+            failed_count:    failed
+        };
+    }
+
     _handleMessage(envelope){
         // AttestationRound itself doesn't handle PBFT messages — those go
         // to AttestationConsensus. We only listen so that subclassed
