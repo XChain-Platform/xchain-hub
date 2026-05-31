@@ -3,3 +3,5 @@ node_modules/
 .DS_Store
 .stryker-tmp/
 reports/mutation/
+# Runtime attestation queue/log output — not source
+data/
