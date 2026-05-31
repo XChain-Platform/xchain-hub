@@ -16,7 +16,7 @@
     "express-rate-limit": "^8.5.2",
     "geoip-lite": "^2.0.2",
     "helmet": "^7.1.0",
-    "mariadb": "~3.4.5",
+    "mariadb": "^3.5.2",
     "ws": "^8.18.0"
   },
   "scripts": {
