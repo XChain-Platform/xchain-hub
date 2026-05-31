@@ -178,6 +178,12 @@ class OracleRound {
             chainTipFetchFailures:    this.chainTipFetchFailures,
             lastChainTipFetchAt:      this.lastSuccessfulChainTipFetchAt
                 ? new Date(this.lastSuccessfulChainTipFetchAt).toISOString()
+                : null,
+            // Server-computed age of the last good chain-tip read. Monitors can
+            // threshold this directly instead of diffing lastChainTipFetchAt
+            // against their own clock (which would fold in client skew).
+            chainTipStalenessMs:      this.lastSuccessfulChainTipFetchAt
+                ? (Date.now() - this.lastSuccessfulChainTipFetchAt)
                 : null
         };
     }
