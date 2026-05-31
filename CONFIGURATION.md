@@ -191,6 +191,7 @@ Wallet and encoder the hub uses to publish oracle prices on Dogecoin.
 |---|---|---|---|
 | `BTC_INDEXER_API_URL` | No | _empty_ | Bitcoin indexer endpoint used for reward tracking. |
 | `BTC_INDEXER_API_KEY` | No | _empty_ | API key for the Bitcoin indexer. |
+| `MAX_INDEXER_LAG_BLOCKS` | No | `200` | Max blocks the indexer's committed tip may trail the decoder before the hub treats the indexer's latest-block response as stale and falls back to graceful degradation, rather than anchoring a consensus snapshot on a lagging tip. |
 
 ## Governance
 

@@ -886,6 +886,20 @@ class XChainHub {
             }, { timeout: 5000 });
             let result = res && res.data && res.data.result;
             if(!result || result.error) return null;
+            // Guard against anchoring a snapshot on a stale tip. The indexer
+            // reports `lag` = how many blocks its committed tip trails the
+            // decoder's current tip. When the indexer is processing far behind
+            // (e.g. repeated contract watchdog timeouts), its tip no longer
+            // reflects recent on-chain state. Past a configurable gap, treat the
+            // tip as untrustworthy and fall back to graceful degradation rather
+            // than locking a stale validator set into the consensus round.
+            let maxLag = Number(process.env.MAX_INDEXER_LAG_BLOCKS);
+            if(!Number.isFinite(maxLag) || maxLag < 0) maxLag = 200;
+            if(result.lag != null && Number(result.lag) > maxLag){
+                console.warn('XChainHub: BTC indexer lag ' + result.lag +
+                    ' exceeds MAX_INDEXER_LAG_BLOCKS (' + maxLag + '); ignoring stale tip');
+                return null;
+            }
             return Number(result.block_index) || null;
         } catch (err) {
             console.error('XChainHub: failed to resolve BTC latest block from indexer:', err);
