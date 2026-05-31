@@ -75,7 +75,7 @@ signatures.
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `HUB_API_KEY` | **Prod** | _empty_ | API key required on requests. **Empty disables auth — see above.** |
-| `HUB_API_RATE_LIMIT` | No | `100` | Requests per minute per client. |
+| `HUB_RATE_LIMIT_RPM` | No | `100` | Requests per minute per client. |
 | `CORS_ORIGIN` | No | `false` | Allowed CORS origin; `false` disables cross-origin requests. |
 
 ## Database (MariaDB)

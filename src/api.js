@@ -49,7 +49,7 @@ const HUB_DB_KEEPALIVE_INTERVAL = parseInt(process.env.HUB_DB_KEEPALIVE_INTERVAL
 
 // Security constants
 const HUB_API_KEY        = process.env.HUB_API_KEY || '';
-const HUB_API_RATE_LIMIT = parseInt(process.env.HUB_API_RATE_LIMIT) || 100;
+const HUB_RATE_LIMIT_RPM = parseInt(process.env.HUB_RATE_LIMIT_RPM) || 100;
 const CORS_ORIGIN        = process.env.CORS_ORIGIN || false;
 
 // Usage telemetry (anonymous install pings from xchain-node operators).
@@ -172,7 +172,7 @@ async function startApi(){
     app.use(cors({ origin: CORS_ORIGIN }));
     app.use(rateLimit({
         windowMs: 60 * 1000,
-        max: HUB_API_RATE_LIMIT,
+        max: HUB_RATE_LIMIT_RPM,
         standardHeaders: true,
         legacyHeaders: false
     }));
