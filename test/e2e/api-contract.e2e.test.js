@@ -55,6 +55,8 @@ describe('E2E: API Contract Verification', function () {
         it('getallconfigs — empty', async function () {
             let res = await callRpc(cluster.getPort(0), 'getallconfigs');
             expect(res.result).to.be.an('object');
+            expect(res.result.configs).to.be.an('object');
+            expect(res.result.seq).to.be.a('number');
         });
 
         it('updateconfig + getallconfigs', async function () {
@@ -65,7 +67,7 @@ describe('E2E: API Contract Verification', function () {
             expect(writeRes.result.status).to.equal('success');
 
             let readRes = await callRpc(port, 'getallconfigs');
-            expect(readRes.result.BTC.mainnet.decoder.host).to.equal('test');
+            expect(readRes.result.configs.BTC.mainnet.decoder.host).to.equal('test');
         });
 
         it('registervalidator + getvalidators', async function () {

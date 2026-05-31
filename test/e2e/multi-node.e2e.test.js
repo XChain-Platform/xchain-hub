@@ -127,8 +127,8 @@ describe('E2E: Multi-Node Cluster', function () {
             // All nodes should see the config via shared DB
             for (let i = 0; i < 3; i++) {
                 let readRes = await callRpc(cluster.getPort(i), 'getallconfigs');
-                expect(readRes.result.BTC).to.exist;
-                expect(readRes.result.BTC.mainnet.decoder.host).to.equal('multi-test.local');
+                expect(readRes.result.configs.BTC).to.exist;
+                expect(readRes.result.configs.BTC.mainnet.decoder.host).to.equal('multi-test.local');
             }
         });
     });

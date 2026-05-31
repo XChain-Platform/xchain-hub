@@ -23,7 +23,7 @@ function buildController(hub) {
         async ping() { return { status: 'success' }; },
 
         async getallconfigs() {
-            try { return await hub.getAllConfigs(); }
+            try { return { configs: await hub.getAllConfigs(), seq: await hub.getLastSeq() }; }
             catch (err) { return { error: 'error getting configs' }; }
         },
 

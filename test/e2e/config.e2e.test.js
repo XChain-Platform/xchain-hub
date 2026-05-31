@@ -64,10 +64,11 @@ describe('E2E: Config Pipeline', function () {
 
             // Read config via JSON-RPC
             let readRes = await callRpc(port, 'getallconfigs');
-            expect(readRes.result.BTC).to.exist;
-            expect(readRes.result.BTC.mainnet.decoder.host).to.equal('btc-decoder.local');
-            expect(readRes.result.BTC.mainnet.decoder.port).to.equal('8332');
-            expect(readRes.result.BTC.mainnet.indexer.host).to.equal('btc-indexer.local');
+            expect(readRes.result.seq).to.be.a('number');
+            expect(readRes.result.configs.BTC).to.exist;
+            expect(readRes.result.configs.BTC.mainnet.decoder.host).to.equal('btc-decoder.local');
+            expect(readRes.result.configs.BTC.mainnet.decoder.port).to.equal('8332');
+            expect(readRes.result.configs.BTC.mainnet.indexer.host).to.equal('btc-indexer.local');
 
             // Also verify updateconfig API returns success
             let writeRes = await callRpc(port, 'updateconfig', {
@@ -77,7 +78,7 @@ describe('E2E: Config Pipeline', function () {
 
             // Verify the update took effect
             let readRes2 = await callRpc(port, 'getallconfigs');
-            expect(readRes2.result.BTC.mainnet.decoder.host).to.equal('updated.local');
+            expect(readRes2.result.configs.BTC.mainnet.decoder.host).to.equal('updated.local');
         });
 
         it('handles multi-coin config in a single update', async function () {
@@ -96,9 +97,9 @@ describe('E2E: Config Pipeline', function () {
             });
 
             let readRes = await callRpc(port, 'getallconfigs');
-            expect(readRes.result.BTC.mainnet.decoder.host).to.equal('btc-host');
-            expect(readRes.result.LTC.mainnet.decoder.host).to.equal('ltc-host');
-            expect(readRes.result.DOGE.mainnet.decoder.host).to.equal('doge-host');
+            expect(readRes.result.configs.BTC.mainnet.decoder.host).to.equal('btc-host');
+            expect(readRes.result.configs.LTC.mainnet.decoder.host).to.equal('ltc-host');
+            expect(readRes.result.configs.DOGE.mainnet.decoder.host).to.equal('doge-host');
         });
 
         it('overwrites existing config on re-update', async function () {
@@ -119,7 +120,7 @@ describe('E2E: Config Pipeline', function () {
             });
 
             let readRes = await callRpc(port, 'getallconfigs');
-            expect(readRes.result.BTC.mainnet.decoder.host).to.equal('new-host');
+            expect(readRes.result.configs.BTC.mainnet.decoder.host).to.equal('new-host');
         });
     });
 });

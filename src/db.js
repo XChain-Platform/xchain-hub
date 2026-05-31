@@ -380,6 +380,21 @@ class Database {
         return configs;
     }
 
+    // Get the last committed consensus sequence number. The PBFT engine persists
+    // this to consensus_state on every applied config change; exposing it lets
+    // config consumers detect that a change was committed between polls and
+    // invalidate their cached config. Returns 0 on a fresh node (no row yet) or
+    // if the value is unparseable, so callers can treat 0 as "no commits seen".
+    async getLastSeq(){
+        let rows = await this.doQuery(
+            "SELECT value FROM consensus_state WHERE key_name = ?",
+            ['last_seq']
+        );
+        if(!rows || rows.length === 0) return 0;
+        let seq = parseInt(rows[0].value, 10);
+        return Number.isNaN(seq) ? 0 : seq;
+    }
+
     // Close the connection pool
     async close(){
         await this.pool.end();

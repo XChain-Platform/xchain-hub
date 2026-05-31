@@ -474,6 +474,12 @@ class XChainHub {
         return await this.db.getAllConfigs();
     }
 
+    // Last committed PBFT sequence number (0 on a fresh node). Surfaced alongside
+    // getAllConfigs so consumers can detect a committed config change between polls.
+    async getLastSeq(){
+        return await this.db.getLastSeq();
+    }
+
     // Register a validator (for Phase 2C bootstrap)
     async registerValidator(signingPubkey, addr){
         if(!signingPubkey || !/^[0-9a-fA-F]{64}$/.test(signingPubkey))

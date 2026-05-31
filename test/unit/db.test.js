@@ -250,6 +250,29 @@ describe('Database', function () {
         });
     });
 
+    describe('getLastSeq()', function () {
+        let db;
+        beforeEach(function () { db = new Database('h', 3306, 'db', 'u', 'p'); });
+
+        it('returns the persisted last_seq as an integer', async function () {
+            mockConn.query.resolves([{ value: '42' }]);
+            let seq = await db.getLastSeq();
+            expect(seq).to.equal(42);
+        });
+
+        it('returns 0 when no consensus_state row exists', async function () {
+            mockConn.query.resolves([]);
+            let seq = await db.getLastSeq();
+            expect(seq).to.equal(0);
+        });
+
+        it('returns 0 when the stored value is unparseable', async function () {
+            mockConn.query.resolves([{ value: 'not-a-number' }]);
+            let seq = await db.getLastSeq();
+            expect(seq).to.equal(0);
+        });
+    });
+
     // -----------------------------------------------------------------
     // close()
     // -----------------------------------------------------------------

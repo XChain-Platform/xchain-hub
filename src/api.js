@@ -235,11 +235,18 @@ async function startApi(){
             };
         },
 
-        // Get all service configs
+        // Get all service configs, tagged with the last committed PBFT sequence
+        // number. The response is wrapped as { configs, seq } so consumers can
+        // detect a config change that was committed between polls and invalidate
+        // their cache. seq is 0 on a fresh node (no commits yet). Consumers that
+        // predate this wrapper read the bare map; the wrapper keeps the config
+        // tree under `configs` so their coin-key iteration still works once they
+        // unwrap.
         async getallconfigs() {
             try {
                 let configs = await hub.getAllConfigs();
-                return configs;
+                let seq     = await hub.getLastSeq();
+                return {configs, seq};
             } catch (err) {
                 return {error: "there was an error trying to get all configs"};
             }
