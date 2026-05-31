@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Upgraded `express-rate-limit` from `^7.5.0` to `^8.5.2`, aligning it with the version used by the other platform API services so rate-limiter configuration can be shared safely across services. The limiter config in `src/api.js` uses only options that are stable across the v7→v8 boundary (`windowMs`, `max`, `standardHeaders`, `legacyHeaders`), so runtime behavior is unchanged; the v8 breaking changes (`keyGenerator` signature, removal of `onLimitReached`, and the `handler` callback signature) do not affect any code here. The rate-limit chaos test (`test/chaos/api/rate-limit-saturation.chaos.test.js`) continues to pass unmodified under v8.
+
 ### Added
 - `src/api.js` — new `health` JSON-RPC method. Like `ping` it probes the database, but it additionally reports the DB circuit-breaker state (`dbCircuit`), so an operator can distinguish a healthy hub from one that is up but stalled waiting on a tripped database connection. Returns HTTP 503 when the database is unreachable or the breaker is open. Purely additive — `ping` is unchanged.
 
