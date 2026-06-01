@@ -167,7 +167,11 @@ Wallet and encoder the hub uses to publish ATTEST responses on Bitcoin.
 | `BTC_PUBKEY_HEX` | If publishing | _empty_ | Public key (hex) for the above address. |
 | `BTC_ENCODER_URL` | If publishing | _empty_ | xchain-encoder endpoint for Bitcoin. |
 | `BTC_ENCODER_API_KEY` | No | _empty_ | API key for the Bitcoin encoder. |
-| `ATTESTATION_QUEUE_PATH` | No | `./data/attestation-queue.jsonl` | On-disk attestation publish queue. |
+| `ATTESTATION_QUEUE_PATH` | No | `./data/attestation-queue.jsonl` | On-disk attestation publish write-ahead log (durable; replayed on restart). |
+| `ATTESTATION_FAILOVER_POLL_MS` | No | `30000` | Sweep cadence (ms) for crash-replay and follower step-in of finalized responses. |
+| `ATTESTATION_FAILOVER_WINDOW_BLOCKS` | No | `2` | Blocks of leader silence before the next responsible validator steps in to broadcast. |
+| `ATTESTATION_LEADER_RETRY_MS` | No | `60000` | Grace (ms) before the sweep retries the leader's own un-broadcast entry. |
+| `ATTESTATION_BLOCK_MS` | No | `600000` | Approx block time (ms) used to translate the failover window into a wall-clock silence threshold. |
 | `ATTESTATION_TIMEOUT` | No | `60000` | Attestation timeout (ms). |
 | `REORG_TIMEOUT` | No | `60000` | Reorg-handler timeout (ms). |
 
