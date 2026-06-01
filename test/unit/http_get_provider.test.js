@@ -44,23 +44,25 @@ describe('http_get.agree — byte_equality', function () {
         expect(result.body.toString()).to.equal('x');
     });
 
-    it('returns the majority body when 2 of 3 agree (PBFT quorum 2f+1 at N=3, f=0 → 1; 2-of-3 trivially meets it)', function () {
+    it('returns the majority body when 2 of 3 agree (simple-majority quorum=2 at N=3; 2-of-3 meets it)', function () {
         const result = httpGet.agree([p('A', '200'), p('A', '200'), p('B', '500')]);
         expect(result).to.not.be.null;
         expect(result.body.toString()).to.equal('A');
     });
 
-    it('returns null on 3-way split with N=3 (no body has enough — 1<quorum)', function () {
-        // Wait — at N=3, quorum = 2*floor((3-1)/3)+1 = 1. So any single proposal counts as quorum.
-        // For a 3-way split each has count=1 which meets quorum=1; first found wins.
-        // The interesting "no quorum" case starts at N>=4 where quorum>1.
+    it('returns null on a 3-way split at N=3 (each body count=1 < quorum=2)', function () {
+        // Regression guard for the quorum=1 defect: under the old BFT formula
+        // 2*floor((N-1)/3)+1 this yielded quorum=1 at N=3, so the first-inserted
+        // group won with count=1 and a single divergent body became canonical.
+        // Simple-majority quorum = ceil((3+1)/2) = 2, so a total 3-way split has
+        // no majority and MUST return null. If this ever returns non-null the
+        // REDUNDANCY=3 consensus guarantee has been silently reverted.
         const result = httpGet.agree([p('A', '200'), p('B', '404'), p('C', '500')]);
-        // At N=3 with f=0, any single body meets quorum. winner picked arbitrarily — just ensure non-null.
-        expect(result).to.not.be.null;
+        expect(result).to.be.null;
     });
 
-    it('returns null when no body meets 2f+1 at N=5 (3-way split with 2-2-1)', function () {
-        // N=5, quorum = 2*floor((5-1)/3)+1 = 2*1+1 = 3. Max group is 2; below quorum.
+    it('returns null when no body meets quorum at N=5 (3-way split with 2-2-1)', function () {
+        // N=5, quorum = ceil((5+1)/2) = 3. Max group is 2; below quorum.
         const result = httpGet.agree([
             p('A', '200'), p('A', '200'),
             p('B', '200'), p('B', '200'),
@@ -84,18 +86,35 @@ describe('http_get.agree — byte_equality', function () {
             p('A', '500'),
             p('A', '500')
         ]);
-        // At N=3, quorum=1; the largest group is {A,500} with count=2. Returns it.
+        // At N=3, quorum=2; the largest group is {A,500} with count=2, which meets it.
         expect(result).to.not.be.null;
         expect(result.meta).to.equal('500');
     });
 
     it('ignores proposals with non-Buffer body', function () {
+        // Two valid matching proposals form a majority (count=2 >= quorum=2 at N=3);
+        // the non-Buffer entry is skipped during grouping and does not corrupt the result.
         const result = httpGet.agree([
             { body: 'not a buffer', meta: '200' },  // ignored
+            p('valid', '200'),
             p('valid', '200')
         ]);
         expect(result).to.not.be.null;
         expect(result.body.toString()).to.equal('valid');
+    });
+
+    // The AttestationSpotChecker compares a published body against the expected
+    // pattern by calling agree() with exactly two proposals (N=2). Under the old
+    // BFT formula quorum was 1, so a published/expected MISMATCH still produced a
+    // winner and the spot-check silently passed. Simple-majority quorum at N=2 is
+    // ceil((2+1)/2) = 2, so both must agree for the check to pass.
+    it('requires both proposals to agree at N=2 (spot-check path)', function () {
+        const match    = httpGet.agree([p('same', '200'), p('same', '200')]);
+        expect(match).to.not.be.null;
+        expect(match.body.toString()).to.equal('same');
+
+        const mismatch = httpGet.agree([p('published', '200'), p('expected', '200')]);
+        expect(mismatch).to.be.null;
     });
 
 });

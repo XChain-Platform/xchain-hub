@@ -86,8 +86,11 @@ exports.fetch = async (payload, options) => {
 };
 
 // byte_equality consensus: group proposals by SHA256(body || meta), return the
-// majority group if it meets PBFT quorum 2*floor((N-1)/3)+1 over the proposal
-// count. Returns null when no group reaches quorum.
+// majority group if it meets a simple-majority quorum ceil((N+1)/2) over the
+// proposal count (1-of-1, 2-of-3, 3-of-5). Returns null when no group reaches
+// quorum. A plain majority is used rather than the BFT 2f+1 form because the
+// latter degenerates to quorum=1 at N=3, which would let a single divergent
+// (stale or adversarial) body become canonical with no agreement at all.
 exports.agree = (proposals) => {
     if (!Array.isArray(proposals) || proposals.length === 0) return null;
 
@@ -105,7 +108,7 @@ exports.agree = (proposals) => {
     }
 
     let N      = proposals.length;
-    let quorum = (N <= 1) ? N : (2 * Math.floor((N - 1) / 3) + 1);
+    let quorum = Math.ceil((N + 1) / 2);
     let winner = null;
     let best   = 0;
     for (let g of groups.values()) {
