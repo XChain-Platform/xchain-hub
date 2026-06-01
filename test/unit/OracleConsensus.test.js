@@ -258,8 +258,11 @@ describe('OracleConsensus', function () {
             ];
             oracleRound.getSubmissions.returns(buildSubmissions(entries));
 
+            let emitCount = 0;
             let emitted = null;
-            oc.on('round:finalized', (data) => { emitted = data; });
+            oc.on('round:finalized', (data) => { emitCount++; emitted = data; });
+
+            let storeSpy = sinon.spy(oc, '_storeSnapshot');
 
             await oc.finalizeRound(1);
 
@@ -267,6 +270,12 @@ describe('OracleConsensus', function () {
             expect(emitted).to.not.be.null;
             expect(emitted.round).to.equal(1);
             expect(emitted.prices[0].coinPair).to.equal('BTC/USD');
+
+            // The round must now be marked finalized so a repeat call is a no-op
+            // (guards against a duplicate snapshot store / PRICE v0 broadcast).
+            await oc.finalizeRound(1);
+            expect(storeSpy.callCount).to.equal(1);
+            expect(emitCount).to.equal(1);
         });
 
         it('non-leader does not propose', async function () {

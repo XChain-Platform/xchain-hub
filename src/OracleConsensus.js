@@ -135,6 +135,10 @@ class OracleConsensus extends EventEmitter {
             let mySig = this._signPriceV0(round, btcBlockTime, aggregated);
             let sigsArray = mySig ? [{ pubkey: mySig.pubkey, sig: mySig.sig }] : [];
             await this._storeSnapshot(round, aggregated, 1, JSON.stringify(sigsArray), btcBlockHeight, btcBlockTime);
+            // Mark the round finalized so the guard at the top of finalizeRound()
+            // dedupes any subsequent call for this round (prevents a duplicate
+            // snapshot store / PRICE v0 broadcast).
+            this.finalized.add(round);
             // Emit finalization event for single-node mode
             let selfAddr = this.peerManager.validatorAddr;
             this.emit('round:finalized', {
