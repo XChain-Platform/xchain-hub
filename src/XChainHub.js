@@ -470,8 +470,15 @@ class XChainHub {
         }
     }
 
-    async getAllConfigs(){
-        return await this.db.getAllConfigs();
+    // sinceUpdatedAt (optional) is an epoch-seconds cursor; when supplied only
+    // rows changed after that instant are returned. Omit it for the full tree.
+    async getAllConfigs(sinceUpdatedAt){
+        return await this.db.getAllConfigs(sinceUpdatedAt);
+    }
+
+    // High-water mark (epoch seconds) consumers thread back as the cursor above.
+    async getConfigWatermark(){
+        return await this.db.getConfigWatermark();
     }
 
     // Last committed PBFT sequence number (0 on a fresh node). Surfaced alongside

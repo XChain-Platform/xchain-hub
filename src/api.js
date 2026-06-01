@@ -236,17 +236,26 @@ async function startApi(){
         },
 
         // Get all service configs, tagged with the last committed PBFT sequence
-        // number. The response is wrapped as { configs, seq } so consumers can
-        // detect a config change that was committed between polls and invalidate
-        // their cache. seq is 0 on a fresh node (no commits yet). Consumers that
-        // predate this wrapper read the bare map; the wrapper keeps the config
-        // tree under `configs` so their coin-key iteration still works once they
-        // unwrap.
-        async getallconfigs() {
+        // number and the config-table high-water mark. The response is wrapped as
+        // { configs, seq, watermark } so consumers can detect a config change that
+        // was committed between polls and invalidate their cache. seq is 0 on a
+        // fresh node (no commits yet). Consumers that predate this wrapper read the
+        // bare map; the wrapper keeps the config tree under `configs` so their
+        // coin-key iteration still works once they unwrap.
+        //
+        // An optional `since_updated_at` param (epoch seconds, echoed from a prior
+        // response's `watermark`) turns the call into a delta: only rows changed
+        // since that instant are returned, so a quiet poll transfers near-nothing
+        // instead of the whole table. Callers that omit it get the full tree, so
+        // the change is fully backward-compatible. The watermark is read before
+        // the rows so a write racing the two reads is re-delivered, never skipped.
+        async getallconfigs(params) {
             try {
-                let configs = await hub.getAllConfigs();
-                let seq     = await hub.getLastSeq();
-                return {configs, seq};
+                let since     = params && params.since_updated_at;
+                let watermark = await hub.getConfigWatermark();
+                let configs   = await hub.getAllConfigs(since);
+                let seq       = await hub.getLastSeq();
+                return {configs, seq, watermark};
             } catch (err) {
                 return {error: "there was an error trying to get all configs"};
             }

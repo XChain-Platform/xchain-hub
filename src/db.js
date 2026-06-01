@@ -364,9 +364,32 @@ class Database {
 
     // Get all configs, reconstructed as nested object
     // Returns: { coin: { network: { module: { param: value } } } }
-    async getAllConfigs(){
-        let query = "SELECT coin, network, module, param_name, param_value FROM configs ORDER BY coin, network, module, param_name";
-        let rows  = await this.doQuery(query);
+    //
+    // Optional `sinceUpdatedAt` is an epoch-seconds cursor (see getConfigWatermark).
+    // When supplied, only rows changed strictly after that instant are returned,
+    // so a consumer that threads the prior watermark back gets a delta — typically
+    // empty on a quiet poll — instead of the full table on every refresh. Omitting
+    // it (or passing 0) returns the complete config tree exactly as before, so
+    // existing callers are unaffected.
+    //
+    // The cursor is anchored on UNIX_TIMESTAMP(updated_at) rather than the raw
+    // TIMESTAMP so the value is a plain integer: it survives JSON round-trips and
+    // re-binds into the query with no client/server timezone ambiguity. The
+    // comparison is strict `>`; updated_at has second granularity, so two distinct
+    // writes in the same wall-clock second straddling a poll could theoretically
+    // miss the later one until a subsequent change re-bumps it — config writes are
+    // rare (governance-driven) and a consumer restart re-fetches in full, so this
+    // boundary is acceptable in exchange for avoiding a separate sequence column.
+    async getAllConfigs(sinceUpdatedAt){
+        let query = "SELECT coin, network, module, param_name, param_value FROM configs";
+        let args  = [];
+        let since = Number(sinceUpdatedAt);
+        if(Number.isFinite(since) && since > 0){
+            query += " WHERE UNIX_TIMESTAMP(updated_at) > ?";
+            args.push(since);
+        }
+        query += " ORDER BY coin, network, module, param_name";
+        let rows  = await this.doQuery(query, args);
         let configs = {};
         for(let row of rows){
             let coin    = row.coin;
@@ -378,6 +401,21 @@ class Database {
             configs[coin][network][module][row.param_name] = row.param_value;
         }
         return configs;
+    }
+
+    // Current high-water mark of the configs table as epoch seconds — the newest
+    // updated_at across all rows, or 0 when the table is empty. Consumers thread
+    // this value back into getAllConfigs(sinceUpdatedAt) on their next poll to
+    // fetch only what changed since. Returned as an integer so it carries through
+    // JSON and re-binds into the cursor query without timezone conversion.
+    //
+    // Callers should read this BEFORE reading the rows: a write landing between
+    // the two reads is then excluded from the watermark but included in the rows,
+    // so it is re-delivered next poll (an idempotent merge) rather than skipped.
+    async getConfigWatermark(){
+        let rows = await this.doQuery("SELECT UNIX_TIMESTAMP(MAX(updated_at)) AS watermark FROM configs");
+        let w = rows && rows[0] ? rows[0].watermark : null;
+        return w == null ? 0 : Number(w);
     }
 
     // Get the last committed consensus sequence number. The PBFT engine persists
