@@ -27,6 +27,7 @@
  ********************************************************************/
 
 const PriceFetcher = require('./PriceFetcher.js');
+const { PRICE_MAX } = require('./constants.js');
 
 const ORACLE_PRICE_SUBMIT = 'ORACLE_PRICE_SUBMIT';
 
@@ -65,7 +66,7 @@ class OracleRound {
         this.roundInterval          = this.config.ORACLE_ROUND_INTERVAL || 600000;     // 10 minutes
         this.submissionWindow       = this.config.ORACLE_SUBMISSION_WINDOW || 180000;   // 3 minutes
         this.maxSubmissionsPerRound  = parseInt(this.config.ORACLE_MAX_SUBMISSIONS_PER_ROUND) || 200;
-        this.priceMax               = 10000000;
+        this.priceMax               = PRICE_MAX;
 
         // Chain-tip health tracking
         this.lastSuccessfulChainTipFetchAt = null;
@@ -410,7 +411,7 @@ class OracleRound {
                 ' (call syncvalidators to register the peer)');
             return;
         }
-        this._persistSubmissions(round, envelope.sender, prices, validatorPubkey);
+        this._persistSubmissions(round, envelope.sender, validPrices, validatorPubkey);
     }
 
     // Persist price submissions to the database

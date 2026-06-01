@@ -27,6 +27,7 @@ const crypto            = require('crypto');
 const EventEmitter      = require('events');
 const PriceFetcher      = require('./PriceFetcher.js');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
+const { PRICE_MAX }     = require('./constants.js');
 
 const ORACLE_PROPOSE = 'ORACLE_PROPOSE';
 const ORACLE_PREPARE = 'ORACLE_PREPARE';
@@ -518,7 +519,7 @@ class OracleConsensus extends EventEmitter {
                 for (let p of sub.prices) {
                     if (p.coinPair === coinPair && p.price) {
                         let val = parseFloat(p.price);
-                        if (isFinite(val) && val > 0 && val < 10000000) {
+                        if (isFinite(val) && val > 0 && val < PRICE_MAX) {
                             values.push(val);
                         }
                     }

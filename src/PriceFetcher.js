@@ -26,6 +26,8 @@
 
 const axios = require('axios');
 
+const { PRICE_MAX } = require('./constants.js');
+
 // CoinGecko coin IDs for the 3 supported coins
 const COINGECKO_IDS = { 'BTC': 'bitcoin', 'LTC': 'litecoin', 'DOGE': 'dogecoin' };
 
@@ -130,7 +132,7 @@ class PriceFetcher {
                         let raw = cgData[fiat.toLowerCase()];
                         if (raw === undefined || raw === null) continue;
                         let val = parseFloat(raw);
-                        if (Number.isFinite(val) && val > 0 && val < 1e12) {
+                        if (Number.isFinite(val) && val > 0 && val < PRICE_MAX) {
                             prices[coin + '/' + fiat] = val;
                         }
                     }
@@ -181,7 +183,7 @@ class PriceFetcher {
                     let cmcQuote = cmcData.quote[fiat];
                     if (!cmcQuote || cmcQuote.price === undefined) continue;
                     let val = parseFloat(cmcQuote.price);
-                    if (Number.isFinite(val) && val > 0 && val < 1e12) {
+                    if (Number.isFinite(val) && val > 0 && val < PRICE_MAX) {
                         prices[coin + '/' + fiat] = val;
                     }
                 }
