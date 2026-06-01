@@ -172,7 +172,7 @@ async function startApi(){
     app.use(cors({ origin: CORS_ORIGIN }));
     app.use(rateLimit({
         windowMs: 60 * 1000,
-        max: HUB_RATE_LIMIT_RPM,
+        limit: HUB_RATE_LIMIT_RPM,
         standardHeaders: true,
         legacyHeaders: false
     }));

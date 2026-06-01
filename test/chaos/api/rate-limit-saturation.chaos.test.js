@@ -19,7 +19,7 @@ describe('Chaos: API Rate Limit Saturation (RES-4)', function () {
 
         let limiter = rateLimit({
             windowMs: 60000,
-            max:      10,
+            limit:    10,
             standardHeaders: true,
             legacyHeaders:   false,
             message:  { error: 'Too many requests' }
