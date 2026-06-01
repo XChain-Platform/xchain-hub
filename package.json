@@ -40,7 +40,7 @@
     "@stryker-mutator/core": "^8.7.1",
     "@stryker-mutator/mocha-runner": "^8.7.1",
     "chai": "^4.5.0",
-    "fast-check": "^3.23.2",
+    "fast-check": "^4.6.0",
     "mocha": "^11.7.5",
     "nock": "^14.0.0",
     "proxyquire": "^2.1.3",
