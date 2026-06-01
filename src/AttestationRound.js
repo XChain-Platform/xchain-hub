@@ -83,6 +83,12 @@ class AttestationRound {
         // Defaults to 5 poll cycles so transient skips clear quickly while
         // still suppressing the steady-state re-poll of confirmed work.
         this.retryAfterMs   = parseInt(this.config.ATTESTATION_RETRY_AFTER_MS) || (5 * this.pollMs);
+        // How long a `rounds` entry is retained before lazy eviction. A round's
+        // active lifecycle is ~2 min (consensus round timeout), so the 1-hour
+        // default leaves a wide safety margin while bounding memory — without
+        // this the Map grew monotonically with lifetime request volume (it was
+        // only ever cleared on stop()).
+        this.roundsTtlMs    = parseInt(this.config.ATTESTATION_ROUND_TTL_MS)   || (60 * 60 * 1000);
     }
 
     setConsensus(consensus){
@@ -129,6 +135,10 @@ class AttestationRound {
         // Drop `seen` entries older than the retry window so transiently-skipped
         // requests can be re-evaluated once their blocking condition clears.
         this._evictStaleSeen();
+
+        // Drop `rounds` entries older than the round TTL so completed/abandoned
+        // round state doesn't accumulate for the process lifetime.
+        this._evictStaleRounds();
 
         // Page forward from where the last poll left off. When the cursor is
         // null this requests the oldest page; otherwise it asks the indexer for
@@ -196,6 +206,19 @@ class AttestationRound {
         }
     }
 
+    // Remove `rounds` entries whose proposedAt is older than the round TTL.
+    // Round state is only needed while a request's PBFT round is in flight
+    // (getRoundState lookups by consensus); long-completed rounds are dead
+    // weight, so evicting them bounds memory.
+    _evictStaleRounds(){
+        let cutoff = Date.now() - this.roundsTtlMs;
+        for(let [rid, st] of this.rounds){
+            if(st && typeof st.proposedAt === 'number' && st.proposedAt < cutoff){
+                this.rounds.delete(rid);
+            }
+        }
+    }
+
     // Evaluate responsibility for this request, fetch if responsible, and
     // propose. Idempotent — repeat calls for the same requestId are dropped.
     async _startRound(request){
@@ -253,7 +276,7 @@ class AttestationRound {
         } catch (e) {
             console.warn('AttestationRound: fetch failed for ' + rid.substring(0,16) + '...: ', e);
             // Persist 'inactive' so we don't retry the same broken URL forever.
-            this.rounds.set(rid, { request, role: amLeader ? 'leader' : 'follower', error: e.message });
+            this.rounds.set(rid, { request, role: amLeader ? 'leader' : 'follower', error: e.message, proposedAt: Date.now() });
             return;
         }
 

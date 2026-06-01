@@ -62,8 +62,16 @@ class AttestationConsensus extends EventEmitter {
         // Per-request state: Map<requestId, pending>
         this.pending = new Map();
 
-        // Already-finalized requests (prevents double-publish on re-receipt)
-        this.finalized = new Set();
+        // Already-finalized requests (prevents double-publish on re-receipt).
+        // Ring-buffer bounded to the most-recent `finalizedMax` request IDs:
+        // a finalized request only needs duplicate suppression within its
+        // active round window, so aged-out IDs are safe to forget. Bounds
+        // memory — a plain unbounded Set grew with lifetime request volume.
+        // `_finalizedOrder` tracks insertion order for FIFO eviction while
+        // `finalized` keeps O(1) Set semantics for the `.has(rid)` guards.
+        this.finalized       = new Set();
+        this._finalizedOrder = [];
+        this.finalizedMax    = parseInt(this.config.ATTESTATION_FINALIZED_MAX) || 10000;
 
         // Early-arrival buffer. With staggered hub polls, the first proposer's
         // PROPOSE often reaches peers before they start their own round —
@@ -469,7 +477,7 @@ class AttestationConsensus extends EventEmitter {
         if(pending.commits.size < needed) return;
 
         pending.finalized = true;
-        this.finalized.add(rid);
+        this._markFinalized(rid);
         if(pending.timer) clearTimeout(pending.timer);
 
         // Convert signatures Map to [{pubkey, sig}] array for publisher
@@ -501,6 +509,19 @@ class AttestationConsensus extends EventEmitter {
 
         // Free memory shortly
         setTimeout(() => this.pending.delete(rid), 10000);
+    }
+
+    // Record a finalized request ID, evicting the oldest once the ring-buffer
+    // cap (`finalizedMax`) is reached. Keeps `finalized` bounded while
+    // preserving Set semantics for the duplicate-finalization guards.
+    _markFinalized(rid){
+        if(this.finalized.has(rid)) return;
+        this.finalized.add(rid);
+        this._finalizedOrder.push(rid);
+        if(this._finalizedOrder.length > this.finalizedMax){
+            let oldest = this._finalizedOrder.shift();
+            this.finalized.delete(oldest);
+        }
     }
 
     // Build the indexer-canonical signing message:
