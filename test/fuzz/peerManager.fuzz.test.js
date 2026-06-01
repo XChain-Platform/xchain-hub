@@ -69,7 +69,7 @@ describe('Fuzz: PeerManager', function () {
                         id:        fc.oneof(fc.string({ maxLength: 20 }), fc.integer(), fc.constant(null)),
                         sender:    fc.oneof(fc.string({ maxLength: 30 }), fc.integer(), fc.constant(null)),
                         timestamp: fc.oneof(fc.integer(), fc.string({ maxLength: 10 }), fc.constant(null)),
-                        data:      fc.anything({ maxDepth: 2, maxKeys: 3 })
+                        data:      fc.anything({ maxDepth: 2 })
                     })
                 ),
                 function (payload) {
@@ -175,8 +175,8 @@ describe('Fuzz: PeerManager', function () {
 
         it('envelope from self address is never emitted', function () {
             fc.assert(fc.property(
-                fc.stringOf(fc.constantFrom('A','B','C','_'), { minLength: 3, maxLength: 15 }),
-                fc.stringOf(fc.constantFrom('a','b','1','2','-'), { minLength: 5, maxLength: 20 }),
+                fc.string({ unit: fc.constantFrom('A','B','C','_'), minLength: 3, maxLength: 15 }),
+                fc.string({ unit: fc.constantFrom('a','b','1','2','-'), minLength: 5, maxLength: 20 }),
                 function (type, id) {
                     pm.seenIds.clear();
                     let ws = mockWs();

@@ -88,7 +88,7 @@ describe('Fuzz: ValidatorIdentity', function () {
                 gen.fc_validPrivkeyHex(),
                 fc.string({ minLength: 1, maxLength: 100 }),
                 fc.integer({ min: 0, max: 99 }),
-                fc.char(),
+                fc.string({ minLength: 1, maxLength: 1 }),
                 function (hex, payload, idx, newChar) {
                     fc.pre(idx < payload.length);
                     let mutated = payload.slice(0, idx) + newChar + payload.slice(idx + 1);

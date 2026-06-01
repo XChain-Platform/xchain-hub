@@ -99,7 +99,7 @@ describe('Fuzz: PriceFetcher', function () {
 
         it('deeply nested garbage response never throws', function () {
             return fc.assert(fc.asyncProperty(
-                fc.anything({ maxDepth: 3, maxKeys: 5 }),
+                fc.anything({ maxDepth: 3 }),
                 async function (responseData) {
                     axiosStub.get.resolves({ data: responseData });
                     let result = await pf.fetchFromCoinGecko();

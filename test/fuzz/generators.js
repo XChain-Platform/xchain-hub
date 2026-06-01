@@ -51,7 +51,7 @@ function fc_knownCoinPair() {
 function fc_coinPair() {
     return fc.oneof(
         fc_knownCoinPair(),
-        fc.stringOf(fc.constantFrom('A','B','C','X','Y','Z'), { minLength: 2, maxLength: 6 })
+        fc.string({ unit: fc.constantFrom('A','B','C','X','Y','Z'), minLength: 2, maxLength: 6 })
             .map(s => s + '/USD')
     );
 }
@@ -63,7 +63,7 @@ function fc_coinPair() {
 // A single submission entry suitable for buildSubmissions()
 function fc_submissionEntry(coinPairArb) {
     return fc.record({
-        sender: fc.stringOf(fc.constantFrom('a','b','c','d','e','f','0','1','2','3'), { minLength: 3, maxLength: 10 })
+        sender: fc.string({ unit: fc.constantFrom('a','b','c','d','e','f','0','1','2','3'), minLength: 3, maxLength: 10 })
             .map(s => 'ws://' + s + ':10001'),
         prices: fc.array(
             fc.record({
@@ -99,10 +99,7 @@ function fc_submissionMap(minSenders, maxSenders) {
 
 // Fixed-length lowercase hex string (byteLen * 2 chars)
 function fc_hexString(byteLen) {
-    return fc.stringOf(
-        fc.constantFrom('0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'),
-        { minLength: byteLen * 2, maxLength: byteLen * 2 }
-    );
+    return fc.string({ unit: fc.constantFrom('0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'), minLength: byteLen * 2, maxLength: byteLen * 2 });
 }
 
 // Valid 64-char hex (32-byte Ed25519 seed)
@@ -130,9 +127,9 @@ function fc_invalidPrivkeyHex() {
 // Well-formed P2P envelope (passes all field validation in _handleInbound)
 function fc_p2pEnvelope(selfAddr) {
     return fc.record({
-        type:      fc.stringOf(fc.constantFrom('A','B','C','_','O','R','P'), { minLength: 3, maxLength: 20 }),
-        id:        fc.stringOf(fc.constantFrom('a','b','c','1','2','3','-'), { minLength: 5, maxLength: 30 }),
-        sender:    fc.stringOf(fc.constantFrom('a','b','c','d','1','2','3'), { minLength: 3, maxLength: 15 })
+        type:      fc.string({ unit: fc.constantFrom('A','B','C','_','O','R','P'), minLength: 3, maxLength: 20 }),
+        id:        fc.string({ unit: fc.constantFrom('a','b','c','1','2','3','-'), minLength: 5, maxLength: 30 }),
+        sender:    fc.string({ unit: fc.constantFrom('a','b','c','d','1','2','3'), minLength: 3, maxLength: 15 })
             .map(s => 'ws://' + s + ':10001')
             .filter(s => s !== selfAddr),
         timestamp: fc.integer({ min: 1, max: Number.MAX_SAFE_INTEGER }),

@@ -186,7 +186,7 @@ describe('Fuzz: OracleConsensus', function () {
         it('unknown coin pair always returns null', function () {
             fc.assert(fc.property(
                 gen.fc_submissionMap(1, 10),
-                fc.stringOf(fc.constantFrom('X','Y','Z'), { minLength: 3, maxLength: 8 })
+                fc.string({ unit: fc.constantFrom('X','Y','Z'), minLength: 3, maxLength: 8 })
                     .map(s => s + '/FAKE')
                     .filter(s => !['BTC/USD', 'LTC/USD', 'DOGE/USD'].includes(s)),
                 function (subs, unknownPair) {

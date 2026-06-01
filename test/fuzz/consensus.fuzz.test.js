@@ -181,7 +181,7 @@ describe('Fuzz: Consensus', function () {
                     fc.record({
                         seq:          fc.integer({ min: -100, max: 1000 }),
                         configDigest: fc.string({ maxLength: 64 }),
-                        config:       fc.anything({ maxDepth: 2, maxKeys: 3 })
+                        config:       fc.anything({ maxDepth: 2 })
                     })
                 ),
                 function (data) {
