@@ -238,9 +238,10 @@ class OracleConsensus extends EventEmitter {
         }, this.finalizationTimeout);
 
         // Broadcast ORACLE_PROPOSE (includes proposer's signature on the canonical PRICE v0 payload).
-        // submissionKeys carries the proposer's own view of the submission set (sorted) so receivers
-        // can validate fallback-proposer legitimacy against the same view the proposer elected itself
-        // from, rather than their own gossip-divergent local map (see _handlePropose).
+        // submissionKeys carries the proposer's own view of the submission set (sorted) purely as a
+        // diagnostic/wire-compat hint. Receivers do NOT trust it for fallback-proposer legitimacy —
+        // that check is made solely against each receiver's locally-observed submissions (see
+        // _handlePropose), since a peer-supplied set is attacker-controllable.
         this.peerManager.broadcast(ORACLE_PROPOSE, {
             round:          round,
             prices:         aggregated,
@@ -278,7 +279,7 @@ class OracleConsensus extends EventEmitter {
     }
 
     async _handlePropose(envelope) {
-        let { round, prices, digest, btcBlockHeight, btcBlockTime, sig_pubkey, sig, submissionKeys } = envelope.data;
+        let { round, prices, digest, btcBlockHeight, btcBlockTime, sig_pubkey, sig } = envelope.data;
         if (!round || !prices || !digest) return;
         if (this.finalized.has(round)) return;
 
@@ -299,20 +300,22 @@ class OracleConsensus extends EventEmitter {
         let isFallback   = false;
 
         if (!isRealLeader) {
-            // Validate the fallback proposer against the proposer's own view of
-            // the submission set (piggybacked on the PROPOSE as submissionKeys),
-            // NOT our local gossip map. Gossip delivery is async, so our map may
-            // have seen a different subset of submitters at this instant —
-            // electing a fallback from our own divergent view rejects a
-            // legitimate proposer and stalls the round until the finalization
-            // timeout. The proposer's view is the only one that can
-            // authoritatively explain why it elected itself.
+            // Validate the fallback proposer against our LOCALLY-observed
+            // submission set only. The PROPOSE also carries the proposer's own
+            // claimed submission keys, but that list is attacker-controlled: a
+            // Byzantine proposer can claim any subset whose lexicographically
+            // lowest entry is its own address and thereby elect itself fallback
+            // even while the deterministic leader has a valid submission. Trusting
+            // it would let a single registered validator inject arbitrary prices
+            // into any round. We therefore ignore the claimed list and elect the
+            // fallback from the submissions we have actually seen.
             //
-            // Backward-compat: older peers don't send submissionKeys, so fall
-            // back to the local map (the previous, divergence-prone behavior).
-            let keys = Array.isArray(submissionKeys) && submissionKeys.length > 0
-                ? submissionKeys.slice()
-                : (submissions ? [...submissions.keys()] : []);
+            // Trade-off: gossip delivery is async, so our local view may lag the
+            // proposer's at the instant of election; in that window we may reject
+            // a legitimate fallback and stall the round until the finalization
+            // timeout re-elects. That liveness edge case is the accepted cost of
+            // not trusting a peer-supplied set for a price-oracle integrity gate.
+            let keys = submissions ? [...submissions.keys()] : [];
             if (keys.length > 0) {
                 let leaderSubmitted = leader && keys.includes(leader.addr);
                 if (!leaderSubmitted) {
