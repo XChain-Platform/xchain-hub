@@ -326,6 +326,147 @@ describe('Consensus (PBFT)', function () {
             // quorum = 3, 3 votes → accepted
             expect(consensus.view).to.equal(1);
         });
+
+        // -------------------------------------------------------------
+        // NEW_VIEW authenticity guards.
+        // _handleNewView must not advance the view on any peer's say-so:
+        // it only accepts a NEW_VIEW from the rotation-designated leader for
+        // the claimed (seq, view), and only when it moves the view forward.
+        // Without this a single Byzantine validator can steer leader
+        // election by broadcasting escalating NEW_VIEW messages.
+        // -------------------------------------------------------------
+
+        it('NEW_VIEW from a non-leader peer does not advance the view', function () {
+            consensus.view = 0;
+            // Leader for (seq=5, view=1) = validators[(5+1) % 4] = validators[2].
+            // A NEW_VIEW from any other validator must be ignored.
+            consensus._handleNewView({
+                sender: VALIDATORS_4[1].addr,
+                data: { view: 1, seq: 5 }
+            });
+            expect(consensus.view).to.equal(0);
+        });
+
+        it('NEW_VIEW from the designated leader advances the view', function () {
+            consensus.view = 0;
+            // validators[(5+1) % 4] = validators[2] is the leader for (5, 1).
+            consensus._handleNewView({
+                sender: VALIDATORS_4[2].addr,
+                data: { view: 1, seq: 5 }
+            });
+            expect(consensus.view).to.equal(1);
+        });
+
+        it('NEW_VIEW cannot rewind the view to a lower number', function () {
+            consensus.view = 5;
+            // Even from the correct leader for the lower view, a regression
+            // is rejected — NEW_VIEW only moves the view forward.
+            let idx = (5 + 2) % VALIDATORS_4.length;
+            consensus._handleNewView({
+                sender: VALIDATORS_4[idx].addr,
+                data: { view: 2, seq: 5 }
+            });
+            expect(consensus.view).to.equal(5);
+        });
+
+        // -------------------------------------------------------------
+        // Validator churn between proposal creation and view-change.
+        // View-change acceptance must use the round-locked quorum
+        // (proposal-creation snapshot), exactly like _checkPrepareQuorum
+        // and _checkCommitQuorum — never a live recompute. Otherwise a set
+        // that grew can stall the election (liveness) and a set that shrank
+        // can let too few votes — even a single node — promote a new leader
+        // (safety).
+        // -------------------------------------------------------------
+
+        it('follower view-change uses locked quorum from the in-flight proposal, not a live recompute (grow → liveness)', function () {
+            // Proposal locked at N=4 → quorum 3.
+            consensus.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+            consensus.view = 0;
+            consensus.pendingProposals.set(5, {
+                config: { x: 1 }, digest: 'd',
+                prepares: new Set(), commits: new Set(),
+                resolved: false, applied: false, timer: null,
+                resolve: null, reject: null,
+                quorum: 3
+            });
+
+            // Churn: set grows to N=7 → live quorum would be 5.
+            consensus.setValidatorSet(VALIDATORS_7);
+            expect(consensus._getQuorum()).to.equal(5);
+
+            // Three distinct view-change votes — meets the locked quorum (3),
+            // below the live one (5). Must accept on the locked value.
+            consensus._handleViewChange({ sender: VALIDATORS_7[1].addr, data: { view: 1, seq: 5 } });
+            consensus._handleViewChange({ sender: VALIDATORS_7[2].addr, data: { view: 1, seq: 5 } });
+            expect(consensus.view).to.equal(0); // 2 votes < 3, not yet
+            consensus._handleViewChange({ sender: VALIDATORS_7[3].addr, data: { view: 1, seq: 5 } });
+            expect(consensus.view).to.equal(1); // 3 votes == locked quorum → accepted
+        });
+
+        it('follower view-change holds at the locked quorum even when the set shrank (shrink → safety)', function () {
+            // Proposal locked at N=7 → quorum 5.
+            consensus.setValidatorSet(VALIDATORS_7);
+            pm.validatorAddr = VALIDATORS_7[0].addr;
+            consensus.view = 0;
+            consensus.pendingProposals.set(5, {
+                config: { x: 1 }, digest: 'd',
+                prepares: new Set(), commits: new Set(),
+                resolved: false, applied: false, timer: null,
+                resolve: null, reject: null,
+                quorum: 5
+            });
+
+            // Churn: set shrinks to N=3 → live quorum would be 1 (single-node
+            // acceptance). The locked quorum is still 5.
+            consensus.setValidatorSet(VALIDATORS_3);
+            expect(consensus._getQuorum()).to.equal(1);
+
+            // Two distinct votes — would clear the live quorum (1) twice over,
+            // but must NOT clear the locked quorum (5).
+            consensus._handleViewChange({ sender: VALIDATORS_3[1].addr, data: { view: 1, seq: 5 } });
+            consensus._handleViewChange({ sender: VALIDATORS_3[2].addr, data: { view: 1, seq: 5 } });
+            expect(consensus.view).to.equal(0);                 // not promoted
+            expect(pm.broadcast.called).to.be.false;            // no NEW_VIEW broadcast
+        });
+
+        it('the initiating node recovers the locked quorum from viewChangeQuorums after its proposal is gone', function () {
+            // Initiator path: the timeout deletes the proposal before
+            // _initiateViewChange runs, so the initiator can't read
+            // proposal.quorum — it relies on the stashed value.
+            consensus.setValidatorSet(VALIDATORS_7);
+            pm.validatorAddr = VALIDATORS_7[0].addr;
+            consensus.view = 0;
+            consensus.lastAppliedSeq = 0;
+
+            // Initiate with the round-locked quorum (N=7 → 5). No proposal
+            // remains in pendingProposals, mirroring the real timeout flow.
+            consensus._initiateViewChange(5, 5);
+            expect(consensus.view).to.equal(1);
+            expect(consensus.pendingProposals.has(5)).to.be.false;
+            expect(consensus.viewChangeQuorums.get(5)).to.equal(5);
+            expect(pm.broadcast.callCount).to.equal(1);         // VIEW_CHANGE only
+
+            // Churn: set shrinks to N=3 → live quorum 1.
+            consensus.setValidatorSet(VALIDATORS_3);
+
+            // Own vote was added by _initiateViewChange; add one more (size 2).
+            consensus._handleViewChange({ sender: VALIDATORS_3[1].addr, data: { view: 1, seq: 5 } });
+            expect(consensus.pendingViewChanges.get(1).size).to.equal(2);
+            expect(pm.broadcast.callCount).to.equal(1);         // still no NEW_VIEW — 2 < locked 5
+        });
+
+        it('_initiateViewChange stashes the locked quorum and prunes already-applied rounds', function () {
+            consensus.setValidatorSet(VALIDATORS_7);
+            pm.validatorAddr = VALIDATORS_7[0].addr;
+            consensus.lastAppliedSeq = 10;
+            consensus.viewChangeQuorums.set(3, 5);  // stale (seq 3 ≤ lastApplied 10)
+
+            consensus._initiateViewChange(12, 7);
+            expect(consensus.viewChangeQuorums.has(3)).to.be.false; // pruned
+            expect(consensus.viewChangeQuorums.get(12)).to.equal(7);
+        });
     });
 
     // -----------------------------------------------------------------

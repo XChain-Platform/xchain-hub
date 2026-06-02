@@ -27,7 +27,7 @@ Decentralized config oracle, price oracle, and cross-chain coordinator for the X
 - **Cross-chain attestation** — PBFT-based attestation for cross-chain actions with per-chain-pair validator filtering
 - **External attestation framework** — contracts emit `ATTEST` v0 (request, via `xchain.attestation` VM namespace); validators in the responsible-set fetch from the named provider, reach PBFT consensus, and publish `ATTEST` v1 (response) on-chain. Built-in providers: `http_get` (byte-equality) and `llm` (Claude judge-model)
 - **Capability-based staking** — four independent capabilities (`price`, `cross_chain`, `oracle_publish`, `attestation`) auto-qualify per validator based on aggregate stake amount vs governance-configurable `min_stake[capability]`; per-capability self-tests gate local participation
-- **Block-boundary quorum snapshot** — every PBFT round locks N at a specific `block_index` via the indexer, so the qualified validator set is deterministic federation-wide even as stake drifts
+- **Block-boundary quorum snapshot** — every PBFT round locks N at a specific `block_index` via the indexer, so the qualified validator set is deterministic federation-wide even as stake drifts. The locked quorum governs the whole round — PREPARE, COMMIT, **and view-change acceptance** — so leader-failover elections can't diverge from the proposal phases when validators join or unstake mid-round
 - **SWAP lifecycle tracking** — tracks cross-chain swaps through initiated → attested → executed → settled
 - **Reorg propagation** — cross-chain reorg detection, hub rollback, and coordinated chain rollback via PBFT consensus
 - **Governance** — off-chain PBFT voting for parameter changes (7-day voting period, 2/3+ approval, 50% quorum)

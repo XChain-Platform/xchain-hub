@@ -59,6 +59,14 @@ class Consensus {
         // Pending view changes: Map<view, Set<sender>>
         this.pendingViewChanges = new Map();
 
+        // Round-locked quorum captured when THIS node initiates a view change,
+        // keyed by seq (the proposal round). The proposal is removed from
+        // pendingProposals by the same timeout that triggers the view change,
+        // so the initiator can no longer read proposal.quorum — we stash it
+        // here so view-change acceptance tallies against the proposal-creation
+        // snapshot, matching PREPARE/COMMIT. Map<seq, quorum>.
+        this.viewChangeQuorums = new Map();
+
         // Digests already applied (prevents double-apply from late COMMIT messages)
         this.applied = new Set();
 
@@ -109,6 +117,7 @@ class Consensus {
             }
         }
         this.pendingProposals.clear();
+        this.viewChangeQuorums.clear();
     }
 
     // Propose a config change — returns a Promise that resolves when consensus is reached
@@ -178,8 +187,11 @@ class Consensus {
                 if (!proposal.resolved) {
                     proposal.resolved = true;
                     this.pendingProposals.delete(seq);
-                    // Initiate view change so a new leader can take over
-                    this._initiateViewChange(seq);
+                    // Initiate view change so a new leader can take over.
+                    // Pass the round-locked quorum so the view-change vote
+                    // tally uses the same N this proposal round used, even
+                    // though we've just removed the proposal from the map.
+                    this._initiateViewChange(seq, proposal.quorum);
                     reject(new Error('Consensus timeout for seq ' + seq + ' (received ' +
                         proposal.prepares.size + ' prepares, ' + proposal.commits.size + ' commits, need ' + quorum + ')'));
                 }
@@ -437,7 +449,22 @@ class Consensus {
         }
         this.pendingViewChanges.get(view).add(envelope.sender);
 
-        let quorum = this._getQuorum();
+        // Use the round's locked quorum, matching _checkPrepareQuorum and
+        // _checkCommitQuorum, so view-change acceptance can't diverge from the
+        // rest of the round under validator churn. Followers still hold the
+        // proposal (proposal.quorum); the node that initiated the view change
+        // recovers it from viewChangeQuorums (its proposal was removed by the
+        // triggering timeout). Live _getQuorum() is the last-resort fallback,
+        // as elsewhere.
+        let proposal = this.pendingProposals.get(seq);
+        let quorum;
+        if (proposal && typeof proposal.quorum === 'number') {
+            quorum = proposal.quorum;
+        } else if (this.viewChangeQuorums.has(seq)) {
+            quorum = this.viewChangeQuorums.get(seq);
+        } else {
+            quorum = this._getQuorum();
+        }
         if (quorum === 0) return;
 
         if (this.pendingViewChanges.get(view).size >= quorum) {
@@ -449,6 +476,7 @@ class Consensus {
                 this.peerManager.broadcast(PBFT_NEW_VIEW, { view: view, seq: seq });
             }
             this.pendingViewChanges.delete(view);
+            this.viewChangeQuorums.delete(seq);
         }
     }
 
@@ -461,9 +489,23 @@ class Consensus {
     }
 
     // Initiate a view change (called when leader times out)
-    _initiateViewChange(seq) {
+    _initiateViewChange(seq, lockedQuorum) {
         this.view++;
         console.log('PBFT: Initiating view change to view ' + this.view + ' (seq ' + seq + ')');
+
+        // Stash the round-locked quorum for this seq so _handleViewChange tallies
+        // view-change votes against the proposal-creation snapshot — the proposal
+        // is already gone from pendingProposals (the triggering timeout removed it
+        // before calling us), so this is the only place the initiator can recover
+        // it. Prune rounds already applied to keep the map bounded (seq is
+        // monotonic, so applied seqs never recur).
+        if (typeof lockedQuorum === 'number') {
+            for (let s of this.viewChangeQuorums.keys()) {
+                if (s <= this.lastAppliedSeq) this.viewChangeQuorums.delete(s);
+            }
+            this.viewChangeQuorums.set(seq, lockedQuorum);
+        }
+
         this.peerManager.broadcast(PBFT_VIEW_CHANGE, {
             view: this.view,
             seq:  seq
