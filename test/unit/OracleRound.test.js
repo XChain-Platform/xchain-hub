@@ -214,4 +214,69 @@ describe('OracleRound', function () {
             expect(info.lastSuccessfulRoundTime).to.be.null;
         });
     });
+
+    // -----------------------------------------------------------------
+    // Cold-start hydration of freshness counters from price_snapshots.
+    // Regression guard: before this, start() left consecutiveSkippedRounds at 0
+    // and lastSuccessfulRoundTime at null after any restart, so a hub that came
+    // back up mid-outage looked clean even though the durable record showed a gap.
+    // -----------------------------------------------------------------
+
+    describe('cold-start hydration (start)', function () {
+
+        // Route the two hydration queries by SQL shape. The first returns the most
+        // recent finalized round (round_number + epoch-ms), the second the count of
+        // trailing non-finalized rounds.
+        function stubHydration(db, { lastFinalized, skipped }) {
+            db.doQuery = sinon.stub().callsFake(async (sql) => {
+                if (/status = 'finalized'[\s\S]*ORDER BY round_number DESC LIMIT 1/.test(sql)) {
+                    return lastFinalized ? [lastFinalized] : [];
+                }
+                if (/COUNT\(DISTINCT round_number\) AS skipped/.test(sql)) {
+                    return [{ skipped: skipped }];
+                }
+                return [];
+            });
+        }
+
+        beforeEach(function () {
+            // We only exercise hydration here, not the scheduler — stub the timer
+            // setup so start() leaves no real timers running after the test.
+            sinon.stub(or, '_startRoundTimer');
+        });
+
+        it('rehydrates skip streak and last-success time from pre-existing rounds', async function () {
+            let finalizedMs = Date.now() - 3600000; // an hour ago
+            stubHydration(hub.db, {
+                lastFinalized: { round_number: 100, ms: finalizedMs },
+                skipped:       5
+            });
+
+            await or.start();
+
+            expect(or.consecutiveSkippedRounds).to.equal(5);
+            expect(or.lastSuccessfulRoundTime).to.equal(finalizedMs);
+        });
+
+        it('leaves constructor defaults when no finalized round exists', async function () {
+            stubHydration(hub.db, { lastFinalized: null, skipped: 3 });
+
+            await or.start();
+
+            // No finalized round ever → last-success stays null, but the skip streak
+            // still reflects the recorded non-finalized rounds.
+            expect(or.lastSuccessfulRoundTime).to.be.null;
+            expect(or.consecutiveSkippedRounds).to.equal(3);
+        });
+
+        it('does not throw or block start() when hydration query fails', async function () {
+            hub.db.doQuery = sinon.stub().rejects(new Error('db down'));
+
+            await or.start();
+
+            // Hydration is best-effort; a failure must leave the clean-slate defaults.
+            expect(or.consecutiveSkippedRounds).to.equal(0);
+            expect(or.lastSuccessfulRoundTime).to.be.null;
+        });
+    });
 });

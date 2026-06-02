@@ -97,6 +97,10 @@ class OracleRound {
 
     // Start the oracle round system
     async start() {
+        // Rehydrate freshness counters from the durable record before the timer
+        // begins, so a restart reflects the real feed state instead of a clean slate.
+        await this._hydrateFreshnessCounters();
+
         // Subscribe to gossip messages
         this._messageHandler = (envelope) => this._handleMessage(envelope);
         this.peerManager.on('message', this._messageHandler);
@@ -105,6 +109,45 @@ class OracleRound {
         this._startRoundTimer();
 
         console.log('Oracle round system started (interval: ' + (this.roundInterval / 1000) + 's, window: ' + (this.submissionWindow / 1000) + 's)');
+    }
+
+    // Rehydrate consecutiveSkippedRounds and lastSuccessfulRoundTime from
+    // price_snapshots so they survive a restart. The constructor initialises both
+    // to a clean-slate value (0 / null); without this step a hub that restarts
+    // mid-outage would present zero skipped rounds and no last-success time even
+    // though the durable record shows otherwise — masking the gap from /health and
+    // the diagnostics RPC. price_snapshots is durable, so this is purely an
+    // observability rehydrate, never a recompute of price data.
+    async _hydrateFreshnessCounters() {
+        try {
+            // (a) Most recent finalized round and its wall-clock time. created_at is
+            // a TIMESTAMP; convert to epoch ms to match the live value, which is set
+            // from Date.now() on each successful round.
+            let lastRows = await this.db.doQuery(
+                "SELECT round_number, UNIX_TIMESTAMP(created_at) * 1000 AS ms " +
+                "FROM price_snapshots WHERE status = 'finalized' " +
+                "ORDER BY round_number DESC LIMIT 1");
+
+            let lastFinalizedRound = -1;
+            if (lastRows && lastRows.length) {
+                lastFinalizedRound           = Number(lastRows[0].round_number);
+                this.lastSuccessfulRoundTime = Number(lastRows[0].ms);
+            }
+
+            // (b) Distinct rounds recorded after the last finalized round that did
+            // NOT finalize — the consecutive trailing skip streak. With no finalized
+            // round at all (lastFinalizedRound = -1) this counts every recorded
+            // non-finalized round.
+            let skipRows = await this.db.doQuery(
+                "SELECT COUNT(DISTINCT round_number) AS skipped " +
+                "FROM price_snapshots WHERE round_number > ? AND status <> 'finalized'",
+                [lastFinalizedRound]);
+            this.consecutiveSkippedRounds = (skipRows && skipRows.length) ? Number(skipRows[0].skipped) : 0;
+        } catch (err) {
+            // Non-fatal: a hydration failure must not block oracle startup. Leave the
+            // constructor defaults (0 / null) in place and continue.
+            console.warn('Oracle: failed to hydrate freshness counters on start:', err);
+        }
     }
 
     // Stop the oracle round system

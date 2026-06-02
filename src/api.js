@@ -227,11 +227,50 @@ async function startApi(){
             }
             let dbCircuit = hub.db ? hub.db.circuitState : null;
             let healthy = dbOk && dbCircuit !== 'open';
+
+            // Oracle freshness. DB liveness alone can't reveal an oracle that has
+            // stopped finalizing rounds (e.g. a price-feed outage), and a restart
+            // wipes the in-memory skip counters — so without this a probe hitting
+            // /health would see a clean bill of health during a stale-feed window.
+            // Surface the age of the most recent finalized round so probes can
+            // detect staleness without the heavier diagnostics RPC. Only evaluated
+            // on oracle-running (P2P-enabled) hubs; a config-only hub mints no rounds.
+            let oracleAgeS     = null;
+            let oracleStale    = false;
+            let oracleThresholdS = null;
+            if (dbOk && p2pConfig) {
+                try {
+                    let roundIntervalMs = p2pConfig.ORACLE_ROUND_INTERVAL || 600000;
+                    // Default to 2x the round interval; an operator can override for
+                    // slow-start environments via ORACLE_STALENESS_THRESHOLD_S.
+                    oracleThresholdS = parseInt(process.env.ORACLE_STALENESS_THRESHOLD_S)
+                        || Math.round((roundIntervalMs * 2) / 1000);
+                    let rows = await Promise.race([
+                        hub.db.doQuery(
+                            "SELECT UNIX_TIMESTAMP() - UNIX_TIMESTAMP(MAX(created_at)) AS age_s " +
+                            "FROM price_snapshots WHERE status = 'finalized'", []),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))
+                    ]);
+                    // age_s is null when no round has ever finalized (fresh node) —
+                    // treat that as not-stale so a slow first round doesn't 503.
+                    if (rows && rows.length && rows[0].age_s != null) {
+                        oracleAgeS  = Number(rows[0].age_s);
+                        oracleStale = oracleAgeS > oracleThresholdS;
+                    }
+                } catch (err) {
+                    // Non-fatal — DB health is still reported if the oracle probe fails
+                }
+            }
+            if (oracleStale) healthy = false;
+
             if(!healthy) res.status(503);
             return {
                 status:    healthy ? "healthy" : "degraded",
                 db:        dbOk,
-                dbCircuit: dbCircuit
+                dbCircuit: dbCircuit,
+                oracle_last_finalized_age_s:  oracleAgeS,
+                oracle_stale:                 oracleStale,
+                oracle_staleness_threshold_s: oracleThresholdS
             };
         },
 
