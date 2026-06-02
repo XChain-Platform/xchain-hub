@@ -743,16 +743,29 @@ async function startApi(){
             };
 
             // Running-module distribution: count installs running each module.
+            // Chain distribution: count installs running at least one module on each
+            // coin/network (e.g. "bitcoin/mainnet"). Shared services (hub/db) carry an
+            // empty coin/network and are skipped — they aren't chain-specific.
             const moduleCounts = new Map();
+            const chainCounts  = new Map();
             for (const r of rows) {
                 let mods = [];
                 try { mods = Array.isArray(r.modules) ? r.modules : JSON.parse(r.modules || '[]'); } catch (e) { mods = []; }
-                const seen = new Set();
+                const seenModule = new Set();
+                const seenChain  = new Set();
                 for (const m of mods) {
-                    if (!m || !m.module || !m.running) continue;
-                    if (seen.has(m.module)) continue;   // count an install once per module
-                    seen.add(m.module);
-                    moduleCounts.set(m.module, (moduleCounts.get(m.module) || 0) + 1);
+                    if (!m || !m.running) continue;
+                    if (m.module && !seenModule.has(m.module)) {   // count an install once per module
+                        seenModule.add(m.module);
+                        moduleCounts.set(m.module, (moduleCounts.get(m.module) || 0) + 1);
+                    }
+                    if (m.coin && m.network) {
+                        const chainKey = m.coin + '/' + m.network;
+                        if (!seenChain.has(chainKey)) {            // count an install once per coin/network
+                            seenChain.add(chainKey);
+                            chainCounts.set(chainKey, (chainCounts.get(chainKey) || 0) + 1);
+                        }
+                    }
                 }
             }
 
@@ -773,6 +786,7 @@ async function startApi(){
                 byArch:    tally(rows.map(r => r.arch), 'arch'),
                 byDocker:  tally(rows.map(r => r.docker_version), 'docker_version'),
                 modules:   [...moduleCounts.entries()].map(([key, count]) => ({ key, count })).sort((a, b) => b.count - a.count),
+                chains:    [...chainCounts.entries()].map(([key, count]) => ({ key, count })).sort((a, b) => b.count - a.count),
             });
         } catch (err) {
             res.status(500).json({ error: err.message || 'telemetry summary error' });
