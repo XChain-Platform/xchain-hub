@@ -132,8 +132,14 @@ class CapabilitySnapshot {
         }
     }
 
-    // Standard PBFT quorum: 2 * floor((N - 1) / 3) + 1
+    // Standard PBFT quorum over the FULL snapshot: 2 * floor((N - 1) / 3) + 1
     // Returns 0 when N <= 1 (single-node mode — caller bypasses consensus).
+    //
+    // NOTE: this is the federation-wide quorum (e.g. config-change Consensus
+    // PBFT, where every staker participates). It is NOT used for attestation
+    // PBFT — those rounds only exchange messages within the REDUNDANCY-sized
+    // responsible set, so AttestationConsensus.propose() computes its own 2f+1
+    // quorum over responsible.length instead of over the full count N here.
     getQuorum(snapshot) {
         if (!snapshot) return 0;
         let N = snapshot.count;

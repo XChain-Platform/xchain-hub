@@ -25,14 +25,15 @@
  *        provider.agree(proposals) → winner. Sign canonical bytes for the
  *        winner. Broadcast ATTEST_PREPARE.
  *   ATTEST_PREPARE handler
- *     -> collect prepares; on PBFT quorum (2f+1 over capability snapshot N),
+ *     -> collect prepares; on PBFT quorum (2f+1 over responsible set, size=REDUNDANCY),
  *        broadcast ATTEST_COMMIT.
  *   ATTEST_COMMIT handler
  *     -> collect commits; on quorum, emit 'request:finalized' for the
  *        publisher to ship the on-chain ATTEST v1 (response).
  *
  * Validator-set snapshot is locked at the request's block_index via
- * CapabilitySnapshot — every hub computes the same quorum N for the round.
+ * CapabilitySnapshot — every hub derives the same responsible set (and thus
+ * the same PBFT quorum over it) for the round.
  *
  * Spec: claude/reports/specs/2026-05-24_external-attestation-framework.md
  *
@@ -154,9 +155,16 @@ class AttestationConsensus extends EventEmitter {
         if(this.pending.has(rid)) return;
 
         let snapshot = roundState.snapshot;
-        let quorum   = this.hub.capabilitySnapshot
-            ? this.hub.capabilitySnapshot.getQuorum(snapshot)
-            : (snapshot && snapshot.validators ? snapshot.validators.length : 0);
+        // PBFT messages (PROPOSE/PREPARE/COMMIT) only flow within the
+        // REDUNDANCY-sized responsible set, so prepares/commits are bounded by
+        // responsible.length — NOT the full attestation-validator count N.
+        // Compute the 2f+1 quorum over the responsible set; computing it over N
+        // would make the threshold unreachable whenever N > REDUNDANCY and
+        // deadlock every round until timeout.
+        let responsible = roundState.responsible || [];
+        let quorum      = responsible.length <= 1
+            ? 0
+            : 2 * Math.floor((responsible.length - 1) / 3) + 1;
 
         let myPubkey  = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
         let myBody    = roundState.myProposal.body;
