@@ -76,9 +76,9 @@ class PriceAggregator extends EventEmitter {
                 (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
                  validator_count, consensus_round, consensus_proof, status, source_chain, source_action_index,
                  created_at)
-                VALUES (?, ?, ?, ?, 'BTC', ?, ?, 1, ?, 'finalized', ?, ?, ?)`;
-            let args = [round, p.pair, p.price, referenceBlock, timestamp,
-                        validatorCount, proofJson, sourceChain || 'DOGE', sourceActionIndex,
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?)`;
+            let args = [round, p.pair, p.price, referenceBlock, sourceChain || null, timestamp,
+                        validatorCount, proofJson, sourceChain || null, sourceActionIndex,
                         createdAt];
             try {
                 await this.db.doQuery(query, args);
@@ -87,13 +87,13 @@ class PriceAggregator extends EventEmitter {
                     coin_pair:           p.pair,
                     price:               p.price,
                     reference_block:     referenceBlock,
-                    reference_chain:     'BTC',
+                    reference_chain:     sourceChain || null,
                     block_timestamp:     timestamp,
                     validator_count:     validatorCount,
                     consensus_round:     1,
                     consensus_proof:     proofJson,
                     status:              'finalized',
-                    source_chain:        sourceChain || 'DOGE',
+                    source_chain:        sourceChain || null,
                     source_action_index: sourceActionIndex,
                     created_at:          createdAt
                 });
