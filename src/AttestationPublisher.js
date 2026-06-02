@@ -65,6 +65,7 @@ const DEFAULT_FAILOVER_POLL_MS       = 30000;   // sweep cadence
 const DEFAULT_LEADER_RETRY_MS        = 60000;   // grace before the sweep retries a leader entry
                                                 // (lets the happy-path live broadcast win)
 const PENDING_PAGE_LIMIT             = 100;     // matches AttestationRound poll page size
+const ATTEST_WIRE_MAX_BYTES          = 8192;    // must equal MAX_DATA_BYTES in xchain-encoder/src/validator.js
 
 class AttestationPublisher {
 
@@ -167,6 +168,19 @@ class AttestationPublisher {
             meta:        event.meta,
             signatures:  event.signatures
         });
+
+        // Guard: the assembled wire string must fit the encoder's data-payload
+        // ceiling, or createTx rejects it with a RangeError. Catching that downstream
+        // is too late — the entry would already be on the durable WAL and the failover
+        // sweep would retry the same oversized payload forever. Drop it loudly here so
+        // the operator can shrink the provider's response body.
+        let payloadBytes = Buffer.byteLength(payload, 'utf8');
+        if (payloadBytes > ATTEST_WIRE_MAX_BYTES) {
+            console.error('AttestationPublisher: ATTEST v1 wire for ' + rid.substring(0, 16) +
+                '... is ' + payloadBytes + ' bytes, exceeds encoder limit of ' + ATTEST_WIRE_MAX_BYTES +
+                ' — dropping broadcast. Reduce the attestation response body size for this provider.');
+            return;
+        }
 
         // Recompute the responsible-set ordering so any node — not just the
         // leader — knows its rank for failover step-in. Persisted on the queue
