@@ -134,8 +134,8 @@ class PriceAggregator extends EventEmitter {
         // subsequent updates are delayed by 24h to prevent front-running attacks on dispensers.
         let blockTime = parseInt(priceData.block_time) || 0;
         let prior = await this.db.doQuery(
-            'SELECT id FROM oracle_prices WHERE source_address = ? AND coin = ? AND tick = ? AND fiat = ? LIMIT 1',
-            [priceData.source_address, priceData.coin, priceData.tick, priceData.fiat]
+            'SELECT id FROM oracle_prices WHERE source_address = ? AND source_chain = ? AND coin = ? AND tick = ? AND fiat = ? LIMIT 1',
+            [priceData.source_address, sourceChain || '', priceData.coin, priceData.tick, priceData.fiat]
         );
         let effectiveAt = (prior && prior.length > 0) ? blockTime + 86400 : blockTime;
 
