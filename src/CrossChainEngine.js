@@ -30,11 +30,32 @@ const XCHAIN_ATTEST_PROPOSE = 'XCHAIN_ATTEST_PROPOSE';
 const XCHAIN_ATTEST_PREPARE = 'XCHAIN_ATTEST_PREPARE';
 const XCHAIN_ATTEST_COMMIT  = 'XCHAIN_ATTEST_COMMIT';
 
-// Confirmation thresholds per chain
-const CONFIRMATIONS = { BTC: 3, LTC: 3, DOGE: 6 };
+// Default per-chain confirmation thresholds (Tier B, 2026-06-02): the depth a
+// cross-chain source action SHOULD reach before its swap settles. Higher on the
+// lower-hashpower chains to approach BTC-comparable settlement assurance.
+//
+// IMPORTANT: this value is recorded on the attestation and folded into the PBFT
+// digest, but is NOT YET ENFORCED — see the Phase-4C TODO in _handlePropose()
+// below ("verify the source action exists … For now, trust the proposer's claim").
+// Making these per-chain/tunable does not gate settlement until that enforcement
+// lands (tracked as an optional revisit).
+const DEFAULT_CONFIRMATIONS = { BTC: 6, LTC: 12, DOGE: 60 };
 
 // Allowed chain names
 const ALLOWED_CHAINS = ['BTC', 'LTC', 'DOGE'];
+
+// Resolve per-chain confirmation thresholds with the hub's standard three-tier
+// idiom: env XCHAIN_CONFIRMATIONS_<COIN> → hub p2pConfig → Tier-B default
+// (mirrors AttestationPublisher / AttestationRound config resolution).
+function resolveConfirmations(cfg) {
+    cfg = cfg || {};
+    const out = {};
+    for (const coin of ALLOWED_CHAINS) {
+        const key = 'XCHAIN_CONFIRMATIONS_' + coin;
+        out[coin] = parseInt(process.env[key], 10) || parseInt(cfg[key], 10) || DEFAULT_CONFIRMATIONS[coin];
+    }
+    return out;
+}
 
 const DEFAULT_ATTESTATION_TIMEOUT = 60000; // 60 seconds
 
@@ -66,6 +87,10 @@ class CrossChainEngine extends EventEmitter {
 
         // Config
         this.timeout = parseInt(process.env.ATTESTATION_TIMEOUT) || DEFAULT_ATTESTATION_TIMEOUT;
+
+        // Per-chain cross-chain confirmation thresholds (env/p2pConfig overridable;
+        // see resolveConfirmations + the DEFAULT_CONFIRMATIONS note above).
+        this.confirmations = resolveConfirmations(this.hub && this.hub.p2pConfig);
     }
 
     // Set the validator set for quorum and leader calculation
@@ -111,7 +136,7 @@ class CrossChainEngine extends EventEmitter {
             throw new Error('sourceActionIndex must be a positive integer');
 
         let attestationId = sourceChain + ':' + sourceActionIndex + ':' + destChain;
-        let confirmations = CONFIRMATIONS[sourceChain] || 3;
+        let confirmations = this.confirmations[sourceChain] || DEFAULT_CONFIRMATIONS[sourceChain] || 6;
 
         // Check if already attested
         if (this.finalized.has(attestationId)) {
