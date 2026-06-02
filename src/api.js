@@ -746,13 +746,18 @@ async function startApi(){
             // Chain distribution: count installs running at least one module on each
             // coin/network (e.g. "bitcoin/mainnet"). Shared services (hub/db) carry an
             // empty coin/network and are skipped — they aren't chain-specific.
+            // Component-per-chain distribution: count installs running each
+            // (module, coin, network) combo — e.g. how many run xchain-indexer on
+            // litecoin/testnet. Keyed "coin/network/module" (none contain a slash).
             const moduleCounts = new Map();
             const chainCounts  = new Map();
+            const chainModuleCounts = new Map();
             for (const r of rows) {
                 let mods = [];
                 try { mods = Array.isArray(r.modules) ? r.modules : JSON.parse(r.modules || '[]'); } catch (e) { mods = []; }
                 const seenModule = new Set();
                 const seenChain  = new Set();
+                const seenChainModule = new Set();
                 for (const m of mods) {
                     if (!m || !m.running) continue;
                     if (m.module && !seenModule.has(m.module)) {   // count an install once per module
@@ -764,6 +769,13 @@ async function startApi(){
                         if (!seenChain.has(chainKey)) {            // count an install once per coin/network
                             seenChain.add(chainKey);
                             chainCounts.set(chainKey, (chainCounts.get(chainKey) || 0) + 1);
+                        }
+                        if (m.module) {
+                            const cmKey = chainKey + '/' + m.module;
+                            if (!seenChainModule.has(cmKey)) {     // count an install once per (chain, module)
+                                seenChainModule.add(cmKey);
+                                chainModuleCounts.set(cmKey, (chainModuleCounts.get(cmKey) || 0) + 1);
+                            }
                         }
                     }
                 }
@@ -787,6 +799,10 @@ async function startApi(){
                 byDocker:  tally(rows.map(r => r.docker_version), 'docker_version'),
                 modules:   [...moduleCounts.entries()].map(([key, count]) => ({ key, count })).sort((a, b) => b.count - a.count),
                 chains:    [...chainCounts.entries()].map(([key, count]) => ({ key, count })).sort((a, b) => b.count - a.count),
+                chainModules: [...chainModuleCounts.entries()].map(([key, count]) => {
+                    const i = key.indexOf('/'), j = key.indexOf('/', i + 1);
+                    return { coin: key.slice(0, i), network: key.slice(i + 1, j), module: key.slice(j + 1), count };
+                }).sort((a, b) => a.coin.localeCompare(b.coin) || a.network.localeCompare(b.network) || a.module.localeCompare(b.module)),
             });
         } catch (err) {
             res.status(500).json({ error: err.message || 'telemetry summary error' });
