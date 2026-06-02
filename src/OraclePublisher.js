@@ -120,7 +120,7 @@ class OraclePublisher {
             pubkey:   this.dogeAddress,
             data:     payload,
             change:   this.dogeAddress,
-            encoding: 'p2sh'
+            encoding: 'P2SH'
         });
         if (!psbtResult || !psbtResult.psbt) {
             throw new Error('encoder returned no PSBT');

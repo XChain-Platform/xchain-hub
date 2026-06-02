@@ -485,7 +485,7 @@ class AttestationPublisher {
             pubkey:   this.btcAddress,
             data:     payload,
             change:   this.btcAddress,
-            encoding: 'p2sh'  // response payloads can exceed 80-byte OP_RETURN
+            encoding: 'P2SH'  // response payloads can exceed 80-byte OP_RETURN
         });
         if (!psbtResult || !psbtResult.psbt) throw new Error('encoder returned no PSBT');
         let txHex = await this.walletSignFn(psbtResult.psbt);

@@ -2,7 +2,7 @@
 
 // Regression coverage for the publisher default-broadcast pipeline.
 //
-// Both publishers call the encoder's createTx with encoding 'p2sh'. The encoder's
+// Both publishers call the encoder's createTx with encoding 'P2SH'. The encoder's
 // P2SH path runs bitcoin.address.fromBase58Check() on the `pubkey` field, so that
 // field MUST carry the base58check address — not the raw hex public key. The e2e
 // harness installs a custom broadcast hook that bypasses _defaultBroadcast, so this
@@ -41,7 +41,7 @@ describe('Publisher _defaultBroadcast — pubkey field carries the base58check a
         const result = await pub._defaultBroadcast('ATTEST|1|...');
 
         expect(encoder.createTxArgs).to.be.an('object');
-        expect(encoder.createTxArgs.encoding).to.equal('p2sh');
+        expect(encoder.createTxArgs.encoding).to.equal('P2SH');
         expect(encoder.createTxArgs.pubkey).to.equal(pub.btcAddress);
         expect(encoder.createTxArgs.pubkey).to.not.equal(pub.btcPubkeyHex);
         expect(result.txid).to.equal('broadcast-txid');
@@ -58,7 +58,7 @@ describe('Publisher _defaultBroadcast — pubkey field carries the base58check a
         const result = await pub._defaultBroadcast('PRICE|0|...');
 
         expect(encoder.createTxArgs).to.be.an('object');
-        expect(encoder.createTxArgs.encoding).to.equal('p2sh');
+        expect(encoder.createTxArgs.encoding).to.equal('P2SH');
         expect(encoder.createTxArgs.pubkey).to.equal(pub.dogeAddress);
         expect(encoder.createTxArgs.pubkey).to.not.equal(pub.dogePubkeyHex);
         expect(result.txid).to.equal('broadcast-txid');
