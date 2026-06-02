@@ -312,6 +312,17 @@ class Consensus {
 
         let proposal = this.pendingProposals.get(seq);
 
+        // A pending proposal for this seq already exists with a different
+        // digest (e.g. two leaders both emit PRE_PREPARE for the same seq
+        // during a view transition). The incoming config is internally valid,
+        // but our PREPARE/COMMIT vote-counting is keyed to proposal.digest, so
+        // broadcasting PREPARE with the incoming digest would cast a vote we
+        // can never commit and that peers will reject. Drop it.
+        if (proposal.digest !== configDigest) {
+            console.warn('PBFT: PRE_PREPARE seq ' + seq + ' digest conflicts with existing proposal — ignoring');
+            return;
+        }
+
         // Add proposer's implicit PREPARE
         proposal.prepares.add(envelope.sender);
         // Add our own PREPARE
@@ -480,10 +491,46 @@ class Consensus {
         }
     }
 
-    // Handle NEW_VIEW: acknowledge new leader
+    // Handle NEW_VIEW: adopt a new leader's view, but only when the
+    // announcement is authentic. Two guards close a liveness attack in which
+    // any authenticated-but-not-leader validator could otherwise advance every
+    // follower's view arbitrarily and thereby steer (seq + view) % N leader
+    // election toward a node of its choosing (itself or a crashed peer):
+    //
+    //   1. Monotonicity — a NEW_VIEW may only move the view FORWARD, never
+    //      rewind it to a lower view the announcer controls.
+    //   2. Leader identity — the announcer must be the rotation-designated
+    //      leader for the CLAIMED (seq, view), mirroring the isRealLeader
+    //      check OracleConsensus applies to its PROPOSE handler. A Byzantine
+    //      node can therefore only ever announce views in which it is already
+    //      the legitimate leader; it can never point followers at another node.
+    //
+    // The 2f+1 VIEW_CHANGE quorum that authorizes the transition is enforced
+    // on the broadcasting side (_handleViewChange emits NEW_VIEW only after
+    // collecting quorum). NEW_VIEW envelopes carry no vote proofs, and a
+    // lagging follower that missed the VIEW_CHANGE round legitimately relies on
+    // the leader's announcement to catch up — so the quorum is not (and, given
+    // the wire format, cannot be) re-verified here.
     _handleNewView(envelope) {
         let { view, seq } = envelope.data;
-        if (typeof view !== 'number') return;
+        if (typeof view !== 'number' || typeof seq !== 'number') return;
+
+        // A NEW_VIEW must advance the view, never rewind it.
+        if (view <= this.view) return;
+
+        // Validate the announcer against the claimed view's designated leader.
+        // (seq + view) % N matches _getLeader's rotation, evaluated at the
+        // claimed view rather than the local one. With no validator set there
+        // is no leader to validate against, so the announcement is rejected.
+        let N = this.validatorSet.length;
+        if (N === 0) return;
+        let expectedLeader = this.validatorSet[(seq + view) % N];
+        if (!expectedLeader || envelope.sender !== expectedLeader.addr) {
+            console.warn('PBFT: Ignoring NEW_VIEW for view ' + view +
+                ' from non-leader ' + envelope.sender);
+            return;
+        }
+
         this.view = view;
         console.log('PBFT: New view ' + view + ' announced by ' + envelope.sender);
     }

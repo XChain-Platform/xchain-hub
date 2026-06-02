@@ -236,6 +236,41 @@ describe('Consensus (PBFT)', function () {
             expect(consensus.pendingProposals.size).to.equal(0);
         });
 
+        it('second PRE_PREPARE for an already-pending seq with a conflicting digest is dropped (no PREPARE)', async function () {
+            // First PRE_PREPARE establishes a pending proposal at seq 5 with digest A.
+            let configA = { x: 1 };
+            let digestA = consensus._digest(configA);
+            await consensus._handlePrePrepare({
+                sender: VALIDATORS_4[1].addr,
+                data: { seq: 5, configDigest: digestA, config: configA }
+            });
+
+            expect(consensus.pendingProposals.has(5)).to.be.true;
+            expect(pm.broadcast.callCount).to.equal(1); // PREPARE for digest A
+
+            // A second PRE_PREPARE arrives for the SAME seq with a different,
+            // internally-valid config (digest B) — as can happen when two
+            // leaders both propose for seq 5 during a view transition.
+            let configB = { x: 2 };
+            let digestB = consensus._digest(configB);
+            expect(digestB).to.not.equal(digestA);
+
+            await consensus._handlePrePrepare({
+                sender: VALIDATORS_4[2].addr,
+                data: { seq: 5, configDigest: digestB, config: configB }
+            });
+
+            // The conflicting message must be dropped: the existing proposal
+            // is untouched (still digest A, no new prepares) and NO additional
+            // PBFT_PREPARE is broadcast for the orphan digest B.
+            let proposal = consensus.pendingProposals.get(5);
+            expect(proposal.digest).to.equal(digestA);
+            expect(proposal.prepares.has(VALIDATORS_4[2].addr)).to.be.false;
+            expect(pm.broadcast.callCount).to.equal(1); // still just the one PREPARE for A
+
+            if (proposal.timer) clearTimeout(proposal.timer);
+        });
+
         it('PREPARE quorum triggers COMMIT broadcast', function () {
             let config = { x: 1 };
             let digest = consensus._digest(config);
