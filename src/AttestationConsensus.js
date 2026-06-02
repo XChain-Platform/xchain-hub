@@ -242,6 +242,19 @@ class AttestationConsensus extends EventEmitter {
         }
     }
 
+    // Maximum allowed base64 length for a peer-supplied body, derived from the
+    // provider's configured max_response_bytes (×1.4 base64 expansion factor).
+    // The only transport gate on an incoming PROPOSE/PREPARE is the WebSocket
+    // frame limit (~1 MB), which is 22–46× larger than any legitimate provider
+    // response — so a peer could otherwise force multi-hundred-KB Buffer
+    // allocations per message. Falls back to a 64 KB cap when the provider def
+    // or its max_response_bytes is unavailable.
+    _maxBodyB64Length(providerId){
+        let def      = this.providerRegistry.getDef(providerId);
+        let maxBytes = (def && Number(def.max_response_bytes)) || 65536;
+        return Math.ceil(maxBytes * 1.4);
+    }
+
     _handlePropose(envelope){
         let d = envelope.data;
         if(!d || !d.requestId) return;
@@ -262,6 +275,14 @@ class AttestationConsensus extends EventEmitter {
         // Sender must be in the responsible set for this request
         if(!pending.responsible.some(v => v.pubkey === senderPubkey)){
             return;  // Outsider proposal — ignore
+        }
+
+        // Reject oversized payloads before allocating a Buffer. A responsible
+        // peer could otherwise craft a body_b64 up to the WebSocket frame limit,
+        // far larger than the provider's configured response cap.
+        if(String(d.body_b64 || '').length > this._maxBodyB64Length(pending.providerId)){
+            console.warn('AttestationConsensus: oversized PROPOSE body from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected pre-decode)');
+            return;
         }
 
         // Decode body and verify signature against canonical bytes
@@ -387,6 +408,12 @@ class AttestationConsensus extends EventEmitter {
 
         let senderPubkey = String(d.sig_pubkey || '').toLowerCase();
         if(!pending.responsible.some(v => v.pubkey === senderPubkey)) return;
+
+        // Reject oversized payloads before allocating a Buffer (see _handlePropose).
+        if(String(d.body_b64 || '').length > this._maxBodyB64Length(pending.providerId)){
+            console.warn('AttestationConsensus: oversized PREPARE body from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected pre-decode)');
+            return;
+        }
 
         // If we haven't picked a winner yet, this PREPARE tells us what the leader/sender
         // believes is the winning body. Adopt it after sig verification.
