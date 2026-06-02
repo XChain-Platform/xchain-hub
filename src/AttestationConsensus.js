@@ -86,6 +86,19 @@ class AttestationConsensus extends EventEmitter {
         this.earlyMessageTtlMs = 60 * 1000;
         this.earlyMessageMaxPerRid = 32;
 
+        // Early-COMMIT buffer. A COMMIT can arrive after `pending` exists but
+        // before a winner is established: the PROPOSE→agree() transition is
+        // async, and _drainEarlyMessages replays buffered envelopes in arrival
+        // order — so a COMMIT can be replayed ahead of its own PROPOSE. Without
+        // buffering, such a COMMIT hits the `!winner` guard in _handleCommit and
+        // is permanently dropped, costing the round that peer's vote and
+        // stalling finalization in quorum>1 federations until a re-broadcast or
+        // round timeout. Hold these per-request and drain them the instant a
+        // winner is set (in _maybeAdvanceFromProposals / _handlePrepare).
+        // Map<rid, Array<envelope>>
+        this.earlyCommits = new Map();
+        this.earlyCommitMaxPerRid = 32;
+
         this._messageHandler = null;
         this.roundTimeoutMs  = parseInt(this.config.ATTESTATION_ROUND_TIMEOUT_MS) || DEFAULT_ROUND_TIMEOUT_MS;
     }
@@ -111,6 +124,7 @@ class AttestationConsensus extends EventEmitter {
         this.pending.clear();
         this.earlyMessages.clear();
         this.earlyMessageTtl.clear();
+        this.earlyCommits.clear();
     }
 
     _pruneEarlyMessages(now){
@@ -142,6 +156,31 @@ class AttestationConsensus extends EventEmitter {
         this.earlyMessageTtl.delete(rid);
         for(let env of arr){
             this._handleMessage(env);
+        }
+    }
+
+    // Hold a COMMIT that arrived before this round established a winner. See
+    // the earlyCommits note in the constructor for why these can't be dropped.
+    _bufferEarlyCommit(rid, envelope){
+        let arr = this.earlyCommits.get(rid);
+        if(!arr){
+            arr = [];
+            this.earlyCommits.set(rid, arr);
+        }
+        if(arr.length >= this.earlyCommitMaxPerRid) return;
+        arr.push(envelope);
+    }
+
+    // Replay COMMITs buffered before the winner was known. Called from the two
+    // sites that set pending.winner. Deletes the queue up-front so re-entrant
+    // _handleCommit calls (now with a winner) process normally rather than
+    // re-buffering.
+    _drainEarlyCommits(rid){
+        let arr = this.earlyCommits.get(rid);
+        if(!arr) return;
+        this.earlyCommits.delete(rid);
+        for(let env of arr){
+            this._handleCommit(env);
         }
     }
 
@@ -205,6 +244,7 @@ class AttestationConsensus extends EventEmitter {
             if(!pending.finalized){
                 console.warn('AttestationConsensus: round timeout for ' + rid.substring(0,16) + '...');
                 this.pending.delete(rid);
+                this.earlyCommits.delete(rid);
             }
         }, this.roundTimeoutMs);
 
@@ -393,6 +433,10 @@ class AttestationConsensus extends EventEmitter {
         if(pending.myPubkey) pending.prepares.add(pending.myPubkey);
 
         this._checkPrepareQuorum(rid);
+
+        // Winner is now set — replay any COMMITs that arrived (and were
+        // buffered) before this point so their votes count toward quorum.
+        this._drainEarlyCommits(rid);
     }
 
     _handlePrepare(envelope){
@@ -448,6 +492,11 @@ class AttestationConsensus extends EventEmitter {
 
         pending.prepares.add(senderPubkey);
         this._checkPrepareQuorum(rid);
+
+        // A PREPARE can be the first thing to establish our winner (when we
+        // adopt the leader's body above). Replay any COMMITs buffered before
+        // then so their votes aren't lost.
+        if(pending.winner) this._drainEarlyCommits(rid);
     }
 
     _checkPrepareQuorum(rid){
@@ -490,7 +539,13 @@ class AttestationConsensus extends EventEmitter {
             this._bufferEarlyMessage(rid, envelope);
             return;
         }
-        if(!pending.winner) return;
+        if(!pending.winner){
+            // Winner not yet established (the PROPOSE→agree() transition is
+            // async). Hold this COMMIT and replay it once the winner is set,
+            // rather than dropping the peer's vote. See _drainEarlyCommits.
+            this._bufferEarlyCommit(rid, envelope);
+            return;
+        }
 
         let senderPubkey = String(d.sig_pubkey || '').toLowerCase();
         if(!pending.responsible.some(v => v.pubkey === senderPubkey)) return;
@@ -543,6 +598,7 @@ class AttestationConsensus extends EventEmitter {
         });
 
         // Free memory shortly
+        this.earlyCommits.delete(rid);
         setTimeout(() => this.pending.delete(rid), 10000);
     }
 
