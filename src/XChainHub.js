@@ -548,10 +548,9 @@ class XChainHub {
     async _loadChainPairValidators(){
         let chainPairMap = new Map();
         try {
-            // Ensure the 'chains' column exists. (The 'tier' column was dropped in the
-            // capability-staking refactor — 2026-05-24_capability-staking-model.md.)
-            await this.db.doQuery("ALTER TABLE validators ADD COLUMN chains VARCHAR(50) DEFAULT NULL").catch(() => {});
-
+            // The 'chains' column is declared in validators.sql and reconciled on
+            // startup by the schema-drift check in db.js (verifyTables →
+            // alterTableForDrift), so it is guaranteed present here.
             let rows = await this.db.doQuery(
                 "SELECT signing_pubkey, addr, chains FROM validators WHERE status = 'active' ORDER BY signing_pubkey"
             );

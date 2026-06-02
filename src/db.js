@@ -156,6 +156,12 @@ class Database {
                     let results = await db.query("SELECT * FROM information_schema.tables WHERE table_schema = ? AND table_name = ?", [this.dbName, table]);
                     if(results.length === 0)
                         await this._createTableFromFile(file);
+                    else
+                        // Existing table — reconcile column drift against the SQL
+                        // source so columns added upstream are auto-applied on
+                        // stacks created from an older release, instead of failing
+                        // later queries with "Unknown column".
+                        await this.alterTableForDrift(file, db);
                 } catch(e){
                     console.error('Error verifying ' + table + ' table: ' + e);
                     throw e;
@@ -225,6 +231,115 @@ class Database {
             query = query.trim();
             if(query === '') continue;
             await this.doQuery(query);
+        }
+    }
+
+    // Remove SQL `--` line comments while respecting quoted strings, so a ';'
+    // or ',' appearing inside comment prose is never mistaken for SQL structure.
+    // Single/double-quote and backtick spans are preserved verbatim (doubled
+    // quotes treated as escapes); a `--` outside any quote skips to the end of
+    // its line. Newlines are kept so the column-split below stays well-formed.
+    stripSqlLineComments(sql){
+        let out = '';
+        let quote = null;
+        for(let i = 0; i < sql.length; i++){
+            const ch = sql[i];
+            if(quote){
+                out += ch;
+                if(ch === quote){
+                    if(sql[i + 1] === quote){ out += sql[++i]; }
+                    else { quote = null; }
+                }
+                continue;
+            }
+            if(ch === "'" || ch === '"' || ch === '`'){ quote = ch; out += ch; continue; }
+            if(ch === '-' && sql[i + 1] === '-'){
+                while(i < sql.length && sql[i] !== '\n'){ i++; }
+                if(i < sql.length){ out += '\n'; }
+                continue;
+            }
+            out += ch;
+        }
+        return out;
+    }
+
+    // Parse a CREATE TABLE statement to extract expected columns. Conservative —
+    // only used for drift detection, not full schema management. Returns array of
+    // {name, nullable, definition, notNull, hasDefault} or null when the file has
+    // no recognizable CREATE TABLE block.
+    parseExpectedColumns(sqlData){
+        // Strip `--` line comments BEFORE any structural parsing — inline comments
+        // routinely carry commas/parens that would otherwise fool the comma split.
+        sqlData = this.stripSqlLineComments(sqlData);
+        // Match the column block up to the table's closing paren, tolerating the
+        // optional `IF NOT EXISTS` clause and both the `) ENGINE=...;` form and a
+        // bare `);` terminator (the hub schema mostly uses the bare form).
+        const m = sqlData.match(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?\S+\s*\(([\s\S]+?)\)\s*(?:ENGINE\b|;|$)/i);
+        if(!m) return null;
+        // Split on top-level commas (commas not inside type parens like VARCHAR(20))
+        const parts = m[1].split(/,(?![^()]*\))/g);
+        const cols = [];
+        for(let raw of parts){
+            let line = raw.replace(/--[^\n\r]*/g, '').trim();
+            if(!line) continue;
+            // Skip constraint/index/key lines — column definitions only
+            if(/^(PRIMARY|UNIQUE|INDEX|KEY|CHECK|CONSTRAINT|FOREIGN)\b/i.test(line)) continue;
+            const tokens = line.split(/\s+/);
+            if(tokens.length < 2) continue;
+            const name       = tokens[0].replace(/`/g, '');
+            // A column is nullable unless it says NOT NULL or is an inline PRIMARY
+            // KEY (SQL forces PK columns NOT NULL, so a MODIFY ... NULL on one is a
+            // silent no-op that would otherwise re-fire on every startup).
+            const nullable   = !/\bNOT\s+NULL\b/i.test(line) && !/\bPRIMARY\s+KEY\b/i.test(line);
+            const notNull    = !nullable;
+            const hasDefault = /\bDEFAULT\b/i.test(line);
+            // Keep the full (comment-stripped) definition so a missing column can
+            // be re-added verbatim — preserving its DEFAULT clause, which is what
+            // backfills existing rows when the column is NOT NULL.
+            cols.push({ name, nullable, definition: line, notNull, hasDefault });
+        }
+        return cols.length > 0 ? cols : null;
+    }
+
+    // Detect schema drift between the live table and its SQL source, and fix it
+    // by ALTER. Two kinds of drift are handled:
+    //   1. Missing columns — a column declared in the SQL source but absent from
+    //      the live table is added with ADD COLUMN, reusing the source definition
+    //      verbatim so its DEFAULT clause backfills existing rows. (A NOT NULL
+    //      column with no DEFAULT can't be backfilled safely, so it's skipped
+    //      with a loud warning rather than aborting startup.)
+    //   2. Nullability — only relaxes NOT NULL -> NULL (the safe direction; never
+    //      strengthens to NOT NULL since live rows might hold NULLs that would
+    //      block the ALTER).
+    // Doesn't touch types, defaults of existing columns, or indexes. Each applied
+    // ALTER is loudly logged. Reuses the caller's connection (`db`).
+    async alterTableForDrift(file, db){
+        const dir      = path.join(__dirname, 'sql');
+        const data     = fs.readFileSync(dir + '/' + file, "utf8");
+        const table    = file.substring(0, file.indexOf('.sql'));
+        const expected = this.parseExpectedColumns(data);
+        if(!expected) return;
+        const live = await db.query(
+            "SELECT COLUMN_NAME, IS_NULLABLE, COLUMN_TYPE FROM information_schema.columns WHERE table_schema = ? AND table_name = ?",
+            [this.dbName, table]
+        );
+        const liveByName = new Map(live.map(c => [c.COLUMN_NAME.toLowerCase(), c]));
+        for(const exp of expected){
+            const cur = liveByName.get(exp.name.toLowerCase());
+            if(!cur){
+                if(exp.notNull && !exp.hasDefault){
+                    console.log('Schema drift on ' + table + '.' + exp.name + ': column missing live, source is NOT NULL with no DEFAULT — cannot backfill existing rows safely. Skipping; add manually.');
+                    continue;
+                }
+                console.log('Schema drift on ' + table + '.' + exp.name + ': column missing live. Adding column from SQL source.');
+                await db.query('ALTER TABLE `' + table + '` ADD COLUMN ' + exp.definition);
+                continue;
+            }
+            const liveIsNullable = cur.IS_NULLABLE === 'YES';
+            if(!liveIsNullable && exp.nullable){
+                console.log('Schema drift on ' + table + '.' + exp.name + ': live=NOT NULL, source=NULL. Relaxing constraint.');
+                await db.query('ALTER TABLE `' + table + '` MODIFY `' + exp.name + '` ' + cur.COLUMN_TYPE + ' NULL');
+            }
         }
     }
 
