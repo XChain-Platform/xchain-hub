@@ -36,6 +36,14 @@ const ORACLE_COMMIT  = 'ORACLE_COMMIT';
 const TRIM_PERCENT = 0.15;  // Discard top and bottom 15% of submissions
 const DEFAULT_FINALIZATION_TIMEOUT = 120000; // 2 minutes
 const FALLBACK_GRACE_MS = 3000;  // brief grace before fallback proposer takes over
+// Leader-timeout: a leader can gossip (and have peers record) its submission and
+// then crash before broadcasting ORACLE_PROPOSE. Followers would otherwise wait
+// out the full finalization window. After this shorter grace with no PROPOSE, the
+// lowest-addr submitter OTHER THAN the (presumed-dead) leader takes over as
+// fallback proposer, salvaging the round's pricing data. Measured from the moment
+// the round becomes ready to finalize (block-driven, so every hub uses the same
+// window); receivers apply the same grace before accepting such a fallback PROPOSE.
+const DEFAULT_LEADER_TIMEOUT_MS = 30000;  // 30 seconds (< finalization window)
 
 class OracleConsensus extends EventEmitter {
 
@@ -49,6 +57,18 @@ class OracleConsensus extends EventEmitter {
         // Pending rounds: Map<round, { prices, digest, prepares: Set, commits: Set, finalized: bool, timer }>
         this.pendingRounds = new Map();
 
+        // When each round became ready to finalize (Date.now() at finalizeRound's
+        // follower path). The receiver-side leader-timeout grace in _handlePropose
+        // is measured from here so every honest hub applies the same window before
+        // accepting a leader-timeout fallback PROPOSE. Pruned when a round
+        // finalizes/skips. Map<round, msEpoch>.
+        this.roundReadyAt = new Map();
+
+        // Armed leader-timeout timers, keyed by round, so they can be cleared on
+        // stop() or once the round is taken. Only the elected fallback proposer
+        // arms one. Map<round, Timeout>.
+        this.leaderTimers = new Map();
+
         // Already finalized rounds (prevents double-store)
         this.finalized = new Set();
 
@@ -61,6 +81,7 @@ class OracleConsensus extends EventEmitter {
         // Config
         this.finalizationTimeout = parseInt(process.env.ORACLE_FINALIZATION_TIMEOUT) || DEFAULT_FINALIZATION_TIMEOUT;
         this.minSubmissions      = parseInt(process.env.ORACLE_MIN_SUBMISSIONS) || 1;
+        this.leaderTimeout       = parseInt(process.env.ORACLE_LEADER_TIMEOUT_MS) || DEFAULT_LEADER_TIMEOUT_MS;
     }
 
     // Set the validator set for quorum calculation and leader selection
@@ -84,7 +105,10 @@ class OracleConsensus extends EventEmitter {
         for (let [round, pending] of this.pendingRounds) {
             if (pending.timer) clearTimeout(pending.timer);
         }
+        for (let [, t] of this.leaderTimers) clearTimeout(t);
+        this.leaderTimers.clear();
         this.pendingRounds.clear();
+        this.roundReadyAt.clear();
     }
 
     // Finalize a round — called by OracleRound after the submission window closes.
@@ -163,10 +187,39 @@ class OracleConsensus extends EventEmitter {
             return;
         }
 
-        // Follower path.
+        // Follower path. Record when this round became ready to finalize so the
+        // receiver-side leader-timeout grace in _handlePropose measures the same
+        // window every other hub does.
+        this._markRoundReady(round);
+
         let leaderSubmitted = leader && submissions.has(leader.addr);
         if (leaderSubmitted) {
-            // Leader will propose — wait for ORACLE_PROPOSE.
+            // The leader has a submission on record and is expected to broadcast
+            // ORACLE_PROPOSE. But a leader can gossip its submission and then
+            // crash before proposing, leaving every follower waiting out the full
+            // finalization window. Arm a shorter leader-timeout: if no PROPOSE has
+            // populated pendingRounds by then, the lowest-addr submitter OTHER THAN
+            // the (presumed-dead) leader takes over as fallback proposer. Only the
+            // elected fallback arms a timer; a live leader proposes immediately, so
+            // by the time this fires the round is already taken and we abort.
+            let fb = [...submissions.keys()].filter(a => !leader || a !== leader.addr).sort()[0];
+            if (fb === myAddr) {
+                let t = setTimeout(() => {
+                    this.leaderTimers.delete(round);
+                    if (this.pendingRounds.has(round) || this.finalized.has(round)) return;
+                    let subs = this.oracleRound.getSubmissions(round);
+                    if (!subs || subs.size === 0) return;
+                    // Re-elect against the (possibly grown) submission set in case
+                    // gossip delivered more submitters during the grace.
+                    let fb2 = [...subs.keys()].filter(a => !leader || a !== leader.addr).sort()[0];
+                    if (fb2 !== myAddr) return;
+                    this._proposeRound(round, subs, true, btcBlockHeight, btcBlockTime, snapshot, quorum);
+                }, this.leaderTimeout + FALLBACK_GRACE_MS);
+                // Don't let an armed grace timer keep the process alive on its own;
+                // the hub stays up via its other listeners. Cleared on stop().
+                if (t.unref) t.unref();
+                this.leaderTimers.set(round, t);
+            }
             return;
         }
 
@@ -321,6 +374,22 @@ class OracleConsensus extends EventEmitter {
                 if (!leaderSubmitted) {
                     let fallbackAddr = keys.sort()[0];
                     if (fallbackAddr === envelope.sender) isFallback = true;
+                } else {
+                    // Leader submitted but may have crashed before proposing. Accept
+                    // a fallback from the lowest-addr submitter OTHER THAN the leader,
+                    // but only after this hub's own leader-timeout grace has elapsed
+                    // since the round became ready — otherwise an early (possibly
+                    // malicious) fallback could usurp a still-alive leader and inject
+                    // arbitrary prices. A live leader proposes immediately, so once
+                    // the grace passes without a PROPOSE the leader is presumed dead.
+                    // The sender is still validated against our LOCALLY-observed
+                    // submission set, never a peer-supplied list (see the trust note
+                    // above), preserving the price-integrity gate.
+                    let readyAt = this.roundReadyAt.get(round);
+                    if (readyAt && (Date.now() - readyAt) >= this.leaderTimeout) {
+                        let fallbackAddr = keys.filter(a => !leader || a !== leader.addr).sort()[0];
+                        if (fallbackAddr === envelope.sender) isFallback = true;
+                    }
                 }
             }
         }
@@ -461,6 +530,7 @@ class OracleConsensus extends EventEmitter {
                 .then(() => {
                     this.finalized.add(round);
                     this.pendingRounds.delete(round);
+                    this._clearRoundTracking(round);
                     console.log('Oracle: Round ' + round + ' finalized (' +
                         pending.prepares.size + ' prepares, ' +
                         pending.commits.size + ' commits)');
@@ -485,6 +555,7 @@ class OracleConsensus extends EventEmitter {
                 .catch(err => {
                     console.error('Oracle: Error storing snapshot for round ' + round + ':', err.message);
                     this.pendingRounds.delete(round);
+                    this._clearRoundTracking(round);
                 });
         }
     }
@@ -598,6 +669,7 @@ class OracleConsensus extends EventEmitter {
             await this.db.doQuery(query, [round, pair, referenceBlock, blockTimestamp, referenceBlock, blockTimestamp]);
         }
         this.finalized.add(round);
+        this._clearRoundTracking(round);
         console.log('Oracle: Round ' + round + ' skipped (no submissions)');
     }
 
@@ -662,6 +734,29 @@ class OracleConsensus extends EventEmitter {
     }
 
     // --- Utilities ---
+
+    // Record the first time we saw this round as ready to finalize. The
+    // receiver-side leader-timeout grace in _handlePropose measures from here.
+    // Opportunistically evicts entries for rounds that never finalized (the rare
+    // stuck case) so the map can't grow unbounded.
+    _markRoundReady(round) {
+        let now = Date.now();
+        let ttl = this.finalizationTimeout * 2 + this.leaderTimeout;
+        for (let [r, ts] of this.roundReadyAt) {
+            if (now - ts > ttl) this.roundReadyAt.delete(r);
+        }
+        if (!this.roundReadyAt.has(round)) this.roundReadyAt.set(round, now);
+    }
+
+    // Forget per-round leader-timeout bookkeeping once the round is done.
+    _clearRoundTracking(round) {
+        this.roundReadyAt.delete(round);
+        let t = this.leaderTimers.get(round);
+        if (t) {
+            clearTimeout(t);
+            this.leaderTimers.delete(round);
+        }
+    }
 
     _getLeader(round) {
         if (this.validatorSet.length === 0) return null;

@@ -181,6 +181,21 @@ class ReorgHandler extends EventEmitter {
         pending.timer = setTimeout(() => {
             if (!pending.finalized) {
                 console.warn('Reorg: Consensus timeout for ' + reorgId);
+                // Surface the discarded rollback before dropping it, so operators
+                // (and downstream consumers) can alert or retry. Without this, a
+                // stalled round silently leaves attestations un-deleted and price
+                // snapshots un-disputed after a reorg — dirty cross-chain state
+                // with no signal beyond a log line.
+                this.emit('reorg:timeout', {
+                    reorgId,
+                    sourceChain:    pending.chain,
+                    reorgHeight:    pending.reorgHeight,
+                    timestamp:      pending.timestamp,
+                    affectedChains: pending.affectedChains,
+                    prepares:       pending.prepares.size,
+                    commits:        pending.commits.size,
+                    quorum:         pending.quorum
+                });
                 this.pendingReorgs.delete(reorgId);
             }
         }, this.timeout);
@@ -209,10 +224,26 @@ class ReorgHandler extends EventEmitter {
                 prepares: new Set(),
                 commits:  new Set(),
                 finalized: false,
-                timer: setTimeout(() => {
-                    this.pendingReorgs.delete(reorgId);
-                }, this.timeout * 2)
+                timer: null
             };
+            pending.timer = setTimeout(() => {
+                if (!pending.finalized) {
+                    // Same silent-discard fix as _initiateReorgConsensus — emit the
+                    // dropped rollback so it isn't lost without a signal.
+                    console.warn('Reorg: Consensus timeout for ' + reorgId);
+                    this.emit('reorg:timeout', {
+                        reorgId,
+                        sourceChain:    pending.chain,
+                        reorgHeight:    pending.reorgHeight,
+                        timestamp:      pending.timestamp,
+                        affectedChains: pending.affectedChains,
+                        prepares:       pending.prepares.size,
+                        commits:        pending.commits.size,
+                        quorum:         pending.quorum
+                    });
+                }
+                this.pendingReorgs.delete(reorgId);
+            }, this.timeout * 2);
             this.pendingReorgs.set(reorgId, pending);
         }
 

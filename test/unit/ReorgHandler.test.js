@@ -4,7 +4,7 @@ const sinon          = require('sinon');
 const { expect }     = require('chai');
 const ReorgHandler   = require('../../src/ReorgHandler');
 const { createMockHub }     = require('../helpers/mockHub');
-const { VALIDATORS_3 }      = require('../helpers/fixtures');
+const { VALIDATORS_3, VALIDATORS_4 } = require('../helpers/fixtures');
 
 describe('ReorgHandler', function () {
 
@@ -240,6 +240,81 @@ describe('ReorgHandler', function () {
             expect(hub.db.doQuery.callCount).to.equal(3); // delete + update + insert
             expect(rh.processed.has(reorgId)).to.be.true;
             expect(emitted).to.not.be.null;
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // Consensus timeout — surfaced event (not silent discard)
+    //
+    // When a reorg round can't reach quorum within the window, the pending
+    // rollback used to be dropped with only a console.warn, leaving cross-chain
+    // state dirty after a reorg with no programmatic signal. The handler now
+    // emits a 'reorg:timeout' event carrying the discarded rollback details
+    // before deleting it, so operators/consumers can alert or retry.
+    // -----------------------------------------------------------------
+
+    describe('consensus timeout event', function () {
+
+        let clock;
+
+        afterEach(function () {
+            if (clock) { clock.restore(); clock = null; }
+        });
+
+        it('emits reorg:timeout instead of silently discarding when quorum is not reached', async function () {
+            clock = sinon.useFakeTimers({ now: 1700000000000 });
+            // N=4 → quorum=3, so a lone self-prepare can't finalize and the round
+            // must time out (N=3 would finalize immediately at quorum=1).
+            rh.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+
+            let emitted = null;
+            rh.on('reorg:timeout', (d) => { emitted = d; });
+
+            await rh.reportReorg('BTC', 500000, 1700000000000);
+            let reorgId = 'BTC:500000:1700000000000';
+
+            // Round is pending, no event yet.
+            expect(rh.pendingReorgs.has(reorgId)).to.be.true;
+            expect(emitted).to.be.null;
+
+            // Window elapses without quorum → event fires, round discarded.
+            clock.tick(rh.timeout + 1);
+
+            expect(emitted).to.not.be.null;
+            expect(emitted.reorgId).to.equal(reorgId);
+            expect(emitted.sourceChain).to.equal('BTC');
+            expect(emitted.reorgHeight).to.equal(500000);
+            expect(emitted.affectedChains).to.deep.equal(['LTC', 'DOGE']);
+            expect(rh.pendingReorgs.has(reorgId)).to.be.false;
+        });
+
+        it('emits reorg:timeout for a follower-created round (PREPARE path) that never reaches quorum', function () {
+            clock = sinon.useFakeTimers({ now: 1700000000000 });
+            rh.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+
+            let reorgId = 'LTC:300:1700000000000';
+            let digest = rh._digest(reorgId, 'LTC', 300, 1700000000000);
+
+            let emitted = null;
+            rh.on('reorg:timeout', (d) => { emitted = d; });
+
+            // A peer's PREPARE creates the pending round locally.
+            rh._handlePrepare({
+                sender: VALIDATORS_4[1].addr,
+                data: { reorgId, chain: 'LTC', reorgHeight: 300, timestamp: 1700000000000,
+                        affectedChains: ['BTC', 'DOGE'], digest }
+            });
+            expect(rh.pendingReorgs.has(reorgId)).to.be.true;
+
+            // Follower timer is timeout*2; quorum (3) unreachable → event fires.
+            clock.tick(rh.timeout * 2 + 1);
+
+            expect(emitted).to.not.be.null;
+            expect(emitted.reorgId).to.equal(reorgId);
+            expect(emitted.sourceChain).to.equal('LTC');
+            expect(rh.pendingReorgs.has(reorgId)).to.be.false;
         });
     });
 

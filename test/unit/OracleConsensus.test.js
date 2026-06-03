@@ -665,4 +665,179 @@ describe('OracleConsensus', function () {
             expect(pm.broadcast.called).to.be.false;
         });
     });
+
+    // -----------------------------------------------------------------
+    // Leader-timeout fallback (post-submission leader crash)
+    //
+    // A leader can gossip (and have peers record) its submission and then crash
+    // before broadcasting ORACLE_PROPOSE. The plain no-submission fallback never
+    // fires because every hub sees leaderSubmitted === true, so the round would
+    // otherwise stall until the full finalization timeout. After a shorter
+    // leader-timeout grace with no PROPOSE, the lowest-addr submitter OTHER THAN
+    // the dead leader takes over; receivers accept that fallback only once their
+    // own grace (measured from the block-driven round-ready time) has elapsed, so
+    // an early/malicious fallback cannot usurp a still-alive leader.
+    // -----------------------------------------------------------------
+
+    describe('leader-timeout fallback', function () {
+
+        let clock;
+
+        afterEach(function () {
+            if (clock) { clock.restore(); clock = null; }
+            for (let [, t] of oc.leaderTimers) clearTimeout(t);
+            for (let [, pending] of oc.pendingRounds) {
+                if (pending.timer) clearTimeout(pending.timer);
+            }
+        });
+
+        it('elected fallback proposes after the grace when the leader submitted but never proposed', async function () {
+            clock = sinon.useFakeTimers();
+            oc.setValidatorSet(VALIDATORS_4);
+            // Round 0 leader is VALIDATORS_4[0] (validator-1). We are validator-2,
+            // the lowest-addr submitter excluding the leader → the elected fallback.
+            pm.validatorAddr = VALIDATORS_4[1].addr;
+
+            let prices = [{ coinPair: 'BTC/USD', price: '100000' }];
+            // Leader submitted (and gossiped), then crashed before proposing.
+            oracleRound.getSubmissions.returns(buildSubmissions([
+                { sender: VALIDATORS_4[0].addr, prices },   // leader
+                { sender: VALIDATORS_4[1].addr, prices },   // us (fallback)
+                { sender: VALIDATORS_4[2].addr, prices }
+            ]));
+
+            await oc.finalizeRound(0);
+
+            // A leader-timeout timer must be armed, and nothing proposed yet.
+            expect(oc.leaderTimers.has(0)).to.be.true;
+            expect(pm.broadcast.called).to.be.false;
+
+            // Before the grace elapses, still no PROPOSE.
+            clock.tick(oc.leaderTimeout - 1);
+            expect(pm.broadcast.called).to.be.false;
+
+            // Past the grace (+ skew buffer) the fallback takes over and proposes.
+            clock.tick(oc.leaderTimeout + 5000);
+            expect(pm.broadcast.called).to.be.true;
+            let [type, data] = pm.broadcast.getCall(0).args;
+            expect(type).to.equal('ORACLE_PROPOSE');
+            expect(data.round).to.equal(0);
+        });
+
+        it('non-elected follower does not arm a leader-timeout timer', async function () {
+            clock = sinon.useFakeTimers();
+            oc.setValidatorSet(VALIDATORS_4);
+            // We are validator-3; the elected fallback is validator-2, so we wait.
+            pm.validatorAddr = VALIDATORS_4[2].addr;
+
+            let prices = [{ coinPair: 'BTC/USD', price: '100000' }];
+            oracleRound.getSubmissions.returns(buildSubmissions([
+                { sender: VALIDATORS_4[0].addr, prices },
+                { sender: VALIDATORS_4[1].addr, prices },
+                { sender: VALIDATORS_4[2].addr, prices }
+            ]));
+
+            await oc.finalizeRound(0);
+
+            expect(oc.leaderTimers.has(0)).to.be.false;
+            clock.tick(oc.leaderTimeout + 5000);
+            expect(pm.broadcast.called).to.be.false;
+        });
+
+        it('aborts the takeover if a PROPOSE arrives during the grace', async function () {
+            clock = sinon.useFakeTimers();
+            oc.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[1].addr; // elected fallback
+
+            // Round 4 leader is VALIDATORS_4[0] (4 % 4 === 0). Round 4 (not 0)
+            // because _handlePropose rejects the falsy round 0.
+            let prices = [{ coinPair: 'BTC/USD', price: '100000' }];
+            oracleRound.getSubmissions.returns(buildSubmissions([
+                { sender: VALIDATORS_4[0].addr, prices },
+                { sender: VALIDATORS_4[1].addr, prices },
+                { sender: VALIDATORS_4[2].addr, prices }
+            ]));
+
+            await oc.finalizeRound(4);
+            expect(oc.leaderTimers.has(4)).to.be.true;
+
+            // The (real) leader's PROPOSE lands mid-grace → pendingRounds populated.
+            let digest = oc._digest(4, prices);
+            await oc._handlePropose({
+                sender: VALIDATORS_4[0].addr,
+                data: { round: 4, prices, digest }
+            });
+            expect(oc.pendingRounds.has(4)).to.be.true;
+            let proposeCalls = pm.broadcast.getCalls().filter(c => c.args[0] === 'ORACLE_PROPOSE').length;
+
+            // Firing the grace must NOT add a second (fallback) PROPOSE.
+            clock.tick(oc.leaderTimeout + 5000);
+            let afterCalls = pm.broadcast.getCalls().filter(c => c.args[0] === 'ORACLE_PROPOSE').length;
+            expect(afterCalls).to.equal(proposeCalls);
+        });
+
+        it('receiver rejects a leader-timeout fallback PROPOSE before the grace, accepts it after', async function () {
+            clock = sinon.useFakeTimers({ now: 1700000000000 });
+            oc.setValidatorSet(VALIDATORS_4);
+            // We are validator-3, a plain receiver. Round 4 leader is validator-1
+            // (submitted); the legitimate post-crash fallback is validator-2.
+            pm.validatorAddr = VALIDATORS_4[2].addr;
+
+            let prices = [{ coinPair: 'BTC/USD', price: '100000.00000000' }];
+            let digest = oc._digest(4, prices);
+            oracleRound.getSubmissions.returns(buildSubmissions([
+                { sender: VALIDATORS_4[0].addr, prices },   // leader submitted
+                { sender: VALIDATORS_4[1].addr, prices }    // fallback
+            ]));
+
+            // Learn the round is ready (sets roundReadyAt for the grace clock).
+            await oc.finalizeRound(4);
+            expect(pm.broadcast.called).to.be.false;
+
+            // Fallback PROPOSE from validator-2 BEFORE the grace → rejected.
+            await oc._handlePropose({
+                sender: VALIDATORS_4[1].addr,
+                data: { round: 4, prices, digest }
+            });
+            expect(oc.pendingRounds.has(4)).to.be.false;
+            expect(pm.broadcast.called).to.be.false;
+
+            // After the grace, the same fallback PROPOSE is accepted.
+            clock.tick(oc.leaderTimeout);
+            await oc._handlePropose({
+                sender: VALIDATORS_4[1].addr,
+                data: { round: 4, prices, digest }
+            });
+            expect(oc.pendingRounds.has(4)).to.be.true;
+            let [type] = pm.broadcast.getCall(0).args;
+            expect(type).to.equal('ORACLE_PREPARE');
+        });
+
+        it('SECURITY: after the grace, only the lowest non-leader submitter is accepted as fallback', async function () {
+            clock = sinon.useFakeTimers({ now: 1700000000000 });
+            oc.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[2].addr; // receiver (validator-3)
+
+            let prices = [{ coinPair: 'BTC/USD', price: '666666.00000000' }];
+            let digest = oc._digest(4, prices);
+            // Round 4 leader (v1) submitted; submitters {v1, v2, v4}. Lowest
+            // non-leader is v2, so a PROPOSE from v4 must be rejected even after
+            // the grace.
+            oracleRound.getSubmissions.returns(buildSubmissions([
+                { sender: VALIDATORS_4[0].addr, prices },
+                { sender: VALIDATORS_4[1].addr, prices },
+                { sender: VALIDATORS_4[3].addr, prices }
+            ]));
+
+            await oc.finalizeRound(4);
+            clock.tick(oc.leaderTimeout);
+
+            await oc._handlePropose({
+                sender: VALIDATORS_4[3].addr,   // v4 — not the lowest non-leader
+                data: { round: 4, prices, digest }
+            });
+            expect(oc.pendingRounds.has(4)).to.be.false;
+            expect(pm.broadcast.called).to.be.false;
+        });
+    });
 });
