@@ -165,6 +165,10 @@ class ReorgHandler extends EventEmitter {
 
         let pending = {
             reorgId, chain, reorgHeight, timestamp, affectedChains, digest,
+            // Lock quorum at round start so the threshold can't shift between
+            // PREPARE and COMMIT (validator set / peer count may change during
+            // the 60s window) — keeps every hub in lockstep across the round.
+            quorum:   this._getQuorum(),
             prepares: new Set(),
             commits:  new Set(),
             finalized: false,
@@ -200,6 +204,8 @@ class ReorgHandler extends EventEmitter {
                 reorgId, chain, reorgHeight, timestamp,
                 affectedChains: affectedChains || [],
                 digest,
+                // Lock quorum at round start (see _initiateReorgConsensus).
+                quorum:   this._getQuorum(),
                 prepares: new Set(),
                 commits:  new Set(),
                 finalized: false,
@@ -232,7 +238,7 @@ class ReorgHandler extends EventEmitter {
         let pending = this.pendingReorgs.get(reorgId);
         if (!pending || pending.finalized) return;
 
-        let quorum = this._getQuorum();
+        let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
         if (pending.prepares.size >= quorum && !pending._commitSent) {
             pending._commitSent = true;
             pending.commits.add(this.peerManager.validatorAddr);
@@ -250,7 +256,7 @@ class ReorgHandler extends EventEmitter {
         let pending = this.pendingReorgs.get(reorgId);
         if (!pending || pending.finalized) return;
 
-        let quorum = this._getQuorum();
+        let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
         if (pending.commits.size >= quorum) {
             pending.finalized = true;
             if (pending.timer) clearTimeout(pending.timer);
