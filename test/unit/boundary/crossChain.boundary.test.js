@@ -154,20 +154,20 @@ describe('Boundary: CrossChainEngine', function () {
 
     describe('confirmation thresholds', function () {
 
-        it('BTC uses 3 confirmations', async function () {
+        it('BTC uses 6 confirmations', async function () {
             cc.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
 
             let result = await cc.requestAttestation('BTC', '1', 'LTC');
-            expect(result.confirmations).to.equal(3);
+            expect(result.confirmations).to.equal(6);
         });
 
-        it('DOGE uses 6 confirmations', async function () {
+        it('DOGE uses 60 confirmations', async function () {
             cc.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
 
             let result = await cc.requestAttestation('DOGE', '1', 'BTC');
-            expect(result.confirmations).to.equal(6);
+            expect(result.confirmations).to.equal(60);
         });
 
         it('unknown chain is rejected by validation', async function () {

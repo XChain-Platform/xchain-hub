@@ -146,7 +146,7 @@ describe('CrossChainEngine', function () {
 
             let result = await engine.requestAttestation('BTC', 42, 'LTC');
             expect(result.attestationId).to.equal('BTC:42:LTC');
-            expect(result.confirmations).to.equal(3); // BTC default
+            expect(result.confirmations).to.equal(6); // BTC Tier-B default (2026-06-02)
             expect(result.status).to.equal('attested');
             expect(hub.db.doQuery.called).to.be.true;
         });
@@ -164,10 +164,10 @@ describe('CrossChainEngine', function () {
             pm.getPeerStatus.returns([]);
 
             let btc = await engine.requestAttestation('BTC', 1, 'LTC');
-            expect(btc.confirmations).to.equal(3);
+            expect(btc.confirmations).to.equal(6);
 
             let doge = await engine.requestAttestation('DOGE', 1, 'BTC');
-            expect(doge.confirmations).to.equal(6);
+            expect(doge.confirmations).to.equal(60);
         });
 
         it('throws when not the leader in multi-node mode', async function () {
