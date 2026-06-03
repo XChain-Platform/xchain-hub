@@ -118,6 +118,10 @@ class Consensus {
         }
         this.pendingProposals.clear();
         this.viewChangeQuorums.clear();
+        // Drop any sub-quorum view-change tallies so a within-process restart
+        // (e.g. a hub reconfiguration that tears down and re-inits the engine)
+        // doesn't inherit stale entries from the previous run.
+        this.pendingViewChanges.clear();
     }
 
     // Propose a config change — returns a Promise that resolves when consensus is reached
@@ -488,6 +492,17 @@ class Consensus {
             }
             this.pendingViewChanges.delete(view);
             this.viewChangeQuorums.delete(seq);
+
+            // Prune sub-quorum entries for any view we've now advanced past.
+            // A view-change round that never reached quorum (e.g. only one peer
+            // timed out while the rest stayed healthy) otherwise leaves its Set
+            // in pendingViewChanges forever; under a flapping network those
+            // stale entries accumulate without bound. Views are monotonic, so
+            // anything strictly below the new view can never gather more votes.
+            // Mirrors the viewChangeQuorums prune in _initiateViewChange.
+            for (let v of this.pendingViewChanges.keys()) {
+                if (v < this.view) this.pendingViewChanges.delete(v);
+            }
         }
     }
 
