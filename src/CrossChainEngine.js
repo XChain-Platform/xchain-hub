@@ -143,8 +143,18 @@ class CrossChainEngine extends EventEmitter {
             return await this._getStoredAttestation(attestationId);
         }
 
+        // Resolve the cross_chain validator set at the current BTC block
+        // boundary so every hub locks the same quorum for this attestation,
+        // regardless of when it processes the round (mirrors Consensus /
+        // OracleConsensus). The block height is stamped into the PROPOSE
+        // envelope below so followers resolve the identical snapshot. Falls
+        // back to the live validator set when the indexer is unreachable.
+        let btcBlockHeight = this.hub._resolveBtcLatestBlock
+            ? await this.hub._resolveBtcLatestBlock()
+            : null;
+
         // Single-node fallback
-        let quorum = this._getQuorum(sourceChain, destChain);
+        let quorum = await this._resolveQuorum(sourceChain, destChain, btcBlockHeight);
         if (quorum === 0) {
             let attestation = {
                 attestationId, sourceChain, sourceActionIndex: parseInt(sourceActionIndex),
@@ -172,6 +182,7 @@ class CrossChainEngine extends EventEmitter {
                 // for this attestation uses a consistent threshold, even if the
                 // validator set changes mid-round. Mirrors Consensus/OracleConsensus.
                 quorum,
+                btcBlockHeight: btcBlockHeight || null,
                 prepares: new Set(),
                 commits:  new Set(),
                 finalized: false,
@@ -196,7 +207,7 @@ class CrossChainEngine extends EventEmitter {
             this.peerManager.broadcast(XCHAIN_ATTEST_PROPOSE, {
                 attestationId, sourceChain,
                 sourceActionIndex: parseInt(sourceActionIndex),
-                destChain, confirmations, digest
+                destChain, confirmations, digest, btcBlockHeight
             });
 
             this._checkPrepareQuorum(attestationId);
@@ -227,14 +238,23 @@ class CrossChainEngine extends EventEmitter {
 
     _handleMessage(envelope) {
         switch (envelope.type) {
-            case XCHAIN_ATTEST_PROPOSE: this._handlePropose(envelope); break;
+            case XCHAIN_ATTEST_PROPOSE:
+                // _handlePropose is async because it locks the cross_chain
+                // validator-set snapshot at the round's block boundary via an
+                // indexer call. Errors are caught and logged — never bubble up
+                // to the gossip layer (mirrors OracleConsensus).
+                this._handlePropose(envelope).catch(err =>
+                    console.error('CrossChain: PROPOSE handler error for ' +
+                        (envelope && envelope.data && envelope.data.attestationId) + ':',
+                        err && err.message));
+                break;
             case XCHAIN_ATTEST_PREPARE: this._handlePrepare(envelope); break;
             case XCHAIN_ATTEST_COMMIT:  this._handleCommit(envelope);  break;
         }
     }
 
-    _handlePropose(envelope) {
-        let { attestationId, sourceChain, sourceActionIndex, destChain, confirmations, digest } = envelope.data;
+    async _handlePropose(envelope) {
+        let { attestationId, sourceChain, sourceActionIndex, destChain, confirmations, digest, btcBlockHeight } = envelope.data;
         if (!attestationId || !digest) return;
         if (!/^[A-Z]{2,6}:\d+:[A-Z]{2,6}$/.test(attestationId)) return;
         if (this.finalized.has(attestationId)) return;
@@ -248,12 +268,16 @@ class CrossChainEngine extends EventEmitter {
 
         // Create pending if not exists
         if (!this.pendingAttestations.has(attestationId)) {
+            // Lock quorum from the same block-boundary cross_chain snapshot the
+            // leader used (btcBlockHeight carried in the envelope) so every hub
+            // freezes the same N for this round. Falls back to the live set when
+            // the indexer is unreachable or the envelope predates this field.
+            let quorum = await this._resolveQuorum(sourceChain, destChain, btcBlockHeight);
             this.pendingAttestations.set(attestationId, {
                 attestationId, sourceChain, sourceActionIndex, destChain,
                 confirmations, digest,
-                // Lock quorum at PROPOSE time from the validator set we hold now,
-                // so prepare/commit checks stay consistent for the whole round.
-                quorum: this._getQuorum(sourceChain, destChain),
+                btcBlockHeight: btcBlockHeight || null,
+                quorum,
                 prepares: new Set(),
                 commits:  new Set(),
                 finalized: false,
@@ -405,6 +429,22 @@ class CrossChainEngine extends EventEmitter {
             : this.validatorSet;
         if (set.length === 0) return null;
         return set[seq % set.length];
+    }
+
+    // Resolve the round's quorum from a deterministic block-boundary snapshot
+    // of the cross_chain capability set (every hub queries the same blockIndex
+    // on the BTC indexer and arrives at the same N, so two hubs processing the
+    // same attestation at different wall-clock times lock the same quorum).
+    // Falls back to the live validator set when the indexer can't be reached or
+    // the envelope carries no block height (e.g. an old peer mid rolling deploy)
+    // — graceful degradation to the pre-snapshot behavior. Mirrors the
+    // getSnapshot/getQuorum pattern in OracleConsensus and Consensus.
+    async _resolveQuorum(sourceChain, destChain, btcBlockHeight) {
+        let snapshot = (this.hub.capabilitySnapshot && btcBlockHeight)
+            ? await this.hub.capabilitySnapshot.getSnapshot('cross_chain', btcBlockHeight)
+            : null;
+        if (snapshot) return this.hub.capabilitySnapshot.getQuorum(snapshot);
+        return this._getQuorum(sourceChain, destChain);
     }
 
     _getQuorum(sourceChain, destChain) {

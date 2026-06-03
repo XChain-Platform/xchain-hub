@@ -50,11 +50,11 @@ describe('Regression: CrossChain & SwapTracker', function () {
                 pm.validatorAddr = VALIDATORS_4[0].addr;
             });
 
-            it('PROPOSE creates pending and broadcasts PREPARE @regression-p0', function () {
+            it('PROPOSE creates pending and broadcasts PREPARE @regression-p0', async function () {
                 let attestationId = 'BTC:1:LTC';
                 let digest = engine._digest(attestationId, 3);
 
-                engine._handlePropose({
+                await engine._handlePropose({
                     sender: VALIDATORS_4[1].addr,
                     data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
                             destChain: 'LTC', confirmations: 3, digest }

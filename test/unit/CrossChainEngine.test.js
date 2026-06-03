@@ -195,11 +195,11 @@ describe('CrossChainEngine', function () {
             pm.validatorAddr = VALIDATORS_4[0].addr;
         });
 
-        it('PROPOSE from peer creates pending and broadcasts PREPARE', function () {
+        it('PROPOSE from peer creates pending and broadcasts PREPARE', async function () {
             let attestationId = 'BTC:1:LTC';
             let digest = engine._digest(attestationId, 3);
 
-            engine._handlePropose({
+            await engine._handlePropose({
                 sender: VALIDATORS_4[1].addr,
                 data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
                         destChain: 'LTC', confirmations: 3, digest }
@@ -345,18 +345,19 @@ describe('CrossChainEngine', function () {
             pm.validatorAddr = VALIDATORS_4[1].addr;
 
             engine.requestAttestation('BTC', 1, 'LTC'); // fire-and-forget; resolves on quorum
+            await new Promise(r => setImmediate(r)); // let the async block-boundary snapshot/quorum resolve
             let pending = engine.pendingAttestations.get('BTC:1:LTC');
             expect(pending).to.exist;
             expect(pending.quorum).to.equal(3);
         });
 
-        it('locks quorum into the pending object on the follower (handlePropose) path', function () {
+        it('locks quorum into the pending object on the follower (handlePropose) path', async function () {
             engine.setValidatorSet(VALIDATORS_4); // N=4 → quorum=3
             pm.validatorAddr = VALIDATORS_4[0].addr;
             let attestationId = 'BTC:1:LTC';
             let digest = engine._digest(attestationId, 3);
 
-            engine._handlePropose({
+            await engine._handlePropose({
                 sender: VALIDATORS_4[1].addr,
                 data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
                         destChain: 'LTC', confirmations: 3, digest }
@@ -365,7 +366,7 @@ describe('CrossChainEngine', function () {
             expect(engine.pendingAttestations.get(attestationId).quorum).to.equal(3);
         });
 
-        it('commits at the round-start quorum even after validatorSet GROWS mid-round', function () {
+        it('commits at the round-start quorum even after validatorSet GROWS mid-round', async function () {
             // Round starts with N=4 (quorum=3). A larger set synced mid-round
             // would yield quorum=5 live — which would wrongly stall this node.
             engine.setValidatorSet(VALIDATORS_4);
@@ -373,7 +374,7 @@ describe('CrossChainEngine', function () {
             let attestationId = 'BTC:1:LTC';
             let digest = engine._digest(attestationId, 3);
 
-            engine._handlePropose({
+            await engine._handlePropose({
                 sender: VALIDATORS_4[1].addr,
                 data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
                         destChain: 'LTC', confirmations: 3, digest }
@@ -394,7 +395,7 @@ describe('CrossChainEngine', function () {
             expect(pm.broadcast.getCall(0).args[0]).to.equal('XCHAIN_ATTEST_COMMIT');
         });
 
-        it('does NOT commit early if validatorSet SHRINKS mid-round', function () {
+        it('does NOT commit early if validatorSet SHRINKS mid-round', async function () {
             // Round starts with N=7 (quorum=5). A shrunk set synced mid-round
             // would yield quorum=1 live — which would wrongly commit too early.
             engine.setValidatorSet(VALIDATORS_7);
@@ -402,7 +403,7 @@ describe('CrossChainEngine', function () {
             let attestationId = 'BTC:1:LTC';
             let digest = engine._digest(attestationId, 3);
 
-            engine._handlePropose({
+            await engine._handlePropose({
                 sender: VALIDATORS_7[1].addr,
                 data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
                         destChain: 'LTC', confirmations: 3, digest }

@@ -463,14 +463,14 @@ describe('Security Hardening', function () {
             expect(engine.pendingAttestations.size).to.equal(0);
         });
 
-        it('_handlePropose accepts valid attestation ID format', function () {
+        it('_handlePropose accepts valid attestation ID format', async function () {
             let attestationId = 'BTC:1:LTC';
             let digest = engine._digest(attestationId, 3);
             let envelope = {
                 sender: 'ws://v:1',
                 data: { attestationId, digest, confirmations: 3, sourceChain: 'BTC', sourceActionIndex: 1, destChain: 'LTC' }
             };
-            engine._handlePropose(envelope);
+            await engine._handlePropose(envelope);
             expect(engine.pendingAttestations.has(attestationId)).to.be.true;
             let p = engine.pendingAttestations.get(attestationId);
             if (p.timer) clearTimeout(p.timer);

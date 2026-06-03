@@ -612,6 +612,10 @@ class XChainHub {
         let validatorSet = await this._loadValidatorSet();
         if (this.consensus) this.consensus.setValidatorSet(validatorSet);
         if (this.oracleConsensus) this.oracleConsensus.setValidatorSet(validatorSet);
+        if (this.crossChain) {
+            this.crossChain.setValidatorSet(validatorSet);
+            this.crossChain.setChainPairValidators(await this._loadChainPairValidators());
+        }
 
         console.log('Validators synced: ' + validators.length + ' entries');
         return true;
