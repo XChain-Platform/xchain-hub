@@ -6,9 +6,13 @@ const fc = require('fast-check');
 // Prices
 // ---------------------------------------------------------------------------
 
-// Positive finite price as a JS number (realistic oracle range)
+// Positive finite price as a JS number (realistic oracle range).
+// Upper bound is just below the oracle's PRICE_MAX cap (10,000,000) so generated
+// values reach the high-magnitude non-USD range (KRW/JPY ~ millions per BTC) where
+// parseFloat + toFixed(8) precision is most at risk, while staying within the
+// production validity filter (val < PRICE_MAX) so prices aren't silently dropped.
 function fc_price() {
-    return fc.double({ min: 0.00000001, max: 1_000_000, noNaN: true, noDefaultInfinity: true })
+    return fc.double({ min: 0.00000001, max: 9_999_999, noNaN: true, noDefaultInfinity: true })
         .filter(n => Number.isFinite(n) && n > 0);
 }
 

@@ -163,6 +163,59 @@ describe('Integration: Price Fetching (SC-1.x)', function () {
             expect(scope.isDone()).to.be.true;
         });
     });
+
+    // SC-1.7: Full multi-fiat fetch — all 3 coins × 12 fiats = 36 pairs.
+    // The other scenarios use USD-only fixtures; this one exercises the complete
+    // multi-fiat parse + median path and guards precision at high magnitudes
+    // (KRW/JPY values near the price cap), where parseFloat + toFixed(8) is most
+    // susceptible to floating-point regressions.
+    describe('SC-1.7: Full multi-fiat fetch (all 36 pairs)', function () {
+        it('returns all 36 coin/fiat pairs from a full dual-source response', async function () {
+            mockApi.mockCoinGeckoSuccess(mockApi.FULL_COINGECKO_RESPONSE);
+            mockApi.mockCmcSuccess(mockApi.FULL_CMC_RESPONSE);
+
+            let fetcher = new PriceFetcher({
+                COINMARKETCAP_API_KEY: 'test-key',
+                PRICE_FETCH_TIMEOUT: 5000
+            });
+            let prices = await fetcher.fetchPrices();
+
+            // Every one of the 36 supported pairs must be present.
+            expect(prices).to.be.an('array').with.lengthOf(36);
+
+            let byPair = {};
+            for (let p of prices) { byPair[p.coinPair] = p; }
+
+            for (let pair of PriceFetcher.getCoinPairs()) {
+                expect(byPair[pair], 'missing pair ' + pair).to.exist;
+                // Both sources agree, so every pair has 2 sources and 8-decimal format.
+                expect(byPair[pair].sources, pair + ' sources').to.equal(2);
+                expect(byPair[pair].price, pair + ' format').to.match(/^\d+\.\d{8}$/);
+            }
+        });
+
+        it('preserves precision for high-magnitude non-USD pairs (KRW, JPY)', async function () {
+            mockApi.mockCoinGeckoSuccess(mockApi.FULL_COINGECKO_RESPONSE);
+            mockApi.mockCmcSuccess(mockApi.FULL_CMC_RESPONSE);
+
+            let fetcher = new PriceFetcher({
+                COINMARKETCAP_API_KEY: 'test-key',
+                PRICE_FETCH_TIMEOUT: 5000
+            });
+            let prices = await fetcher.fetchPrices();
+            let byPair = {};
+            for (let p of prices) { byPair[p.coinPair] = p; }
+
+            // KRW ~9.87M and JPY ~8.2M per BTC — both sources agree, so the median
+            // equals the input and toFixed(8) must reproduce it exactly.
+            expect(byPair['BTC/KRW'].price).to.equal('9876543.25000000');
+            expect(byPair['BTC/JPY'].price).to.equal('8200000.50000000');
+
+            // A non-USD pair at a smaller magnitude, for good measure.
+            expect(byPair['DOGE/KRW'].price).to.equal('205.25000000');
+            expect(byPair['LTC/JPY'].price).to.equal('13345.50000000');
+        });
+    });
 });
 
 // Helper: nock interceptor that validates the CoinGecko API key header
