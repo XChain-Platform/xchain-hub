@@ -97,6 +97,34 @@ class PriceFetcher {
         return prices;
     }
 
+    // Perform an HTTP GET with up to 3 attempts, retrying only on HTTP 429/503
+    // with exponential backoff + jitter (attempt 1 → 1-3s, attempt 2 → 2-6s).
+    // Non-retryable errors fail immediately. Resolves with the axios response;
+    // rejects with the last error once every attempt is exhausted. Shared by both
+    // price-source fetchers so each gets identical rate-limit resilience.
+    async _fetchWithRetry(url, options) {
+        let maxAttempts = 3;
+        let lastErr     = null;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                return await axios.get(url, options);
+            } catch (err) {
+                lastErr = err;
+                let status = err.response && err.response.status;
+                let retryable = status === 429 || status === 503;
+                if (retryable && attempt < maxAttempts) {
+                    // Backoff with jitter: attempt 1 → 1-3s, attempt 2 → 2-6s
+                    let baseMs   = 1000 * attempt;
+                    let jitterMs = Math.floor(Math.random() * 2000 * attempt);
+                    await new Promise(resolve => setTimeout(resolve, baseMs + jitterMs));
+                    continue;
+                }
+                break;
+            }
+        }
+        throw lastErr;
+    }
+
     // Fetch all coin/fiat pairs from CoinGecko in a single request, retrying on
     // 429/503 with exponential backoff + jitter. Multiple hubs behind the same NAT
     // hit CoinGecko's per-IP limit simultaneously on synchronized startup; jittered
@@ -116,47 +144,35 @@ class PriceFetcher {
         // collide on CoinGecko's per-second rate limit at the start of each round.
         await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 3000)));
 
-        let maxAttempts = 3;
-        let lastErr     = null;
-        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-            try {
-                let response = await axios.get(url, { timeout: this.timeout, headers });
-                let data = response.data;
+        let response;
+        try {
+            response = await this._fetchWithRetry(url, { timeout: this.timeout, headers });
+        } catch (err) {
+            console.warn('CoinGecko fetch failed after retries: ' + (err ? err.message : 'unknown error'));
+            return null;
+        }
 
-                let prices = {};
-                for (let coin of COINS) {
-                    let cgId   = COINGECKO_IDS[coin];
-                    let cgData = data && data[cgId];
-                    if (!cgData) continue;
-                    for (let fiat of FIATS) {
-                        let raw = cgData[fiat.toLowerCase()];
-                        if (raw === undefined || raw === null) continue;
-                        let val = parseFloat(raw);
-                        if (Number.isFinite(val) && val > 0 && val < PRICE_MAX) {
-                            prices[coin + '/' + fiat] = val;
-                        }
-                    }
+        let data = response.data;
+        let prices = {};
+        for (let coin of COINS) {
+            let cgId   = COINGECKO_IDS[coin];
+            let cgData = data && data[cgId];
+            if (!cgData) continue;
+            for (let fiat of FIATS) {
+                let raw = cgData[fiat.toLowerCase()];
+                if (raw === undefined || raw === null) continue;
+                let val = parseFloat(raw);
+                if (Number.isFinite(val) && val > 0 && val < PRICE_MAX) {
+                    prices[coin + '/' + fiat] = val;
                 }
-                return prices;
-            } catch (err) {
-                lastErr = err;
-                let status = err.response && err.response.status;
-                let retryable = status === 429 || status === 503;
-                if (retryable && attempt < maxAttempts) {
-                    // Backoff with jitter: attempt 1 → 1-3s, attempt 2 → 2-6s
-                    let baseMs   = 1000 * attempt;
-                    let jitterMs = Math.floor(Math.random() * 2000 * attempt);
-                    await new Promise(resolve => setTimeout(resolve, baseMs + jitterMs));
-                    continue;
-                }
-                break;
             }
         }
-        console.warn('CoinGecko fetch failed after ' + maxAttempts + ' attempts: ' + (lastErr ? lastErr.message : 'unknown error'));
-        return null;
+        return prices;
     }
 
-    // Fetch all coin/fiat pairs from CoinMarketCap (requires API key)
+    // Fetch all coin/fiat pairs from CoinMarketCap (requires API key), retrying on
+    // 429/503 with the same exponential backoff + jitter as CoinGecko so a transient
+    // CMC rate-limit doesn't silently drop the round to a single source.
     // CMC supports `convert` as a comma-separated list of fiat currencies
     // Returns: { 'BTC/USD': number, ..., 'DOGE/KRW': number } or null
     async fetchFromCoinMarketCap() {
@@ -166,33 +182,35 @@ class PriceFetcher {
         let convert = FIATS.join(',');
         let url     = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest?symbol=' + symbols + '&convert=' + convert;
 
+        let response;
         try {
-            let response = await axios.get(url, {
+            response = await this._fetchWithRetry(url, {
                 timeout: this.timeout,
                 headers: { 'X-CMC_PRO_API_KEY': this.coinmarketcapApiKey }
             });
-            let data = response.data && response.data.data;
-            if (!data) return null;
-
-            let prices = {};
-            for (let coin of COINS) {
-                let symbol  = CMC_SYMBOLS[coin];
-                let cmcData = data[symbol];
-                if (!cmcData || !cmcData.quote) continue;
-                for (let fiat of FIATS) {
-                    let cmcQuote = cmcData.quote[fiat];
-                    if (!cmcQuote || cmcQuote.price === undefined) continue;
-                    let val = parseFloat(cmcQuote.price);
-                    if (Number.isFinite(val) && val > 0 && val < PRICE_MAX) {
-                        prices[coin + '/' + fiat] = val;
-                    }
-                }
-            }
-            return prices;
         } catch (err) {
-            console.warn('CoinMarketCap fetch failed:', err);
+            console.warn('CoinMarketCap fetch failed after retries: ' + (err ? err.message : 'unknown error'));
             return null;
         }
+
+        let data = response.data && response.data.data;
+        if (!data) return null;
+
+        let prices = {};
+        for (let coin of COINS) {
+            let symbol  = CMC_SYMBOLS[coin];
+            let cmcData = data[symbol];
+            if (!cmcData || !cmcData.quote) continue;
+            for (let fiat of FIATS) {
+                let cmcQuote = cmcData.quote[fiat];
+                if (!cmcQuote || cmcQuote.price === undefined) continue;
+                let val = parseFloat(cmcQuote.price);
+                if (Number.isFinite(val) && val > 0 && val < PRICE_MAX) {
+                    prices[coin + '/' + fiat] = val;
+                }
+            }
+        }
+        return prices;
     }
 
     // Compute median of a numeric array
