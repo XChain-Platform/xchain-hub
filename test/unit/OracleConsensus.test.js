@@ -114,6 +114,46 @@ describe('OracleConsensus', function () {
             let subs = buildSubmissions(entries);
             expect(oc._aggregate(subs, 'BTC/USD')).to.equal('42000.00000000');
         });
+
+        it('counts duplicate same-pair entries from one sender as a single data point', function () {
+            // A sender may include N entries for the same pair in one submission.
+            // Each sender must contribute at most one value, otherwise values.length
+            // is inflated and the trim boundary (floor(N * 0.15)) shifts so the
+            // duplicated outlier survives instead of being trimmed.
+            //
+            // Six honest senders at 100, plus one sender at 200 duplicated 20×.
+            //   Deduped: [100×6, 200×1] → 7 values, trimCount=floor(7*0.15)=1,
+            //            trim removes the 200 → median 100.
+            //   If duplicates counted: [100×6, 200×20] → 26 values,
+            //            trimCount=floor(26*0.15)=3, the 200s dominate → median 200.
+            let entries = [
+                { sender: 'v1', prices: [{ coinPair: 'BTC/USD', price: '100' }] },
+                { sender: 'v2', prices: [{ coinPair: 'BTC/USD', price: '100' }] },
+                { sender: 'v3', prices: [{ coinPair: 'BTC/USD', price: '100' }] },
+                { sender: 'v4', prices: [{ coinPair: 'BTC/USD', price: '100' }] },
+                { sender: 'v5', prices: [{ coinPair: 'BTC/USD', price: '100' }] },
+                { sender: 'v6', prices: [{ coinPair: 'BTC/USD', price: '100' }] },
+                { sender: 'attacker', prices: Array.from({ length: 20 },
+                    () => ({ coinPair: 'BTC/USD', price: '200' })) }
+            ];
+            let subs = buildSubmissions(entries);
+            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100.00000000');
+        });
+
+        it('uses the first valid entry per sender, skipping an invalid leading duplicate', function () {
+            // The first entry for the pair is invalid (zero) and must be skipped;
+            // the next valid entry is the sender's single data point. A single
+            // valid value alone is returned as-is.
+            let entries = [
+                { sender: 'v1', prices: [
+                    { coinPair: 'BTC/USD', price: '0' },       // skipped (invalid)
+                    { coinPair: 'BTC/USD', price: '55000' },   // first valid → used
+                    { coinPair: 'BTC/USD', price: '999999' }   // ignored (already have one)
+                ]}
+            ];
+            let subs = buildSubmissions(entries);
+            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('55000.00000000');
+        });
     });
 
     // -----------------------------------------------------------------

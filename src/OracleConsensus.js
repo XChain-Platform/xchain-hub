@@ -524,6 +524,12 @@ class OracleConsensus extends EventEmitter {
                         let val = parseFloat(p.price);
                         if (isFinite(val) && val > 0 && val < PRICE_MAX) {
                             values.push(val);
+                            // Cap each sender at one data point per pair. A
+                            // submission could contain N entries for the same
+                            // pair; counting them all would inflate values.length
+                            // and shift the trim boundary, letting an outlier
+                            // survive. Stop after the first valid value.
+                            break;
                         }
                     }
                 }
