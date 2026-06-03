@@ -130,7 +130,7 @@ class OracleConsensus extends EventEmitter {
         let submissions = this.oracleRound.getSubmissions(round);
         if (!submissions || submissions.size === 0) {
             // No submissions — skip the round
-            await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime);
+            await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'no submissions');
             return;
         }
 
@@ -138,7 +138,7 @@ class OracleConsensus extends EventEmitter {
         if (submissions.size < this.minSubmissions) {
             console.warn('Oracle: Round ' + round + ' has only ' + submissions.size +
                 ' submission(s); minimum is ' + this.minSubmissions + ' — skipping');
-            await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime);
+            await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'below minimum submissions threshold');
             return;
         }
 
@@ -247,7 +247,7 @@ class OracleConsensus extends EventEmitter {
     _proposeRound(round, submissions, isFallback, btcBlockHeight, btcBlockTime, snapshot, quorum) {
         let aggregated = this._aggregateAll(submissions);
         if (aggregated.length === 0) {
-            this._storeSkippedRound(round, btcBlockHeight, btcBlockTime).catch(err =>
+            this._storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'aggregation yielded no prices').catch(err =>
                 console.error('Oracle: Error storing skipped round ' + round + ':', err.message));
             return;
         }
@@ -656,7 +656,11 @@ class OracleConsensus extends EventEmitter {
     }
 
     // Store a skipped round
-    async _storeSkippedRound(round, btcBlockHeight, btcBlockTime) {
+    // reason is a short human-readable string describing why the round was
+    // skipped (e.g. 'no submissions', 'below minimum submissions threshold',
+    // 'aggregation yielded no prices'); it's surfaced in the skip log so
+    // operators can tell a full outage apart from a quorum shortfall.
+    async _storeSkippedRound(round, btcBlockHeight, btcBlockTime, reason) {
         let referenceBlock = btcBlockHeight || round;
         let blockTimestamp = btcBlockTime   || Math.floor(Date.now() / 1000);
         let coinPairs = PriceFetcher.getCoinPairs();
@@ -670,7 +674,7 @@ class OracleConsensus extends EventEmitter {
         }
         this.finalized.add(round);
         this._clearRoundTracking(round);
-        console.log('Oracle: Round ' + round + ' skipped (no submissions)');
+        console.log('Oracle: Round ' + round + ' skipped (' + (reason || 'no submissions') + ')');
     }
 
     // --- Signature collection (PRICE v0 anchor) ---
