@@ -61,6 +61,10 @@ const TELEMETRY_RETENTION_DAYS = parseInt(process.env.TELEMETRY_RETENTION_DAYS) 
 // derive a coarse country/region and a keyed HMAC, then discard the IP. Without a salt set,
 // ip_hash is left null (we never store an unsalted hash, which would be trivially reversible).
 const TELEMETRY_IP_SALT        = process.env.TELEMETRY_IP_SALT || '';
+// Gate for the per-install detail endpoint (GET /telemetry/operators). Unlike the
+// aggregate summary, that endpoint exposes per-server data (ip_hash/region/what-runs-where),
+// so it is fail-closed: without this key set, the endpoint returns 401 for everyone.
+const TELEMETRY_ADMIN_KEY      = process.env.TELEMETRY_ADMIN_KEY || '';
 
 const ALLOWED_CHAINS = new Set(['BTC', 'LTC', 'DOGE']);
 const WRITE_METHODS  = new Set([
@@ -845,6 +849,77 @@ async function startApi(){
             });
         } catch (err) {
             res.status(500).json({ error: err.message || 'telemetry summary error' });
+        }
+    });
+
+    // GET /telemetry/operators — per-install (per-server) detail. UNLIKE the aggregate
+    // summary this returns identifying-ish data (ip_hash, region, exactly what each
+    // server runs), so it is fail-closed behind TELEMETRY_ADMIN_KEY (x-api-key header).
+    // Intended for the operator's own auth-gated dashboard, never public consumption.
+    app.get('/telemetry/operators', async (req, res) => {
+        if (!TELEMETRY_ENABLED) return res.json({ enabled: false });
+        if (!TELEMETRY_ADMIN_KEY || (req.headers['x-api-key'] || '') !== TELEMETRY_ADMIN_KEY) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+        try {
+            let days = req.query.days ? parseInt(req.query.days, 10) : 30;
+            if (!Number.isFinite(days) || days < 1) days = 30;
+            if (days > 365) days = 365;
+
+            // Latest ping per install in the window — the current state of each server.
+            let rows = await hub.db.doQuery(
+                `SELECT t.install_id, t.country, t.region, t.ip_hash, t.node_version,
+                        t.os_platform, t.os_release, t.arch, t.docker_version, t.modules,
+                        t.created_at AS last_seen
+                   FROM telemetry_pings t
+                   JOIN (
+                     SELECT install_id, MAX(created_at) AS mx
+                       FROM telemetry_pings
+                      WHERE created_at > (NOW() - INTERVAL ${days} DAY)
+                      GROUP BY install_id
+                   ) l ON t.install_id = l.install_id AND t.created_at = l.mx
+                  LIMIT 50000`,
+                []
+            );
+
+            // first_seen + ping count per install over the window.
+            let statRows = await hub.db.doQuery(
+                `SELECT install_id, COUNT(*) AS pings, MIN(created_at) AS first_seen
+                   FROM telemetry_pings
+                  WHERE created_at > (NOW() - INTERVAL ${days} DAY)
+                  GROUP BY install_id`,
+                []
+            );
+            const stats = new Map();
+            for (const s of statRows) stats.set(s.install_id, s);
+
+            const operators = rows.map(r => {
+                let mods = [];
+                try { mods = Array.isArray(r.modules) ? r.modules : JSON.parse(r.modules || '[]'); } catch (e) { mods = []; }
+                const chains = [...new Set(mods.filter(m => m && m.running && m.coin && m.network).map(m => m.coin + '/' + m.network))].sort();
+                const modules = [...new Set(mods.filter(m => m && m.running && m.module).map(m => m.module))].sort();
+                const st = stats.get(r.install_id) || {};
+                return {
+                    install_id:     r.install_id,
+                    first_seen:     st.first_seen || null,
+                    last_seen:      r.last_seen,
+                    pings:          st.pings != null ? Number(st.pings) : null,
+                    country:        r.country,
+                    region:         r.region,
+                    ip_hash:        r.ip_hash,
+                    node_version:   r.node_version,
+                    os_platform:    r.os_platform,
+                    os_release:     r.os_release,
+                    arch:           r.arch,
+                    docker_version: r.docker_version,
+                    chains,
+                    modules
+                };
+            }).sort((a, b) => new Date(b.last_seen) - new Date(a.last_seen));
+
+            res.json({ enabled: true, window_days: days, operators });
+        } catch (err) {
+            res.status(500).json({ error: err.message || 'telemetry operators error' });
         }
     });
 
