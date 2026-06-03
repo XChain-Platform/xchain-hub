@@ -45,7 +45,7 @@ const AttestationSpotChecker = require('./AttestationSpotChecker.js');
 const fs                 = require('fs');
 const axios              = require('axios');
 const PARAMETER_LIST     = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass"];
-const OPERATIONAL_PARAMS = new Set(["GAS_PRICE", "FEE_PAYMENT_MODE", "ACTIVATION_DELAY_BLOCKS", "EXPIRATION_FEE_PER_DAY"]);
+const OPERATIONAL_PARAMS = new Set(["GAS_PRICE", "ACTIVATION_DELAY_BLOCKS", "EXPIRATION_FEE_PER_DAY"]);
 const JSON_BLOB_PARAMS   = new Set(["GAS_SCHEDULE", "STAKING"]);
 
 class XChainHub {
@@ -417,7 +417,7 @@ class XChainHub {
                         });
                     }
 
-                    // Flat scalar operational params (GAS_PRICE, FEE_PAYMENT_MODE, etc.)
+                    // Flat scalar operational params (GAS_PRICE, ACTIVATION_DELAY_BLOCKS, etc.)
                     for(let nextParam of OPERATIONAL_PARAMS){
                         let nextValue = moduleLevel[nextParam];
                         if(nextValue === null || nextValue === undefined) continue;
