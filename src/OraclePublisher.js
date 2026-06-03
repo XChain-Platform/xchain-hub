@@ -53,11 +53,11 @@ class OraclePublisher {
 
         // Config (read from env or hub p2pConfig)
         let cfg = hub.p2pConfig || {};
-        this.queuePath          = process.env.PUBLISHER_QUEUE_PATH || './data/publisher-queue.jsonl';
+        this.queuePath          = process.env.PUBLISHER_QUEUE_PATH || cfg.PUBLISHER_QUEUE_PATH || './data/publisher-queue.jsonl';
         this.dogeAddress        = process.env.DOGE_ADDRESS || cfg.DOGE_ADDRESS || '';
         this.dogePubkeyHex      = process.env.DOGE_PUBKEY_HEX || cfg.DOGE_PUBKEY_HEX || '';
         this.lowBalanceThreshold = parseFloat(process.env.DOGE_LOW_BALANCE_THRESHOLD || cfg.DOGE_LOW_BALANCE_THRESHOLD || '10'); // DOGE
-        this.maxAttempts        = parseInt(process.env.PUBLISHER_MAX_ATTEMPTS || '5');
+        this.maxAttempts        = parseInt(process.env.PUBLISHER_MAX_ATTEMPTS || cfg.PUBLISHER_MAX_ATTEMPTS || '5');
 
         // Per-round state
         this.failoverWindowBlocks = 1; // 1 BTC block before failover triggers
