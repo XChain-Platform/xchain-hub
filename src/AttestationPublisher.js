@@ -65,7 +65,7 @@ const DEFAULT_FAILOVER_POLL_MS       = 30000;   // sweep cadence
 const DEFAULT_LEADER_RETRY_MS        = 60000;   // grace before the sweep retries a leader entry
                                                 // (lets the happy-path live broadcast win)
 const PENDING_PAGE_LIMIT             = 100;     // matches AttestationRound poll page size
-const ATTEST_WIRE_MAX_BYTES          = 8192;    // must equal MAX_DATA_BYTES in xchain-encoder/src/validator.js
+const ATTEST_WIRE_MAX_BYTES          = 8189;    // must equal MAX_DATA_BYTES in xchain-encoder/src/validator.js
 
 class AttestationPublisher {
 
