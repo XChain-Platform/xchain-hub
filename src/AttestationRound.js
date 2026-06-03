@@ -73,7 +73,6 @@ class AttestationRound {
         // AttestationConsensus instance — set via setConsensus after creation
         this.consensus = null;
 
-        this._messageHandler = null;
         this._pollTimer      = null;
 
         this.pollMs         = parseInt(this.config.ATTESTATION_POLL_MS)        || DEFAULT_POLL_MS;
@@ -100,8 +99,6 @@ class AttestationRound {
             console.log('AttestationRound: no peer manager — skipping start');
             return;
         }
-        this._messageHandler = (env) => this._handleMessage(env);
-        this.peerManager.on('message', this._messageHandler);
         this._pollTimer = setInterval(() => {
             this._pollPending().catch(e => console.error('AttestationRound: poll error:', e));
         }, this.pollMs);
@@ -114,10 +111,6 @@ class AttestationRound {
         if(this._pollTimer){
             clearInterval(this._pollTimer);
             this._pollTimer = null;
-        }
-        if(this._messageHandler){
-            this.peerManager.removeListener('message', this._messageHandler);
-            this._messageHandler = null;
         }
         this.rounds.clear();
         this.seen.clear();
@@ -337,12 +330,6 @@ class AttestationRound {
             proposed_count:  proposed,
             failed_count:    failed
         };
-    }
-
-    _handleMessage(envelope){
-        // AttestationRound itself doesn't handle PBFT messages — those go
-        // to AttestationConsensus. We only listen so that subclassed
-        // implementations or future scope can hook here without re-subscribing.
     }
 
     // ----- BTC indexer URL resolution (mirrors XChainHub helpers) -----
