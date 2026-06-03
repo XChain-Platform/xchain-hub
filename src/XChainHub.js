@@ -973,7 +973,7 @@ class XChainHub {
             if(!netConfig) continue;
             // xchain-node's updateconfig push uses nested {host, port, ...} under the module key
             let nested = netConfig['xchain-indexer'];
-            let host = (nested && nested['host']) || netConfig['INDEXER_HOST'];
+            let host = (nested && nested['host']) || netConfig['INDEXER_URL'];
             let port = (nested && nested['port']) || netConfig['INDEXER_API_PORT'];
             if(host && port) return 'http://' + host + ':' + port;
         }
