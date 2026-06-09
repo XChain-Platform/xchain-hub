@@ -180,8 +180,9 @@ class CrossChainDexEngine extends EventEmitter {
     }
 
     // True iff a and b are a clean cross-chain swap: each gives what the other wants.
-    // NOTE: amount equality is string-exact for now; bignumber-normalized compare is a
-    // refinement (different formatting of the same value would currently miss).
+    // Amounts compare by normalized decimal value (the two compared amounts are always the
+    // SAME token, so same decimals), not raw string — give_amount/get_amount are stored
+    // VARCHAR as the user wrote them, so "100" and "100.00000000" are the same offer.
     _isExactMatch(a, b){
         if(a.home_coin === b.home_coin) return false;
         if((a.home_network || '') !== (b.home_network || '') || !a.home_network) return false; // never match across networks
@@ -189,11 +190,32 @@ class CrossChainDexEngine extends EventEmitter {
         if(a.give_coin !== b.get_coin || a.get_coin !== b.give_coin) return false;
         if((a.give_tick || '') !== (b.get_tick || '')) return false;
         if((a.get_tick || '') !== (b.give_tick || '')) return false;
-        if(String(a.give_amount) !== String(b.get_amount)) return false;
-        if(String(a.get_amount) !== String(b.give_amount)) return false;
+        if(!this._amountsEqual(a.give_amount, b.get_amount)) return false;
+        if(!this._amountsEqual(a.get_amount, b.give_amount)) return false;
         if(Number(a.give_ownership || 0) !== Number(b.get_ownership || 0)) return false;
         if(Number(a.get_ownership || 0)  !== Number(b.give_ownership || 0)) return false;
         return true;
+    }
+
+    // Canonicalize a validated, non-negative decimal numeral string for exact value compare:
+    // strip insignificant leading (int) and trailing (fraction) zeros. Pure string math — no
+    // float, no bignumber dep — so it's exact at any precision and deterministic. null/empty
+    // (ownership offers carry no amount) normalize to '' and compare equal to each other.
+    _normalizeAmount(v){
+        if(v === null || v === undefined) return '';
+        let s = String(v).trim();
+        if(s === '') return '';
+        let neg = s.startsWith('-');                  // pre-validated non-negative; defensive only
+        if(neg) s = s.slice(1);
+        let parts = s.split('.');
+        let int  = (parts[0] || '').replace(/^0+/, '') || '0';
+        let frac = (parts[1] || '').replace(/0+$/, '');
+        let out  = frac ? (int + '.' + frac) : int;
+        return (neg && out !== '0') ? '-' + out : out;
+    }
+
+    _amountsEqual(x, y){
+        return this._normalizeAmount(x) === this._normalizeAmount(y);
     }
 
     // ─── Finalize: sign + write the match row + persist the capability snapshot ──
