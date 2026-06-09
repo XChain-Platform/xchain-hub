@@ -63,6 +63,14 @@ class HubDbBroadcaster {
                 let op = await this.db.doQuery('SELECT MAX(id) AS max_id FROM oracle_prices');
                 maxIds.oracle_prices = (op.length > 0 && op[0].max_id != null) ? Number(op[0].max_id) : 0;
             } catch (e) { /* table may not exist yet */ }
+            try {
+                let cm = await this.db.doQuery('SELECT MAX(id) AS max_id FROM cross_chain_matches');
+                maxIds.cross_chain_matches = (cm.length > 0 && cm[0].max_id != null) ? Number(cm[0].max_id) : 0;
+            } catch (e) { /* table may not exist yet */ }
+            try {
+                let cs = await this.db.doQuery('SELECT MAX(id) AS max_id FROM capability_snapshots');
+                maxIds.capability_snapshots = (cs.length > 0 && cs[0].max_id != null) ? Number(cs[0].max_id) : 0;
+            } catch (e) { /* table may not exist yet */ }
         }
 
         try {

@@ -28,6 +28,7 @@ const OracleRound        = require('./OracleRound.js');
 const RewardTracker      = require('./RewardTracker.js');
 const SlashDetector      = require('./SlashDetector.js');
 const CrossChainEngine   = require('./CrossChainEngine.js');
+const CrossChainDexEngine = require('./CrossChainDexEngine.js');
 const ReorgHandler       = require('./ReorgHandler.js');
 const SwapTracker        = require('./SwapTracker.js');
 const Governance         = require('./Governance.js');
@@ -278,11 +279,23 @@ class XChainHub {
         this.swapTracker.start(this.crossChain);
 
         await this.crossChain.start();
+
+        // Cross-chain DEX engine — matches cross-chain ORDER/SWAP offers across chains
+        // and drives their settlement via the validator-broadcast XSETTLE rail. Only
+        // active when at least one chain's indexer URL is configured (XDEX_*/per-coin
+        // INDEXER_URL); otherwise it idles harmlessly.
+        this.crossChainDex = new CrossChainDexEngine(this);
+        await this.crossChainDex.start();
     }
 
     // Get the CrossChainEngine instance
     getCrossChain(){
         return this.crossChain;
+    }
+
+    // Get the CrossChainDexEngine instance
+    getCrossChainDex(){
+        return this.crossChainDex;
     }
 
     // Start the reorg handler (no-op if P2P is not active)

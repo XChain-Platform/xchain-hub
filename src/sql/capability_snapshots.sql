@@ -1,0 +1,15 @@
+DROP TABLE IF EXISTS capability_snapshots;
+CREATE TABLE capability_snapshots (
+    id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, -- mirror cursor (since_id)
+    snapshot_block BIGINT UNSIGNED NOT NULL,                -- BTC-anchored block boundary this set is locked at
+    capability     VARCHAR(20)  NOT NULL,                   -- e.g. 'cross_chain'
+    signing_pubkey VARCHAR(64)  NOT NULL,                   -- Ed25519 validator pubkey (64 hex)
+    amount         VARCHAR(250) NOT NULL,                   -- aggregate active stake at the block (informational)
+    created_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci;
+
+-- Presence of a row = that pubkey QUALIFIED for `capability` at `snapshot_block`
+-- (the hub only writes pubkeys already filtered by min_stake via getcapabilityvalidators).
+CREATE UNIQUE INDEX uq_cap_snap   ON capability_snapshots (snapshot_block, capability, signing_pubkey);
+CREATE        INDEX cap_block     ON capability_snapshots (capability, snapshot_block);

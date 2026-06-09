@@ -677,6 +677,36 @@ async function startApi(){
         }
     });
 
+    // GET /hub-db/snapshot/cross_chain_matches — full snapshot of cross_chain_matches table
+    app.get('/hub-db/snapshot/cross_chain_matches', async (req, res) => {
+        try {
+            let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
+            let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
+            let rows = await hub.db.doQuery(
+                'SELECT * FROM cross_chain_matches WHERE id > ? ORDER BY id ASC LIMIT ?',
+                [since, limit]
+            );
+            res.json({ table: 'cross_chain_matches', rows: rows, count: rows.length });
+        } catch (err) {
+            res.status(500).json({ error: err.message || 'snapshot error' });
+        }
+    });
+
+    // GET /hub-db/snapshot/capability_snapshots — full snapshot of capability_snapshots table
+    app.get('/hub-db/snapshot/capability_snapshots', async (req, res) => {
+        try {
+            let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
+            let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
+            let rows = await hub.db.doQuery(
+                'SELECT * FROM capability_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?',
+                [since, limit]
+            );
+            res.json({ table: 'capability_snapshots', rows: rows, count: rows.length });
+        } catch (err) {
+            res.status(500).json({ error: err.message || 'snapshot error' });
+        }
+    });
+
     // POST /telemetry — anonymous usage ping receiver for xchain-node operators.
     // The connecting IP is NEVER stored. At ingest we derive a coarse country/region and a
     // keyed one-way hash from it, then discard the IP. The body is never trusted for IP.
