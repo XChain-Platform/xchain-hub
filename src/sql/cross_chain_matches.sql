@@ -7,15 +7,19 @@ CREATE TABLE cross_chain_matches (
     -- Order A (canonical-lower side). payout addr = A's receive address on B's chain.
     a_chain              VARCHAR(10)  NOT NULL,
     a_action_index       BIGINT UNSIGNED NOT NULL,
+    a_kind               VARCHAR(10)  NOT NULL DEFAULT 'swap',      -- 'swap' (full, single-fill) | 'order' (partial-fillable)
     a_tick               VARCHAR(255),                             -- NULL = native coin (later phase)
-    a_amount             VARCHAR(250) NOT NULL,
+    a_amount             VARCHAR(250) NOT NULL,                     -- FILL amount settled in THIS match (== full offer for a swap)
+    a_filled_before      VARCHAR(250) NOT NULL DEFAULT '0',        -- A's cumulative committed fill BEFORE this match (binds sequential fills)
     a_ownership          TINYINT(1)   NOT NULL DEFAULT 0,
     a_payout_addr        VARCHAR(255) NOT NULL,
     -- Order B (canonical-higher side). payout addr = B's receive address on A's chain.
     b_chain              VARCHAR(10)  NOT NULL,
     b_action_index       BIGINT UNSIGNED NOT NULL,
+    b_kind               VARCHAR(10)  NOT NULL DEFAULT 'swap',
     b_tick               VARCHAR(255),
-    b_amount             VARCHAR(250) NOT NULL,
+    b_amount             VARCHAR(250) NOT NULL,                     -- FILL amount settled in THIS match
+    b_filled_before      VARCHAR(250) NOT NULL DEFAULT '0',
     b_ownership          TINYINT(1)   NOT NULL DEFAULT 0,
     b_payout_addr        VARCHAR(255) NOT NULL,
     effective_time       BIGINT UNSIGNED NOT NULL,                 -- wall-clock instant indexers apply at (shared clock across chains)
