@@ -94,6 +94,28 @@ describe('OracleRound', function () {
             expect(subs.has(pm.validatorAddr)).to.be.true;
         });
 
+        // BTC chain-tip anchor resolution. getChainTip (the pushed hub-DB tip) is
+        // null in these mocks, so they exercise the resolver fallback added for hubs
+        // not co-located with a BTC indexer.
+        it('anchors on the direct indexer height when no pushed tip exists', async function () {
+            // getChainTip stays null (mockHub default); the resolver returns a height.
+            hub._resolveBtcLatestBlock.resolves(952913);
+            await or._executeRound();
+
+            expect(or.currentBtcBlockHeight).to.equal(952913);
+            // A real height must clear the fallback so finalization is not suppressed.
+            expect(or.chainTipFallbackActive).to.be.false;
+            expect(or.lastSuccessfulChainTipFetchAt).to.be.a('number');
+        });
+
+        it('falls back to the round number when both tip sources are empty', async function () {
+            // getChainTip null + resolver null (both mockHub defaults).
+            await or._executeRound();
+
+            expect(or.chainTipFallbackActive).to.be.true;
+            expect(or.currentBtcBlockHeight).to.equal(or.getCurrentRound());
+        });
+
         it('skips round when price fetch returns empty', async function () {
             mockPriceFetcher.fetchPrices.resolves([]);
             await or._executeRound();

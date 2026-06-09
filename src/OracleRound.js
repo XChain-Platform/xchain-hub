@@ -283,16 +283,37 @@ class OracleRound {
                 this.chainTipFetchFailures         = 0;
                 this.chainTipFallbackActive        = false;
             } else {
-                // No BTC tip available yet — fall back to round number
-                this.chainTipFetchFailures++;
-                if (!this.chainTipFallbackActive) this.chainTipFallbackActive = true;
-                if (this.chainTipFetchFailures > 1) {
-                    console.error('Oracle: BTC chain tip unavailable (failure ' + this.chainTipFetchFailures + ') — using round number as fallback anchor');
+                // No pushed chain tip in the hub DB. The indexer→hub `pushchaintip`
+                // path only populates getChainTip when an indexer is co-located with
+                // (and configured to push to) this hub — which a master/standalone hub
+                // box running the oracle may not have. Before degrading to the round
+                // number, try the hub's direct indexer resolver (getlatestblock via
+                // BTC_INDEXER_API_URL or the configs table). It returns only a height,
+                // so anchor the timestamp to the wall clock. A real height is a real
+                // anchor, so clear the fallback flag — finalization must NOT be
+                // suppressed when we have an authoritative block height.
+                let directHeight = null;
+                try { directHeight = await this.hub._resolveBtcLatestBlock(); }
+                catch (_) { /* resolver failed — fall through to round-number anchor */ }
+
+                if (directHeight) {
+                    this.currentBtcBlockHeight         = directHeight;
+                    this.currentBtcBlockTime           = Math.floor(Date.now() / 1000);
+                    this.lastSuccessfulChainTipFetchAt = Date.now();
+                    this.chainTipFetchFailures         = 0;
+                    this.chainTipFallbackActive        = false;
                 } else {
-                    console.warn('Oracle: BTC chain tip unavailable — using round number as fallback anchor');
+                    // No BTC tip available at all — fall back to round number
+                    this.chainTipFetchFailures++;
+                    if (!this.chainTipFallbackActive) this.chainTipFallbackActive = true;
+                    if (this.chainTipFetchFailures > 1) {
+                        console.error('Oracle: BTC chain tip unavailable (failure ' + this.chainTipFetchFailures + ') — using round number as fallback anchor');
+                    } else {
+                        console.warn('Oracle: BTC chain tip unavailable — using round number as fallback anchor');
+                    }
+                    this.currentBtcBlockHeight = this.currentRound;
+                    this.currentBtcBlockTime   = Math.floor(Date.now() / 1000);
                 }
-                this.currentBtcBlockHeight = this.currentRound;
-                this.currentBtcBlockTime   = Math.floor(Date.now() / 1000);
             }
         } catch (err) {
             this.chainTipFetchFailures++;
