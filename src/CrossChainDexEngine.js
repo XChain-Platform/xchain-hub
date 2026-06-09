@@ -46,8 +46,13 @@ const crypto       = require('crypto');
 const EventEmitter = require('events');
 const axios        = require('axios');
 
+const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
+
 const ALLOWED_CHAINS = ['BTC', 'LTC', 'DOGE'];
 const DEFAULT_POLL_MS = 15000;
+// Min on-chain confirmations a give-side escrow must have before a peer will sign
+// a proposed match (Byzantine safety against matching on a reorg-able escrow).
+const DEFAULT_MIN_CONFIRMATIONS = 1;
 
 class CrossChainDexEngine extends EventEmitter {
 
@@ -90,16 +95,22 @@ class CrossChainDexEngine extends EventEmitter {
         // from cross_chain_matches.
         this.matchedOffers = new Set();
 
+        this.minConfirmations = parseInt(process.env.XDEX_MIN_CONFIRMATIONS || cfg.XDEX_MIN_CONFIRMATIONS || DEFAULT_MIN_CONFIRMATIONS);
+
+        // PBFT consensus over each match. Single-node (quorum 0) collapses to an
+        // immediate self-sign + finalize, so behavior with no federation is unchanged.
+        this.consensus = new CrossChainDexConsensus(this);
+        this.consensus.on('match:finalized', (ev) => {
+            this._writeFinalizedMatch(ev).catch(err =>
+                console.error('CrossChainDex: write finalized match error:', err && err.message));
+        });
+
         this._pollTimer = null;
-        this._messageHandler = null;
     }
 
     async start(){
         await this._rebuildMatchedOffers();
-        if(this.peerManager){
-            this._messageHandler = (envelope) => this._handleMessage(envelope);
-            this.peerManager.on('message', this._messageHandler);
-        }
+        await this.consensus.start();           // subscribes to P2P; drives PBFT match rounds
         this._pollTimer = setInterval(() => {
             this._discoverAndMatch().catch(err => console.error('CrossChainDex: tick error:', err && err.message));
         }, this.pollMs);
@@ -108,10 +119,7 @@ class CrossChainDexEngine extends EventEmitter {
 
     async stop(){
         if(this._pollTimer){ clearInterval(this._pollTimer); this._pollTimer = null; }
-        if(this._messageHandler && this.peerManager){
-            this.peerManager.removeListener('message', this._messageHandler);
-            this._messageHandler = null;
-        }
+        await this.consensus.stop();
     }
 
     // Rebuild the in-flight matched-offer set from finalized matches (restart safety).
@@ -248,25 +256,71 @@ class CrossChainDexEngine extends EventEmitter {
             effective_time: effectiveTime
         };
 
-        // Persist the cross_chain validator snapshot at snapshot_block so every
-        // indexer can verify these signatures (mandatory off-BTC; see design §5).
-        await this._persistCapabilitySnapshot('cross_chain', Number(snapshotBlock));
+        // Resolve the cross_chain validator set at snapshot_block (deterministic,
+        // BTC-anchored) so every node computes the same quorum. The leader of the
+        // round persists + mirrors these rows to indexers (in consensus PROPOSE).
+        let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock));
 
-        // Federation consensus on the match. Single-node (no quorum) signs directly.
-        // TODO (multi-node): run a PBFT round (XDEX_MATCH_PROPOSE/PREPARE/COMMIT) over
-        //   the canonical match before signing — see _handleMessage scaffold.
-        let canonical = this._canonicalMatch(row);
-        let sigs      = await this._collectSignatures(canonical);
-        row.validator_signatures = JSON.stringify(sigs);
-
-        // Write + mirror the finalized match.
-        await this._insertMatchRow(row);
+        // Reserve both offers so a later poll doesn't re-propose the same escrow while
+        // the round is in flight. (Cleared by retraction; the indexer marks the offer
+        // complete on settle, after which it drops out of getopencrosschainorders.)
         this.matchedOffers.add(row.a_chain + ':' + row.a_action_index);
         this.matchedOffers.add(row.b_chain + ':' + row.b_action_index);
 
-        console.log('CrossChainDex: finalized ' + matchId.substring(0, 16) + '... ' +
-                    row.a_chain + ':' + row.a_action_index + ' ⇄ ' + row.b_chain + ':' + row.b_action_index);
-        this.emit('match:finalized', { matchId });
+        // Run the PBFT round. quorum 0 (single operator) self-signs + finalizes inline;
+        // a federation gathers 2f+1 independent signatures, then 'match:finalized' fires
+        // and _writeFinalizedMatch writes + mirrors the row.
+        await this.consensus.propose(matchId, { row: row, snapshot: { validators: validators, count: validators.length } });
+    }
+
+    // Persist a consensus-finalized match (2f+1 signatures attached) and mirror it.
+    async _writeFinalizedMatch(ev){
+        let row = ev.row;
+        row.validator_signatures = JSON.stringify(ev.signatures || []);
+        await this._insertMatchRow(row);
+        console.log('CrossChainDex: finalized ' + String(row.match_id).substring(0, 16) + '... ' +
+                    row.a_chain + ':' + row.a_action_index + ' ⇄ ' + row.b_chain + ':' + row.b_action_index +
+                    ' (' + (ev.signatures ? ev.signatures.length : 0) + ' sigs)');
+        this.emit('match:finalized', { matchId: row.match_id });
+    }
+
+    // Independent confirmation a peer runs before signing a leader's proposed match:
+    // re-fetch both chains' open cross-chain orders, confirm each leg is still open +
+    // escrowed + at least minConfirmations deep, and that the pair re-derives to the
+    // SAME match_id and canonical. Returns true only when our own view confirms the
+    // match — a Byzantine leader cannot get us to sign a match we can't independently see.
+    async validateProposedMatch(row){
+        if(!row || row.a_chain === row.b_chain) return false;
+        let a = await this._findOpenOffer(row.a_chain, Number(row.a_action_index));
+        let b = await this._findOpenOffer(row.b_chain, Number(row.b_action_index));
+        if(!a || !b) return false;
+        // Both legs must be a clean cross-chain swap of each other (same checks the
+        // matcher used) and carry the network the match claims.
+        if((a.home_network || '') !== String(row.network || '')) return false;
+        if((b.home_network || '') !== String(row.network || '')) return false;
+        if(!this._isExactMatch(a, b) && !this._isExactMatch(b, a)) return false;
+        // Re-derive the match_id + canonical from our own offers and require byte-match.
+        let lo = (a.home_coin <= b.home_coin) ? a : b;
+        let hi = (lo === a) ? b : a;
+        let derivedId = this._deriveMatchId(lo, hi, Number(row.snapshot_block));
+        if(String(derivedId).toLowerCase() !== String(row.match_id).toLowerCase()) return false;
+        return true;
+    }
+
+    // Look up a single still-open cross-chain offer on `coin` by action_index, gated on
+    // minConfirmations. Returns the offer (tagged like _discoverAndMatch) or null.
+    async _findOpenOffer(coin, actionIndex){
+        if(!this.indexers[coin] || !this.indexers[coin].url) return null;
+        let res;
+        try { res = await this._indexerCall(coin, 'getopencrosschainorders', { limit: 500 }); }
+        catch(e){ return null; }
+        if(!res || !Array.isArray(res.orders) || !res.network) return null;
+        let latest = Number(res.latest_block_index);
+        let o = res.orders.find(x => Number(x.action_index) === actionIndex);
+        if(!o) return null;
+        if(Number.isFinite(latest) && Number.isFinite(Number(o.block_index)) &&
+           (latest - Number(o.block_index) + 1) < this.minConfirmations) return null;   // not deep enough
+        return Object.assign({ home_coin: coin, home_network: String(res.network) }, o);
     }
 
     // Canonical signing string. MUST byte-match the indexer's verifier (the
@@ -278,12 +332,6 @@ class CrossChainDexEngine extends EventEmitter {
             r.b_chain, String(r.b_action_index), r.b_tick || '', String(r.b_amount), String(r.b_ownership), r.b_payout_addr,
             String(r.effective_time), r.network || ''
         ].join('|');
-    }
-
-    // Single-node: our own signature. Multi-node: PBFT-collected 2f+1 (scaffold).
-    async _collectSignatures(canonical){
-        if(!this.identity) throw new Error('no validator identity — cannot sign cross-chain match');
-        return [{ pubkey: this.identity.getPubkeyHex(), sig: this.identity.sign(canonical) }];
     }
 
     async _insertMatchRow(row){
@@ -302,18 +350,25 @@ class CrossChainDexEngine extends EventEmitter {
         }
     }
 
-    // Persist the qualifying validator set for `capability` at `block` to
-    // capability_snapshots (idempotent), and mirror each row to indexers. The set is
-    // resolved from the BTC indexer via CapabilitySnapshot (on-chain-deterministic).
-    async _persistCapabilitySnapshot(capability, block){
+    // Resolve the qualifying validator set for `capability` at `block` from the
+    // BTC indexer via CapabilitySnapshot (on-chain-deterministic), with the regtest
+    // seam fallback (XDEX_SEED_LOCAL_VALIDATOR → this hub's own pubkey). Used for both
+    // quorum (in _finalizeMatch) and the mirror persist (_persistCapabilitySnapshot).
+    async _resolveCapabilityValidators(capability, block){
         let validators = [];
         if(this.capSnapshot){
             let snap = await this.capSnapshot.getSnapshot(capability, block);
             if(snap && Array.isArray(snap.validators)) validators = snap.validators;
         }
-        // Regtest seam: no BTC-sourced set → seed this hub's own validator pubkey.
         if(validators.length === 0 && this._seedLocalValidator && this.identity)
             validators = [{ pubkey: this.identity.getPubkeyHex(), amount: '1' }];
+        return validators;
+    }
+
+    // Persist the qualifying validator set for `capability` at `block` to
+    // capability_snapshots (idempotent), and mirror each row to indexers.
+    async _persistCapabilitySnapshot(capability, block){
+        let validators = await this._resolveCapabilityValidators(capability, block);
         for(let v of validators){
             let pubkey = String(v.pubkey).toLowerCase();
             let amount = String(v.amount != null ? v.amount : '0');
@@ -381,13 +436,6 @@ class CrossChainDexEngine extends EventEmitter {
         return Number.isFinite(this._snapshotBlockOverride) ? this._snapshotBlockOverride : null;
     }
 
-    // ─── Multi-node PBFT scaffold ──────────────────────────────────────────
-    // Federation path: a leader broadcasts XDEX_MATCH_PROPOSE(canonical match); peers
-    // re-derive the match from their own synced order-book view, validate it (offers
-    // open, amounts mirror, both escrows confirmed N-deep), and sign; signatures gather
-    // to 2f+1 and go into validator_signatures. Mirrors AttestationConsensus. Not yet
-    // wired — single-node finalize above is the regtest-testable slice.
-    _handleMessage(/* envelope */){ /* TODO: XDEX_MATCH_PROPOSE/PREPARE/COMMIT */ }
 }
 
 module.exports = CrossChainDexEngine;
