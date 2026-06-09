@@ -11,6 +11,7 @@
 // contact legal@dankest.llc.
 
 const sinon          = require('sinon');
+const axios          = require('axios');
 const { expect }     = require('chai');
 const RewardTracker  = require('../../src/RewardTracker');
 const { createMockHub }     = require('../helpers/mockHub');
@@ -96,6 +97,21 @@ describe('RewardTracker', function () {
             await rt.distributeRewards(1, [hexPk(1), hexPk(2)]);
             expect(hub.db.doQuery.callCount).to.equal(2); // both attempted
         });
+
+        it('throws on a non-positive / non-finite reward amount', async function () {
+            let rt2 = new RewardTracker(createMockHub({ p2pConfig: { ORACLE_REWARD_PER_ROUND: '0' } }));
+            try {
+                await rt2.distributeRewards(1, [hexPk(1)]);
+                expect.fail('should throw');
+            } catch (e) {
+                expect(e.message).to.include('Invalid reward amount');
+            }
+        });
+
+        it('returns without DB writes when no participant has a valid pubkey', async function () {
+            await rt.distributeRewards(1, ['not-hex', 123, null]);
+            expect(hub.db.doQuery.called).to.be.false;
+        });
     });
 
     // -----------------------------------------------------------------
@@ -151,6 +167,55 @@ describe('RewardTracker', function () {
             hub.db.doQuery.resolves([]);
             let result = await rt.getTotalDistributed();
             expect(result).to.equal('0');
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // _pushRewardsToBtcIndexer()
+    // -----------------------------------------------------------------
+
+    describe('_pushRewardsToBtcIndexer()', function () {
+        it('returns early (no POST) when no BTC indexer URL is configured', async function () {
+            let post = sinon.stub(axios, 'post').resolves({});
+            rt.btcIndexerApiUrl = '';
+            await rt._pushRewardsToBtcIndexer(1, [hexPk(1)], '2.00000000', 800000);
+            expect(post.called).to.be.false;
+        });
+
+        it('POSTs a pushvalidatorrewards JSON-RPC body to the indexer', async function () {
+            let post = sinon.stub(axios, 'post').resolves({});
+            rt.btcIndexerApiUrl = 'http://btc-indexer/api';
+            await rt._pushRewardsToBtcIndexer(7, [hexPk(1), hexPk(2)], '5.00000000', 800000);
+
+            expect(post.calledOnce).to.be.true;
+            let [url, body, opts] = post.getCall(0).args;
+            expect(url).to.equal('http://btc-indexer/api');
+            expect(body.jsonrpc).to.equal('2.0');
+            expect(body.method).to.equal('pushvalidatorrewards');
+            expect(body.params.round).to.equal(7);
+            expect(body.params.reward_type).to.equal('oracle_round');
+            expect(body.params.block_index).to.equal(800000);
+            expect(body.params.rewards).to.deep.equal([
+                { pubkey: hexPk(1), amount: '5.00000000' },
+                { pubkey: hexPk(2), amount: '5.00000000' }
+            ]);
+            expect(opts.headers['Content-Type']).to.equal('application/json');
+            expect(opts.headers).to.not.have.property('x-api-key');
+        });
+
+        it('includes the x-api-key header when an API key is configured', async function () {
+            let post = sinon.stub(axios, 'post').resolves({});
+            rt.btcIndexerApiUrl = 'http://btc-indexer/api';
+            rt.btcIndexerApiKey = 'test-fixture-key';
+            await rt._pushRewardsToBtcIndexer(1, [hexPk(1)], '1.00000000', 1);
+            expect(post.getCall(0).args[2].headers['x-api-key']).to.equal('test-fixture-key');
+        });
+
+        it('swallows a POST failure without throwing', async function () {
+            let post = sinon.stub(axios, 'post').rejects(new Error('econnrefused'));
+            rt.btcIndexerApiUrl = 'http://btc-indexer/api';
+            await rt._pushRewardsToBtcIndexer(1, [hexPk(1)], '1.00000000', 1);
+            expect(post.calledOnce).to.be.true;
         });
     });
 });

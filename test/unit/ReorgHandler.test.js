@@ -345,4 +345,120 @@ describe('ReorgHandler', function () {
             expect(hub.db.doQuery.getCall(0).args[1]).to.deep.equal([50]);
         });
     });
+
+    // -----------------------------------------------------------------
+    // start() / stop() + dispatch
+    // -----------------------------------------------------------------
+
+    describe('start() / stop()', function () {
+        it('start subscribes to peer messages; stop unsubscribes and clears pending timers', async function () {
+            await rh.start();
+            expect(rh._messageHandler).to.be.a('function');
+            expect(pm.listenerCount('message')).to.equal(1);
+
+            rh.pendingReorgs.set('x', { timer: setTimeout(() => {}, 60000) });
+            await rh.stop();
+
+            expect(rh._messageHandler).to.equal(null);
+            expect(pm.listenerCount('message')).to.equal(0);
+            expect(rh.pendingReorgs.size).to.equal(0);
+        });
+    });
+
+    describe('_handleMessage dispatch', function () {
+        it('routes alert / prepare / commit and ignores unknown types', function () {
+            let a = sinon.spy(rh, '_handleAlert');
+            let p = sinon.spy(rh, '_handlePrepare');
+            let c = sinon.spy(rh, '_handleCommit');
+            rh._handleMessage({ type: 'REORG_ALERT', data: {} });
+            rh._handleMessage({ type: 'XCHAIN_REORG_PREPARE', data: {} });
+            rh._handleMessage({ type: 'XCHAIN_REORG_COMMIT', data: {} });
+            expect(() => rh._handleMessage({ type: 'NOPE', data: {} })).to.not.throw();
+            expect(a.calledOnce).to.be.true;
+            expect(p.calledOnce).to.be.true;
+            expect(c.calledOnce).to.be.true;
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // _handleAlert()
+    // -----------------------------------------------------------------
+
+    describe('_handleAlert()', function () {
+        beforeEach(function () {
+            rh.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+        });
+
+        it('ignores an alert with missing fields', function () {
+            rh._handleAlert({ sender: 'peer', data: { chain: 'BTC' } });
+            expect(rh.pendingReorgs.size).to.equal(0);
+        });
+
+        it('ignores an alert for an already-processed reorg', function () {
+            rh.processed.add('BTC:5:1700000000000');
+            rh._handleAlert({ sender: 'peer', data: { chain: 'BTC', reorgHeight: 5, timestamp: 1700000000000, reorgId: 'BTC:5:1700000000000' } });
+            expect(rh.pendingReorgs.size).to.equal(0);
+        });
+
+        it('starts consensus for a new reorg alert', function () {
+            let init = sinon.spy(rh, '_initiateReorgConsensus');
+            rh._handleAlert({ sender: 'peer', data: { chain: 'BTC', reorgHeight: 5, timestamp: 1700000000000, reorgId: 'BTC:5:1700000000000' } });
+            expect(init.calledOnce).to.be.true;
+            let p = rh.pendingReorgs.get('BTC:5:1700000000000');
+            if (p && p.timer) clearTimeout(p.timer);
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // Commit-quorum rollback error path
+    // -----------------------------------------------------------------
+
+    describe('reportReorg() validation', function () {
+        it('rejects an unsupported chain', async function () {
+            try { await rh.reportReorg('ETH', 5, Date.now()); expect.fail('should throw'); }
+            catch (e) { expect(e.message).to.include('Invalid chain'); }
+        });
+
+        it('rejects a negative / non-integer reorgHeight', async function () {
+            try { await rh.reportReorg('BTC', -1, Date.now()); expect.fail('should throw'); }
+            catch (e) { expect(e.message).to.include('non-negative integer'); }
+        });
+
+        it('rejects a negative timestamp', async function () {
+            try { await rh.reportReorg('BTC', 5, -1); expect.fail('should throw'); }
+            catch (e) { expect(e.message).to.include('non-negative number'); }
+        });
+
+        it('rejects a timestamp too far in the future', async function () {
+            try { await rh.reportReorg('BTC', 5, Date.now() + 600000); expect.fail('should throw'); }
+            catch (e) { expect(e.message).to.include('future'); }
+        });
+
+        it('enforces the per-chain rate limit', async function () {
+            rh.reorgRateTracker.set('BTC', Date.now());
+            try { await rh.reportReorg('BTC', 5, Date.now()); expect.fail('should throw'); }
+            catch (e) { expect(e.message).to.include('Rate limit'); }
+        });
+
+        it('_initiateReorgConsensus is a no-op for an already-pending reorg', function () {
+            rh.pendingReorgs.set('r1', { timer: null });
+            rh._initiateReorgConsensus('r1', 'BTC', 5, 1, ['LTC', 'DOGE']);
+            expect(rh.pendingReorgs.get('r1')).to.deep.equal({ timer: null });
+        });
+    });
+
+    describe('_checkCommitQuorum() rollback failure', function () {
+        it('logs and clears the pending reorg when rollback execution throws', async function () {
+            sinon.stub(rh, '_executeRollback').rejects(new Error('db down'));
+            rh.pendingReorgs.set('BTC:5:1', {
+                chain: 'BTC', reorgHeight: 5, timestamp: 1,
+                prepares: new Set(['a', 'b']), commits: new Set(['a', 'b']),
+                finalized: false, timer: null, quorum: 2, digest: 'd'
+            });
+            rh._checkCommitQuorum('BTC:5:1');
+            await new Promise(r => setTimeout(r, 20));
+            expect(rh.pendingReorgs.has('BTC:5:1')).to.be.false;
+        });
+    });
 });

@@ -850,4 +850,160 @@ describe('OracleConsensus', function () {
             expect(pm.broadcast.called).to.be.false;
         });
     });
+
+    // -----------------------------------------------------------------
+    // start() / stop()
+    // -----------------------------------------------------------------
+
+    describe('start() / stop()', function () {
+        it('start subscribes; stop unsubscribes and clears all per-round state', async function () {
+            await oc.start();
+            expect(oc._messageHandler).to.be.a('function');
+            expect(pm.listenerCount('message')).to.equal(1);
+
+            oc.pendingRounds.set(1, { timer: setTimeout(() => {}, 60000) });
+            oc.leaderTimers.set(1, setTimeout(() => {}, 60000));
+            oc.roundReadyAt.set(1, Date.now());
+
+            await oc.stop();
+            expect(oc._messageHandler).to.equal(null);
+            expect(pm.listenerCount('message')).to.equal(0);
+            expect(oc.pendingRounds.size).to.equal(0);
+            expect(oc.leaderTimers.size).to.equal(0);
+            expect(oc.roundReadyAt.size).to.equal(0);
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // finalizeRound() — below-minimum + dispatch + empty aggregation
+    // -----------------------------------------------------------------
+
+    describe('finalizeRound() / dispatch — additional paths', function () {
+        it('skips a round below the minimum submission threshold', async function () {
+            oc.minSubmissions = 3;
+            oracleRound.getSubmissions.returns(buildSubmissions([
+                { sender: VALIDATORS_3[0].addr, prices: [{ coinPair: 'BTC/USD', price: '100000' }] }
+            ]));
+            let store = sinon.stub(oc, '_storeSkippedRound').resolves();
+            await oc.finalizeRound(5, 800000, 1700000000);
+            expect(store.calledOnce).to.be.true;
+            expect(store.getCall(0).args[3]).to.include('below minimum');
+        });
+
+        it('_handleMessage routes PROPOSE / PREPARE / COMMIT and ignores unknown', function () {
+            let prop = sinon.stub(oc, '_handlePropose').resolves();
+            let prep = sinon.spy(oc, '_handlePrepare');
+            let com  = sinon.spy(oc, '_handleCommit');
+            oc._handleMessage({ type: 'ORACLE_PROPOSE', data: { round: 1 } });
+            oc._handleMessage({ type: 'ORACLE_PREPARE', data: { round: 1, digest: 'd' } });
+            oc._handleMessage({ type: 'ORACLE_COMMIT',  data: { round: 1, digest: 'd' } });
+            expect(() => oc._handleMessage({ type: 'X', data: {} })).to.not.throw();
+            expect(prop.calledOnce).to.be.true;
+            expect(prep.calledOnce).to.be.true;
+            expect(com.calledOnce).to.be.true;
+        });
+
+        it('_proposeRound stores a skipped round when aggregation yields no prices', function () {
+            let store = sinon.stub(oc, '_storeSkippedRound').resolves();
+            oc._proposeRound(5, new Map(), false, 800000, 1700000000, null, 1);
+            expect(store.calledOnce).to.be.true;
+            expect(store.getCall(0).args[3]).to.include('aggregation');
+        });
+
+        it('_proposeRound arms a finalization timeout that drops a stalled round', function () {
+            let clock = sinon.useFakeTimers();
+            oc.finalizationTimeout = 1000;
+            oc.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+            let subs = buildSubmissions([
+                { sender: VALIDATORS_4[0].addr, prices: [{ coinPair: 'BTC/USD', price: '100000' }] }
+            ]);
+            oc._proposeRound(7, subs, false, 800000, 1700000000, null, 3); // quorum 3 → stays pending
+            expect(oc.pendingRounds.has(7)).to.be.true;
+            clock.tick(1001);
+            expect(oc.pendingRounds.has(7)).to.be.false;
+            clock.restore();
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // PRICE v0 signing + verification
+    // -----------------------------------------------------------------
+
+    describe('PRICE v0 signature helpers', function () {
+        const ValidatorIdentity = require('../../src/ValidatorIdentity');
+
+        it('_buildPriceV0Payload sorts pairs canonically', function () {
+            let payload = oc._buildPriceV0Payload(5, 1700000000, [
+                { coinPair: 'LTC/USD', price: '80' },
+                { coinPair: 'BTC/USD', price: '100000' }
+            ]);
+            let obj = JSON.parse(payload);
+            expect(obj.round).to.equal(5);
+            expect(obj.pairs.map(p => p.pair)).to.deep.equal(['BTC/USD', 'LTC/USD']);
+        });
+
+        it('_buildPriceV0Payload keeps both entries when pair names are equal', function () {
+            let payload = oc._buildPriceV0Payload(1, 1, [
+                { coinPair: 'BTC/USD', price: '1' },
+                { coinPair: 'BTC/USD', price: '2' }
+            ]);
+            expect(JSON.parse(payload).pairs).to.have.length(2);
+        });
+
+        it('_signPriceV0 returns null when no identity is configured', function () {
+            hub.getIdentity.returns(null);
+            expect(oc._signPriceV0(5, 1700000000, [{ coinPair: 'BTC/USD', price: '1' }])).to.be.null;
+        });
+
+        it('_signPriceV0 returns null (not throw) when signing fails', function () {
+            hub.getIdentity.returns({ sign: () => { throw new Error('hsm offline'); }, getPubkeyHex: () => 'aa'.repeat(32) });
+            expect(oc._signPriceV0(5, 1700000000, [{ coinPair: 'BTC/USD', price: '1' }])).to.be.null;
+        });
+
+        it('_verifyAndStoreSig rejects missing args / duplicate / round-less pending', function () {
+            expect(oc._verifyAndStoreSig(null, 'pk', 'sig')).to.be.false;
+            expect(oc._verifyAndStoreSig({ round: 1, signatures: new Map() }, null, 'sig')).to.be.false;
+            expect(oc._verifyAndStoreSig({ round: 1, signatures: new Map() }, 'pk', null)).to.be.false;
+            expect(oc._verifyAndStoreSig({ round: 1, signatures: new Map([['pk', 'x']]) }, 'pk', 'sig')).to.be.false;
+            expect(oc._verifyAndStoreSig({ signatures: new Map() }, 'pk', 'sig')).to.be.false; // no round
+        });
+
+        it('_verifyAndStoreSig stores a valid signature and rejects an invalid one', function () {
+            let id = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
+            let prices = [{ coinPair: 'BTC/USD', price: '100000' }];
+            let payload = oc._buildPriceV0Payload(5, 1700000000, prices);
+            let sig = id.sign(payload);
+
+            let pending = { round: 5, btcBlockTime: 1700000000, prices, signatures: new Map() };
+            expect(oc._verifyAndStoreSig(pending, id.getPubkeyHex(), sig)).to.be.true;
+            expect(pending.signatures.has(id.getPubkeyHex())).to.be.true;
+
+            let pending2 = { round: 5, btcBlockTime: 1700000000, prices, signatures: new Map() };
+            expect(oc._verifyAndStoreSig(pending2, id.getPubkeyHex(), 'ff'.repeat(64))).to.be.false;
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // Round-tracking utilities
+    // -----------------------------------------------------------------
+
+    describe('round-tracking utilities', function () {
+        it('_markRoundReady records a new round and evicts stale entries', function () {
+            oc.finalizationTimeout = 1000;
+            oc.leaderTimeout = 1000; // ttl = 1000*2 + 1000 = 3000
+            oc.roundReadyAt.set(99, Date.now() - 10000); // stale
+            oc._markRoundReady(5);
+            expect(oc.roundReadyAt.has(99)).to.be.false;
+            expect(oc.roundReadyAt.has(5)).to.be.true;
+        });
+
+        it('_clearRoundTracking drops the round-ready entry and clears any leader timer', function () {
+            oc.roundReadyAt.set(5, Date.now());
+            oc.leaderTimers.set(5, setTimeout(() => {}, 60000));
+            oc._clearRoundTracking(5);
+            expect(oc.roundReadyAt.has(5)).to.be.false;
+            expect(oc.leaderTimers.has(5)).to.be.false;
+        });
+    });
 });

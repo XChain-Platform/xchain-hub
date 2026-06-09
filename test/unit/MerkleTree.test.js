@@ -64,4 +64,18 @@ describe('MerkleTree', function () {
         let proof = MerkleTree.generateProof(tree.layers, 0);
         expect(MerkleTree.verifyProof(leaf(99), proof, tree.root)).to.be.false;
     });
+
+    it('generateProof returns null for missing layers or an out-of-range index', function () {
+        let tree = MerkleTree.buildTree([leaf(1), leaf(2)]);
+        expect(MerkleTree.generateProof(null, 0)).to.be.null;
+        expect(MerkleTree.generateProof([], 0)).to.be.null;
+        expect(MerkleTree.generateProof(tree.layers, -1)).to.be.null;
+        expect(MerkleTree.generateProof(tree.layers, 99)).to.be.null;
+    });
+
+    it('verifyProof returns false for missing leaf / proof / expectedRoot', function () {
+        expect(MerkleTree.verifyProof(null, [], 'root')).to.be.false;
+        expect(MerkleTree.verifyProof('leaf', null, 'root')).to.be.false;
+        expect(MerkleTree.verifyProof('leaf', [], null)).to.be.false;
+    });
 });

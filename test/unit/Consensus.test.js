@@ -538,5 +538,417 @@ describe('Consensus (PBFT)', function () {
             expect(args[0]).to.include('consensus_state');
             expect(args[1]).to.include('10');
         });
+
+        it('_saveSeq swallows DB errors', async function () {
+            hub.db.doQuery.rejects(new Error('db down'));
+            await consensus._saveSeq(5); // must not throw
+        });
+
+        it('_loadSeq swallows DB errors and leaves seq at 0', async function () {
+            hub.db.doQuery.rejects(new Error('db down'));
+            await consensus._loadSeq();
+            expect(consensus.seq).to.equal(0);
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // start() / stop()
+    // -----------------------------------------------------------------
+
+    describe('start() / stop()', function () {
+        it('start() loads the sequence and subscribes to peer messages', async function () {
+            hub.db.doQuery.resolves([{ value: '7' }]);
+            await consensus.start();
+            expect(consensus.seq).to.equal(7);
+            expect(consensus.lastAppliedSeq).to.equal(7);
+            expect(pm.listenerCount('message')).to.equal(1);
+        });
+
+        it('stop() unsubscribes, rejects pending proposals, and clears all maps', async function () {
+            await consensus.start();
+            let rejected = null;
+            consensus.pendingProposals.set(9, {
+                resolved: false, timer: setTimeout(() => {}, 60000),
+                reject: (e) => { rejected = e; }
+            });
+            consensus.viewChangeQuorums.set(9, 3);
+            consensus.pendingViewChanges.set(1, new Set(['a']));
+
+            await consensus.stop();
+
+            expect(consensus._messageHandler).to.equal(null);
+            expect(pm.listenerCount('message')).to.equal(0);
+            expect(rejected).to.be.an('error');
+            expect(consensus.pendingProposals.size).to.equal(0);
+            expect(consensus.viewChangeQuorums.size).to.equal(0);
+            expect(consensus.pendingViewChanges.size).to.equal(0);
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // _handleMessage dispatch
+    // -----------------------------------------------------------------
+
+    describe('_handleMessage dispatch', function () {
+        beforeEach(function () {
+            consensus.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+        });
+
+        it('routes PREPARE / COMMIT / VIEW_CHANGE / NEW_VIEW and ignores unknown types', function () {
+            let prepare = sinon.spy(consensus, '_handlePrepare');
+            let commit  = sinon.spy(consensus, '_handleCommit');
+            let vc      = sinon.spy(consensus, '_handleViewChange');
+            let nv      = sinon.spy(consensus, '_handleNewView');
+
+            consensus._handleMessage({ type: 'PBFT_PREPARE',     data: { seq: 1, configDigest: 'd' } });
+            consensus._handleMessage({ type: 'PBFT_COMMIT',      data: { seq: 1, configDigest: 'd' } });
+            consensus._handleMessage({ type: 'PBFT_VIEW_CHANGE', data: { view: 1, seq: 1 } });
+            consensus._handleMessage({ type: 'PBFT_NEW_VIEW',    data: { view: 1, seq: 1 } });
+            expect(() => consensus._handleMessage({ type: 'NOPE', data: {} })).to.not.throw();
+
+            expect(prepare.calledOnce).to.be.true;
+            expect(commit.calledOnce).to.be.true;
+            expect(vc.calledOnce).to.be.true;
+            expect(nv.calledOnce).to.be.true;
+        });
+
+        it('routes PRE_PREPARE and swallows handler errors', async function () {
+            // Force _lockSnapshot to throw inside the async handler so the
+            // dispatch-site .catch is exercised.
+            hub.capabilitySnapshot = { getActiveValidatorSnapshot: () => { throw new Error('boom'); }, getQuorum: () => 3 };
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+            let config = { x: 1 };
+            let digest = consensus._digest(config);
+            consensus._handleMessage({
+                type: 'PBFT_PRE_PREPARE',
+                sender: VALIDATORS_4[1].addr,
+                data: { seq: 5, configDigest: digest, config, btcBlockHeight: 800000 }
+            });
+            await new Promise(r => setImmediate(r));
+            expect(consensus.pendingProposals.has(5)).to.be.false; // threw before creating
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // _lockSnapshot + snapshot-quorum propose
+    // -----------------------------------------------------------------
+
+    describe('_lockSnapshot()', function () {
+        it('returns the snapshot acquired at the resolved BTC tip', async function () {
+            hub.capabilitySnapshot = {
+                getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000 }),
+                getQuorum: sinon.stub().returns(3)
+            };
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+            let snap = await consensus._lockSnapshot();
+            expect(snap).to.deep.equal({ blockIndex: 800000 });
+            expect(hub.capabilitySnapshot.getActiveValidatorSnapshot.calledWith(800000)).to.be.true;
+        });
+
+        it('honours an explicit block-height override without resolving the tip', async function () {
+            hub.capabilitySnapshot = {
+                getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 42 }),
+                getQuorum: sinon.stub().returns(1)
+            };
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(999);
+            await consensus._lockSnapshot(42);
+            expect(hub.capabilitySnapshot.getActiveValidatorSnapshot.calledWith(42)).to.be.true;
+            expect(hub._resolveBtcLatestBlock.called).to.be.false;
+        });
+
+        it('returns null when no capabilitySnapshot is wired', async function () {
+            expect(await consensus._lockSnapshot()).to.equal(null);
+        });
+
+        it('returns null when no BTC tip can be resolved', async function () {
+            hub.capabilitySnapshot = { getActiveValidatorSnapshot: sinon.stub(), getQuorum: sinon.stub() };
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(null);
+            expect(await consensus._lockSnapshot()).to.equal(null);
+            expect(hub.capabilitySnapshot.getActiveValidatorSnapshot.called).to.be.false;
+        });
+
+        it('propose() locks the federation snapshot quorum and stamps the block height', async function () {
+            consensus.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[1].addr; // leader for seq 1
+            hub.capabilitySnapshot = {
+                getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000 }),
+                getQuorum: sinon.stub().returns(3)
+            };
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+
+            let promise = consensus.propose({ cfg: 1 });
+            await new Promise(r => setImmediate(r));
+
+            let pending = consensus.pendingProposals.get(1);
+            expect(pending.quorum).to.equal(3);
+            expect(pending.btcBlockHeight).to.equal(800000);
+            let [type, data] = pm.broadcast.getCall(0).args;
+            expect(type).to.equal('PBFT_PRE_PREPARE');
+            expect(data.btcBlockHeight).to.equal(800000);
+
+            clearTimeout(pending.timer);
+            pending.resolved = true;
+            pending.reject(new Error('cleanup'));
+            await promise.catch(() => {});
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // propose() edge cases + timeouts
+    // -----------------------------------------------------------------
+
+    describe('propose() additional paths', function () {
+        it('warns but still applies in single-node mode when MIN_VALIDATORS > 1', async function () {
+            consensus.setValidatorSet([]);
+            pm.getPeerStatus.returns([]);
+            consensus.minValidators = 3;
+            let result = await consensus.propose({ x: 1 });
+            expect(result).to.be.true;
+            expect(hub.applyConfig.calledOnce).to.be.true;
+        });
+
+        it('times out → rejects the promise and initiates a view change', async function () {
+            let clock = sinon.useFakeTimers();
+            consensus.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[1].addr; // leader for seq 1
+            consensus.timeout = 1000;
+
+            let promise = consensus.propose({ cfg: 1 });
+            let caught = null;
+            promise.catch(e => { caught = e; });
+            await clock.tickAsync(1001);
+
+            expect(caught).to.be.an('error');
+            expect(caught.message).to.include('Consensus timeout');
+            expect(consensus.view).to.equal(1);                 // view change initiated
+            expect(consensus.pendingProposals.has(1)).to.be.false;
+            let vc = pm.broadcast.getCalls().find(c => c.args[0] === 'PBFT_VIEW_CHANGE');
+            expect(vc).to.exist;
+            clock.restore();
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // PRE_PREPARE stale seq + follower expiry
+    // -----------------------------------------------------------------
+
+    describe('PRE_PREPARE replay + follower expiry', function () {
+        beforeEach(function () {
+            consensus.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+        });
+
+        it('rejects a PRE_PREPARE whose seq is at/below the last applied seq', async function () {
+            consensus.lastAppliedSeq = 10;
+            let config = { x: 1 };
+            let digest = consensus._digest(config);
+            await consensus._handlePrePrepare({
+                sender: VALIDATORS_4[1].addr,
+                data: { seq: 5, configDigest: digest, config }
+            });
+            expect(consensus.pendingProposals.has(5)).to.be.false;
+        });
+
+        it('expires a follower proposal on its (doubled) timeout', async function () {
+            let clock = sinon.useFakeTimers();
+            consensus.timeout = 1000;
+            let config = { x: 1 };
+            let digest = consensus._digest(config);
+            await consensus._handlePrePrepare({
+                sender: VALIDATORS_4[1].addr,
+                data: { seq: 5, configDigest: digest, config }
+            });
+            expect(consensus.pendingProposals.has(5)).to.be.true;
+            await clock.tickAsync(2001); // followers wait timeout * 2
+            expect(consensus.pendingProposals.has(5)).to.be.false;
+            clock.restore();
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // COMMIT apply-error path
+    // -----------------------------------------------------------------
+
+    describe('COMMIT apply failure', function () {
+        it('rejects the proposer promise and drops the proposal when applyConfig throws', async function () {
+            consensus.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+            hub.applyConfig.rejects(new Error('db down'));
+
+            let config = { x: 1 };
+            let digest = consensus._digest(config);
+            let rejected = null;
+            consensus.pendingProposals.set(5, {
+                config, digest,
+                prepares: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr, VALIDATORS_4[2].addr]),
+                commits:  new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr]),
+                resolved: false, applied: false, timer: null, _commitSent: true,
+                resolve: () => {}, reject: (e) => { rejected = e; }, quorum: 3
+            });
+
+            consensus._handleCommit({ sender: VALIDATORS_4[2].addr, data: { seq: 5, configDigest: digest } });
+            await new Promise(r => setTimeout(r, 20));
+
+            expect(rejected).to.be.an('error');
+            expect(consensus.pendingProposals.has(5)).to.be.false;
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // VIEW_CHANGE / NEW_VIEW remaining branches
+    // -----------------------------------------------------------------
+
+    describe('view change — remaining branches', function () {
+        beforeEach(function () {
+            consensus.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+        });
+
+        it('ignores VIEW_CHANGE with non-numeric fields', function () {
+            consensus._handleViewChange({ sender: 'a', data: { view: 'x', seq: 5 } });
+            expect(consensus.pendingViewChanges.size).to.equal(0);
+        });
+
+        it('ignores VIEW_CHANGE when the computed quorum is 0', function () {
+            consensus.setValidatorSet([]);
+            pm.getPeerStatus.returns([]);
+            consensus._handleViewChange({ sender: 'a', data: { view: 1, seq: 5 } });
+            expect(consensus.view).to.equal(0);
+        });
+
+        it('on quorum where this node is the new leader, broadcasts NEW_VIEW and prunes lower views', function () {
+            pm.validatorAddr = VALIDATORS_4[2].addr; // leader for (seq 5, view 1)
+            consensus.view = 0;
+            consensus.pendingViewChanges.set(0, new Set(['stale'])); // lower view to prune
+
+            consensus._handleViewChange({ sender: VALIDATORS_4[1].addr, data: { view: 1, seq: 5 } });
+            consensus._handleViewChange({ sender: VALIDATORS_4[3].addr, data: { view: 1, seq: 5 } });
+            consensus._handleViewChange({ sender: VALIDATORS_4[0].addr, data: { view: 1, seq: 5 } });
+
+            expect(consensus.view).to.equal(1);
+            let nv = pm.broadcast.getCalls().find(c => c.args[0] === 'PBFT_NEW_VIEW');
+            expect(nv).to.exist;
+            expect(consensus.pendingViewChanges.has(0)).to.be.false; // pruned (0 < 1)
+            expect(consensus.pendingViewChanges.has(1)).to.be.false; // cleared on accept
+        });
+
+        it('ignores NEW_VIEW with non-numeric fields', function () {
+            consensus._handleNewView({ sender: 'a', data: { view: null, seq: 5 } });
+            expect(consensus.view).to.equal(0);
+        });
+
+        it('ignores NEW_VIEW when the validator set is empty', function () {
+            consensus.setValidatorSet([]);
+            consensus._handleNewView({ sender: 'a', data: { view: 1, seq: 5 } });
+            expect(consensus.view).to.equal(0);
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // Remaining guard branches
+    // -----------------------------------------------------------------
+
+    describe('guard branches', function () {
+        beforeEach(function () {
+            consensus.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+        });
+
+        it('rejects a PRE_PREPARE with a non-positive seq', async function () {
+            await consensus._handlePrePrepare({
+                sender: VALIDATORS_4[1].addr,
+                data: { seq: -1, configDigest: 'd', config: { x: 1 } }
+            });
+            expect(consensus.pendingProposals.size).to.equal(0);
+        });
+
+        it('_handlePrePrepare uses the snapshot quorum when a snapshot is available', async function () {
+            hub.capabilitySnapshot = {
+                getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 900000 }),
+                getQuorum: sinon.stub().returns(3)
+            };
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(900000);
+            let config = { x: 1 };
+            let digest = consensus._digest(config);
+            await consensus._handlePrePrepare({
+                sender: VALIDATORS_4[1].addr,
+                data: { seq: 5, configDigest: digest, config, btcBlockHeight: 900000 }
+            });
+            let p = consensus.pendingProposals.get(5);
+            expect(p.quorum).to.equal(3);
+            expect(p.btcBlockHeight).to.equal(900000);
+            if (p.timer) clearTimeout(p.timer);
+        });
+
+        it('ignores a PREPARE with no configDigest', function () {
+            expect(() => consensus._handlePrepare({ sender: 'a', data: { seq: 5 } })).to.not.throw();
+        });
+
+        it('ignores a PREPARE whose digest does not match the proposal', function () {
+            consensus.pendingProposals.set(5, { digest: 'right', prepares: new Set(), resolved: false, quorum: 3 });
+            consensus._handlePrepare({ sender: 'a', data: { seq: 5, configDigest: 'wrong' } });
+            expect(consensus.pendingProposals.get(5).prepares.size).to.equal(0);
+        });
+
+        it('ignores a COMMIT with no configDigest', function () {
+            expect(() => consensus._handleCommit({ sender: 'a', data: { seq: 5 } })).to.not.throw();
+        });
+
+        it('ignores a COMMIT whose digest does not match the proposal', function () {
+            consensus.pendingProposals.set(5, { digest: 'right', commits: new Set(), applied: false, quorum: 3 });
+            consensus._handleCommit({ sender: 'a', data: { seq: 5, configDigest: 'wrong' } });
+            expect(consensus.pendingProposals.get(5).commits.size).to.equal(0);
+        });
+
+        it('_checkPrepareQuorum returns when the proposal is resolved', function () {
+            consensus.pendingProposals.set(5, { resolved: true });
+            expect(() => consensus._checkPrepareQuorum(5)).to.not.throw();
+        });
+
+        it('_checkCommitQuorum returns when the proposal is already applied', function () {
+            consensus.pendingProposals.set(5, { applied: true });
+            expect(() => consensus._checkCommitQuorum(5)).to.not.throw();
+        });
+
+        it('applies a follower proposal (no resolve handler) on commit quorum', async function () {
+            let config = { x: 1 };
+            let digest = consensus._digest(config);
+            consensus.pendingProposals.set(5, {
+                config, digest, prepares: new Set(),
+                commits: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr]),
+                resolved: false, applied: false, timer: null, resolve: null, reject: null, quorum: 3
+            });
+            consensus._handleCommit({ sender: VALIDATORS_4[2].addr, data: { seq: 5, configDigest: digest } });
+            await new Promise(r => setTimeout(r, 20));
+            expect(hub.applyConfig.calledOnce).to.be.true;
+            expect(consensus.applied.has(digest)).to.be.true;
+        });
+
+        it('swallows a follower apply error when there is no reject handler', async function () {
+            hub.applyConfig.rejects(new Error('db down'));
+            let config = { x: 1 };
+            let digest = consensus._digest(config);
+            consensus.pendingProposals.set(5, {
+                config, digest, prepares: new Set(),
+                commits: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr]),
+                resolved: false, applied: false, timer: null, resolve: null, reject: null, quorum: 3
+            });
+            consensus._handleCommit({ sender: VALIDATORS_4[2].addr, data: { seq: 5, configDigest: digest } });
+            await new Promise(r => setTimeout(r, 20));
+            expect(consensus.pendingProposals.has(5)).to.be.false;
+        });
+
+        it('_getQuorum returns 0 with neither validators nor a peer manager', function () {
+            consensus.setValidatorSet([]);
+            consensus.peerManager = null;
+            expect(consensus._getQuorum()).to.equal(0);
+        });
+
+        it('_loadSeq treats a non-numeric stored value as 0', async function () {
+            hub.db.doQuery.resolves([{ value: 'abc' }]);
+            await consensus._loadSeq();
+            expect(consensus.seq).to.equal(0);
+        });
     });
 });

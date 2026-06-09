@@ -94,6 +94,26 @@ describe('Governance', function () {
             it('skips validation when current value is 0', function () {
                 expect(() => gov._validateChangeBounds('P', '0', '100')).to.not.throw();
             });
+
+            it('treats null / undefined values as non-numeric and skips', function () {
+                expect(() => gov._validateChangeBounds('P', null, '100')).to.not.throw();
+                expect(() => gov._validateChangeBounds('P', '100', undefined)).to.not.throw();
+            });
+
+            it('parses an explicit + sign', function () {
+                expect(() => gov._validateChangeBounds('P', '+100', '+120')).to.not.throw();
+            });
+
+            it('parses a leading-dot fraction (empty integer part)', function () {
+                expect(() => gov._validateChangeBounds('P', '.5', '.6')).to.not.throw();
+            });
+
+            it('enforces bounds when the current value is negative', function () {
+                // C=-100: a move to -160 is a 60% magnitude increase → exceeds.
+                expect(() => gov._validateChangeBounds('P', '-100', '-160')).to.throw(/exceeds maximum/);
+                // A small move stays within bounds.
+                expect(() => gov._validateChangeBounds('P', '-100', '-120')).to.not.throw();
+            });
         });
     });
 
@@ -186,6 +206,24 @@ describe('Governance', function () {
                 expect(e.message).to.include('exceeds maximum');
             }
         });
+
+        it('rejects a parameter name longer than 255 characters', async function () {
+            try {
+                await gov.propose('P'.repeat(256), '1', '2');
+                expect.fail('should throw');
+            } catch (e) {
+                expect(e.message).to.include('255');
+            }
+        });
+
+        it('rejects a rationale longer than 2000 characters', async function () {
+            try {
+                await gov.propose('P', '1', '2', 'x'.repeat(2001));
+                expect.fail('should throw');
+            } catch (e) {
+                expect(e.message).to.include('2000');
+            }
+        });
     });
 
     // -----------------------------------------------------------------
@@ -237,6 +275,28 @@ describe('Governance', function () {
                 expect.fail('should throw');
             } catch (e) {
                 expect(e.message).to.include('ended');
+            }
+        });
+
+        it('throws when no validator identity is configured', async function () {
+            hub.getIdentity.returns({ getPubkeyHex: () => null });
+            let gov2 = new Governance(hub);
+            gov2.setValidatorSet(VALIDATORS_3);
+            try {
+                await gov2.vote('gov:P:1', 'approve');
+                expect.fail('should throw');
+            } catch (e) {
+                expect(e.message).to.include('No validator identity');
+            }
+        });
+
+        it('throws when the voter is not an active validator', async function () {
+            identity.getPubkeyHex.returns('ff'.repeat(32)); // not in the set
+            try {
+                await gov.vote('gov:P:1', 'approve');
+                expect.fail('should throw');
+            } catch (e) {
+                expect(e.message).to.include('not an active validator');
             }
         });
     });
@@ -384,6 +444,30 @@ describe('Governance', function () {
             expect(hub.db.doQuery.called).to.be.true;
         });
 
+        it('_handlePropose defaults a missing proposerPubkey and rationale to empty strings', function () {
+            gov._handlePropose({
+                sender: 'peer', type: 'GOV_PROPOSE',
+                data: {
+                    proposalId: 'gov:P:1', parameter: 'P',
+                    currentValue: '100', proposedValue: '120',
+                    votingEnd: new Date().toISOString()
+                }
+            });
+            let args = hub.db.doQuery.getCall(0).args[1];
+            expect(args[1]).to.equal(''); // proposer_pubkey
+            expect(args[5]).to.equal(''); // rationale
+        });
+
+        it('_handleVote defaults a missing signature to an empty string', function () {
+            gov._handleVote({
+                sender: 'peer', type: 'GOV_VOTE',
+                data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: 'abc' }
+            });
+            let args = hub.db.doQuery.getCall(0).args[1];
+            expect(args[3]).to.equal(''); // signature (insert)
+            expect(args[5]).to.equal(''); // signature (on-duplicate update)
+        });
+
         it('_handleResult updates proposal status', function () {
             gov._handleResult({
                 sender: 'peer', type: 'GOV_RESULT',
@@ -398,6 +482,127 @@ describe('Governance', function () {
             gov._handleVote({ sender: 'peer', data: {} });
             gov._handleResult({ sender: 'peer', data: {} });
             expect(hub.db.doQuery.called).to.be.false;
+        });
+
+        it('_handleMessage routes each governance message type and ignores unknown', function () {
+            let p = sinon.spy(gov, '_handlePropose');
+            let v = sinon.spy(gov, '_handleVote');
+            let r = sinon.spy(gov, '_handleResult');
+            gov._handleMessage({ type: 'GOV_PROPOSE', data: {} });
+            gov._handleMessage({ type: 'GOV_VOTE', data: {} });
+            gov._handleMessage({ type: 'GOV_RESULT', data: {} });
+            expect(() => gov._handleMessage({ type: 'NOPE', data: {} })).to.not.throw();
+            expect(p.calledOnce).to.be.true;
+            expect(v.calledOnce).to.be.true;
+            expect(r.calledOnce).to.be.true;
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // start() / stop()
+    // -----------------------------------------------------------------
+
+    describe('start() / stop()', function () {
+        it('start() subscribes and schedules the tally timer; stop() tears both down', async function () {
+            let clock = sinon.useFakeTimers();
+            gov.tallyInterval = 1000;
+            let spy = sinon.spy(gov, '_checkExpiredProposals');
+            await gov.start();
+            expect(pm.listenerCount('message')).to.equal(1);
+            expect(gov._tallyTimer).to.not.equal(null);
+
+            clock.tick(1001);
+            expect(spy.called).to.be.true;
+
+            await gov.stop();
+            expect(gov._messageHandler).to.equal(null);
+            expect(gov._tallyTimer).to.equal(null);
+            expect(pm.listenerCount('message')).to.equal(0);
+            clock.restore();
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // Tally leadership
+    // -----------------------------------------------------------------
+
+    describe('tally leadership', function () {
+        it('_getProposalLeader returns null for an empty validator set', function () {
+            gov.setValidatorSet([]);
+            expect(gov._getProposalLeader('gov:P:1')).to.be.null;
+        });
+
+        it('_getProposalLeader is deterministic and drawn from the validator set', function () {
+            gov.setValidatorSet(VALIDATORS_3);
+            let l1 = gov._getProposalLeader('gov:P:1');
+            let l2 = gov._getProposalLeader('gov:P:1');
+            expect(l1).to.equal(l2);
+            expect(VALIDATORS_3).to.include(l1);
+        });
+
+        it('_isTallyLeader is true in standalone mode (no validator set)', function () {
+            gov.setValidatorSet([]);
+            expect(gov._isTallyLeader('gov:P:1')).to.be.true;
+        });
+
+        it('_isTallyLeader is true when this node is the designated leader', function () {
+            gov.setValidatorSet(VALIDATORS_3);
+            pm.validatorAddr = gov._getProposalLeader('gov:P:1').addr;
+            expect(gov._isTallyLeader('gov:P:1')).to.be.true;
+        });
+
+        it('_isTallyLeader is false when another node is the leader', function () {
+            gov.setValidatorSet(VALIDATORS_3);
+            let leader = gov._getProposalLeader('gov:P:1');
+            let other = VALIDATORS_3.find(v => v.addr !== leader.addr);
+            pm.validatorAddr = other.addr;
+            expect(gov._isTallyLeader('gov:P:1')).to.be.false;
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // _checkExpiredProposals()
+    // -----------------------------------------------------------------
+
+    describe('_checkExpiredProposals()', function () {
+        it('tallies an expired proposal when this node leads it', async function () {
+            gov.setValidatorSet([]); // standalone → always leader
+            hub.db.doQuery.onFirstCall().resolves([
+                { proposal_id: 'gov:P:1', parameter: 'P', current_value: '100', proposed_value: '120' }
+            ]);
+            let tally = sinon.stub(gov, '_tallyProposal').resolves();
+            await gov._checkExpiredProposals();
+            expect(tally.calledOnce).to.be.true;
+            expect(tally.getCall(0).args[0].proposal_id).to.equal('gov:P:1');
+        });
+
+        it('skips proposals led by another node', async function () {
+            gov.setValidatorSet(VALIDATORS_3);
+            let leader = gov._getProposalLeader('gov:P:1');
+            pm.validatorAddr = VALIDATORS_3.find(v => v.addr !== leader.addr).addr;
+            hub.db.doQuery.onFirstCall().resolves([{ proposal_id: 'gov:P:1' }]);
+            let tally = sinon.stub(gov, '_tallyProposal').resolves();
+            await gov._checkExpiredProposals();
+            expect(tally.called).to.be.false;
+        });
+
+        it('logs and returns without crashing when the SELECT throws', async function () {
+            hub.db.doQuery.onFirstCall().rejects(new Error('schema drift'));
+            let tally = sinon.stub(gov, '_tallyProposal').resolves();
+            await gov._checkExpiredProposals(); // must not throw
+            expect(tally.called).to.be.false;
+        });
+
+        it('continues past a proposal whose tally throws', async function () {
+            gov.setValidatorSet([]); // always leader
+            hub.db.doQuery.onFirstCall().resolves([
+                { proposal_id: 'gov:A' }, { proposal_id: 'gov:B' }
+            ]);
+            let tally = sinon.stub(gov, '_tallyProposal');
+            tally.onFirstCall().rejects(new Error('boom'));
+            tally.onSecondCall().resolves();
+            await gov._checkExpiredProposals();
+            expect(tally.callCount).to.equal(2); // did not abort after the first error
         });
     });
 });
