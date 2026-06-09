@@ -3,5 +3,10 @@ node_modules/
 .DS_Store
 .stryker-tmp/
 reports/mutation/
+# Coverage output (c8/nyc) — generated, not source
+coverage/
+.nyc_output/
+# Worktree marker
+.__wt
 # Runtime attestation queue/log output — not source
 data/
