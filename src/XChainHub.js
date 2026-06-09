@@ -29,6 +29,7 @@ const RewardTracker      = require('./RewardTracker.js');
 const SlashDetector      = require('./SlashDetector.js');
 const CrossChainEngine   = require('./CrossChainEngine.js');
 const CrossChainDexEngine = require('./CrossChainDexEngine.js');
+const CrossChainDexAnchor = require('./CrossChainDexAnchor.js');
 const ReorgHandler       = require('./ReorgHandler.js');
 const SwapTracker        = require('./SwapTracker.js');
 const Governance         = require('./Governance.js');
@@ -286,6 +287,12 @@ class XChainHub {
         // INDEXER_URL); otherwise it idles harmlessly.
         this.crossChainDex = new CrossChainDexEngine(this);
         await this.crossChainDex.start();
+
+        // DOGE Merkle audit anchor — batches finalized cross-chain matches, anchors
+        // their Merkle root on DOGE, and stamps batch_root/anchor_txid. Audit-only
+        // (hub-side); a clean no-op when DOGE publishing isn't configured.
+        this.crossChainDexAnchor = new CrossChainDexAnchor(this);
+        await this.crossChainDexAnchor.start();
     }
 
     // Get the CrossChainEngine instance
@@ -296,6 +303,11 @@ class XChainHub {
     // Get the CrossChainDexEngine instance
     getCrossChainDex(){
         return this.crossChainDex;
+    }
+
+    // Get the CrossChainDexAnchor instance
+    getCrossChainDexAnchor(){
+        return this.crossChainDexAnchor;
     }
 
     // Start the reorg handler (no-op if P2P is not active)
