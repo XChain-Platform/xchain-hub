@@ -490,6 +490,27 @@ async function startApi(){
             }
         },
 
+        // Get per-capability MIN_STAKE thresholds, read live from the
+        // CapabilityRegistry (the same hot-reloaded source the hub uses to
+        // decide qualification). Read-only; lets clients (e.g. the wallet
+        // stake form) show which capabilities a stake amount qualifies for.
+        // Capabilities are global governance config, so this is not
+        // chain-scoped. `disabled` flags operator-disabled capabilities.
+        async getcapabilitythresholds(){
+            if(!hub.capabilityRegistry) return {error: "capability registry not active"};
+            try {
+                let reg = hub.capabilityRegistry;
+                let thresholds = reg.getCapabilities().map((cap) => ({
+                    capability: cap,
+                    min_stake:  reg.getMinStake(cap),
+                    disabled:   reg.isDisabledByOperator(cap)
+                }));
+                return {thresholds};
+            } catch (err) {
+                return {error: "error fetching capability thresholds"};
+            }
+        },
+
         // Submit a governance proposal
         async propose({parameter, current_value, proposed_value, rationale}){
             if(!parameter || !proposed_value)
