@@ -579,4 +579,112 @@ describe('OraclePublisher', function () {
             expect(processStub.calledOnce).to.be.true;
         });
     });
+
+    // ── _defaultBroadcast() pipeline ────────────────────────────────────────
+    describe('_defaultBroadcast()', function () {
+        // Build a publisher with a fully-wired encoder + hooks, then let each test
+        // knock out one prerequisite to exercise the corresponding guard.
+        function wiredPub() {
+            let pub = new OraclePublisher(makeHub());
+            pub.encoder = {
+                getUtxos:    sinon.stub().resolves([{ txid: 'a', vout: 0, value: 100000 }]),
+                createTx:    sinon.stub().resolves({ psbt: 'psbthex' }),
+                broadcastTx: sinon.stub().resolves({ txid: 'TXID' })
+            };
+            pub.walletSignFn  = sinon.stub().resolves('signedtxhex');
+            pub.dogeAddress   = 'DwhateverAddress';
+            pub.dogePubkeyHex = '02' + 'a'.repeat(64);
+            return pub;
+        }
+        async function expectThrow(pub, frag) {
+            try { await pub._defaultBroadcast('payload'); expect.fail('should throw'); }
+            catch (e) { expect(e.message).to.include(frag); }
+        }
+
+        it('throws when the encoder is not configured', async function () {
+            let pub = wiredPub(); pub.encoder = null;
+            await expectThrow(pub, 'no encoder configured');
+        });
+        it('throws when no wallet sign hook is configured', async function () {
+            let pub = wiredPub(); pub.walletSignFn = null;
+            await expectThrow(pub, 'no wallet sign hook');
+        });
+        it('throws when DOGE_ADDRESS is unset', async function () {
+            let pub = wiredPub(); pub.dogeAddress = null;
+            await expectThrow(pub, 'no DOGE_ADDRESS');
+        });
+        it('throws when DOGE_PUBKEY_HEX is unset', async function () {
+            let pub = wiredPub(); pub.dogePubkeyHex = null;
+            await expectThrow(pub, 'no DOGE_PUBKEY_HEX');
+        });
+        it('throws when no UTXOs are available', async function () {
+            let pub = wiredPub(); pub.encoder.getUtxos = sinon.stub().resolves([]);
+            await expectThrow(pub, 'no UTXOs available');
+        });
+        it('throws when the encoder returns no PSBT', async function () {
+            let pub = wiredPub(); pub.encoder.createTx = sinon.stub().resolves({});
+            await expectThrow(pub, 'no PSBT');
+        });
+        it('throws when the wallet hook returns invalid tx hex', async function () {
+            let pub = wiredPub(); pub.walletSignFn = sinon.stub().resolves(null);
+            await expectThrow(pub, 'invalid tx hex');
+        });
+        it('signs, broadcasts, and returns the txid on success', async function () {
+            let pub = wiredPub();
+            let result = await pub._defaultBroadcast('the-payload');
+            expect(result).to.deep.equal({ txid: 'TXID' });
+            expect(pub.encoder.createTx.getCall(0).args[0].data).to.equal('the-payload');
+            expect(pub.walletSignFn.calledWith('psbthex')).to.be.true;
+            expect(pub.encoder.broadcastTx.calledWith('signedtxhex')).to.be.true;
+        });
+        it('falls back to { txid: null } when broadcast returns nothing', async function () {
+            let pub = wiredPub(); pub.encoder.broadcastTx = sinon.stub().resolves(null);
+            let result = await pub._defaultBroadcast('p');
+            expect(result).to.deep.equal({ txid: null });
+        });
+    });
+
+    // ── start() ─────────────────────────────────────────────────────────────
+    describe('start()', function () {
+        it('creates the queue dir, touches the file, and subscribes to round:finalized', async function () {
+            let oc = { on: sinon.stub() };
+            let pub = new OraclePublisher(makeHub({ oracleConsensus: oc }));
+            fsMock.existsSync.returns(false); // force the writeFileSync touch
+            await pub.start();
+            expect(fsMock.mkdirSync.called).to.be.true;
+            expect(fsMock.writeFileSync.called).to.be.true;
+            expect(oc.on.calledWith('round:finalized')).to.be.true;
+        });
+
+        it('tolerates mkdir/touch failures without throwing', async function () {
+            let pub = new OraclePublisher(makeHub());
+            fsMock.mkdirSync = sinon.stub().throws(new Error('eperm'));
+            fsMock.existsSync.returns(false);
+            fsMock.writeFileSync = sinon.stub().throws(new Error('eacces'));
+            await pub.start(); // best-effort — must not throw
+        });
+    });
+
+    // ── _enqueue() ──────────────────────────────────────────────────────────
+    describe('_enqueue()', function () {
+        it('appends an fsync-durable JSON line with attempt metadata', async function () {
+            let pub = new OraclePublisher(makeHub());
+            await pub._enqueue({ round: 5, prices: [], sigs: [] });
+            expect(fsMock.openSync.called).to.be.true;
+            expect(fsMock.writeSync.called).to.be.true;
+            expect(fsMock.fsyncSync.called).to.be.true;
+            expect(fsMock.closeSync.called).to.be.true;
+            let entry = JSON.parse(fsMock.writeSync.getCall(0).args[1].trim());
+            expect(entry.round).to.equal(5);
+            expect(entry.attempts).to.equal(0);
+            expect(entry).to.have.property('enqueuedAt');
+        });
+
+        it('fails loud when the queue write throws', async function () {
+            let pub = new OraclePublisher(makeHub());
+            fsMock.openSync = sinon.stub().throws(new Error('disk full'));
+            try { await pub._enqueue({ round: 5 }); expect.fail('should throw'); }
+            catch (e) { expect(e.message).to.include('disk full'); }
+        });
+    });
 });

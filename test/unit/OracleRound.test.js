@@ -311,4 +311,41 @@ describe('OracleRound', function () {
             expect(or.lastSuccessfulRoundTime).to.be.null;
         });
     });
+
+    // -----------------------------------------------------------------
+    // setConsensus / scheduler / fresh-round submission map
+    // -----------------------------------------------------------------
+
+    describe('additional coverage', function () {
+        it('setConsensus wires the consensus engine', function () {
+            let c = { finalizeRound: sinon.stub() };
+            or.setConsensus(c);
+            expect(or.oracleConsensus).to.equal(c);
+        });
+
+        it('_handleMessage initializes the submission map for a not-yet-seen round', async function () {
+            await or._executeRound();              // sets currentRound + its own round map
+            let next = or.getCurrentRound() + 1;   // a round with no map yet
+            or._handleMessage({
+                type: 'ORACLE_PRICE_SUBMIT', sender: 'ws://peer-9:10001',
+                data: { round: next, prices: [{ coinPair: 'BTC/USD', price: '123' }], sources: 1, timestamp: Date.now() }
+            });
+            expect(or.getSubmissions(next).has('ws://peer-9:10001')).to.be.true;
+        });
+
+        it('_startRoundTimer schedules an aligned execution plus a steady interval', function () {
+            let clock = sinon.useFakeTimers({ now: or.epochStart + 1000 }); // 1s into a round
+            let exec = sinon.stub(or, '_executeRound').resolves();
+            or._startRoundTimer();
+
+            clock.tick(5001);                       // initial-delay timer (1000+5000 < window)
+            expect(exec.callCount).to.be.greaterThan(0);
+            clock.tick(Number(or.roundInterval));   // next boundary + first interval tick
+            expect(exec.callCount).to.be.greaterThan(1);
+
+            if (or.initialRoundTimer) clearTimeout(or.initialRoundTimer);
+            if (or.roundTimer) clearInterval(or.roundTimer);
+            clock.restore();
+        });
+    });
 });
