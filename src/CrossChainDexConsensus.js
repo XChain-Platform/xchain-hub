@@ -213,10 +213,12 @@ class CrossChainDexConsensus extends EventEmitter {
     }
 
     _armTimer(rid){
-        return setTimeout(() => {
+        let t = setTimeout(() => {
             let p = this.pending.get(rid);
             if(p && !p.finalized) this._initiateViewChange(rid);
         }, this.roundTimeoutMs);
+        if(t.unref) t.unref();                          // housekeeping timer — never pin process liveness
+        return t;
     }
 
     // Leader action: persist snapshot, sign canonical, seed own vote, broadcast PROPOSE.
@@ -368,7 +370,8 @@ class CrossChainDexConsensus extends EventEmitter {
                     pending.prepares.size + ' prepares, ' + pending.commits.size + ' commits, ' + sigs.length + ' sigs)');
         this.emit('match:finalized', { matchId: rid, row: pending.row, signatures: sigs });
 
-        setTimeout(() => this.pending.delete(rid), 10000);
+        let cleanup = setTimeout(() => this.pending.delete(rid), 10000);
+        if(cleanup.unref) cleanup.unref();             // housekeeping timer — never pin process liveness
     }
 
     _markFinalized(rid){
