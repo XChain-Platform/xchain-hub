@@ -224,7 +224,11 @@ class Database {
         let dir     = path.join(__dirname, 'sql');
         let data    = fs.readFileSync(dir + '/' + file, "utf8");
         let table   = file.substring(0, file.indexOf('.sql'));
-        let queries = data.split(';');
+        // Strip `--` line comments BEFORE splitting on ';' — a comment may contain a
+        // ';' (e.g. "regtest; signed into the canonical"), which would otherwise split
+        // the CREATE TABLE mid-statement and fail to parse. stripSqlLineComments
+        // preserves quoted strings, so real SQL structure is untouched.
+        let queries = this.stripSqlLineComments(data).split(';');
         console.log('Creating ' + table + ' table...');
         for(let query of queries){
             query = query.trim();
