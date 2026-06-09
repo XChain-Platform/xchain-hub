@@ -152,14 +152,12 @@ describe('CrossChainDexEngine', function () {
             expect(eng._pollTimer).to.be.null;
         });
 
-        it('removes peerManager message listener', async function () {
+        it('stops the consensus engine', async function () {
             let hub = makeDexHub();
             let eng = new CrossChainDexEngine(hub);
-            eng._messageHandler = () => {};
-            hub._peerManager.on('message', eng._messageHandler);
-            expect(hub._peerManager.listenerCount('message')).to.be.at.least(1);
+            let stopSpy = sinon.stub(eng.consensus, 'stop').resolves();
             await eng.stop();
-            expect(eng._messageHandler).to.be.null;
+            expect(stopSpy.calledOnce).to.be.true;
         });
     });
 
@@ -414,30 +412,79 @@ describe('CrossChainDexEngine', function () {
         });
     });
 
-    // ── _collectSignatures ───────────────────────────────────────────────────
+    // ── _resolveCapabilityValidators ─────────────────────────────────────────
 
-    describe('_collectSignatures()', function () {
-        it('signs the canonical string with the identity', async function () {
+    describe('_resolveCapabilityValidators()', function () {
+        it('returns snapshot validators when capSnapshot provides them', async function () {
             let hub = makeDexHub();
             let eng = new CrossChainDexEngine(hub);
-            let sigs = await eng._collectSignatures('XMATCH|abc|...');
-            expect(sigs).to.have.length(1);
-            expect(sigs[0]).to.have.property('pubkey');
-            expect(sigs[0]).to.have.property('sig');
+            eng.capSnapshot = { getSnapshot: sinon.stub().resolves({ validators: [{ pubkey: 'p1', amount: '9' }] }) };
+            let v = await eng._resolveCapabilityValidators('cross_chain', 100);
+            expect(v).to.have.length(1);
+            expect(v[0].pubkey).to.equal('p1');
         });
 
-        it('throws when there is no identity', async function () {
+        it('seeds this hub\'s pubkey when no snapshot and _seedLocalValidator=true', async function () {
             let hub = makeDexHub();
             let eng = new CrossChainDexEngine(hub);
-            eng.identity = null;
-            let threw = false;
-            try {
-                await eng._collectSignatures('msg');
-            } catch (e) {
-                threw = true;
-                expect(e.message).to.include('no validator identity');
-            }
-            expect(threw).to.be.true;
+            eng.capSnapshot = null;
+            eng._seedLocalValidator = true;
+            let v = await eng._resolveCapabilityValidators('cross_chain', 100);
+            expect(v).to.have.length(1);
+            expect(v[0].pubkey).to.equal(eng.identity.getPubkeyHex());
+        });
+
+        it('returns empty when no snapshot and _seedLocalValidator=false', async function () {
+            let hub = makeDexHub();
+            let eng = new CrossChainDexEngine(hub);
+            eng.capSnapshot = null;
+            eng._seedLocalValidator = false;
+            let v = await eng._resolveCapabilityValidators('cross_chain', 100);
+            expect(v).to.have.length(0);
+        });
+    });
+
+    // ── validateProposedMatch (independent re-derivation a peer runs pre-sign) ─
+
+    describe('validateProposedMatch()', function () {
+        // Build the row _finalizeMatch would produce for a makePair() at a block.
+        function rowFor(eng, a, b, block) {
+            let lo = (a.home_coin <= b.home_coin) ? a : b;
+            let hi = (lo === a) ? b : a;
+            return {
+                match_id:       eng._deriveMatchId(lo, hi, block),
+                snapshot_block: block, network: lo.home_network,
+                a_chain: lo.home_coin, a_action_index: lo.action_index, a_tick: lo.give_tick,
+                a_amount: lo.give_amount, a_ownership: lo.give_ownership, a_payout_addr: lo.get_address,
+                b_chain: hi.home_coin, b_action_index: hi.action_index, b_tick: hi.give_tick,
+                b_amount: hi.give_amount, b_ownership: hi.give_ownership, b_payout_addr: hi.get_address,
+                effective_time: 1700000000
+            };
+        }
+
+        it('returns true when both legs re-derive to the same match', async function () {
+            let eng = new CrossChainDexEngine(makeDexHub());
+            let { a, b } = makePair();
+            let row = rowFor(eng, a, b, 100);
+            sinon.stub(eng, '_findOpenOffer').callsFake(async (coin) => coin === 'BTC' ? a : b);
+            expect(await eng.validateProposedMatch(row)).to.be.true;
+        });
+
+        it('returns false when a leg is no longer open', async function () {
+            let eng = new CrossChainDexEngine(makeDexHub());
+            let { a, b } = makePair();
+            let row = rowFor(eng, a, b, 100);
+            sinon.stub(eng, '_findOpenOffer').callsFake(async (coin) => coin === 'BTC' ? a : null);
+            expect(await eng.validateProposedMatch(row)).to.be.false;
+        });
+
+        it('returns false when the offers re-derive a different match_id', async function () {
+            let eng = new CrossChainDexEngine(makeDexHub());
+            let { a, b } = makePair();
+            let row = rowFor(eng, a, b, 100);
+            row.match_id = 'f'.repeat(64);                  // tampered id
+            sinon.stub(eng, '_findOpenOffer').callsFake(async (coin) => coin === 'BTC' ? a : b);
+            expect(await eng.validateProposedMatch(row)).to.be.false;
         });
     });
 
@@ -583,6 +630,7 @@ describe('CrossChainDexEngine', function () {
             eng.on('match:finalized', () => { emitted = true; });
 
             await eng._finalizeMatch(a, b);
+            await new Promise(r => setImmediate(r));   // let the async match:finalized write run
             expect(emitted).to.be.true;
         });
     });
