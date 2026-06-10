@@ -30,6 +30,8 @@ const SlashDetector      = require('./SlashDetector.js');
 const CrossChainEngine   = require('./CrossChainEngine.js');
 const CrossChainDexEngine = require('./CrossChainDexEngine.js');
 const CrossChainDexAnchor = require('./CrossChainDexAnchor.js');
+const StateCheckpointEngine = require('./StateCheckpointEngine.js');
+const StateAnchorPublisher  = require('./StateAnchorPublisher.js');
 const ReorgHandler       = require('./ReorgHandler.js');
 const SwapTracker        = require('./SwapTracker.js');
 const Governance         = require('./Governance.js');
@@ -123,8 +125,19 @@ class XChainHub {
             this.peerManager.setIdentity(this.identity);
         }
 
-        // Load validator pubkey registry for verification
+        // Load validator pubkey registry for verification. This MUST succeed
+        // before the P2P listener opens: a null registry makes _verifySignature
+        // accept any signed envelope from any sender (see PeerManager). On a DB
+        // failure _loadValidatorPubkeys throws, so we never reach start() below.
         await this._loadValidatorPubkeys();
+
+        // Fail closed: refuse to open the P2P listener with a null validator
+        // registry. An empty (non-null) registry is fine — it rejects every
+        // unknown sender, which is the correct pre-bootstrap state while
+        // validators are still being registered via the registervalidator RPC.
+        if(!this.peerManager.validatorPubkeys){
+            throw new Error('Validator registry not loaded — refusing to start the P2P listener (database unavailable?)');
+        }
 
         await this.peerManager.start();
     }
@@ -291,8 +304,23 @@ class XChainHub {
         // DOGE Merkle audit anchor — batches finalized cross-chain matches, anchors
         // their Merkle root on DOGE, and stamps batch_root/anchor_txid. Audit-only
         // (hub-side); a clean no-op when DOGE publishing isn't configured.
+        // Superseded by ANCHOR (StateAnchorPublisher); kept in parallel until the
+        // ANCHOR pipeline is verified on testnet.
         this.crossChainDexAnchor = new CrossChainDexAnchor(this);
         await this.crossChainDexAnchor.start();
+
+        // State checkpoints — quorum-signed per-chain ledger/actions/contract hash
+        // commitments, written off-chain to state_checkpoints and streamed over the
+        // hub-DB mirror so explorers/wallets can verify indexer state.
+        this.stateCheckpoints = new StateCheckpointEngine(this);
+        await this.stateCheckpoints.start();
+
+        // ANCHOR publisher — commits the latest checkpoints (v0) and the
+        // cross-chain match archive (v1/v2) on DOGE, making all federation state
+        // recoverable from chain parse alone. A clean no-op when DOGE publishing
+        // isn't configured (mirrors the oracle/anchor publishers).
+        this.stateAnchorPublisher = new StateAnchorPublisher(this);
+        await this.stateAnchorPublisher.start();
     }
 
     // Get the CrossChainEngine instance
@@ -550,6 +578,14 @@ class XChainHub {
             this.peerManager.setValidatorPubkeys(pubkeyMap);
         } catch(e){
             console.error('Error loading validator pubkeys:', e);
+            // Fail closed: propagate so the startup path (startP2P) does not open
+            // the P2P listener with a null registry. Swallowing here previously
+            // left validatorPubkeys === null on a transient DB failure, which
+            // makes _verifySignature accept any signed message. Reload callers
+            // (registerValidator / syncValidators) already hold a non-null
+            // registry, so a failed reload there surfaces as an error without
+            // reopening the null-registry window.
+            throw e;
         }
     }
 
@@ -1176,6 +1212,8 @@ class XChainHub {
         if(this._capabilityConfigWatcher){ try { this._capabilityConfigWatcher.close(); } catch(e){} this._capabilityConfigWatcher = null; }
         if(this.governance)       await this.governance.stop();
         if(this.reorgHandler)     await this.reorgHandler.stop();
+        if(this.stateAnchorPublisher) await this.stateAnchorPublisher.stop();
+        if(this.stateCheckpoints) await this.stateCheckpoints.stop();
         if(this.crossChain)       await this.crossChain.stop();
         if(this.oracle)           await this.oracle.stop();
         if(this.oracleConsensus)  await this.oracleConsensus.stop();

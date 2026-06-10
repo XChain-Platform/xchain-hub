@@ -25,8 +25,10 @@ CREATE TABLE cross_chain_matches (
     effective_time       BIGINT UNSIGNED NOT NULL,                 -- wall-clock instant indexers apply at (shared clock across chains)
     validator_signatures TEXT         NOT NULL,                    -- JSON [{pubkey,sig}] — 2f+1 over the canonical match
     status               VARCHAR(20)  NOT NULL DEFAULT 'finalized',-- finalized / retracted
-    batch_root           VARCHAR(64),                              -- optional Merkle root of the DOGE audit batch
-    anchor_txid          VARCHAR(64),                              -- optional DOGE anchor txid
+    batch_root           VARCHAR(64),                              -- optional Merkle root of the DOGE audit batch (legacy XDEXANCHOR)
+    anchor_txid          VARCHAR(64),                              -- optional DOGE anchor txid (legacy XDEXANCHOR)
+    batch_seq            BIGINT UNSIGNED,                          -- ANCHOR v1 archive batch this match (at archived_status) was published in; hub-side only
+    archived_status      VARCHAR(20),                              -- status at last archive publish — a later retraction re-archives the match
     created_at           TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci;

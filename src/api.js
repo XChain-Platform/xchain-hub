@@ -23,7 +23,7 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 // Validate required environment variables
-const REQUIRED_ENV = ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT'];
+const REQUIRED_ENV = ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT', 'HUB_API_KEY'];
 for(const key of REQUIRED_ENV){
     if(!process.env[key]){
         console.error('Missing required environment variable: ' + key);
@@ -180,13 +180,13 @@ async function startApi(){
         legacyHeaders: false
     }));
 
-    // API key enforcement for write methods
+    // API key enforcement for write methods. Fails closed: without a
+    // configured key, write methods are rejected, never left open.
     app.use((req, res, next) => {
-        if (!HUB_API_KEY) return next();
         let method = req.body && req.body.method;
         if (method && WRITE_METHODS.has(method.toLowerCase())) {
             let provided = req.headers['x-api-key'] || '';
-            if (provided !== HUB_API_KEY) {
+            if (!HUB_API_KEY || provided !== HUB_API_KEY) {
                 return res.status(401).json({
                     jsonrpc: '2.0', id: req.body.id || null,
                     error: { code: -32001, message: 'Unauthorized' }
@@ -728,6 +728,25 @@ async function startApi(){
         }
     });
 
+    // GET /hub-db/snapshot/state_checkpoints — full snapshot of state_checkpoints table.
+    // Explicit column list: anchor_txid is hub-side audit metadata and is NOT mirrored
+    // (the indexer mirror schema has no such column).
+    app.get('/hub-db/snapshot/state_checkpoints', async (req, res) => {
+        try {
+            let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
+            let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
+            let rows = await hub.db.doQuery(
+                'SELECT id, chain, network, block_index, block_hash, ledger_hash, actions_hash, ' +
+                'contract_hash, checkpoint_seq, snapshot_block, validator_signatures, created_at ' +
+                'FROM state_checkpoints WHERE id > ? ORDER BY id ASC LIMIT ?',
+                [since, limit]
+            );
+            res.json({ table: 'state_checkpoints', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000) });
+        } catch (err) {
+            res.status(500).json({ error: err.message || 'snapshot error' });
+        }
+    });
+
     // POST /telemetry — anonymous usage ping receiver for xchain-node operators.
     // The connecting IP is NEVER stored. At ingest we derive a coarse country/region and a
     // keyed one-way hash from it, then discard the IP. The body is never trusted for IP.
@@ -985,14 +1004,13 @@ async function startApi(){
     const wss = new WebSocket.Server({ noServer: true });
 
     server.on('upgrade', (request, socket, head) => {
-        // Authenticate using the same hub API key used for write methods
-        if (HUB_API_KEY) {
-            let authHeader = request.headers['authorization'];
-            if (!authHeader || authHeader !== 'Bearer ' + HUB_API_KEY) {
-                socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-                socket.destroy();
-                return;
-            }
+        // Authenticate using the same hub API key used for write methods.
+        // Fails closed: without a configured key, no upgrade is accepted.
+        let authHeader = request.headers['authorization'];
+        if (!HUB_API_KEY || !authHeader || authHeader !== 'Bearer ' + HUB_API_KEY) {
+            socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+            socket.destroy();
+            return;
         }
         // Only accept upgrades to the /hub-db/subscribe path
         if (!request.url || !request.url.startsWith('/hub-db/subscribe')) {

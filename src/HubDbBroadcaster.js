@@ -95,6 +95,10 @@ class HubDbBroadcaster {
                 let cs = await this.db.doQuery('SELECT MAX(id) AS max_id FROM capability_snapshots');
                 maxIds.capability_snapshots = (cs.length > 0 && cs[0].max_id != null) ? Number(cs[0].max_id) : 0;
             } catch (e) { /* table may not exist yet */ }
+            try {
+                let sc = await this.db.doQuery('SELECT MAX(id) AS max_id FROM state_checkpoints');
+                maxIds.state_checkpoints = (sc.length > 0 && sc[0].max_id != null) ? Number(sc[0].max_id) : 0;
+            } catch (e) { /* table may not exist yet */ }
         }
 
         try {
