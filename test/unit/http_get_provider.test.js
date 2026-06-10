@@ -21,7 +21,14 @@
 const { expect } = require('chai');
 const sinon      = require('sinon');
 const nock       = require('nock');
+const dns        = require('dns');
 const httpGet    = require('../../src/providers/http_get.js');
+
+// Resolve every hostname to a public address so unit tests never touch real
+// DNS (the SSRF guard resolves before nock's request interception kicks in).
+function stubPublicDns() {
+    sinon.stub(dns.promises, 'lookup').resolves([{ address: '93.184.216.34', family: 4 }]);
+}
 
 function p(body, meta){ return { body: Buffer.from(body, 'utf8'), meta: String(meta || '200') }; }
 
@@ -123,6 +130,8 @@ describe('http_get.agree — byte_equality', function () {
 // ---- fetch() ---------------------------------------------------------------
 
 describe('http_get.fetch', function () {
+
+    beforeEach(stubPublicDns);
 
     afterEach(function () {
         nock.cleanAll();
@@ -232,9 +241,96 @@ describe('http_get.fetch', function () {
 
 });
 
+// ---- fetch() SSRF guard ----------------------------------------------------
+
+describe('http_get.fetch — SSRF guard', function () {
+
+    afterEach(function () {
+        nock.cleanAll();
+        sinon.restore();
+        delete process.env.ATTESTATION_HTTP_GET_ALLOW_PRIVATE;
+    });
+
+    async function expectGuardReject(payload) {
+        let err = null;
+        try { await httpGet.fetch(payload, {}); } catch (e) { err = e; }
+        expect(err, payload + ' should have been refused').to.exist;
+        expect(err.message).to.match(/SSRF guard/);
+        return err;
+    }
+
+    it('refuses loopback, private, link-local, CGNAT and metadata IP literals', async function () {
+        await expectGuardReject('https://127.0.0.1/');
+        await expectGuardReject('https://127.8.8.8/secret');
+        await expectGuardReject('https://10.0.0.5/');
+        await expectGuardReject('https://172.16.0.1/');
+        await expectGuardReject('https://172.31.255.254/');
+        await expectGuardReject('https://192.168.1.1/admin');
+        await expectGuardReject('https://169.254.169.254/latest/meta-data/'); // cloud metadata over TLS
+        await expectGuardReject('https://100.64.0.1/');
+        await expectGuardReject('https://0.0.0.0/');
+    });
+
+    it('refuses IPv6 loopback, link-local, unique-local and v4-mapped literals', async function () {
+        await expectGuardReject('https://[::1]/');
+        await expectGuardReject('https://[fe80::1]/');
+        await expectGuardReject('https://[fd00::1]/');
+        await expectGuardReject('https://[::ffff:127.0.0.1]/');
+    });
+
+    it('allows public IP literals adjacent to blocked ranges (boundary check)', async function () {
+        // 172.32.0.1 is just past 172.16/12; 100.128.0.1 just past 100.64/10.
+        // nock intercepts so no real connection is made.
+        nock('https://172.32.0.1').get('/').reply(200, 'ok');
+        const r1 = await httpGet.fetch('https://172.32.0.1/', {});
+        expect(r1.meta).to.equal('200');
+
+        nock('https://100.128.0.1').get('/').reply(200, 'ok');
+        const r2 = await httpGet.fetch('https://100.128.0.1/', {});
+        expect(r2.meta).to.equal('200');
+    });
+
+    it('refuses a hostname that resolves to a private address', async function () {
+        sinon.stub(dns.promises, 'lookup').resolves([{ address: '10.1.2.3', family: 4 }]);
+        await expectGuardReject('https://internal.example.com/');
+    });
+
+    it('refuses a hostname when ANY resolved address is private (rebind mix)', async function () {
+        sinon.stub(dns.promises, 'lookup').resolves([
+            { address: '93.184.216.34', family: 4 },
+            { address: '169.254.169.254', family: 4 }
+        ]);
+        await expectGuardReject('https://rebind.example.com/');
+    });
+
+    it('refuses when DNS resolution fails', async function () {
+        sinon.stub(dns.promises, 'lookup').rejects(Object.assign(new Error('queryA ENOTFOUND'), { code: 'ENOTFOUND' }));
+        let err = null;
+        try { await httpGet.fetch('https://nxdomain.example.com/', {}); } catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.message).to.match(/DNS lookup failed/);
+    });
+
+    it('proceeds for a hostname resolving to a public address', async function () {
+        sinon.stub(dns.promises, 'lookup').resolves([{ address: '93.184.216.34', family: 4 }]);
+        nock('https://public.example.com').get('/data').reply(200, 'public-ok');
+        const result = await httpGet.fetch('https://public.example.com/data', {});
+        expect(result.body.toString()).to.equal('public-ok');
+    });
+
+    it('ATTESTATION_HTTP_GET_ALLOW_PRIVATE=1 disables the guard (regtest/e2e escape hatch)', async function () {
+        process.env.ATTESTATION_HTTP_GET_ALLOW_PRIVATE = '1';
+        nock('https://127.0.0.1').get('/local').reply(200, 'local-ok');
+        const result = await httpGet.fetch('https://127.0.0.1/local', {});
+        expect(result.body.toString()).to.equal('local-ok');
+    });
+});
+
 // ---- healthCheck() ---------------------------------------------------------
 
 describe('http_get.healthCheck', function () {
+
+    beforeEach(stubPublicDns);
 
     afterEach(function () {
         nock.cleanAll();
