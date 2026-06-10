@@ -129,14 +129,17 @@ class PriceAggregator extends EventEmitter {
             return { accepted: false, reason: 'duplicate' };
         }
 
-        // Determine effective_at: first broadcast for this oracle/coin/tick/fiat is immediate;
-        // subsequent updates are delayed by 24h to prevent front-running attacks on dispensers.
+        // Determine effective_at: EVERY publish — first or update — is delayed by 24h
+        // from its action's block_time. The delay on updates prevents front-running
+        // attacks on dispensers. The delay on FIRST publishes exists for consensus:
+        // an immediate first publish was retroactively effective (effective_at =
+        // block_time, which precedes the row's arrival in any hub/mirror by the
+        // source chain's indexing lag), so a FIAT dispense settled live could replay
+        // differently once the row existed — a ledger fork. A uniform +24h makes
+        // every row land in every mirror long before any block can read it, which
+        // is also what makes the hub-db sync stream watermark a sound barrier.
         let blockTime = parseInt(priceData.block_time) || 0;
-        let prior = await this.db.doQuery(
-            'SELECT id FROM oracle_prices WHERE source_address = ? AND source_chain = ? AND coin = ? AND tick = ? AND fiat = ? LIMIT 1',
-            [priceData.source_address, sourceChain || '', priceData.coin, priceData.tick, priceData.fiat]
-        );
-        let effectiveAt = (prior && prior.length > 0) ? blockTime + 86400 : blockTime;
+        let effectiveAt = blockTime + 86400;
 
         let query = `INSERT INTO oracle_prices
             (source_address, source_chain, coin, tick, fiat, value, fee, memo, block_time, effective_at, action_index)

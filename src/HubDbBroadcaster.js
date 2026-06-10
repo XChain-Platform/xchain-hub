@@ -37,6 +37,30 @@ class HubDbBroadcaster {
         this.db     = db || null;      // Optional hub DB — used to stamp max IDs in the ready message
         this.subscribers = new Set();  // Set<ws>
         this.maxBufferedMessages = parseInt(this.config.WS_BACKPRESSURE_LIMIT || 50);
+
+        // Stream-position watermark heartbeat. Every interval, tell subscribers
+        // "you have received every row event produced up to ts" — row events are
+        // emitted synchronously at insert time in this same process, so a quiet
+        // stream genuinely means no new rows exist, and the indexer's sync
+        // barriers can distinguish "mirror is behind" from "the world is quiet"
+        // (the row-content watermark deadlock: review items #1984/#1986).
+        this.watermarkIntervalMs = parseInt(this.config.WS_WATERMARK_INTERVAL_MS || 10000);
+        this._watermarkTimer = setInterval(() => this.broadcastWatermark(), this.watermarkIntervalMs);
+        if (this._watermarkTimer.unref) this._watermarkTimer.unref();
+    }
+
+    // Broadcast the current stream position to all subscribers.
+    broadcastWatermark() {
+        if (this.subscribers.size === 0) return;
+        let message = JSON.stringify({ type: 'watermark', ts: Math.floor(Date.now() / 1000) });
+        for (let ws of this.subscribers) {
+            this._send(ws, message);
+        }
+    }
+
+    stop() {
+        if (this._watermarkTimer) clearInterval(this._watermarkTimer);
+        this._watermarkTimer = null;
     }
 
     // Add a new subscriber WebSocket. Sends a 'ready' acknowledgement once the
@@ -74,7 +98,7 @@ class HubDbBroadcaster {
         }
 
         try {
-            ws.send(JSON.stringify({ type: 'ready', max_ids: maxIds }));
+            ws.send(JSON.stringify({ type: 'ready', max_ids: maxIds, watermark: Math.floor(Date.now() / 1000) }));
         } catch (e) { /* ignore */ }
     }
 

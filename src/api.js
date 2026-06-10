@@ -677,7 +677,7 @@ async function startApi(){
                 'SELECT * FROM price_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.json({ table: 'price_snapshots', rows: rows, count: rows.length });
+            res.json({ table: 'price_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000) });
         } catch (err) {
             res.status(500).json({ error: err.message || 'snapshot error' });
         }
@@ -692,7 +692,7 @@ async function startApi(){
                 'SELECT * FROM oracle_prices WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.json({ table: 'oracle_prices', rows: rows, count: rows.length });
+            res.json({ table: 'oracle_prices', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000) });
         } catch (err) {
             res.status(500).json({ error: err.message || 'snapshot error' });
         }
@@ -707,7 +707,7 @@ async function startApi(){
                 'SELECT * FROM cross_chain_matches WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.json({ table: 'cross_chain_matches', rows: rows, count: rows.length });
+            res.json({ table: 'cross_chain_matches', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000) });
         } catch (err) {
             res.status(500).json({ error: err.message || 'snapshot error' });
         }
@@ -722,7 +722,7 @@ async function startApi(){
                 'SELECT * FROM capability_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.json({ table: 'capability_snapshots', rows: rows, count: rows.length });
+            res.json({ table: 'capability_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000) });
         } catch (err) {
             res.status(500).json({ error: err.message || 'snapshot error' });
         }
