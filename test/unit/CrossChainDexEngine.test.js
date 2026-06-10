@@ -280,11 +280,30 @@ describe('CrossChainDexEngine', function () {
             expect(eng._tryMatch(a, b)).to.be.null;
         });
 
-        it('does not cross-match a SWAP against an ORDER (carry-forward)', function () {
-            let { a } = makeOrderPair();              // ORDER on LTC
-            let swap = makeOffer({ home_coin: 'DOGE', kind: 'swap', give_coin: 'DOGE', give_tick: 'DOGT',
-                give_amount: '20', get_coin: 'LTC', get_tick: 'LTCT', get_amount: '40', get_address: 'x' });
-            expect(eng._tryMatch(a, swap)).to.be.null;
+        it('does not cross-match a SWAP against an ORDER (carry-forward) — kind, not terms, is the bar', function () {
+            // ORDER on LTC: give 100 LTCT, get 50 DOGT (makeOrderPair's A, home_network 'regtest').
+            let { a: order } = makeOrderPair();
+            // A DOGE counterparty with terms that DO cross the order (identical to makeOrderPair's B,
+            // which test 237 proves matches as order×order). CRITICAL: it must share the order's
+            // network — otherwise _tryMatch short-circuits on the network guard (line 245) and a null
+            // would be a FALSE proof (the carry-forward branch at line 258 never runs).
+            let terms = { home_coin: 'DOGE', home_network: 'regtest', block_index: 20, action_index: 7,
+                give_coin: 'DOGE', give_tick: 'DOGT', give_amount: '20',
+                get_coin: 'LTC', get_tick: 'LTCT', get_amount: '40', get_address: 'Daddr',
+                give_ownership: 0, get_ownership: 0 };
+            let swap  = Object.assign({}, terms, { kind: 'swap' });
+            let ordr2 = Object.assign({}, terms, { kind: 'order' });
+
+            // SWAP↔ORDER carries forward in BOTH orderings (the only difference from the controls is kind).
+            expect(eng._tryMatch(order, swap), 'order×swap should carry forward').to.be.null;
+            expect(eng._tryMatch(swap, order), 'swap×order should carry forward').to.be.null;
+
+            // Positive controls: the SAME crossing terms DO match when both sides are the same kind,
+            // proving the null above is the SWAP↔ORDER boundary, not term incompatibility or the
+            // network guard. order×order fills; swap×swap (an exact same-network pair) finalises.
+            expect(eng._tryMatch(order, ordr2), 'order×order control should match').to.not.be.null;
+            let { a: swapA, b: swapB } = makePair();
+            expect(eng._tryMatch(swapA, swapB), 'swap×swap control should match').to.not.be.null;
         });
     });
 
