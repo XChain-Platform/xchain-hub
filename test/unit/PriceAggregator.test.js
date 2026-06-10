@@ -10,10 +10,30 @@
 // license (without AGPL source-disclosure terms) is available —
 // contact legal@dankest.llc.
 
+const crypto           = require('crypto');
 const sinon            = require('sinon');
 const { expect }       = require('chai');
 const PriceAggregator  = require('../../src/PriceAggregator');
 const { createMockHub } = require('../helpers/mockHub');
+
+// Mirror of the canonical PRICE v0 payload — xchain-indexer/src/ed25519.js
+// buildPriceV0Payload. Tests sign these exact bytes.
+function buildPriceV0Payload(round, timestamp, pairs) {
+    let sortedPairs = pairs
+        .map(p => ({ pair: p.pair, price: String(p.price) }))
+        .sort((a, b) => (a.pair < b.pair ? -1 : a.pair > b.pair ? 1 : 0));
+    return JSON.stringify({ round: parseInt(round), timestamp: parseInt(timestamp), pairs: sortedPairs });
+}
+
+// Generate a real Ed25519 validator keypair: { pubkey (64-hex), sign(payload) → 128-hex }
+function makeValidator() {
+    let { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+    let pubkey = publicKey.export({ format: 'der', type: 'spki' }).subarray(-32).toString('hex');
+    return {
+        pubkey,
+        sign: (payload) => crypto.sign(null, Buffer.from(payload, 'utf8'), privateKey).toString('hex')
+    };
+}
 
 describe('PriceAggregator.retractFromActionIndex()', function () {
 
@@ -93,32 +113,15 @@ describe('PriceAggregator.retractFromActionIndex()', function () {
     });
 });
 
-describe('PriceAggregator.receiveOraclePrice() effective_at lock-window', function () {
+describe('PriceAggregator.receiveOraclePrice() uniform 24h effective_at delay', function () {
 
     let hub, agg;
 
-    // Build a doQuery stub that models an oracle_prices table holding the given
-    // pre-existing rows. The dedup and lock-window SELECTs are answered from that
-    // set; the INSERT is captured so tests can assert the persisted effective_at.
-    function stubDb(existingRows) {
+    // Capture the INSERT args; the dedup SELECT misses.
+    function stubDb() {
         let insertArgs = null;
         hub.db.doQuery.callsFake(async (sql, params) => {
-            if (/^INSERT INTO oracle_prices/.test(sql)) {
-                insertArgs = params;
-                return {};
-            }
-            // Lock-window prior check (scoped to source_chain + coin/tick/fiat)
-            if (/SELECT id FROM oracle_prices WHERE source_address = \? AND source_chain = \? AND coin = \?/.test(sql)) {
-                let [addr, chain, coin, tick, fiat] = params;
-                let hit = existingRows.some(r =>
-                    r.source_address === addr && r.source_chain === chain &&
-                    r.coin === coin && r.tick === tick && r.fiat === fiat);
-                return hit ? [{ id: 1 }] : [];
-            }
-            // Dedup check (source_address + source_chain + action_index)
-            if (/SELECT id FROM oracle_prices WHERE source_address = \? AND source_chain = \? AND action_index/.test(sql)) {
-                return [];
-            }
+            if (/^INSERT INTO oracle_prices/.test(sql)) { insertArgs = params; return {}; }
             return [];
         });
         return () => insertArgs;
@@ -137,11 +140,8 @@ describe('PriceAggregator.receiveOraclePrice() effective_at lock-window', functi
         sinon.restore();
     });
 
-    it('treats the first submission on a NEW chain as immediate even when the oracle exists on another chain', async function () {
-        // Oracle already published BTC for this coin/tick/fiat; LTC has never been seen.
-        let getInsert = stubDb([
-            { source_address: 'addr1', source_chain: 'BTC', coin: 'XCP', tick: 'GOLD', fiat: 'USD' }
-        ]);
+    it('delays a first-ever publish by 24h from its block_time', async function () {
+        let getInsert = stubDb();
 
         let result = await agg.receiveOraclePrice('LTC', {
             source_address: 'addr1', coin: 'XCP', tick: 'GOLD', fiat: 'USD',
@@ -149,15 +149,13 @@ describe('PriceAggregator.receiveOraclePrice() effective_at lock-window', functi
         });
 
         expect(result).to.deep.equal({ accepted: true });
-        // No prior LTC row → effective immediately, NOT delayed by 24h.
-        expect(getInsert()[EFFECTIVE_AT]).to.equal(1700000000);
+        // EVERY publish — first included — is delayed 24h so the row lands in
+        // every mirror before any block can read it (no retroactive effect).
+        expect(getInsert()[EFFECTIVE_AT]).to.equal(1700000000 + 86400);
     });
 
-    it('still delays a genuine same-chain update by 24h', async function () {
-        // Oracle already published LTC for this coin/tick/fiat; this is an update on LTC.
-        let getInsert = stubDb([
-            { source_address: 'addr1', source_chain: 'LTC', coin: 'XCP', tick: 'GOLD', fiat: 'USD' }
-        ]);
+    it('delays an update by 24h from its block_time', async function () {
+        let getInsert = stubDb();
 
         let result = await agg.receiveOraclePrice('LTC', {
             source_address: 'addr1', coin: 'XCP', tick: 'GOLD', fiat: 'USD',
@@ -165,22 +163,7 @@ describe('PriceAggregator.receiveOraclePrice() effective_at lock-window', functi
         });
 
         expect(result).to.deep.equal({ accepted: true });
-        // Prior LTC row exists → 24h front-running delay applies.
         expect(getInsert()[EFFECTIVE_AT]).to.equal(1700000000 + 86400);
-    });
-
-    it('scopes the lock-window SELECT to source_chain', async function () {
-        stubDb([]);
-
-        await agg.receiveOraclePrice('LTC', {
-            source_address: 'addr1', coin: 'XCP', tick: 'GOLD', fiat: 'USD',
-            value: '1.00', block_time: 1700000000, action_index: 1
-        });
-
-        let priorCall = hub.db.doQuery.getCalls().find(c =>
-            /SELECT id FROM oracle_prices WHERE source_address = \? AND source_chain = \? AND coin = \?/.test(c.args[0]));
-        expect(priorCall, 'lock-window prior check includes source_chain').to.exist;
-        expect(priorCall.args[1]).to.deep.equal(['addr1', 'LTC', 'XCP', 'GOLD', 'USD']);
     });
 });
 
@@ -254,18 +237,34 @@ describe('PriceAggregator.receiveOraclePrice() validation + persistence', functi
         });
 
         expect(result).to.deep.equal({ accepted: true });
-        // First-ever submission → effective immediately.
+        // Uniform 24h delay applies to every publish, first included.
         expect(insertArgs).to.deep.equal([
             'addr1', 'BTC', 'XCP', 'GOLD', 'USD', '1.23', '0.01', 'hi',
-            1700000000, 1700000000, 7
+            1700000000, 1700086400, 7
         ]);
         expect(events).to.have.length(1);
         expect(events[0].table).to.equal('oracle_prices');
         expect(events[0].row).to.include({
             source_address: 'addr1', source_chain: 'BTC', coin: 'XCP',
             tick: 'GOLD', fiat: 'USD', value: '1.23', fee: '0.01', memo: 'hi',
-            block_time: 1700000000, effective_at: 1700000000, action_index: 7
+            block_time: 1700000000, effective_at: 1700086400, action_index: 7
         });
+    });
+
+    it('rejects a malformed or non-positive value without touching the DB', async function () {
+        for (let value of ['abc', '-1', '0', '1.123456789', '1e5']) {
+            let result = await agg.receiveOraclePrice('BTC', { ...VALID, value });
+            expect(result, 'value=' + value).to.deep.equal({ accepted: false, reason: 'invalid value' });
+        }
+        expect(hub.db.doQuery.called).to.equal(false);
+    });
+
+    it('rejects a malformed or out-of-range fee without touching the DB', async function () {
+        for (let fee of ['abc', '1.5', '-0.1']) {
+            let result = await agg.receiveOraclePrice('BTC', { ...VALID, fee });
+            expect(result, 'fee=' + fee).to.deep.equal({ accepted: false, reason: 'invalid fee' });
+        }
+        expect(hub.db.doQuery.called).to.equal(false);
     });
 
     it('defaults fee/memo to null, action_index to 0, and source_chain to "" when omitted', async function () {
@@ -290,25 +289,60 @@ describe('PriceAggregator.receiveValidatedRound()', function () {
 
     let hub, agg;
 
+    // Four price-qualified validators → PBFT quorum 2*floor(3/3)+1 = 3
+    const V = [makeValidator(), makeValidator(), makeValidator(), makeValidator()];
+    const PAIRS   = [{ pair: 'BTC/USD', price: '50000' }, { pair: 'LTC/USD', price: '80' }];
+    const PAYLOAD = buildPriceV0Payload(5, 1700000000, PAIRS);
+
+    // A legitimately signed round: 3 of the 4 qualified validators signed
+    function makeRound(overrides = {}) {
+        return {
+            round: 5,
+            timestamp: 1700000000,
+            block_index: 800000,
+            action_index: 42,
+            pairs: PAIRS,
+            sigs: V.slice(0, 3).map(v => ({ pubkey: v.pubkey, sig: v.sign(PAYLOAD) })),
+            ...overrides
+        };
+    }
+
+    function stubSnapshot(snapshot) {
+        hub.capabilitySnapshot = { getSnapshot: sinon.stub().resolves(snapshot) };
+        return hub.capabilitySnapshot.getSnapshot;
+    }
+
+    function snapshotOf(validators) {
+        return {
+            capability: 'price',
+            blockIndex: 800000,
+            count:      validators.length,
+            validators: validators.map(v => ({ pubkey: v.pubkey, amount: '100000.00000000' }))
+        };
+    }
+
+    // doQuery stub: dedup SELECT misses, INSERTs are captured
+    function stubDb() {
+        let inserts = [];
+        hub.db.doQuery.callsFake(async (sql, params) => {
+            if (/^SELECT id FROM price_snapshots/.test(sql)) return [];
+            if (/^INSERT INTO price_snapshots/.test(sql)) { inserts.push(params); return {}; }
+            return [];
+        });
+        return inserts;
+    }
+
     beforeEach(function () {
         hub = createMockHub();
         agg = new PriceAggregator(hub);
+        stubSnapshot(snapshotOf(V));
     });
 
     afterEach(function () {
         sinon.restore();
     });
 
-    const ROUND = {
-        round: 5,
-        timestamp: 1700000000,
-        block_index: 800000,
-        action_index: 42,
-        sigs: ['sigA', 'sigB'],
-        pairs: [{ pair: 'BTC/USD', price: '50000' }, { pair: 'LTC/USD', price: '80' }]
-    };
-
-    it('rejects roundData that is null / missing round / has non-array pairs', async function () {
+    it('rejects roundData that is null / missing round / has non-array or empty pairs', async function () {
         for (let bad of [null, { pairs: [] }, { round: 5 }, { round: 5, pairs: 'x' }]) {
             let result = await agg.receiveValidatedRound('BTC', bad);
             expect(result).to.deep.equal({ accepted: false, reason: 'invalid roundData' });
@@ -317,74 +351,145 @@ describe('PriceAggregator.receiveValidatedRound()', function () {
     });
 
     it('rejects a non-finite or negative round number', async function () {
-        let r1 = await agg.receiveValidatedRound('BTC', { round: -1, pairs: [{ pair: 'X', price: '1' }] });
+        let r1 = await agg.receiveValidatedRound('BTC', makeRound({ round: -1 }));
         expect(r1).to.deep.equal({ accepted: false, reason: 'invalid round' });
         expect(hub.db.doQuery.called).to.equal(false);
     });
 
-    it('rejects a duplicate round (a snapshot row already exists)', async function () {
-        hub.db.doQuery.onFirstCall().resolves([{ id: 1 }]);
-        let result = await agg.receiveValidatedRound('BTC', ROUND);
-        expect(result).to.deep.equal({ accepted: false, reason: 'duplicate' });
-        expect(hub.db.doQuery.callCount).to.equal(1); // dedup SELECT only
+    it('rejects a round missing timestamp or block_index — both are signed/anchoring fields', async function () {
+        let r1 = await agg.receiveValidatedRound('BTC', makeRound({ timestamp: undefined }));
+        expect(r1).to.deep.equal({ accepted: false, reason: 'invalid timestamp' });
+        let r2 = await agg.receiveValidatedRound('BTC', makeRound({ block_index: undefined }));
+        expect(r2).to.deep.equal({ accepted: false, reason: 'invalid block_index' });
+        expect(hub.db.doQuery.called).to.equal(false);
     });
 
-    it('inserts one row per valid pair, skips malformed pairs, and emits row:inserted for each', async function () {
-        let inserts = [];
-        hub.db.doQuery.callsFake(async (sql, params) => {
-            if (/^SELECT id FROM price_snapshots/.test(sql)) return [];   // no dup
-            if (/^INSERT INTO price_snapshots/.test(sql)) { inserts.push(params); return {}; }
-            return [];
-        });
+    it('rejects malformed pairs instead of silently skipping them', async function () {
+        for (let pairs of [
+            [{ pair: 'BTC/USD', price: '50000' }, null],
+            [{ pair: 'NOPRICE' }],
+            [{ price: '1' }],
+            [{ pair: 'not a pair', price: '1' }],
+            [{ pair: 'BTC/USD', price: 'NaN' }]
+        ]) {
+            let result = await agg.receiveValidatedRound('BTC', makeRound({ pairs }));
+            expect(result, JSON.stringify(pairs)).to.deep.equal({ accepted: false, reason: 'invalid pairs' });
+        }
+        expect(hub.db.doQuery.called).to.equal(false);
+    });
+
+    it('rejects opaque/unstructured sigs — the historical blind-storage shape', async function () {
+        // Before hub-side verification existed, exactly this shape was stored
+        // verbatim as a 'finalized' consensus proof with validator_count 2.
+        for (let sigs of [undefined, [], ['sigA', 'sigB'], [{ pubkey: 'xx', sig: 'yy' }]]) {
+            let result = await agg.receiveValidatedRound('BTC', makeRound({ sigs }));
+            expect(result, JSON.stringify(sigs)).to.deep.equal({ accepted: false, reason: 'invalid sigs' });
+        }
+        expect(hub.db.doQuery.called).to.equal(false);
+    });
+
+    it('rejects a duplicate round (a snapshot row already exists) before verification', async function () {
+        hub.db.doQuery.onFirstCall().resolves([{ id: 1 }]);
+        let result = await agg.receiveValidatedRound('BTC', makeRound());
+        expect(result).to.deep.equal({ accepted: false, reason: 'duplicate' });
+        expect(hub.db.doQuery.callCount).to.equal(1); // dedup SELECT only
+        expect(hub.capabilitySnapshot.getSnapshot.called).to.equal(false);
+    });
+
+    it('accepts a quorum-signed round, stores only verified sigs, and emits row:inserted per pair', async function () {
+        let inserts = stubDb();
         let events = [];
         agg.on('row:inserted', e => events.push(e));
 
-        let result = await agg.receiveValidatedRound('BTC', {
-            ...ROUND,
-            pairs: [
-                { pair: 'BTC/USD', price: '50000' },
-                null,                       // skipped
-                { pair: 'NOPRICE' },        // skipped (no price)
-                { price: '1' },             // skipped (no pair)
-                { pair: 'LTC/USD', price: '80' }
-            ]
-        });
+        let result = await agg.receiveValidatedRound('BTC', makeRound());
 
         expect(result).to.deep.equal({ accepted: true });
-        expect(inserts).to.have.length(2); // only the two well-formed pairs
-        // Each insert carries the shared round metadata.
+        // The validator set was resolved for the price capability at the round's block
+        expect(hub.capabilitySnapshot.getSnapshot.calledOnceWith('price', 800000)).to.equal(true);
+        expect(inserts).to.have.length(2);
         expect(inserts[0][0]).to.equal(5);             // round_number
         expect(inserts[0][1]).to.equal('BTC/USD');     // coin_pair
         expect(inserts[0][2]).to.equal('50000');       // price
         expect(inserts[0][3]).to.equal(800000);        // reference_block
         expect(inserts[0][4]).to.equal('BTC');         // reference_chain
         expect(inserts[0][5]).to.equal(1700000000);    // block_timestamp
-        expect(inserts[0][6]).to.equal(2);             // validator_count (2 sigs)
-        // emitted one row event per inserted row
+        expect(inserts[0][6]).to.equal(3);             // validator_count = VERIFIED sigs
+        // consensus_proof holds exactly the verified (pubkey, sig) pairs
+        let proof = JSON.parse(inserts[0][7]);
+        expect(proof.map(s => s.pubkey)).to.deep.equal(V.slice(0, 3).map(v => v.pubkey));
         expect(events).to.have.length(2);
         expect(events.every(e => e.table === 'price_snapshots')).to.equal(true);
         expect(events.map(e => e.row.coin_pair)).to.deep.equal(['BTC/USD', 'LTC/USD']);
     });
 
-    it('defaults sigs→[], validator_count→0, reference_block→round, action_index→null when absent', async function () {
-        let insertArgs = null;
-        hub.db.doQuery.callsFake(async (sql, params) => {
-            if (/^SELECT id FROM price_snapshots/.test(sql)) return [];
-            if (/^INSERT INTO price_snapshots/.test(sql)) { insertArgs = params; return {}; }
-            return [];
-        });
-        await agg.receiveValidatedRound(null, {
-            round: 9,
+    it('rejects a round whose sigs are forged (well-formed hex but cryptographically invalid)', async function () {
+        stubDb();
+        let result = await agg.receiveValidatedRound('BTC', makeRound({
+            sigs: V.slice(0, 3).map(v => ({ pubkey: v.pubkey, sig: 'ab'.repeat(64) }))
+        }));
+        expect(result).to.deep.equal({ accepted: false, reason: 'insufficient quorum (0/3)' });
+        expect(hub.db.doQuery.getCalls().some(c => /^INSERT/.test(c.args[0]))).to.equal(false);
+    });
+
+    it('rejects a round signed over a DIFFERENT payload (valid sigs, wrong data)', async function () {
+        stubDb();
+        // Validators signed round 5 at the real prices; attacker replays those
+        // sigs on a round claiming BTC/USD = 1.
+        let result = await agg.receiveValidatedRound('BTC', makeRound({
             pairs: [{ pair: 'BTC/USD', price: '1' }]
-            // no timestamp, block_index, sigs, action_index
-        });
-        expect(insertArgs[0]).to.equal(9);     // round_number
-        expect(insertArgs[3]).to.equal(9);     // reference_block falls back to round
-        expect(insertArgs[4]).to.equal(null);  // reference_chain (sourceChain null)
-        expect(insertArgs[5]).to.equal(0);     // block_timestamp
-        expect(insertArgs[6]).to.equal(0);     // validator_count (no sigs)
-        expect(insertArgs[7]).to.equal('[]');  // consensus_proof (empty sigs)
-        expect(insertArgs[9]).to.equal(null);  // source_action_index (args[10] is created_at)
+        }));
+        expect(result).to.deep.equal({ accepted: false, reason: 'insufficient quorum (0/3)' });
+        expect(hub.db.doQuery.getCalls().some(c => /^INSERT/.test(c.args[0]))).to.equal(false);
+    });
+
+    it('rejects a round signed by keys outside the qualified price-capability set', async function () {
+        stubDb();
+        let outsiders = [makeValidator(), makeValidator(), makeValidator()];
+        let result = await agg.receiveValidatedRound('BTC', makeRound({
+            sigs: outsiders.map(v => ({ pubkey: v.pubkey, sig: v.sign(PAYLOAD) }))
+        }));
+        expect(result).to.deep.equal({ accepted: false, reason: 'insufficient quorum (0/3)' });
+        expect(hub.db.doQuery.getCalls().some(c => /^INSERT/.test(c.args[0]))).to.equal(false);
+    });
+
+    it('rejects a round below quorum and counts a duplicated pubkey only once', async function () {
+        stubDb();
+        // 2 distinct valid sigs < quorum 3
+        let result = await agg.receiveValidatedRound('BTC', makeRound({
+            sigs: V.slice(0, 2).map(v => ({ pubkey: v.pubkey, sig: v.sign(PAYLOAD) }))
+        }));
+        expect(result).to.deep.equal({ accepted: false, reason: 'insufficient quorum (2/3)' });
+
+        // Padding with a repeat of the same validator must not reach quorum
+        let sig0 = { pubkey: V[0].pubkey, sig: V[0].sign(PAYLOAD) };
+        let result2 = await agg.receiveValidatedRound('BTC', makeRound({
+            sigs: [sig0, sig0, { pubkey: V[1].pubkey, sig: V[1].sign(PAYLOAD) }]
+        }));
+        expect(result2).to.deep.equal({ accepted: false, reason: 'insufficient quorum (2/3)' });
+        expect(hub.db.doQuery.getCalls().some(c => /^INSERT/.test(c.args[0]))).to.equal(false);
+    });
+
+    it('fails closed when the validator snapshot is unavailable', async function () {
+        stubDb();
+        stubSnapshot(null); // indexer unreachable
+        let result = await agg.receiveValidatedRound('BTC', makeRound());
+        expect(result).to.deep.equal({ accepted: false, reason: 'validator snapshot unavailable' });
+
+        hub.capabilitySnapshot = undefined; // no snapshot machinery at all
+        let result2 = await agg.receiveValidatedRound('BTC', makeRound());
+        expect(result2).to.deep.equal({ accepted: false, reason: 'validator snapshot unavailable' });
+        expect(hub.db.doQuery.getCalls().some(c => /^INSERT/.test(c.args[0]))).to.equal(false);
+    });
+
+    it('accepts a single-validator round in a single-node set (quorum 1)', async function () {
+        let inserts = stubDb();
+        stubSnapshot(snapshotOf([V[0]]));
+        let result = await agg.receiveValidatedRound('BTC', makeRound({
+            sigs: [{ pubkey: V[0].pubkey, sig: V[0].sign(PAYLOAD) }]
+        }));
+        expect(result).to.deep.equal({ accepted: true });
+        expect(inserts).to.have.length(2);
+        expect(inserts[0][6]).to.equal(1); // validator_count
     });
 
     it('returns a db error if a snapshot INSERT throws', async function () {
@@ -395,7 +500,7 @@ describe('PriceAggregator.receiveValidatedRound()', function () {
             if (/^INSERT INTO price_snapshots/.test(sql)) throw new Error('boom');
             return [];
         });
-        let result = await agg.receiveValidatedRound('BTC', ROUND);
+        let result = await agg.receiveValidatedRound('BTC', makeRound());
         expect(result).to.deep.equal({ accepted: false, reason: 'db error' });
         expect(events).to.deep.equal([]); // aborts before emitting
     });

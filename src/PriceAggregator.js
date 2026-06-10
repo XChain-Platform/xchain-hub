@@ -20,12 +20,18 @@
  * price_snapshots / oracle_prices tables in the hub DB.
  *
  * Indexers push to the hub via JSON-RPC after validating PBFT signatures
- * locally. The hub is the cross-chain aggregation point — first valid
- * submission for a given round wins, duplicates are silently ignored.
+ * locally, but the hub does NOT take that on trust: every PRICE v0 round
+ * is re-verified here — each Ed25519 signature is checked against the
+ * canonical round payload, signers must belong to the price-capability
+ * validator snapshot at the round's block, and the verified count must
+ * meet PBFT quorum — before anything is written as 'finalized'. The hub
+ * is the cross-chain aggregation point — first valid submission for a
+ * given round wins, duplicates are silently ignored.
  *
  ********************************************************************/
 
-const EventEmitter = require('events');
+const EventEmitter      = require('events');
+const ValidatorIdentity = require('./ValidatorIdentity.js');
 
 class PriceAggregator extends EventEmitter {
 
@@ -35,18 +41,78 @@ class PriceAggregator extends EventEmitter {
         this.db  = hub.db;
     }
 
+    // Build the canonical signable payload for a PRICE v0 round.
+    // MUST match xchain-indexer/src/ed25519.js buildPriceV0Payload (and
+    // OracleConsensus._buildPriceV0Payload) exactly — validators signed these
+    // bytes, so any divergence here rejects every legitimate round.
+    _buildPriceV0Payload(round, timestamp, pairs) {
+        let sortedPairs = pairs
+            .map(p => ({ pair: p.pair, price: String(p.price) }))
+            .sort((a, b) => {
+                if (a.pair < b.pair) return -1;
+                if (a.pair > b.pair) return 1;
+                return 0;
+            });
+        return JSON.stringify({
+            round:     parseInt(round),
+            timestamp: parseInt(timestamp),
+            pairs:     sortedPairs
+        });
+    }
+
     // Receive a validated PRICE v0 round from an indexer
     // sourceChain: chain on which the PRICE tx was published
     // roundData:   { round, timestamp, pairs, sigs, action_index, block_index }
-    // Returns: { accepted, reason } where reason is 'duplicate' or 'error' if rejected
+    //
+    // The pusher's local validation is NOT trusted: before any row is stored
+    // as 'finalized', every signature is re-verified here against the
+    // canonical payload, signers must be in the price-capability validator
+    // snapshot at block_index, and the verified count must meet PBFT quorum.
+    // Returns: { accepted, reason } where reason explains the rejection
     async receiveValidatedRound(sourceChain, roundData) {
-        if (!roundData || !roundData.round || !Array.isArray(roundData.pairs)) {
+        if (!roundData || !roundData.round || !Array.isArray(roundData.pairs) || roundData.pairs.length < 1) {
             return { accepted: false, reason: 'invalid roundData' };
         }
 
         let round = parseInt(roundData.round);
         if (!Number.isFinite(round) || round < 0) {
             return { accepted: false, reason: 'invalid round' };
+        }
+
+        // timestamp is part of the signed payload — it must be present and sane
+        let timestamp = parseInt(roundData.timestamp);
+        if (!Number.isFinite(timestamp) || timestamp < 0) {
+            return { accepted: false, reason: 'invalid timestamp' };
+        }
+
+        // block_index anchors both the signed payload's validator snapshot and
+        // the stored reference_block; verification is impossible without it
+        let referenceBlock = parseInt(roundData.block_index);
+        if (!Number.isFinite(referenceBlock) || referenceBlock < 0) {
+            return { accepted: false, reason: 'invalid block_index' };
+        }
+
+        // Every pair must satisfy the on-chain wire-format rules (mirrors the
+        // indexer's PRICE v0 parser) so the canonical payload reconstruction
+        // below is byte-exact with what the validators signed
+        for (let p of roundData.pairs) {
+            if (!p || typeof p.pair !== 'string' || !/^[A-Z]{3,5}\/[A-Z]{3,5}$/.test(p.pair) ||
+                p.price === undefined || p.price === null || !/^[0-9]+(\.[0-9]+)?$/.test(String(p.price))) {
+                return { accepted: false, reason: 'invalid pairs' };
+            }
+        }
+
+        // Structural sig validation: [{ pubkey: 64-hex, sig: 128-hex }, ...]
+        if (!Array.isArray(roundData.sigs) || roundData.sigs.length < 1) {
+            return { accepted: false, reason: 'invalid sigs' };
+        }
+        let sigs = [];
+        for (let s of roundData.sigs) {
+            if (!s || typeof s.pubkey !== 'string' || typeof s.sig !== 'string' ||
+                !/^[0-9a-fA-F]{64}$/.test(s.pubkey) || !/^[0-9a-fA-F]{128}$/.test(s.sig)) {
+                return { accepted: false, reason: 'invalid sigs' };
+            }
+            sigs.push({ pubkey: s.pubkey.toLowerCase(), sig: s.sig.toLowerCase() });
         }
 
         // Dedupe: if any row exists for this round_number, this is a duplicate
@@ -58,10 +124,45 @@ class PriceAggregator extends EventEmitter {
             return { accepted: false, reason: 'duplicate' };
         }
 
-        let proofJson = JSON.stringify(roundData.sigs || []);
-        let validatorCount = Array.isArray(roundData.sigs) ? roundData.sigs.length : 0;
-        let timestamp = parseInt(roundData.timestamp) || 0;
-        let referenceBlock = parseInt(roundData.block_index) || round;
+        // Resolve the deterministic price-capability validator set at the
+        // round's block. Fail closed: without the snapshot the sigs cannot be
+        // checked against the qualified set, so the round is rejected rather
+        // than stored on trust.
+        let snapshot = this.hub.capabilitySnapshot
+            ? await this.hub.capabilitySnapshot.getSnapshot('price', referenceBlock)
+            : null;
+        if (!snapshot || !Array.isArray(snapshot.validators)) {
+            return { accepted: false, reason: 'validator snapshot unavailable' };
+        }
+
+        // Verify each sig over the canonical payload, counting at most one per
+        // qualified pubkey. Unknown or invalid sigs are skipped rather than
+        // fatal — same semantics as the indexer's PRICE v0 parser — so any
+        // round the indexer accepted on-chain also verifies here, but only
+        // cryptographically-valid sigs from snapshot members count for quorum.
+        let payload    = this._buildPriceV0Payload(round, timestamp, roundData.pairs);
+        let qualified  = new Set(snapshot.validators.map(v => String(v.pubkey).toLowerCase()));
+        let seenPubkey = new Set();
+        let verifiedSigs = [];
+        for (let s of sigs) {
+            if (seenPubkey.has(s.pubkey)) continue;        // duplicate pubkey counts once
+            seenPubkey.add(s.pubkey);
+            if (!qualified.has(s.pubkey)) continue;        // not price-qualified at this block
+            if (!ValidatorIdentity.verify(payload, s.sig, s.pubkey)) continue;
+            verifiedSigs.push(s);
+        }
+
+        // PBFT quorum over the snapshot size: 2 * floor((N - 1) / 3) + 1 —
+        // the same threshold the indexer enforces when validating the action
+        let setSize = Number.isFinite(parseInt(snapshot.count)) ? parseInt(snapshot.count) : snapshot.validators.length;
+        let quorum  = (setSize <= 1) ? 1 : 2 * Math.floor((setSize - 1) / 3) + 1;
+        if (verifiedSigs.length < quorum) {
+            return { accepted: false, reason: 'insufficient quorum (' + verifiedSigs.length + '/' + quorum + ')' };
+        }
+
+        // Only the verified signatures are stored as the consensus proof
+        let proofJson = JSON.stringify(verifiedSigs);
+        let validatorCount = verifiedSigs.length;
         let sourceActionIndex = roundData.action_index || null;
 
         // Insert one row per pair
@@ -70,7 +171,6 @@ class PriceAggregator extends EventEmitter {
         let createdAt = new Date();
         let insertedRows = [];
         for (let p of roundData.pairs) {
-            if (!p || !p.pair || !p.price) continue;
             let query = `INSERT INTO price_snapshots
                 (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
                  validator_count, consensus_round, consensus_proof, status, source_chain, source_action_index,
@@ -118,6 +218,21 @@ class PriceAggregator extends EventEmitter {
     async receiveOraclePrice(sourceChain, priceData) {
         if (!priceData || !priceData.source_address || !priceData.coin || !priceData.tick || !priceData.fiat || !priceData.value) {
             return { accepted: false, reason: 'invalid priceData' };
+        }
+
+        // PRICE v1 carries no PBFT signatures on the wire — it is a single
+        // user's oracle price whose authenticity is the on-chain transaction
+        // itself, which only the indexer that observed the chain can validate.
+        // Unlike PRICE v0 rounds (re-verified in receiveValidatedRound), the
+        // hub cannot re-check that cryptographically; the gates here are the
+        // authenticated push channel, strict field validation (mirroring the
+        // indexer's wire-format rules), and the uniform 24h effective_at delay.
+        if (!/^[0-9]+(\.[0-9]{1,8})?$/.test(String(priceData.value)) || parseFloat(priceData.value) <= 0) {
+            return { accepted: false, reason: 'invalid value' };
+        }
+        if (priceData.fee !== undefined && priceData.fee !== null && priceData.fee !== '' &&
+            (!/^[0-9]+(\.[0-9]+)?$/.test(String(priceData.fee)) || parseFloat(priceData.fee) > 1)) {
+            return { accepted: false, reason: 'invalid fee' };
         }
 
         // Dedupe by (source_address, source_chain, action_index)
