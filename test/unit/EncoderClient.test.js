@@ -162,6 +162,29 @@ describe('EncoderClient', function () {
             expect(body.method).to.equal('get_utxos');
             expect(body.params.address).to.equal('Daddress123');
         });
+
+        it('unwraps the live encoder { utxos: [...] } envelope to a bare array', async function () {
+            // create_tx requires a bare array; passing the envelope through
+            // failed every default-pipeline broadcast with "utxos must be an
+            // array" (first live mainnet ANCHOR flush, 2026-06-11).
+            let utxos = [{ txid: 'ab', vout: 0, value: '100.0' }];
+            axiosStub.post.resolves(okResponse({ utxos: utxos }));
+            let c = new EncoderClient('http://enc/rpc', '');
+            expect(await c.getUtxos('D1')).to.deep.equal(utxos);
+        });
+
+        it('passes an already-bare array through unchanged', async function () {
+            let utxos = [{ txid: 'cd', vout: 1 }];
+            axiosStub.post.resolves(okResponse(utxos));
+            let c = new EncoderClient('http://enc/rpc', '');
+            expect(await c.getUtxos('D1')).to.deep.equal(utxos);
+        });
+
+        it('returns null result untouched (no UTXOs / empty response)', async function () {
+            axiosStub.post.resolves({ data: { result: null } });
+            let c = new EncoderClient('http://enc/rpc', '');
+            expect(await c.getUtxos('D1')).to.equal(null);
+        });
     });
 
     // ── createTx ─────────────────────────────────────────────────────────────

@@ -49,9 +49,15 @@ class EncoderClient {
         return response.data ? response.data.result : null;
     }
 
-    // Fetch UTXOs for an address (proxies to UTXO tracker via encoder)
+    // Fetch UTXOs for an address (proxies to UTXO tracker via encoder).
+    // The live encoder wraps the list as { utxos: [...] } (the tracker's
+    // get_utxos shape); unwrap it so callers can feed the result straight
+    // into create_tx, which requires a bare array. Tolerates an already-bare
+    // array (test stubs / older encoders).
     async getUtxos(address) {
-        return this._call('get_utxos', { address: address });
+        let result = await this._call('get_utxos', { address: address });
+        if (result && Array.isArray(result.utxos)) return result.utxos;
+        return result;
     }
 
     // Create an unsigned PSBT transaction with embedded data payload
