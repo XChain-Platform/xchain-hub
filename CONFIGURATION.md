@@ -15,16 +15,19 @@ validator federation — read the **Silent-failure variables** section first.
 
 ## ⚠️ Silent-failure variables (read this first)
 
-Two variables degrade security **without raising any error** when left empty.
-The hub starts and appears healthy, so the misconfiguration is easy to miss.
+Two variables degrade security when left empty. The hub starts and appears
+healthy, so the misconfiguration is easy to miss.
 
 ### `HUB_API_KEY` — empty disables API authentication
 
-When `HUB_API_KEY` is unset or empty, API-key enforcement is skipped and **every
-endpoint is open**, including the mutating methods (`updateconfig`,
-`registervalidator`, `propose`, `vote`, `requestattestation`, `reportreorg`,
-`initiateswap`, and the oracle/price push methods). There is no warning in the
-logs.
+When `HUB_API_KEY` is set, authentication fails closed: mutating methods
+(`updateconfig`, `registervalidator`, `propose`, `vote`, `requestattestation`,
+`reportreorg`, `initiateswap`, the oracle/price push methods) and the hub-DB
+WebSocket upgrade return 401 unless the caller presents the configured key.
+
+When it is unset or empty, those paths are **open** and a warning is logged at
+startup. The key is deliberately not required at boot: `xchain-node`-managed
+deployments provision no key, so a hard requirement would crash-loop them.
 
 **Production requirement:** always set a strong, random `HUB_API_KEY`. Generate one with:
 
@@ -74,7 +77,7 @@ signatures.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `HUB_API_KEY` | **Prod** | _empty_ | API key required on requests. **Empty disables auth — see above.** |
+| `HUB_API_KEY` | **Prod** | _empty_ | API key required on write requests and WS upgrades when set. **Empty leaves them open (startup warning) — see above.** |
 | `HUB_RATE_LIMIT_RPM` | No | `100` | Requests per minute per client. |
 | `CORS_ORIGIN` | No | `false` | Allowed CORS origin; `false` disables cross-origin requests. |
 

@@ -23,7 +23,7 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 // Validate required environment variables
-const REQUIRED_ENV = ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT', 'HUB_API_KEY'];
+const REQUIRED_ENV = ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT'];
 for(const key of REQUIRED_ENV){
     if(!process.env[key]){
         console.error('Missing required environment variable: ' + key);
@@ -47,7 +47,15 @@ const HUB_HOST = process.env.HUB_HOST || '0.0.0.0';
 const HUB_DB_KEEPALIVE_INTERVAL = parseInt(process.env.HUB_DB_KEEPALIVE_INTERVAL) || 30000;
 
 // Security constants
+// HUB_API_KEY is optional, matching the other services: unset disables the
+// write/WS-subscribe gate (single-host / regtest / managed deploys); when
+// configured, those paths fail closed (401) without a valid key. Hard-requiring
+// it at boot crash-loops every xchain-node-managed deployment (ConfigService
+// injects no such var and HubConnector sends no key) — the same over-tightening
+// that hit the indexer (771880c) and encoder (e2bf7c4) pre-launch.
 const HUB_API_KEY        = process.env.HUB_API_KEY || '';
+if(!HUB_API_KEY)
+    console.warn('WARNING: HUB_API_KEY is not set — write methods and WebSocket subscriptions are UNAUTHENTICATED. Set a strong key for any shared or public-facing deployment.');
 const HUB_RATE_LIMIT_RPM = parseInt(process.env.HUB_RATE_LIMIT_RPM) || 100;
 const CORS_ORIGIN        = process.env.CORS_ORIGIN || false;
 
@@ -180,13 +188,14 @@ async function startApi(){
         legacyHeaders: false
     }));
 
-    // API key enforcement for write methods. Fails closed: without a
-    // configured key, write methods are rejected, never left open.
+    // API key enforcement for write methods (only when a key is configured —
+    // see the HUB_API_KEY note above)
     app.use((req, res, next) => {
+        if (!HUB_API_KEY) return next();
         let method = req.body && req.body.method;
         if (method && WRITE_METHODS.has(method.toLowerCase())) {
             let provided = req.headers['x-api-key'] || '';
-            if (!HUB_API_KEY || provided !== HUB_API_KEY) {
+            if (provided !== HUB_API_KEY) {
                 return res.status(401).json({
                     jsonrpc: '2.0', id: req.body.id || null,
                     error: { code: -32001, message: 'Unauthorized' }
@@ -1004,13 +1013,17 @@ async function startApi(){
     const wss = new WebSocket.Server({ noServer: true });
 
     server.on('upgrade', (request, socket, head) => {
-        // Authenticate using the same hub API key used for write methods.
-        // Fails closed: without a configured key, no upgrade is accepted.
-        let authHeader = request.headers['authorization'];
-        if (!HUB_API_KEY || !authHeader || authHeader !== 'Bearer ' + HUB_API_KEY) {
-            socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-            socket.destroy();
-            return;
+        // Authenticate using the same hub API key used for write methods
+        // (enforced only when a key is configured — an unconditional fail-closed
+        // here 401s every indexer's hub_db_sync subscription on managed deploys,
+        // severing the price-sync barrier and the state_checkpoints mirror).
+        if (HUB_API_KEY) {
+            let authHeader = request.headers['authorization'];
+            if (!authHeader || authHeader !== 'Bearer ' + HUB_API_KEY) {
+                socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+                socket.destroy();
+                return;
+            }
         }
         // Only accept upgrades to the /hub-db/subscribe path
         if (!request.url || !request.url.startsWith('/hub-db/subscribe')) {
