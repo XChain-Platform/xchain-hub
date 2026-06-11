@@ -37,6 +37,7 @@ const SwapTracker        = require('./SwapTracker.js');
 const Governance         = require('./Governance.js');
 const PriceAggregator    = require('./PriceAggregator.js');
 const OraclePublisher    = require('./OraclePublisher.js');
+const { loadSignerHooks, applySignerHooks } = require('./lib/signer-loader.js');
 const HubDbBroadcaster   = require('./HubDbBroadcaster.js');
 const CapabilityRegistry = require('./CapabilityRegistry.js');
 const CapabilitySnapshot = require('./CapabilitySnapshot.js');
@@ -213,6 +214,15 @@ class XChainHub {
         // for publishing to the DOGE chain. The actual broadcast transport is wired
         // by the operator via setBroadcastHook() / setBalanceHook().
         this.oraclePublisher = new OraclePublisher(this);
+        // Wire the operator-supplied signer (HUB_SIGNER_MODULE) into the DOGE
+        // pipeline. This is the single wiring point for ALL on-chain DOGE
+        // publishing: StateAnchorPublisher and CrossChainDexAnchor borrow these
+        // hooks via _resolveSigner(). Throws on a configured-but-broken module.
+        let signerHooks = loadSignerHooks();
+        if(signerHooks){
+            applySignerHooks(this.oraclePublisher, signerHooks);
+            console.log('OraclePublisher: operator signer wired (' + signerHooks.source + ')');
+        }
         await this.oraclePublisher.start();
     }
 
