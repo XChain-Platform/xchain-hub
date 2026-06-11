@@ -214,14 +214,10 @@ describe('CapabilitySnapshot (extra coverage)', function () {
             expect(snap.getQuorum({ count: 1 })).to.equal(0);
         });
 
-        it('returns 2f+1 for N=3 (f=1) → quorum=3', function () {
-            // 2*floor((3-1)/3)+1 = 2*0+1=1? Let me recalculate:
-            // 2 * floor((N-1)/3) + 1 at N=3: 2*floor(2/3)+1 = 2*0+1 = 1
-            // Wait - test what the actual formula gives
-            let q = snap.getQuorum({ count: 3 });
-            // Formula: 2*floor((N-1)/3)+1
-            // N=3: 2*floor(0.67)+1 = 2*0+1 = 1
-            expect(q).to.equal(1);
+        it('floors N=3 at the simple majority → quorum=2', function () {
+            // 2f+1 at N=3 is 2*0+1 = 1; the majority floor ceil((3+1)/2) = 2
+            // wins, so a single validator can never finalize alone.
+            expect(snap.getQuorum({ count: 3 })).to.equal(2);
         });
 
         it('returns correct quorum for N=4', function () {

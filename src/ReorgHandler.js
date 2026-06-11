@@ -362,7 +362,9 @@ class ReorgHandler extends EventEmitter {
         }
         if (N <= 1) return 0;
         let f = Math.floor((N - 1) / 3);
-        return 2 * f + 1;
+        // Majority floor: bare 2f+1 degenerates to quorum=1 at N=3 (f=0),
+        // letting a single validator finalize alone.
+        return Math.max(2 * f + 1, Math.ceil((N + 1) / 2));
     }
 
     _digest(reorgId, chain, reorgHeight, timestamp) {

@@ -196,13 +196,15 @@ class AttestationConsensus extends EventEmitter {
         // PBFT messages (PROPOSE/PREPARE/COMMIT) only flow within the
         // REDUNDANCY-sized responsible set, so prepares/commits are bounded by
         // responsible.length — NOT the full attestation-validator count N.
-        // Compute the 2f+1 quorum over the responsible set; computing it over N
+        // Compute the quorum over the responsible set; computing it over N
         // would make the threshold unreachable whenever N > REDUNDANCY and
-        // deadlock every round until timeout.
+        // deadlock every round until timeout. The 2f+1 form is floored at a
+        // simple majority — bare 2f+1 degenerates to quorum=1 at size 3.
         let responsible = roundState.responsible || [];
         let quorum      = responsible.length <= 1
             ? 0
-            : 2 * Math.floor((responsible.length - 1) / 3) + 1;
+            : Math.max(2 * Math.floor((responsible.length - 1) / 3) + 1,
+                       Math.ceil((responsible.length + 1) / 2));
 
         let myPubkey  = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
         let myBody    = roundState.myProposal.body;

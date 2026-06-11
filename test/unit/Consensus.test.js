@@ -40,11 +40,12 @@ describe('Consensus (PBFT)', function () {
     // -----------------------------------------------------------------
 
     describe('_getQuorum()', function () {
-        // Quorum = 2f+1 where f = floor((N-1)/3). N<=1 returns 0 (single-node).
+        // Quorum = max(2f+1, ceil((N+1)/2)) where f = floor((N-1)/3) — the
+        // majority floor stops 2f+1 degenerating to 1 at N=3. N<=1 returns 0.
         let cases = [
             { N: 1,  expected: 0, label: 'N=1 → 0 (single node)' },
-            { N: 2,  expected: 1, label: 'N=2 → 1' },
-            { N: 3,  expected: 1, label: 'N=3 → 1' },
+            { N: 2,  expected: 2, label: 'N=2 → 2 (majority floor)' },
+            { N: 3,  expected: 2, label: 'N=3 → 2 (majority floor)' },
             { N: 4,  expected: 3, label: 'N=4 → 3' },
             { N: 7,  expected: 5, label: 'N=7 → 5' },
             { N: 10, expected: 7, label: 'N=10 → 7' },
@@ -463,13 +464,13 @@ describe('Consensus (PBFT)', function () {
                 quorum: 5
             });
 
-            // Churn: set shrinks to N=3 → live quorum would be 1 (single-node
-            // acceptance). The locked quorum is still 5.
+            // Churn: set shrinks to N=3 → live quorum would be 2 (majority
+            // floor). The locked quorum is still 5.
             consensus.setValidatorSet(VALIDATORS_3);
-            expect(consensus._getQuorum()).to.equal(1);
+            expect(consensus._getQuorum()).to.equal(2);
 
-            // Two distinct votes — would clear the live quorum (1) twice over,
-            // but must NOT clear the locked quorum (5).
+            // Two distinct votes — would clear the live quorum (2), but must
+            // NOT clear the locked quorum (5).
             consensus._handleViewChange({ sender: VALIDATORS_3[1].addr, data: { view: 1, seq: 5 } });
             consensus._handleViewChange({ sender: VALIDATORS_3[2].addr, data: { view: 1, seq: 5 } });
             expect(consensus.view).to.equal(0);                 // not promoted

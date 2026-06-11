@@ -247,7 +247,7 @@ class StateAnchorPublisher {
         let mySig    = this.identity.sign(canonical);
 
         let snapCount = pubkeys.length;
-        let quorum    = (snapCount <= 1) ? 1 : (2 * Math.floor((snapCount - 1) / 3) + 1);
+        let quorum    = (snapCount <= 1) ? 1 : Math.max(2 * Math.floor((snapCount - 1) / 3) + 1, Math.ceil((snapCount + 1) / 2));
 
         let round = {
             cp, batchSeq, crc, b64, chunks, canonical, quorum, signer,
@@ -558,7 +558,7 @@ class StateAnchorPublisher {
     _quorumVerified(canonical, sigs, pubkeys){
         let qualified = new Set((pubkeys || []).map(p => String(p).toLowerCase()));
         if(qualified.size === 0) return false;
-        let quorum = (qualified.size <= 1) ? 1 : (2 * Math.floor((qualified.size - 1) / 3) + 1);
+        let quorum = (qualified.size <= 1) ? 1 : Math.max(2 * Math.floor((qualified.size - 1) / 3) + 1, Math.ceil((qualified.size + 1) / 2));
         let valid = 0, seen = new Set();
         for(let s of sigs){
             let pk = String(s.pubkey).toLowerCase();

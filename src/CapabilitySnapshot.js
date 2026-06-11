@@ -134,19 +134,22 @@ class CapabilitySnapshot {
         }
     }
 
-    // Standard PBFT quorum over the FULL snapshot: 2 * floor((N - 1) / 3) + 1
+    // Standard PBFT quorum over the FULL snapshot, floored at a simple
+    // majority: max(2 * floor((N - 1) / 3) + 1, ceil((N + 1) / 2)). The bare
+    // 2f+1 form degenerates to quorum=1 at N=3 (f=0), which would let a single
+    // validator finalize alone.
     // Returns 0 when N <= 1 (single-node mode — caller bypasses consensus).
     //
     // NOTE: this is the federation-wide quorum (e.g. config-change Consensus
     // PBFT, where every staker participates). It is NOT used for attestation
     // PBFT — those rounds only exchange messages within the REDUNDANCY-sized
-    // responsible set, so AttestationConsensus.propose() computes its own 2f+1
+    // responsible set, so AttestationConsensus.propose() computes its own
     // quorum over responsible.length instead of over the full count N here.
     getQuorum(snapshot) {
         if (!snapshot) return 0;
         let N = snapshot.count;
         if (N <= 1) return 0;
-        return 2 * Math.floor((N - 1) / 3) + 1;
+        return Math.max(2 * Math.floor((N - 1) / 3) + 1, Math.ceil((N + 1) / 2));
     }
 
     // Whether a pubkey appears in the snapshot's validator set.

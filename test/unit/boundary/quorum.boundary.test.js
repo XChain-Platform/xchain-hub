@@ -47,11 +47,11 @@ describe('Boundary: Quorum Calculation', function () {
         let cases = [
             { N: 0,   expected: 0,  label: 'N=0 → 0 (no validators, no peers)' },
             { N: 1,   expected: 0,  label: 'N=1 → 0 (single node fallback)' },
-            { N: 2,   expected: 1,  label: 'N=2 → 1 (first non-zero quorum)' },
-            { N: 3,   expected: 1,  label: 'N=3 → 1 (f=0)' },
-            { N: 4,   expected: 3,  label: 'N=4 → 3 (f=1, sharp jump from N=3)' },
+            { N: 2,   expected: 2,  label: 'N=2 → 2 (majority floor)' },
+            { N: 3,   expected: 2,  label: 'N=3 → 2 (f=0; majority floor prevents quorum=1)' },
+            { N: 4,   expected: 3,  label: 'N=4 → 3 (f=1)' },
             { N: 5,   expected: 3,  label: 'N=5 → 3' },
-            { N: 6,   expected: 3,  label: 'N=6 → 3' },
+            { N: 6,   expected: 4,  label: 'N=6 → 4 (majority floor beats 2f+1=3)' },
             { N: 7,   expected: 5,  label: 'N=7 → 5 (f=2, sharp jump from N=6)' },
             { N: 10,  expected: 7,  label: 'N=10 → 7 (f=3)' },
             { N: 13,  expected: 9,  label: 'N=13 → 9 (f=4)' },
@@ -84,8 +84,8 @@ describe('Boundary: Quorum Calculation', function () {
             pm.getPeerStatus.returns([
                 { state: 'open' }, { state: 'closed' }, { state: 'connecting' }
             ]);
-            // 1 open peer + 1 self = 2 → quorum=1
-            expect(consensus._getQuorum()).to.equal(1);
+            // 1 open peer + 1 self = 2 → quorum=2 (majority floor)
+            expect(consensus._getQuorum()).to.equal(2);
         });
     });
 
@@ -188,10 +188,10 @@ describe('Boundary: Quorum Calculation', function () {
             expect(rh._getQuorum()).to.equal(3);
         });
 
-        it('empty set + 2 open peers → N=3, quorum=1', function () {
+        it('empty set + 2 open peers → N=3, quorum=2 (majority floor)', function () {
             rh.setValidatorSet([]);
             pm.getPeerStatus.returns([{ state: 'open' }, { state: 'open' }]);
-            expect(rh._getQuorum()).to.equal(1);
+            expect(rh._getQuorum()).to.equal(2);
         });
     });
 });

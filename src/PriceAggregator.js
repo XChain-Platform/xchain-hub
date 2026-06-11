@@ -152,10 +152,11 @@ class PriceAggregator extends EventEmitter {
             verifiedSigs.push(s);
         }
 
-        // PBFT quorum over the snapshot size: 2 * floor((N - 1) / 3) + 1 —
+        // PBFT quorum over the snapshot size, floored at a simple majority:
+        // max(2 * floor((N - 1) / 3) + 1, ceil((N + 1) / 2)) —
         // the same threshold the indexer enforces when validating the action
         let setSize = Number.isFinite(parseInt(snapshot.count)) ? parseInt(snapshot.count) : snapshot.validators.length;
-        let quorum  = (setSize <= 1) ? 1 : 2 * Math.floor((setSize - 1) / 3) + 1;
+        let quorum  = (setSize <= 1) ? 1 : Math.max(2 * Math.floor((setSize - 1) / 3) + 1, Math.ceil((setSize + 1) / 2));
         if (verifiedSigs.length < quorum) {
             return { accepted: false, reason: 'insufficient quorum (' + verifiedSigs.length + '/' + quorum + ')' };
         }

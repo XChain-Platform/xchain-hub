@@ -166,7 +166,7 @@ class CrossChainDexConsensus extends EventEmitter {
         let row        = ctx.row;
         let validators = (ctx.snapshot && Array.isArray(ctx.snapshot.validators)) ? ctx.snapshot.validators : [];
         let snapCount  = validators.length;
-        let quorum     = (snapCount <= 1) ? 0 : (2 * Math.floor((snapCount - 1) / 3) + 1);
+        let quorum     = (snapCount <= 1) ? 0 : Math.max(2 * Math.floor((snapCount - 1) / 3) + 1, Math.ceil((snapCount + 1) / 2));
         let canonical  = this.engine._canonicalMatch(row);
         let myPubkey   = this.identity.getPubkeyHex().toLowerCase();
 

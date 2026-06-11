@@ -56,10 +56,10 @@ describe('ReorgHandler', function () {
     // -----------------------------------------------------------------
 
     describe('_getQuorum()', function () {
-        it('N=3 → 1', function () {
+        it('N=3 → 2 (majority floor)', function () {
             rh.setValidatorSet(VALIDATORS_3);
-            // f=floor(2/3)=0, quorum=2*0+1=1
-            expect(rh._getQuorum()).to.equal(1);
+            // f=floor(2/3)=0 → 2f+1=1, floored at ceil((3+1)/2)=2
+            expect(rh._getQuorum()).to.equal(2);
         });
 
         it('single node → 0', function () {

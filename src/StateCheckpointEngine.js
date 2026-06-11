@@ -197,7 +197,7 @@ class StateCheckpointEngine extends EventEmitter {
         let myPubkey = this.identity.getPubkeyHex().toLowerCase();
         let mySig    = this.identity.sign(canonical);
         let snapCount = validators.length;
-        let quorum    = (snapCount <= 1) ? 1 : (2 * Math.floor((snapCount - 1) / 3) + 1);
+        let quorum    = (snapCount <= 1) ? 1 : Math.max(2 * Math.floor((snapCount - 1) / 3) + 1, Math.ceil((snapCount + 1) / 2));
 
         // Single-node set: self-sign satisfies the quorum — finalize immediately.
         if(snapCount <= 1){
@@ -315,7 +315,7 @@ class StateCheckpointEngine extends EventEmitter {
         let validators = await this._resolveCapabilityValidators('oracle_publish', cp.snapshot_block);
         let pubkeys    = new Set(validators.map(v => String(v.pubkey).toLowerCase()));
         let snapCount  = pubkeys.size;
-        let quorum     = (snapCount <= 1) ? 1 : (2 * Math.floor((snapCount - 1) / 3) + 1);
+        let quorum     = (snapCount <= 1) ? 1 : Math.max(2 * Math.floor((snapCount - 1) / 3) + 1, Math.ceil((snapCount + 1) / 2));
 
         let canonical = StateCheckpointEngine.canonicalCheckpoint(cp);
         let seen = new Set(), sigs = [];

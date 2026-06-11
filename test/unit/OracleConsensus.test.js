@@ -206,9 +206,9 @@ describe('OracleConsensus', function () {
             expect(oc._getQuorum()).to.equal(0);
         });
 
-        it('N=3 → 1', function () {
+        it('N=3 → 2 (majority floor)', function () {
             oc.setValidatorSet(VALIDATORS_3);
-            expect(oc._getQuorum()).to.equal(1);
+            expect(oc._getQuorum()).to.equal(2);
         });
 
         it('N=4 → 3', function () {
@@ -234,8 +234,8 @@ describe('OracleConsensus', function () {
         it('empty validator set falls back to peer count', function () {
             oc.setValidatorSet([]);
             pm.getPeerStatus.returns([{ state: 'open' }, { state: 'open' }]);
-            // N = 2 peers + 1 self = 3 → f=0, quorum = 1
-            expect(oc._getQuorum()).to.equal(1);
+            // N = 2 peers + 1 self = 3 → quorum = 2 (majority floor)
+            expect(oc._getQuorum()).to.equal(2);
         });
     });
 

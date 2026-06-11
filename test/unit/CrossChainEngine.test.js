@@ -88,8 +88,8 @@ describe('CrossChainEngine', function () {
                 ['BTC-LTC', [makeValidator(1), makeValidator(2), makeValidator(3)]]
             ]);
             engine.setValidatorSet(VALIDATORS_7);
-            // Per-pair: N=3 → f=floor(2/3)=0, quorum=1
-            expect(engine._getQuorum('BTC', 'LTC')).to.equal(1);
+            // Per-pair: N=3 → 2f+1=1, floored at majority ceil((3+1)/2)=2
+            expect(engine._getQuorum('BTC', 'LTC')).to.equal(2);
         });
 
         it('falls back to full set quorum without chain params', function () {
