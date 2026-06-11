@@ -52,6 +52,44 @@ describe('Security Hardening', function () {
             let envelope = { type: 'TEST', id: 'x1', sender: 'ws://peer:1', timestamp: Date.now(), data: {} };
             expect(pm._verifySignature(envelope)).to.be.true;
         });
+
+        it('rejects a signed message when validatorPubkeys is null (fail closed, not bootstrap-accept)', function () {
+            // Regression: a null registry (bootstrap / DB-load failure) previously
+            // returned true here, accepting any self-signed envelope from any
+            // sender. It must now fail closed when signatures are required.
+            let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1', REQUIRE_SIGNATURES: true }, null);
+            pm.validatorPubkeys = null;
+            let envelope = { type: 'PBFT_PRE_PREPARE', id: 'x1', sender: 'ws://attacker:9',
+                             timestamp: Date.now(), sig: 'deadbeef', data: {} };
+            expect(pm._verifySignature(envelope)).to.be.false;
+        });
+    });
+
+    // =================================================================
+    // XChainHub — Fail-closed validator registry on startup
+    // =================================================================
+
+    describe('XChainHub — Fail-closed validator registry', function () {
+        const XChainHub   = require('../../src/XChainHub');
+        const PeerManager = require('../../src/PeerManager');
+
+        it('startP2P throws and never opens the P2P listener when the registry load fails', async function () {
+            // Regression: a DB failure in _loadValidatorPubkeys previously left
+            // validatorPubkeys === null while peerManager.start() ran anyway,
+            // opening the listener with no registry in memory.
+            let startStub = sinon.stub(PeerManager.prototype, 'start').resolves();
+
+            let h = new XChainHub('h', 3306, 'db', 'u', 'p',
+                { P2P_VALIDATOR_ADDR: 'ws://a:1', REQUIRE_SIGNATURES: true });
+            // Skip start(); inject a db whose validator-load query rejects so
+            // _loadValidatorPubkeys throws before peerManager.start() can run.
+            h.db = { doQuery: sinon.stub().rejects(new Error('DB down')) };
+
+            let threw = false;
+            try { await h.startP2P(); } catch (e) { threw = true; }
+            expect(threw).to.be.true;
+            expect(startStub.called).to.be.false;
+        });
     });
 
     // =================================================================
@@ -484,6 +522,85 @@ describe('Security Hardening', function () {
             expect(engine.pendingAttestations.has(attestationId)).to.be.true;
             let p = engine.pendingAttestations.get(attestationId);
             if (p.timer) clearTimeout(p.timer);
+        });
+    });
+
+    // =================================================================
+    // Consensus engines — sender-membership guard (anti quorum-inflation)
+    // =================================================================
+
+    describe('Consensus engines — sender-membership guard', function () {
+        const Consensus       = require('../../src/Consensus');
+        const OracleConsensus = require('../../src/OracleConsensus');
+        const CrossChainEngine = require('../../src/CrossChainEngine');
+
+        // Populate the peer registry so the guard is active, then inject a
+        // PREPARE from a sender that is NOT a registered validator and assert the
+        // quorum counter never moves. This is the fake-sender quorum-inflation
+        // path: counting raw envelope.sender values would otherwise let one
+        // connection drive quorum with fabricated identities.
+        function hubWithRegistry() {
+            let hub = createMockHub();
+            hub._peerManager.validatorPubkeys = new Map(VALIDATORS_4.map(v => [v.addr, v.pubkey]));
+            return hub;
+        }
+
+        const UNKNOWN = 'ws://attacker:9';
+
+        it('Consensus._handlePrepare does not count votes from unregistered senders', function () {
+            let hub = hubWithRegistry();
+            let consensus = new Consensus(hub);
+            consensus.setValidatorSet(VALIDATORS_4);
+            let config = { a: 1 };
+            let digest = consensus._digest(config);
+            consensus.pendingProposals.set(1, {
+                config, digest, prepares: new Set(), commits: new Set(),
+                quorum: 3, resolved: false, applied: false, timer: null
+            });
+            consensus._handlePrepare({ sender: UNKNOWN, data: { seq: 1, configDigest: digest } });
+            expect(consensus.pendingProposals.get(1).prepares.size).to.equal(0);
+        });
+
+        it('OracleConsensus._handlePrepare does not count votes from unregistered senders', function () {
+            let hub = hubWithRegistry();
+            let oc = new OracleConsensus(hub, { getSubmissions: sinon.stub() });
+            oc.setValidatorSet(VALIDATORS_4);
+            let digest = 'd1';
+            oc.pendingRounds.set(1, {
+                round: 1, digest, prices: [], btcBlockTime: 0,
+                prepares: new Set(), commits: new Set(), signatures: new Map(),
+                quorum: 3, finalized: false, timer: null
+            });
+            oc._handlePrepare({ sender: UNKNOWN, data: { round: 1, digest } });
+            expect(oc.pendingRounds.get(1).prepares.size).to.equal(0);
+        });
+
+        it('CrossChainEngine._handlePrepare does not count votes from unregistered senders', function () {
+            let hub = hubWithRegistry();
+            let engine = new CrossChainEngine(hub);
+            engine.setValidatorSet(VALIDATORS_4);
+            let attestationId = 'BTC:1:LTC';
+            let digest = engine._digest(attestationId, 6);
+            engine.pendingAttestations.set(attestationId, {
+                attestationId, digest, prepares: new Set(), commits: new Set(),
+                quorum: 3, finalized: false, timer: null
+            });
+            engine._handlePrepare({ sender: UNKNOWN, data: { attestationId, digest } });
+            expect(engine.pendingAttestations.get(attestationId).prepares.size).to.equal(0);
+        });
+
+        it('Consensus._handlePrepare still counts votes from registered senders', function () {
+            let hub = hubWithRegistry();
+            let consensus = new Consensus(hub);
+            consensus.setValidatorSet(VALIDATORS_4);
+            let config = { a: 1 };
+            let digest = consensus._digest(config);
+            consensus.pendingProposals.set(1, {
+                config, digest, prepares: new Set(), commits: new Set(),
+                quorum: 3, resolved: false, applied: false, timer: null
+            });
+            consensus._handlePrepare({ sender: VALIDATORS_4[1].addr, data: { seq: 1, configDigest: digest } });
+            expect(consensus.pendingProposals.get(1).prepares.has(VALIDATORS_4[1].addr)).to.be.true;
         });
     });
 

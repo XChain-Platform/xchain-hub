@@ -548,10 +548,15 @@ describe('XChainHub', function () {
             expect(map.get('ws://v:1')).to.equal('pk1');
         });
 
-        it('_loadValidatorPubkeys swallows DB errors', async function () {
+        it('_loadValidatorPubkeys propagates DB errors and leaves the registry unset (fail closed)', async function () {
             hub.peerManager = { setValidatorPubkeys: sinon.stub() };
             mockDb.doQuery.rejects(new Error('db down'));
-            await hub._loadValidatorPubkeys();
+            let threw = false;
+            try { await hub._loadValidatorPubkeys(); } catch (e) { threw = true; }
+            // Must propagate so startP2P never opens the listener with a null
+            // registry (a null registry makes _verifySignature accept any
+            // signed envelope — see PeerManager).
+            expect(threw).to.be.true;
             expect(hub.peerManager.setValidatorPubkeys.called).to.be.false;
         });
 

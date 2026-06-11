@@ -314,6 +314,22 @@ class OracleConsensus extends EventEmitter {
 
     // --- Message handlers ---
 
+    // Defense-in-depth: only tally votes from senders that are registered
+    // validators. PeerManager already drops messages whose signature doesn't
+    // match a registered pubkey, but counting raw envelope.sender values means a
+    // forged sender that slipped past that layer (e.g. during a null-registry
+    // window) could otherwise inflate quorum from a single connection. The
+    // registry is keyed by addr — the same value used as the sender. A null
+    // registry fails closed (the vulnerability scenario); an empty registry
+    // stays lenient (genuine pre-bootstrap, where the sig layer already rejects
+    // unknown senders and no peer votes should be arriving).
+    _isKnownSender(sender) {
+        let registry = this.peerManager && this.peerManager.validatorPubkeys;
+        if (!registry) return false;
+        if (registry.size === 0) return true;
+        return registry.has(sender);
+    }
+
     _handleMessage(envelope) {
         switch (envelope.type) {
             case ORACLE_PROPOSE:
@@ -334,6 +350,10 @@ class OracleConsensus extends EventEmitter {
         let { round, prices, digest, btcBlockHeight, btcBlockTime, sig_pubkey, sig } = envelope.data;
         if (!round || !prices || !digest) return;
         if (this.finalized.has(round)) return;
+
+        // Discard proposals from senders that are not registered validators
+        // before doing any snapshot/indexer work for them.
+        if (!this._isKnownSender(envelope.sender)) return;
 
         // Verify digest
         let computedDigest = this._digest(round, prices);
@@ -463,6 +483,9 @@ class OracleConsensus extends EventEmitter {
         let { round, digest, sig_pubkey, sig } = envelope.data;
         if (!round || !digest) return;
 
+        // Only count PREPARE votes from registered validators.
+        if (!this._isKnownSender(envelope.sender)) return;
+
         let pending = this.pendingRounds.get(round);
         if (!pending || pending.digest !== digest) return;
 
@@ -474,6 +497,9 @@ class OracleConsensus extends EventEmitter {
     _handleCommit(envelope) {
         let { round, digest, sig_pubkey, sig } = envelope.data;
         if (!round || !digest) return;
+
+        // Only count COMMIT votes from registered validators.
+        if (!this._isKnownSender(envelope.sender)) return;
 
         let pending = this.pendingRounds.get(round);
         if (!pending || pending.digest !== digest) return;

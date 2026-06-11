@@ -250,8 +250,14 @@ class PeerManager extends EventEmitter {
         if (!this.requireSigs && !envelope.sig) return true;
         // If signatures required but missing, reject
         if (this.requireSigs && !envelope.sig) return false;
-        // If no validator registry loaded, accept (bootstrap mode)
-        if (!this.validatorPubkeys) return true;
+        // No validator registry loaded: fail closed. A null registry means we
+        // cannot authenticate any sender, so a self-signed envelope from an
+        // unknown peer must be rejected rather than trusted. (Defense in depth:
+        // the hub also refuses to open the P2P listener with a null registry —
+        // see XChainHub.startP2P.) When signatures are not required the hub is
+        // not authenticating peers at all, so preserve that mode's permissive
+        // behavior, matching the unknown-sender handling below.
+        if (!this.validatorPubkeys) return !this.requireSigs;
         // Look up sender's pubkey
         let pubkeyHex = this.validatorPubkeys.get(envelope.sender);
         if (!pubkeyHex) {

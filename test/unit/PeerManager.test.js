@@ -168,8 +168,17 @@ describe('PeerManager', function () {
             expect(pm._verifySignature({ sender: 'x' })).to.be.false;
         });
 
-        it('accepts a signed message in bootstrap mode (no validator registry)', function () {
+        it('rejects a signed message when the validator registry is null (fail closed)', function () {
+            // A null registry means no sender can be authenticated, so a signed
+            // envelope must be rejected, not trusted — accepting here would let
+            // any self-signed message through while the registry is unloaded.
             pm.requireSigs = true;
+            pm.validatorPubkeys = null;
+            expect(pm._verifySignature({ sender: 'x', sig: 'aa' })).to.be.false;
+        });
+
+        it('null registry still accepts when signatures are not required', function () {
+            pm.requireSigs = false;
             pm.validatorPubkeys = null;
             expect(pm._verifySignature({ sender: 'x', sig: 'aa' })).to.be.true;
         });

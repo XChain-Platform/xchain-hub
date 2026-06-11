@@ -234,6 +234,24 @@ class Consensus {
 
     // --- Private methods ---
 
+    // Defense-in-depth: only tally votes from senders that are registered
+    // validators. PeerManager already drops any message whose signature doesn't
+    // match a registered pubkey, so in normal operation an unregistered sender
+    // never reaches these handlers — but counting raw envelope.sender values
+    // means a forged sender that slipped past that layer (e.g. during a
+    // null-registry window) could otherwise inflate quorum from a single
+    // connection. The registry is keyed by addr, the same value used as the
+    // sender. A null registry fails closed (matches the vulnerability scenario);
+    // an empty registry stays lenient (genuine pre-bootstrap, where no peer
+    // votes should be arriving and the sig layer already rejects unknown
+    // senders).
+    _isKnownSender(sender) {
+        let registry = this.peerManager && this.peerManager.validatorPubkeys;
+        if (!registry) return false;
+        if (registry.size === 0) return true;
+        return registry.has(sender);
+    }
+
     // Handle incoming P2P messages
     _handleMessage(envelope) {
         switch (envelope.type) {
@@ -261,6 +279,10 @@ class Consensus {
         // Validate
         if (!seq || !configDigest || !config) return;
         if (typeof seq !== 'number' || seq <= 0) return;
+
+        // Discard proposals from senders that are not registered validators
+        // before doing any snapshot/indexer work for them.
+        if (!this._isKnownSender(envelope.sender)) return;
 
         // Reject stale/replayed sequence numbers
         if (seq <= this.lastAppliedSeq) {
@@ -346,6 +368,9 @@ class Consensus {
         let { seq, configDigest } = envelope.data;
         if (!seq || !configDigest) return;
 
+        // Only count PREPARE votes from registered validators.
+        if (!this._isKnownSender(envelope.sender)) return;
+
         let proposal = this.pendingProposals.get(seq);
         if (!proposal) return;
 
@@ -391,6 +416,9 @@ class Consensus {
     _handleCommit(envelope) {
         let { seq, configDigest } = envelope.data;
         if (!seq || !configDigest) return;
+
+        // Only count COMMIT votes from registered validators.
+        if (!this._isKnownSender(envelope.sender)) return;
 
         let proposal = this.pendingProposals.get(seq);
         if (!proposal) return;
@@ -457,6 +485,10 @@ class Consensus {
     _handleViewChange(envelope) {
         let { view, seq } = envelope.data;
         if (typeof view !== 'number' || typeof seq !== 'number') return;
+
+        // Only count VIEW_CHANGE votes from registered validators — view-change
+        // quorum is the same Set.size tally as PREPARE/COMMIT.
+        if (!this._isKnownSender(envelope.sender)) return;
 
         if (!this.pendingViewChanges.has(view)) {
             this.pendingViewChanges.set(view, new Set());
