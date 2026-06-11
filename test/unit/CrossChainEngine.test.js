@@ -24,6 +24,12 @@ describe('CrossChainEngine', function () {
         hub    = createMockHub();
         pm     = hub._peerManager;
         engine = new CrossChainEngine(hub);
+        // Followers verify the proposed source action against their own indexer
+        // before co-signing (fail-closed). The PBFT-flow tests exercise the
+        // consensus machinery, not that guard, so verification passes by
+        // default; the dedicated 'source-action verification' suite restores
+        // the real method.
+        sinon.stub(engine, '_verifySourceAction').resolves(true);
     });
 
     afterEach(function () {
@@ -432,6 +438,81 @@ describe('CrossChainEngine', function () {
             let commitBroadcast = pm.broadcast.getCalls()
                 .some(c => c.args[0] === 'XCHAIN_ATTEST_COMMIT');
             expect(commitBroadcast).to.be.false;
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // Source-action verification — the fail-closed follower guard that
+    // replaced the Phase-4C "trust the proposer's claim" TODO. A follower
+    // confirms the proposed source action against its OWN indexer (via
+    // getactionconfirmations) and refuses to co-sign when the action is
+    // missing, under-confirmed, unverifiable, or when the discrete fields
+    // don't match the attestationId the digest covers.
+    // -----------------------------------------------------------------
+
+    describe('source-action verification', function () {
+
+        beforeEach(function () {
+            engine._verifySourceAction.restore(); // exercise the real guard
+            engine.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+        });
+
+        function propose(overrides = {}) {
+            let attestationId = overrides.attestationId || 'BTC:1:LTC';
+            let confirmations = overrides.confirmations || 3;
+            let digest = engine._digest(attestationId, confirmations);
+            return engine._handlePropose({
+                sender: VALIDATORS_4[1].addr,
+                data: Object.assign({ attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
+                                      destChain: 'LTC', confirmations, digest }, overrides.data)
+            });
+        }
+
+        it('refuses to PREPARE when no indexer endpoint is configured (fail closed)', async function () {
+            await propose();
+            expect(engine.pendingAttestations.size).to.equal(0);
+            expect(pm.broadcast.called).to.be.false;
+        });
+
+        it('refuses when the discrete fields do not match the attestationId', async function () {
+            // Digest matches the id, but the proposer claims a different source
+            // action than the one the id (and digest) commit to.
+            sinon.stub(engine, '_indexerCall').resolves({ exists: true, confirmations: 100 });
+            engine.indexers.BTC.url = 'http://stub:3004/';
+            await propose({ data: { sourceActionIndex: 2 } });
+            expect(engine.pendingAttestations.size).to.equal(0);
+        });
+
+        it('refuses when the action does not exist on the source chain', async function () {
+            engine.indexers.BTC.url = 'http://stub:3004/';
+            sinon.stub(engine, '_indexerCall').resolves({ exists: false, confirmations: 0 });
+            await propose();
+            expect(engine.pendingAttestations.size).to.equal(0);
+        });
+
+        it('refuses when the action is below the per-chain confirmation threshold', async function () {
+            engine.indexers.BTC.url = 'http://stub:3004/';
+            sinon.stub(engine, '_indexerCall').resolves({ exists: true, confirmations: 5 }); // BTC needs 6
+            await propose();
+            expect(engine.pendingAttestations.size).to.equal(0);
+        });
+
+        it('refuses when the indexer lookup fails (fail closed, not fail open)', async function () {
+            engine.indexers.BTC.url = 'http://stub:3004/';
+            sinon.stub(engine, '_indexerCall').rejects(new Error('ECONNREFUSED'));
+            await propose();
+            expect(engine.pendingAttestations.size).to.equal(0);
+        });
+
+        it('co-signs when the action exists at sufficient depth', async function () {
+            engine.indexers.BTC.url = 'http://stub:3004/';
+            let call = sinon.stub(engine, '_indexerCall').resolves({ exists: true, confirmations: 6 });
+            await propose();
+            expect(engine.pendingAttestations.has('BTC:1:LTC')).to.be.true;
+            expect(call.calledOnceWith('BTC', 'getactionconfirmations', { action_index: 1 })).to.be.true;
+            let pending = engine.pendingAttestations.get('BTC:1:LTC');
+            if (pending.timer) clearTimeout(pending.timer);
         });
     });
 });

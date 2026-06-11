@@ -22,6 +22,7 @@
  *
  ********************************************************************/
 
+const axios        = require('axios');
 const crypto       = require('crypto');
 const EventEmitter = require('events');
 
@@ -30,14 +31,11 @@ const XCHAIN_ATTEST_PREPARE = 'XCHAIN_ATTEST_PREPARE';
 const XCHAIN_ATTEST_COMMIT  = 'XCHAIN_ATTEST_COMMIT';
 
 // Default per-chain confirmation thresholds (Tier B, 2026-06-02): the depth a
-// cross-chain source action SHOULD reach before its swap settles. Higher on the
+// cross-chain source action must reach before its swap settles. Higher on the
 // lower-hashpower chains to approach BTC-comparable settlement assurance.
-//
-// IMPORTANT: this value is recorded on the attestation and folded into the PBFT
-// digest, but is NOT YET ENFORCED — see the Phase-4C TODO in _handlePropose()
-// below ("verify the source action exists … For now, trust the proposer's claim").
-// Making these per-chain/tunable does not gate settlement until that enforcement
-// lands (tracked as an optional revisit).
+// Enforced in _handlePropose(): a follower verifies the proposed source action
+// against its OWN indexer for that chain and refuses to co-sign below the
+// threshold (see _verifySourceAction).
 const DEFAULT_CONFIRMATIONS = { BTC: 6, LTC: 12, DOGE: 60 };
 
 // Allowed chain names
@@ -90,6 +88,20 @@ class CrossChainEngine extends EventEmitter {
         // Per-chain cross-chain confirmation thresholds (env/p2pConfig overridable;
         // see resolveConfirmations + the DEFAULT_CONFIRMATIONS note above).
         this.confirmations = resolveConfirmations(this.hub && this.hub.p2pConfig);
+
+        // Per-coin indexer JSON-RPC endpoints used to verify a proposed source
+        // action against this hub's own view of the source chain (federation
+        // read methods need the api key): <COIN>_INDEXER_URL,
+        // <COIN>_INDEXER_API_KEY. Same idiom as CrossChainDexEngine /
+        // StateCheckpointEngine.
+        let cfg = (this.hub && this.hub.p2pConfig) || {};
+        this.indexers = {};
+        for (let coin of ALLOWED_CHAINS) {
+            this.indexers[coin] = {
+                url: process.env[coin + '_INDEXER_URL'] || cfg[coin + '_INDEXER_URL'] || '',
+                key: process.env[coin + '_INDEXER_API_KEY'] || cfg[coin + '_INDEXER_API_KEY'] || ''
+            };
+        }
     }
 
     // Set the validator set for quorum and leader calculation
@@ -282,8 +294,22 @@ class CrossChainEngine extends EventEmitter {
         let computedDigest = this._digest(attestationId, confirmations);
         if (computedDigest !== digest) return;
 
-        // TODO (Phase 4C): Verify the source action exists in our synced indexer DB
-        // For now, trust the proposer's claim
+        // The discrete fields are what get stored when the round finalizes, so
+        // bind them to the attestationId the digest covers — a proposer must
+        // not be able to verify one action while attesting another.
+        let [idSource, idIndex, idDest] = attestationId.split(':');
+        if (idSource !== sourceChain || idDest !== destChain ||
+            parseInt(idIndex, 10) !== parseInt(sourceActionIndex, 10)) return;
+
+        // Never trust the proposer's claim: confirm the source action exists on
+        // the source chain — at sufficient depth — against this hub's OWN
+        // indexer before co-signing. Fails closed (drop, don't sign) when the
+        // action is missing, under-confirmed, or unverifiable.
+        if (!(await this._verifySourceAction(sourceChain, sourceActionIndex))) {
+            console.warn('CrossChain: refusing to PREPARE ' + attestationId +
+                ' — source action not verified against local indexer');
+            return;
+        }
 
         // Create pending if not exists
         if (!this.pendingAttestations.has(attestationId)) {
@@ -345,6 +371,54 @@ class CrossChainEngine extends EventEmitter {
 
         pending.commits.add(envelope.sender);
         this._checkCommitQuorum(attestationId);
+    }
+
+    // --- Source-action verification ---
+
+    // Confirm the proposed source action exists in this hub's own indexer for
+    // the source chain and has reached that chain's confirmation threshold.
+    // Fails closed: no endpoint configured, indexer unreachable, action not
+    // found, or depth below threshold all return false — the caller must then
+    // refuse to co-sign. Availability is deliberately traded away here: a hub
+    // that cannot see the source chain has no business attesting actions on it.
+    async _verifySourceAction(sourceChain, sourceActionIndex) {
+        let idx = parseInt(sourceActionIndex, 10);
+        if (!Number.isInteger(idx) || idx <= 0) return false;
+
+        let ix = this.indexers[sourceChain];
+        if (!ix || !ix.url) {
+            console.warn('CrossChain: no indexer endpoint for ' + sourceChain +
+                ' (set ' + sourceChain + '_INDEXER_URL) — cannot verify source action');
+            return false;
+        }
+
+        let required = this.confirmations[sourceChain] || DEFAULT_CONFIRMATIONS[sourceChain];
+        if (!Number.isFinite(required) || required <= 0) return false;
+
+        let res;
+        try {
+            res = await this._indexerCall(sourceChain, 'getactionconfirmations', { action_index: idx });
+        } catch (err) {
+            console.warn('CrossChain: source action lookup failed for ' + sourceChain + ':' + idx +
+                ' — ' + (err && err.message));
+            return false;
+        }
+        if (!res || res.error || res.exists !== true) return false;
+
+        let depth = Number(res.confirmations);
+        return Number.isFinite(depth) && depth >= required;
+    }
+
+    async _indexerCall(coin, method, params) {
+        let ix = this.indexers[coin];
+        if (!ix || !ix.url) throw new Error('no indexer url for ' + coin);
+        let headers = { 'Content-Type': 'application/json' };
+        if (ix.key) headers['x-api-key'] = ix.key;
+        let resp = await axios.post(ix.url,
+            { jsonrpc: '2.0', method, params: params || {}, id: 1 },
+            { headers, timeout: 15000 });
+        if (resp.data && resp.data.error) throw new Error('indexer RPC error: ' + JSON.stringify(resp.data.error));
+        return resp.data ? resp.data.result : null;
     }
 
     _checkPrepareQuorum(attestationId) {
@@ -486,7 +560,9 @@ class CrossChainEngine extends EventEmitter {
         }
         if (N <= 1) return 0;
         let f = Math.floor((N - 1) / 3);
-        return 2 * f + 1;
+        // Majority floor: bare 2f+1 degenerates to quorum=1 at N=3 (f=0),
+        // letting a single validator finalize alone.
+        return Math.max(2 * f + 1, Math.ceil((N + 1) / 2));
     }
 
     _digest(attestationId, confirmations) {
