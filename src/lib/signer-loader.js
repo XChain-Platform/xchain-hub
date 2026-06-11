@@ -15,7 +15,7 @@
  * XChain Hub - Operator Signer Loader
  *
  * The on-chain publishers (OraclePublisher → PRICE v0, StateAnchorPublisher →
- * ANCHOR, CrossChainDexAnchor → legacy XDEXANCHOR) build and broadcast DOGE
+ * ANCHOR) build and broadcast DOGE
  * transactions through the encoder, but SIGNING is the operator's
  * responsibility — the hub holds no coin keys, only its Ed25519 validator
  * identity. Each publisher exposes setWalletSignHook / setBroadcastHook /
@@ -70,8 +70,8 @@ function loadSignerHooks(env){
 }
 
 // Apply loaded hooks to a publisher (anything exposing the standard setters).
-// Wiring OraclePublisher alone covers StateAnchorPublisher and
-// CrossChainDexAnchor too — both borrow its hooks via _resolveSigner().
+// Wiring OraclePublisher alone covers StateAnchorPublisher too — it borrows
+// the hooks via _resolveSigner().
 function applySignerHooks(publisher, hooks){
     if(!publisher || !hooks) return false;
     if(typeof publisher.setWalletSignHook === 'function')

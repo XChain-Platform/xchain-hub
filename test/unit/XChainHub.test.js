@@ -360,14 +360,13 @@ describe('XChainHub', function () {
         it('return the wired-in subsystem instances', function () {
             hub.peerManager = { a: 1 }; hub.consensus = { b: 2 }; hub.identity = { c: 3 };
             hub.oracle = { d: 4 }; hub.crossChain = { e: 5 };
-            hub.crossChainDex = { f: 6 }; hub.crossChainDexAnchor = { g: 7 };
+            hub.crossChainDex = { f: 6 };
             expect(hub.getPeerManager()).to.equal(hub.peerManager);
             expect(hub.getConsensus()).to.equal(hub.consensus);
             expect(hub.getIdentity()).to.equal(hub.identity);
             expect(hub.getOracle()).to.equal(hub.oracle);
             expect(hub.getCrossChain()).to.equal(hub.crossChain);
             expect(hub.getCrossChainDex()).to.equal(hub.crossChainDex);
-            expect(hub.getCrossChainDexAnchor()).to.equal(hub.crossChainDexAnchor);
         });
     });
 

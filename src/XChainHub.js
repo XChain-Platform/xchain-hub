@@ -29,7 +29,6 @@ const RewardTracker      = require('./RewardTracker.js');
 const SlashDetector      = require('./SlashDetector.js');
 const CrossChainEngine   = require('./CrossChainEngine.js');
 const CrossChainDexEngine = require('./CrossChainDexEngine.js');
-const CrossChainDexAnchor = require('./CrossChainDexAnchor.js');
 const StateCheckpointEngine = require('./StateCheckpointEngine.js');
 const StateAnchorPublisher  = require('./StateAnchorPublisher.js');
 const ReorgHandler       = require('./ReorgHandler.js');
@@ -216,8 +215,8 @@ class XChainHub {
         this.oraclePublisher = new OraclePublisher(this);
         // Wire the operator-supplied signer (HUB_SIGNER_MODULE) into the DOGE
         // pipeline. This is the single wiring point for ALL on-chain DOGE
-        // publishing: StateAnchorPublisher and CrossChainDexAnchor borrow these
-        // hooks via _resolveSigner(). Throws on a configured-but-broken module.
+        // publishing: StateAnchorPublisher borrows these hooks via
+        // _resolveSigner(). Throws on a configured-but-broken module.
         let signerHooks = loadSignerHooks();
         if(signerHooks){
             applySignerHooks(this.oraclePublisher, signerHooks);
@@ -311,14 +310,6 @@ class XChainHub {
         this.crossChainDex = new CrossChainDexEngine(this);
         await this.crossChainDex.start();
 
-        // DOGE Merkle audit anchor — batches finalized cross-chain matches, anchors
-        // their Merkle root on DOGE, and stamps batch_root/anchor_txid. Audit-only
-        // (hub-side); a clean no-op when DOGE publishing isn't configured.
-        // Superseded by ANCHOR (StateAnchorPublisher); kept in parallel until the
-        // ANCHOR pipeline is verified on testnet.
-        this.crossChainDexAnchor = new CrossChainDexAnchor(this);
-        await this.crossChainDexAnchor.start();
-
         // State checkpoints — quorum-signed per-chain ledger/actions/contract hash
         // commitments, written off-chain to state_checkpoints and streamed over the
         // hub-DB mirror so explorers/wallets can verify indexer state.
@@ -341,11 +332,6 @@ class XChainHub {
     // Get the CrossChainDexEngine instance
     getCrossChainDex(){
         return this.crossChainDex;
-    }
-
-    // Get the CrossChainDexAnchor instance
-    getCrossChainDexAnchor(){
-        return this.crossChainDexAnchor;
     }
 
     // Start the reorg handler (no-op if P2P is not active)
