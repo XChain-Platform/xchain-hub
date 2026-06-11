@@ -41,16 +41,34 @@
  * Re-archival rule: a match is pending when batch_seq IS NULL (never archived)
  * OR archived_status <> status (retracted after being archived as finalized).
  *
- * Election, signer resolution, balance checks and the DOGE broadcast pipeline
- * mirror CrossChainDexAnchor/OraclePublisher (the DB is the durable queue —
- * pending checkpoints are rows with anchor_txid IS NULL, pending matches per
- * the rule above; crash-safe with no separate WAL file). Supersedes the legacy
- * XDEXANCHOR raw payload, which is kept running in parallel until ANCHOR is
- * verified on testnet.
+ * Election (attestation-style hash-ordering, spec §8.2 idiom): each pending
+ * checkpoint elects its OWN publisher — oracle_publish validators at the
+ * checkpoint's snapshot_block ordered by SHA256(election key ‖ pubkey)
+ * ascending, where the key binds chain/network/seq/snapshot_block. Rank 0
+ * publishes; if it hasn't after ANCHOR_ELECTION_TOLERANCE_BLOCKS BTC blocks,
+ * rank 1 also qualifies, and so on (the DB row's anchor_txid IS NULL is the
+ * shared "still pending" signal, so a late rank-0 and an early rank-1 can at
+ * worst double-spend one anchor's fee, never corrupt state). A different
+ * validator therefore publishes each chain's anchor in a cycle, FROM ITS OWN
+ * DOGE WALLET — no UTXO contention between the per-chain anchors, per-chain
+ * fault isolation, and publish work (plus its DOGE cost) spreads across the
+ * federation. Each successful publish records an `anchor_<chain>` /
+ * `anchor_archive` reward on the validator_rewards rail (oracle-round
+ * pattern; INSERT IGNORE dedups, best-effort push to the BTC indexer for
+ * COLLECT). The v1 archive round elects a single leader the same way with a
+ * per-election-block key. Signer resolution, balance checks and the DOGE
+ * broadcast pipeline mirror OraclePublisher (the DB is
+ * the durable queue — pending checkpoints are rows with anchor_txid IS NULL,
+ * pending matches per the rule above; crash-safe with no separate WAL file).
+ * The degenerate single-validator federation keeps today's behavior: one
+ * publisher, serialized spends from one wallet. Supersedes the legacy
+ * XDEXANCHOR raw payload (CrossChainDexAnchor, retired 2026-06-11 after
+ * ANCHOR verified end-to-end on mainnet).
  *
  ********************************************************************/
 
 const zlib              = require('zlib');
+const crypto            = require('crypto');
 const EncoderClient     = require('./EncoderClient.js');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const StateCheckpointEngine = require('./StateCheckpointEngine.js');
@@ -58,6 +76,7 @@ const StateCheckpointEngine = require('./StateCheckpointEngine.js');
 const XANC_SIGN_REQ  = 'XANC_SIGN_REQ';
 const XANC_SIGN      = 'XANC_SIGN';
 const XANC_FINALIZED = 'XANC_FINALIZED';
+const XANC_V0_DONE   = 'XANC_V0_DONE';
 
 // Fixed serialization order for an archived match row — the crc32 (and the
 // follower byte-comparison) depend on this exact order. Spec §Archive JSON.
@@ -146,18 +165,14 @@ class StateAnchorPublisher {
     }
 
     // ── Flush: publish pending v0 checkpoints + the pending archive batch ──────
+    // Returns a summary (also served by the hub's `anchorflush` RPC):
+    // { anchored: [{chain, network, block_index, txid}], archive: 'published'|
+    //   'round_started'|'none', skipped: 'already_flushing'|'no_pipeline'? }
     async flush(){
-        if(this._flushing) return;
+        if(this._flushing) return { anchored: [], archive: 'none', skipped: 'already_flushing' };
         this._flushing = true;
         try {
             let btcBlock = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
-            let pubkeys  = await this._getActiveOraclePublishPubkeys(btcBlock);
-            if(pubkeys.length > 0){
-                let myRank = this._myRank(pubkeys);
-                if(myRank === null) return;                                  // not an oracle_publish validator
-                let leaderRank = (Number.isFinite(btcBlock) ? btcBlock : 0) % pubkeys.length;
-                if(pubkeys.length > 1 && myRank !== leaderRank) return;      // not our turn (failover next block)
-            }
 
             let signer = this._resolveSigner();
             if(!signer.broadcastFn && !(signer.encoder && signer.walletSignFn)){
@@ -165,30 +180,68 @@ class StateAnchorPublisher {
                     console.warn('StateAnchorPublisher: no DOGE broadcast pipeline configured — anchors deferred (set DOGE_ENCODER_URL + a wallet-sign hook)');
                     this._loggedNoPipeline = true;
                 }
-                return;
+                return { anchored: [], archive: 'none', skipped: 'no_pipeline' };
             }
             await this._checkBalance(signer);
 
-            await this._publishPendingCheckpoints(signer);
-            await this._startArchiveRound(pubkeys, signer, btcBlock);
+            let anchored = await this._publishPendingCheckpoints(signer, btcBlock);
+            let archive  = await this._startArchiveRound(signer, btcBlock);
+            return { anchored: anchored, archive: archive };
         } catch(e){
             console.error('StateAnchorPublisher: flush failed:', e && e.message);
+            return { anchored: [], archive: 'none', error: e && e.message };
         } finally {
             this._flushing = false;
         }
     }
 
+    // Deterministic publisher ordering — AttestationRound's responsible-set
+    // idiom: sort the eligible set by SHA256(key ‖ pubkey) ascending. Every
+    // hub computes the identical order from the block-boundary snapshot.
+    static hashOrder(key, pubkeys){
+        return (pubkeys || []).map(pk => {
+            let p = String(pk).toLowerCase();
+            return { pubkey: p, hash: crypto.createHash('sha256').update(key, 'utf8').update(p, 'utf8').digest('hex') };
+        }).sort((a, b) => (a.hash < b.hash) ? -1 : (a.hash > b.hash ? 1 : 0)).map(e => e.pubkey);
+    }
+
+    _v0ElectionKey(row){
+        return 'XANCV0|' + row.chain + '|' + row.network + '|' + String(row.checkpoint_seq) + '|' + String(row.snapshot_block);
+    }
+
+    // May THIS hub publish for `order` right now? Rank 0 always may; each
+    // additional rank unlocks after ANCHOR_ELECTION_TOLERANCE_BLOCKS more BTC
+    // blocks past the election anchor point (deterministic failover ladder).
+    // A hub outside a non-empty eligible set never publishes.
+    _mayPublish(order, sinceBlocks){
+        if(order.length === 0) return true;
+        if(!this.identity) return false;
+        let rank = order.indexOf(String(this.identity.getPubkeyHex()).toLowerCase());
+        if(rank < 0) return false;
+        if(order.length === 1) return true;
+        let unlocked = Number.isFinite(sinceBlocks) ? Math.floor(Math.max(0, sinceBlocks) / this.electionToleranceBlocks) : 0;
+        return rank <= unlocked;
+    }
+
     // v0: one per chain/network — the LATEST checkpoint that has no anchor yet.
     // Older unanchored checkpoints are superseded (the chained hashes commit to
     // all prior history), so only the newest per chain costs DOGE bytes.
-    async _publishPendingCheckpoints(signer){
+    // Each row elects its own publisher (hash-order at its snapshot_block).
+    async _publishPendingCheckpoints(signer, btcBlock){
         let rows = await this.db.doQuery(
             'SELECT sc.* FROM state_checkpoints sc JOIN (' +
             '  SELECT chain, network, MAX(checkpoint_seq) AS max_seq FROM state_checkpoints GROUP BY chain, network' +
             ') t ON sc.chain = t.chain AND sc.network = t.network AND sc.checkpoint_seq = t.max_seq ' +
             'WHERE sc.anchor_txid IS NULL');
+        let anchored = [];
         for(let row of (rows || [])){
             try {
+                let eligible = await this._getActiveOraclePublishPubkeys(Number(row.snapshot_block));
+                if(eligible.length > 0){
+                    let order = StateAnchorPublisher.hashOrder(this._v0ElectionKey(row), eligible);
+                    let since = Number.isFinite(btcBlock) ? btcBlock - Number(row.snapshot_block) : null;
+                    if(!this._mayPublish(order, since)) continue;        // someone else's anchor (or not unlocked yet)
+                }
                 let payload = this._buildV0Payload(row);
                 let broadcaster = signer.broadcastFn || ((p) => this._defaultBroadcast(p, signer));
                 let result = await broadcaster(payload);
@@ -198,10 +251,33 @@ class StateAnchorPublisher {
                     [txid, row.chain, row.network, row.block_index]);
                 console.log('StateAnchorPublisher: anchored checkpoint ' + row.chain + '/' + row.network +
                             ' @ ' + row.block_index + ' (txid ' + txid + ')');
+                anchored.push({ chain: row.chain, network: row.network, block_index: Number(row.block_index), txid: txid });
+                this._recordReward('anchor_' + row.chain, Number(row.checkpoint_seq), btcBlock);
+                // Tell peers so THEIR copy of the row stops being pending —
+                // without this, every hub whose failover rank unlocks would
+                // re-anchor a checkpoint someone else already paid for.
+                if(this.peerManager && this.identity){
+                    this.peerManager.broadcast(XANC_V0_DONE, {
+                        chain: row.chain, network: row.network, block_index: Number(row.block_index),
+                        checkpoint_seq: Number(row.checkpoint_seq), txid: txid,
+                        sig_pubkey: this.identity.getPubkeyHex().toLowerCase(),
+                        sig: this.identity.sign(this._v0DoneCanonical(row, txid))
+                    });
+                }
             } catch(e){
                 console.error('StateAnchorPublisher: v0 publish failed for ' + row.chain + ': ' + (e && e.message));
             }
         }
+        return anchored;
+    }
+
+    // Publisher-side reward (oracle-round rail): the validator that paid the
+    // DOGE earns it. INSERT IGNORE on (pubkey, round, type) dedups retries.
+    _recordReward(rewardType, roundNumber, btcBlock){
+        if(!this.identity || !this.hub.rewardTracker || typeof this.hub.rewardTracker.recordAnchorReward !== 'function') return;
+        this.hub.rewardTracker
+            .recordAnchorReward(rewardType, roundNumber, this.identity.getPubkeyHex().toLowerCase(), Number.isFinite(btcBlock) ? btcBlock : 0)
+            .catch(e => console.warn('StateAnchorPublisher: reward record failed (' + rewardType + '/' + roundNumber + '): ' + (e && e.message)));
     }
 
     _buildV0Payload(row){
@@ -214,13 +290,26 @@ class StateAnchorPublisher {
     }
 
     // ── Archive round (v1/v2) ───────────────────────────────────────────────────
-    async _startArchiveRound(pubkeys, signer, electionBlock){
-        if(this._archiveRound) return;                                       // one at a time
+    // One leader per election block: hash-order rank 0 over the oracle_publish
+    // set (failover = next block ⇒ new key ⇒ new leader). Returns the flush
+    // summary's archive status.
+    async _startArchiveRound(signer, electionBlock){
+        if(this._archiveRound) return 'round_pending';                       // one at a time
+
+        let pubkeys = await this._getActiveOraclePublishPubkeys(electionBlock);
+        if(pubkeys.length > 0){
+            if(!this.identity) return 'none';
+            let me = String(this.identity.getPubkeyHex()).toLowerCase();
+            if(!pubkeys.includes(me)) return 'none';                         // not an oracle_publish validator
+            if(pubkeys.length > 1 &&
+               StateAnchorPublisher.hashOrder(this._archiveElectionKey(electionBlock), pubkeys)[0] !== me)
+                return 'none';                                               // not the elected archive leader
+        }
 
         let matches = await this.db.doQuery(
             "SELECT * FROM cross_chain_matches WHERE batch_seq IS NULL OR archived_status <> status " +
             "ORDER BY match_id ASC LIMIT ?", [this.maxBatch]);
-        if(!matches || matches.length === 0){ this._pendingMatches = 0; return; }
+        if(!matches || matches.length === 0){ this._pendingMatches = 0; return 'none'; }
 
         // The checkpoint wrapper: latest checkpoint (prefer BTC — its height also
         // selects validator sets). Without any checkpoint there is nothing to bind
@@ -229,7 +318,7 @@ class StateAnchorPublisher {
             "SELECT * FROM state_checkpoints ORDER BY (chain = 'BTC') DESC, id DESC LIMIT 1");
         if(!cps || cps.length === 0){
             console.log('StateAnchorPublisher: no state checkpoint yet — archive deferred');
-            return;
+            return 'none';
         }
         let cp = this._cpFromRow(cps[0]);
 
@@ -250,7 +339,7 @@ class StateAnchorPublisher {
         let quorum    = (snapCount <= 1) ? 1 : Math.max(2 * Math.floor((snapCount - 1) / 3) + 1, Math.ceil((snapCount + 1) / 2));
 
         let round = {
-            cp, batchSeq, crc, b64, chunks, canonical, quorum, signer,
+            cp, batchSeq, crc, b64, chunks, canonical, quorum, signer, electionBlock,
             count:      archive.count,
             matchIds:   matches.map(m => ({ match_id: m.match_id, status: m.status })),
             validators: pubkeys.slice(),
@@ -262,7 +351,7 @@ class StateAnchorPublisher {
         if(snapCount <= 1){                                                   // single-node: self-sign suffices
             await this._publishArchive(round);
             this._pendingMatches = 0;
-            return;
+            return 'published';
         }
 
         this._archiveRound = round;
@@ -282,6 +371,11 @@ class StateAnchorPublisher {
             sig_pubkey: myPubkey, sig: mySig
         });
         await this._checkArchiveQuorum();
+        return 'round_started';
+    }
+
+    _archiveElectionKey(electionBlock){
+        return 'XANCV1|' + String(Number.isFinite(electionBlock) ? electionBlock : 0);
     }
 
     // Resolve the qualifying set for (capability, block). Primary source is
@@ -371,7 +465,28 @@ class StateAnchorPublisher {
             case XANC_SIGN_REQ:  this._handleSignReq(envelope).catch(e => console.error('StateAnchorPublisher: SIGN_REQ error: ' + (e && e.message))); break;
             case XANC_SIGN:      this._handleSign(envelope).catch(e => console.error('StateAnchorPublisher: SIGN error: ' + (e && e.message)));        break;
             case XANC_FINALIZED: this._handleFinalized(envelope).catch(e => console.error('StateAnchorPublisher: FINALIZED error: ' + (e && e.message))); break;
+            case XANC_V0_DONE:   this._handleV0Done(envelope).catch(e => console.error('StateAnchorPublisher: V0_DONE error: ' + (e && e.message)));     break;
         }
+    }
+
+    // Peer back-fill for a published v0 anchor. Anti-spam only (membership +
+    // signature) — a fabricated txid can at worst suppress a re-anchor, and the
+    // row's hashes were already quorum-signed. First writer wins (IS NULL guard).
+    async _handleV0Done(envelope){
+        let d = envelope.data;
+        if(!d || !d.chain || !d.txid) return;
+        let sender = String(d.sig_pubkey || '').toLowerCase();
+        let pubkeys = await this._getActiveOraclePublishPubkeys(null);
+        if(pubkeys.length && !pubkeys.includes(sender)) return;
+        if(!ValidatorIdentity.verify(this._v0DoneCanonical(d, String(d.txid)), String(d.sig || ''), sender)) return;
+        await this.db.doQuery(
+            'UPDATE state_checkpoints SET anchor_txid = ? WHERE chain = ? AND network = ? AND block_index = ? AND anchor_txid IS NULL',
+            [String(d.txid), String(d.chain), String(d.network), Number(d.block_index)]);
+    }
+
+    _v0DoneCanonical(row, txid){
+        return 'XANCV0DONE|' + row.chain + '|' + row.network + '|' + String(row.block_index) + '|' +
+               String(row.checkpoint_seq) + '|' + String(txid || '');
     }
 
     // Follower: co-sign ONLY an archive that byte-matches our own DB state.
@@ -393,7 +508,9 @@ class StateAnchorPublisher {
         if(Number.isFinite(myBtc) && Math.abs(myBtc - electionBlock) > this.electionToleranceBlocks) return;
         let pubkeys = await this._getActiveOraclePublishPubkeys(electionBlock);
         if(!pubkeys.includes(myPubkey)) return;
-        if(pubkeys.length > 1 && sender !== pubkeys[electionBlock % pubkeys.length]) return;   // not the elected publisher
+        if(pubkeys.length > 1 &&
+           sender !== StateAnchorPublisher.hashOrder(this._archiveElectionKey(electionBlock), pubkeys)[0])
+            return;                                                          // not the elected archive leader
 
         let canonical = this._archiveCanonical(cp, Number(d.batch_seq), Number(d.match_count),
                                                String(d.batch_crc32), Number(d.total_chunks));
@@ -523,6 +640,7 @@ class StateAnchorPublisher {
         }
         console.log('StateAnchorPublisher: archived ' + round.count + ' matches (batch ' + round.batchSeq +
                     ', ' + round.chunks.length + ' chunk(s), txid ' + txid + ')');
+        this._recordReward('anchor_archive', round.batchSeq, round.electionBlock);
     }
 
     // Peers back-fill batch metadata so a rotated leader doesn't re-archive.
@@ -613,14 +731,7 @@ class StateAnchorPublisher {
         return (crc ^ 0xFFFFFFFF) >>> 0;
     }
 
-    // ── Election + DOGE pipeline (mirror CrossChainDexAnchor/OraclePublisher) ──
-    _myRank(pubkeys){
-        if(!this.identity) return null;
-        let me = String(this.identity.getPubkeyHex()).toLowerCase();
-        let idx = pubkeys.indexOf(me);
-        return idx >= 0 ? idx : null;
-    }
-
+    // ── Eligible set + DOGE pipeline (mirror OraclePublisher) ──────────────────
     async _getActiveOraclePublishPubkeys(blockIndex){
         if(!this.hub) return [];
         if(this.hub.capabilitySnapshot && blockIndex !== undefined && blockIndex !== null){
@@ -682,4 +793,5 @@ module.exports = StateAnchorPublisher;
 module.exports.XANC_SIGN_REQ  = XANC_SIGN_REQ;
 module.exports.XANC_SIGN      = XANC_SIGN;
 module.exports.XANC_FINALIZED = XANC_FINALIZED;
+module.exports.XANC_V0_DONE   = XANC_V0_DONE;
 module.exports.MATCH_KEYS     = MATCH_KEYS;

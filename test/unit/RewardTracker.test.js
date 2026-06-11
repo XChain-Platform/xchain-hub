@@ -115,6 +115,56 @@ describe('RewardTracker', function () {
     });
 
     // -----------------------------------------------------------------
+    // recordAnchorReward()
+    // -----------------------------------------------------------------
+
+    describe('recordAnchorReward()', function () {
+
+        it('records a per-chain anchor reward for the publisher', async function () {
+            await rt.recordAnchorReward('anchor_DOGE', 8, hexPk(1), 953190);
+            let args = hub.db.doQuery.getCall(0).args;
+            expect(args[0]).to.include('INSERT IGNORE INTO validator_rewards');
+            expect(args[1]).to.deep.equal([hexPk(1), 8, 'anchor_DOGE', '10.00000000']);
+        });
+
+        it('pushes the reward to the BTC indexer with its own reward_type', async function () {
+            rt.btcIndexerApiUrl = 'http://indexer:3000';
+            let post = sinon.stub(axios, 'post').resolves({ data: {} });
+            await rt.recordAnchorReward('anchor_archive', 3, hexPk(2), 953200);
+            await new Promise(r => setImmediate(r));
+            expect(post.calledOnce).to.be.true;
+            let body = post.getCall(0).args[1];
+            expect(body.params.reward_type).to.equal('anchor_archive');
+            expect(body.params.round).to.equal(3);
+            expect(body.params.block_index).to.equal(953200);
+            expect(body.params.rewards).to.deep.equal([{ pubkey: hexPk(2), amount: '10.00000000' }]);
+        });
+
+        it('honors ANCHOR_REWARD_PER_PUBLISH config', async function () {
+            let rt2 = new RewardTracker(createMockHub({ p2pConfig: { ANCHOR_REWARD_PER_PUBLISH: '2.5' } }));
+            await rt2.recordAnchorReward('anchor_BTC', 1, hexPk(1), 100);
+            let args = rt2.db.doQuery.getCall(0).args;
+            expect(args[1][3]).to.equal('2.50000000');
+        });
+
+        it('rejects an invalid pubkey without DB writes', async function () {
+            await rt.recordAnchorReward('anchor_BTC', 1, 'not-a-pubkey', 100);
+            expect(hub.db.doQuery.called).to.be.false;
+        });
+
+        it('skips a non-positive reward amount without DB writes', async function () {
+            let rt2 = new RewardTracker(createMockHub({ p2pConfig: { ANCHOR_REWARD_PER_PUBLISH: '0' } }));
+            await rt2.recordAnchorReward('anchor_BTC', 1, hexPk(1), 100);
+            expect(rt2.db.doQuery.called).to.be.false;
+        });
+
+        it('swallows an INSERT failure (idempotent retries)', async function () {
+            hub.db.doQuery.rejects(new Error('dup'));
+            await rt.recordAnchorReward('anchor_LTC', 4, hexPk(3), 100);   // must not throw
+        });
+    });
+
+    // -----------------------------------------------------------------
     // getUnclaimedRewards()
     // -----------------------------------------------------------------
 

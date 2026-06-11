@@ -75,8 +75,10 @@ function memDb() {
                 return checkpoints.filter(r => r.chain === params[0] && r.network === params[1] && r.block_index === params[2]).slice(0, 1);
             }
             if (sql.startsWith('UPDATE state_checkpoints SET anchor_txid')) {
+                let onlyIfNull = sql.includes('anchor_txid IS NULL');
                 for (let r of checkpoints)
-                    if (r.chain === params[1] && r.network === params[2] && r.block_index === params[3]) r.anchor_txid = params[0];
+                    if (r.chain === params[1] && r.network === params[2] && r.block_index === params[3] &&
+                        (!onlyIfNull || r.anchor_txid == null)) r.anchor_txid = params[0];
                 return [];
             }
             if (sql.startsWith('SELECT * FROM cross_chain_matches WHERE batch_seq IS NULL OR archived_status <> status')) {
@@ -128,7 +130,7 @@ describe('StateAnchorPublisher', function () {
 
         for (let i = 0; i < n; i++) {
             let identity = identities[i];
-            let self = { i, identity, pubkey: identity.getPubkeyHex().toLowerCase(), handler: null, published: [] };
+            let self = { i, identity, pubkey: identity.getPubkeyHex().toLowerCase(), handler: null, published: [], rewards: [] };
             let peerManager = {
                 on(evt, h) { if (evt === 'message') self.handler = h; },
                 removeListener(evt) { if (evt === 'message') self.handler = null; },
@@ -163,6 +165,7 @@ describe('StateAnchorPublisher', function () {
                 capabilitySnapshot: { async getSnapshot() { return { validators: validators.slice(0, n) }; } },
                 getPeerManager: () => peerManager,
                 getIdentity: () => identity,
+                rewardTracker: { recordAnchorReward: async (type, round, pubkey, blk) => { self.rewards.push({ type, round, pubkey, blk }); } },
                 _resolveBtcLatestBlock: async () => (opts.btcBlock != null ? opts.btcBlock : 100)
             };
             self.db  = db;
@@ -177,12 +180,20 @@ describe('StateAnchorPublisher', function () {
         return bus;
     }
 
-    function leaderNode(bus, btcBlock) {
-        let sorted = bus.nodes.map(nd => nd.pubkey).sort();
-        let leaderPk = sorted[btcBlock % bus.nodes.length];
-        return bus.nodes.find(nd => nd.pubkey === leaderPk);
+    // Election helpers mirroring the publisher's hash-ordering (different key
+    // per pending checkpoint, one per election block for the archive round).
+    function v0Order(bus, row) {
+        row = row || CP_ROW;
+        let key = 'XANCV0|' + row.chain + '|' + row.network + '|' + row.checkpoint_seq + '|' + row.snapshot_block;
+        let order = StateAnchorPublisher.hashOrder(key, bus.nodes.map(nd => nd.pubkey));
+        return order.map(pk => bus.nodes.find(nd => nd.pubkey === pk));
+    }
+    function archiveLeader(bus, btcBlock) {
+        let order = StateAnchorPublisher.hashOrder('XANCV1|' + btcBlock, bus.nodes.map(nd => nd.pubkey));
+        return bus.nodes.find(nd => nd.pubkey === order[0]);
     }
     async function startAll(bus) { for (let nd of bus.nodes) await nd.pub.start(); }
+    async function flushAll(bus) { for (let nd of bus.nodes) await nd.pub.flush(); }
 
     it('v0 payload matches the ANCHOR spec field order', function () {
         let bus = buildMesh(1);
@@ -257,48 +268,143 @@ describe('StateAnchorPublisher', function () {
         expect(archive.matches.length).to.equal(40);
     });
 
-    it('N=4: followers co-sign a faithful archive; v1 carries 2f+1 sigs; back-fill propagates', async function () {
+    it('N=4: per-row v0 election + archive leader; v1 carries 2f+1 sigs; back-fill propagates', async function () {
         let bus = buildMesh(4, { btcBlock: 101 });
         await startAll(bus);
-        let leader = leaderNode(bus, 101);
-        await leader.pub.flush();
+        let v0Pub  = v0Order(bus)[0];                                  // elected for the BTC checkpoint
+        let leader = archiveLeader(bus, 101);                          // elected archive leader
+        await flushAll(bus);                                           // every hub's timer fires
         await sleep(100);
 
-        expect(leader.published.length).to.equal(2);
-        let v1 = leader.published[1].split('|');
+        // Exactly one v0, published by the hash-order rank-0 node for that row's key.
+        let v0s = bus.nodes.flatMap(nd => nd.published.filter(p => p.split('|')[1] === '0').map(() => nd));
+        expect(v0s.length).to.equal(1);
+        expect(v0s[0]).to.equal(v0Pub);
+        // XANC_V0_DONE back-fills every peer's row, so no other hub re-anchors.
+        for (let nd of bus.nodes) expect(nd.db.checkpoints[0].anchor_txid, 'node ' + nd.i).to.be.a('string');
+
+        // Exactly one v1, published by the elected archive leader with quorum sigs.
+        let v1Nodes = bus.nodes.filter(nd => nd.published.some(p => p.split('|')[1] === '1'));
+        expect(v1Nodes.length).to.equal(1);
+        expect(v1Nodes[0]).to.equal(leader);
+        let v1 = leader.published.find(p => p.split('|')[1] === '1').split('|');
         let sigCount = Number(v1[16]);
         expect(sigCount).to.be.at.least(3);                            // quorum 2f+1 = 3
         let canonical = leader.pub._archiveCanonical(leader.pub._cpFromRow(leader.db.checkpoints[0]), 0, 1, v1[13], 1);
         for (let i = 0; i < sigCount; i++)
             expect(ValidatorIdentity.verify(canonical, v1[18 + 2 * i], v1[17 + 2 * i])).to.be.true;
 
-        // Followers published nothing but back-filled batch metadata via XANC_FINALIZED.
+        // All nodes back-filled batch metadata (leader directly, rest via XANC_FINALIZED).
         for (let nd of bus.nodes) {
-            if (nd !== leader) expect(nd.published.length).to.equal(0);
             expect(nd.db.matches[0].batch_seq, 'node ' + nd.i).to.equal(0);
             expect(nd.db.matches[0].archived_status).to.equal('finalized');
+        }
+
+        // Rewards: the v0 publisher recorded anchor_BTC @ checkpoint_seq, the
+        // archive leader anchor_archive @ batch_seq — each credited to itself.
+        expect(v0Pub.rewards.some(r => r.type === 'anchor_BTC' && r.round === 7 && r.pubkey === v0Pub.pubkey)).to.equal(true);
+        expect(leader.rewards.some(r => r.type === 'anchor_archive' && r.round === 0 && r.pubkey === leader.pubkey)).to.equal(true);
+        for (let nd of bus.nodes) {
+            if (nd !== v0Pub)  expect(nd.rewards.filter(r => r.type === 'anchor_BTC').length, 'node ' + nd.i).to.equal(0);
+            if (nd !== leader) expect(nd.rewards.filter(r => r.type === 'anchor_archive').length, 'node ' + nd.i).to.equal(0);
         }
     });
 
     it('followers refuse an archive that diverges from their own match rows', async function () {
-        let bus = buildMesh(4, {
-            btcBlock: 101,
-            mutate: (self, db) => {
-                // Two followers hold a different amount for m1 → leader can reach at
-                // most 2 sigs (self + 1 honest) < quorum 3 → nothing published.
-                let sorted = [];   // resolved after mesh construction via index trick:
-                if (self.i === 1 || self.i === 2) db.matches[0].a_amount = '999';
-            }
-        });
+        let bus = buildMesh(4, { btcBlock: 101 });
+        let leader = archiveLeader(bus, 101);
+        // Two followers hold a different amount for m1 → the leader can reach at
+        // most 2 sigs (self + 1 honest) < quorum 3 → nothing published.
+        let mutated = 0;
+        for (let nd of bus.nodes) {
+            if (nd !== leader && mutated < 2) { nd.db.matches[0].a_amount = '999'; mutated++; }
+        }
         await startAll(bus);
-        let leader = leaderNode(bus, 101);
-        // Ensure the leader itself isn't one of the mutated nodes for a clean read
-        // of the property; if it is, the honest follower count is still < quorum.
         await leader.pub.flush();
         await sleep(120);
         let v1s = bus.nodes.flatMap(nd => nd.published.filter(p => p.split('|')[1] === '1'));
         expect(v1s.length).to.equal(0);
         for (let nd of bus.nodes) expect(nd.db.matches[0].batch_seq).to.equal(null);
+    });
+
+    it('failover ladder: higher ranks unlock only after the tolerance window', async function () {
+        // since = btcBlock - snapshot_block = 37 → floor(37/36) = 1 → ranks 0–1.
+        let bus = buildMesh(4, { btcBlock: 137 });
+        await startAll(bus);
+        let order = v0Order(bus);
+
+        await order[2].pub.flush();                                    // rank 2: still locked
+        await order[3].pub.flush();                                    // rank 3: still locked
+        await sleep(30);
+        expect(bus.nodes.flatMap(nd => nd.published).filter(p => p.split('|')[1] === '0').length).to.equal(0);
+
+        await order[1].pub.flush();                                    // rank 1: unlocked (rank 0 absent)
+        await sleep(30);
+        let v0s = bus.nodes.filter(nd => nd.published.some(p => p.split('|')[1] === '0'));
+        expect(v0s.length).to.equal(1);
+        expect(v0s[0]).to.equal(order[1]);
+        // Back-fill reached rank 0 too — it won't double-publish when it returns.
+        await order[0].pub.flush();
+        await sleep(30);
+        expect(bus.nodes.flatMap(nd => nd.published).filter(p => p.split('|')[1] === '0').length).to.equal(1);
+    });
+
+    it('distinct chains elect their own publishers (per-row election keys)', async function () {
+        let bus = buildMesh(4, { btcBlock: 101 });
+        // Three pending checkpoints, one per chain, same heights/seq.
+        for (let nd of bus.nodes) {
+            nd.db.checkpoints.length = 0;
+            for (let chain of ['BTC', 'LTC', 'DOGE'])
+                nd.db.checkpoints.push(Object.assign({}, CP_ROW, { chain: chain, anchor_txid: null }));
+        }
+        await startAll(bus);
+        await flushAll(bus);
+        await sleep(50);
+
+        for (let chain of ['BTC', 'LTC', 'DOGE']) {
+            let expected = v0Order(bus, Object.assign({}, CP_ROW, { chain: chain }))[0];
+            let publishers = bus.nodes.filter(nd => nd.published.some(p => {
+                let f = p.split('|'); return f[1] === '0' && f[2] === chain;
+            }));
+            expect(publishers.length, chain).to.equal(1);
+            expect(publishers[0], chain).to.equal(expected);
+            expect(publishers[0].rewards.some(r => r.type === 'anchor_' + chain && r.round === 7)).to.equal(true);
+            // Every node's row for this chain is anchored (publisher or gossip).
+            for (let nd of bus.nodes)
+                expect(nd.db.checkpoints.find(c => c.chain === chain).anchor_txid, chain + ' node ' + nd.i).to.be.a('string');
+        }
+    });
+
+    it('a hub outside the oracle_publish snapshot never publishes', async function () {
+        let bus = buildMesh(4, { btcBlock: 101 });
+        // Drop node 0 from every hub's view of the eligible set.
+        let outsider = bus.nodes[0];
+        for (let nd of bus.nodes) {
+            let eligible = bus.nodes.filter(o => o !== outsider).map(o => ({ pubkey: o.pubkey, amount: '1' }));
+            nd.pub.capSnapshot = { async getSnapshot() { return { validators: eligible }; } };
+            nd.pub.hub.capabilitySnapshot = nd.pub.capSnapshot;
+        }
+        await startAll(bus);
+        await outsider.pub.flush();
+        await sleep(30);
+        expect(outsider.published.length).to.equal(0);
+        expect(outsider.rewards.length).to.equal(0);
+    });
+
+    it('flush returns a summary (and reports election skips honestly)', async function () {
+        let bus = buildMesh(1);
+        let nd = bus.nodes[0];
+        await startAll(bus);
+        let first = await nd.pub.flush();
+        await sleep(30);
+        expect(first.anchored.length).to.equal(1);
+        expect(first.anchored[0]).to.include({ chain: 'BTC', network: 'regtest', block_index: 494 });
+        expect(first.anchored[0].txid).to.be.a('string');
+        expect(first.archive).to.equal('published');
+
+        let second = await nd.pub.flush();
+        expect(second.anchored.length).to.equal(0);
+        expect(second.archive).to.equal('none');
     });
 
     it('a match retracted after archival is re-archived with its new status', async function () {

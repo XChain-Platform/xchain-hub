@@ -30,6 +30,7 @@ class RewardTracker {
 
         // Config
         this.rewardPerRound = hub.p2pConfig.ORACLE_REWARD_PER_ROUND || '10.00000000';
+        this.anchorReward   = process.env.ANCHOR_REWARD_PER_PUBLISH || hub.p2pConfig.ANCHOR_REWARD_PER_PUBLISH || '10.00000000';
 
         // BTC indexer push config (for replicating rewards to indexer's validator_rewards table)
         this.btcIndexerApiUrl = process.env.BTC_INDEXER_API_URL || '';
@@ -72,9 +73,30 @@ class RewardTracker {
             .catch(e => console.warn('Rewards: failed to push to BTC indexer:', e));
     }
 
+    // Record a single anchor-publish reward (ANCHOR v0 per-chain or v1 archive).
+    // rewardType: 'anchor_<chain>' / 'anchor_archive'; roundNumber: checkpoint_seq /
+    // batch_seq. The elected publisher paid the DOGE, so it earns the reward —
+    // INSERT IGNORE on (pubkey, round, type) makes retries and re-flushes idempotent.
+    async recordAnchorReward(rewardType, roundNumber, pubkey, blockIndex) {
+        if (typeof pubkey !== 'string' || !/^[0-9a-fA-F]{64}$/.test(pubkey)) return;
+        let amount = parseFloat(this.anchorReward);
+        if (!Number.isFinite(amount) || amount <= 0) return;
+        let amountStr = amount.toFixed(8);
+
+        let query = `INSERT IGNORE INTO validator_rewards (validator_pubkey, round_number, reward_type, amount)
+                     VALUES (?, ?, ?, ?)`;
+        await this.db.doQuery(query, [pubkey, roundNumber, rewardType, amountStr])
+            .catch(e => console.error('Error recording anchor reward for ' + pubkey + ':', e));
+
+        console.log('Rewards: ' + rewardType + ' #' + roundNumber + ' — ' + amountStr + ' XCHAIN to ' + pubkey.substring(0, 16) + '…');
+
+        this._pushRewardsToBtcIndexer(roundNumber, [pubkey], amountStr, blockIndex || roundNumber, rewardType)
+            .catch(e => console.warn('Rewards: failed to push anchor reward to BTC indexer:', e));
+    }
+
     // Push validator rewards to the BTC indexer's local DB via JSON-RPC
     // Called fire-and-forget — failures are logged but never block the consensus path
-    async _pushRewardsToBtcIndexer(round, pubkeys, amount, blockIndex) {
+    async _pushRewardsToBtcIndexer(round, pubkeys, amount, blockIndex, rewardType) {
         if (!this.btcIndexerApiUrl) return;
         let rewards = pubkeys.map(pk => ({ pubkey: pk, amount: amount }));
         let body = {
@@ -83,7 +105,7 @@ class RewardTracker {
             method:  'pushvalidatorrewards',
             params:  {
                 round:       round,
-                reward_type: 'oracle_round',
+                reward_type: rewardType || 'oracle_round',
                 block_index: blockIndex,
                 rewards:     rewards
             }

@@ -77,7 +77,8 @@ const ALLOWED_CHAINS = new Set(['BTC', 'LTC', 'DOGE']);
 const WRITE_METHODS  = new Set([
     'updateconfig', 'registervalidator', 'syncvalidators',
     'propose', 'vote', 'requestattestation', 'reportreorg', 'initiateswap',
-    'pushchaintip', 'pushpriceround', 'pushoracleprice', 'pushpricereorg'
+    'pushchaintip', 'pushpriceround', 'pushoracleprice', 'pushpricereorg',
+    'anchorflush'
 ]);
 
 function validateChain(chain) {
@@ -484,6 +485,20 @@ async function startApi(){
         async getattestationstats(){
             if(!hub.attestationRound) return {error: "attestation subsystem not active"};
             return hub.attestationRound.getStats();
+        },
+
+        // Manually trigger an ANCHOR flush (write-auth): publish any pending
+        // checkpoint anchors + the pending archive batch now instead of waiting
+        // for the interval timer. Election still applies — a hub that isn't the
+        // elected publisher for a pending anchor skips it (reflected in the
+        // returned summary) rather than publishing out of turn.
+        async anchorflush(){
+            if(!hub.stateAnchorPublisher) return {error: "anchor publisher not active"};
+            try {
+                return await hub.stateAnchorPublisher.flush();
+            } catch (err) {
+                return {error: "anchor flush failed"};
+            }
         },
 
         // Get fee quote (gas → XCHAIN → native coin)
