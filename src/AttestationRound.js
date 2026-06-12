@@ -34,6 +34,7 @@
 
 const crypto = require('crypto');
 const axios  = require('axios');
+const bc     = require('./bcmath.js');
 
 const ATTEST_PROPOSE = 'ATTEST_PROPOSE';
 
@@ -255,10 +256,24 @@ class AttestationRound {
         }
         let amLeader = (leaderPubkey === myPubkey);
 
+        let providerDef = this.providerRegistry.getDef(providerId);
+
+        // Hub-local min_fee floor (E1, governance-synced via the provider
+        // definition). Below-floor requests are skipped BEFORE any provider
+        // fetch; with every hub applying the same floor the request simply
+        // expires on-chain and the fee refunds — economically clean
+        // back-pressure with zero consensus involvement.
+        let minFee    = (providerDef && !bc.isNull(providerDef.min_fee_xchain)) ? String(providerDef.min_fee_xchain) : '0';
+        let reqFeeAmt = (request && !bc.isNull(request.fee_amount)) ? String(request.fee_amount) : '0';
+        if(bc.bcgt(minFee, '0') && bc.bclt(reqFeeAmt, minFee)){
+            console.log('AttestationRound: skipping ' + rid.substring(0,16) + '... — fee ' + reqFeeAmt +
+                        ' below provider "' + providerId + '" min_fee ' + minFee + ' (request will expire + refund)');
+            return;
+        }
+
         // Fetch the payload via the provider module. Capped at provider's max
         // response bytes; timeout from config. Failure burns the round on this
         // validator — slashing missed-validators is Phase 4.
-        let providerDef = this.providerRegistry.getDef(providerId);
         let fetched;
         try {
             fetched = await providerModule.fetch(request.payload, {

@@ -61,6 +61,13 @@ describe('ProviderRegistry', function () {
             expect(reg.getDef('nonexistent')).to.be.null;
         });
 
+        it("defaults min_fee_xchain to '0' (serve everything) on both providers", function () {
+            let hub = makeHub();
+            let reg = new ProviderRegistry(hub);
+            expect(reg.getDef('http_get').min_fee_xchain).to.equal('0');
+            expect(reg.getDef('llm').min_fee_xchain).to.equal('0');
+        });
+
         it('lists all known provider ids', function () {
             let hub = makeHub();
             let reg = new ProviderRegistry(hub);

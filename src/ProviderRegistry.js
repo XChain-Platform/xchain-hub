@@ -37,6 +37,11 @@ const DEFAULTS = {
         allowed_redundancy:     [1, 3, 5],
         min_stake_xchain:       '10000',
         per_call_base_fee_xchain: '0.01',
+        // Hub-local request-fee floor (E1): requests whose on-chain FEE_AMOUNT
+        // is below this are skipped by AttestationRound (they expire + refund).
+        // '0' = serve everything, including feeless requests. Governance-synced
+        // like every other field in this definition.
+        min_fee_xchain:         '0',
         deadline_window_blocks: 100,
         additional_config:      {}
     },
@@ -50,6 +55,7 @@ const DEFAULTS = {
         allowed_redundancy:     [1, 3, 5],
         min_stake_xchain:       '25000',
         per_call_base_fee_xchain: '0.50',
+        min_fee_xchain:         '0',
         deadline_window_blocks: 20,
         additional_config: {
             approved_models: [

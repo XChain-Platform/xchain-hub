@@ -475,6 +475,55 @@ describe('AttestationRound', function () {
             expect(ar.rounds.size).to.equal(0);
         });
 
+        it('skips (before any fetch) when the request fee is below the provider min_fee', async function () {
+            let myPubkey = 'aa'.repeat(32);
+            let capSS = { getSnapshot: sinon.stub().resolves({ validators: [{ pubkey: myPubkey }] }) };
+            let hub   = makeHub({ capabilitySnapshot: capSS });
+            hub.getIdentity = () => makeIdentity(myPubkey);
+            let fetchStub = sinon.stub().resolves({ body: 'data', meta: '200' });
+            let reg = makeProviderRegistry({
+                getModule: sinon.stub().returns({ fetch: fetchStub }),
+                getDef:    sinon.stub().returns({ max_response_bytes: 32768, min_fee_xchain: '0.50' })
+            });
+            let ar = new AttestationRound(hub, reg);
+            sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: myPubkey, hash: '00' }]);
+            await ar._startRound(makeRequest({ fee_amount: '0.10' }));
+            expect(ar.rounds.size).to.equal(0, 'below-floor request skipped');
+            expect(fetchStub.called).to.be.false;
+        });
+
+        it('proceeds when the request fee meets the provider min_fee exactly', async function () {
+            let myPubkey = 'aa'.repeat(32);
+            let capSS = { getSnapshot: sinon.stub().resolves({ validators: [{ pubkey: myPubkey }] }) };
+            let hub   = makeHub({ capabilitySnapshot: capSS });
+            hub.getIdentity = () => makeIdentity(myPubkey);
+            let fetchStub = sinon.stub().resolves({ body: Buffer.from('ok'), meta: '200' });
+            let reg = makeProviderRegistry({
+                getModule: sinon.stub().returns({ fetch: fetchStub }),
+                getDef:    sinon.stub().returns({ max_response_bytes: 32768, min_fee_xchain: '0.50' })
+            });
+            let ar = new AttestationRound(hub, reg);
+            sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: myPubkey, hash: '00' }]);
+            await ar._startRound(makeRequest({ fee_amount: '0.50' }));
+            expect(fetchStub.calledOnce).to.be.true;
+        });
+
+        it('proceeds for a feeless request when min_fee is 0 (default)', async function () {
+            let myPubkey = 'aa'.repeat(32);
+            let capSS = { getSnapshot: sinon.stub().resolves({ validators: [{ pubkey: myPubkey }] }) };
+            let hub   = makeHub({ capabilitySnapshot: capSS });
+            hub.getIdentity = () => makeIdentity(myPubkey);
+            let fetchStub = sinon.stub().resolves({ body: Buffer.from('ok'), meta: '200' });
+            let reg = makeProviderRegistry({
+                getModule: sinon.stub().returns({ fetch: fetchStub }),
+                getDef:    sinon.stub().returns({ max_response_bytes: 32768, min_fee_xchain: '0' })
+            });
+            let ar = new AttestationRound(hub, reg);
+            sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: myPubkey, hash: '00' }]);
+            await ar._startRound(makeRequest());   // no fee_amount at all
+            expect(fetchStub.calledOnce).to.be.true;
+        });
+
         it('records an error in rounds when provider fetch throws', async function () {
             let myPubkey = 'aa'.repeat(32);
             let capSS = { getSnapshot: sinon.stub().resolves({ validators: [{ pubkey: myPubkey }] }) };
