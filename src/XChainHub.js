@@ -250,6 +250,15 @@ class XChainHub {
         this.attestationRound.setConsensus(this.attestationConsensus);
 
         this.attestationPublisher  = new AttestationPublisher(this);
+        // Wire the operator-supplied signer (HUB_SIGNER_MODULE) into the
+        // attestation publish pipeline, mirroring startOracle(). Without this
+        // a validator with only HUB_SIGNER_MODULE configured finalizes ATTEST
+        // responses but never broadcasts them — the queue grows forever.
+        let attestationSignerHooks = loadSignerHooks();
+        if(attestationSignerHooks){
+            applySignerHooks(this.attestationPublisher, attestationSignerHooks);
+            console.log('AttestationPublisher: operator signer wired (' + attestationSignerHooks.source + ')');
+        }
         this.attestationSpotChecker = new AttestationSpotChecker(this, this.providerRegistry);
 
         await this.attestationConsensus.start();

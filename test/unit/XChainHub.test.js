@@ -658,4 +658,75 @@ describe('XChainHub', function () {
             expect(hub.db.close.calledOnce).to.be.true;
         });
     });
+
+    // -----------------------------------------------------------------
+    // startAttestation() — operator signer wiring
+    // -----------------------------------------------------------------
+
+    describe('startAttestation() signer wiring', function () {
+
+        function makeAttestationStubs() {
+            const publisher = {
+                start:             sinon.stub().resolves(),
+                setWalletSignHook: sinon.stub(),
+                setBroadcastHook:  sinon.stub()
+            };
+            return {
+                publisher,
+                modules: {
+                    './ProviderRegistry.js':       function () { return { load: sinon.stub().resolves(), listProviderIds: sinon.stub().returns([]) }; },
+                    './AttestationConsensus.js':   function () { return { start: sinon.stub().resolves(), on: sinon.stub() }; },
+                    './AttestationRound.js':       function () { return { start: sinon.stub().resolves(), setConsensus: sinon.stub() }; },
+                    './AttestationPublisher.js':   function () { return publisher; },
+                    './AttestationSpotChecker.js': function () { return { start: sinon.stub().resolves() }; }
+                }
+            };
+        }
+
+        it('applies HUB_SIGNER_MODULE hooks to the attestation publisher', async function () {
+            this.timeout(30000);
+            const realLoader = require('../../src/lib/signer-loader.js');
+            const fakeHooks = {
+                source:       'fake-signer',
+                walletSignFn: sinon.stub(),
+                broadcastFn:  sinon.stub(),
+                getBalanceFn: null
+            };
+            const stubs = makeAttestationStubs();
+            const HubWithSigner = proxyquire('../../src/XChainHub', Object.assign({
+                './db': function () { return mockDb; },
+                './lib/signer-loader.js': {
+                    loadSignerHooks:  () => fakeHooks,
+                    applySignerHooks: realLoader.applySignerHooks
+                }
+            }, stubs.modules));
+
+            let hub = new HubWithSigner('host', 3306, 'db', 'user', 'pass', { P2P_PORT: 10001 });
+            hub.peerManager = {};
+            await hub.startAttestation();
+
+            expect(stubs.publisher.setWalletSignHook.calledOnceWith(fakeHooks.walletSignFn)).to.be.true;
+            expect(stubs.publisher.setBroadcastHook.calledOnceWith(fakeHooks.broadcastFn)).to.be.true;
+            expect(stubs.publisher.start.calledOnce).to.be.true;
+        });
+
+        it('starts cleanly with no signer configured (hooks null)', async function () {
+            this.timeout(30000);
+            const stubs = makeAttestationStubs();
+            const HubNoSigner = proxyquire('../../src/XChainHub', Object.assign({
+                './db': function () { return mockDb; },
+                './lib/signer-loader.js': {
+                    loadSignerHooks:  () => null,
+                    applySignerHooks: () => { throw new Error('must not be called'); }
+                }
+            }, stubs.modules));
+
+            let hub = new HubNoSigner('host', 3306, 'db', 'user', 'pass', { P2P_PORT: 10001 });
+            hub.peerManager = {};
+            await hub.startAttestation();
+
+            expect(stubs.publisher.setWalletSignHook.called).to.be.false;
+            expect(stubs.publisher.start.calledOnce).to.be.true;
+        });
+    });
 });
