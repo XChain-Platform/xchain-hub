@@ -557,15 +557,33 @@ class XChainHub {
             [signingPubkey, addr, addr]
         );
 
-        // Reload pubkey registry and validator set
+        // Reload pubkey registry and propagate the new set to EVERY running
+        // consensus engine — a validator registered at runtime must enter
+        // oracle leader rotation etc., not just config-PBFT. Previously only
+        // this.consensus was updated; the resulting per-hub divergent leader
+        // views made a hub silently miss every round whose expected leader
+        // never proposes (standing-federation Phase 1, finding F1).
         await this._loadValidatorPubkeys();
-        if(this.consensus){
-            let validators = await this._loadValidatorSet();
-            this.consensus.setValidatorSet(validators);
-        }
+        await this._propagateValidatorSet();
 
         console.log('Validator registered: ' + addr + ' (pubkey: ' + signingPubkey.substring(0, 16) + '...)');
         return true;
+    }
+
+    // Load the active validator set once and push it into every running
+    // consensus engine. registerValidator and syncValidators both route here
+    // so runtime membership changes reach ALL PBFT subsystems.
+    async _propagateValidatorSet(){
+        let validators = await this._loadValidatorSet();
+        if (this.consensus)       this.consensus.setValidatorSet(validators);
+        if (this.oracleConsensus) this.oracleConsensus.setValidatorSet(validators);
+        if (this.crossChain) {
+            this.crossChain.setValidatorSet(validators);
+            this.crossChain.setChainPairValidators(await this._loadChainPairValidators());
+        }
+        if (this.reorgHandler)    this.reorgHandler.setValidatorSet(validators);
+        if (this.governance)      this.governance.setValidatorSet(validators);
+        return validators;
     }
 
     // Load validator pubkeys from DB into PeerManager for signature verification
@@ -671,15 +689,10 @@ class XChainHub {
             );
         }
 
-        // Reload validator set across all subsystems
+        // Reload validator set across all subsystems (now also reorg +
+        // governance, which previously only got the boot-time set)
         await this._loadValidatorPubkeys();
-        let validatorSet = await this._loadValidatorSet();
-        if (this.consensus) this.consensus.setValidatorSet(validatorSet);
-        if (this.oracleConsensus) this.oracleConsensus.setValidatorSet(validatorSet);
-        if (this.crossChain) {
-            this.crossChain.setValidatorSet(validatorSet);
-            this.crossChain.setChainPairValidators(await this._loadChainPairValidators());
-        }
+        await this._propagateValidatorSet();
 
         console.log('Validators synced: ' + validators.length + ' entries');
         return true;

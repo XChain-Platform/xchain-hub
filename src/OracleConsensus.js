@@ -71,6 +71,19 @@ class OracleConsensus extends EventEmitter {
         // Already finalized rounds (prevents double-store)
         this.finalized = new Set();
 
+        // Early-arrival buffer (finding F7). A PREPARE/COMMIT can land while
+        // _handlePropose is still awaiting the block-boundary snapshot — or
+        // before the PROPOSE itself arrives. The whole PBFT burst completes in
+        // well under a second, so dropping those messages makes this hub miss
+        // the round (the federation still finalizes without it, leaving a
+        // silent hole in this hub's price_snapshots). Buffer by round and
+        // drain once pendingRounds is populated. Mirrors
+        // AttestationConsensus.earlyMessages.
+        this.earlyMessages        = new Map();   // round -> [envelope]
+        this.earlyMessageTtl      = new Map();   // round -> expiresAt (ms)
+        this.earlyMessageTtlMs    = 60 * 1000;
+        this.earlyMessageMaxPerRound = 64;
+
         // Validator set (loaded from hub)
         this.validatorSet = [];
 
@@ -108,6 +121,48 @@ class OracleConsensus extends EventEmitter {
         this.leaderTimers.clear();
         this.pendingRounds.clear();
         this.roundReadyAt.clear();
+        this.earlyMessages.clear();
+        this.earlyMessageTtl.clear();
+    }
+
+    // --- Early-message buffering (finding F7) ---
+
+    _pruneEarlyMessages(now) {
+        for (let [round, expiresAt] of this.earlyMessageTtl) {
+            if (expiresAt <= now) {
+                this.earlyMessages.delete(round);
+                this.earlyMessageTtl.delete(round);
+            }
+        }
+    }
+
+    // Hold a PREPARE/COMMIT that arrived before this hub's pendingRounds entry
+    // exists for the round. Replayed by _drainEarlyMessages once it does.
+    _bufferEarlyMessage(round, envelope) {
+        let now = Date.now();
+        this._pruneEarlyMessages(now);
+        let arr = this.earlyMessages.get(round);
+        if (!arr) {
+            arr = [];
+            this.earlyMessages.set(round, arr);
+        }
+        if (arr.length >= this.earlyMessageMaxPerRound) return;
+        arr.push(envelope);
+        this.earlyMessageTtl.set(round, now + this.earlyMessageTtlMs);
+    }
+
+    // Replay buffered envelopes through the normal dispatch path. Called from
+    // both pendingRounds.set sites (proposer + follower). Deletes the queue
+    // up-front so replayed messages can't re-buffer.
+    _drainEarlyMessages(round) {
+        let arr = this.earlyMessages.get(round);
+        if (!arr) return;
+        this.earlyMessages.delete(round);
+        this.earlyMessageTtl.delete(round);
+        for (let env of arr) {
+            try { this._handleMessage(env); }
+            catch (e) { console.error('Oracle: error replaying buffered message for round ' + round + ':', e.message); }
+        }
     }
 
     // Finalize a round — called by OracleRound after the submission window closes.
@@ -281,6 +336,8 @@ class OracleConsensus extends EventEmitter {
         pending.prepares.add(this.peerManager.validatorAddr);
         if (mySig) pending.signatures.set(mySig.pubkey, mySig.sig);
         this.pendingRounds.set(round, pending);
+        // Replay any PREPARE/COMMIT that beat this proposal (finding F7).
+        this._drainEarlyMessages(round);
 
         pending.timer = setTimeout(() => {
             if (!pending.finalized) {
@@ -451,6 +508,9 @@ class OracleConsensus extends EventEmitter {
                 }, this.finalizationTimeout)
             };
             this.pendingRounds.set(round, pending);
+            // Replay any PREPARE/COMMIT that arrived while this handler was
+            // awaiting the snapshot fetch above (finding F7).
+            this._drainEarlyMessages(round);
         }
 
         let pending = this.pendingRounds.get(round);
@@ -487,7 +547,14 @@ class OracleConsensus extends EventEmitter {
         if (!this._isKnownSender(envelope.sender)) return;
 
         let pending = this.pendingRounds.get(round);
-        if (!pending || pending.digest !== digest) return;
+        if (!pending) {
+            // No pending entry yet — the PROPOSE may still be in flight or its
+            // handler mid-await on the snapshot fetch. Buffer instead of
+            // dropping (finding F7); replayed once pendingRounds is populated.
+            if (!this.finalized.has(round)) this._bufferEarlyMessage(round, envelope);
+            return;
+        }
+        if (pending.digest !== digest) return;
 
         pending.prepares.add(envelope.sender);
         if (sig_pubkey && sig) this._verifyAndStoreSig(pending, sig_pubkey, sig);
@@ -502,7 +569,12 @@ class OracleConsensus extends EventEmitter {
         if (!this._isKnownSender(envelope.sender)) return;
 
         let pending = this.pendingRounds.get(round);
-        if (!pending || pending.digest !== digest) return;
+        if (!pending) {
+            // Same early-arrival race as _handlePrepare (finding F7).
+            if (!this.finalized.has(round)) this._bufferEarlyMessage(round, envelope);
+            return;
+        }
+        if (pending.digest !== digest) return;
 
         pending.commits.add(envelope.sender);
         if (sig_pubkey && sig) this._verifyAndStoreSig(pending, sig_pubkey, sig);
