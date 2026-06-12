@@ -7,6 +7,7 @@ WORKDIR /XChainHub
 RUN npm ci --omit=dev
 
 COPY ./src /XChainHub/src
+COPY ./docs /XChainHub/docs
 COPY ./.en[v] /XChainHub/.env
 
 CMD ["npm", "run", "api"]
