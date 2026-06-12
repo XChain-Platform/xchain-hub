@@ -381,6 +381,45 @@ describe('StateAnchorPublisher', function () {
         for (let nd of bus.nodes) expect(nd.db.matches[0].batch_seq).to.equal(null);
     });
 
+    it('late joiners co-sign archives covering history they never held (signature quorum alone)', async function () {
+        // Live finding (3-hub venue): rows from the single-hub era exist only in
+        // the founding hub's DB; followers added later refused every archive
+        // containing them ("diverges from our DB"), so quorum 3 could never be
+        // reached and history became unarchivable. A locally-MISSING row must be
+        // accepted purely on its archived 2f+1 signatures; a present-but-
+        // DIFFERENT row must still refuse (the divergence test above).
+        let bus = buildMesh(4, { btcBlock: 101 });
+        let leader = archiveLeader(bus, 101);
+        let pruned = 0;
+        for (let nd of bus.nodes) {
+            if (nd !== leader && pruned < 2) { nd.db.matches.length = 0; pruned++; }   // joined after m1
+        }
+        await startAll(bus);
+        await leader.pub.flush();
+        await sleep(120);
+
+        let v1s = bus.nodes.flatMap(nd => nd.published.filter(p => p.split('|')[1] === '1'));
+        expect(v1s.length, 'archive published despite two late joiners').to.equal(1);
+        let v1 = v1s[0].split('|');
+        expect(Number(v1[16]), 'sig count').to.be.at.least(3);                          // real quorum
+    });
+
+    it('followers tolerate per-hub mirror ids in archived rows (id is bookkeeping, not consensus)', async function () {
+        // Live finding (3-hub venue): each hub assigns its own AUTO_INCREMENT id
+        // to the same finalized row (hub1=60, hub2=36, hub3=34 for one call) —
+        // byte-comparing ids made every multi-hub archive unverifiable.
+        let bus = buildMesh(4, { btcBlock: 101 });
+        let leader = archiveLeader(bus, 101);
+        for (let nd of bus.nodes) {
+            if (nd !== leader) nd.db.matches[0].id = 1000 + nd.i;          // divergent local cursors
+        }
+        await startAll(bus);
+        await leader.pub.flush();
+        await sleep(120);
+        let v1s = bus.nodes.flatMap(nd => nd.published.filter(p => p.split('|')[1] === '1'));
+        expect(v1s.length, 'archive published despite divergent ids').to.equal(1);
+    });
+
     it('failover ladder: higher ranks unlock only after the tolerance window', async function () {
         // since = btcBlock - snapshot_block = 37 → floor(37/36) = 1 → ranks 0–1.
         let bus = buildMesh(4, { btcBlock: 137 });

@@ -51,6 +51,7 @@ const XDEX_MATCH_PREPARE     = 'XDEX_MATCH_PREPARE';
 const XDEX_MATCH_COMMIT      = 'XDEX_MATCH_COMMIT';
 const XDEX_MATCH_VIEW_CHANGE = 'XDEX_MATCH_VIEW_CHANGE';
 const XDEX_MATCH_NEW_VIEW    = 'XDEX_MATCH_NEW_VIEW';
+const XDEX_MATCH_FINAL_SYNC  = 'XDEX_MATCH_FINAL_SYNC';
 
 const DEFAULT_ROUND_TIMEOUT_MS = 120000;  // 2 minutes per match round before view-change
 
@@ -78,8 +79,12 @@ class CrossChainDexConsensus extends EventEmitter {
         this.config       = (engine.hub && engine.hub.p2pConfig) || {};
         this.types        = opts.messageTypes || {
             PROPOSE: XDEX_MATCH_PROPOSE, PREPARE: XDEX_MATCH_PREPARE, COMMIT: XDEX_MATCH_COMMIT,
-            VIEW_CHANGE: XDEX_MATCH_VIEW_CHANGE, NEW_VIEW: XDEX_MATCH_NEW_VIEW
+            VIEW_CHANGE: XDEX_MATCH_VIEW_CHANGE, NEW_VIEW: XDEX_MATCH_NEW_VIEW,
+            FINAL_SYNC: XDEX_MATCH_FINAL_SYNC
         };
+        // Engines configured before FINAL_SYNC existed get a derived type so
+        // straggler catch-up works without every caller updating its map.
+        if(!this.types.FINAL_SYNC) this.types.FINAL_SYNC = String(this.types.PROPOSE).replace(/PROPOSE$/, 'FINAL_SYNC');
         this.controlTags  = opts.controlTags || { vc: 'XDEXVC', nv: 'XDEXNV' };
         this.idField      = opts.idField || 'match_id';
 
@@ -91,6 +96,13 @@ class CrossChainDexConsensus extends EventEmitter {
         this.finalized       = new Set();
         this._finalizedOrder = [];
         this.finalizedMax    = parseInt(this.config.XDEX_FINALIZED_MAX) || 10000;
+
+        // Finalized round payloads (row + quorum signatures), same eviction as
+        // `finalized`. Serves FINAL_SYNC catch-up: a straggler that missed a
+        // round (e.g. its local validation raced confirmation depth) keeps
+        // emitting VIEW_CHANGEs, but peers that finalized ignore the round —
+        // without state transfer the straggler's mirror NEVER gets the row.
+        this.finalizedRows   = new Map();
 
         // Early-arrival buffer: a PROPOSE/PREPARE/COMMIT/VIEW_CHANGE can reach a
         // peer before that peer's own _discoverAndMatch created the round. Buffer
@@ -259,6 +271,7 @@ class CrossChainDexConsensus extends EventEmitter {
             case this.types.COMMIT:      this._handleCommit(envelope);     break;
             case this.types.VIEW_CHANGE: this._handleViewChange(envelope); break;
             case this.types.NEW_VIEW:    this._handleNewView(envelope);    break;
+            case this.types.FINAL_SYNC:  this._handleFinalSync(envelope);  break;
         }
     }
 
@@ -409,11 +422,12 @@ class CrossChainDexConsensus extends EventEmitter {
         let pending = this.pending.get(rid);
         if(!pending || pending.finalized) return;
         pending.finalized = true;
-        this._markFinalized(rid);
-        if(pending.timer){ clearTimeout(pending.timer); pending.timer = null; }
 
         let sigs = [];
         for(let [pk, sg] of pending.signatures) sigs.push({ pubkey: pk, sig: sg });
+
+        this._markFinalized(rid, pending.row, sigs);
+        if(pending.timer){ clearTimeout(pending.timer); pending.timer = null; }
 
         console.log('CrossChainDexConsensus: finalized ' + rid.substring(0,16) + '... (' +
                     pending.prepares.size + ' prepares, ' + pending.commits.size + ' commits, ' + sigs.length + ' sigs)');
@@ -423,13 +437,15 @@ class CrossChainDexConsensus extends EventEmitter {
         if(cleanup.unref) cleanup.unref();             // housekeeping timer — never pin process liveness
     }
 
-    _markFinalized(rid){
+    _markFinalized(rid, row, signatures){
         if(this.finalized.has(rid)) return;
         this.finalized.add(rid);
+        if(row) this.finalizedRows.set(rid, { row: row, signatures: signatures || [] });
         this._finalizedOrder.push(rid);
         if(this._finalizedOrder.length > this.finalizedMax){
             let oldest = this._finalizedOrder.shift();
             this.finalized.delete(oldest);
+            this.finalizedRows.delete(oldest);
         }
     }
 
@@ -452,7 +468,20 @@ class CrossChainDexConsensus extends EventEmitter {
     _handleViewChange(envelope){
         let d = envelope.data;
         let rid = String(d.matchId || '').toLowerCase();
-        if(!rid || this.finalized.has(rid)) return;
+        if(!rid) return;
+        if(this.finalized.has(rid)){
+            // A VIEW_CHANGE for a round we finalized means the voter is a
+            // straggler stuck in failover purgatory — the round can never
+            // re-reach quorum (everyone else moved on), so answer with the
+            // finalized row + its quorum signatures (state transfer).
+            let fin = this.finalizedRows.get(rid);
+            if(fin && this.peerManager){
+                this.peerManager.broadcast(this.types.FINAL_SYNC, {
+                    matchId: rid, row: fin.row, signatures: fin.signatures
+                });
+            }
+            return;
+        }
         let pending = this.pending.get(rid);
         if(!pending){ this._bufferEarlyMessage(rid, envelope); return; }
         let view = Number(d.view);
@@ -480,6 +509,39 @@ class CrossChainDexConsensus extends EventEmitter {
             });
             this._broadcastPropose(pending).catch(e => console.warn('CrossChainDexConsensus: re-propose failed: ' + (e && e.message)));
         }
+    }
+
+    // FINAL_SYNC (straggler catch-up): a peer answered our VIEW_CHANGE for a
+    // round the federation already finalized. The quorum signatures over the
+    // canonical ARE the proof — the same proof the indexers verify — so a
+    // forged sync would need 2f+1 real validator signatures. Adopt + finalize.
+    _handleFinalSync(envelope){
+        let d = envelope.data;
+        let rid = String(d.matchId || '').toLowerCase();
+        if(!rid || this.finalized.has(rid)) return;
+        let pending = this.pending.get(rid);
+        if(!pending || pending.finalized) return;                          // only rescues a live stuck round
+
+        let row = d.row;
+        if(!row || String(row[this.idField]).toLowerCase() !== rid) return;
+        let canonical = this.engine._canonicalMatch(row);
+
+        let offered = Array.isArray(d.signatures) ? d.signatures : [];
+        let verified = new Map();
+        for(let s of offered){
+            if(!s || !s.pubkey || !s.sig) continue;
+            let pk = String(s.pubkey).toLowerCase();
+            if(!pending.validators.some(v => v.pubkey === pk)) continue;
+            if(!ValidatorIdentity.verify(canonical, String(s.sig), pk)) continue;
+            verified.set(pk, String(s.sig));
+        }
+        if(verified.size < Math.max(pending.quorum, 1)) return;            // not a quorum proof — ignore
+
+        pending.row        = row;
+        pending.canonical  = canonical;
+        pending.signatures = verified;
+        console.log('CrossChainDexConsensus: FINAL_SYNC caught up ' + rid.substring(0,16) + '... (' + verified.size + ' sigs)');
+        this._finalize(rid);
     }
 
     _handleNewView(envelope){
@@ -510,3 +572,4 @@ module.exports.XDEX_MATCH_PREPARE     = XDEX_MATCH_PREPARE;
 module.exports.XDEX_MATCH_COMMIT      = XDEX_MATCH_COMMIT;
 module.exports.XDEX_MATCH_VIEW_CHANGE = XDEX_MATCH_VIEW_CHANGE;
 module.exports.XDEX_MATCH_NEW_VIEW    = XDEX_MATCH_NEW_VIEW;
+module.exports.XDEX_MATCH_FINAL_SYNC  = XDEX_MATCH_FINAL_SYNC;

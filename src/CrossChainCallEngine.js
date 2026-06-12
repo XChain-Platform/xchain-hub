@@ -123,7 +123,8 @@ class CrossChainCallEngine extends EventEmitter {
                 PREPARE:     'XCALL_RELAY_PREPARE',
                 COMMIT:      'XCALL_RELAY_COMMIT',
                 VIEW_CHANGE: 'XCALL_RELAY_VIEW_CHANGE',
-                NEW_VIEW:    'XCALL_RELAY_NEW_VIEW'
+                NEW_VIEW:    'XCALL_RELAY_NEW_VIEW',
+                FINAL_SYNC:  'XCALL_RELAY_FINAL_SYNC'
             },
             controlTags: { vc: 'XCALLVC', nv: 'XCALLNV' },
             idField: 'round_id'

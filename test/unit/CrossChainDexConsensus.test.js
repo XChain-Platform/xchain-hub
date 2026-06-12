@@ -208,6 +208,58 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         }
     });
 
+    it('FINAL_SYNC: a straggler that missed a finalized round catches up via state transfer (regression: lost callback)', async function () {
+        // Live finding: one hub missed a result round (validation raced the
+        // confirmation depth); the others finalized and thereafter ignored the
+        // round, so the straggler's mirror NEVER got the row. Its VIEW_CHANGE
+        // heartbeat must now elicit a FINAL_SYNC carrying the row + quorum
+        // signatures, which it verifies and finalizes from.
+        this.timeout(5000);
+        let partitioned = true;
+        let bus = buildMesh(4, {
+            roundTimeoutMs: 150,
+            drop: (self, other) => partitioned && (self.i === 0 || other.i === 0)
+        });
+        await startAll(bus);
+        let mid = 'c3'.repeat(32), row = sampleRow(mid);
+        await proposeAll(bus, mid, row);
+        await sleep(100);
+
+        // nodes 1-3 finalized without node 0
+        expect([1, 2, 3].every(i => bus.nodes[i].finalized.length === 1)).to.be.true;
+        expect(bus.nodes[0].finalized.length).to.equal(0);
+
+        // heal the partition; node 0's view-change timer fires and a finalized
+        // peer answers with FINAL_SYNC
+        partitioned = false;
+        await sleep(400);
+
+        expect(bus.nodes[0].finalized.length, 'straggler caught up').to.equal(1);
+        let ev = bus.nodes[0].finalized[0];
+        expect(ev.signatures.length).to.be.at.least(3);                  // the round's quorum proof
+        let canon = canonicalMatch(ev.row);
+        expect(ev.signatures.every(s => ValidatorIdentity.verify(canon, s.sig, s.pubkey))).to.be.true;
+    });
+
+    it('guard: a FINAL_SYNC without a quorum of verifying signatures is ignored', async function () {
+        let bus = buildMesh(4, { drop: () => true });                     // isolated victim
+        await startAll(bus);
+        let mid = 'd4'.repeat(32), row = sampleRow(mid);
+        let victim = bus.nodes[0];
+        await victim.consensus.propose(mid, { row, snapshot: { validators: validatorsOf(bus), count: 4 } });
+
+        // one real signature (below quorum 3) + one garbage signature
+        let signer = bus.nodes[1];
+        victim.consensus._handleMessage({ type: 'XDEX_MATCH_FINAL_SYNC', sender: signer.pubkey,
+            data: { matchId: mid, row, signatures: [
+                { pubkey: signer.pubkey, sig: signer.identity.sign(canonicalMatch(row)) },
+                { pubkey: bus.nodes[2].pubkey, sig: 'ab'.repeat(64) }
+            ] } });
+        await sleep(30);
+        expect(victim.finalized.length).to.equal(0);
+        expect(victim.consensus.pending.get(mid).finalized).to.equal(false);
+    });
+
     it('guard: COMMIT votes without a verifying signature never count toward quorum', async function () {
         // Counting unverified commits let a node whose canonical diverged
         // "finalize" with zero collected signatures (live finding: hub1 wrote a

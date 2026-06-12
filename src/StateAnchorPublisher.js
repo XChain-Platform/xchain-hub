@@ -335,10 +335,23 @@ class StateAnchorPublisher {
         if(pubkeys.length > 0){
             if(!this.identity) return 'none';
             let me = String(this.identity.getPubkeyHex()).toLowerCase();
-            if(!pubkeys.includes(me)) return 'none';                         // not an oracle_publish validator
-            if(pubkeys.length > 1 &&
-               StateAnchorPublisher.hashOrder(this._archiveElectionKey(electionBlock), pubkeys)[0] !== me)
-                return 'none';                                               // not the elected archive leader
+            if(!pubkeys.includes(me)){
+                console.log('StateAnchorPublisher: archive election at block ' + electionBlock +
+                            ' — own pubkey not in the oracle_publish set (' + pubkeys.length + ' eligible)');
+                return 'none';                                               // not an oracle_publish validator
+            }
+            if(pubkeys.length > 1){
+                let order = StateAnchorPublisher.hashOrder(this._archiveElectionKey(electionBlock), pubkeys);
+                if(order[0] !== me){
+                    // Operator visibility: a hub that never wins the archive
+                    // election (e.g. signer-less peers keep ranking first) is
+                    // indistinguishable from a broken publisher without this.
+                    console.log('StateAnchorPublisher: archive election at block ' + electionBlock +
+                                ' — rank ' + order.indexOf(me) + '/' + order.length + ' (leader ' +
+                                order[0].substring(0, 12) + '...), not publishing');
+                    return 'none';                                           // not the elected archive leader
+                }
+            }
         }
 
         let matches = await this.db.doQuery(
@@ -618,30 +631,69 @@ class StateAnchorPublisher {
     async _verifyArchiveAgainstLocal(archive){
         for(let am of archive.matches){
             let rows = await this.db.doQuery('SELECT * FROM cross_chain_matches WHERE match_id = ? LIMIT 1', [am.match_id]);
-            if(!rows || rows.length === 0) return false;
-            let localTerms    = StateAnchorPublisher.serializeMatch(rows[0]);
-            let archivedTerms = Object.assign({}, am);
-            delete localTerms.validator_signatures;
-            delete archivedTerms.validator_signatures;
-            if(JSON.stringify(localTerms) !== JSON.stringify(archivedTerms)) return false;
+            if(rows && rows.length > 0){
+                let localTerms    = StateAnchorPublisher.serializeMatch(rows[0]);
+                let archivedTerms = Object.assign({}, am);
+                // id is per-hub bookkeeping (each hub assigns its own AUTO_INCREMENT
+                // cursor) — the leader archives ITS id as the recovery ordering key, so
+                // followers must not byte-compare it, like validator_signatures.
+                delete localTerms.id;
+                delete archivedTerms.id;
+                delete localTerms.validator_signatures;
+                delete archivedTerms.validator_signatures;
+                if(JSON.stringify(localTerms) !== JSON.stringify(archivedTerms)){
+                    console.warn("StateAnchorPublisher: archive match " + String(am.match_id).substring(0, 16) +
+                                 "... TERMS differ from our row — local " + JSON.stringify(localTerms).substring(0, 120) +
+                                 " vs archived " + JSON.stringify(archivedTerms).substring(0, 120));
+                    return false;
+                }
+            } else {
+                // A row we never wrote: it predates this hub joining the
+                // federation (a late joiner has no copy of earlier history).
+                // The cryptographic bar below — archived sigs reaching 2f+1 of
+                // OUR OWN resolved cross_chain set at the row's snapshot_block —
+                // is the same proof full-parse recovery accepts, so absence is
+                // not divergence. A forged row cannot carry those signatures.
+                console.log('StateAnchorPublisher: archive match ' + String(am.match_id).substring(0, 16) +
+                            '... predates our local history — accepting on signature quorum alone');
+            }
 
             let set  = await this._resolveCapabilitySet('cross_chain', Number(am.snapshot_block));
             let sigs = this._parseSigs(am.validator_signatures);
-            if(!this._quorumVerified(this._matchCanonical(am), sigs, set.map(v => v.pubkey))) return false;
+            if(!this._quorumVerified(this._matchCanonical(am), sigs, set.map(v => v.pubkey))){
+                console.warn('StateAnchorPublisher: archive match ' + String(am.match_id).substring(0, 16) +
+                             '... fails signature quorum against the cross_chain set at block ' + am.snapshot_block);
+                return false;
+            }
         }
         for(let ac of (archive.calls || [])){
             let rows = await this.db.doQuery(
                 'SELECT * FROM cross_chain_calls WHERE call_id = ? AND phase = ? LIMIT 1', [ac.call_id, ac.phase]);
-            if(!rows || rows.length === 0) return false;
-            let localTerms    = StateAnchorPublisher.serializeCall(rows[0]);
-            let archivedTerms = Object.assign({}, ac);
-            delete localTerms.validator_signatures;
-            delete archivedTerms.validator_signatures;
-            if(JSON.stringify(localTerms) !== JSON.stringify(archivedTerms)) return false;
+            if(rows && rows.length > 0){
+                let localTerms    = StateAnchorPublisher.serializeCall(rows[0]);
+                let archivedTerms = Object.assign({}, ac);
+                delete localTerms.id;                       // per-hub cursor — see the match loop
+                delete archivedTerms.id;
+                delete localTerms.validator_signatures;
+                delete archivedTerms.validator_signatures;
+                if(JSON.stringify(localTerms) !== JSON.stringify(archivedTerms)){
+                    console.warn("StateAnchorPublisher: archive call " + String(ac.call_id).substring(0, 16) +
+                                 "... (" + ac.phase + ") TERMS differ from our row — local " + JSON.stringify(localTerms).substring(0, 160) +
+                                 " vs archived " + JSON.stringify(archivedTerms).substring(0, 160));
+                    return false;
+                }
+            } else {
+                console.log('StateAnchorPublisher: archive call ' + String(ac.call_id).substring(0, 16) +
+                            '... (' + ac.phase + ') predates our local history — accepting on signature quorum alone');
+            }
 
             let set  = await this._resolveCapabilitySet('cross_chain', Number(ac.snapshot_block));
             let sigs = this._parseSigs(ac.validator_signatures);
-            if(!this._quorumVerified(this._callCanonical(ac), sigs, set.map(v => v.pubkey))) return false;
+            if(!this._quorumVerified(this._callCanonical(ac), sigs, set.map(v => v.pubkey))){
+                console.warn('StateAnchorPublisher: archive call ' + String(ac.call_id).substring(0, 16) +
+                             '... (' + ac.phase + ') fails signature quorum against the cross_chain set at block ' + ac.snapshot_block);
+                return false;
+            }
         }
         let groups = new Map();              // block|capability → Map<pubkey, amount>
         for(let s of (archive.capability_snapshots || [])){
@@ -652,10 +704,18 @@ class StateAnchorPublisher {
         for(let [key, archived] of groups){
             let [block, capability] = key.split('|');
             let resolved = await this._resolveCapabilitySet(capability, Number(block));
-            if(resolved.length !== archived.size) return false;
+            if(resolved.length !== archived.size){
+                console.warn("StateAnchorPublisher: archive snapshot group " + key + " size " + archived.size +
+                             " differs from our resolution (" + resolved.length + ")");
+                return false;
+            }
             for(let v of resolved){
-                if(!archived.has(v.pubkey)) return false;
-                if(archived.get(v.pubkey) !== v.amount) return false;
+                if(!archived.has(v.pubkey) || archived.get(v.pubkey) !== v.amount){
+                    console.warn("StateAnchorPublisher: archive snapshot group " + key + " diverges for pubkey " +
+                                 v.pubkey.substring(0, 12) + "... (local amount " + v.amount + ", archived " +
+                                 (archived.get(v.pubkey) || "<absent>") + ")");
+                    return false;
+                }
             }
         }
         return true;
@@ -703,8 +763,18 @@ class StateAnchorPublisher {
 
         for(let i = 1; i < round.chunks.length; i++){
             let v2Payload = ['ANCHOR', '2', String(round.batchSeq), String(i), String(round.chunks.length), round.chunks[i]].join('|');
-            try { await broadcaster(v2Payload); }
-            catch(e){ console.error('StateAnchorPublisher: v2 chunk ' + i + ' broadcast failed: ' + (e && e.message)); }
+            // Back-to-back chunk spends race the UTXO tracker's mempool view and
+            // collide on input selection (txn-mempool-conflict). A lost chunk is
+            // a DURABILITY failure — recovery needs every chunk and the batch is
+            // already marked archived — so retry with a pause for the previous
+            // spend to become visible before giving up.
+            let sent = false, lastErr = null;
+            for(let attempt = 0; attempt < 5 && !sent; attempt++){
+                if(attempt > 0) await new Promise(r => setTimeout(r, 2500));
+                try { await broadcaster(v2Payload); sent = true; }
+                catch(e){ lastErr = e; }
+            }
+            if(!sent) console.error('StateAnchorPublisher: v2 chunk ' + i + ' broadcast failed after retries: ' + (lastErr && lastErr.message));
         }
 
         await this._backfillBatch(round.batchSeq, round.matchIds, txid, round.callIds);
