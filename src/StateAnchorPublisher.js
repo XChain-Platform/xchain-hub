@@ -121,6 +121,7 @@ class StateAnchorPublisher {
         this.maxBatch      = parseInt(process.env.ANCHOR_MAX_BATCH        || cfg.ANCHOR_MAX_BATCH        || '1000');
         this.chunkMaxBytes = parseInt(process.env.ANCHOR_CHUNK_MAX_BYTES  || cfg.ANCHOR_CHUNK_MAX_BYTES  || '6000');
         this.roundTimeoutMs = parseInt(process.env.ANCHOR_ROUND_TIMEOUT_MS || cfg.ANCHOR_ROUND_TIMEOUT_MS || '120000');
+        this.chunkRetryDelayMs = parseInt(process.env.ANCHOR_CHUNK_RETRY_MS || cfg.ANCHOR_CHUNK_RETRY_MS || '2500');
         this.electionToleranceBlocks = parseInt(process.env.ANCHOR_ELECTION_TOLERANCE_BLOCKS || cfg.ANCHOR_ELECTION_TOLERANCE_BLOCKS || '36');
         this.lowBalanceThreshold = parseFloat(process.env.DOGE_LOW_BALANCE_THRESHOLD || cfg.DOGE_LOW_BALANCE_THRESHOLD || '10');
 
@@ -761,35 +762,53 @@ class StateAnchorPublisher {
         let result = await broadcaster(v1Payload);
         let txid = result && result.txid ? result.txid : null;
 
+        let lostChunks = 0;
         for(let i = 1; i < round.chunks.length; i++){
             let v2Payload = ['ANCHOR', '2', String(round.batchSeq), String(i), String(round.chunks.length), round.chunks[i]].join('|');
             // Back-to-back chunk spends race the UTXO tracker's mempool view and
             // collide on input selection (txn-mempool-conflict). A lost chunk is
-            // a DURABILITY failure — recovery needs every chunk and the batch is
-            // already marked archived — so retry with a pause for the previous
-            // spend to become visible before giving up.
+            // a DURABILITY failure — recovery needs every chunk — so retry with a
+            // pause for the previous spend to become visible before giving up.
             let sent = false, lastErr = null;
             for(let attempt = 0; attempt < 5 && !sent; attempt++){
-                if(attempt > 0) await new Promise(r => setTimeout(r, 2500));
+                if(attempt > 0) await new Promise(r => setTimeout(r, this.chunkRetryDelayMs));
                 try { await broadcaster(v2Payload); sent = true; }
                 catch(e){ lastErr = e; }
             }
-            if(!sent) console.error('StateAnchorPublisher: v2 chunk ' + i + ' broadcast failed after retries: ' + (lastErr && lastErr.message));
+            if(!sent){
+                lostChunks++;
+                console.error('StateAnchorPublisher: v2 chunk ' + i + ' broadcast failed after retries: ' + (lastErr && lastErr.message));
+            }
         }
 
-        await this._backfillBatch(round.batchSeq, round.matchIds, txid, round.callIds);
+        // A partially-published archive is unrecoverable (recovery refuses
+        // incomplete batches), so the rows must NOT be marked archived. Back-fill
+        // with a sentinel archived_status instead: batch_seq still advances (a
+        // re-archive must get a FRESH seq — two v1 anchors sharing one seq would
+        // corrupt chunk reassembly) while `archived_status <> status` keeps every
+        // row eligible, so the next flush re-archives the whole batch.
+        let matchIds = round.matchIds, callIds = round.callIds || [];
+        if(lostChunks > 0){
+            matchIds = matchIds.map(m => Object.assign({}, m, { status: '__partial__' }));
+            callIds  = callIds.map(c => Object.assign({}, c, { status: '__partial__' }));
+            console.error('StateAnchorPublisher: batch ' + round.batchSeq + ' lost ' + lostChunks +
+                          ' chunk(s) on-chain — rows stay pending; they re-archive under a new batch seq');
+        }
+        await this._backfillBatch(round.batchSeq, matchIds, txid, callIds);
         if(this.peerManager){
             this.peerManager.broadcast(XANC_FINALIZED, {
-                batch_seq: round.batchSeq, txid: txid, matches: round.matchIds,
-                calls: round.callIds || [],
+                batch_seq: round.batchSeq, txid: txid, matches: matchIds,
+                calls: callIds,
                 sig_pubkey: this.identity.getPubkeyHex().toLowerCase(),
-                sig: this.identity.sign(this._finalizedCanonical(round.batchSeq, txid, round.matchIds.length))
+                sig: this.identity.sign(this._finalizedCanonical(round.batchSeq, txid, matchIds.length))
             });
         }
-        console.log('StateAnchorPublisher: archived ' + round.count + ' matches + ' +
-                    ((round.callIds && round.callIds.length) || 0) + ' calls (batch ' + round.batchSeq +
-                    ', ' + round.chunks.length + ' chunk(s), txid ' + txid + ')');
-        this._recordReward('anchor_archive', round.batchSeq, round.electionBlock);
+        if(lostChunks === 0){
+            console.log('StateAnchorPublisher: archived ' + round.count + ' matches + ' +
+                        ((round.callIds && round.callIds.length) || 0) + ' calls (batch ' + round.batchSeq +
+                        ', ' + round.chunks.length + ' chunk(s), txid ' + txid + ')');
+            this._recordReward('anchor_archive', round.batchSeq, round.electionBlock);
+        }
     }
 
     // Peers back-fill batch metadata so a rotated leader doesn't re-archive.

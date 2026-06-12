@@ -500,6 +500,48 @@ describe('StateAnchorPublisher', function () {
         expect(second.archive).to.equal('none');
     });
 
+    it('a batch that loses v2 chunks is NOT marked archived and re-archives under a fresh seq', async function () {
+        // Live finding (bug G): chunk broadcasts hitting txn-mempool-conflict
+        // were lost while the batch was already back-filled as archived — an
+        // unrecoverable archive (recovery refuses incomplete batches). A partial
+        // publish must keep the rows pending and the retry must use a NEW seq
+        // (two v1 anchors sharing one seq corrupt chunk reassembly).
+        let bus = buildMesh(1, { cfg: { ANCHOR_CHUNK_MAX_BYTES: '600', ANCHOR_CHUNK_RETRY_MS: '1' },
+                                 matches: [matchRow('m1'), matchRow('m2'), matchRow('m3')] });
+        let nd = bus.nodes[0];
+        let dropChunks = true;
+        nd.pub.setBroadcastHook(async (payload) => {
+            if (dropChunks && payload.split('|')[1] === '2') throw new Error('txn-mempool-conflict');
+            nd.published.push(payload);
+            return { txid: 'txid' + nd.published.length };
+        });
+        await startAll(bus);
+        await nd.pub.flush();
+        await sleep(50);
+
+        // v1 went out but the batch must stay pending (sentinel ≠ real status)
+        let v1a = nd.published.find(p => p.split('|')[1] === '1');
+        expect(v1a, 'v1 broadcast').to.exist;
+        let seqA = Number(v1a.split('|')[11]);
+        for (let r of nd.db.matches) {
+            expect(r.batch_seq, 'seq advances even on partial').to.equal(seqA);
+            expect(r.archived_status).to.equal('__partial__');
+        }
+
+        // chunks deliverable again → next flush re-archives EVERYTHING under a new seq
+        dropChunks = false;
+        await nd.pub.flush();
+        await sleep(50);
+        let v1s = nd.published.filter(p => p.split('|')[1] === '1');
+        expect(v1s.length).to.equal(2);
+        let seqB = Number(v1s[1].split('|')[11]);
+        expect(seqB, 'fresh seq for the retry').to.be.greaterThan(seqA);
+        for (let r of nd.db.matches) {
+            expect(r.batch_seq).to.equal(seqB);
+            expect(r.archived_status).to.equal(r.status);                  // now genuinely archived
+        }
+    });
+
     it('a match retracted after archival is re-archived with its new status', async function () {
         let bus = buildMesh(1);
         let nd = bus.nodes[0];
