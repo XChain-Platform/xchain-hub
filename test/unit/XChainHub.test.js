@@ -600,6 +600,25 @@ describe('XChainHub', function () {
             delete process.env.BTC_INDEXER_API_KEY;
         });
 
+        it('_resolveBtcIndexerUrl prefers BTC_INDEXER_API_URL, falls back to BTC_INDEXER_URL, then configs', async function () {
+            delete process.env.BTC_INDEXER_API_URL;
+            delete process.env.BTC_INDEXER_URL;
+            hub.db = mockDb;
+            mockDb.getAllConfigs.resolves({ bitcoin: { regtest: { 'xchain-indexer': { host: 'cfg-host', port: 4001 } } } });
+            expect(await hub._resolveBtcIndexerUrl()).to.equal('http://cfg-host:4001');
+
+            // The footgun: a hub configured with only BTC_INDEXER_URL silently
+            // fell to seed-local capability snapshots (quorum-0 self-sign).
+            process.env.BTC_INDEXER_URL = 'http://alias:4000';
+            expect(await hub._resolveBtcIndexerUrl()).to.equal('http://alias:4000');
+
+            process.env.BTC_INDEXER_API_URL = 'http://canonical:4000';
+            expect(await hub._resolveBtcIndexerUrl()).to.equal('http://canonical:4000');
+
+            delete process.env.BTC_INDEXER_API_URL;
+            delete process.env.BTC_INDEXER_URL;
+        });
+
         it('_parseDecimalParts parses decimals and rejects junk', function () {
             expect(hub._parseDecimalParts('12.50')).to.deep.equal({ neg: false, int: '12', frac: '50' });
             expect(hub._parseDecimalParts('-3')).to.deep.equal({ neg: true, int: '3', frac: '' });

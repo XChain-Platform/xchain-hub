@@ -1033,10 +1033,14 @@ class XChainHub {
 
     // Resolve the BTC indexer JSON-RPC URL. Priority:
     //   1. BTC_INDEXER_API_URL env var (explicit operator override)
-    //   2. Hub's own configs table (populated by xchain-node's updateconfig push)
-    // Returns null when neither yields a usable URL.
+    //   2. BTC_INDEXER_URL env var (commonly-set alias; without this fallback a
+    //      hub configured with only BTC_INDEXER_URL silently falls to seed-local
+    //      capability snapshots and self-signs at quorum 0)
+    //   3. Hub's own configs table (populated by xchain-node's updateconfig push)
+    // Returns null when none yields a usable URL.
     async _resolveBtcIndexerUrl(){
         if(process.env.BTC_INDEXER_API_URL) return process.env.BTC_INDEXER_API_URL;
+        if(process.env.BTC_INDEXER_URL) return process.env.BTC_INDEXER_URL;
         if(!this.db) return null;
         let configs;
         try { configs = await this.db.getAllConfigs(); }

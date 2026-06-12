@@ -335,6 +335,15 @@ class StateCheckpointEngine extends EventEmitter {
     // the INSERT-IGNORE indexer mirror always converges), stream it to our
     // indexer subscribers, and emit for the StateAnchorPublisher.
     async _acceptFinalized(cp, sigs, quorum, isLeader){
+        // EVERY hub persists the oracle_publish snapshot for the checkpoint's
+        // snapshot_block, not just the cadence leader (_tick): ANCHOR verifiers
+        // check the checkpoint's signatures against capability_snapshots in
+        // whichever hub DB they mirror, and a follower's DB may be the only one
+        // they read. Deterministic from BTC stakes + INSERT IGNORE, so all hubs
+        // write identical rows. Persisted BEFORE the checkpoint row streams so a
+        // mirror subscriber never sees a row it can't verify.
+        try { await this._persistCapabilitySnapshot('oracle_publish', Number(cp.snapshot_block)); }
+        catch(e){ console.warn('StateCheckpointEngine: snapshot persist on finalize failed: ' + (e && e.message)); }
         await this.db.doQuery(
             'INSERT IGNORE INTO state_checkpoints (chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, validator_signatures) ' +
             'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',

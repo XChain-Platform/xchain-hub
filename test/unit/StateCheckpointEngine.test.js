@@ -188,6 +188,23 @@ describe('StateCheckpointEngine', function () {
         expect(new Set(rows).size).to.equal(1);
     });
 
+    it('every node (followers included) persists the oracle_publish snapshot at finalize', async function () {
+        // Bug-C analog: only the cadence leader persisted capability_snapshots
+        // (in _tick), but ANCHOR verifiers check checkpoint signatures against
+        // whichever hub DB they mirror — a follower's DB may be the only one
+        // they read.
+        let bus = buildMesh(4, { btcBlock: 101 });
+        await startAll(bus);
+        await tickAll(bus);
+        await sleep(80);
+
+        for (let nd of bus.nodes) {
+            expect(nd.db.checkpoints.length, 'node ' + nd.i + ' checkpoint').to.equal(1);
+            let snaps = nd.db.snapshots.filter(s => s.capability === 'oracle_publish' && s.snapshot_block === 101);
+            expect(snaps.length, 'node ' + nd.i + ' snapshot rows').to.equal(4);
+        }
+    });
+
     it('a diverged replica refuses to sign; 3 honest of 4 still reach quorum', async function () {
         let bus = buildMesh(4, {
             btcBlock: 101,

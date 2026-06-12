@@ -242,9 +242,14 @@ describe('StateAnchorPublisher', function () {
         let order = StateAnchorPublisher.hashOrder(key, bus.nodes.map(nd => nd.pubkey));
         return order.map(pk => bus.nodes.find(nd => nd.pubkey === pk));
     }
-    function archiveLeader(bus, btcBlock) {
-        let order = StateAnchorPublisher.hashOrder('XANCV1|' + btcBlock, bus.nodes.map(nd => nd.pubkey));
-        return bus.nodes.find(nd => nd.pubkey === order[0]);
+    function archiveOrder(bus, batchSeq) {
+        // Content-anchored key: wrapper checkpoint (CP_ROW in the mesh) + batch seq.
+        let key = 'XANCV1|' + CP_ROW.chain + '|' + CP_ROW.network + '|' + CP_ROW.checkpoint_seq + '|' + (batchSeq || 0);
+        let order = StateAnchorPublisher.hashOrder(key, bus.nodes.map(nd => nd.pubkey));
+        return order.map(pk => bus.nodes.find(nd => nd.pubkey === pk));
+    }
+    function archiveLeader(bus, batchSeq) {
+        return archiveOrder(bus, batchSeq)[0];
     }
     async function startAll(bus) { for (let nd of bus.nodes) await nd.pub.start(); }
     async function flushAll(bus) { for (let nd of bus.nodes) await nd.pub.flush(); }
@@ -326,7 +331,7 @@ describe('StateAnchorPublisher', function () {
         let bus = buildMesh(4, { btcBlock: 101 });
         await startAll(bus);
         let v0Pub  = v0Order(bus)[0];                                  // elected for the BTC checkpoint
-        let leader = archiveLeader(bus, 101);                          // elected archive leader
+        let leader = archiveLeader(bus);                          // elected archive leader
         await flushAll(bus);                                           // every hub's timer fires
         await sleep(100);
 
@@ -366,7 +371,7 @@ describe('StateAnchorPublisher', function () {
 
     it('followers refuse an archive that diverges from their own match rows', async function () {
         let bus = buildMesh(4, { btcBlock: 101 });
-        let leader = archiveLeader(bus, 101);
+        let leader = archiveLeader(bus);
         // Two followers hold a different amount for m1 → the leader can reach at
         // most 2 sigs (self + 1 honest) < quorum 3 → nothing published.
         let mutated = 0;
@@ -389,7 +394,7 @@ describe('StateAnchorPublisher', function () {
         // accepted purely on its archived 2f+1 signatures; a present-but-
         // DIFFERENT row must still refuse (the divergence test above).
         let bus = buildMesh(4, { btcBlock: 101 });
-        let leader = archiveLeader(bus, 101);
+        let leader = archiveLeader(bus);
         let pruned = 0;
         for (let nd of bus.nodes) {
             if (nd !== leader && pruned < 2) { nd.db.matches.length = 0; pruned++; }   // joined after m1
@@ -409,7 +414,7 @@ describe('StateAnchorPublisher', function () {
         // to the same finalized row (hub1=60, hub2=36, hub3=34 for one call) —
         // byte-comparing ids made every multi-hub archive unverifiable.
         let bus = buildMesh(4, { btcBlock: 101 });
-        let leader = archiveLeader(bus, 101);
+        let leader = archiveLeader(bus);
         for (let nd of bus.nodes) {
             if (nd !== leader) nd.db.matches[0].id = 1000 + nd.i;          // divergent local cursors
         }
@@ -440,6 +445,34 @@ describe('StateAnchorPublisher', function () {
         await order[0].pub.flush();
         await sleep(30);
         expect(bus.nodes.flatMap(nd => nd.published).filter(p => p.split('|')[1] === '0').length).to.equal(1);
+    });
+
+    it('archive failover ladder: a non-leader publishes once its rank unlocks, with full co-sign quorum', async function () {
+        // Live finding (devhost 3-hub): the archive election had NO rank
+        // tolerance — a signer-less elected leader stalled archiving (only
+        // 1-of-3 elections could publish), and on a static regtest tip the
+        // same leader won forever. The election key is now content-anchored
+        // (wrapper checkpoint + batch seq) and ranks unlock like v0 anchors:
+        // since = btcBlock - wrapper snapshot_block = 37 → floor(37/36) = 1.
+        let bus = buildMesh(4, { btcBlock: 137 });
+        await startAll(bus);
+        let order = archiveOrder(bus);
+
+        await order[2].pub.flush();                                    // rank 2: still locked
+        await order[3].pub.flush();                                    // rank 3: still locked
+        await sleep(60);
+        expect(bus.nodes.flatMap(nd => nd.published).filter(p => p.split('|')[1] === '1').length).to.equal(0);
+
+        await order[1].pub.flush();                                    // rank 1: unlocked (rank-0 hub signer-less)
+        await sleep(120);
+        let v1Nodes = bus.nodes.filter(nd => nd.published.some(p => p.split('|')[1] === '1'));
+        expect(v1Nodes.length).to.equal(1);
+        expect(v1Nodes[0]).to.equal(order[1]);
+        // Followers co-signed the rank-1 publisher — a real quorum, not a self-sign.
+        let v1 = order[1].published.find(p => p.split('|')[1] === '1').split('|');
+        expect(Number(v1[16])).to.be.at.least(3);
+        // Back-fill reached every node — the stalled rank-0 won't re-archive on return.
+        for (let nd of bus.nodes) expect(nd.db.matches[0].batch_seq, 'node ' + nd.i).to.equal(0);
     });
 
     it('distinct chains elect their own publishers (per-row election keys)', async function () {
@@ -542,6 +575,43 @@ describe('StateAnchorPublisher', function () {
         }
     });
 
+    it('v0 publishes retry through txn-mempool-conflict (and stay pending when exhausted)', async function () {
+        // Live finding (first prod ANCHOR cycle post-XCALL deploy): multiple
+        // chains' v0 anchors broadcast back-to-back from the one publisher
+        // wallet; without a retry only the first landed each 30-min cycle and
+        // DOGE/LTC staggered one chain per flush on 258: txn-mempool-conflict.
+        let bus = buildMesh(1, { cfg: { ANCHOR_CHUNK_RETRY_MS: '1' } });
+        let nd = bus.nodes[0];
+        let v0Failures = 0, failuresLeft = 2;
+        nd.pub.setBroadcastHook(async (payload) => {
+            if (payload.split('|')[1] === '0' && failuresLeft > 0) {
+                failuresLeft--; v0Failures++;
+                throw new Error('Encoder RPC error: 258: txn-mempool-conflict');
+            }
+            nd.published.push(payload);
+            return { txid: 'txid' + nd.published.length };
+        });
+        await startAll(bus);
+        await nd.pub.flush();
+        await sleep(30);
+
+        // Two conflicts absorbed by the retry — the checkpoint still anchors this flush.
+        expect(v0Failures).to.equal(2);
+        expect(nd.db.checkpoints[0].anchor_txid).to.equal('txid1');
+
+        // Exhausted retries (5 straight conflicts) leave the row pending for the next flush.
+        nd.db.checkpoints.push(Object.assign({}, CP_ROW, { id: 2, chain: 'DOGE', anchor_txid: null }));
+        failuresLeft = 99;
+        await nd.pub.flush();
+        await sleep(30);
+        expect(nd.db.checkpoints[1].anchor_txid).to.equal(null);
+
+        failuresLeft = 0;
+        await nd.pub.flush();
+        await sleep(30);
+        expect(nd.db.checkpoints[1].anchor_txid).to.be.a('string');
+    });
+
     it('a match retracted after archival is re-archived with its new status', async function () {
         let bus = buildMesh(1);
         let nd = bus.nodes[0];
@@ -603,7 +673,7 @@ describe('StateAnchorPublisher', function () {
             btcBlock: 300
         });
         // Two non-leader nodes hold a mutated copy of the call → no quorum forms.
-        let leader = archiveLeader(bus, 300);
+        let leader = archiveLeader(bus);
         let mutated = 0;
         for (let nd of bus.nodes) {
             if (nd !== leader && mutated < 2) { nd.db.calls[0].gas_limit = 999999; mutated++; }

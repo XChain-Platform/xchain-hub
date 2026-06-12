@@ -280,7 +280,11 @@ class StateAnchorPublisher {
                 }
                 let payload = this._buildV0Payload(row);
                 let broadcaster = signer.broadcastFn || ((p) => this._defaultBroadcast(p, signer));
-                let result = await broadcaster(payload);
+                // Multiple chains' v0 anchors go out back-to-back from the same
+                // wallet — without the retry, every cycle lands only the first
+                // and the rest stagger one chain per 30-min flush (live prod
+                // finding, first post-deploy cycle).
+                let result = await this._broadcastWithRetry(broadcaster, payload);
                 let txid = result && result.txid ? result.txid : null;
                 await this.db.doQuery(
                     'UPDATE state_checkpoints SET anchor_txid = ? WHERE chain = ? AND network = ? AND block_index = ?',
@@ -326,32 +330,26 @@ class StateAnchorPublisher {
     }
 
     // ── Archive round (v1/v2) ───────────────────────────────────────────────────
-    // One leader per election block: hash-order rank 0 over the oracle_publish
-    // set (failover = next block ⇒ new key ⇒ new leader). Returns the flush
-    // summary's archive status.
+    // Leader = hash-order rank 0 over the oracle_publish set, with the same
+    // failover ladder as v0 anchors: the election key is anchored on the archive
+    // CONTENT (wrapper checkpoint + batch seq — deterministic + identical on
+    // every hub, and stable while the batch is stalled), and each further rank
+    // unlocks after another ANCHOR_ELECTION_TOLERANCE_BLOCKS past the wrapper
+    // checkpoint's snapshot_block. Without the ladder a signer-less elected
+    // leader stalled archiving (live on devhost: only 1-of-3 elections could
+    // publish; on a static regtest tip the same leader won forever). Returns
+    // the flush summary's archive status.
     async _startArchiveRound(signer, electionBlock){
         if(this._archiveRound) return 'round_pending';                       // one at a time
 
         let pubkeys = await this._getActiveOraclePublishPubkeys(electionBlock);
+        let me = this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
         if(pubkeys.length > 0){
-            if(!this.identity) return 'none';
-            let me = String(this.identity.getPubkeyHex()).toLowerCase();
+            if(!me) return 'none';
             if(!pubkeys.includes(me)){
                 console.log('StateAnchorPublisher: archive election at block ' + electionBlock +
                             ' — own pubkey not in the oracle_publish set (' + pubkeys.length + ' eligible)');
                 return 'none';                                               // not an oracle_publish validator
-            }
-            if(pubkeys.length > 1){
-                let order = StateAnchorPublisher.hashOrder(this._archiveElectionKey(electionBlock), pubkeys);
-                if(order[0] !== me){
-                    // Operator visibility: a hub that never wins the archive
-                    // election (e.g. signer-less peers keep ranking first) is
-                    // indistinguishable from a broken publisher without this.
-                    console.log('StateAnchorPublisher: archive election at block ' + electionBlock +
-                                ' — rank ' + order.indexOf(me) + '/' + order.length + ' (leader ' +
-                                order[0].substring(0, 12) + '...), not publishing');
-                    return 'none';                                           // not the elected archive leader
-                }
             }
         }
 
@@ -378,6 +376,21 @@ class StateAnchorPublisher {
 
         let network  = String(cps[0].network);
         let batchSeq = await this._getNextBatchSeq();
+
+        if(pubkeys.length > 1){
+            let order = StateAnchorPublisher.hashOrder(this._archiveElectionKey(cp, batchSeq), pubkeys);
+            let since = Number.isFinite(electionBlock) ? electionBlock - Number(cp.snapshot_block) : null;
+            if(!this._rankUnlocked(order, me, since)){
+                // Operator visibility: a hub that never wins the archive
+                // election (e.g. signer-less peers keep ranking first) is
+                // indistinguishable from a broken publisher without this.
+                console.log('StateAnchorPublisher: archive election (batch ' + batchSeq + ') at block ' + electionBlock +
+                            ' — rank ' + order.indexOf(me) + '/' + order.length + ' (leader ' +
+                            order[0].substring(0, 12) + '..., ladder unlocks a rank every ' +
+                            this.electionToleranceBlocks + ' blocks), not publishing');
+                return 'none';                                               // not unlocked on the failover ladder
+            }
+        }
         let archive  = await this._buildArchive(network, batchSeq, matches, cp.snapshot_block, calls);
         let json     = archive.json;
         let crc      = this._crc32Hex(json);
@@ -429,8 +442,27 @@ class StateAnchorPublisher {
         return 'round_started';
     }
 
-    _archiveElectionKey(electionBlock){
-        return 'XANCV1|' + String(Number.isFinite(electionBlock) ? electionBlock : 0);
+    // Content-anchored election key: deterministic + identical on every hub
+    // (both fields come from quorum-agreed state) and STABLE while the batch is
+    // stalled, so the failover ladder has a fixed anchor to climb against —
+    // unlike the old current-block key, which re-elected fresh every block (and
+    // on a static regtest tip elected the SAME leader forever).
+    _archiveElectionKey(cp, batchSeq){
+        return 'XANCV1|' + cp.chain + '|' + cp.network + '|' + String(cp.checkpoint_seq) + '|' + String(batchSeq);
+    }
+
+    // Failover-ladder check shared by leader election and follower verification:
+    // rank 0 may publish immediately; each further rank unlocks after another
+    // ANCHOR_ELECTION_TOLERANCE_BLOCKS past the anchor point. Concurrent
+    // unlocked publishers build byte-identical archives (both verify against
+    // the same quorum-agreed rows), so a race is duplicate-tx waste, not a
+    // divergence hazard.
+    _rankUnlocked(order, pubkey, sinceBlocks){
+        let rank = order.indexOf(String(pubkey || '').toLowerCase());
+        if(rank < 0) return false;
+        if(rank === 0) return true;
+        let unlocked = Number.isFinite(sinceBlocks) ? Math.floor(Math.max(0, sinceBlocks) / this.electionToleranceBlocks) : 0;
+        return rank <= unlocked;
     }
 
     // Resolve the qualifying set for (capability, block). Primary source is
@@ -585,9 +617,14 @@ class StateAnchorPublisher {
         if(Number.isFinite(myBtc) && Math.abs(myBtc - electionBlock) > this.electionToleranceBlocks) return;
         let pubkeys = await this._getActiveOraclePublishPubkeys(electionBlock);
         if(!pubkeys.includes(myPubkey)) return;
-        if(pubkeys.length > 1 &&
-           sender !== StateAnchorPublisher.hashOrder(this._archiveElectionKey(electionBlock), pubkeys)[0])
-            return;                                                          // not the elected archive leader
+        if(pubkeys.length > 1){
+            // Same content-anchored key + failover ladder the leader used —
+            // accept any sender whose rank has unlocked, not just rank 0, or a
+            // signer-less rank-0 hub stalls archiving federation-wide.
+            let order = StateAnchorPublisher.hashOrder(this._archiveElectionKey(cp, Number(d.batch_seq)), pubkeys);
+            let since = electionBlock - Number(cp.snapshot_block);
+            if(!this._rankUnlocked(order, sender, since)) return;            // not unlocked on the failover ladder
+        }
 
         let canonical = this._archiveCanonical(cp, Number(d.batch_seq), Number(d.match_count),
                                                String(d.batch_crc32), Number(d.total_chunks));
@@ -636,7 +673,8 @@ class StateAnchorPublisher {
                 let localTerms    = StateAnchorPublisher.serializeMatch(rows[0]);
                 let archivedTerms = Object.assign({}, am);
                 // id is per-hub bookkeeping (each hub assigns its own AUTO_INCREMENT
-                // cursor) — the leader archives ITS id as the recovery ordering key, so
+                // cursor) — the leader archives ITS id as provenance only (ordering
+                // is (snapshot_block, match_id)/(snapshot_block, call_id)), so
                 // followers must not byte-compare it, like validator_signatures.
                 delete localTerms.id;
                 delete archivedTerms.id;
@@ -759,25 +797,18 @@ class StateAnchorPublisher {
         let v1Payload = parts.join('|');
 
         let broadcaster = round.signer.broadcastFn || ((p) => this._defaultBroadcast(p, round.signer));
-        let result = await broadcaster(v1Payload);
+        let result = await this._broadcastWithRetry(broadcaster, v1Payload);
         let txid = result && result.txid ? result.txid : null;
 
         let lostChunks = 0;
         for(let i = 1; i < round.chunks.length; i++){
             let v2Payload = ['ANCHOR', '2', String(round.batchSeq), String(i), String(round.chunks.length), round.chunks[i]].join('|');
-            // Back-to-back chunk spends race the UTXO tracker's mempool view and
-            // collide on input selection (txn-mempool-conflict). A lost chunk is
-            // a DURABILITY failure — recovery needs every chunk — so retry with a
-            // pause for the previous spend to become visible before giving up.
-            let sent = false, lastErr = null;
-            for(let attempt = 0; attempt < 5 && !sent; attempt++){
-                if(attempt > 0) await new Promise(r => setTimeout(r, this.chunkRetryDelayMs));
-                try { await broadcaster(v2Payload); sent = true; }
-                catch(e){ lastErr = e; }
-            }
-            if(!sent){
+            // A lost chunk is a DURABILITY failure — recovery needs every chunk —
+            // so the shared anchor-broadcast retry matters most here.
+            try { await this._broadcastWithRetry(broadcaster, v2Payload); }
+            catch(e){
                 lostChunks++;
-                console.error('StateAnchorPublisher: v2 chunk ' + i + ' broadcast failed after retries: ' + (lastErr && lastErr.message));
+                console.error('StateAnchorPublisher: v2 chunk ' + i + ' broadcast failed after retries: ' + (e && e.message));
             }
         }
 
@@ -954,6 +985,22 @@ class StateAnchorPublisher {
             getBalanceFn: this.getBalanceFn || op.getBalanceFn || null,
             encoder:      this.encoder      || op.encoder      || null
         };
+    }
+
+    // Back-to-back spends from the one publisher wallet race the UTXO
+    // tracker's mempool view and collide on input selection
+    // (txn-mempool-conflict), so every anchor broadcast retries with a pause
+    // for the previous spend to become visible. Throws the last error once
+    // attempts are exhausted.
+    async _broadcastWithRetry(broadcaster, payload, attempts){
+        attempts = attempts || 5;
+        let lastErr = null;
+        for(let attempt = 0; attempt < attempts; attempt++){
+            if(attempt > 0) await new Promise(r => setTimeout(r, this.chunkRetryDelayMs));
+            try { return await broadcaster(payload); }
+            catch(e){ lastErr = e; }
+        }
+        throw lastErr || new Error('broadcast failed');
     }
 
     async _defaultBroadcast(payload, signer){

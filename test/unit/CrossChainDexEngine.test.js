@@ -587,6 +587,28 @@ describe('CrossChainDexEngine', function () {
             expect(hub.db.doQuery.calledWith(sinon.match(/INSERT IGNORE INTO capability_snapshots/))).to.be.true;
         });
 
+        it('_writeFinalizedMatch persists the snapshot on EVERY hub, not just the leader', async function () {
+            // Bug-C analog: indexers verify match signatures against
+            // capability_snapshots in whichever hub DB they mirror, and a
+            // follower's DB may be the only one they read — leader-only
+            // persistence (quorum-0 inline + _broadcastPropose) left follower
+            // DBs without it.
+            let hub = makeDexHub();
+            hub.db.doQuery = sinon.stub().resolves({ affectedRows: 1 });
+            let eng = new CrossChainDexEngine(hub);
+            let persist = sinon.stub(eng, '_persistCapabilitySnapshot').resolves();
+            let row = {
+                match_id: 'm'.repeat(64), snapshot_block: 150, network: 'regtest',
+                a_chain: 'LTC', a_action_index: 1, a_kind: 'swap', a_tick: 'XCH', a_amount: '100',
+                a_filled_before: '0', a_ownership: 0, a_payout_addr: 'La',
+                b_chain: 'DOGE', b_action_index: 2, b_kind: 'swap', b_tick: 'XCH', b_amount: '500',
+                b_filled_before: '0', b_ownership: 0, b_payout_addr: 'Db',
+                effective_time: 1700000000
+            };
+            await eng._writeFinalizedMatch({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
+            expect(persist.calledWith('cross_chain', 150)).to.be.true;
+        });
+
         it('does nothing when no validators and _seedLocalValidator=false', async function () {
             let hub = makeDexHub();
             hub.db.doQuery = sinon.stub().resolves([]);

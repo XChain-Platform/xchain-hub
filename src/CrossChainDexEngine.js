@@ -446,6 +446,13 @@ class CrossChainDexEngine extends EventEmitter {
     async _writeFinalizedMatch(ev){
         let row = ev.row;
         row.validator_signatures = JSON.stringify(ev.signatures || []);
+        // EVERY hub persists the capability snapshot for the row's snapshot_block,
+        // not just the round leader: the indexers verify the row's signatures
+        // against capability_snapshots in whichever hub DB they mirror, and a
+        // follower's DB may be the only one they read. Deterministic from BTC
+        // stakes + idempotent (INSERT IGNORE), so all hubs write identical rows.
+        try { await this._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block)); }
+        catch(e){ console.warn('CrossChainDex: snapshot persist on finalize failed: ' + (e && e.message)); }
         let inserted = await this._insertMatchRow(row);
         if(inserted) this._applyCommit(row, +1);
         this._inflight.delete(row.match_id);
