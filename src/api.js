@@ -116,6 +116,10 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     P2P_WS_PING_INTERVAL:      parseInt(process.env.P2P_WS_PING_INTERVAL) || 30000,
     P2P_RECONNECT_BASE:        parseInt(process.env.P2P_RECONNECT_BASE) || 2000,
     P2P_RECONNECT_MAX:      parseInt(process.env.P2P_RECONNECT_MAX) || 60000,
+    // Per-IP inbound cap (anti-DoS, PeerManager). The default of 3 is too low
+    // for co-located federations (N validators on one IP need N-1 inbound
+    // slots each); without this line the env knob never reaches PeerManager.
+    P2P_MAX_CONNECTIONS_PER_IP: parseInt(process.env.P2P_MAX_CONNECTIONS_PER_IP) || 3,
     P2P_MSG_DEDUP_TTL:      parseInt(process.env.P2P_MSG_DEDUP_TTL) || 60000,
     P2P_MAX_PAYLOAD:        parseInt(process.env.P2P_MAX_PAYLOAD) || 1048576,
     ORACLE_EPOCH_START:     parseInt(process.env.ORACLE_EPOCH_START),
