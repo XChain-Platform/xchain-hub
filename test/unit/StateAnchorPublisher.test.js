@@ -17,6 +17,7 @@
 
 const { expect }            = require('chai');
 const zlib                  = require('zlib');
+const crypto                = require('crypto');
 const StateAnchorPublisher  = require('../../src/StateAnchorPublisher');
 const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
 const ValidatorIdentity     = require('../../src/ValidatorIdentity');
@@ -31,6 +32,7 @@ const CP_ROW = {
 
 function matchRow(id, status) {
     return {
+        id: 1,
         match_id: id, snapshot_block: 100, network: 'regtest',
         a_chain: 'LTC', a_action_index: 5, a_kind: 'swap', a_tick: 'TOKA', a_amount: '1000',
         a_filled_before: '0', a_ownership: 0, a_payout_addr: 'Lpay',
@@ -52,11 +54,39 @@ function matchCanonical(m) {
         m.b_kind || 'swap', String(m.b_filled_before != null ? m.b_filled_before : '0')].join('|');
 }
 
+function callRow(id, phase, status) {
+    return {
+        id: phase === 'result' ? 2 : 1,
+        call_id: id, phase: phase || 'dispatch', snapshot_block: 100, network: 'regtest',
+        source_chain: 'LTC', source_action_index: 41, source_contract_index: 7,
+        target_chain: 'DOGE', target_contract_index: 9, method: 'onArrival',
+        params_json: '["a","b"]', gas_limit: 50000, cross_hops: 0,
+        effective_time: 1700000100,
+        result_status: phase === 'result' ? 'ok' : null,
+        return_payload_b64: phase === 'result' ? 'cGF5bG9hZA' : null,
+        validator_signatures: null,                                // signed per-mesh in buildMesh
+        status: status || 'finalized', anchor_txid: null, batch_seq: null, archived_status: null
+    };
+}
+
+// XCALL phase canonicals (mirror of the publisher's _callCanonical).
+function callCanonical(c) {
+    let sha = (s) => crypto.createHash('sha256').update(String(s == null ? '' : s), 'utf8').digest('hex');
+    if (c.phase === 'result') {
+        return ['XCALL', 'RESULT', c.call_id, String(c.snapshot_block), c.network || '',
+            c.target_chain, String(c.result_status || ''), sha(c.return_payload_b64), String(c.effective_time)].join('|');
+    }
+    return ['XCALL', 'DISPATCH', c.call_id, String(c.snapshot_block), c.network || '',
+        c.source_chain, String(c.source_action_index), String(c.source_contract_index),
+        c.target_chain, String(c.target_contract_index), c.method, sha(c.params_json),
+        String(c.gas_limit), String(c.cross_hops), String(c.effective_time)].join('|');
+}
+
 // In-memory hub DB for the publisher's query surface.
 function memDb() {
-    let matches = [], checkpoints = [], snapshots = [];
+    let matches = [], checkpoints = [], snapshots = [], calls = [];
     return {
-        matches, checkpoints, snapshots,
+        matches, checkpoints, snapshots, calls,
         async doQuery(sql, params) {
             params = params || [];
             if (sql.startsWith('SELECT sc.* FROM state_checkpoints sc JOIN')) {
@@ -87,13 +117,27 @@ function memDb() {
             if (sql.startsWith('SELECT * FROM cross_chain_matches WHERE match_id = ?')) {
                 return matches.filter(r => r.match_id === params[0]).slice(0, 1);
             }
-            if (sql.startsWith('SELECT COALESCE(MAX(batch_seq)')) {
+            if (sql.startsWith('SELECT COALESCE(GREATEST(')) {
                 let max = -1;
                 for (let r of matches) if (r.batch_seq != null && r.batch_seq > max) max = r.batch_seq;
+                for (let r of calls)   if (r.batch_seq != null && r.batch_seq > max) max = r.batch_seq;
                 return [{ next_seq: max + 1 }];
             }
             if (sql.startsWith('UPDATE cross_chain_matches SET batch_seq')) {
                 for (let r of matches) if (r.match_id === params[3]) {
+                    r.batch_seq = params[0]; r.archived_status = params[1];
+                    if (params[2] != null) r.anchor_txid = params[2];
+                }
+                return [];
+            }
+            if (sql.startsWith('SELECT * FROM cross_chain_calls WHERE batch_seq IS NULL OR archived_status <> status')) {
+                return calls.filter(r => r.batch_seq == null || r.archived_status !== r.status).slice(0, params[0]);
+            }
+            if (sql.startsWith('SELECT * FROM cross_chain_calls WHERE call_id = ?')) {
+                return calls.filter(r => r.call_id === params[0] && r.phase === params[1]).slice(0, 1);
+            }
+            if (sql.startsWith('UPDATE cross_chain_calls SET batch_seq')) {
+                for (let r of calls) if (r.call_id === params[3] && r.phase === params[4]) {
                     r.batch_seq = params[0]; r.archived_status = params[1];
                     if (params[2] != null) r.anchor_txid = params[2];
                 }
@@ -156,6 +200,16 @@ describe('StateAnchorPublisher', function () {
                         ({ pubkey: id.getPubkeyHex().toLowerCase(), sig: id.sign(canon) })));
                 }
                 db.matches.push(row);
+            }
+            for (let c of (opts.calls || [])) {
+                let row = Object.assign({}, c);
+                if (row.validator_signatures == null) {
+                    let canon = callCanonical(row);
+                    let signers = identities.slice(0, Math.max(1, n - 1));
+                    row.validator_signatures = JSON.stringify(signers.map(id =>
+                        ({ pubkey: id.getPubkeyHex().toLowerCase(), sig: id.sign(canon) })));
+                }
+                db.calls.push(row);
             }
             if (opts.mutate) opts.mutate(self, db);
 
@@ -429,5 +483,53 @@ describe('StateAnchorPublisher', function () {
         expect(archive.matches[0].status).to.equal('retracted');
         expect(nd.db.matches[0].batch_seq).to.equal(1);
         expect(nd.db.matches[0].archived_status).to.equal('retracted');
+    });
+
+    it('XCALL relay rows ride the archive (both phases) and back-fill batch metadata', async function () {
+        let bus = buildMesh(1, { calls: [callRow('c'.repeat(64), 'dispatch'), callRow('c'.repeat(64), 'result')] });
+        let nd = bus.nodes[0];
+        await startAll(bus);
+        await nd.pub.flush();
+        await sleep(30);
+
+        let v1s = nd.published.filter(p => p.split('|')[1] === '1');
+        expect(v1s.length).to.equal(1);
+        let f = v1s[0].split('|');
+        let archive = JSON.parse(zlib.gunzipSync(Buffer.from(f[15], 'base64url')).toString('utf8'));
+        // Fixed-key-order call records, both phases, alongside the match.
+        expect(archive.matches.length).to.equal(1);
+        expect(archive.calls.length).to.equal(2);
+        expect(archive.calls[0].phase).to.equal('dispatch');
+        expect(archive.calls[0].result_status).to.equal(null);
+        expect(archive.calls[1].phase).to.equal('result');
+        expect(archive.calls[1].result_status).to.equal('ok');
+        expect(archive.calls[1].return_payload_b64).to.equal('cGF5bG9hZA');
+        // The cross_chain snapshot for the calls' snapshot_block is self-contained.
+        expect(archive.capability_snapshots.some(s => s.capability === 'cross_chain' && s.snapshot_block === 100)).to.equal(true);
+        // Batch metadata back-filled on both phases; a second flush archives nothing.
+        for (let c of nd.db.calls) {
+            expect(c.batch_seq).to.equal(0);
+            expect(c.archived_status).to.equal('finalized');
+        }
+        nd.db.checkpoints[0].anchor_txid = 'already';
+        let second = await nd.pub.flush();
+        expect(second.archive).to.equal('none');
+    });
+
+    it('a follower refuses to co-sign an archive whose call terms diverge from its DB', async function () {
+        let bus = buildMesh(4, {
+            calls: [callRow('d'.repeat(64), 'dispatch')],
+            btcBlock: 300
+        });
+        // Two non-leader nodes hold a mutated copy of the call → no quorum forms.
+        let leader = archiveLeader(bus, 300);
+        let mutated = 0;
+        for (let nd of bus.nodes) {
+            if (nd !== leader && mutated < 2) { nd.db.calls[0].gas_limit = 999999; mutated++; }
+        }
+        await startAll(bus);
+        await leader.pub.flush();
+        await sleep(50);
+        for (let nd of bus.nodes) expect(nd.db.calls[0].batch_seq).to.equal(null);
     });
 });

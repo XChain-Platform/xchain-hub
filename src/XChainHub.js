@@ -28,7 +28,8 @@ const OracleRound        = require('./OracleRound.js');
 const RewardTracker      = require('./RewardTracker.js');
 const SlashDetector      = require('./SlashDetector.js');
 const CrossChainEngine   = require('./CrossChainEngine.js');
-const CrossChainDexEngine = require('./CrossChainDexEngine.js');
+const CrossChainDexEngine  = require('./CrossChainDexEngine.js');
+const CrossChainCallEngine = require('./CrossChainCallEngine.js');
 const StateCheckpointEngine = require('./StateCheckpointEngine.js');
 const StateAnchorPublisher  = require('./StateAnchorPublisher.js');
 const ReorgHandler       = require('./ReorgHandler.js');
@@ -309,6 +310,13 @@ class XChainHub {
         // INDEXER_URL); otherwise it idles harmlessly.
         this.crossChainDex = new CrossChainDexEngine(this);
         await this.crossChainDex.start();
+
+        // Cross-chain contract call relay (XCALL) — confirmation-gates contract-
+        // emitted cross-chain call requests, PBFTs the dispatch + result rows, and
+        // mirrors them to indexers (zero per-call chain writes; same transport as
+        // cross_chain_matches). Idles harmlessly without indexer URLs.
+        this.crossChainCalls = new CrossChainCallEngine(this);
+        await this.crossChainCalls.start();
 
         // State checkpoints — quorum-signed per-chain ledger/actions/contract hash
         // commitments, written off-chain to state_checkpoints and streamed over the
@@ -1210,6 +1218,8 @@ class XChainHub {
         if(this.reorgHandler)     await this.reorgHandler.stop();
         if(this.stateAnchorPublisher) await this.stateAnchorPublisher.stop();
         if(this.stateCheckpoints) await this.stateCheckpoints.stop();
+        if(this.crossChainCalls)  await this.crossChainCalls.stop();
+        if(this.crossChainDex)    await this.crossChainDex.stop();
         if(this.crossChain)       await this.crossChain.stop();
         if(this.oracle)           await this.oracle.stop();
         if(this.oracleConsensus)  await this.oracleConsensus.stop();

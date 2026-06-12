@@ -80,10 +80,30 @@ const XANC_V0_DONE   = 'XANC_V0_DONE';
 
 // Fixed serialization order for an archived match row — the crc32 (and the
 // follower byte-comparison) depend on this exact order. Spec §Archive JSON.
-const MATCH_KEYS = ['match_id', 'snapshot_block', 'network',
+// `id` (the hub-assigned mirror cursor) is archived because it is the
+// indexers' settlement-order key (getEffectiveUnsettledMatches ORDER BY id):
+// recovery must rebuild rows under their original ids or a reindexing node
+// could settle two same-block matches in a different order than live history
+// (action_index divergence). Archives published before this field exist
+// without it; recovery tolerates both shapes.
+const MATCH_KEYS = ['id', 'match_id', 'snapshot_block', 'network',
     'a_chain', 'a_action_index', 'a_kind', 'a_tick', 'a_amount', 'a_filled_before', 'a_ownership', 'a_payout_addr',
     'b_chain', 'b_action_index', 'b_kind', 'b_tick', 'b_amount', 'b_filled_before', 'b_ownership', 'b_payout_addr',
     'effective_time', 'validator_signatures', 'status'];
+
+// Fixed serialization order for an archived cross-chain CALL relay row (XCALL
+// dispatch/result phases) — same crc32/byte-comparison rules as MATCH_KEYS.
+// Without these in the archive, a full-chain-parse recovery could not rebuild
+// the injected executions/callbacks and would diverge from live nodes.
+// `id` (the hub-assigned mirror cursor) IS archived: it is the indexers'
+// deterministic injection-order key, so recovery must rebuild rows under
+// their original ids or a reindexing node would inject calls in a different
+// order than live nodes did (action_index divergence).
+const CALL_KEYS = ['id', 'call_id', 'phase', 'snapshot_block', 'network',
+    'source_chain', 'source_action_index', 'source_contract_index',
+    'target_chain', 'target_contract_index', 'method', 'params_json',
+    'gas_limit', 'cross_hops', 'effective_time', 'result_status',
+    'return_payload_b64', 'validator_signatures', 'status'];
 
 class StateAnchorPublisher {
 
@@ -117,6 +137,7 @@ class StateAnchorPublisher {
 
         this._archiveRound   = null;     // leader-side archive signing round (one at a time)
         this._pendingMatches = 0;        // size trigger; DB is the source of truth
+        this._callHandler    = null;
         this._flushing       = false;
         this._timer          = null;
         this._messageHandler = null;
@@ -143,6 +164,15 @@ class StateAnchorPublisher {
             // round reads cross_chain_matches), unlike the consensus-level event.
             this.hub.crossChainDex.on('match:finalized', this._matchHandler);
         }
+        if(this.hub.crossChainCalls){
+            // XCALL relay rows share the size trigger — they ride the same archive.
+            this._callHandler = () => {
+                if(++this._pendingMatches >= this.batchSize)
+                    this.flush().catch(err => console.error('StateAnchorPublisher: size-trigger flush error:', err && err.message));
+            };
+            this.hub.crossChainCalls.on('call:dispatch', this._callHandler);
+            this.hub.crossChainCalls.on('call:result',   this._callHandler);
+        }
         this._timer = setInterval(() => {
             this.flush().catch(err => console.error('StateAnchorPublisher: interval flush error:', err && err.message));
         }, this.intervalMs);
@@ -159,6 +189,11 @@ class StateAnchorPublisher {
         if(this._matchHandler && this.hub.crossChainDex){
             this.hub.crossChainDex.removeListener('match:finalized', this._matchHandler);
             this._matchHandler = null;
+        }
+        if(this._callHandler && this.hub.crossChainCalls){
+            this.hub.crossChainCalls.removeListener('call:dispatch', this._callHandler);
+            this.hub.crossChainCalls.removeListener('call:result',   this._callHandler);
+            this._callHandler = null;
         }
         if(this._archiveRound && this._archiveRound.timer) clearTimeout(this._archiveRound.timer);
         this._archiveRound = null;
@@ -309,7 +344,12 @@ class StateAnchorPublisher {
         let matches = await this.db.doQuery(
             "SELECT * FROM cross_chain_matches WHERE batch_seq IS NULL OR archived_status <> status " +
             "ORDER BY match_id ASC LIMIT ?", [this.maxBatch]);
-        if(!matches || matches.length === 0){ this._pendingMatches = 0; return 'none'; }
+        let calls = await this.db.doQuery(
+            "SELECT * FROM cross_chain_calls WHERE batch_seq IS NULL OR archived_status <> status " +
+            "ORDER BY call_id ASC, phase ASC LIMIT ?", [this.maxBatch]);
+        if((!matches || matches.length === 0) && (!calls || calls.length === 0)){ this._pendingMatches = 0; return 'none'; }
+        matches = matches || [];
+        calls   = calls   || [];
 
         // The checkpoint wrapper: latest checkpoint (prefer BTC — its height also
         // selects validator sets). Without any checkpoint there is nothing to bind
@@ -324,7 +364,7 @@ class StateAnchorPublisher {
 
         let network  = String(cps[0].network);
         let batchSeq = await this._getNextBatchSeq();
-        let archive  = await this._buildArchive(network, batchSeq, matches, cp.snapshot_block);
+        let archive  = await this._buildArchive(network, batchSeq, matches, cp.snapshot_block, calls);
         let json     = archive.json;
         let crc      = this._crc32Hex(json);
         let b64      = zlib.gzipSync(Buffer.from(json, 'utf8'), { level: 9 }).toString('base64url');
@@ -342,6 +382,7 @@ class StateAnchorPublisher {
             cp, batchSeq, crc, b64, chunks, canonical, quorum, signer, electionBlock,
             count:      archive.count,
             matchIds:   matches.map(m => ({ match_id: m.match_id, status: m.status })),
+            callIds:    calls.map(c => ({ call_id: c.call_id, phase: c.phase, status: c.status })),
             validators: pubkeys.slice(),
             signatures: new Map([[myPubkey, mySig]]),
             done:       false,
@@ -406,8 +447,10 @@ class StateAnchorPublisher {
     // re-verify the v1 anchor's own signatures). Recovery additionally
     // cross-checks archived pubkeys against on-chain BTC stakes — archived
     // sets are a convenience, the chain remains the root of trust.
-    async _buildArchive(network, batchSeq, matches, wrapperSnapshotBlock){
-        let wants = matches.map(m => ({ block: Number(m.snapshot_block), capability: 'cross_chain' }));
+    async _buildArchive(network, batchSeq, matches, wrapperSnapshotBlock, calls){
+        calls = calls || [];
+        let wants = matches.map(m => ({ block: Number(m.snapshot_block), capability: 'cross_chain' }))
+            .concat(calls.map(c => ({ block: Number(c.snapshot_block), capability: 'cross_chain' })));
         if(wrapperSnapshotBlock != null)
             wants.push({ block: Number(wrapperSnapshotBlock), capability: 'oracle_publish' });
         let seen = new Set(), snaps = [];
@@ -420,11 +463,14 @@ class StateAnchorPublisher {
                 snaps.push({ snapshot_block: w.block, capability: w.capability,
                              signing_pubkey: v.pubkey, amount: v.amount });
         }
+        // `calls` is additive to the v1 archive shape: recovery treats a missing
+        // key as an empty list, so pre-XCALL archives on-chain stay parseable.
         let obj = {
             v: 1,
             network: network,
             batch_seq: batchSeq,
             matches: matches.map(m => StateAnchorPublisher.serializeMatch(m)),
+            calls: calls.map(c => StateAnchorPublisher.serializeCall(c)),
             capability_snapshots: snaps
         };
         return { json: JSON.stringify(obj), count: matches.length };
@@ -435,11 +481,28 @@ class StateAnchorPublisher {
         let out = {};
         for(let k of MATCH_KEYS){
             let v = m[k];
-            if(k === 'a_action_index' || k === 'b_action_index' || k === 'snapshot_block' || k === 'effective_time')
+            if(k === 'id' || k === 'a_action_index' || k === 'b_action_index' || k === 'snapshot_block' || k === 'effective_time')
                 out[k] = Number(v);
             else if(k === 'a_ownership' || k === 'b_ownership')
                 out[k] = Number(v) ? 1 : 0;
             else if(k === 'a_tick' || k === 'b_tick')
+                out[k] = (v == null) ? null : String(v);
+            else
+                out[k] = String(v == null ? '' : v);
+        }
+        return out;
+    }
+
+    // Fixed-key-order XCALL relay record (shared with the follower verifier +
+    // recovery). result_status / return_payload_b64 are null on dispatch rows.
+    static serializeCall(c){
+        let out = {};
+        for(let k of CALL_KEYS){
+            let v = c[k];
+            if(k === 'id' || k === 'snapshot_block' || k === 'source_action_index' || k === 'source_contract_index' ||
+               k === 'target_contract_index' || k === 'gas_limit' || k === 'cross_hops' || k === 'effective_time')
+                out[k] = Number(v);
+            else if(k === 'result_status' || k === 'return_payload_b64')
                 out[k] = (v == null) ? null : String(v);
             else
                 out[k] = String(v == null ? '' : v);
@@ -566,6 +629,20 @@ class StateAnchorPublisher {
             let sigs = this._parseSigs(am.validator_signatures);
             if(!this._quorumVerified(this._matchCanonical(am), sigs, set.map(v => v.pubkey))) return false;
         }
+        for(let ac of (archive.calls || [])){
+            let rows = await this.db.doQuery(
+                'SELECT * FROM cross_chain_calls WHERE call_id = ? AND phase = ? LIMIT 1', [ac.call_id, ac.phase]);
+            if(!rows || rows.length === 0) return false;
+            let localTerms    = StateAnchorPublisher.serializeCall(rows[0]);
+            let archivedTerms = Object.assign({}, ac);
+            delete localTerms.validator_signatures;
+            delete archivedTerms.validator_signatures;
+            if(JSON.stringify(localTerms) !== JSON.stringify(archivedTerms)) return false;
+
+            let set  = await this._resolveCapabilitySet('cross_chain', Number(ac.snapshot_block));
+            let sigs = this._parseSigs(ac.validator_signatures);
+            if(!this._quorumVerified(this._callCanonical(ac), sigs, set.map(v => v.pubkey))) return false;
+        }
         let groups = new Map();              // block|capability → Map<pubkey, amount>
         for(let s of (archive.capability_snapshots || [])){
             let key = Number(s.snapshot_block) + '|' + String(s.capability);
@@ -630,15 +707,17 @@ class StateAnchorPublisher {
             catch(e){ console.error('StateAnchorPublisher: v2 chunk ' + i + ' broadcast failed: ' + (e && e.message)); }
         }
 
-        await this._backfillBatch(round.batchSeq, round.matchIds, txid);
+        await this._backfillBatch(round.batchSeq, round.matchIds, txid, round.callIds);
         if(this.peerManager){
             this.peerManager.broadcast(XANC_FINALIZED, {
                 batch_seq: round.batchSeq, txid: txid, matches: round.matchIds,
+                calls: round.callIds || [],
                 sig_pubkey: this.identity.getPubkeyHex().toLowerCase(),
                 sig: this.identity.sign(this._finalizedCanonical(round.batchSeq, txid, round.matchIds.length))
             });
         }
-        console.log('StateAnchorPublisher: archived ' + round.count + ' matches (batch ' + round.batchSeq +
+        console.log('StateAnchorPublisher: archived ' + round.count + ' matches + ' +
+                    ((round.callIds && round.callIds.length) || 0) + ' calls (batch ' + round.batchSeq +
                     ', ' + round.chunks.length + ' chunk(s), txid ' + txid + ')');
         this._recordReward('anchor_archive', round.batchSeq, round.electionBlock);
     }
@@ -652,7 +731,8 @@ class StateAnchorPublisher {
         if(pubkeys.length && !pubkeys.includes(sender)) return;
         if(!ValidatorIdentity.verify(this._finalizedCanonical(Number(d.batch_seq), d.txid, d.matches.length),
                                      String(d.sig || ''), sender)) return;
-        await this._backfillBatch(Number(d.batch_seq), d.matches, d.txid ? String(d.txid) : null);
+        await this._backfillBatch(Number(d.batch_seq), d.matches, d.txid ? String(d.txid) : null,
+                                  Array.isArray(d.calls) ? d.calls : []);
     }
 
     _finalizedCanonical(batchSeq, txid, count){
@@ -673,6 +753,26 @@ class StateAnchorPublisher {
         ].join('|');
     }
 
+    // XCALL phase canonicals — byte-identical to CrossChainCallEngine._canonicalMatch
+    // / the indexer's verifiers (kept local for the same reason as _matchCanonical).
+    _callCanonical(c){
+        let sha = (s) => crypto.createHash('sha256').update(String(s == null ? '' : s), 'utf8').digest('hex');
+        if(c.phase === 'result'){
+            return [
+                'XCALL', 'RESULT', c.call_id, String(c.snapshot_block), c.network || '',
+                c.target_chain, String(c.result_status || ''),
+                sha(c.return_payload_b64), String(c.effective_time)
+            ].join('|');
+        }
+        return [
+            'XCALL', 'DISPATCH', c.call_id, String(c.snapshot_block), c.network || '',
+            c.source_chain, String(c.source_action_index), String(c.source_contract_index),
+            c.target_chain, String(c.target_contract_index),
+            c.method, sha(c.params_json),
+            String(c.gas_limit), String(c.cross_hops), String(c.effective_time)
+        ].join('|');
+    }
+
     _quorumVerified(canonical, sigs, pubkeys){
         let qualified = new Set((pubkeys || []).map(p => String(p).toLowerCase()));
         if(qualified.size === 0) return false;
@@ -687,16 +787,25 @@ class StateAnchorPublisher {
         return valid >= quorum;
     }
 
-    async _backfillBatch(batchSeq, matchIds, txid){
+    async _backfillBatch(batchSeq, matchIds, txid, callIds){
         for(let m of matchIds){
             await this.db.doQuery(
                 'UPDATE cross_chain_matches SET batch_seq = ?, archived_status = ?, anchor_txid = COALESCE(?, anchor_txid) WHERE match_id = ?',
                 [batchSeq, m.status, txid, m.match_id]);
         }
+        for(let c of (callIds || [])){
+            await this.db.doQuery(
+                'UPDATE cross_chain_calls SET batch_seq = ?, archived_status = ?, anchor_txid = COALESCE(?, anchor_txid) WHERE call_id = ? AND phase = ?',
+                [batchSeq, c.status, txid, c.call_id, c.phase]);
+        }
     }
 
     async _getNextBatchSeq(){
-        let r = await this.db.doQuery('SELECT COALESCE(MAX(batch_seq), -1) + 1 AS next_seq FROM cross_chain_matches');
+        let r = await this.db.doQuery(
+            'SELECT COALESCE(GREATEST(' +
+            '  COALESCE((SELECT MAX(batch_seq) FROM cross_chain_matches), -1), ' +
+            '  COALESCE((SELECT MAX(batch_seq) FROM cross_chain_calls), -1)' +
+            '), -1) + 1 AS next_seq');
         return (r && r.length > 0) ? Number(r[0].next_seq) : 0;
     }
 

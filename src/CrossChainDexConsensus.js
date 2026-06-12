@@ -59,14 +59,29 @@ class CrossChainDexConsensus extends EventEmitter {
     // engine: the CrossChainDexEngine — used for _canonicalMatch (the signable
     // payload, byte-identical to the indexer verifier), validateProposedMatch
     // (independent re-derivation), and _persistCapabilitySnapshot (leader path).
-    constructor(engine){
+    //
+    // opts (optional) lets a second engine reuse this consensus over its own item
+    // type without sharing gossip traffic with DEX match rounds. The engine
+    // contract is unchanged (duck-typed _canonicalMatch / validateProposedMatch /
+    // _persistCapabilitySnapshot; rows carry snapshot_block + the id field):
+    //   opts.messageTypes — {PROPOSE, PREPARE, COMMIT, VIEW_CHANGE, NEW_VIEW}
+    //   opts.controlTags  — {vc, nv} signed-control payload tags
+    //   opts.idField      — row field that must equal the round id (default 'match_id')
+    constructor(engine, opts){
         super();
+        opts = opts || {};
         this.engine       = engine;
         this.hub          = engine.hub;
         this.peerManager  = engine.peerManager;
         this.identity     = engine.identity;
         this.capSnapshot  = engine.capSnapshot;
         this.config       = (engine.hub && engine.hub.p2pConfig) || {};
+        this.types        = opts.messageTypes || {
+            PROPOSE: XDEX_MATCH_PROPOSE, PREPARE: XDEX_MATCH_PREPARE, COMMIT: XDEX_MATCH_COMMIT,
+            VIEW_CHANGE: XDEX_MATCH_VIEW_CHANGE, NEW_VIEW: XDEX_MATCH_NEW_VIEW
+        };
+        this.controlTags  = opts.controlTags || { vc: 'XDEXVC', nv: 'XDEXNV' };
+        this.idField      = opts.idField || 'match_id';
 
         // Per-match round state: Map<match_id, pending>
         this.pending = new Map();
@@ -229,7 +244,7 @@ class CrossChainDexConsensus extends EventEmitter {
         pending.signatures.set(pending.myPubkey, mySig);
         pending.prepares.add(pending.myPubkey);
         if(this.peerManager){
-            this.peerManager.broadcast(XDEX_MATCH_PROPOSE, {
+            this.peerManager.broadcast(this.types.PROPOSE, {
                 matchId: pending.matchId, view: pending.view, row: pending.row,
                 sig_pubkey: pending.myPubkey, sig: mySig
             });
@@ -239,11 +254,11 @@ class CrossChainDexConsensus extends EventEmitter {
     _handleMessage(envelope){
         if(!envelope || !envelope.data) return;
         switch(envelope.type){
-            case XDEX_MATCH_PROPOSE:     this._handlePropose(envelope).catch(e => console.error('CrossChainDexConsensus: PROPOSE error: ' + (e && e.message))); break;
-            case XDEX_MATCH_PREPARE:     this._handlePrepare(envelope);    break;
-            case XDEX_MATCH_COMMIT:      this._handleCommit(envelope);     break;
-            case XDEX_MATCH_VIEW_CHANGE: this._handleViewChange(envelope); break;
-            case XDEX_MATCH_NEW_VIEW:    this._handleNewView(envelope);    break;
+            case this.types.PROPOSE:     this._handlePropose(envelope).catch(e => console.error('CrossChainDexConsensus: PROPOSE error: ' + (e && e.message))); break;
+            case this.types.PREPARE:     this._handlePrepare(envelope);    break;
+            case this.types.COMMIT:      this._handleCommit(envelope);     break;
+            case this.types.VIEW_CHANGE: this._handleViewChange(envelope); break;
+            case this.types.NEW_VIEW:    this._handleNewView(envelope);    break;
         }
     }
 
@@ -263,22 +278,41 @@ class CrossChainDexConsensus extends EventEmitter {
         if(senderPubkey !== this._leaderFor(rid, pending.validators, view)) return;
         if(!pending.validators.some(v => v.pubkey === senderPubkey)) return;
 
-        // The proposed row must hash to this round's id and rebuild OUR canonical.
+        // The proposed row must hash to this round's id.
         let row = d.row;
-        if(!row || String(row.match_id).toLowerCase() !== rid) return;
+        if(!row || String(row[this.idField]).toLowerCase() !== rid) return;
         let canonical = this.engine._canonicalMatch(row);
-        if(canonical !== pending.canonical) return;                        // not the match we derived
 
-        // Verify the leader's signature over the canonical.
+        // Verify the leader's signature over THEIR canonical.
         if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), senderPubkey)) return;
 
-        // INDEPENDENT confirmation: re-derive + validate against our own order book.
+        // INDEPENDENT confirmation: re-derive + validate against our own view of
+        // the underlying data. This — not byte-equality with our locally pre-built
+        // row — is the gate against a Byzantine leader.
         let ok = false;
         try { ok = await this.engine.validateProposedMatch(row); }
         catch(e){ ok = false; }
         if(!ok){
             console.warn('CrossChainDexConsensus: PROPOSE ' + rid.substring(0,16) + '... failed local validation — not signing');
             return;
+        }
+
+        let adopted = false;
+        if(canonical !== pending.canonical){
+            // Leader-choice fields (effective_time = the leader's clock second,
+            // snapshot_block = the leader's chain-tip view) legitimately differ
+            // from the row WE pre-built at discovery, so byte-equality here
+            // deadlocked every round whose hubs polled in different seconds.
+            // The leader's row passed independent validation above — adopt it as
+            // the round canonical, unless we already committed to another.
+            if(pending._commitSent) return;
+            pending.row       = row;
+            pending.canonical = canonical;
+            pending.signatures.clear();   // any collected sigs were over the old canonical
+            pending.prepares.clear();
+            pending.commits.clear();
+            adopted = true;
+            console.log('CrossChainDexConsensus: adopted leader canonical for ' + rid.substring(0,16) + '...');
         }
 
         if(view > pending.view) pending.view = view;
@@ -291,12 +325,17 @@ class CrossChainDexConsensus extends EventEmitter {
             pending.signatures.set(pending.myPubkey, mySig);
             pending.prepares.add(pending.myPubkey);
             if(this.peerManager){
-                this.peerManager.broadcast(XDEX_MATCH_PREPARE, {
+                this.peerManager.broadcast(this.types.PREPARE, {
                     matchId: rid, view: pending.view, sig_pubkey: pending.myPubkey, sig: mySig
                 });
             }
         }
         this._checkPrepareQuorum(rid);
+
+        // PREPARE/COMMIT votes that raced ahead of this PROPOSE failed signature
+        // verification against our stale canonical and were buffered — replay them
+        // now that the round canonical matches what they signed.
+        if(adopted) this._drainEarlyMessages(rid);
     }
 
     _handlePrepare(envelope){
@@ -308,11 +347,15 @@ class CrossChainDexConsensus extends EventEmitter {
 
         let senderPubkey = String(d.sig_pubkey || '').toLowerCase();
         if(!pending.validators.some(v => v.pubkey === senderPubkey)) return;
-        if(d.sig && ValidatorIdentity.verify(pending.canonical, String(d.sig), senderPubkey)){
-            pending.signatures.set(senderPubkey, String(d.sig));
-        } else if(d.sig){
-            return;                                                        // bad sig — drop the vote
+        if(!d.sig || !ValidatorIdentity.verify(pending.canonical, String(d.sig), senderPubkey)){
+            // A vote only counts with a verifying signature over the round
+            // canonical. A mismatch usually means this vote raced ahead of the
+            // leader's PROPOSE (we still hold our pre-built canonical) — buffer
+            // it for replay after adoption rather than losing it.
+            this._bufferEarlyMessage(rid, envelope);
+            return;
         }
+        pending.signatures.set(senderPubkey, String(d.sig));
         pending.prepares.add(senderPubkey);
         this._checkPrepareQuorum(rid);
     }
@@ -325,7 +368,7 @@ class CrossChainDexConsensus extends EventEmitter {
         pending.commits.add(pending.myPubkey);
         let mySig = pending.signatures.get(pending.myPubkey) || null;
         if(this.peerManager){
-            this.peerManager.broadcast(XDEX_MATCH_COMMIT, {
+            this.peerManager.broadcast(this.types.COMMIT, {
                 matchId: rid, view: pending.view, sig_pubkey: pending.myPubkey, sig: mySig
             });
         }
@@ -341,9 +384,15 @@ class CrossChainDexConsensus extends EventEmitter {
 
         let senderPubkey = String(d.sig_pubkey || '').toLowerCase();
         if(!pending.validators.some(v => v.pubkey === senderPubkey)) return;
-        if(d.sig && ValidatorIdentity.verify(pending.canonical, String(d.sig), senderPubkey)){
-            pending.signatures.set(senderPubkey, String(d.sig));
+        if(!d.sig || !ValidatorIdentity.verify(pending.canonical, String(d.sig), senderPubkey)){
+            // Unverified commits must NOT count toward quorum: counting them let a
+            // node whose canonical diverged "finalize" with zero collected
+            // signatures and persist an unverifiable mirror row. Buffer for
+            // replay in case the leader's PROPOSE (and adoption) is still racing.
+            this._bufferEarlyMessage(rid, envelope);
+            return;
         }
+        pending.signatures.set(senderPubkey, String(d.sig));
         pending.commits.add(senderPubkey);
         this._checkCommitQuorum(rid);
     }
@@ -392,8 +441,8 @@ class CrossChainDexConsensus extends EventEmitter {
         let view = pending.view;
         if(!pending.viewChanges.has(view)) pending.viewChanges.set(view, new Set());
         pending.viewChanges.get(view).add(pending.myPubkey);
-        if(this.peerManager) this.peerManager.broadcast(XDEX_MATCH_VIEW_CHANGE, {
-            matchId: rid, view: view, sig_pubkey: pending.myPubkey, sig: this._signControl('XDEXVC', rid, view)
+        if(this.peerManager) this.peerManager.broadcast(this.types.VIEW_CHANGE, {
+            matchId: rid, view: view, sig_pubkey: pending.myPubkey, sig: this._signControl(this.controlTags.vc, rid, view)
         });
         if(pending.timer) clearTimeout(pending.timer);
         pending.timer = this._armTimer(rid);
@@ -410,7 +459,7 @@ class CrossChainDexConsensus extends EventEmitter {
         if(!Number.isFinite(view)) return;
         let voter = String(d.sig_pubkey || '').toLowerCase();
         if(!pending.validators.some(v => v.pubkey === voter)) return;     // not a validator
-        if(!this._verifyControl('XDEXVC', rid, view, voter, d.sig)) return; // unauthenticated vote
+        if(!this._verifyControl(this.controlTags.vc, rid, view, voter, d.sig)) return; // unauthenticated vote
         if(!pending.viewChanges.has(view)) pending.viewChanges.set(view, new Set());
         pending.viewChanges.get(view).add(voter);
         this._maybeAssumeLeadership(rid, view);
@@ -426,8 +475,8 @@ class CrossChainDexConsensus extends EventEmitter {
         if(view > pending.view) pending.view = view;
         let newLeader = this._leaderFor(rid, pending.validators, view);
         if(newLeader === pending.myPubkey){
-            if(this.peerManager) this.peerManager.broadcast(XDEX_MATCH_NEW_VIEW, {
-                matchId: rid, view: view, sig_pubkey: pending.myPubkey, sig: this._signControl('XDEXNV', rid, view)
+            if(this.peerManager) this.peerManager.broadcast(this.types.NEW_VIEW, {
+                matchId: rid, view: view, sig_pubkey: pending.myPubkey, sig: this._signControl(this.controlTags.nv, rid, view)
             });
             this._broadcastPropose(pending).catch(e => console.warn('CrossChainDexConsensus: re-propose failed: ' + (e && e.message)));
         }
@@ -450,7 +499,7 @@ class CrossChainDexConsensus extends EventEmitter {
             console.warn('CrossChainDexConsensus: ignoring NEW_VIEW for view ' + view + ' from non-leader');
             return;
         }
-        if(!this._verifyControl('XDEXNV', rid, view, announcer, d.sig)) return;
+        if(!this._verifyControl(this.controlTags.nv, rid, view, announcer, d.sig)) return;
         pending.view = view;
     }
 }

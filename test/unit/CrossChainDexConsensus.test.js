@@ -151,8 +151,15 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         expect(bus.nodes.filter(nd => !nd.crashed && nd.finalized.length === 1).length).to.equal(3);
     });
 
-    it('guard: a tampered-row PROPOSE (wrong canonical) is not signed', async function () {
-        let bus = buildMesh(4);
+    it('guard: a tampered-row PROPOSE (fails independent validation) is not signed', async function () {
+        // Followers no longer require byte-equality with their locally pre-built
+        // canonical (leader-choice fields legitimately differ) — independent
+        // validation is the gate. Model an engine that, like the real ones,
+        // verifies business fields against its own data.
+        let bus = buildMesh(4, { validate: () => true });
+        bus.nodes.forEach(nd => {
+            nd.consensus.engine.validateProposedMatch = async (row) => String(row.a_amount) === '1000';
+        });
         await startAll(bus);
         let mid = 'ff'.repeat(32), row = sampleRow(mid);
         let victim = bus.nodes[0];
@@ -166,6 +173,61 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
             data: { matchId: mid, view: 0, row: badRow, sig_pubkey: leaderPk, sig: badSig } });
         await sleep(30);
         expect(victim.consensus.pending.get(mid).signatures.size).to.equal(before);
+        expect(victim.consensus.pending.get(mid).canonical).to.equal(canonicalMatch(row)); // no adoption either
+    });
+
+    it('followers ADOPT a validated leader canonical whose leader-choice fields differ (regression: per-hub effective_time deadlock)', async function () {
+        // Every hub pre-builds its row at discovery with its OWN clock second and
+        // chain-tip view. Byte-equality used to silently drop the leader's
+        // PROPOSE, deadlocking the round (live finding: 3-hub XCALL relay,
+        // 2026-06-11). Each node here proposes a row with a different
+        // effective_time; the round must still finalize on the LEADER's
+        // canonical with quorum verifying sigs on every node.
+        let bus = buildMesh(4);
+        await startAll(bus);
+        let mid = 'a1'.repeat(32);
+        let snap = { validators: validatorsOf(bus), count: 4 };
+        for (let k = 0; k < bus.nodes.length; k++) {
+            let row = Object.assign(sampleRow(mid), { effective_time: 1700000000 + k });
+            await bus.nodes[k].consensus.propose(mid, { row, snapshot: snap });
+        }
+        await sleep(200);
+
+        expect(bus.nodes.every(nd => nd.finalized.length === 1),
+               'every node finalizes').to.be.true;
+        // All nodes converged on ONE canonical — the leader's — and every
+        // emitted signature verifies against it (no empty-signature rows).
+        let leaderPk = leaderPubkey(bus, mid, 0);
+        let leaderIdx = bus.nodes.findIndex(nd => nd.pubkey === leaderPk);
+        let leaderCanon = canonicalMatch(Object.assign(sampleRow(mid), { effective_time: 1700000000 + leaderIdx }));
+        for (let nd of bus.nodes) {
+            let ev = nd.finalized[0];
+            expect(canonicalMatch(ev.row)).to.equal(leaderCanon);
+            expect(ev.signatures.length, 'collected sigs on node ' + nd.i).to.be.at.least(3);
+            expect(ev.signatures.every(s => ValidatorIdentity.verify(leaderCanon, s.sig, s.pubkey))).to.be.true;
+        }
+    });
+
+    it('guard: COMMIT votes without a verifying signature never count toward quorum', async function () {
+        // Counting unverified commits let a node whose canonical diverged
+        // "finalize" with zero collected signatures (live finding: hub1 wrote a
+        // 0-sig mirror row). Feed a victim commits with garbage sigs — the round
+        // must NOT finalize.
+        let bus = buildMesh(4, { drop: () => true });   // isolate: no real gossip
+        await startAll(bus);
+        let mid = 'b2'.repeat(32), row = sampleRow(mid);
+        let victim = bus.nodes[0];
+        await victim.consensus.propose(mid, { row, snapshot: { validators: validatorsOf(bus), count: 4 } });
+        for (let nd of bus.nodes) {
+            if (nd === victim) continue;
+            victim.consensus._handleMessage({ type: 'XDEX_MATCH_COMMIT', sender: nd.pubkey,
+                data: { matchId: mid, view: 0, sig_pubkey: nd.pubkey, sig: 'de'.repeat(64) } });
+            victim.consensus._handleMessage({ type: 'XDEX_MATCH_COMMIT', sender: nd.pubkey,
+                data: { matchId: mid, view: 0, sig_pubkey: nd.pubkey, sig: null } });
+        }
+        await sleep(50);
+        expect(victim.finalized.length).to.equal(0);
+        expect(victim.consensus.pending.get(mid).commits.size).to.equal(0);
     });
 
     it('guard: NEW_VIEW from a non-leader, and view-rewind, are ignored', async function () {
