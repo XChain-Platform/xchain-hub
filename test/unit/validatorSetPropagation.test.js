@@ -68,6 +68,33 @@ describe('XChainHub — validator-set propagation (F1)', function () {
         }
     });
 
+    it('rotateValidator routes through the same propagation', async function () {
+        // The addr-existence SELECT must return a current active row.
+        hub.db.doQuery = sinon.stub().resolves([{ signing_pubkey: 'cc'.repeat(32) }]);
+        await hub.rotateValidator('ws://v1:10001', PUBKEY);
+
+        for (let [name, eng] of Object.entries(engines)) {
+            expect(eng.setValidatorSet.calledOnceWith(SET), name + '.setValidatorSet').to.be.true;
+        }
+    });
+
+    it('rotateValidator on an unknown addr throws (no active row) and does NOT propagate', async function () {
+        // Default stub resolves [] → addr-check finds no active validator.
+        let threw = false;
+        try { await hub.rotateValidator('ws://unknown:10001', PUBKEY); }
+        catch (e) { threw = true; expect(e.message).to.include('No active validator'); }
+        expect(threw, 'should throw').to.be.true;
+        expect(engines.consensus.setValidatorSet.called).to.be.false;
+    });
+
+    it('deregisterValidator routes through the same propagation', async function () {
+        await hub.deregisterValidator({ signingPubkey: PUBKEY });
+
+        for (let [name, eng] of Object.entries(engines)) {
+            expect(eng.setValidatorSet.calledOnceWith(SET), name + '.setValidatorSet').to.be.true;
+        }
+    });
+
     it('skips engines that are not running (standalone mode)', async function () {
         hub.oracleConsensus = null;
         hub.crossChain      = null;

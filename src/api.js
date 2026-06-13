@@ -77,7 +77,7 @@ const TELEMETRY_ADMIN_KEY      = process.env.TELEMETRY_ADMIN_KEY || '';
 
 const ALLOWED_CHAINS = new Set(['BTC', 'LTC', 'DOGE']);
 const WRITE_METHODS  = new Set([
-    'updateconfig', 'registervalidator', 'syncvalidators',
+    'updateconfig', 'registervalidator', 'rotatevalidator', 'deregistervalidator', 'syncvalidators',
     'propose', 'vote', 'requestattestation', 'reportreorg', 'initiateswap',
     'pushchaintip', 'pushpriceround', 'pushoracleprice', 'pushpricereorg',
     'anchorflush'
@@ -466,6 +466,26 @@ async function startApi(){
                 return {status: "success"};
             } catch (err) {
                 return {error: err.message || "there was an error trying to register a validator"};
+            }
+        },
+
+        // Rotate the signing key of the validator at `addr` to a new pubkey
+        async rotatevalidator({addr, new_signing_pubkey}){
+            try {
+                await hub.rotateValidator(addr, new_signing_pubkey);
+                return {status: "success"};
+            } catch (err) {
+                return {error: err.message || "there was an error trying to rotate a validator"};
+            }
+        },
+
+        // Deregister a validator by signing_pubkey OR addr (mark removed)
+        async deregistervalidator({signing_pubkey, addr}){
+            try {
+                await hub.deregisterValidator({signingPubkey: signing_pubkey, addr});
+                return {status: "success"};
+            } catch (err) {
+                return {error: err.message || "there was an error trying to deregister a validator"};
             }
         },
 

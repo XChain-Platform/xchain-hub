@@ -108,6 +108,14 @@ describe('Integration: JSON-RPC API (SC-8.x)', function () {
                 try { await hub.registerValidator(signing_pubkey, addr); return { status: 'success' }; }
                 catch (err) { return { error: err.message }; }
             },
+            async rotatevalidator({ addr, new_signing_pubkey }) {
+                try { await hub.rotateValidator(addr, new_signing_pubkey); return { status: 'success' }; }
+                catch (err) { return { error: err.message }; }
+            },
+            async deregistervalidator({ signing_pubkey, addr }) {
+                try { await hub.deregisterValidator({ signingPubkey: signing_pubkey, addr }); return { status: 'success' }; }
+                catch (err) { return { error: err.message }; }
+            },
             async getvalidators() {
                 try { return await hub.getValidators(); }
                 catch (err) { return { error: 'error fetching validators' }; }
@@ -258,6 +266,61 @@ describe('Integration: JSON-RPC API (SC-8.x)', function () {
             let res = await callRpc('getvalidatorstatus', { signing_pubkey: pubkey });
             expect(res.result.validator).to.exist;
             expect(res.result.validator.signing_pubkey).to.equal(pubkey);
+        });
+
+        // Addr-keyed register: registering a second key for an existing addr
+        // retires the first, leaving exactly one active row per addr (the F8
+        // duplicate-active-row fix).
+        it('register of a second pubkey for an existing addr retires the first', async function () {
+            let addr = 'ws://rot:10001';
+            let pkA = 'a1'.repeat(32), pkB = 'b2'.repeat(32);
+            await callRpc('registervalidator', { signing_pubkey: pkA, addr });
+            await callRpc('registervalidator', { signing_pubkey: pkB, addr });
+
+            let active = (await callRpc('getvalidators')).result;
+            expect(active).to.be.an('array').with.lengthOf(1);
+            expect(active[0].signing_pubkey).to.equal(pkB);
+            // pkA persists as a removed row (getValidators returns active only)
+            let rows = await testDb.getDb().doQuery(
+                "SELECT signing_pubkey, status FROM validators WHERE addr = ? ORDER BY signing_pubkey", [addr]);
+            let byPk = Object.fromEntries(rows.map(r => [r.signing_pubkey, r.status]));
+            expect(byPk[pkA]).to.equal('removed');
+            expect(byPk[pkB]).to.equal('active');
+        });
+
+        it('rotatevalidator replaces the addr active pubkey; old key removed', async function () {
+            let addr = 'ws://rot2:10001';
+            let pkOld = 'c3'.repeat(32), pkNew = 'd4'.repeat(32);
+            await callRpc('registervalidator', { signing_pubkey: pkOld, addr });
+
+            let rotRes = await callRpc('rotatevalidator', { addr, new_signing_pubkey: pkNew });
+            expect(rotRes.result.status).to.equal('success');
+
+            let active = (await callRpc('getvalidators')).result;
+            expect(active).to.be.an('array').with.lengthOf(1);
+            expect(active[0].signing_pubkey).to.equal(pkNew);
+            expect(active[0].addr).to.equal(addr);
+        });
+
+        it('rotatevalidator on an unknown addr errors', async function () {
+            let res = await callRpc('rotatevalidator', {
+                addr: 'ws://nope:10001', new_signing_pubkey: 'e5'.repeat(32) });
+            expect(res.result.error).to.include('No active validator');
+        });
+
+        it('deregistervalidator by pubkey marks the validator removed', async function () {
+            let pubkey = 'f6'.repeat(32);
+            await callRpc('registervalidator', { signing_pubkey: pubkey, addr: 'ws://dr:10001' });
+            let dRes = await callRpc('deregistervalidator', { signing_pubkey: pubkey });
+            expect(dRes.result.status).to.equal('success');
+            expect((await callRpc('getvalidators')).result).to.be.an('array').with.lengthOf(0);
+        });
+
+        it('deregistervalidator by addr marks the validator removed', async function () {
+            let addr = 'ws://dr2:10001';
+            await callRpc('registervalidator', { signing_pubkey: '17'.repeat(32), addr });
+            await callRpc('deregistervalidator', { addr });
+            expect((await callRpc('getvalidators')).result).to.be.an('array').with.lengthOf(0);
         });
     });
 

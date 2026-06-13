@@ -559,6 +559,18 @@ class XChainHub {
         if(!addr)
             throw new Error('Validator addr is required');
 
+        // Addr-keyed: each addr has exactly ONE active pubkey. Retire any other
+        // active row for this addr (a different signing key) BEFORE the upsert,
+        // so registering a new key for an existing addr replaces the old one
+        // (the rotation path). Without this, _loadValidatorPubkeys' Map<addr,
+        // pubkey> resolves a two-active-rows-per-addr collision non-
+        // deterministically by signing_pubkey sort order — the F8-drill bug.
+        await this.db.doQuery(
+            "UPDATE validators SET status = 'removed', updated_at = NOW() " +
+            "WHERE addr = ? AND signing_pubkey <> ? AND status = 'active'",
+            [addr, signingPubkey]
+        );
+
         await this.db.doQuery(
             `INSERT INTO validators (signing_pubkey, addr, status)
              VALUES (?, ?, 'active')
@@ -576,6 +588,67 @@ class XChainHub {
         await this._propagateValidatorSet();
 
         console.log('Validator registered: ' + addr + ' (pubkey: ' + signingPubkey.substring(0, 16) + '...)');
+        return true;
+    }
+
+    // Rotate the signing key of the validator at `addr` to `newSigningPubkey`:
+    // retire the addr's current active key, activate the new one, reload +
+    // propagate. The on-chain capability layer follows key rotation
+    // automatically (DELEGATE v0/v2 → effective set); this is the manual
+    // transport-registry equivalent until Option A makes transport auth
+    // chain-following. Rejects an addr with no current active validator (use
+    // registerValidator for a fresh addr).
+    async rotateValidator(addr, newSigningPubkey){
+        if(!newSigningPubkey || !/^[0-9a-fA-F]{64}$/.test(newSigningPubkey))
+            throw new Error('Invalid signing pubkey (must be 64 hex chars)');
+        if(!addr)
+            throw new Error('Validator addr is required');
+
+        let current = await this.db.doQuery(
+            "SELECT signing_pubkey FROM validators WHERE addr = ? AND status = 'active'", [addr]);
+        if(!current || current.length === 0)
+            throw new Error('No active validator at addr ' + addr + ' to rotate');
+
+        await this.db.doQuery(
+            "UPDATE validators SET status = 'removed', updated_at = NOW() " +
+            "WHERE addr = ? AND signing_pubkey <> ? AND status = 'active'",
+            [addr, newSigningPubkey]);
+        await this.db.doQuery(
+            `INSERT INTO validators (signing_pubkey, addr, status)
+             VALUES (?, ?, 'active')
+             ON DUPLICATE KEY UPDATE addr = ?, status = 'active', updated_at = NOW()`,
+            [newSigningPubkey, addr, addr]);
+
+        await this._loadValidatorPubkeys();
+        await this._propagateValidatorSet();
+
+        console.log('Validator rotated at ' + addr + ' → ' + newSigningPubkey.substring(0, 16) + '...');
+        return true;
+    }
+
+    // Deregister a validator by signing_pubkey OR addr: mark active row(s)
+    // status='removed' and reload + propagate. The first-class replacement for
+    // the raw `UPDATE ... SET status='removed'` SQL the F8 drill needed.
+    async deregisterValidator({ signingPubkey, addr }){
+        if(!signingPubkey && !addr)
+            throw new Error('signing_pubkey or addr is required');
+        let where, args;
+        if(signingPubkey){
+            if(!/^[0-9a-fA-F]{64}$/.test(signingPubkey))
+                throw new Error('Invalid signing pubkey (must be 64 hex chars)');
+            where = 'signing_pubkey = ?'; args = [signingPubkey];
+        } else {
+            where = 'addr = ?'; args = [addr];
+        }
+        let res = await this.db.doQuery(
+            "UPDATE validators SET status = 'removed', updated_at = NOW() WHERE " + where + " AND status = 'active'",
+            args);
+        await this._loadValidatorPubkeys();
+        await this._propagateValidatorSet();
+
+        let n = (res && res.affectedRows != null) ? res.affectedRows : '?';
+        console.log('Validator deregistered (' +
+            (signingPubkey ? 'pubkey ' + signingPubkey.substring(0, 16) + '...' : 'addr ' + addr) + '), rows=' + n);
         return true;
     }
 
