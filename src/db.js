@@ -185,6 +185,15 @@ class Database {
             '(validator_pubkey, round_number, reward_type)',
             ['validator_pubkey', 'round_number', 'reward_type']
         );
+        // Plain (non-unique) indexes declared in a table's SQL source AFTER the
+        // table first shipped. alterTableForDrift back-fills missing columns but
+        // deliberately never touches indexes, so an index added to the source
+        // later never reaches a table that already exists on a deployed node.
+        // idx_batch_seq is the case in point: the batch_seq column was
+        // drift-reconciled onto prod validator_rewards during the ANCHOR rollout,
+        // but its index had to be added by hand on every box — this folds that
+        // hand-step into the code-side self-heal.
+        await this._migrateIndex('validator_rewards', 'idx_batch_seq', '(batch_seq)');
     }
 
     // Add a UNIQUE KEY to a table, removing duplicate rows first
@@ -212,6 +221,30 @@ class Database {
             // Add the unique key
             await db.query('ALTER TABLE ' + table + ' ADD UNIQUE KEY ' + indexName + ' ' + indexColumns);
             console.log('Migration: added UNIQUE KEY ' + indexName + ' on ' + table);
+        } catch(e){
+            console.error('Migration error on ' + table + ':', e);
+        } finally {
+            await db.release();
+        }
+    }
+
+    // Add a plain (non-unique) INDEX to a table if it is missing. Mirrors
+    // _migrateUniqueKey without the duplicate-removal step — a non-unique index
+    // enforces nothing, so there is nothing to dedup before the ALTER. The
+    // existence check makes it an idempotent no-op once the index is present.
+    async _migrateIndex(table, indexName, indexColumns){
+        let db = await this.getConnection();
+        try {
+            // Check if the index already exists — skip the ALTER if so
+            let existing = await db.query(
+                "SELECT COUNT(*) AS c FROM information_schema.statistics " +
+                "WHERE table_schema = ? AND table_name = ? AND index_name = ?",
+                [this.dbName, table, indexName]
+            );
+            if(existing[0] && Number(existing[0].c) > 0) return;
+
+            await db.query('ALTER TABLE ' + table + ' ADD INDEX ' + indexName + ' ' + indexColumns);
+            console.log('Migration: added INDEX ' + indexName + ' on ' + table);
         } catch(e){
             console.error('Migration error on ' + table + ':', e);
         } finally {

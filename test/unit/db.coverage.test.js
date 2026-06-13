@@ -268,9 +268,48 @@ describe('Database — extended coverage', function () {
         it('runMigrations migrates both oracle_submissions and validator_rewards', async function () {
             const { db } = makeDb();
             const mig = sinon.stub(db, '_migrateUniqueKey').resolves();
+            const idx = sinon.stub(db, '_migrateIndex').resolves();
             await db.runMigrations();
             expect(mig.calledWith('oracle_submissions', 'uq_submission')).to.be.true;
             expect(mig.calledWith('validator_rewards', 'uq_reward')).to.be.true;
+            expect(idx.calledWith('validator_rewards', 'idx_batch_seq', '(batch_seq)')).to.be.true;
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // _migrateIndex()
+    // -----------------------------------------------------------------
+
+    describe('_migrateIndex()', function () {
+        it('skips the ALTER when the index already exists', async function () {
+            const { db, mockConn } = makeDb();
+            mockConn.query.resolves([{ c: 1 }]); // index already present
+            await db._migrateIndex('validator_rewards', 'idx_batch_seq', '(batch_seq)');
+            // only the existence SELECT runs — no ALTER
+            expect(mockConn.query.callCount).to.equal(1);
+            expect(mockConn.release.called).to.be.true;
+        });
+
+        it('adds the index with ADD INDEX (no dedup step) when absent', async function () {
+            const { db, mockConn } = makeDb();
+            mockConn.query
+                .onCall(0).resolves([{ c: 0 }]) // not present
+                .onCall(1).resolves([]);        // ALTER ADD INDEX
+            await db._migrateIndex('validator_rewards', 'idx_batch_seq', '(batch_seq)');
+            // exactly two queries: the existence check + the ALTER (no DELETE dedup)
+            expect(mockConn.query.callCount).to.equal(2);
+            const add = mockConn.query.getCall(1).args[0];
+            expect(add).to.include('ALTER TABLE validator_rewards ADD INDEX idx_batch_seq (batch_seq)');
+            expect(add).to.not.include('UNIQUE');
+            expect(console.log.calledWithMatch(/added INDEX idx_batch_seq on validator_rewards/)).to.be.true;
+        });
+
+        it('catches and logs a migration error, still releasing the connection', async function () {
+            const { db, mockConn } = makeDb();
+            mockConn.query.onCall(0).resolves([{ c: 0 }]).onCall(1).rejects(new Error('alter failed'));
+            await db._migrateIndex('validator_rewards', 'idx_batch_seq', '(batch_seq)'); // must not throw
+            expect(console.error.calledWithMatch(/Migration error on validator_rewards/)).to.be.true;
+            expect(mockConn.release.called).to.be.true;
         });
     });
 
