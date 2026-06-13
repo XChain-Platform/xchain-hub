@@ -425,6 +425,22 @@ class StateAnchorPublisher {
             rewardRows.push({ row: r, source: source });
         }
 
+        // After source resolution, a round with no matches, no calls, and no
+        // RESOLVABLE rewards has nothing to archive. The raw empty-check above
+        // counts unresolvable rewards as pending, so without this an unstaked
+        // single-validator hub (its own anchor-reward pubkey resolves to no
+        // stake source) re-publishes an empty 0/0/0 archive to DOGE every cycle
+        // — a live prod fee-burn finding. The unresolvable rows stay pending
+        // (batch_seq NULL) for a later batch that can resolve them; recording is
+        // deliberately unconditional (every hub holds identical rows for the
+        // federation re-derivation invariant), so we suppress the empty PUBLISH,
+        // not the record. Real federations are unaffected: a staked publisher's
+        // rewards resolve, so rewardRows is non-empty whenever rewards are.
+        if(matches.length === 0 && calls.length === 0 && rewardRows.length === 0){
+            this._pendingMatches = 0;
+            return 'none';
+        }
+
         let archive  = await this._buildArchive(network, batchSeq, matches, cp.snapshot_block, calls, rewardRows);
         let json     = archive.json;
         let crc      = this._crc32Hex(json);

@@ -509,6 +509,22 @@ describe('StateAnchorPublisher', function () {
         expect(nd.db.rewardRows[0].batch_seq).to.equal(null);          // stays pending for a later batch
     });
 
+    it('no matches/calls + only unresolvable rewards publishes NOTHING (empty-archive DOGE-burn fix)', async function () {
+        // Live prod regression: an unstaked single-validator hub anchoring its
+        // own checkpoints records anchor rewards whose pubkey resolves to no
+        // stake source. Pre-fix the archive round counted them as pending and
+        // broadcast an empty 0/0/0 archive to DOGE every cycle. With nothing
+        // archivable after source resolution the round must publish nothing.
+        let bus = buildMesh(1, { matches: [], calls: [], rewards: [rewardRow(pkOf(0))], sourceResolver: () => null });
+        let nd = bus.nodes[0];
+        await startAll(bus);
+        await nd.pub.flush();
+        await sleep(30);
+
+        expect(nd.published.find(p => p.split('|')[1] === '1'), 'no v1 archive published').to.equal(undefined);
+        expect(nd.db.rewardRows[0].batch_seq, 'reward stays pending').to.equal(null);
+    });
+
     it('follower re-derivation rejects forged reward type / pubkey / amount / source / conflicting local row', async function () {
         let pk0 = pkOf(0), pk1 = pkOf(1);
         let bus = buildMesh(2, { matches: [], rewards: [rewardRow(pk0)] });
