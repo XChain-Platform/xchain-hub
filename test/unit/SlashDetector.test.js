@@ -142,6 +142,50 @@ describe('SlashDetector', function () {
             await sd._checkDeviations(1, subs, finalizedPrices);
             expect(hub.db.doQuery.called).to.be.false;
         });
+
+        it('aggregates multiple deviating pairs into ONE proposal per validator per round (F12)', async function () {
+            let finalizedPrices = [
+                { coinPair: 'BTC/USD',    price: '100000' },
+                { coinPair: 'LTC/USD',    price: '100' },
+                { coinPair: 'DOGE/USD',   price: '0.2' }
+            ];
+            let subs = buildSubmissions([{
+                sender: VALIDATORS_3[0].addr,
+                prices: [
+                    { coinPair: 'BTC/USD',  price: '110000' }, // 10%
+                    { coinPair: 'LTC/USD',  price: '110' },    // 10%
+                    { coinPair: 'DOGE/USD', price: '0.22' }    // 10%
+                ]
+            }]);
+
+            await sd._checkDeviations(7, subs, finalizedPrices);
+
+            // Exactly one slash_proposals INSERT for the round
+            expect(hub.db.doQuery.callCount).to.equal(1);
+            let args = hub.db.doQuery.getCall(0).args;
+            expect(args[1][1]).to.equal('price_deviation');
+            expect(args[1][2]).to.equal(7);
+            let evidence = JSON.parse(args[1][3]);
+            expect(evidence.pairCount).to.equal(3);
+            expect(evidence.pairs.map(p => p.coinPair)).to.deep.equal(['BTC/USD', 'LTC/USD', 'DOGE/USD']);
+        });
+
+        it('tracks ONE deviation entry per round regardless of deviating pair count (F12)', async function () {
+            let finalizedPrices = [
+                { coinPair: 'BTC/USD', price: '100000' },
+                { coinPair: 'LTC/USD', price: '100' }
+            ];
+            let subs = buildSubmissions([{
+                sender: VALIDATORS_3[0].addr,
+                prices: [
+                    { coinPair: 'BTC/USD', price: '110000' },
+                    { coinPair: 'LTC/USD', price: '110' }
+                ]
+            }]);
+
+            await sd._checkDeviations(7, subs, finalizedPrices);
+            expect(sd.recentDeviations.get(VALIDATORS_3[0].pubkey).length).to.equal(1);
+        });
     });
 
     // -----------------------------------------------------------------
@@ -186,6 +230,44 @@ describe('SlashDetector', function () {
             // After pruning, only 1 deviation (the new one) → no proposal
             expect(sd.recentDeviations.get(VALIDATORS_3[0].pubkey).length).to.equal(1);
             expect(hub.db.doQuery.called).to.be.false;
+        });
+
+        it('does NOT re-fire while the 24h window stays saturated (F12 latch)', function () {
+            sd.recentDeviations.set(VALIDATORS_3[0].pubkey, [
+                { round: 1, timestamp: Date.now() - 1000 },
+                { round: 2, timestamp: Date.now() - 500 }
+            ]);
+
+            sd._trackDeviation(VALIDATORS_3[0].pubkey, 3); // crossing → fires
+            expect(hub.db.doQuery.callCount).to.equal(1);
+
+            sd._trackDeviation(VALIDATORS_3[0].pubkey, 4); // still ≥3 → latched, no re-fire
+            sd._trackDeviation(VALIDATORS_3[0].pubkey, 5);
+            expect(hub.db.doQuery.callCount).to.equal(1);
+        });
+
+        it('re-arms after pruning drops the window below 3 (F12 latch)', function () {
+            sd.recentDeviations.set(VALIDATORS_3[0].pubkey, [
+                { round: 1, timestamp: Date.now() - 1000 },
+                { round: 2, timestamp: Date.now() - 500 }
+            ]);
+            sd._trackDeviation(VALIDATORS_3[0].pubkey, 3); // fires, latch set
+            expect(hub.db.doQuery.callCount).to.equal(1);
+
+            // Window ages out — replace with stale entries, next track prunes to 1
+            let over24h = Date.now() - (25 * 60 * 60 * 1000);
+            sd.recentDeviations.set(VALIDATORS_3[0].pubkey, [
+                { round: 3, timestamp: over24h },
+                { round: 4, timestamp: over24h }
+            ]);
+            sd._trackDeviation(VALIDATORS_3[0].pubkey, 10); // count 1 → latch re-arms
+            expect(hub.db.doQuery.callCount).to.equal(1);
+
+            sd.recentDeviations.get(VALIDATORS_3[0].pubkey).push(
+                { round: 11, timestamp: Date.now() }
+            );
+            sd._trackDeviation(VALIDATORS_3[0].pubkey, 12); // count 3 again → fires again
+            expect(hub.db.doQuery.callCount).to.equal(2);
         });
     });
 

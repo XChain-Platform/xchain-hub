@@ -177,12 +177,24 @@ async function startApi(){
     // Create the app
     const app = express();
 
-    // The hub sits behind Apache (and Cloudflare proxy is OFF for it), so honour
-    // X-Forwarded-For to recover the real client IP. For telemetry the IP is only
-    // used transiently to derive a coarse country/region + keyed hash and is never
-    // stored. If a future deployment exposes the hub directly, req.ip falls back to
-    // the socket address.
-    app.set('trust proxy', true);
+    // The hub sits behind Apache on the same host (Cloudflare proxy is OFF for
+    // it), so honour X-Forwarded-For to recover the real client IP — but only
+    // from a trusted proxy. `true` would trust ANY client-supplied XFF, letting
+    // callers spoof their IP past the per-IP rate limiter (express-rate-limit's
+    // ERR_ERL_PERMISSIVE_TRUST_PROXY warning). The default trusts loopback plus
+    // private-range peers: a containerized hub sees the host reverse proxy as
+    // the docker bridge IP (uniquelocal), a native hub sees it as loopback —
+    // both recover the real client IP. Exposed directly to the internet, a
+    // forged XFF is ignored (public socket address) and req.ip is the socket
+    // address. HUB_TRUST_PROXY overrides for other topologies — `false`, a hop
+    // count (e.g. `1`), or an address/CIDR list per the express docs. For
+    // telemetry the IP is only used transiently to derive a coarse
+    // country/region + keyed hash and is never stored.
+    let trustProxy = process.env.HUB_TRUST_PROXY || 'loopback, uniquelocal';
+    if (trustProxy === 'true')       trustProxy = true;
+    else if (trustProxy === 'false') trustProxy = false;
+    else if (/^\d+$/.test(trustProxy)) trustProxy = parseInt(trustProxy);
+    app.set('trust proxy', trustProxy);
 
     // Security and parsing middleware
     app.use(helmet());

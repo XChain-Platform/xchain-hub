@@ -40,6 +40,11 @@ class SlashDetector {
 
         // Track deviations in 24h window: Map<pubkey, [{ round, timestamp }]>
         this.recentDeviations = new Map();
+
+        // Latch per validator so repeated_deviation fires once per crossing
+        // of the 3-in-24h threshold, not on every deviation while the window
+        // stays saturated: Map<pubkey, bool>
+        this.repeatedDeviationFired = new Map();
     }
 
     // Check a finalized round for slashable offenses
@@ -65,7 +70,11 @@ class SlashDetector {
             finalizedMap[fp.coinPair] = parseFloat(fp.price);
         }
 
-        // Check each validator's submission against the finalized price
+        // Check each validator's submission against the finalized prices.
+        // The unique offense signal is (validator, round) — one proposal per
+        // deviating validator per round, with the deviating pairs aggregated
+        // into the evidence (one row per pair flooded the table: 34 pairs ×
+        // rounds × hubs, unbounded).
         for (let [sender, sub] of submissions) {
             if (!sub.prices || !Array.isArray(sub.prices)) continue;
 
@@ -73,6 +82,7 @@ class SlashDetector {
             let pubkey = this._resolveValidatorPubkey(sender);
             if (!pubkey) continue;
 
+            let deviatingPairs = [];
             for (let p of sub.prices) {
                 let finalPrice = finalizedMap[p.coinPair];
                 if (!finalPrice || finalPrice === 0) continue;
@@ -86,19 +96,25 @@ class SlashDetector {
                     console.warn('Slash: Validator ' + pubkey.substring(0, 16) + '... deviated ' +
                         (deviation * 100).toFixed(2) + '% on ' + p.coinPair + ' in round ' + round);
 
-                    // Record the deviation
-                    await this._recordSlashProposal(pubkey, 'price_deviation', round,
-                        JSON.stringify({
-                            coinPair: p.coinPair,
-                            submitted: submittedPrice,
-                            finalized: finalPrice,
-                            deviation: (deviation * 100).toFixed(2) + '%'
-                        })
-                    );
-
-                    // Track for repeated deviation check
-                    this._trackDeviation(pubkey, round);
+                    deviatingPairs.push({
+                        coinPair: p.coinPair,
+                        submitted: submittedPrice,
+                        finalized: finalPrice,
+                        deviation: (deviation * 100).toFixed(2) + '%'
+                    });
                 }
+            }
+
+            if (deviatingPairs.length > 0) {
+                await this._recordSlashProposal(pubkey, 'price_deviation', round,
+                    JSON.stringify({
+                        pairCount: deviatingPairs.length,
+                        pairs: deviatingPairs
+                    })
+                );
+
+                // Track once per (validator, round) for the repeated-deviation check
+                this._trackDeviation(pubkey, round);
             }
         }
     }
@@ -150,14 +166,25 @@ class SlashDetector {
 
         this.recentDeviations.set(pubkey, deviations);
 
-        // Check for 3+ deviations in 24h → repeated deviation
-        if (this.recentDeviations.get(pubkey).length >= 3) {
-            console.warn('Slash: Validator ' + pubkey.substring(0, 16) +
-                '... has 3+ price deviations in 24 hours');
+        // 3+ deviations in 24h → repeated deviation. Fire once per crossing
+        // of the threshold (latched), not on every deviation while the window
+        // stays ≥3 — the latch re-arms when pruning drops the window below 3.
+        if (deviations.length >= 3) {
+            if (!this.repeatedDeviationFired.get(pubkey)) {
+                this.repeatedDeviationFired.set(pubkey, true);
 
-            this._recordSlashProposal(pubkey, 'repeated_deviation', round,
-                JSON.stringify({ deviationsIn24h: this.recentDeviations.get(pubkey).length })
-            );
+                console.warn('Slash: Validator ' + pubkey.substring(0, 16) +
+                    '... has 3+ price deviations in 24 hours');
+
+                this._recordSlashProposal(pubkey, 'repeated_deviation', round,
+                    JSON.stringify({
+                        deviationsIn24h: deviations.length,
+                        rounds: deviations.slice(-50).map(d => d.round)
+                    })
+                );
+            }
+        } else {
+            this.repeatedDeviationFired.set(pubkey, false);
         }
     }
 

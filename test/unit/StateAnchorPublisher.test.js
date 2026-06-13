@@ -84,9 +84,9 @@ function callCanonical(c) {
 
 // In-memory hub DB for the publisher's query surface.
 function memDb() {
-    let matches = [], checkpoints = [], snapshots = [], calls = [];
+    let matches = [], checkpoints = [], snapshots = [], calls = [], rewardRows = [];
     return {
-        matches, checkpoints, snapshots, calls,
+        matches, checkpoints, snapshots, calls, rewardRows,
         async doQuery(sql, params) {
             params = params || [];
             if (sql.startsWith('SELECT sc.* FROM state_checkpoints sc JOIN')) {
@@ -104,6 +104,11 @@ function memDb() {
             if (sql.startsWith('SELECT * FROM state_checkpoints WHERE chain = ?')) {
                 return checkpoints.filter(r => r.chain === params[0] && r.network === params[1] && r.block_index === params[2]).slice(0, 1);
             }
+            if (sql.startsWith('SELECT snapshot_block FROM state_checkpoints WHERE chain = ?')) {
+                return checkpoints.filter(r => r.chain === params[0] && r.network === params[1] && r.block_index === params[2])
+                    .sort((a, b) => b.checkpoint_seq - a.checkpoint_seq)
+                    .slice(0, 1).map(r => ({ snapshot_block: r.snapshot_block }));
+            }
             if (sql.startsWith('UPDATE state_checkpoints SET anchor_txid')) {
                 let onlyIfNull = sql.includes('anchor_txid IS NULL');
                 for (let r of checkpoints)
@@ -119,9 +124,26 @@ function memDb() {
             }
             if (sql.startsWith('SELECT COALESCE(GREATEST(')) {
                 let max = -1;
-                for (let r of matches) if (r.batch_seq != null && r.batch_seq > max) max = r.batch_seq;
-                for (let r of calls)   if (r.batch_seq != null && r.batch_seq > max) max = r.batch_seq;
+                for (let r of matches)    if (r.batch_seq != null && r.batch_seq > max) max = r.batch_seq;
+                for (let r of calls)      if (r.batch_seq != null && r.batch_seq > max) max = r.batch_seq;
+                for (let r of rewardRows) if (r.batch_seq != null && r.batch_seq > max) max = r.batch_seq;
                 return [{ next_seq: max + 1 }];
+            }
+            if (sql.startsWith('SELECT * FROM validator_rewards WHERE reward_type LIKE')) {
+                return rewardRows.filter(r => /^anchor_/.test(String(r.reward_type)) && r.batch_seq == null && r.block_index != null)
+                    .sort((a, b) => String(a.reward_type).localeCompare(String(b.reward_type)) ||
+                                    a.round_number - b.round_number ||
+                                    String(a.validator_pubkey).localeCompare(String(b.validator_pubkey)))
+                    .slice(0, params[0]);
+            }
+            if (sql.startsWith('SELECT validator_pubkey, amount, block_index FROM validator_rewards')) {
+                return rewardRows.filter(r => r.reward_type === params[0] && r.round_number === params[1]).slice(0, 1);
+            }
+            if (sql.startsWith('UPDATE validator_rewards SET batch_seq')) {
+                for (let r of rewardRows)
+                    if (r.reward_type === params[1] && r.round_number === params[2] &&
+                        String(r.validator_pubkey).toLowerCase() === params[3]) r.batch_seq = params[0];
+                return [];
             }
             if (sql.startsWith('UPDATE cross_chain_matches SET batch_seq')) {
                 for (let r of matches) if (r.match_id === params[3]) {
@@ -211,6 +233,7 @@ describe('StateAnchorPublisher', function () {
                 }
                 db.calls.push(row);
             }
+            for (let r of (opts.rewards || [])) db.rewardRows.push(Object.assign({}, r));
             if (opts.mutate) opts.mutate(self, db);
 
             let hub = {
@@ -219,7 +242,16 @@ describe('StateAnchorPublisher', function () {
                 capabilitySnapshot: { async getSnapshot() { return { validators: validators.slice(0, n) }; } },
                 getPeerManager: () => peerManager,
                 getIdentity: () => identity,
-                rewardTracker: { recordAnchorReward: async (type, round, pubkey, blk) => { self.rewards.push({ type, round, pubkey, blk }); } },
+                rewardTracker: {
+                    anchorReward: '10.00000000',
+                    recordAnchorReward: async (type, round, pubkey, blk) => { self.rewards.push({ type, round, pubkey, blk }); },
+                    // Block-scoped indexer resolution — deterministic, so every
+                    // hub resolves the same source (overridable for divergence
+                    // / unresolvable-source tests).
+                    resolveSourceByPubkey: async (pubkey, blk) => (opts.sourceResolver
+                        ? opts.sourceResolver(self, pubkey, blk)
+                        : 'src_' + String(pubkey).toLowerCase().substring(0, 12))
+                },
                 _resolveBtcLatestBlock: async () => (opts.btcBlock != null ? opts.btcBlock : 100)
             };
             self.db  = db;
@@ -359,13 +391,18 @@ describe('StateAnchorPublisher', function () {
             expect(nd.db.matches[0].archived_status).to.equal('finalized');
         }
 
-        // Rewards: the v0 publisher recorded anchor_BTC @ checkpoint_seq, the
-        // archive leader anchor_archive @ batch_seq — each credited to itself.
-        expect(v0Pub.rewards.some(r => r.type === 'anchor_BTC' && r.round === 7 && r.pubkey === v0Pub.pubkey)).to.equal(true);
-        expect(leader.rewards.some(r => r.type === 'anchor_archive' && r.round === 0 && r.pubkey === leader.pubkey)).to.equal(true);
+        // Rewards: EVERY hub records both rows — the earner at publish time, the
+        // rest by mirroring the signature-verified V0_DONE / FINALIZED
+        // announcements — credited to the publisher/leader with the quorum-agreed
+        // snapshot_block, so all hubs hold identical reward rows and any of them
+        // can build/verify the archive's rewards section.
         for (let nd of bus.nodes) {
-            if (nd !== v0Pub)  expect(nd.rewards.filter(r => r.type === 'anchor_BTC').length, 'node ' + nd.i).to.equal(0);
-            if (nd !== leader) expect(nd.rewards.filter(r => r.type === 'anchor_archive').length, 'node ' + nd.i).to.equal(0);
+            let v0r = nd.rewards.filter(r => r.type === 'anchor_BTC');
+            expect(v0r.length, 'node ' + nd.i + ' anchor_BTC').to.equal(1);
+            expect(v0r[0], 'node ' + nd.i).to.deep.equal({ type: 'anchor_BTC', round: 7, pubkey: v0Pub.pubkey, blk: 100 });
+            let arr = nd.rewards.filter(r => r.type === 'anchor_archive');
+            expect(arr.length, 'node ' + nd.i + ' anchor_archive').to.equal(1);
+            expect(arr[0], 'node ' + nd.i).to.deep.equal({ type: 'anchor_archive', round: 0, pubkey: leader.pubkey, blk: 100 });
         }
     });
 
@@ -407,6 +444,101 @@ describe('StateAnchorPublisher', function () {
         expect(v1s.length, 'archive published despite two late joiners').to.equal(1);
         let v1 = v1s[0].split('|');
         expect(Number(v1[16]), 'sig count').to.be.at.least(3);                          // real quorum
+    });
+
+    // ── anchor-reward archive rail (F10) ────────────────────────────────────
+    // Anchor-publish rewards are hub-pushed rows the indexer can never re-derive
+    // from a chain parse — the archive is their recovery transport. Rows carry
+    // no per-row signatures, so followers verify them by RE-DERIVATION.
+
+    const pkOf = (i) => new ValidatorIdentity(String(10 + i).repeat(32).slice(0, 64)).getPubkeyHex().toLowerCase();
+    const srcOf = (pk) => 'src_' + pk.substring(0, 12);
+    function rewardRow(pk, over) {
+        return Object.assign({
+            validator_pubkey: pk, round_number: 7, reward_type: 'anchor_BTC',
+            amount: '10.00000000', block_index: 100, batch_seq: null
+        }, over || {});
+    }
+
+    it('N=4: pending anchor rewards ride the archive with a pinned source and back-fill batch_seq on every hub', async function () {
+        let pk0 = pkOf(0);
+        let bus = buildMesh(4, { btcBlock: 101, matches: [], rewards: [rewardRow(pk0)] });
+        let leader = archiveLeader(bus);
+        await startAll(bus);
+        await flushAll(bus);
+        await sleep(150);
+
+        // Rewards-only batches publish (the empty-check includes rewards) with a
+        // real co-sign quorum — followers re-derived every archived field.
+        let v1Nodes = bus.nodes.filter(nd => nd.published.some(p => p.split('|')[1] === '1'));
+        expect(v1Nodes.length).to.equal(1);
+        expect(v1Nodes[0]).to.equal(leader);
+        let v1 = leader.published.find(p => p.split('|')[1] === '1').split('|');
+        expect(Number(v1[16]), 'sig count').to.be.at.least(3);
+        expect(v1[12], 'MATCH_COUNT counts matches only').to.equal('0');
+
+        let archive = JSON.parse(zlib.gunzipSync(Buffer.from(v1[15], 'base64url')).toString('utf8'));
+        expect(archive.matches.length).to.equal(0);
+        // serializeReward fixed shape, earn-time source pinned by the leader.
+        expect(archive.rewards).to.deep.equal([{
+            validator_pubkey: pk0, source: srcOf(pk0), round_number: 7,
+            reward_type: 'anchor_BTC', amount: '10.00000000', block_index: 100
+        }]);
+        // oracle_publish set archived at the reward's earn block (recovery
+        // re-checks the rewarded pubkey was an eligible publisher).
+        expect(archive.capability_snapshots.filter(s =>
+            s.capability === 'oracle_publish' && s.snapshot_block === 100).length).to.equal(4);
+
+        // batch_seq back-filled on the leader directly and on followers via
+        // XANC_FINALIZED — the row leaves the pending set federation-wide.
+        for (let nd of bus.nodes)
+            expect(nd.db.rewardRows[0].batch_seq, 'node ' + nd.i).to.equal(0);
+    });
+
+    it('a reward whose source cannot be resolved is deferred, not archived as a hole', async function () {
+        let bus = buildMesh(1, { rewards: [rewardRow(pkOf(0))], sourceResolver: () => null });
+        let nd = bus.nodes[0];
+        await startAll(bus);
+        await nd.pub.flush();
+        await sleep(30);
+
+        let v1 = nd.published.find(p => p.split('|')[1] === '1').split('|');
+        let archive = JSON.parse(zlib.gunzipSync(Buffer.from(v1[15], 'base64url')).toString('utf8'));
+        expect(archive.matches.length).to.equal(1);                    // the default match still archives
+        expect(archive.rewards).to.deep.equal([]);                     // the reward did not
+        expect(nd.db.rewardRows[0].batch_seq).to.equal(null);          // stays pending for a later batch
+    });
+
+    it('follower re-derivation rejects forged reward type / pubkey / amount / source / conflicting local row', async function () {
+        let pk0 = pkOf(0), pk1 = pkOf(1);
+        let bus = buildMesh(2, { matches: [], rewards: [rewardRow(pk0)] });
+        let verify = (ar) => bus.nodes[1].pub._verifyArchiveAgainstLocal(
+            { matches: [], calls: [], rewards: [ar], capability_snapshots: [] });
+        let good = {
+            validator_pubkey: pk0, source: srcOf(pk0), round_number: 7,
+            reward_type: 'anchor_BTC', amount: '10.00000000', block_index: 100
+        };
+
+        expect(await verify(good), 'baseline must re-derive cleanly').to.equal(true);
+        // oracle_round/attest_fee are indexer-derived and must never ride the archive.
+        expect(await verify(Object.assign({}, good, { reward_type: 'oracle_round' }))).to.equal(false);
+        // Pubkey outside our oracle_publish set at the earn block.
+        expect(await verify(Object.assign({}, good, { validator_pubkey: 'ab'.repeat(32), source: srcOf('ab'.repeat(32)) }))).to.equal(false);
+        // Amount must equal OUR configured publish reward exactly.
+        expect(await verify(Object.assign({}, good, { amount: '11.00000000' }))).to.equal(false);
+        // Source must match our own block-scoped indexer resolution.
+        expect(await verify(Object.assign({}, good, { source: 'src_forged' }))).to.equal(false);
+        // A held (type, round) row must agree — a leader crediting itself for
+        // another hub's publish diverges here on every honest hub.
+        expect(await verify(Object.assign({}, good, { validator_pubkey: pk1, source: srcOf(pk1) }))).to.equal(false);
+        // Absence alone is tolerated (late joiner): an unheld round still
+        // verifies on re-derivation.
+        expect(await verify(Object.assign({}, good, { round_number: 8 }))).to.equal(true);
+    });
+
+    it('_getNextBatchSeq spans validator_rewards too', async function () {
+        let bus = buildMesh(1, { rewards: [rewardRow(pkOf(0), { batch_seq: 5 })] });
+        expect(await bus.nodes[0].pub._getNextBatchSeq()).to.equal(6);  // matches/calls hold no seq ≥ 5
     });
 
     it('followers tolerate per-hub mirror ids in archived rows (id is bookkeeping, not consensus)', async function () {

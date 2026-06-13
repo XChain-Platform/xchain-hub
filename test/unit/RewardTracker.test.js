@@ -112,6 +112,17 @@ describe('RewardTracker', function () {
             await rt.distributeRewards(1, ['not-hex', 123, null]);
             expect(hub.db.doQuery.called).to.be.false;
         });
+
+        it('is hub-local only — never pushes to the BTC indexer', async function () {
+            // The consensus oracle_round rows are derived by the indexer from the
+            // PRICE v0 signer set; a hub push would credit the (unverifiable) PBFT
+            // prepare set and could race the indexer's own derivation.
+            rt.btcIndexerApiUrl = 'http://indexer:3000';
+            let post = sinon.stub(axios, 'post').resolves({ data: {} });
+            await rt.distributeRewards(1, [hexPk(1), hexPk(2)]);
+            await new Promise(r => setImmediate(r));
+            expect(post.called).to.be.false;
+        });
     });
 
     // -----------------------------------------------------------------
@@ -124,7 +135,14 @@ describe('RewardTracker', function () {
             await rt.recordAnchorReward('anchor_DOGE', 8, hexPk(1), 953190);
             let args = hub.db.doQuery.getCall(0).args;
             expect(args[0]).to.include('INSERT IGNORE INTO validator_rewards');
-            expect(args[1]).to.deep.equal([hexPk(1), 8, 'anchor_DOGE', '10.00000000']);
+            expect(args[0]).to.include('block_index');
+            expect(args[1]).to.deep.equal([hexPk(1), 8, 'anchor_DOGE', '10.00000000', 953190]);
+        });
+
+        it('stores block_index 0 when no blockIndex given', async function () {
+            await rt.recordAnchorReward('anchor_BTC', 2, hexPk(1));
+            let args = hub.db.doQuery.getCall(0).args;
+            expect(args[1][4]).to.equal(0);
         });
 
         it('pushes the reward to the BTC indexer with its own reward_type', async function () {
@@ -161,6 +179,53 @@ describe('RewardTracker', function () {
         it('swallows an INSERT failure (idempotent retries)', async function () {
             hub.db.doQuery.rejects(new Error('dup'));
             await rt.recordAnchorReward('anchor_LTC', 4, hexPk(3), 100);   // must not throw
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // resolveSourceByPubkey()
+    // -----------------------------------------------------------------
+
+    describe('resolveSourceByPubkey()', function () {
+
+        it('returns null without a request when no BTC indexer URL is configured', async function () {
+            let post = sinon.stub(axios, 'post').resolves({ data: {} });
+            let result = await rt.resolveSourceByPubkey(hexPk(1), 100);
+            expect(result).to.equal(null);
+            expect(post.called).to.be.false;
+        });
+
+        it('queries getstakesourcebypubkey block-scoped and lowercased', async function () {
+            rt.btcIndexerApiUrl = 'http://indexer:3000';
+            let post = sinon.stub(axios, 'post').resolves({ data: { result: { source: 'bc1qsource' } } });
+            let result = await rt.resolveSourceByPubkey(hexPk(0xAB).toUpperCase(), 953190);
+            expect(result).to.equal('bc1qsource');
+            let body = post.getCall(0).args[1];
+            expect(body.method).to.equal('getstakesourcebypubkey');
+            expect(body.params.pubkey).to.equal(hexPk(0xAB).toLowerCase());
+            expect(body.params.block_index).to.equal(953190);
+        });
+
+        it('includes the x-api-key header when an API key is configured', async function () {
+            rt.btcIndexerApiUrl = 'http://indexer:3000';
+            rt.btcIndexerApiKey = 'k';
+            let post = sinon.stub(axios, 'post').resolves({ data: { result: { source: 's' } } });
+            await rt.resolveSourceByPubkey(hexPk(1), 1);
+            expect(post.getCall(0).args[2].headers['x-api-key']).to.equal('k');
+        });
+
+        it('returns null for an unknown pubkey (result.source null)', async function () {
+            rt.btcIndexerApiUrl = 'http://indexer:3000';
+            sinon.stub(axios, 'post').resolves({ data: { result: { source: null } } });
+            let result = await rt.resolveSourceByPubkey(hexPk(1), 1);
+            expect(result).to.equal(null);
+        });
+
+        it('returns null instead of throwing when the indexer is unreachable', async function () {
+            rt.btcIndexerApiUrl = 'http://indexer:3000';
+            sinon.stub(axios, 'post').rejects(new Error('econnrefused'));
+            let result = await rt.resolveSourceByPubkey(hexPk(1), 1);
+            expect(result).to.equal(null);
         });
     });
 

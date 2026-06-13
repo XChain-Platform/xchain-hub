@@ -292,7 +292,9 @@ class StateAnchorPublisher {
                 console.log('StateAnchorPublisher: anchored checkpoint ' + row.chain + '/' + row.network +
                             ' @ ' + row.block_index + ' (txid ' + txid + ')');
                 anchored.push({ chain: row.chain, network: row.network, block_index: Number(row.block_index), txid: txid });
-                this._recordReward('anchor_' + row.chain, Number(row.checkpoint_seq), btcBlock);
+                this._recordReward('anchor_' + row.chain, Number(row.checkpoint_seq),
+                                   this.identity ? this.identity.getPubkeyHex() : null,
+                                   Number(row.snapshot_block));
                 // Tell peers so THEIR copy of the row stops being pending —
                 // without this, every hub whose failover rank unlocks would
                 // re-anchor a checkpoint someone else already paid for.
@@ -311,12 +313,17 @@ class StateAnchorPublisher {
         return anchored;
     }
 
-    // Publisher-side reward (oracle-round rail): the validator that paid the
-    // DOGE earns it. INSERT IGNORE on (pubkey, round, type) dedups retries.
-    _recordReward(rewardType, roundNumber, btcBlock){
-        if(!this.identity || !this.hub.rewardTracker || typeof this.hub.rewardTracker.recordAnchorReward !== 'function') return;
+    // Anchor-publish reward: the validator that paid the DOGE earns it. Recorded
+    // on EVERY hub — by the publisher at publish time and by peers from the
+    // signature-verified V0_DONE / FINALIZED announcements — with blockIndex =
+    // the quorum-agreed snapshot_block of the rewarded checkpoint, so all hubs
+    // hold identical row bytes and the archived rewards section verifies by
+    // re-derivation. INSERT IGNORE on (pubkey, round, type) dedups all paths.
+    _recordReward(rewardType, roundNumber, pubkey, blockIndex){
+        if(!this.hub.rewardTracker || typeof this.hub.rewardTracker.recordAnchorReward !== 'function') return;
+        if(!pubkey) return;
         this.hub.rewardTracker
-            .recordAnchorReward(rewardType, roundNumber, this.identity.getPubkeyHex().toLowerCase(), Number.isFinite(btcBlock) ? btcBlock : 0)
+            .recordAnchorReward(rewardType, roundNumber, String(pubkey).toLowerCase(), Number.isFinite(blockIndex) ? blockIndex : 0)
             .catch(e => console.warn('StateAnchorPublisher: reward record failed (' + rewardType + '/' + roundNumber + '): ' + (e && e.message)));
     }
 
@@ -359,9 +366,18 @@ class StateAnchorPublisher {
         let calls = await this.db.doQuery(
             "SELECT * FROM cross_chain_calls WHERE batch_seq IS NULL OR archived_status <> status " +
             "ORDER BY call_id ASC, phase ASC LIMIT ?", [this.maxBatch]);
-        if((!matches || matches.length === 0) && (!calls || calls.length === 0)){ this._pendingMatches = 0; return 'none'; }
+        // Anchor-publish rewards are hub-pushed rows the BTC indexer can never
+        // re-derive from a chain parse — the archive is their recovery transport
+        // (oracle_round/attest_fee rows are indexer-derived and NEVER archived).
+        // Rows are immutable, so batch_seq IS NULL is the only pending test;
+        // pre-upgrade rows without a deterministic block_index stay local.
+        let rewards = await this.db.doQuery(
+            "SELECT * FROM validator_rewards WHERE reward_type LIKE 'anchor\\_%' AND batch_seq IS NULL AND block_index IS NOT NULL " +
+            "ORDER BY reward_type ASC, round_number ASC, validator_pubkey ASC LIMIT ?", [this.maxBatch]);
+        if((!matches || matches.length === 0) && (!calls || calls.length === 0) && (!rewards || rewards.length === 0)){ this._pendingMatches = 0; return 'none'; }
         matches = matches || [];
         calls   = calls   || [];
+        rewards = rewards || [];
 
         // The checkpoint wrapper: latest checkpoint (prefer BTC — its height also
         // selects validator sets). Without any checkpoint there is nothing to bind
@@ -391,7 +407,25 @@ class StateAnchorPublisher {
                 return 'none';                                               // not unlocked on the failover ladder
             }
         }
-        let archive  = await this._buildArchive(network, batchSeq, matches, cp.snapshot_block, calls);
+        // Pin each reward's earn-time source into the archive (resolved via the
+        // BTC indexer, block-scoped — every hub gets the same answer, and
+        // recovery restores rewards BEFORE the BTC reindex so it cannot resolve
+        // them itself). An unresolvable source leaves the row for a later batch
+        // rather than archiving a hole.
+        let rewardRows = [];
+        for(let r of rewards){
+            let source = this.hub.rewardTracker
+                ? await this.hub.rewardTracker.resolveSourceByPubkey(String(r.validator_pubkey), Number(r.block_index))
+                : null;
+            if(!source){
+                console.warn('StateAnchorPublisher: reward ' + r.reward_type + '/#' + r.round_number +
+                             ' source unresolved for ' + String(r.validator_pubkey).substring(0, 12) + '… — deferred to a later batch');
+                continue;
+            }
+            rewardRows.push({ row: r, source: source });
+        }
+
+        let archive  = await this._buildArchive(network, batchSeq, matches, cp.snapshot_block, calls, rewardRows);
         let json     = archive.json;
         let crc      = this._crc32Hex(json);
         let b64      = zlib.gzipSync(Buffer.from(json, 'utf8'), { level: 9 }).toString('base64url');
@@ -410,6 +444,7 @@ class StateAnchorPublisher {
             count:      archive.count,
             matchIds:   matches.map(m => ({ match_id: m.match_id, status: m.status })),
             callIds:    calls.map(c => ({ call_id: c.call_id, phase: c.phase, status: c.status })),
+            rewardIds:  rewardRows.map(({row}) => ({ reward_type: String(row.reward_type), round_number: Number(row.round_number), validator_pubkey: String(row.validator_pubkey).toLowerCase() })),
             validators: pubkeys.slice(),
             signatures: new Map([[myPubkey, mySig]]),
             done:       false,
@@ -493,10 +528,14 @@ class StateAnchorPublisher {
     // re-verify the v1 anchor's own signatures). Recovery additionally
     // cross-checks archived pubkeys against on-chain BTC stakes — archived
     // sets are a convenience, the chain remains the root of trust.
-    async _buildArchive(network, batchSeq, matches, wrapperSnapshotBlock, calls){
-        calls = calls || [];
+    async _buildArchive(network, batchSeq, matches, wrapperSnapshotBlock, calls, rewards){
+        calls   = calls   || [];
+        rewards = rewards || [];
         let wants = matches.map(m => ({ block: Number(m.snapshot_block), capability: 'cross_chain' }))
-            .concat(calls.map(c => ({ block: Number(c.snapshot_block), capability: 'cross_chain' })));
+            .concat(calls.map(c => ({ block: Number(c.snapshot_block), capability: 'cross_chain' })))
+            // oracle_publish set at each reward's earn block — verifiers (and
+            // recovery) check the rewarded pubkey was an eligible publisher.
+            .concat(rewards.map(({row}) => ({ block: Number(row.block_index), capability: 'oracle_publish' })));
         if(wrapperSnapshotBlock != null)
             wants.push({ block: Number(wrapperSnapshotBlock), capability: 'oracle_publish' });
         let seen = new Set(), snaps = [];
@@ -509,14 +548,16 @@ class StateAnchorPublisher {
                 snaps.push({ snapshot_block: w.block, capability: w.capability,
                              signing_pubkey: v.pubkey, amount: v.amount });
         }
-        // `calls` is additive to the v1 archive shape: recovery treats a missing
-        // key as an empty list, so pre-XCALL archives on-chain stay parseable.
+        // `calls` and `rewards` are additive to the v1 archive shape: recovery
+        // treats a missing key as an empty list, so older on-chain archives stay
+        // parseable.
         let obj = {
             v: 1,
             network: network,
             batch_seq: batchSeq,
             matches: matches.map(m => StateAnchorPublisher.serializeMatch(m)),
             calls: calls.map(c => StateAnchorPublisher.serializeCall(c)),
+            rewards: rewards.map(({row, source}) => StateAnchorPublisher.serializeReward(row, source)),
             capability_snapshots: snaps
         };
         return { json: JSON.stringify(obj), count: matches.length };
@@ -556,6 +597,22 @@ class StateAnchorPublisher {
         return out;
     }
 
+    // Fixed-key-order anchor-publish reward record (shared with the follower
+    // verifier + recovery). `source` is the earn-time staking address pinned by
+    // the archive builder — recovery restores rewards into the BTC indexer DB
+    // BEFORE the reindex, so it cannot resolve sources itself, and a later
+    // re-stake of the pubkey from a different address must not move the credit.
+    static serializeReward(r, source){
+        return {
+            validator_pubkey: String(r.validator_pubkey).toLowerCase(),
+            source:           String(source),
+            round_number:     Number(r.round_number),
+            reward_type:      String(r.reward_type),
+            amount:           String(r.amount),
+            block_index:      Number(r.block_index)
+        };
+    }
+
     _archiveCanonical(cp, batchSeq, count, crc, totalChunks){
         return StateCheckpointEngine.canonicalCheckpoint(cp) + '|' +
                String(batchSeq) + '|' + String(count) + '|' + crc + '|' + String(totalChunks);
@@ -591,6 +648,16 @@ class StateAnchorPublisher {
         await this.db.doQuery(
             'UPDATE state_checkpoints SET anchor_txid = ? WHERE chain = ? AND network = ? AND block_index = ? AND anchor_txid IS NULL',
             [String(d.txid), String(d.chain), String(d.network), Number(d.block_index)]);
+        // Mirror the publisher's anchor reward locally (sender is signature-
+        // verified above) so every hub holds the same reward rows and any of
+        // them can archive/verify the rewards section. The snapshot_block comes
+        // from OUR copy of the checkpoint row — quorum-agreed state, identical
+        // on every hub.
+        let cps = await this.db.doQuery(
+            'SELECT snapshot_block FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? ORDER BY checkpoint_seq DESC LIMIT 1',
+            [String(d.chain), String(d.network), Number(d.block_index)]);
+        if(cps && cps.length > 0)
+            this._recordReward('anchor_' + String(d.chain), Number(d.checkpoint_seq), sender, Number(cps[0].snapshot_block));
     }
 
     _v0DoneCanonical(row, txid){
@@ -734,6 +801,63 @@ class StateAnchorPublisher {
                 return false;
             }
         }
+        // Reward rows carry no per-row signatures (they are unilateral local
+        // writes), so they verify by RE-DERIVATION — every field must equal what
+        // this hub derives independently:
+        //   type      — anchor publish rails only; oracle_round/attest_fee are
+        //               indexer-derived and must never ride the archive
+        //   pubkey    — member of OUR oracle_publish set at the earn block
+        //   amount    — exactly OUR configured publish reward
+        //   source    — OUR own block-scoped indexer resolution
+        //   local row — if we hold (type, round), it must agree (a leader
+        //               crediting itself for another hub's publish diverges
+        //               here on every hub that saw the real announcement);
+        //               absence alone is tolerated (late joiner), the
+        //               re-derivation above still bounds what it can say.
+        for(let ar of (archive.rewards || [])){
+            let tag = (ar && ar.reward_type) + '/#' + (ar && ar.round_number);
+            if(!ar || !/^anchor_[A-Za-z_]+$/.test(String(ar.reward_type || ''))){
+                console.warn('StateAnchorPublisher: archive reward ' + tag + ' has a non-anchor reward_type — NOT signing');
+                return false;
+            }
+            let pubkey = String(ar.validator_pubkey || '').toLowerCase();
+            let set = await this._resolveCapabilitySet('oracle_publish', Number(ar.block_index));
+            if(!set.some(v => v.pubkey === pubkey)){
+                console.warn('StateAnchorPublisher: archive reward ' + tag + ' pubkey ' + pubkey.substring(0, 12) +
+                             '… is not in the oracle_publish set at block ' + ar.block_index + ' — NOT signing');
+                return false;
+            }
+            let expectedAmount = this.hub.rewardTracker ? parseFloat(this.hub.rewardTracker.anchorReward).toFixed(8) : null;
+            if(expectedAmount !== null && String(ar.amount) !== expectedAmount){
+                console.warn('StateAnchorPublisher: archive reward ' + tag + ' amount ' + ar.amount +
+                             ' != configured ' + expectedAmount + ' — NOT signing');
+                return false;
+            }
+            let mySource = this.hub.rewardTracker
+                ? await this.hub.rewardTracker.resolveSourceByPubkey(pubkey, Number(ar.block_index))
+                : null;
+            if(!mySource || String(ar.source) !== mySource){
+                console.warn('StateAnchorPublisher: archive reward ' + tag + ' source ' + ar.source +
+                             ' does not match our resolution (' + mySource + ') — NOT signing');
+                return false;
+            }
+            let local = await this.db.doQuery(
+                'SELECT validator_pubkey, amount, block_index FROM validator_rewards WHERE reward_type = ? AND round_number = ? LIMIT 1',
+                [String(ar.reward_type), Number(ar.round_number)]);
+            if(local && local.length > 0){
+                let mine = local[0];
+                if(String(mine.validator_pubkey).toLowerCase() !== pubkey ||
+                   String(mine.amount) !== String(ar.amount) ||
+                   (mine.block_index != null && Number(mine.block_index) !== Number(ar.block_index))){
+                    console.warn('StateAnchorPublisher: archive reward ' + tag + ' diverges from our row (' +
+                                 String(mine.validator_pubkey).substring(0, 12) + '…/' + mine.amount + '/' + mine.block_index +
+                                 ' vs ' + pubkey.substring(0, 12) + '…/' + ar.amount + '/' + ar.block_index + ') — NOT signing');
+                    return false;
+                }
+            } else {
+                console.log('StateAnchorPublisher: archive reward ' + tag + ' predates our local history — accepting on re-derivation alone');
+            }
+        }
         let groups = new Map();              // block|capability → Map<pubkey, amount>
         for(let s of (archive.capability_snapshots || [])){
             let key = Number(s.snapshot_block) + '|' + String(s.capability);
@@ -818,27 +942,33 @@ class StateAnchorPublisher {
         // re-archive must get a FRESH seq — two v1 anchors sharing one seq would
         // corrupt chunk reassembly) while `archived_status <> status` keeps every
         // row eligible, so the next flush re-archives the whole batch.
-        let matchIds = round.matchIds, callIds = round.callIds || [];
+        let matchIds = round.matchIds, callIds = round.callIds || [], rewardIds = round.rewardIds || [];
         if(lostChunks > 0){
-            matchIds = matchIds.map(m => Object.assign({}, m, { status: '__partial__' }));
-            callIds  = callIds.map(c => Object.assign({}, c, { status: '__partial__' }));
+            matchIds  = matchIds.map(m => Object.assign({}, m, { status: '__partial__' }));
+            callIds   = callIds.map(c => Object.assign({}, c, { status: '__partial__' }));
+            rewardIds = [];                  // reward rows stay pending (batch_seq NULL) and re-archive
             console.error('StateAnchorPublisher: batch ' + round.batchSeq + ' lost ' + lostChunks +
                           ' chunk(s) on-chain — rows stay pending; they re-archive under a new batch seq');
         }
-        await this._backfillBatch(round.batchSeq, matchIds, txid, callIds);
+        await this._backfillBatch(round.batchSeq, matchIds, txid, callIds, rewardIds);
         if(this.peerManager){
             this.peerManager.broadcast(XANC_FINALIZED, {
                 batch_seq: round.batchSeq, txid: txid, matches: matchIds,
                 calls: callIds,
+                rewards: rewardIds,
+                snapshot_block: Number(round.cp.snapshot_block),
                 sig_pubkey: this.identity.getPubkeyHex().toLowerCase(),
                 sig: this.identity.sign(this._finalizedCanonical(round.batchSeq, txid, matchIds.length))
             });
         }
         if(lostChunks === 0){
             console.log('StateAnchorPublisher: archived ' + round.count + ' matches + ' +
-                        ((round.callIds && round.callIds.length) || 0) + ' calls (batch ' + round.batchSeq +
+                        ((round.callIds && round.callIds.length) || 0) + ' calls + ' +
+                        ((round.rewardIds && round.rewardIds.length) || 0) + ' rewards (batch ' + round.batchSeq +
                         ', ' + round.chunks.length + ' chunk(s), txid ' + txid + ')');
-            this._recordReward('anchor_archive', round.batchSeq, round.electionBlock);
+            this._recordReward('anchor_archive', round.batchSeq,
+                               this.identity ? this.identity.getPubkeyHex() : null,
+                               Number(round.cp.snapshot_block));
         }
     }
 
@@ -852,7 +982,16 @@ class StateAnchorPublisher {
         if(!ValidatorIdentity.verify(this._finalizedCanonical(Number(d.batch_seq), d.txid, d.matches.length),
                                      String(d.sig || ''), sender)) return;
         await this._backfillBatch(Number(d.batch_seq), d.matches, d.txid ? String(d.txid) : null,
-                                  Array.isArray(d.calls) ? d.calls : []);
+                                  Array.isArray(d.calls) ? d.calls : [],
+                                  Array.isArray(d.rewards) ? d.rewards : []);
+        // Mirror the leader's archive-publish reward (sender is signature-
+        // verified) so all hubs hold the same reward rows — same rail as the
+        // V0_DONE mirror. Only a COMPLETE publish earns it (the leader skips
+        // its own reward on lost chunks and marks rows __partial__).
+        let partial = (d.matches || []).some(m => m && m.status === '__partial__') ||
+                      (Array.isArray(d.calls) && d.calls.some(c => c && c.status === '__partial__'));
+        if(d.txid && !partial && Number.isFinite(Number(d.snapshot_block)))
+            this._recordReward('anchor_archive', Number(d.batch_seq), sender, Number(d.snapshot_block));
     }
 
     _finalizedCanonical(batchSeq, txid, count){
@@ -907,7 +1046,7 @@ class StateAnchorPublisher {
         return valid >= quorum;
     }
 
-    async _backfillBatch(batchSeq, matchIds, txid, callIds){
+    async _backfillBatch(batchSeq, matchIds, txid, callIds, rewardIds){
         for(let m of matchIds){
             await this.db.doQuery(
                 'UPDATE cross_chain_matches SET batch_seq = ?, archived_status = ?, anchor_txid = COALESCE(?, anchor_txid) WHERE match_id = ?',
@@ -918,13 +1057,23 @@ class StateAnchorPublisher {
                 'UPDATE cross_chain_calls SET batch_seq = ?, archived_status = ?, anchor_txid = COALESCE(?, anchor_txid) WHERE call_id = ? AND phase = ?',
                 [batchSeq, c.status, txid, c.call_id, c.phase]);
         }
+        for(let r of (rewardIds || [])){
+            // Rows are immutable — batch_seq is the only archive bookkeeping.
+            await this.db.doQuery(
+                'UPDATE validator_rewards SET batch_seq = ? WHERE reward_type = ? AND round_number = ? AND validator_pubkey = ?',
+                [batchSeq, String(r.reward_type), Number(r.round_number), String(r.validator_pubkey).toLowerCase()]);
+        }
     }
 
     async _getNextBatchSeq(){
+        // Spans every batch_seq-bearing table so a fresh seq is unique across
+        // matches, calls AND rewards (consensus-uniform — all hubs compute the
+        // same next seq from quorum-agreed rows).
         let r = await this.db.doQuery(
             'SELECT COALESCE(GREATEST(' +
             '  COALESCE((SELECT MAX(batch_seq) FROM cross_chain_matches), -1), ' +
-            '  COALESCE((SELECT MAX(batch_seq) FROM cross_chain_calls), -1)' +
+            '  COALESCE((SELECT MAX(batch_seq) FROM cross_chain_calls), -1), ' +
+            '  COALESCE((SELECT MAX(batch_seq) FROM validator_rewards), -1)' +
             '), -1) + 1 AS next_seq');
         return (r && r.length > 0) ? Number(r[0].next_seq) : 0;
     }

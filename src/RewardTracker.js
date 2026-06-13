@@ -37,9 +37,15 @@ class RewardTracker {
         this.btcIndexerApiKey = process.env.BTC_INDEXER_API_KEY || '';
     }
 
-    // Distribute rewards for a finalized oracle round
+    // Distribute rewards for a finalized oracle round — HUB-LOCAL ONLY (ops
+    // visibility: getRewardHistory / dashboards). The consensus oracle_round
+    // rewards are derived by the BTC indexer from the published PRICE v0
+    // action's verified signer set (a deterministic function of the chain, so
+    // reindex/recovery replays them); the old push to the indexer is retired —
+    // it credited the in-memory PBFT prepare set, which no offline verifier
+    // could ever re-derive, and could race the indexer's own derivation.
     // participants: array of validator pubkeys that submitted valid prices
-    // btcBlockHeight: the BTC chain tip when this round was triggered (used as block_index in indexer)
+    // btcBlockHeight: the BTC chain tip when this round was triggered
     async distributeRewards(round, participants, btcBlockHeight) {
         if (!participants || participants.length === 0) return;
 
@@ -66,32 +72,59 @@ class RewardTracker {
                 .catch(e => console.error('Error recording reward for ' + pubkey + ':', e));
         }
 
-        console.log('Rewards: Round ' + round + ' — ' + perValidator + ' XCHAIN each to ' + validParticipants.length + ' validators');
-
-        // Push rewards to the BTC indexer so COLLECT can find them (best-effort)
-        this._pushRewardsToBtcIndexer(round, validParticipants, perValidator, btcBlockHeight || round)
-            .catch(e => console.warn('Rewards: failed to push to BTC indexer:', e));
+        console.log('Rewards: Round ' + round + ' — ' + perValidator + ' XCHAIN each to ' + validParticipants.length + ' validators (hub-local; indexer derives the consensus rows from PRICE v0)');
     }
 
     // Record a single anchor-publish reward (ANCHOR v0 per-chain or v1 archive).
     // rewardType: 'anchor_<chain>' / 'anchor_archive'; roundNumber: checkpoint_seq /
-    // batch_seq. The elected publisher paid the DOGE, so it earns the reward —
-    // INSERT IGNORE on (pubkey, round, type) makes retries and re-flushes idempotent.
+    // batch_seq. The publisher that paid the DOGE earns it. Called on EVERY hub
+    // (the publisher at publish time; peers from the signature-verified
+    // V0_DONE/FINALIZED announcements), and blockIndex MUST be the quorum-agreed
+    // snapshot_block of the rewarded checkpoint — so all hubs record identical
+    // row bytes and the ANCHOR archive's rewards section verifies by
+    // re-derivation. INSERT IGNORE on (pubkey, round, type) makes retries,
+    // re-flushes, and the multi-hub recording idempotent.
     async recordAnchorReward(rewardType, roundNumber, pubkey, blockIndex) {
         if (typeof pubkey !== 'string' || !/^[0-9a-fA-F]{64}$/.test(pubkey)) return;
         let amount = parseFloat(this.anchorReward);
         if (!Number.isFinite(amount) || amount <= 0) return;
         let amountStr = amount.toFixed(8);
 
-        let query = `INSERT IGNORE INTO validator_rewards (validator_pubkey, round_number, reward_type, amount)
-                     VALUES (?, ?, ?, ?)`;
-        await this.db.doQuery(query, [pubkey, roundNumber, rewardType, amountStr])
+        let query = `INSERT IGNORE INTO validator_rewards (validator_pubkey, round_number, reward_type, amount, block_index)
+                     VALUES (?, ?, ?, ?, ?)`;
+        await this.db.doQuery(query, [pubkey, roundNumber, rewardType, amountStr, blockIndex || 0])
             .catch(e => console.error('Error recording anchor reward for ' + pubkey + ':', e));
 
         console.log('Rewards: ' + rewardType + ' #' + roundNumber + ' — ' + amountStr + ' XCHAIN to ' + pubkey.substring(0, 16) + '…');
 
         this._pushRewardsToBtcIndexer(roundNumber, [pubkey], amountStr, blockIndex || roundNumber, rewardType)
             .catch(e => console.warn('Rewards: failed to push anchor reward to BTC indexer:', e));
+    }
+
+    // Resolve the staking source address that owns a signing pubkey at a block,
+    // via the BTC indexer (stakes first, then DELEGATE v0 delegations) — the
+    // archive builder pins this earn-time source into the ANCHOR archive and
+    // followers re-resolve it before co-signing. Block-scoped, so every hub gets
+    // the same answer regardless of when it asks. Returns the address string or
+    // null (unreachable indexer / unknown pubkey).
+    async resolveSourceByPubkey(pubkey, blockIndex) {
+        if (!this.btcIndexerApiUrl) return null;
+        let body = {
+            jsonrpc: '2.0',
+            id:      Date.now(),
+            method:  'getstakesourcebypubkey',
+            params:  { pubkey: String(pubkey).toLowerCase(), block_index: Number(blockIndex) }
+        };
+        let headers = { 'Content-Type': 'application/json' };
+        if (this.btcIndexerApiKey) headers['x-api-key'] = this.btcIndexerApiKey;
+        try {
+            let res = await axios.post(this.btcIndexerApiUrl, body, { headers: headers, timeout: 5000 });
+            let result = res && res.data ? res.data.result : null;
+            return (result && result.source) ? String(result.source) : null;
+        } catch (err) {
+            console.warn('Rewards: source resolution failed for ' + String(pubkey).substring(0, 16) + '…:', err && err.message);
+            return null;
+        }
     }
 
     // Push validator rewards to the BTC indexer's local DB via JSON-RPC
