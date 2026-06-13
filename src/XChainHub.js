@@ -85,6 +85,9 @@ class XChainHub {
         this._capabilityRecheckTimer = null;
         this._capabilityConfigWatcher = null;
         this._stakePollTimer          = null;
+        this._transportSetTimer       = null;   // Option A: chain-effective signer-set refresh timer
+        this._transportSignerSet      = new Set();  // last-known-good effective signer set (lowercased pubkey hex)
+        this._transportSignerSetAt    = 0;       // ms timestamp of last successful refresh (0 = never)
         this._latestBlockIndex        = null;  // most recent observed BTC block index (for capability gossip block_at)
         this._latestStakeAmount       = null;  // most recent observed own on-chain stake amount (for threshold re-evaluation)
     }
@@ -141,6 +144,48 @@ class XChainHub {
         }
 
         await this.peerManager.start();
+
+        // Option A transport auth: begin following the on-chain effective signer
+        // set so transport auth tracks validator key rotation without manual
+        // registry edits. Best-effort immediate refresh + periodic poll. Inert
+        // where there is no chain validator set (empty snapshot → the registry
+        // remains the auth floor), e.g. a prod single-validator hub.
+        let refreshMs = (this.p2pConfig && this.p2pConfig.P2P_SIGNER_SET_REFRESH_MS) || 30000;
+        this._refreshTransportSignerSet().catch(e => console.error('Initial transport signer-set refresh failed:', e));
+        this._transportSetTimer = setInterval(() => {
+            this._refreshTransportSignerSet().catch(e => console.error('Transport signer-set refresh failed:', e));
+        }, refreshMs);
+    }
+
+    // Option A transport auth — refresh the chain-effective signer set from the
+    // on-chain validator snapshot and push it into the PeerManager. The effective
+    // set is ADDITIVE to the validator registry (a pubkey in either is admitted),
+    // so transport auth follows on-chain key rotation. NEVER clears the set to
+    // empty on an upstream failure (no fail-open): the last-known-good set is
+    // retained and the registry remains the authorization floor.
+    async _refreshTransportSignerSet(){
+        if(!this.peerManager) return;
+        let block = await this._resolveBtcLatestBlock();
+        if(block == null){ this._warnTransportStale('BTC tip unresolved'); return; }
+        let snap = await this.capabilitySnapshot.getActiveValidatorSnapshot(block);
+        if(!snap || !Array.isArray(snap.validators)){ this._warnTransportStale('validator snapshot unavailable'); return; }
+        let set = new Set(snap.validators.map(v => String(v.pubkey).toLowerCase()));
+        this._transportSignerSet   = set;
+        this._transportSignerSetAt = Date.now();
+        this.peerManager.setEffectiveSignerSet(set);
+    }
+
+    // Warn loudly (once the last good refresh ages past a threshold) when the
+    // transport signer set can't be refreshed. Does NOT clear the existing set —
+    // retaining last-known-good is the no-fail-open invariant; the registry
+    // remains the floor. Silent before the first successful refresh (the inert
+    // no-chain-validator-set state needs no alarm).
+    _warnTransportStale(why){
+        let maxAgeMs = (this.p2pConfig && this.p2pConfig.P2P_SIGNER_SET_MAX_AGE_MS) || 600000;
+        if(this._transportSignerSetAt && (Date.now() - this._transportSignerSetAt) > maxAgeMs){
+            console.warn('XChainHub: transport signer set STALE (' + why + '); retaining last-known-good set of ' +
+                this._transportSignerSet.size + ' pubkey(s) — registry remains the auth floor');
+        }
     }
 
     // Start the PBFT consensus engine (no-op if P2P is not active)
@@ -1311,6 +1356,7 @@ class XChainHub {
     async close(){
         if(this._capabilityRecheckTimer){ clearInterval(this._capabilityRecheckTimer); this._capabilityRecheckTimer = null; }
         if(this._stakePollTimer){ clearInterval(this._stakePollTimer); this._stakePollTimer = null; }
+        if(this._transportSetTimer){ clearInterval(this._transportSetTimer); this._transportSetTimer = null; }
         if(this._capabilityConfigDebounce){ clearTimeout(this._capabilityConfigDebounce); this._capabilityConfigDebounce = null; }
         if(this._capabilityConfigWatcher){ try { this._capabilityConfigWatcher.close(); } catch(e){} this._capabilityConfigWatcher = null; }
         if(this.governance)       await this.governance.stop();

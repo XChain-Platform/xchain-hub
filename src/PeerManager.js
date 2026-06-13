@@ -39,6 +39,18 @@ class PeerManager extends EventEmitter {
         this.validatorPubkeys = null;   // Map<addr, pubkeyHex> — loaded from DB
         this.requireSigs      = config.REQUIRE_SIGNATURES !== false;
 
+        // Option A transport auth: chain-effective signer set (lowercased pubkey
+        // hex), pushed in by XChainHub from the on-chain validator snapshot so
+        // transport auth follows on-chain key rotation. ADDITIVE to the registry
+        // (a pubkey in EITHER is admitted); null until the first refresh. Never
+        // cleared to empty on an upstream failure — the registry is the floor.
+        this.effectiveSignerSet = null;   // Set<pubkeyHex> | null
+        // Optional operator denylist of signing pubkeys (comma-separated hex).
+        this.denyPubkeys = new Set(
+            String(config.P2P_DENY_PUBKEYS || '')
+                .split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+        );
+
         // Per-IP connection limits
         this.maxConnectionsPerIp = parseInt(config.P2P_MAX_CONNECTIONS_PER_IP) || 3;
         this.ipConnectionCounts  = new Map();
@@ -73,6 +85,14 @@ class PeerManager extends EventEmitter {
     // Set the validator pubkey registry for verifying incoming messages
     setValidatorPubkeys(pubkeyMap) {
         this.validatorPubkeys = pubkeyMap;  // Map<addr, pubkeyHex>
+    }
+
+    // Set the chain-effective signer set (Option A). Pubkeys must be lowercase
+    // hex. Additive to the registry — a pubkey in EITHER set is admitted. The
+    // caller (XChainHub._refreshTransportSignerSet) never clears this to empty
+    // on an upstream failure, so the registry stays the authorization floor.
+    setEffectiveSignerSet(set) {
+        this.effectiveSignerSet = set;  // Set<pubkeyHex> | null
     }
 
     // Start the P2P layer
@@ -237,19 +257,50 @@ class PeerManager extends EventEmitter {
             timestamp: Date.now(),
             data:      data || {}
         };
-        // Sign if identity is available
+        // Sign if identity is available. Option A: carry the signing pubkey so
+        // verifiers can authenticate by chain-effective-set membership (not by a
+        // static addr→pubkey map). Set BEFORE signing so it is in the canonical.
         if (this.identity) {
-            envelope.sig = this.identity.signEnvelope(envelope);
+            envelope.sig_pubkey = this.identity.getPubkeyHex();
+            envelope.sig        = this.identity.signEnvelope(envelope);
         }
         return envelope;
     }
 
-    // Verify an envelope's signature against the validator registry
+    // Verify an envelope's signature.
+    //
+    // Option A (sig_pubkey present): authenticate by MEMBERSHIP in the union of
+    // the chain-effective signer set and the validator registry's pubkey set,
+    // then verify the Ed25519 signature against the carried key. This makes
+    // transport auth follow on-chain key rotation without manual registry edits.
+    //
+    // Backward-compat (no sig_pubkey): fall back to TODAY's path — the static
+    // addr→pubkey registry — so pre-A and A hubs interoperate during a rolling
+    // deploy.
     _verifySignature(envelope) {
         // If signatures not required, accept unsigned messages
         if (!this.requireSigs && !envelope.sig) return true;
         // If signatures required but missing, reject
         if (this.requireSigs && !envelope.sig) return false;
+
+        // --- Option A: envelope carries its signing pubkey ---
+        if (envelope.sig_pubkey && typeof envelope.sig_pubkey === 'string') {
+            let pk = envelope.sig_pubkey.toLowerCase();
+            // Denylist: reject outright, BEFORE any expensive Ed25519 verify.
+            if (this.denyPubkeys.has(pk)) return false;
+            // Membership check BEFORE verify (DoS guard: never burn a verify on
+            // a key we'd reject anyway). Admit iff the key is in the chain
+            // effective set OR the registry's pubkey set (addr-independent).
+            let inSet = (this.effectiveSignerSet && this.effectiveSignerSet.has(pk))
+                     || this._registryHasPubkey(pk);
+            // Not a member: reject when sigs are required (fail closed), preserve
+            // the permissive mode otherwise — matching the unknown-sender path.
+            if (!inSet) return !this.requireSigs;
+            return ValidatorIdentity.verify(
+                ValidatorIdentity.getSignablePayload(envelope), envelope.sig, pk);
+        }
+
+        // --- Backward-compat path (pre-A envelope, no sig_pubkey) ---
         // No validator registry loaded: fail closed. A null registry means we
         // cannot authenticate any sender, so a self-signed envelope from an
         // unknown peer must be rejected rather than trusted. (Defense in depth:
@@ -266,6 +317,18 @@ class PeerManager extends EventEmitter {
         }
         // Verify the signature
         return ValidatorIdentity.verifyEnvelope(envelope, pubkeyHex);
+    }
+
+    // True iff the validator registry maps some addr to this pubkey hex. The
+    // registry is Map<addr, pubkeyHex>; Option A uses it as an addr-independent
+    // pubkey SET so a rotated key is admitted as soon as the registry carries it
+    // under any addr.
+    _registryHasPubkey(pubkeyHexLower) {
+        if (!this.validatorPubkeys) return false;
+        for (let v of this.validatorPubkeys.values()) {
+            if (v && v.toLowerCase() === pubkeyHexLower) return true;
+        }
+        return false;
     }
 
     // Send a serialized message on a WebSocket
@@ -295,6 +358,13 @@ class PeerManager extends EventEmitter {
         if (!envelope.id   || typeof envelope.id !== 'string')   return;
         if (!envelope.sender || typeof envelope.sender !== 'string') return;
         if (typeof envelope.timestamp !== 'number') return;
+
+        // Timestamp freshness — drop envelopes too far from our clock in either
+        // direction. The dedup cache TTL is only ~60s, so without this a signed
+        // envelope replayed after its dedup entry expires would re-enter as new.
+        // (Anti-replay for the Option A signed-envelope surface.)
+        let maxSkew = parseInt(this.config.P2P_MSG_MAX_SKEW_MS) || 300000;
+        if (Math.abs(Date.now() - envelope.timestamp) > maxSkew) return;
 
         // Self-connection guard
         if (envelope.sender === this.validatorAddr) {

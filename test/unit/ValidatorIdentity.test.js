@@ -170,6 +170,50 @@ describe('ValidatorIdentity', function () {
     });
 
     // -----------------------------------------------------------------
+    // Option A: sig_pubkey binding into the canonical payload
+    // -----------------------------------------------------------------
+
+    describe('sig_pubkey canonical binding (Option A)', function () {
+        it('omits sig_pubkey from the canonical when absent (pre-A backward compat)', function () {
+            // A pre-A envelope must yield the IDENTICAL canonical it was signed
+            // with, so an A-verifier accepts a pre-A signature unchanged.
+            let env = { id: 'x', type: 'T', sender: 's', timestamp: 0, data: { a: 1 } };
+            let parsed = JSON.parse(ValidatorIdentity.getSignablePayload(env));
+            expect(parsed).to.not.have.property('sig_pubkey');
+            expect(Object.keys(parsed)).to.deep.equal(['id', 'type', 'sender', 'timestamp', 'data']);
+        });
+
+        it('appends sig_pubkey LAST when present', function () {
+            let env = {
+                id: 'x', type: 'T', sender: 's', timestamp: 0, data: {}, sig_pubkey: keypair.pubkeyHex
+            };
+            let parsed = JSON.parse(ValidatorIdentity.getSignablePayload(env));
+            expect(Object.keys(parsed)).to.deep.equal(['id', 'type', 'sender', 'timestamp', 'data', 'sig_pubkey']);
+        });
+
+        it('round-trips an envelope that carries sig_pubkey', function () {
+            let id = new ValidatorIdentity(keypair.privkeyHex);
+            let env = {
+                id: 'oa', type: 'TEST', sender: 'ws://v:1', timestamp: 1700000000000,
+                data: { foo: 'bar' }, sig_pubkey: keypair.pubkeyHex
+            };
+            env.sig = id.signEnvelope(env);
+            expect(ValidatorIdentity.verifyEnvelope(env, keypair.pubkeyHex)).to.be.true;
+        });
+
+        it('tampering sig_pubkey after signing breaks verification', function () {
+            let id = new ValidatorIdentity(keypair.privkeyHex);
+            let env = {
+                id: 'oa', type: 'TEST', sender: 'ws://v:1', timestamp: 1,
+                data: {}, sig_pubkey: keypair.pubkeyHex
+            };
+            env.sig = id.signEnvelope(env);
+            env.sig_pubkey = ValidatorIdentity.generate().pubkeyHex; // swap the bound key
+            expect(ValidatorIdentity.verifyEnvelope(env, keypair.pubkeyHex)).to.be.false;
+        });
+    });
+
+    // -----------------------------------------------------------------
     // pubkeyFromHex()
     // -----------------------------------------------------------------
 

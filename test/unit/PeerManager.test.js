@@ -193,6 +193,86 @@ describe('PeerManager', function () {
     });
 
     // -----------------------------------------------------------------
+    // _verifySignature() — Option A (sig_pubkey union membership)
+    // -----------------------------------------------------------------
+
+    describe('_verifySignature() — Option A', function () {
+
+        let identity;
+        beforeEach(function () {
+            pm.requireSigs = true;
+            identity = new ValidatorIdentity(keypair.privkeyHex);
+        });
+
+        // Build a signed Option-A envelope (sig_pubkey carried) from `identity`.
+        function signedEnv(id) {
+            let env = {
+                id: id || 'oa-1', type: 'TEST', sender: 'ws://peer:10001',
+                timestamp: Date.now(), data: { x: 1 }, sig_pubkey: keypair.pubkeyHex
+            };
+            env.sig = identity.signEnvelope(env);
+            return env;
+        }
+
+        it('accepts when sig_pubkey is in the chain-effective signer set', function () {
+            pm.setEffectiveSignerSet(new Set([keypair.pubkeyHex.toLowerCase()]));
+            // Registry is empty — admission must come purely from the effective set.
+            pm.setValidatorPubkeys(new Map());
+            expect(pm._verifySignature(signedEnv())).to.be.true;
+        });
+
+        it('accepts when sig_pubkey is in the registry pubkey set (addr-independent)', function () {
+            // Registry maps a DIFFERENT addr to this pubkey — membership is by
+            // pubkey value, not by envelope.sender.
+            pm.setValidatorPubkeys(new Map([['ws://other-addr:9', keypair.pubkeyHex]]));
+            pm.setEffectiveSignerSet(null);
+            expect(pm._verifySignature(signedEnv())).to.be.true;
+        });
+
+        it('rejects (sigs required) when sig_pubkey is in neither set', function () {
+            pm.setValidatorPubkeys(new Map());
+            pm.setEffectiveSignerSet(new Set(['deadbeef'.repeat(8)]));
+            expect(pm._verifySignature(signedEnv())).to.be.false;
+        });
+
+        it('rejects a bad signature even for a member key', function () {
+            pm.setEffectiveSignerSet(new Set([keypair.pubkeyHex.toLowerCase()]));
+            let env = signedEnv();
+            env.sig = 'aa'.repeat(64); // corrupt
+            expect(pm._verifySignature(env)).to.be.false;
+        });
+
+        it('checks membership BEFORE running the Ed25519 verify (DoS guard)', function () {
+            let verifySpy = sinon.spy(ValidatorIdentity, 'verify');
+            pm.setValidatorPubkeys(new Map());
+            pm.setEffectiveSignerSet(new Set()); // not a member
+            expect(pm._verifySignature(signedEnv())).to.be.false;
+            expect(verifySpy.called).to.be.false; // never reached verify
+        });
+
+        it('rejects a denylisted pubkey before verify, even if otherwise a member', function () {
+            let pk = keypair.pubkeyHex.toLowerCase();
+            pm.denyPubkeys = new Set([pk]);
+            pm.setEffectiveSignerSet(new Set([pk]));         // in the set...
+            pm.setValidatorPubkeys(new Map([['a', keypair.pubkeyHex]])); // ...and registry
+            let verifySpy = sinon.spy(ValidatorIdentity, 'verify');
+            expect(pm._verifySignature(signedEnv())).to.be.false;
+            expect(verifySpy.called).to.be.false; // denylist short-circuits before verify
+        });
+
+        it('backward-compat: a pre-A envelope (no sig_pubkey) still uses the addr→pubkey map', function () {
+            let env = {
+                id: 'bc-1', type: 'TEST', sender: 'ws://peer:10001',
+                timestamp: Date.now(), data: {}
+            };
+            env.sig = identity.signEnvelope(env); // signed without sig_pubkey in canonical
+            pm.setValidatorPubkeys(new Map([['ws://peer:10001', keypair.pubkeyHex]]));
+            pm.setEffectiveSignerSet(null);
+            expect(pm._verifySignature(env)).to.be.true;
+        });
+    });
+
+    // -----------------------------------------------------------------
     // Invalid JSON handling
     // -----------------------------------------------------------------
 
@@ -296,6 +376,17 @@ describe('PeerManager', function () {
             pm._handleInbound({}, '[1,2]', 'a');
             pm._handleInbound({}, JSON.stringify({ type: 'T' }), 'a');                 // missing id/sender/ts
             pm._handleInbound({}, JSON.stringify({ id: 'x', type: 'T', sender: 's', timestamp: 'nan' }), 'a');
+            expect(emitted).to.equal(0);
+        });
+
+        it('drops an envelope whose timestamp is outside the freshness window (anti-replay)', function () {
+            let emitted = 0;
+            pm.on('message', () => emitted++);
+            let stale = JSON.stringify({
+                id: 'stale1', type: 'T', sender: 'ws://peer:10001',
+                timestamp: Date.now() - 400000, data: {}  // > default 300s skew
+            });
+            pm._handleInbound({ _peerAddr: 'ws://peer:10001' }, stale, 'ws://peer:10001');
             expect(emitted).to.equal(0);
         });
 

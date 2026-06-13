@@ -62,11 +62,16 @@ class ValidatorIdentity {
     // Deterministic: sorted keys in a specific order
     static getSignablePayload(envelope) {
         return JSON.stringify({
-            id:        envelope.id,
-            type:      envelope.type,
-            sender:    envelope.sender,
-            timestamp: envelope.timestamp,
-            data:      envelope.data
+            id:         envelope.id,
+            type:       envelope.type,
+            sender:     envelope.sender,
+            timestamp:  envelope.timestamp,
+            data:       envelope.data,
+            // Option A: bind the signing key into the signature. Appended last
+            // and via JSON.stringify (which omits undefined keys), so a pre-A
+            // envelope without sig_pubkey produces the identical canonical it
+            // was signed with — backward compatible across a rolling deploy.
+            sig_pubkey: envelope.sig_pubkey
         });
     }
 
