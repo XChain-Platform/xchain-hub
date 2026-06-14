@@ -82,22 +82,61 @@ class RewardTracker {
     // V0_DONE/FINALIZED announcements), and blockIndex MUST be the quorum-agreed
     // snapshot_block of the rewarded checkpoint — so all hubs record identical
     // row bytes and the ANCHOR archive's rewards section verifies by
-    // re-derivation. INSERT IGNORE on (pubkey, round, type) makes retries,
-    // re-flushes, and the multi-hub recording idempotent.
+    // re-derivation.
+    //
+    // One logical anchor → exactly ONE reward, even across DISTINCT publisher
+    // pubkeys. The table's UNIQUE KEY includes validator_pubkey, so a bare INSERT
+    // IGNORE cannot collapse a failover race: when a late rank-0 and an early
+    // rank-1 both publish the same checkpoint, each records its own pubkey for the
+    // same (round_number, reward_type) and BOTH rows would land — minting the
+    // reward twice and inflating the COLLECT rail. We collapse them
+    // deterministically: the lexicographically smallest pubkey keeps the credit.
+    // Every hub computes the identical winner from the same set of rows, so the
+    // surviving row stays byte-identical fleet-wide (the ANCHOR archive's
+    // re-derivation invariant holds and recovery restores a single reward). A row
+    // that has already ridden an on-chain archive (batch_seq IS NOT NULL) is
+    // immutable and is never displaced. Retries / re-flushes / multi-hub recording
+    // of the SAME pubkey remain idempotent (UNIQUE KEY + the existence check below).
     async recordAnchorReward(rewardType, roundNumber, pubkey, blockIndex) {
         if (typeof pubkey !== 'string' || !/^[0-9a-fA-F]{64}$/.test(pubkey)) return;
         let amount = parseFloat(this.anchorReward);
         if (!Number.isFinite(amount) || amount <= 0) return;
         let amountStr = amount.toFixed(8);
+        let lcPubkey  = pubkey.toLowerCase();
+
+        // Cross-pubkey dedup guard: inspect any rows already holding this logical
+        // anchor (round_number, reward_type) regardless of pubkey.
+        let existing = await this.db.doQuery(
+            'SELECT validator_pubkey, batch_seq FROM validator_rewards WHERE round_number = ? AND reward_type = ?',
+            [roundNumber, rewardType])
+            .catch(e => { console.error('Error reading anchor reward for ' + lcPubkey + ':', e); return null; });
+        existing = existing || [];
+
+        if (existing.some(r => String(r.validator_pubkey).toLowerCase() === lcPubkey)) return;   // already ours — idempotent
+        if (existing.length > 0) {
+            // A row already rode an on-chain archive → immutable, the canonical
+            // winner fleet-wide. Never insert a competing pubkey behind it.
+            if (existing.some(r => r.batch_seq != null)) return;
+            // Otherwise the deterministic winner is the smallest pubkey. If an
+            // incumbent sorts at or below ours, ours is the duplicate — drop it.
+            let minIncumbent = existing.map(r => String(r.validator_pubkey).toLowerCase()).sort()[0];
+            if (minIncumbent <= lcPubkey) return;
+            // Our pubkey sorts strictly lower and nothing is archived yet — it
+            // supersedes the local-only incumbent(s); every hub makes the same call.
+            await this.db.doQuery(
+                'DELETE FROM validator_rewards WHERE round_number = ? AND reward_type = ? AND batch_seq IS NULL',
+                [roundNumber, rewardType])
+                .catch(e => console.error('Error consolidating anchor reward for ' + lcPubkey + ':', e));
+        }
 
         let query = `INSERT IGNORE INTO validator_rewards (validator_pubkey, round_number, reward_type, amount, block_index)
                      VALUES (?, ?, ?, ?, ?)`;
-        await this.db.doQuery(query, [pubkey, roundNumber, rewardType, amountStr, blockIndex || 0])
-            .catch(e => console.error('Error recording anchor reward for ' + pubkey + ':', e));
+        await this.db.doQuery(query, [lcPubkey, roundNumber, rewardType, amountStr, blockIndex || 0])
+            .catch(e => console.error('Error recording anchor reward for ' + lcPubkey + ':', e));
 
-        console.log('Rewards: ' + rewardType + ' #' + roundNumber + ' — ' + amountStr + ' XCHAIN to ' + pubkey.substring(0, 16) + '…');
+        console.log('Rewards: ' + rewardType + ' #' + roundNumber + ' — ' + amountStr + ' XCHAIN to ' + lcPubkey.substring(0, 16) + '…');
 
-        this._pushRewardsToBtcIndexer(roundNumber, [pubkey], amountStr, blockIndex || roundNumber, rewardType)
+        this._pushRewardsToBtcIndexer(roundNumber, [lcPubkey], amountStr, blockIndex || roundNumber, rewardType)
             .catch(e => console.warn('Rewards: failed to push anchor reward to BTC indexer:', e));
     }
 

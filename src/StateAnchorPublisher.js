@@ -47,15 +47,20 @@
  * ascending, where the key binds chain/network/seq/snapshot_block. Rank 0
  * publishes; if it hasn't after ANCHOR_ELECTION_TOLERANCE_BLOCKS BTC blocks,
  * rank 1 also qualifies, and so on (the DB row's anchor_txid IS NULL is the
- * shared "still pending" signal, so a late rank-0 and an early rank-1 can at
- * worst double-spend one anchor's fee, never corrupt state). A different
+ * shared "still pending" signal, so a late rank-0 and an early rank-1 can both
+ * publish). The on-chain state never diverges — both build byte-identical
+ * commitments — and the anchor-reward rail does NOT inflate: recordAnchorReward
+ * deterministically keeps a single reward per (checkpoint_seq, reward_type)
+ * across distinct publisher pubkeys (see below), so the only residual cost of
+ * the race is the duplicate DOGE tx fee. A different
  * validator therefore publishes each chain's anchor in a cycle, FROM ITS OWN
  * DOGE WALLET — no UTXO contention between the per-chain anchors, per-chain
  * fault isolation, and publish work (plus its DOGE cost) spreads across the
  * federation. Each successful publish records an `anchor_<chain>` /
  * `anchor_archive` reward on the validator_rewards rail (oracle-round
- * pattern; INSERT IGNORE dedups, best-effort push to the BTC indexer for
- * COLLECT). The v1 archive round elects a single leader the same way with a
+ * pattern; recordAnchorReward collapses failover-race duplicates to a single
+ * deterministic per-(round,type) winner, best-effort push to the BTC indexer
+ * for COLLECT). The v1 archive round elects a single leader the same way with a
  * per-election-block key. Signer resolution, balance checks and the DOGE
  * broadcast pipeline mirror OraclePublisher (the DB is
  * the durable queue — pending checkpoints are rows with anchor_txid IS NULL,
@@ -334,7 +339,9 @@ class StateAnchorPublisher {
     // signature-verified V0_DONE / FINALIZED announcements — with blockIndex =
     // the quorum-agreed snapshot_block of the rewarded checkpoint, so all hubs
     // hold identical row bytes and the archived rewards section verifies by
-    // re-derivation. INSERT IGNORE on (pubkey, round, type) dedups all paths.
+    // re-derivation. recordAnchorReward dedups all paths — including a failover
+    // race that hands the same (round, type) to two different publisher pubkeys,
+    // which it collapses to a single deterministic per-(round,type) winner.
     _recordReward(rewardType, roundNumber, pubkey, blockIndex){
         if(!this.hub.rewardTracker || typeof this.hub.rewardTracker.recordAnchorReward !== 'function') return;
         if(!pubkey) return;

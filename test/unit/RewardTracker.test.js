@@ -131,9 +131,17 @@ describe('RewardTracker', function () {
 
     describe('recordAnchorReward()', function () {
 
+        it('reads existing rows for (round, type) before inserting', async function () {
+            await rt.recordAnchorReward('anchor_DOGE', 8, hexPk(1), 953190);
+            let sel = hub.db.doQuery.getCall(0).args;
+            expect(sel[0]).to.match(/SELECT[\s\S]*validator_rewards[\s\S]*round_number = \?[\s\S]*reward_type = \?/);
+            expect(sel[1]).to.deep.equal([8, 'anchor_DOGE']);
+        });
+
         it('records a per-chain anchor reward for the publisher', async function () {
             await rt.recordAnchorReward('anchor_DOGE', 8, hexPk(1), 953190);
-            let args = hub.db.doQuery.getCall(0).args;
+            // getCall(0) is the cross-pubkey dedup SELECT; the INSERT follows it.
+            let args = hub.db.doQuery.getCall(1).args;
             expect(args[0]).to.include('INSERT IGNORE INTO validator_rewards');
             expect(args[0]).to.include('block_index');
             expect(args[1]).to.deep.equal([hexPk(1), 8, 'anchor_DOGE', '10.00000000', 953190]);
@@ -141,8 +149,51 @@ describe('RewardTracker', function () {
 
         it('stores block_index 0 when no blockIndex given', async function () {
             await rt.recordAnchorReward('anchor_BTC', 2, hexPk(1));
-            let args = hub.db.doQuery.getCall(0).args;
+            let args = hub.db.doQuery.getCall(1).args;
             expect(args[1][4]).to.equal(0);
+        });
+
+        it('skips the INSERT when a lower-or-equal pubkey already holds the (round, type)', async function () {
+            // A failover race: an incumbent row already exists for this logical
+            // anchor under a smaller pubkey. Our (larger) pubkey is the duplicate.
+            hub.db.doQuery.onFirstCall().resolves([{ validator_pubkey: hexPk(1), batch_seq: null }]);
+            await rt.recordAnchorReward('anchor_BTC', 5, hexPk(2), 100);
+            // Only the SELECT ran — no INSERT, no DELETE.
+            expect(hub.db.doQuery.callCount).to.equal(1);
+        });
+
+        it('does not push the loser to the BTC indexer', async function () {
+            hub.db.doQuery.onFirstCall().resolves([{ validator_pubkey: hexPk(1), batch_seq: null }]);
+            rt.btcIndexerApiUrl = 'http://indexer:3000';
+            let post = sinon.stub(axios, 'post').resolves({ data: {} });
+            await rt.recordAnchorReward('anchor_BTC', 5, hexPk(2), 100);
+            await new Promise(r => setImmediate(r));
+            expect(post.called).to.be.false;
+        });
+
+        it('is idempotent when our exact pubkey already holds the (round, type)', async function () {
+            hub.db.doQuery.onFirstCall().resolves([{ validator_pubkey: hexPk(2), batch_seq: null }]);
+            await rt.recordAnchorReward('anchor_BTC', 5, hexPk(2), 100);
+            expect(hub.db.doQuery.callCount).to.equal(1);   // SELECT only
+        });
+
+        it('supersedes a local-only incumbent when our pubkey sorts strictly lower', async function () {
+            // Incumbent pubkey is larger and not yet archived → our smaller pubkey
+            // wins: DELETE the local incumbent(s) then INSERT ours.
+            hub.db.doQuery.onFirstCall().resolves([{ validator_pubkey: hexPk(9), batch_seq: null }]);
+            await rt.recordAnchorReward('anchor_BTC', 5, hexPk(1), 100);
+            expect(hub.db.doQuery.getCall(1).args[0]).to.include('DELETE FROM validator_rewards');
+            let ins = hub.db.doQuery.getCall(2).args;
+            expect(ins[0]).to.include('INSERT IGNORE INTO validator_rewards');
+            expect(ins[1]).to.deep.equal([hexPk(1), 5, 'anchor_BTC', '10.00000000', 100]);
+        });
+
+        it('never displaces a row that has already ridden an on-chain archive', async function () {
+            // An archived incumbent (batch_seq set) is immutable, even if ours sorts
+            // lower — leave it untouched and drop ours.
+            hub.db.doQuery.onFirstCall().resolves([{ validator_pubkey: hexPk(9), batch_seq: 42 }]);
+            await rt.recordAnchorReward('anchor_BTC', 5, hexPk(1), 100);
+            expect(hub.db.doQuery.callCount).to.equal(1);   // SELECT only — no DELETE, no INSERT
         });
 
         it('pushes the reward to the BTC indexer with its own reward_type', async function () {
@@ -161,7 +212,7 @@ describe('RewardTracker', function () {
         it('honors ANCHOR_REWARD_PER_PUBLISH config', async function () {
             let rt2 = new RewardTracker(createMockHub({ p2pConfig: { ANCHOR_REWARD_PER_PUBLISH: '2.5' } }));
             await rt2.recordAnchorReward('anchor_BTC', 1, hexPk(1), 100);
-            let args = rt2.db.doQuery.getCall(0).args;
+            let args = rt2.db.doQuery.getCall(1).args;   // getCall(0) is the dedup SELECT
             expect(args[1][3]).to.equal('2.50000000');
         });
 
