@@ -365,14 +365,19 @@ class StateAnchorPublisher {
     async _startArchiveRound(signer, electionBlock){
         if(this._archiveRound) return 'round_pending';                       // one at a time
 
-        let pubkeys = await this._getActiveOraclePublishPubkeys(electionBlock);
+        // Leader ELECTION runs over the set at the current BTC block (liveness: a
+        // freshly-joined validator can take over a stalled publish even when the
+        // wrapper checkpoint's snapshot_block is hours old). This set decides only
+        // WHO drives the round + pays the DOGE — it does NOT gate which signatures
+        // count on-chain; that is the snapshot_block signing set resolved below.
+        let electionPubkeys = await this._getActiveOraclePublishPubkeys(electionBlock);
         let me = this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
-        if(pubkeys.length > 0){
+        if(electionPubkeys.length > 0){
             if(!me) return 'none';
-            if(!pubkeys.includes(me)){
+            if(!electionPubkeys.includes(me)){
                 console.log('StateAnchorPublisher: archive election at block ' + electionBlock +
-                            ' — own pubkey not in the oracle_publish set (' + pubkeys.length + ' eligible)');
-                return 'none';                                               // not an oracle_publish validator
+                            ' — own pubkey not in the oracle_publish election set (' + electionPubkeys.length + ' eligible)');
+                return 'none';                                               // not an eligible publisher right now
             }
         }
 
@@ -409,8 +414,8 @@ class StateAnchorPublisher {
         let network  = String(cps[0].network);
         let batchSeq = await this._getNextBatchSeq();
 
-        if(pubkeys.length > 1){
-            let order = StateAnchorPublisher.hashOrder(this._archiveElectionKey(cp, batchSeq), pubkeys);
+        if(electionPubkeys.length > 1){
+            let order = StateAnchorPublisher.hashOrder(this._archiveElectionKey(cp, batchSeq), electionPubkeys);
             let since = Number.isFinite(electionBlock) ? electionBlock - Number(cp.snapshot_block) : null;
             if(!this._rankUnlocked(order, me, since)){
                 // Operator visibility: a hub that never wins the archive
@@ -468,8 +473,26 @@ class StateAnchorPublisher {
         let myPubkey = this.identity.getPubkeyHex().toLowerCase();
         let mySig    = this.identity.sign(canonical);
 
-        let snapCount = pubkeys.length;
+        // SIGNING/QUORUM set: resolved at the wrapper checkpoint's snapshot_block —
+        // the block the published v1 declares on the wire and the block the indexer
+        // (anchor.js) + full-parse recovery verify the wrapper signatures against
+        // (oracle_publish @ snapshot_block). Resolving it at the current election
+        // block instead would let signers present only in the current set
+        // contribute signatures the indexer later drops, pushing validSigs below
+        // quorum, marking the v1 invalid on-chain — while the rows get dequeued
+        // anyway (see the on-chain-validity gate in _publishArchive), permanently
+        // losing settled cross-chain state. The election set above may differ
+        // (liveness); the set that gates co-signature acceptance must not.
+        let signingPubkeys = await this._getActiveOraclePublishPubkeys(Number(cp.snapshot_block));
+        let snapCount = signingPubkeys.length;
         let quorum    = (snapCount <= 1) ? 1 : Math.max(2 * Math.floor((snapCount - 1) / 3) + 1, Math.ceil((snapCount + 1) / 2));
+
+        // Seed the leader's own signature only if the leader is itself in the
+        // signing set. A leader elected for liveness but absent from the
+        // snapshot_block set must not inflate the local quorum count with a
+        // signature the indexer will drop on-chain.
+        let signatures = new Map();
+        if(snapCount <= 1 || signingPubkeys.includes(myPubkey)) signatures.set(myPubkey, mySig);
 
         let round = {
             cp, batchSeq, crc, b64, chunks, canonical, quorum, signer, electionBlock,
@@ -477,8 +500,8 @@ class StateAnchorPublisher {
             matchIds:   matches.map(m => ({ match_id: m.match_id, status: m.status })),
             callIds:    calls.map(c => ({ call_id: c.call_id, phase: c.phase, status: c.status })),
             rewardIds:  rewardRows.map(({row}) => ({ reward_type: String(row.reward_type), round_number: Number(row.round_number), validator_pubkey: String(row.validator_pubkey).toLowerCase() })),
-            validators: pubkeys.slice(),
-            signatures: new Map([[myPubkey, mySig]]),
+            validators: signingPubkeys.slice(),
+            signatures: signatures,
             done:       false,
             timer:      null
         };
@@ -708,22 +731,28 @@ class StateAnchorPublisher {
         let cp = d.checkpoint;
         // The publisher is elected by the CURRENT BTC block (not the checkpoint's
         // possibly hours-old snapshot_block). The REQ carries its election block;
-        // we verify the sender's rank against it, bounded to our own view of the
+        // we verify the SENDER's rank against it, bounded to our own view of the
         // BTC tip (anti-spam — the security property is the DB byte-match below).
         let electionBlock = Number(d.election_block);
         if(!Number.isFinite(electionBlock)) return;
         let myBtc = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
         if(Number.isFinite(myBtc) && Math.abs(myBtc - electionBlock) > this.electionToleranceBlocks) return;
-        let pubkeys = await this._getActiveOraclePublishPubkeys(electionBlock);
-        if(!pubkeys.includes(myPubkey)) return;
-        if(pubkeys.length > 1){
+        let electionPubkeys = await this._getActiveOraclePublishPubkeys(electionBlock);
+        if(electionPubkeys.length > 1){
             // Same content-anchored key + failover ladder the leader used —
             // accept any sender whose rank has unlocked, not just rank 0, or a
             // signer-less rank-0 hub stalls archiving federation-wide.
-            let order = StateAnchorPublisher.hashOrder(this._archiveElectionKey(cp, Number(d.batch_seq)), pubkeys);
+            let order = StateAnchorPublisher.hashOrder(this._archiveElectionKey(cp, Number(d.batch_seq)), electionPubkeys);
             let since = electionBlock - Number(cp.snapshot_block);
             if(!this._rankUnlocked(order, sender, since)) return;            // not unlocked on the failover ladder
         }
+        // MY co-sign eligibility, by contrast, is gated on the snapshot_block
+        // SIGNING set: the indexer + recovery only count a wrapper signature whose
+        // signer holds oracle_publish AT snapshot_block, so a follower present only
+        // in the current election set would contribute a signature that is dropped
+        // on-chain — and could drag an otherwise-valid archive below quorum.
+        let signingPubkeys = await this._getActiveOraclePublishPubkeys(Number(cp.snapshot_block));
+        if(!signingPubkeys.includes(myPubkey)) return;
 
         let canonical = this._archiveCanonical(cp, Number(d.batch_seq), Number(d.match_count),
                                                String(d.batch_crc32), Number(d.total_chunks));
@@ -968,6 +997,20 @@ class StateAnchorPublisher {
             }
         }
 
+        // On-chain VALIDITY gate: the source rows are only safe to DEQUEUE if the
+        // v1 we just broadcast will pass the indexer's own check — its wrapper
+        // signatures must reach quorum over oracle_publish @ snapshot_block, the
+        // SAME set + threshold the indexer (anchor.js) and full-parse recovery
+        // verify against. If they don't (e.g. a validator-set drift the signing
+        // round could not satisfy), the on-chain v1 is stored `invalid`; dequeuing
+        // the rows anyway would strand settled cross_chain_matches/calls in an
+        // unrecoverable hole. Treat it exactly like a lost chunk: keep the rows
+        // pending so a later round re-archives them under a fresh batch seq. The
+        // single-node / unresolvable-set degenerate (validators.length <= 1) keeps
+        // today's behavior — the indexer stores those as recoverable 'unverified'.
+        let onChainValid = (round.validators.length <= 1) ||
+                           this._quorumVerified(round.canonical, sigs, round.validators);
+
         // A partially-published archive is unrecoverable (recovery refuses
         // incomplete batches), so the rows must NOT be marked archived. Back-fill
         // with a sentinel archived_status instead: batch_seq still advances (a
@@ -975,12 +1018,17 @@ class StateAnchorPublisher {
         // corrupt chunk reassembly) while `archived_status <> status` keeps every
         // row eligible, so the next flush re-archives the whole batch.
         let matchIds = round.matchIds, callIds = round.callIds || [], rewardIds = round.rewardIds || [];
-        if(lostChunks > 0){
+        if(lostChunks > 0 || !onChainValid){
             matchIds  = matchIds.map(m => Object.assign({}, m, { status: '__partial__' }));
             callIds   = callIds.map(c => Object.assign({}, c, { status: '__partial__' }));
             rewardIds = [];                  // reward rows stay pending (batch_seq NULL) and re-archive
-            console.error('StateAnchorPublisher: batch ' + round.batchSeq + ' lost ' + lostChunks +
-                          ' chunk(s) on-chain — rows stay pending; they re-archive under a new batch seq');
+            if(lostChunks > 0)
+                console.error('StateAnchorPublisher: batch ' + round.batchSeq + ' lost ' + lostChunks +
+                              ' chunk(s) on-chain — rows stay pending; they re-archive under a new batch seq');
+            if(!onChainValid)
+                console.error('StateAnchorPublisher: batch ' + round.batchSeq + ' archive will NOT reach quorum over ' +
+                              'oracle_publish @ snapshot_block ' + round.cp.snapshot_block + ' — on-chain v1 would be ' +
+                              'invalid; rows stay pending and re-archive under a new batch seq');
         }
         await this._backfillBatch(round.batchSeq, matchIds, txid, callIds, rewardIds);
         if(this.peerManager){
@@ -993,7 +1041,7 @@ class StateAnchorPublisher {
                 sig: this.identity.sign(this._finalizedCanonical(round.batchSeq, txid, matchIds.length))
             });
         }
-        if(lostChunks === 0){
+        if(lostChunks === 0 && onChainValid){
             console.log('StateAnchorPublisher: archived ' + round.count + ' matches + ' +
                         ((round.callIds && round.callIds.length) || 0) + ' calls + ' +
                         ((round.rewardIds && round.rewardIds.length) || 0) + ' rewards (batch ' + round.batchSeq +

@@ -698,6 +698,102 @@ describe('StateAnchorPublisher', function () {
         expect(outsider.rewards.length).to.equal(0);
     });
 
+    // ── signing set is resolved at snapshot_block, not the election block ────────
+    // The published v1 declares the wrapper checkpoint's snapshot_block on the
+    // wire, and the indexer + full-parse recovery verify the wrapper signatures
+    // against oracle_publish AT snapshot_block. The leader is elected by the
+    // current BTC block for liveness, but the SIGNING/QUORUM set must track
+    // snapshot_block — otherwise, when oracle_publish membership drifts inside the
+    // tolerance window, a signer present only in the election set contributes a
+    // signature the indexer drops, the v1 stores `invalid`, and the rows (already
+    // dequeued) become permanently unrecoverable.
+    it('archive is signed by the snapshot_block set even when the election-block set has drifted', async function () {
+        // Wrapper checkpoint snapshot_block = 100 (CP_ROW); current BTC tip = 110
+        // (a 10-block drift, well inside the 36-block tolerance window). Between
+        // the two blocks oracle_publish membership changed: C left, D joined.
+        let bus = buildMesh(4, { btcBlock: 110 });
+        let [A, B, C, D] = bus.nodes;
+        let snapSet = [A, B, C].map(nd => ({ pubkey: nd.pubkey, amount: '1' }));   // oracle_publish @ snapshot_block 100
+        let elecSet = [A, B, D].map(nd => ({ pubkey: nd.pubkey, amount: '1' }));   // oracle_publish @ election block 110
+        let fullSet = bus.nodes.map(nd => ({ pubkey: nd.pubkey, amount: '1' }));   // cross_chain (block-agnostic here)
+        let blockAware = {
+            async getSnapshot(capability, block) {
+                if (capability === 'cross_chain') return { validators: fullSet };
+                return { validators: (Number(block) === 100) ? snapSet : elecSet };  // oracle_publish
+            }
+        };
+        for (let nd of bus.nodes) { nd.pub.capSnapshot = blockAware; nd.pub.hub.capabilitySnapshot = blockAware; }
+
+        await startAll(bus);
+        await flushAll(bus);
+        await sleep(150);
+
+        // Exactly one v1, and every signature on it belongs to the snapshot_block
+        // set — so the indexer, verifying against oracle_publish @ snapshot_block,
+        // accepts them all and stores the archive `valid`.
+        let v1s = bus.nodes.flatMap(nd => nd.published.filter(p => p.split('|')[1] === '1'));
+        expect(v1s.length, 'exactly one v1 archive').to.equal(1);
+        let v1 = v1s[0].split('|');
+        expect(v1[10], 'wire SNAPSHOT_BLOCK').to.equal('100');
+        let sigCount = Number(v1[16]);
+        let snapPubkeys = new Set(snapSet.map(v => v.pubkey));
+        let signers = [];
+        for (let i = 0; i < sigCount; i++) signers.push(v1[17 + 2 * i]);
+        for (let s of signers)
+            expect(snapPubkeys.has(s), 'signer ' + s.substring(0, 12) + '… is in the snapshot_block set').to.equal(true);
+        // The election-only validator D never contributes a signature that would
+        // be dropped on-chain (the pre-fix bug had it signing into the quorum).
+        expect(signers.includes(D.pubkey), 'election-only validator absent from the v1 sigs').to.equal(false);
+        // Indexer simulation: valid sigs over oracle_publish @ snapshot_block (N=3
+        // → quorum 2) clear quorum, so the v1 is on-chain `valid`.
+        expect(signers.length, 'sigs valid at snapshot_block reach quorum').to.be.at.least(2);
+
+        // The archive is valid, so the source rows are safely dequeued on every hub.
+        for (let nd of bus.nodes) {
+            expect(nd.db.matches[0].batch_seq, 'node ' + nd.i).to.equal(0);
+            expect(nd.db.matches[0].archived_status, 'node ' + nd.i).to.equal('finalized');
+        }
+    });
+
+    // ── back-fill is gated on confirmed on-chain validity ───────────────────────
+    // Even after a successful DOGE broadcast, the source rows must NOT be marked
+    // archived unless the broadcast v1 will reach quorum over oracle_publish @
+    // snapshot_block (the indexer's own check). Otherwise settled cross-chain
+    // state is dequeued behind an `invalid` on-chain copy and lost forever.
+    it('_publishArchive keeps rows pending when the broadcast v1 cannot reach on-chain quorum', async function () {
+        let bus = buildMesh(1);
+        let nd = bus.nodes[0];
+        let cp = nd.pub._cpFromRow(nd.db.checkpoints[0]);                  // snapshot_block 100
+        let batchSeq = 0, count = 1, crc = 'deadbeef';
+        let canonical = nd.pub._archiveCanonical(cp, batchSeq, count, crc, 1);
+        // A 3-member snapshot signing set (quorum 2) but only the leader's own
+        // signature collected (1 valid) — the indexer would reject it as invalid.
+        let validators = [nd.pubkey, pkOf(1), pkOf(2)];
+        let round = {
+            cp, batchSeq, crc, count, canonical,
+            b64: 'x', chunks: ['x'],
+            signer: { broadcastFn: nd.pub.broadcastFn },
+            quorum: 2,
+            matchIds: [{ match_id: 'm1', status: 'finalized' }],
+            callIds: [], rewardIds: [],
+            validators,
+            signatures: new Map([[nd.pubkey, nd.identity.sign(canonical)]]),
+            done: true, timer: null
+        };
+        await nd.pub._publishArchive(round);
+        await sleep(20);
+
+        // The v1 broadcast happened (a txid was produced) …
+        expect(nd.published.some(p => p.split('|')[1] === '1'), 'v1 was broadcast').to.equal(true);
+        // … but the row stays PENDING: batch_seq advances (a re-archive needs a
+        // fresh seq) while archived_status is the sentinel, so archived_status <>
+        // status keeps it eligible for re-archival rather than lost.
+        expect(nd.db.matches[0].batch_seq, 'seq advances').to.equal(0);
+        expect(nd.db.matches[0].archived_status, 'row stays pending via sentinel').to.equal('__partial__');
+        // No archive reward is recorded for an invalid (non-finalized) publish.
+        expect(nd.rewards.filter(r => r.type === 'anchor_archive').length, 'no reward on invalid publish').to.equal(0);
+    });
+
     it('flush returns a summary (and reports election skips honestly)', async function () {
         let bus = buildMesh(1);
         let nd = bus.nodes[0];
