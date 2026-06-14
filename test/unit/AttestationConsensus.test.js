@@ -879,7 +879,7 @@ describe('AttestationConsensus — message guards & internal early-returns', fun
         expect(pending.commits.size).to.equal(0);
     });
 
-    it('handles a winner that diverges from our own proposal (no self-signature, null sig in broadcasts)', async function () {
+    it('does NOT finalize a byte_equality round when our body genuinely diverges (only one valid sig)', async function () {
         const RID   = '3c'.repeat(16);
         const MINE  = Buffer.from('my-body');
         const OTHER = Buffer.from('peer-body');
@@ -896,13 +896,113 @@ describe('AttestationConsensus — message guards & internal early-returns', fun
 
         let pending = c.pending.get(RID);
         expect(pending.winner.body.toString()).to.equal('peer-body');
-        // Our proposal diverged → we hold no signature for the winning body.
+        // Our proposal diverged under byte_equality → we hold no signature for
+        // the winning body, and (correctly) we do NOT re-sign it: a byte
+        // divergence is a genuine disagreement, not a semantic one.
         expect(pending.signatures.has(pub(me))).to.equal(false);
 
-        // Drive to finalization via the peer's PREPARE + COMMIT over the winner.
+        // Peer's PREPARE + COMMIT over the winner give exactly ONE valid sig.
+        // needed = max(quorum=2, redundancy=2) = 2, so the round must NOT
+        // finalize on participation alone — emitting a 1-sig payload here is the
+        // F-2 defect. The round falls through to deadline expiry instead.
         c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, OTHER));
         c._handleMessage(signEnv('ATTEST_COMMIT', RID, 'http_get', p1, OTHER));
         await flush();
+        expect(pending.signatures.size).to.equal(1);
+        expect(finalized).to.have.length(0);
+    });
+});
+
+describe('AttestationConsensus — judge_model re-signs the canonical winner', function () {
+
+    let me, p1, p2, hub, c, finalized;
+    beforeEach(() => {
+        me  = mkIdentity();
+        p1  = mkIdentity();
+        p2  = mkIdentity();
+        hub = createMockHub({ identity: me });
+        finalized = [];
+    });
+    afterEach(() => {
+        for (let [, p] of (c ? c.pending : [])) if (p.timer) clearTimeout(p.timer);
+        sinon.restore();
+    });
+
+    // judge_model registry whose agree() picks the proposal whose body matches
+    // `winnerText` — modelling the judge selecting one of N byte-divergent but
+    // semantically-equivalent proposals as canonical.
+    function judgeRegistry(winnerText) {
+        return makeRealProviderRegistry(
+            (proposals) => proposals.find(p => p.body.toString() === winnerText),
+            'judge_model'
+        );
+    }
+
+    it('redundancy=3: every responsible validator re-signs the judge-selected body so the round finalizes with REDUNDANCY sigs', async function () {
+        const RID    = 'd4'.repeat(16);
+        const MINE   = Buffer.from('answer-alpha');   // my divergent body
+        const P1BODY = Buffer.from('answer-beta');    // judge picks THIS one
+        const P2BODY = Buffer.from('answer-gamma');   // p2's divergent body
+        const WINNER = P1BODY;
+
+        c = new AttestationConsensus(hub, judgeRegistry('answer-beta'));
+        c.on('request:finalized', e => finalized.push(e));
+
+        // me proposes its own (divergent) body.
+        await c.propose(RID, roundState(me, [me, p1, p2], MINE, 'llm', 3));
+        await flush();
+
+        // Peers propose their own divergent bodies → 3 proposals → judge_model
+        // agree() selects p1's body as canonical.
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, P1BODY));
+        await flush();
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, P2BODY));
+        await flush();
+
+        let pending = c.pending.get(RID);
+        expect(pending.winner.body.toString()).to.equal('answer-beta');
+
+        // THE FIX: even though my body diverged from the winner, I re-signed the
+        // canonical winning body — so I hold a verifying signature for it.
+        expect(pending.signatures.has(pub(me))).to.equal(true);
+        let myCanonical = buildCanonical(RID, 'llm', WINNER, 'ok', '').toString('utf8');
+        expect(ValidatorIdentity.verify(myCanonical, pending.signatures.get(pub(me)), pub(me))).to.equal(true);
+
+        // Peers re-sign the winner too and contribute it on PREPARE/COMMIT.
+        c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p1, WINNER));
+        c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p2, WINNER));
+        c._handleMessage(signEnv('ATTEST_COMMIT', RID, 'llm', p1, WINNER));
+        c._handleMessage(signEnv('ATTEST_COMMIT', RID, 'llm', p2, WINNER));
+        await flush();
+
+        // Three genuine signatures over the single canonical body → finalizes,
+        // and the on-chain response carries exactly REDUNDANCY (3) signatures.
+        expect(pending.signatures.size).to.equal(3);
         expect(finalized).to.have.length(1);
+        expect(finalized[0].responseBody.toString()).to.equal('answer-beta');
+        expect(finalized[0].signatures).to.have.length(3);
+        let pubkeys = finalized[0].signatures.map(s => s.pubkey).sort();
+        expect(pubkeys).to.deep.equal([pub(me), pub(p1), pub(p2)].sort());
+        // Every emitted signature verifies against the canonical winner.
+        let canonical = buildCanonical(RID, 'llm', WINNER, 'ok', '').toString('utf8');
+        for (let s of finalized[0].signatures) {
+            expect(ValidatorIdentity.verify(canonical, s.sig, s.pubkey)).to.equal(true);
+        }
+    });
+
+    it('redundancy=1: single-validator judge_model still finalizes with one valid signature', async function () {
+        const RID  = 'e5'.repeat(16);
+        const BODY = Buffer.from('the-only-answer');
+        c = new AttestationConsensus(hub, judgeRegistry('the-only-answer'));
+        c.on('request:finalized', e => finalized.push(e));
+
+        await c.propose(RID, roundState(me, [me], BODY, 'llm', 1));
+        await flush();
+
+        expect(finalized).to.have.length(1);
+        expect(finalized[0].signatures).to.have.length(1);
+        expect(finalized[0].signatures[0].pubkey).to.equal(pub(me));
+        let canonical = buildCanonical(RID, 'llm', BODY, 'ok', '').toString('utf8');
+        expect(ValidatorIdentity.verify(canonical, finalized[0].signatures[0].sig, pub(me))).to.equal(true);
     });
 });

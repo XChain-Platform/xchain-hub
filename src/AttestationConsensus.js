@@ -418,6 +418,21 @@ class AttestationConsensus extends EventEmitter {
             }
         }
 
+        // judge_model is a SEMANTIC consensus: each responsible validator runs
+        // its own model call and produces a byte-divergent body that the judge
+        // deems equivalent, then selects ONE as canonical. The match-based sig
+        // collection above therefore captures at most the single validator
+        // whose body happened to be chosen — every other responsible validator
+        // contributes nothing, so an N>=3 round would finalize with one
+        // signature and the on-chain response would be rejected (it requires
+        // REDUNDANCY signatures over the single canonical body). Re-sign the
+        // canonical winner here so THIS validator vouches for the agreed bytes.
+        // Only validators that actually produced a proposal (did the work) sign.
+        if(strategy === 'judge_model' && pending.myPubkey && pending.proposals.has(pending.myPubkey)){
+            let reSig = this._signCanonical(rid, pending.providerId, winner.body, pending.status, winner.meta);
+            if(reSig) pending.signatures.set(pending.myPubkey, reSig);
+        }
+
         // Broadcast PREPARE so other followers can verify and contribute their sigs
         let mySig = pending.signatures.get(pending.myPubkey);
         if(this.peerManager){
@@ -483,10 +498,24 @@ class AttestationConsensus extends EventEmitter {
             // Sign our own copy if we agreed (we might have proposed the same body)
             let myProposal = pending.proposals.get(pending.myPubkey);
             if(myProposal){
-                let winnerHash = crypto.createHash('sha256').update(body).digest();
-                let myHash     = crypto.createHash('sha256').update(myProposal.body).digest();
-                if(Buffer.compare(winnerHash, myHash) === 0 && myProposal.meta === meta){
-                    pending.signatures.set(pending.myPubkey, myProposal.sig);
+                let providerDef = this.providerRegistry.getDef(pending.providerId);
+                let strategy    = providerDef && providerDef.consensus_strategy;
+                if(strategy === 'judge_model'){
+                    // Semantic consensus: our own body is byte-divergent from the
+                    // judge-selected winner even though both are valid. Re-sign
+                    // the canonical winner so our vote carries a verifying
+                    // signature over the agreed bytes (see _maybeAdvanceFromProposals).
+                    let reSig = this._signCanonical(rid, pending.providerId, body, status, meta);
+                    if(reSig) pending.signatures.set(pending.myPubkey, reSig);
+                } else {
+                    // byte_equality: only sign if our independently-fetched body
+                    // is byte-identical to the winner. A divergence is a genuine
+                    // disagreement and must NOT be papered over with a signature.
+                    let winnerHash = crypto.createHash('sha256').update(body).digest();
+                    let myHash     = crypto.createHash('sha256').update(myProposal.body).digest();
+                    if(Buffer.compare(winnerHash, myHash) === 0 && myProposal.meta === meta){
+                        pending.signatures.set(pending.myPubkey, myProposal.sig);
+                    }
                 }
             }
         }
@@ -565,7 +594,16 @@ class AttestationConsensus extends EventEmitter {
         let pending = this.pending.get(rid);
         if(!pending || pending.finalized) return;
         let needed = Math.max(pending.quorum, pending.redundancy);
-        if(pending.commits.size < needed) return;
+        // Gate on the number of VALID signatures over the canonical body, not on
+        // raw participation (commits.size). A COMMIT vote is counted even when it
+        // carries no verifying signature (null sig, or a sig over a divergent
+        // body), so finalizing on commits.size would emit an on-chain response
+        // with fewer signatures than REDUNDANCY — which the indexer
+        // deterministically rejects. Requiring `needed` signatures guarantees the
+        // emitted response is on-chain-fulfillable; rounds that can't reach it
+        // (genuine divergence under byte_equality) correctly fall through to
+        // deadline expiry instead of dead-lettering a doomed payload every cycle.
+        if(pending.signatures.size < needed) return;
 
         pending.finalized = true;
         this._markFinalized(rid);
