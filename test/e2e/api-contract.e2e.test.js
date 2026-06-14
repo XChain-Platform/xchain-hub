@@ -293,6 +293,21 @@ describe('E2E: API Contract Verification', function () {
             expect(res.result.error).to.include('from_action_index is required');
         });
 
+        it('pushdexreorg — missing source_chain', async function () {
+            let res = await callRpc(cluster.getPort(0), 'pushdexreorg', { from_action_index: 100 });
+            expect(res.result.error).to.include('source_chain is required');
+        });
+
+        it('pushdexreorg — invalid chain', async function () {
+            let res = await callRpc(cluster.getPort(0), 'pushdexreorg', { source_chain: 'INVALID', from_action_index: 100 });
+            expect(res.result.error).to.match(/chain|BTC/i);
+        });
+
+        it('pushdexreorg — missing from_action_index', async function () {
+            let res = await callRpc(cluster.getPort(0), 'pushdexreorg', { source_chain: 'BTC' });
+            expect(res.result.error).to.include('from_action_index is required');
+        });
+
         it('getattestation — missing params', async function () {
             let res = await callRpc(cluster.getPort(0), 'getattestation', {});
             expect(res.result.error).to.include('required');

@@ -727,6 +727,43 @@
       },
       "x-auth": "x-api-key header, when HUB_API_KEY is configured",
       "x-internal": true
+    },
+    {
+      "name": "pushdexreorg",
+      "summary": "Indexer push: cross-chain DEX match reorg rollback.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "source_chain",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "from_action_index",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object"
+        }
+      },
+      "x-auth": "x-api-key header, when HUB_API_KEY is configured",
+      "x-internal": true
     }
   ]
 }

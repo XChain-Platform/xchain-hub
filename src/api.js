@@ -80,7 +80,7 @@ const WRITE_METHODS  = new Set([
     'updateconfig', 'registervalidator', 'rotatevalidator', 'deregistervalidator', 'syncvalidators',
     'propose', 'vote', 'requestattestation', 'reportreorg', 'initiateswap',
     'pushchaintip', 'pushpriceround', 'pushoracleprice', 'pushpricereorg', 'pushxcallreorg',
-    'anchorflush'
+    'pushdexreorg', 'anchorflush'
 ]);
 
 function validateChain(chain) {
@@ -475,6 +475,26 @@ async function startApi(){
                 return {status: "ok", source_chain, from_action_index};
             } catch (err) {
                 return {error: err.message || "error retracting cross-chain calls"};
+            }
+        },
+
+        // Retract cross_chain_matches rows after an indexer rolled back DEX ORDER actions in a
+        // reorg. The indexer pushes its source chain plus the lowest rolled-back action_index; the
+        // hub marks every match whose retracted leg (a_chain/b_chain) is on that source chain at or
+        // above that index 'retracted', restores both legs' remaining capacity, and broadcasts
+        // deletions so distributed indexers prune their mirrored cross_chain_matches copies too.
+        async pushdexreorg({source_chain, from_action_index}){
+            if(!source_chain) return {error: "source_chain is required"};
+            let chainErr = validateChain(source_chain);
+            if (chainErr) return chainErr;
+            if(from_action_index === undefined || from_action_index === null)
+                return {error: "from_action_index is required"};
+            if(!hub.crossChainDex) return {error: "cross-chain dex engine not active"};
+            try {
+                await hub.crossChainDex.retractMatchesForReorg(source_chain, from_action_index);
+                return {status: "ok", source_chain, from_action_index};
+            } catch (err) {
+                return {error: err.message || "error retracting cross-chain matches"};
             }
         },
 

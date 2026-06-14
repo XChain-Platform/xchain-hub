@@ -53,6 +53,7 @@ const METHODS = [
     ['pushoracleprice', 'Indexer push: user-published PRICE v1 oracle row.', [], { auth: true, internal: true }],
     ['pushpricereorg', 'Indexer push: price reorg rollback.', [], { auth: true, internal: true }],
     ['pushxcallreorg', 'Indexer push: cross-chain call reorg rollback.', ['source_chain', 'from_action_index'], { auth: true, internal: true }],
+    ['pushdexreorg', 'Indexer push: cross-chain DEX match reorg rollback.', ['source_chain', 'from_action_index'], { auth: true, internal: true }],
 ];
 
 const spec = {
