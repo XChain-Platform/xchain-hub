@@ -422,6 +422,41 @@ describe('PriceAggregator.receiveValidatedRound()', function () {
         expect(events.map(e => e.row.coin_pair)).to.deep.equal(['BTC/USD', 'LTC/USD']);
     });
 
+    it("excludes 'skipped' placeholder rows from the dedup SELECT so a peer-salvaged round is not rejected", async function () {
+        // A round this hub locally marked 'skipped' (no local submissions) must not
+        // block a real validated round for the same round_number arriving from a
+        // peer chain that reached quorum. The dedup SELECT therefore filters out
+        // skipped rows; only a genuine finalized row counts as a duplicate.
+        let dedupSql = null;
+        hub.db.doQuery.callsFake(async (sql) => {
+            if (/^SELECT id FROM price_snapshots/.test(sql)) { dedupSql = sql; return []; }
+            return {};
+        });
+        let result = await agg.receiveValidatedRound('BTC', makeRound());
+        expect(result).to.deep.equal({ accepted: true });
+        expect(dedupSql).to.match(/status\s*!=\s*'skipped'/);
+    });
+
+    it('writes each pair as an upsert (ON DUPLICATE KEY UPDATE → finalized) so a skipped placeholder is overwritten, not collided', async function () {
+        // With skipped rows excluded from the dedup, a skipped placeholder still
+        // occupies the (round_number, coin_pair) unique key, so a plain INSERT would
+        // collide. The write must upsert: overwrite the placeholder with finalized
+        // data (and stay idempotent for an already-finalized row).
+        let insertSqls = [];
+        hub.db.doQuery.callsFake(async (sql) => {
+            if (/^SELECT id FROM price_snapshots/.test(sql)) return [];
+            if (/^INSERT INTO price_snapshots/.test(sql)) { insertSqls.push(sql); return {}; }
+            return {};
+        });
+        let result = await agg.receiveValidatedRound('BTC', makeRound());
+        expect(result).to.deep.equal({ accepted: true });
+        expect(insertSqls).to.have.length(2);
+        insertSqls.forEach(sql => {
+            expect(sql).to.match(/ON DUPLICATE KEY UPDATE/);
+            expect(sql).to.match(/status\s*=\s*'finalized'/);
+        });
+    });
+
     it('rejects a round whose sigs are forged (well-formed hex but cryptographically invalid)', async function () {
         stubDb();
         let result = await agg.receiveValidatedRound('BTC', makeRound({

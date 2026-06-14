@@ -115,9 +115,15 @@ class PriceAggregator extends EventEmitter {
             sigs.push({ pubkey: s.pubkey.toLowerCase(), sig: s.sig.toLowerCase() });
         }
 
-        // Dedupe: if any row exists for this round_number, this is a duplicate
+        // Dedupe: if a NON-SKIPPED row exists for this round_number, this is a
+        // duplicate of an already-finalized round. 'skipped' placeholder rows
+        // (written by OracleConsensus._storeSkippedRound when this hub had no
+        // local submissions) must NOT count as a duplicate — a real validated
+        // round for the same round_number can still arrive from a peer chain that
+        // did reach quorum, and it must be allowed to overwrite the placeholders
+        // (see the ON DUPLICATE KEY UPDATE on the insert below).
         let existing = await this.db.doQuery(
-            'SELECT id FROM price_snapshots WHERE round_number = ? LIMIT 1',
+            "SELECT id FROM price_snapshots WHERE round_number = ? AND status != 'skipped' LIMIT 1",
             [round]
         );
         if (existing && existing.length > 0) {
@@ -172,11 +178,24 @@ class PriceAggregator extends EventEmitter {
         let createdAt = new Date();
         let insertedRows = [];
         for (let p of roundData.pairs) {
+            // Upsert (not a plain INSERT): a 'skipped' placeholder row may already
+            // occupy this (round_number, coin_pair) unique key from
+            // _storeSkippedRound. Overwrite it with the real finalized data rather
+            // than colliding on the key. For an already-finalized row this is an
+            // idempotent no-op of identical data (failover double-publish safe).
+            // created_at is intentionally NOT overwritten so it preserves when the
+            // hub first recorded the round.
             let query = `INSERT INTO price_snapshots
                 (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
                  validator_count, consensus_round, consensus_proof, status, source_chain, source_action_index,
                  created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?)`;
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                    price = VALUES(price), reference_block = VALUES(reference_block),
+                    reference_chain = VALUES(reference_chain), block_timestamp = VALUES(block_timestamp),
+                    validator_count = VALUES(validator_count), consensus_proof = VALUES(consensus_proof),
+                    status = 'finalized', source_chain = VALUES(source_chain),
+                    source_action_index = VALUES(source_action_index)`;
             let args = [round, p.pair, p.price, referenceBlock, sourceChain || null, timestamp,
                         validatorCount, proofJson, sourceChain || null, sourceActionIndex,
                         createdAt];
