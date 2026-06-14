@@ -124,6 +124,15 @@ class StateAnchorPublisher {
         this.chunkRetryDelayMs = parseInt(process.env.ANCHOR_CHUNK_RETRY_MS || cfg.ANCHOR_CHUNK_RETRY_MS || '2500');
         this.electionToleranceBlocks = parseInt(process.env.ANCHOR_ELECTION_TOLERANCE_BLOCKS || cfg.ANCHOR_ELECTION_TOLERANCE_BLOCKS || '36');
         this.lowBalanceThreshold = parseFloat(process.env.DOGE_LOW_BALANCE_THRESHOLD || cfg.DOGE_LOW_BALANCE_THRESHOLD || '10');
+        // Decouple on-chain anchoring from checkpoint production: checkpoints are
+        // free (off-chain hub-DB mirror, good for light-client verify) but each
+        // on-chain v0 anchor spends real DOGE on 3 chains. Only anchor every Nth
+        // checkpoint_seq — recovery needs just the LATEST anchored checkpoint per
+        // chain, so the skipped (non-multiple) seqs stay off-chain. N=1 keeps the
+        // original anchor-every-checkpoint behaviour. checkpoint_seq is consensus
+        // data (identical on every hub) so `seq % N` is deterministic fleet-wide.
+        this.anchorEveryNCheckpoints = Math.max(1,
+            parseInt(process.env.ANCHOR_CHECKPOINT_EVERY_N || cfg.ANCHOR_CHECKPOINT_EVERY_N || '1') || 1);
 
         this.dogeAddress   = process.env.DOGE_ADDRESS    || cfg.DOGE_ADDRESS    || '';
         this.dogePubkeyHex = process.env.DOGE_PUBKEY_HEX || cfg.DOGE_PUBKEY_HEX || '';
@@ -264,11 +273,18 @@ class StateAnchorPublisher {
     // all prior history), so only the newest per chain costs DOGE bytes.
     // Each row elects its own publisher (hash-order at its snapshot_block).
     async _publishPendingCheckpoints(signer, btcBlock){
+        // Pick, per chain, the latest ANCHOR-ELIGIBLE checkpoint (seq divisible by
+        // anchorEveryNCheckpoints) that is not yet on-chain. Selecting the max
+        // eligible seq — rather than the absolute max — means accumulated
+        // non-multiple seqs never block: they simply stay off-chain. With N=1
+        // (MOD(seq,1)=0 for all) this is identical to anchoring every checkpoint.
         let rows = await this.db.doQuery(
             'SELECT sc.* FROM state_checkpoints sc JOIN (' +
-            '  SELECT chain, network, MAX(checkpoint_seq) AS max_seq FROM state_checkpoints GROUP BY chain, network' +
+            '  SELECT chain, network, MAX(checkpoint_seq) AS max_seq FROM state_checkpoints' +
+            '  WHERE MOD(checkpoint_seq, ?) = 0 GROUP BY chain, network' +
             ') t ON sc.chain = t.chain AND sc.network = t.network AND sc.checkpoint_seq = t.max_seq ' +
-            'WHERE sc.anchor_txid IS NULL');
+            'WHERE sc.anchor_txid IS NULL',
+            [this.anchorEveryNCheckpoints]);
         let anchored = [];
         for(let row of (rows || [])){
             try {

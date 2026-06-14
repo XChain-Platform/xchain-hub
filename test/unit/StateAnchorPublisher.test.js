@@ -90,8 +90,10 @@ function memDb() {
         async doQuery(sql, params) {
             params = params || [];
             if (sql.startsWith('SELECT sc.* FROM state_checkpoints sc JOIN')) {
+                let everyN = params[0] || 1;                       // ANCHOR_CHECKPOINT_EVERY_N
                 let latest = {};
                 for (let r of checkpoints) {
+                    if (r.checkpoint_seq % everyN !== 0) continue; // only anchor-eligible seqs
                     let k = r.chain + '|' + r.network;
                     if (!latest[k] || r.checkpoint_seq > latest[k].checkpoint_seq) latest[k] = r;
                 }
@@ -331,6 +333,37 @@ describe('StateAnchorPublisher', function () {
 
         expect(nd.db.matches[0].batch_seq).to.equal(0);
         expect(nd.db.matches[0].archived_status).to.equal('finalized');
+    });
+
+    it('ANCHOR_CHECKPOINT_EVERY_N anchors only the latest divisible seq; off-multiples stay off-chain', async function () {
+        // Decouple on-chain anchoring from checkpoint production. With N=2 only
+        // even seqs are eligible; the odd one is never anchored (it lives only in
+        // the off-chain mirror). Seeds: seq6 already anchored, seq7 (odd, null),
+        // seq8 (even, null) — the latest eligible unanchored is seq8.
+        let bus = buildMesh(1, {
+            cfg: { ANCHOR_CHECKPOINT_EVERY_N: '2' },
+            mutate: (self, db) => {
+                db.checkpoints.length = 0;
+                db.checkpoints.push(Object.assign({}, CP_ROW, { id: 1, block_index: 493, checkpoint_seq: 6, anchor_txid: 'old' }));
+                db.checkpoints.push(Object.assign({}, CP_ROW, { id: 2, block_index: 494, checkpoint_seq: 7, anchor_txid: null }));
+                db.checkpoints.push(Object.assign({}, CP_ROW, { id: 3, block_index: 495, checkpoint_seq: 8, anchor_txid: null }));
+            }
+        });
+        let nd = bus.nodes[0];
+        await startAll(bus);
+        await nd.pub.flush();
+        await sleep(30);
+
+        let v0s = nd.published.filter(p => p.split('|')[1] === '0');
+        expect(v0s.length, 'exactly one v0 anchor').to.equal(1);
+        let v0 = v0s[0].split('|');
+        expect(v0[4], 'block_index of anchored row').to.equal('495');   // seq 8
+        expect(v0[9], 'checkpoint_seq anchored').to.equal('8');
+
+        let bySeq = s => nd.db.checkpoints.find(r => r.checkpoint_seq === s);
+        expect(bySeq(8).anchor_txid, 'seq8 anchored on-chain').to.be.a('string');
+        expect(bySeq(7).anchor_txid, 'odd seq7 stays off-chain').to.equal(null);
+        expect(bySeq(6).anchor_txid, 'seq6 untouched').to.equal('old');
     });
 
     it('oversized archive splits into v1 + v2 chunks that reassemble byte-identically', async function () {

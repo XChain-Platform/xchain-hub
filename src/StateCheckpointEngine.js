@@ -104,6 +104,13 @@ class StateCheckpointEngine extends EventEmitter {
 
     async start(){
         if(!this.enabled){ console.log('StateCheckpointEngine: disabled (CHECKPOINT_ENABLED=false)'); return; }
+        // Restore the cadence latch from the last checkpoint we already produced.
+        // Without this the latch starts null, so the FIRST tick after a restart
+        // checkpoints immediately regardless of intervalBlocks — and every such
+        // off-schedule checkpoint anchors 3 chains on-chain (real DOGE). A
+        // restart must not reset the cadence; only btcBlock advancing past
+        // intervalBlocks should.
+        await this._loadLastCheckpointLatch();
         if(this.peerManager){
             this._messageHandler = (env) => this._handleMessage(env);
             this.peerManager.on('message', this._messageHandler);
@@ -123,6 +130,25 @@ class StateCheckpointEngine extends EventEmitter {
         }
         for(let [, p] of this.pending){ if(p.timer) clearTimeout(p.timer); }
         this.pending.clear();
+    }
+
+    // Seed the cadence latch from persisted checkpoints so a hub restart does
+    // not fire an off-schedule (extra DOGE-anchored) checkpoint. The latch is a
+    // single global "last snapshot block we checkpointed at" (one round spans
+    // all chains), so MAX(snapshot_block) across the table is the right seed.
+    // Best-effort: a read failure leaves the latch null (pre-fix behaviour) and
+    // must not block engine startup.
+    async _loadLastCheckpointLatch(){
+        try {
+            let rows = await this.db.doQuery('SELECT MAX(snapshot_block) AS last_block FROM state_checkpoints');
+            let last = rows && rows[0] ? rows[0].last_block : null;
+            if(last != null){
+                this._lastCheckpointBtcBlock = Number(last);
+                console.log('StateCheckpointEngine: cadence latch restored at snapshot block ' + this._lastCheckpointBtcBlock);
+            }
+        } catch(e){
+            console.warn('StateCheckpointEngine: could not restore cadence latch (' + (e && e.message) + ') — first tick may checkpoint early');
+        }
     }
 
     // ── Cadence (leader-only initiation; followers only react to SIGN_REQs) ────

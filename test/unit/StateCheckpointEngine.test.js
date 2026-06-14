@@ -55,6 +55,11 @@ describe('StateCheckpointEngine', function () {
                     for (let r of checkpoints) if (r.chain === params[0] && r.network === params[1] && (max == null || r.checkpoint_seq > max)) max = r.checkpoint_seq;
                     return [{ max_seq: max }];
                 }
+                if (sql.startsWith('SELECT MAX(snapshot_block)')) {
+                    let max = null;
+                    for (let r of checkpoints) if (max == null || r.snapshot_block > max) max = r.snapshot_block;
+                    return [{ last_block: max }];
+                }
                 if (sql.startsWith('INSERT IGNORE INTO state_checkpoints')) {
                     let [chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, validator_signatures] = params;
                     // Append-only INSERT IGNORE keyed by (chain, network, block_index, checkpoint_seq)
@@ -165,6 +170,35 @@ describe('StateCheckpointEngine', function () {
         expect(ValidatorIdentity.verify(canon, sigs[0].sig, sigs[0].pubkey)).to.be.true;
         // Streamed to the indexer mirror (capability snapshot rows + the checkpoint row).
         expect(nd.hub.hubDbBroadcaster.rows.some(r => r.table === 'state_checkpoints')).to.be.true;
+    });
+
+    it('restart does not re-checkpoint: cadence latch is restored from persisted rows', async function () {
+        // First boot: one checkpoint at btcBlock 100 (default intervalBlocks 6).
+        let bus = buildMesh(1, { btcBlock: 100 });
+        let nd  = bus.nodes[0];
+        await nd.engine.start();
+        await nd.engine._tick();
+        await sleep(30);
+        expect(nd.db.checkpoints.length, 'after first boot').to.equal(1);
+        let seqAfterBoot = nd.db.checkpoints[0].checkpoint_seq;
+
+        // Simulate a restart: a fresh engine over the SAME hub/db, btcBlock
+        // unchanged (no new interval elapsed). Pre-fix this re-checkpointed
+        // immediately (latch null) and burned another on-chain anchor round.
+        let restarted = new StateCheckpointEngine(nd.hub);
+        restarted._indexerCall = async () => Object.assign({}, TIP);
+        await restarted.start();
+        expect(restarted._lastCheckpointBtcBlock, 'latch restored on start').to.equal(100);
+        await restarted._tick();
+        await sleep(30);
+        expect(nd.db.checkpoints.length, 'no extra checkpoint after restart').to.equal(1);
+        expect(nd.db.checkpoints[0].checkpoint_seq).to.equal(seqAfterBoot);
+
+        // Once btcBlock advances past the interval, it checkpoints again.
+        restarted.hub._resolveBtcLatestBlock = async () => 100 + restarted.intervalBlocks;
+        await restarted._tick();
+        await sleep(30);
+        expect(nd.db.checkpoints.length, 'checkpoints again past the interval').to.equal(2);
     });
 
     it('N=4: leader collects 2f+1, every node writes the same quorum-signed row', async function () {
