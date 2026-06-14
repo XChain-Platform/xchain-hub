@@ -302,6 +302,46 @@ describe('Governance', function () {
     });
 
     // -----------------------------------------------------------------
+    // _handleResult() — followers must apply a passed proposal too
+    // -----------------------------------------------------------------
+
+    describe('_handleResult()', function () {
+
+        it('emits proposal:finalized on a passed status transition (affectedRows > 0)', async function () {
+            hub.db.doQuery.onFirstCall().resolves({ affectedRows: 1 });   // UPDATE: voting → passed
+            hub.db.doQuery.onSecondCall().resolves([                      // SELECT proposal row
+                { parameter: 'CAPABILITY_PRICE_MIN_STAKE', current_value: '100', proposed_value: '200' }
+            ]);
+            let emitted = null;
+            gov.on('proposal:finalized', (d) => { emitted = d; });
+
+            await gov._handleResult({ data: { proposalId: 'gov:P:1', status: 'passed' } });
+
+            expect(emitted).to.not.be.null;
+            expect(emitted.proposalId).to.equal('gov:P:1');
+            expect(emitted.parameter).to.equal('CAPABILITY_PRICE_MIN_STAKE');
+            expect(emitted.oldValue).to.equal('100');
+            expect(emitted.newValue).to.equal('200');
+        });
+
+        it('does NOT emit when already finalized (affectedRows = 0 — tally-leader loopback)', async function () {
+            hub.db.doQuery.onFirstCall().resolves({ affectedRows: 0 });
+            let emitted = false;
+            gov.on('proposal:finalized', () => { emitted = true; });
+            await gov._handleResult({ data: { proposalId: 'gov:P:1', status: 'passed' } });
+            expect(emitted).to.be.false;
+        });
+
+        it('does NOT emit for a failed proposal', async function () {
+            hub.db.doQuery.onFirstCall().resolves({ affectedRows: 1 });
+            let emitted = false;
+            gov.on('proposal:finalized', () => { emitted = true; });
+            await gov._handleResult({ data: { proposalId: 'gov:P:1', status: 'failed' } });
+            expect(emitted).to.be.false;
+        });
+    });
+
+    // -----------------------------------------------------------------
     // _tallyProposal()
     // -----------------------------------------------------------------
 

@@ -92,7 +92,10 @@ class OracleConsensus extends EventEmitter {
 
         // Config
         this.finalizationTimeout = parseInt(process.env.ORACLE_FINALIZATION_TIMEOUT) || DEFAULT_FINALIZATION_TIMEOUT;
-        this.minSubmissions      = parseInt(process.env.ORACLE_MIN_SUBMISSIONS) || 1;
+        // Default to a 2-hub diversity floor: a single hub's single external source must never
+        // become a federation-signed price. A real federation always clears 2; single-host / regtest
+        // deployments set ORACLE_MIN_SUBMISSIONS=1 explicitly.
+        this.minSubmissions      = parseInt(process.env.ORACLE_MIN_SUBMISSIONS) || 2;
         this.leaderTimeout       = parseInt(process.env.ORACLE_LEADER_TIMEOUT_MS) || DEFAULT_LEADER_TIMEOUT_MS;
     }
 
@@ -480,6 +483,38 @@ class OracleConsensus extends EventEmitter {
                 ' for round ' + round + ' (leader ' + (leader ? leader.addr : 'unknown') + ' has no submission)');
         }
 
+        // Content-validate the proposed prices before co-signing. Leadership rotates round-robin, so
+        // a Byzantine or feed-broken validator gets a leader turn; without this check honest followers
+        // would PREPARE/COMMIT and contribute signatures to whatever prices it proposed (the digest
+        // check only proves the proposer's array hashes to its own digest). Mirror CrossChainEngine's
+        // "never trust the proposer's claim": reject (no PREPARE/sign) any pair outside the hard
+        // PRICE_MAX bound, or — when this hub has its own aggregate for the pair — more than the slash
+        // deviation threshold away from it (refuse to co-sign exactly what we'd be slashed for). Pairs
+        // we have no local submission for can't be band-checked, so only the PRICE_MAX bound applies —
+        // a hub that failed its own fetch still helps quorum but cannot rubber-stamp an out-of-range price.
+        {
+            let localByPair  = new Map((this._aggregateAll(submissions) || []).map(a => [a.coinPair, a.price]));
+            let devThreshold = (this.hub.slashDetector && this.hub.slashDetector.deviationThreshold) || 0.05;
+            for (let p of prices) {
+                let val = parseFloat(p.price);
+                if (!(Number.isFinite(val) && val > 0 && val < PRICE_MAX)) {
+                    console.warn('Oracle: rejecting PROPOSE round ' + round + ' from ' + envelope.sender +
+                        ' — ' + p.coinPair + ' price ' + p.price + ' outside (0, PRICE_MAX)');
+                    return;
+                }
+                let local = localByPair.get(p.coinPair);
+                if (local !== undefined && local !== null && local > 0) {
+                    let deviation = Math.abs(val - local) / local;
+                    if (deviation > devThreshold) {
+                        console.warn('Oracle: rejecting PROPOSE round ' + round + ' from ' + envelope.sender +
+                            ' — ' + p.coinPair + ' proposed ' + val + ' deviates ' + (deviation * 100).toFixed(2) +
+                            '% from local ' + local + ' (> ' + (devThreshold * 100).toFixed(2) + '%)');
+                        return;
+                    }
+                }
+            }
+        }
+
         // Create or update pending round. The validator-set snapshot is locked
         // at the round's block boundary (same snapshot the leader used in
         // finalizeRound) so PREPARE/COMMIT checks use the same N on every hub.
@@ -749,6 +784,19 @@ class OracleConsensus extends EventEmitter {
                 validatorCount, proof,
                 p.price, referenceBlock, blockTimestamp, validatorCount, proof
             ]);
+            // Broadcast the finalized row to hub-DB mirror subscribers (distributed indexers),
+            // mirroring StateCheckpointEngine/CrossChainDexEngine. Without this the round is written
+            // via a bare INSERT that emits nothing, so a replica's price mirror never receives it live
+            // and _priceSyncSatisfied passes while the round is absent — the replica then validates
+            // native-coin fees against the prior round (ledger divergence). Best-effort; never block finalize.
+            if (this.hub && this.hub.hubDbBroadcaster) {
+                try {
+                    let r = await this.db.doQuery(
+                        'SELECT * FROM price_snapshots WHERE round_number=? AND coin_pair=? LIMIT 1',
+                        [round, p.coinPair]);
+                    if (r.length) this.hub.hubDbBroadcaster.broadcastRow({ table: 'price_snapshots', row: r[0] });
+                } catch (e) { /* broadcast is best-effort */ }
+            }
         }
     }
 

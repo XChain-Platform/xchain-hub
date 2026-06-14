@@ -79,7 +79,7 @@ const ALLOWED_CHAINS = new Set(['BTC', 'LTC', 'DOGE']);
 const WRITE_METHODS  = new Set([
     'updateconfig', 'registervalidator', 'rotatevalidator', 'deregistervalidator', 'syncvalidators',
     'propose', 'vote', 'requestattestation', 'reportreorg', 'initiateswap',
-    'pushchaintip', 'pushpriceround', 'pushoracleprice', 'pushpricereorg',
+    'pushchaintip', 'pushpriceround', 'pushoracleprice', 'pushpricereorg', 'pushxcallreorg',
     'anchorflush'
 ]);
 
@@ -456,6 +456,25 @@ async function startApi(){
                 return await hub.priceAggregator.retractFromActionIndex(source_chain, from_action_index);
             } catch (err) {
                 return {error: err.message || "error retracting prices"};
+            }
+        },
+
+        // Retract cross_chain_calls relay rows after an indexer rolled back XCALL request
+        // actions in a reorg. The indexer pushes its source chain plus the lowest rolled-back
+        // action_index; the hub marks the matching relay rows 'retracted' (both phases) and
+        // broadcasts deletions so distributed indexers prune their mirrored copies too.
+        async pushxcallreorg({source_chain, from_action_index}){
+            if(!source_chain) return {error: "source_chain is required"};
+            let chainErr = validateChain(source_chain);
+            if (chainErr) return chainErr;
+            if(from_action_index === undefined || from_action_index === null)
+                return {error: "from_action_index is required"};
+            if(!hub.crossChainCalls) return {error: "cross-chain call engine not active"};
+            try {
+                await hub.crossChainCalls.retractCallsForReorg(source_chain, from_action_index);
+                return {status: "ok", source_chain, from_action_index};
+            } catch (err) {
+                return {error: err.message || "error retracting cross-chain calls"};
             }
         },
 

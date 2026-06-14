@@ -279,15 +279,42 @@ class Governance extends EventEmitter {
         ).catch(e => {}); // Ignore errors
     }
 
-    _handleResult(envelope) {
+    async _handleResult(envelope) {
         let { proposalId, status } = envelope.data;
         if (!proposalId || !status) return;
 
-        // Update proposal status locally
-        this.db.doQuery(
-            "UPDATE governance_proposals SET status = ?, applied_at = NOW() WHERE proposal_id = ? AND status = 'voting'",
-            [status, proposalId]
-        ).catch(e => {});
+        // Update proposal status locally. Guard side effects on the status-transition (was 'voting')
+        // so the tally leader's own loopback of this GOV_RESULT — which already applied + emitted in
+        // _tallyProposal — affects 0 rows here and does not double-emit.
+        let res;
+        try {
+            res = await this.db.doQuery(
+                "UPDATE governance_proposals SET status = ?, applied_at = NOW() WHERE proposal_id = ? AND status = 'voting'",
+                [status, proposalId]
+            );
+        } catch (e) { return; }
+
+        // A passed proposal's 'proposal:finalized' listeners (capability hot-reload, provider
+        // registry) are registered on EVERY hub, but _tallyProposal only runs on the deterministic
+        // tally leader — so without emitting here followers update the row yet never APPLY the change,
+        // and capability thresholds (min_stake etc.) diverge federation-wide until restart. Emit on the
+        // same transition + payload shape the leader uses in _tallyProposal.
+        if (status === 'passed' && res && res.affectedRows > 0) {
+            try {
+                let rows = await this.db.doQuery(
+                    'SELECT parameter, current_value, proposed_value FROM governance_proposals WHERE proposal_id = ? LIMIT 1',
+                    [proposalId]
+                );
+                if (rows.length) {
+                    this.emit('proposal:finalized', {
+                        proposalId: proposalId,
+                        parameter:  rows[0].parameter,
+                        oldValue:   rows[0].current_value,
+                        newValue:   rows[0].proposed_value
+                    });
+                }
+            } catch (e) { /* best-effort: status already persisted */ }
+        }
     }
 
     // --- Tally logic ---

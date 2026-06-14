@@ -200,6 +200,78 @@
       "x-auth": "x-api-key header, when HUB_API_KEY is configured"
     },
     {
+      "name": "rotatevalidator",
+      "summary": "Rotate a validator's signing key (consensus-effective at the next block boundary).",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "addr",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "new_signing_pubkey",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object"
+        }
+      },
+      "x-auth": "x-api-key header, when HUB_API_KEY is configured"
+    },
+    {
+      "name": "deregistervalidator",
+      "summary": "Deregister a validator from the federation.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "signing_pubkey",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "addr",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object"
+        }
+      },
+      "x-auth": "x-api-key header, when HUB_API_KEY is configured"
+    },
+    {
       "name": "syncvalidators",
       "summary": "Sync the validator set from a peer.",
       "paramStructure": "by-name",
@@ -610,6 +682,43 @@
       "summary": "Indexer push: price reorg rollback.",
       "paramStructure": "by-name",
       "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object"
+        }
+      },
+      "x-auth": "x-api-key header, when HUB_API_KEY is configured",
+      "x-internal": true
+    },
+    {
+      "name": "pushxcallreorg",
+      "summary": "Indexer push: cross-chain call reorg rollback.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "source_chain",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "from_action_index",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
       "result": {
         "name": "result",
         "schema": {

@@ -29,6 +29,8 @@ const METHODS = [
     ['getfeequote', 'Protocol fee quote for an action (native-coin USD-pegged fees).', []],
     ['getcapabilitythresholds', 'Governance-set minimum stake per capability (price, cross_chain, oracle_publish, attestation).', []],
     ['registervalidator', 'Register a validator with the federation.', ['validator'], { auth: true }],
+    ['rotatevalidator', 'Rotate a validator\'s signing key (consensus-effective at the next block boundary).', ['addr', 'new_signing_pubkey'], { auth: true }],
+    ['deregistervalidator', 'Deregister a validator from the federation.', ['signing_pubkey', 'addr'], { auth: true }],
     ['syncvalidators', 'Sync the validator set from a peer.', [], { auth: true, internal: true }],
     ['getvalidators', 'Known validators and their status.', []],
     ['getvalidatorstatus', 'Status of one validator.', []],
@@ -50,6 +52,7 @@ const METHODS = [
     ['pushpriceround', 'Indexer push: finalized price round for cross-validation.', [], { auth: true, internal: true }],
     ['pushoracleprice', 'Indexer push: user-published PRICE v1 oracle row.', [], { auth: true, internal: true }],
     ['pushpricereorg', 'Indexer push: price reorg rollback.', [], { auth: true, internal: true }],
+    ['pushxcallreorg', 'Indexer push: cross-chain call reorg rollback.', ['source_chain', 'from_action_index'], { auth: true, internal: true }],
 ];
 
 const spec = {

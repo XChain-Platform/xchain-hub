@@ -29,6 +29,10 @@ describe('OracleConsensus', function () {
             getSubmissions: sinon.stub().returns(new Map())
         };
         oc = new OracleConsensus(hub, oracleRound);
+        // These cases exercise finalize/propose logic with small fixed submission sets and model a
+        // configured single/small deployment, so use the regtest override (ORACLE_MIN_SUBMISSIONS=1).
+        // The 2-hub default diversity floor is covered in OracleConsensus.propose-validation.test.js.
+        oc.minSubmissions = 1;
     });
 
     afterEach(function () {
