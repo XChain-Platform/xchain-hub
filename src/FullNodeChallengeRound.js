@@ -124,10 +124,19 @@ class FullNodeChallengeRound {
 
     // ── Indexer / coin RPC ───────────────────────────────────────────────────
     async _indexerCall(method, params){
-        if(!this.indexerUrl) throw new Error('no BTC_INDEXER_URL');
-        let headers = { 'Content-Type': 'application/json' };
-        if(this.indexerKey) headers['x-api-key'] = this.indexerKey;
-        let resp = await axios.post(this.indexerUrl, { jsonrpc: '2.0', method, params: params || {}, id: 1 }, { headers, timeout: 15000 });
+        // Resolve the BTC indexer URL the same way the rest of the hub does
+        // (BTC_INDEXER_API_URL → BTC_INDEXER_URL → config), so a standard hub
+        // deployment that only sets BTC_INDEXER_API_URL still reaches the indexer.
+        // Fall back to the env/cfg value captured at construction.
+        let url = this.indexerUrl;
+        if(this.hub && typeof this.hub._resolveBtcIndexerUrl === 'function'){
+            try { url = (await this.hub._resolveBtcIndexerUrl()) || this.indexerUrl; } catch(_){}
+        }
+        if(!url) throw new Error('no BTC indexer URL (set BTC_INDEXER_API_URL / BTC_INDEXER_URL)');
+        let headers = (this.hub && typeof this.hub._btcIndexerHeaders === 'function')
+            ? this.hub._btcIndexerHeaders()
+            : Object.assign({ 'Content-Type': 'application/json' }, this.indexerKey ? { 'x-api-key': this.indexerKey } : {});
+        let resp = await axios.post(url, { jsonrpc: '2.0', method, params: params || {}, id: 1 }, { headers, timeout: 15000 });
         if(resp.data && resp.data.error) throw new Error('indexer RPC error: ' + JSON.stringify(resp.data.error));
         return resp.data ? resp.data.result : null;
     }
