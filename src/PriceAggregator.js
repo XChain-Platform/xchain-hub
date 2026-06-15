@@ -177,30 +177,23 @@ class PriceAggregator extends EventEmitter {
         // share the same created_at and it propagates to operators via the WS broadcast row.
         let createdAt = new Date();
         let insertedRows = [];
-        for (let p of roundData.pairs) {
-            // Upsert (not a plain INSERT): a 'skipped' placeholder row may already
-            // occupy this (round_number, coin_pair) unique key from
-            // _storeSkippedRound. Overwrite it with the real finalized data rather
-            // than colliding on the key. For an already-finalized row this is an
-            // idempotent no-op of identical data (failover double-publish safe).
-            // created_at is intentionally NOT overwritten so it preserves when the
-            // hub first recorded the round.
-            let query = `INSERT INTO price_snapshots
-                (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
-                 validator_count, consensus_round, consensus_proof, status, source_chain, source_action_index,
-                 created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                    price = VALUES(price), reference_block = VALUES(reference_block),
-                    reference_chain = VALUES(reference_chain), block_timestamp = VALUES(block_timestamp),
-                    validator_count = VALUES(validator_count), consensus_proof = VALUES(consensus_proof),
-                    status = 'finalized', source_chain = VALUES(source_chain),
-                    source_action_index = VALUES(source_action_index)`;
-            let args = [round, p.pair, p.price, referenceBlock, sourceChain || null, timestamp,
-                        validatorCount, proofJson, sourceChain || null, sourceActionIndex,
-                        createdAt];
-            try {
-                await this.db.doQuery(query, args);
+        // Upsert (not a plain INSERT): a 'skipped' placeholder row may already occupy
+        // this (round_number, coin_pair) unique key from _storeSkippedRound. Overwrite
+        // it with the real finalized data rather than colliding on the key. For an
+        // already-finalized row this is an idempotent no-op of identical data (failover
+        // double-publish safe). created_at is intentionally NOT overwritten so it
+        // preserves when the hub first recorded the round.
+        //
+        // ONE multi-row INSERT so the whole round lands atomically — a getfeequote /
+        // getpricesnapshots reader (or the id-ordered mirror bootstrap) can never observe
+        // a torn round (some pairs from this round, others from the prior round). The hub
+        // Database has no transaction API, so a single statement is the atomicity tool.
+        if (roundData.pairs.length) {
+            let placeholders = roundData.pairs.map(() => "(?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?)").join(', ');
+            let params = [];
+            for (let p of roundData.pairs) {
+                params.push(round, p.pair, p.price, referenceBlock, sourceChain || null, timestamp,
+                            validatorCount, proofJson, sourceChain || null, sourceActionIndex, createdAt);
                 insertedRows.push({
                     round_number:        round,
                     coin_pair:           p.pair,
@@ -216,8 +209,22 @@ class PriceAggregator extends EventEmitter {
                     source_action_index: sourceActionIndex,
                     created_at:          createdAt
                 });
+            }
+            let query = `INSERT INTO price_snapshots
+                (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
+                 validator_count, consensus_round, consensus_proof, status, source_chain, source_action_index,
+                 created_at)
+                VALUES ${placeholders}
+                ON DUPLICATE KEY UPDATE
+                    price = VALUES(price), reference_block = VALUES(reference_block),
+                    reference_chain = VALUES(reference_chain), block_timestamp = VALUES(block_timestamp),
+                    validator_count = VALUES(validator_count), consensus_proof = VALUES(consensus_proof),
+                    status = 'finalized', source_chain = VALUES(source_chain),
+                    source_action_index = VALUES(source_action_index)`;
+            try {
+                await this.db.doQuery(query, params);
             } catch (err) {
-                console.error('PriceAggregator: error inserting snapshot for round ' + round + ' pair ' + p.pair + ':', err);
+                console.error('PriceAggregator: error inserting round ' + round + ':', err);
                 return { accepted: false, reason: 'db error' };
             }
         }

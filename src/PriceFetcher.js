@@ -26,6 +26,7 @@
 const axios = require('axios');
 
 const { PRICE_MAX } = require('./constants.js');
+const bcmath = require('./bcmath.js');
 
 // CoinGecko coin IDs for the 3 supported coins
 const COINGECKO_IDS = { 'BTC': 'bitcoin', 'LTC': 'litecoin', 'DOGE': 'dogecoin' };
@@ -84,10 +85,10 @@ class PriceFetcher {
         for (let pair of COIN_PAIRS) {
             let values = results[pair];
             if (values.length > 0) {
-                let median = this._median(values);
+                let median = this._median(values);   // already an 8dp bignumber string
                 prices.push({
                     coinPair: pair,
-                    price:    median.toFixed(8),
+                    price:    median,
                     sources:  values.length
                 });
             }
@@ -212,15 +213,18 @@ class PriceFetcher {
         return prices;
     }
 
-    // Compute median of a numeric array
+    // Compute median of a numeric array, returned as an 8-decimal bignumber string
+    // (mathjs/bcmath per the platform mandate — the even-length midpoint average is
+    // done in bignumber so the submitted local price carries no float/.toFixed artifact).
+    // Ordering uses a float compare (no consensus arithmetic).
     _median(values) {
-        if (values.length === 0) return 0;
+        if (values.length === 0) return bcmath.bcstr('0', 8);
         let sorted = [...values].sort((a, b) => a - b);
         let mid = Math.floor(sorted.length / 2);
         if (sorted.length % 2 === 0) {
-            return (sorted[mid - 1] + sorted[mid]) / 2;
+            return bcmath.bcstr(bcmath.bcdiv(bcmath.bcadd(String(sorted[mid - 1]), String(sorted[mid]), 8), '2', 8), 8);
         }
-        return sorted[mid];
+        return bcmath.bcstr(String(sorted[mid]), 8);
     }
 
     // Expose the supported pair list (used by OracleConsensus._storeSkippedRound and tests)

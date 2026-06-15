@@ -300,33 +300,35 @@ describe('Boundary: PriceFetcher', function () {
             fetcher = makeFetcher();
         });
 
+        // _median returns an 8-decimal bignumber string (mathjs/bcmath mandate)
+
         it('empty array → returns 0', function () {
-            expect(fetcher._median([])).to.equal(0);
+            expect(fetcher._median([])).to.equal('0.00000000');
         });
 
         it('single value → returns that value', function () {
-            expect(fetcher._median([42])).to.equal(42);
+            expect(fetcher._median([42])).to.equal('42.00000000');
         });
 
         it('two values → returns their average', function () {
-            expect(fetcher._median([10, 20])).to.equal(15);
+            expect(fetcher._median([10, 20])).to.equal('15.00000000');
         });
 
         it('two identical values → returns that value', function () {
-            expect(fetcher._median([7, 7])).to.equal(7);
+            expect(fetcher._median([7, 7])).to.equal('7.00000000');
         });
 
         it('three values (odd) → returns the middle element', function () {
-            expect(fetcher._median([1, 3, 5])).to.equal(3);
+            expect(fetcher._median([1, 3, 5])).to.equal('3.00000000');
         });
 
         it('four values (even) → returns average of middle two', function () {
-            expect(fetcher._median([1, 2, 3, 4])).to.equal(2.5);
+            expect(fetcher._median([1, 2, 3, 4])).to.equal('2.50000000');
         });
 
         it('unsorted input → sorts before computing median', function () {
             // Unsorted: [5, 1, 3] → sorted: [1, 3, 5] → median = 3
-            expect(fetcher._median([5, 1, 3])).to.equal(3);
+            expect(fetcher._median([5, 1, 3])).to.equal('3.00000000');
         });
 
         it('does not mutate the original array', function () {
@@ -336,12 +338,12 @@ describe('Boundary: PriceFetcher', function () {
         });
 
         it('all-zero array → returns 0', function () {
-            expect(fetcher._median([0, 0, 0])).to.equal(0);
+            expect(fetcher._median([0, 0, 0])).to.equal('0.00000000');
         });
 
-        it('large values → no overflow, returns correct average', function () {
+        it('large values → no overflow, returns correct average (bignumber, exact)', function () {
             let result = fetcher._median([1e18, 2e18]);
-            expect(result).to.equal(1.5e18);
+            expect(result).to.equal('1500000000000000000.00000000');
         });
     });
 });

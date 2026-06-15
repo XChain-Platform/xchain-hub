@@ -26,8 +26,9 @@ const crypto            = require('crypto');
 const EventEmitter      = require('events');
 const PriceFetcher      = require('./PriceFetcher.js');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
-const { PRICE_MAX }     = require('./constants.js');
+const { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD } = require('./constants.js');
 const swq               = require('./stake_weighted_quorum.js');
+const bcmath            = require('./bcmath.js');
 
 const ORACLE_PROPOSE = 'ORACLE_PROPOSE';
 const ORACLE_PREPARE = 'ORACLE_PREPARE';
@@ -510,21 +511,35 @@ class OracleConsensus extends EventEmitter {
         // a hub that failed its own fetch still helps quorum but cannot rubber-stamp an out-of-range price.
         {
             let localByPair  = new Map((this._aggregateAll(submissions) || []).map(a => [a.coinPair, a.price]));
-            let devThreshold = (this.hub.slashDetector && this.hub.slashDetector.deviationThreshold) || 0.05;
+            // Federation-uniform deviation band (shared constant, not per-hub config) so
+            // every hub's accept/withhold boundary is identical; deviation is computed in
+            // bignumber (bcmath) per the platform mandate, removing the ±band-boundary
+            // float-ULP ambiguity. A reject emits oracle:propose-rejected so a feed-
+            // disagreement withhold is distinguishable from a leader crash.
+            let devThreshold = ORACLE_DEVIATION_THRESHOLD;
+            let reject = (coinPair, detail, extra) => {
+                console.warn('Oracle: rejecting PROPOSE round ' + round + ' from ' + envelope.sender +
+                    ' — ' + coinPair + ' ' + detail);
+                this.emit('oracle:propose-rejected', Object.assign({ round, sender: envelope.sender, coinPair }, extra || {}));
+            };
             for (let p of prices) {
                 let val = parseFloat(p.price);
                 if (!(Number.isFinite(val) && val > 0 && val < PRICE_MAX)) {
-                    console.warn('Oracle: rejecting PROPOSE round ' + round + ' from ' + envelope.sender +
-                        ' — ' + p.coinPair + ' price ' + p.price + ' outside (0, PRICE_MAX)');
+                    reject(p.coinPair, 'price ' + p.price + ' outside (0, PRICE_MAX)',
+                        { reason: 'out-of-range', proposed: String(p.price) });
                     return;
                 }
                 let local = localByPair.get(p.coinPair);
-                if (local !== undefined && local !== null && local > 0) {
-                    let deviation = Math.abs(val - local) / local;
-                    if (deviation > devThreshold) {
-                        console.warn('Oracle: rejecting PROPOSE round ' + round + ' from ' + envelope.sender +
-                            ' — ' + p.coinPair + ' proposed ' + val + ' deviates ' + (deviation * 100).toFixed(2) +
-                            '% from local ' + local + ' (> ' + (devThreshold * 100).toFixed(2) + '%)');
+                if (local !== undefined && local !== null && bcmath.bcgt(local, '0')) {
+                    // deviation = |proposed - local| / local, in bignumber
+                    let diff    = bcmath.bcsub(p.price, local, 18);
+                    let absDiff = bcmath.bclt(diff, 0) ? bcmath.bcmul(diff, '-1', 18) : diff;
+                    let deviation = bcmath.bcdiv(absDiff, local, 18);
+                    if (bcmath.bcgt(deviation, String(devThreshold))) {
+                        let pct = bcmath.bcstr(bcmath.bcmul(deviation, '100', 4), 4);
+                        reject(p.coinPair, 'proposed ' + p.price + ' deviates ' + pct +
+                            '% from local ' + local + ' (> ' + (devThreshold * 100) + '%)',
+                            { reason: 'deviation', proposed: String(p.price), local: String(local), deviation: bcmath.bcstr(deviation, 18) });
                         return;
                     }
                 }
@@ -759,7 +774,10 @@ class OracleConsensus extends EventEmitter {
 
     // Aggregate a single coin pair using trimmed median
     _aggregate(submissions, coinPair) {
-        // Collect all prices for this pair
+        // Collect all prices for this pair. Keep the original string `s` alongside a
+        // float `f` used only for ordering — the median value itself is computed in
+        // mathjs bignumber (bcmath) per the platform's bignumber mandate, so the
+        // signed aggregate carries no float/`.toFixed` rounding artifact.
         let values = [];
         for (let [sender, sub] of submissions) {
             if (sub.prices && Array.isArray(sub.prices)) {
@@ -767,7 +785,7 @@ class OracleConsensus extends EventEmitter {
                     if (p.coinPair === coinPair && p.price) {
                         let val = parseFloat(p.price);
                         if (isFinite(val) && val > 0 && val < PRICE_MAX) {
-                            values.push(val);
+                            values.push({ f: val, s: String(p.price) });
                             // Cap each sender at one data point per pair. A
                             // submission could contain N entries for the same
                             // pair; counting them all would inflate values.length
@@ -782,8 +800,8 @@ class OracleConsensus extends EventEmitter {
 
         if (values.length === 0) return null;
 
-        // Sort ascending
-        values.sort((a, b) => a - b);
+        // Sort ascending (ordering only — float compare is fine here)
+        values.sort((a, b) => a.f - b.f);
 
         // Trim top and bottom 15%
         let trimCount = Math.floor(values.length * TRIM_PERCENT);
@@ -794,16 +812,12 @@ class OracleConsensus extends EventEmitter {
         // If trimming removed everything, use original sorted array
         if (values.length === 0) return null;
 
-        // Compute median
+        // Compute median in bignumber (no float midpoint average / .toFixed artifact)
         let mid = Math.floor(values.length / 2);
-        let median;
         if (values.length % 2 === 0) {
-            median = (values[mid - 1] + values[mid]) / 2;
-        } else {
-            median = values[mid];
+            return bcmath.bcstr(bcmath.bcdiv(bcmath.bcadd(values[mid - 1].s, values[mid].s, 8), '2', 8), 8);
         }
-
-        return median.toFixed(8);
+        return bcmath.bcstr(values[mid].s, 8);
     }
 
     // --- Storage ---
@@ -814,30 +828,38 @@ class OracleConsensus extends EventEmitter {
     async _storeSnapshot(round, prices, validatorCount, proof, btcBlockHeight, btcBlockTime) {
         let referenceBlock = btcBlockHeight || round;
         let blockTimestamp = btcBlockTime   || Math.floor(Date.now() / 1000);
-        for (let p of prices) {
-            let query = `INSERT INTO price_snapshots
+        if (!prices || prices.length === 0) return;
+
+        // Write the whole round in ONE multi-row INSERT (mirrors db.setParams) so the
+        // round lands atomically. The per-pair loop this replaced let a getfeequote /
+        // getpricesnapshots reader observe a torn round (some pairs from round N, others
+        // from N-1) mid-loop, and the id-ordered mirror bootstrap could persist that torn
+        // read to a replica. The hub Database exposes no transaction API, so a single
+        // statement is the atomicity primitive here.
+        let placeholders = prices.map(() => "(?, ?, ?, ?, 'BTC', ?, ?, 1, ?, 'finalized')").join(', ');
+        let params = [];
+        for (let p of prices) params.push(round, p.coinPair, p.price, referenceBlock, blockTimestamp, validatorCount, proof);
+        let query = `INSERT INTO price_snapshots
                 (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
                  validator_count, consensus_round, consensus_proof, status)
-                VALUES (?, ?, ?, ?, 'BTC', ?, ?, 1, ?, 'finalized')
-                ON DUPLICATE KEY UPDATE price = ?, reference_block = ?, block_timestamp = ?, validator_count = ?, consensus_proof = ?, status = 'finalized'`;
-            await this.db.doQuery(query, [
-                round, p.coinPair, p.price, referenceBlock, blockTimestamp,
-                validatorCount, proof,
-                p.price, referenceBlock, blockTimestamp, validatorCount, proof
-            ]);
-            // Broadcast the finalized row to hub-DB mirror subscribers (distributed indexers),
-            // mirroring StateCheckpointEngine/CrossChainDexEngine. Without this the round is written
-            // via a bare INSERT that emits nothing, so a replica's price mirror never receives it live
-            // and _priceSyncSatisfied passes while the round is absent — the replica then validates
-            // native-coin fees against the prior round (ledger divergence). Best-effort; never block finalize.
-            if (this.hub && this.hub.hubDbBroadcaster) {
-                try {
-                    let r = await this.db.doQuery(
-                        'SELECT * FROM price_snapshots WHERE round_number=? AND coin_pair=? LIMIT 1',
-                        [round, p.coinPair]);
-                    if (r.length) this.hub.hubDbBroadcaster.broadcastRow({ table: 'price_snapshots', row: r[0] });
-                } catch (e) { /* broadcast is best-effort */ }
-            }
+                VALUES ${placeholders}
+                ON DUPLICATE KEY UPDATE price = VALUES(price), reference_block = VALUES(reference_block),
+                 block_timestamp = VALUES(block_timestamp), validator_count = VALUES(validator_count),
+                 consensus_proof = VALUES(consensus_proof), status = 'finalized'`;
+        await this.db.doQuery(query, params);
+
+        // Broadcast the finalized rows to hub-DB mirror subscribers (distributed indexers),
+        // mirroring StateCheckpointEngine/CrossChainDexEngine — AFTER the atomic write so a
+        // subscriber never sees a partial round. Without this the round is written via a bare
+        // INSERT that emits nothing, so a replica's price mirror never receives it live and
+        // _priceSyncSatisfied passes while the round is absent — the replica then validates
+        // native-coin fees against the prior round (ledger divergence). Best-effort; never block finalize.
+        if (this.hub && this.hub.hubDbBroadcaster) {
+            try {
+                let rows = await this.db.doQuery(
+                    'SELECT * FROM price_snapshots WHERE round_number=? ORDER BY coin_pair', [round]);
+                for (let row of rows) this.hub.hubDbBroadcaster.broadcastRow({ table: 'price_snapshots', row });
+            } catch (e) { /* broadcast is best-effort */ }
         }
     }
 
@@ -850,13 +872,19 @@ class OracleConsensus extends EventEmitter {
         let referenceBlock = btcBlockHeight || round;
         let blockTimestamp = btcBlockTime   || Math.floor(Date.now() / 1000);
         let coinPairs = PriceFetcher.getCoinPairs();
-        for (let pair of coinPairs) {
+        // One multi-row INSERT so the skipped round lands atomically (same torn-read
+        // rationale as _storeSnapshot).
+        if (coinPairs.length) {
+            let placeholders = coinPairs.map(() => "(?, ?, NULL, ?, 'BTC', ?, 0, 1, '[]', 'skipped')").join(', ');
+            let params = [];
+            for (let pair of coinPairs) params.push(round, pair, referenceBlock, blockTimestamp);
             let query = `INSERT INTO price_snapshots
                 (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
                  validator_count, consensus_round, consensus_proof, status)
-                VALUES (?, ?, NULL, ?, 'BTC', ?, 0, 1, '[]', 'skipped')
-                ON DUPLICATE KEY UPDATE reference_block = ?, block_timestamp = ?, status = 'skipped'`;
-            await this.db.doQuery(query, [round, pair, referenceBlock, blockTimestamp, referenceBlock, blockTimestamp]);
+                VALUES ${placeholders}
+                ON DUPLICATE KEY UPDATE reference_block = VALUES(reference_block),
+                 block_timestamp = VALUES(block_timestamp), status = 'skipped'`;
+            await this.db.doQuery(query, params);
         }
         this.finalized.add(round);
         this._clearRoundTracking(round);

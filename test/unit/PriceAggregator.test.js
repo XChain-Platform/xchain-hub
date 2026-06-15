@@ -406,7 +406,9 @@ describe('PriceAggregator.receiveValidatedRound()', function () {
         expect(result).to.deep.equal({ accepted: true });
         // The validator set was resolved for the price capability at the round's block
         expect(hub.capabilitySnapshot.getSnapshot.calledOnceWith('price', 800000)).to.equal(true);
-        expect(inserts).to.have.length(2);
+        // One atomic multi-row INSERT for the whole round; inserts[0] is the flat
+        // params array, first 11 entries = the first row (round/pair/price/…).
+        expect(inserts).to.have.length(1);
         expect(inserts[0][0]).to.equal(5);             // round_number
         expect(inserts[0][1]).to.equal('BTC/USD');     // coin_pair
         expect(inserts[0][2]).to.equal('50000');       // price
@@ -450,7 +452,8 @@ describe('PriceAggregator.receiveValidatedRound()', function () {
         });
         let result = await agg.receiveValidatedRound('BTC', makeRound());
         expect(result).to.deep.equal({ accepted: true });
-        expect(insertSqls).to.have.length(2);
+        // One atomic multi-row INSERT for the whole round (not one per pair).
+        expect(insertSqls).to.have.length(1);
         insertSqls.forEach(sql => {
             expect(sql).to.match(/ON DUPLICATE KEY UPDATE/);
             expect(sql).to.match(/status\s*=\s*'finalized'/);
@@ -523,8 +526,8 @@ describe('PriceAggregator.receiveValidatedRound()', function () {
             sigs: [{ pubkey: V[0].pubkey, sig: V[0].sign(PAYLOAD) }]
         }));
         expect(result).to.deep.equal({ accepted: true });
-        expect(inserts).to.have.length(2);
-        expect(inserts[0][6]).to.equal(1); // validator_count
+        expect(inserts).to.have.length(1); // one atomic multi-row INSERT
+        expect(inserts[0][6]).to.equal(1); // validator_count (first row)
     });
 
     it('returns a db error if a snapshot INSERT throws', async function () {

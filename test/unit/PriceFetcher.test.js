@@ -36,24 +36,26 @@ describe('PriceFetcher', function () {
             pf = new PriceFetcher({});
         });
 
+        // _median returns an 8-decimal bignumber string (mathjs/bcmath mandate)
+
         it('single value returns that value', function () {
-            expect(pf._median([42])).to.equal(42);
+            expect(pf._median([42])).to.equal('42.00000000');
         });
 
         it('two values returns average', function () {
-            expect(pf._median([10, 20])).to.equal(15);
+            expect(pf._median([10, 20])).to.equal('15.00000000');
         });
 
         it('odd count returns middle value', function () {
-            expect(pf._median([1, 3, 2])).to.equal(2);
+            expect(pf._median([1, 3, 2])).to.equal('2.00000000');
         });
 
         it('even count returns average of two middle values', function () {
-            expect(pf._median([1, 2, 3, 4])).to.equal(2.5);
+            expect(pf._median([1, 2, 3, 4])).to.equal('2.50000000');
         });
 
         it('empty array returns 0', function () {
-            expect(pf._median([])).to.equal(0);
+            expect(pf._median([])).to.equal('0.00000000');
         });
 
         it('does not mutate input array', function () {

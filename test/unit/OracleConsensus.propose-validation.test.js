@@ -87,4 +87,34 @@ describe('OracleConsensus — follower price validation / minSubmissions / broad
         expect(hub.hubDbBroadcaster.broadcastRow.calledOnce).to.be.true;
         expect(hub.hubDbBroadcaster.broadcastRow.firstCall.args[0].table).to.equal('price_snapshots');
     });
+
+    // #3707 — a finalized round must be written atomically (one statement) so a
+    // getfeequote / getpricesnapshots reader can never observe a torn round.
+    it('_storeSnapshot writes the whole round in a single multi-row INSERT (atomic)', async function () {
+        let insertCalls = [];
+        hub.db.doQuery.callsFake(async (sql, params) => {
+            if (/^INSERT INTO price_snapshots/i.test(sql)) { insertCalls.push({ sql, params }); return {}; }
+            return [];
+        });
+        await oc._storeSnapshot(1, [
+            { coinPair: 'BTC/USD', price: '100000' },
+            { coinPair: 'XCHAIN/USD', price: '0.50000000' }
+        ], 3, 'proof', 100, 1700000000);
+        expect(insertCalls).to.have.length(1);                                  // ONE statement, not one-per-pair
+        expect((insertCalls[0].sql.match(/\(\?, \?, \?/g) || []).length).to.equal(2); // two value tuples
+        expect(insertCalls[0].sql).to.match(/ON DUPLICATE KEY UPDATE/);
+    });
+
+    // #3955 — a withheld co-sign emits an observability signal so a feed-disagreement
+    // timeout is distinguishable from a leader crash.
+    it('emits oracle:propose-rejected when a proposed price is withheld', async function () {
+        let events = [];
+        oc.on('oracle:propose-rejected', e => events.push(e));
+        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '200000' }])); // +100% vs local 100000
+        expect(oc.pendingRounds.has(ROUND)).to.be.false;
+        expect(events).to.have.length(1);
+        expect(events[0].reason).to.equal('deviation');
+        expect(events[0].coinPair).to.equal('BTC/USD');
+        expect(events[0].round).to.equal(ROUND);
+    });
 });

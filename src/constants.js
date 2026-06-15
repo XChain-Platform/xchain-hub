@@ -30,4 +30,13 @@
 // before adding any high-nominal-value pair that could exceed it.
 const PRICE_MAX = 10_000_000;
 
-module.exports = { PRICE_MAX };
+// Co-sign deviation band for the oracle PREPARE content-validation gate
+// (OracleConsensus._handlePropose): a follower refuses to co-sign a proposed price
+// that deviates more than this fraction from its own local aggregate for the pair.
+// MUST be federation-uniform — if hubs used different bands, identical aggregates
+// could yield different accept/withhold decisions (a liveness divergence on the ±band
+// boundary). Sourced as a shared constant (not per-hub slashDetector config) so it can
+// never drift between hubs. 0.05 = 5%.
+const ORACLE_DEVIATION_THRESHOLD = 0.05;
+
+module.exports = { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD };
