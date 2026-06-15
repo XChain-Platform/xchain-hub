@@ -27,6 +27,7 @@ const EventEmitter      = require('events');
 const PriceFetcher      = require('./PriceFetcher.js');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const { PRICE_MAX }     = require('./constants.js');
+const swq               = require('./stake_weighted_quorum.js');
 
 const ORACLE_PROPOSE = 'ORACLE_PROPOSE';
 const ORACLE_PREPARE = 'ORACLE_PREPARE';
@@ -205,8 +206,16 @@ class OracleConsensus extends EventEmitter {
         // Falls back to the live validator-set count when the indexer is
         // unreachable (graceful degradation; same behavior as before the
         // snapshot wiring landed).
+        // STAKE_WEIGHTED_QUORUM: at/above the activation snapshot_block, finalize on
+        // summed signer STAKE (>2/3 of S, source-deduped) rather than signer COUNT.
+        // Gated on the round's BTC block boundary + the hub's network so the hub and
+        // every indexer flip on the same anchor. When weighted, lock the source-keyed
+        // weight snapshot; below activation, byte-for-byte the legacy count snapshot.
+        let weighted = swq.isStakeWeightedQuorumActive(btcBlockHeight, this.hub.network);
         let snapshot = this.hub.capabilitySnapshot
-            ? await this.hub.capabilitySnapshot.getSnapshot('price', btcBlockHeight)
+            ? (weighted
+                ? await this.hub.capabilitySnapshot.getWeightSnapshot('price', btcBlockHeight)
+                : await this.hub.capabilitySnapshot.getSnapshot('price', btcBlockHeight))
             : null;
         let quorum = snapshot
             ? this.hub.capabilitySnapshot.getQuorum(snapshot)
@@ -240,7 +249,7 @@ class OracleConsensus extends EventEmitter {
         let isLeader = leader && leader.addr === myAddr;
 
         if (isLeader) {
-            this._proposeRound(round, submissions, false, btcBlockHeight, btcBlockTime, snapshot, quorum);
+            this._proposeRound(round, submissions, false, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted);
             return;
         }
 
@@ -270,7 +279,7 @@ class OracleConsensus extends EventEmitter {
                     // gossip delivered more submitters during the grace.
                     let fb2 = [...subs.keys()].filter(a => !leader || a !== leader.addr).sort()[0];
                     if (fb2 !== myAddr) return;
-                    this._proposeRound(round, subs, true, btcBlockHeight, btcBlockTime, snapshot, quorum);
+                    this._proposeRound(round, subs, true, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted);
                 }, this.leaderTimeout + FALLBACK_GRACE_MS);
                 // Don't let an armed grace timer keep the process alive on its own;
                 // the hub stays up via its other listeners. Cleared on stop().
@@ -301,7 +310,7 @@ class OracleConsensus extends EventEmitter {
     // snapshot + quorum are captured in finalizeRound() at the block boundary
     // and threaded through so the entire round uses the same locked validator
     // set. Without the snapshot, falls back to live _getQuorum() per legacy.
-    _proposeRound(round, submissions, isFallback, btcBlockHeight, btcBlockTime, snapshot, quorum) {
+    _proposeRound(round, submissions, isFallback, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted) {
         let aggregated = this._aggregateAll(submissions);
         if (aggregated.length === 0) {
             this._storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'aggregation yielded no prices').catch(err =>
@@ -332,7 +341,14 @@ class OracleConsensus extends EventEmitter {
             // against the same N for the round's full lifecycle, even when
             // on-chain stake state changes mid-round (capability-staking spec §6).
             snapshot:       snapshot || null,
-            quorum:         (typeof quorum === 'number' && quorum >= 0) ? quorum : this._getQuorum()
+            quorum:         (typeof quorum === 'number' && quorum >= 0) ? quorum : this._getQuorum(),
+            // STAKE_WEIGHTED_QUORUM round? Carry the source-keyed validator weights so
+            // _checkPrepareQuorum/_checkCommitQuorum can tally signer stake (the count
+            // quorum above is ignored when weighted).
+            weighted:       !!weighted,
+            validators:     (weighted && snapshot && Array.isArray(snapshot.validators))
+                ? snapshot.validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), source: String(v.source != null ? v.source : ''), weight: String(v.weight != null ? v.weight : '0') }))
+                : []
         };
 
         // Add own PREPARE vote and signature
@@ -520,8 +536,14 @@ class OracleConsensus extends EventEmitter {
         // finalizeRound) so PREPARE/COMMIT checks use the same N on every hub.
         if (!this.pendingRounds.has(round)) {
             let blockHeight = btcBlockHeight || round;
+            // Same activation gate + weight snapshot the leader locked in finalizeRound,
+            // so this follower tallies the round identically (weighted on stake or legacy
+            // on count) — keyed on the round's BTC block boundary + the hub's network.
+            let weighted = swq.isStakeWeightedQuorumActive(blockHeight, this.hub.network);
             let snapshot = this.hub.capabilitySnapshot
-                ? await this.hub.capabilitySnapshot.getSnapshot('price', blockHeight)
+                ? (weighted
+                    ? await this.hub.capabilitySnapshot.getWeightSnapshot('price', blockHeight)
+                    : await this.hub.capabilitySnapshot.getSnapshot('price', blockHeight))
                 : null;
             let quorum = snapshot
                 ? this.hub.capabilitySnapshot.getQuorum(snapshot)
@@ -538,6 +560,10 @@ class OracleConsensus extends EventEmitter {
                 finalized:      false,
                 snapshot:       snapshot || null,
                 quorum:         quorum,
+                weighted:       !!weighted,
+                validators:     (weighted && snapshot && Array.isArray(snapshot.validators))
+                    ? snapshot.validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), source: String(v.source != null ? v.source : ''), weight: String(v.weight != null ? v.weight : '0') }))
+                    : [],
                 timer:          setTimeout(() => {
                     this.pendingRounds.delete(round);
                 }, this.finalizationTimeout)
@@ -616,14 +642,30 @@ class OracleConsensus extends EventEmitter {
         this._checkCommitQuorum(round);
     }
 
+    // Whether the round has cleared quorum. STAKE_WEIGHTED_QUORUM tallies the
+    // SUMMED STAKE (source-deduped, >2/3 of S) of validators that have produced a
+    // valid signature on the canonical — keyed on `pending.signatures` because,
+    // unlike the DEX/checkpoint engines, this engine's prepare/commit sets hold
+    // validator ADDRESSES while the snapshot + signatures are PUBKEY-keyed; the
+    // signatures map is the only pubkey-keyed record of who endorsed the canonical,
+    // and is exactly the signer set the indexer re-verifies (actions/price.js). A
+    // value cannot finalize without >2/3 stake having signed it, so the published
+    // PRICE always clears the indexer's identical weighted gate. Below activation:
+    // byte-for-byte the legacy count of the passed vote set against the locked quorum.
+    _quorumMet(pending, voteSet) {
+        if (pending.weighted)
+            return swq.meetsStakeThreshold(pending.validators, [...pending.signatures.keys()]);
+        let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
+        return voteSet.size >= quorum;
+    }
+
     _checkPrepareQuorum(round) {
         let pending = this.pendingRounds.get(round);
         if (!pending || pending.finalized) return;
 
         // Use the round's locked quorum (snapshot at the block boundary),
         // not a live recompute — keeps every hub in lockstep across the round.
-        let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
-        if (pending.prepares.size >= quorum && !pending._commitSent) {
+        if (this._quorumMet(pending, pending.prepares) && !pending._commitSent) {
             pending._commitSent = true;
             pending.commits.add(this.peerManager.validatorAddr);
 
@@ -649,9 +691,8 @@ class OracleConsensus extends EventEmitter {
         let pending = this.pendingRounds.get(round);
         if (!pending || pending.finalized) return;
 
-        // Same locked quorum as _checkPrepareQuorum — see comment there.
-        let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
-        if (pending.commits.size >= quorum) {
+        // Same quorum rule as _checkPrepareQuorum — see _quorumMet.
+        if (this._quorumMet(pending, pending.commits)) {
             pending.finalized = true;
             if (pending.timer) clearTimeout(pending.timer);
 

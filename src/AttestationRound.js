@@ -35,6 +35,7 @@
 const crypto = require('crypto');
 const axios  = require('axios');
 const bc     = require('./bcmath.js');
+const swq    = require('./stake_weighted_quorum.js');
 
 const ATTEST_PROPOSE = 'ATTEST_PROPOSE';
 
@@ -235,8 +236,17 @@ class AttestationRound {
 
         // Snapshot of validators qualifying for `attestation` at the request's
         // block boundary. Each hub computes the same set (deterministic).
+        // STAKE_WEIGHTED_QUORUM: at/above activation, resolve the SOURCE-keyed
+        // weight snapshot so the responsible-set selection can dedupe by staking
+        // source (one slot per source) — closing the delegation slot-inflation
+        // hole. The within-subset quorum stays count-based (attestation is an
+        // independent-replication check, not a stake vote). Gated on the request's
+        // block + the hub's network so every hub flips on the same anchor.
+        let weighted = swq.isStakeWeightedQuorumActive(snapshotBlk, this.hub.network);
         let snapshot = this.hub.capabilitySnapshot
-            ? await this.hub.capabilitySnapshot.getSnapshot('attestation', snapshotBlk)
+            ? (weighted
+                ? await this.hub.capabilitySnapshot.getWeightSnapshot('attestation', snapshotBlk)
+                : await this.hub.capabilitySnapshot.getSnapshot('attestation', snapshotBlk))
             : null;
         if(!snapshot || !Array.isArray(snapshot.validators) || snapshot.validators.length === 0){
             // Empty snapshot means no qualified validators exist at the request's
@@ -245,7 +255,7 @@ class AttestationRound {
             return;
         }
 
-        let responsible = this._computeResponsibleSet(snapshot.validators, rid, redundancy);
+        let responsible = this._computeResponsibleSet(snapshot.validators, rid, redundancy, weighted);
         let leaderPubkey = responsible[0] ? responsible[0].pubkey : null;
         let amResponsible = responsible.some(v => v.pubkey === myPubkey);
         if(!amResponsible){
@@ -316,13 +326,26 @@ class AttestationRound {
     // Deterministic responsibility computation. Sort validators by
     // SHA256(request_id || pubkey) ascending, take top REDUNDANCY.
     // Returns [{ pubkey, hash }] sorted by hash. responsible[0] is leader.
-    _computeResponsibleSet(validators, requestId, redundancy){
+    // STAKE_WEIGHTED_QUORUM (weighted=true): first dedupe by staking source so a
+    // source's delegated keys can't occupy multiple responsible slots — keep each
+    // source's lowest-hash key (iterate in hash order). CONSENSUS-CRITICAL: the
+    // indexer (actions/attest.js) applies the identical rule or validation forks.
+    _computeResponsibleSet(validators, requestId, redundancy, weighted){
         let withHash = validators.map(v => {
             let pk = String(v.pubkey).toLowerCase();
             let h  = crypto.createHash('sha256').update(requestId, 'utf8').update(pk, 'utf8').digest('hex');
-            return { pubkey: pk, hash: h };
+            return { pubkey: pk, source: (v.source != null ? String(v.source) : null), hash: h };
         });
         withHash.sort((a, b) => (a.hash < b.hash) ? -1 : (a.hash > b.hash ? 1 : 0));
+        if(weighted){
+            let seen = new Set();
+            withHash = withHash.filter(v => {
+                if(v.source === null) return true;          // no source info → keep (defensive)
+                if(seen.has(v.source)) return false;        // source already represented
+                seen.add(v.source);
+                return true;
+            });
+        }
         return withHash.slice(0, Math.max(1, redundancy));
     }
 

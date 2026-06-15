@@ -81,7 +81,8 @@ describe('stake_weighted_quorum', function () {
 
     describe('totalStake', function () {
         it('sums weight over DISTINCT sources (not keys)', function () {
-            expect(swq.totalStake(V)).to.equal('12000');
+            // totalStake returns a bcmath bignumber; assert on its decimal string.
+            expect(String(swq.totalStake(V))).to.equal('12000');
         });
     });
 
@@ -98,6 +99,22 @@ describe('stake_weighted_quorum', function () {
         });
         it('non-numeric snapshot block is off', function () {
             expect(swq.isStakeWeightedQuorumActive(undefined, 'regtest')).to.equal(false);
+        });
+    });
+
+    // Cross-service activation parity: the hub's LOCAL activation map must equal
+    // the canonical map in xchain-documentation/protocol/constants.js. The indexer
+    // suite asserts the same against its own copy, so transitively
+    // hub == canonical == indexer. A drift here means the hub and indexers would
+    // flip stake-weighting on different blocks → guaranteed ledger fork.
+    describe('cross-service activation parity', function () {
+        it('hub activation map == canonical constants.js', function () {
+            // Monorepo-relative; the canonical doc is always present alongside the
+            // services. A missing/unreadable canonical is a hard failure (NOT a
+            // skip) — a silent skip would be a false green on a fork-class invariant.
+            const canonical = require('../../../xchain-documentation/protocol/constants.js')
+                .STAKE_WEIGHTED_QUORUM_ACTIVATION;
+            expect(swq.STAKE_WEIGHTED_QUORUM_ACTIVATION).to.deep.equal(canonical);
         });
     });
 });

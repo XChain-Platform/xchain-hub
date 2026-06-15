@@ -179,6 +179,46 @@ class CapabilitySnapshot {
         }
     }
 
+    // Source-keyed whole-federation weight snapshot — every staker with ANY active
+    // stake at the block (no capability filter), each row carrying { pubkey, source,
+    // weight }. The STAKE_WEIGHTED_QUORUM counterpart of getActiveValidatorSnapshot,
+    // used by Consensus (config-change PBFT) to weight quorum by stake. Cache key is
+    // disjoint ('wa:' prefix). Returns null on indexer error.
+    async getActiveWeightSnapshot(blockIndex) {
+        if (blockIndex === undefined || blockIndex === null) return null;
+        let key = 'wa:' + blockIndex;
+        let cached = this.cache.get(key);
+        let now = Date.now();
+        if (cached && cached.expiresAt > now) return cached;
+
+        let url = await this.hub._resolveBtcIndexerUrl();
+        if (!url) return null;
+
+        try {
+            let res = await axios.post(url, {
+                jsonrpc: '2.0',
+                id:      now,
+                method:  'getactivestakeweights',
+                params:  { block_index: blockIndex }
+            }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
+            let result = res && res.data && res.data.result;
+            if (!result || result.error) return null;
+            let snapshot = {
+                capability:  '*',
+                blockIndex:  result.block_index,
+                count:       result.count,
+                sourceCount: result.source_count,
+                validators:  result.validators || [],     // [{pubkey, source, weight}]
+                expiresAt:   now + this.cacheTtlMs
+            };
+            this.cache.set(key, snapshot);
+            this._prune(now);
+            return snapshot;
+        } catch (err) {
+            return null;
+        }
+    }
+
     // Standard PBFT quorum over the FULL snapshot, floored at a simple
     // majority: max(2 * floor((N - 1) / 3) + 1, ceil((N + 1) / 2)). The bare
     // 2f+1 form degenerates to quorum=1 at N=3 (f=0), which would let a single

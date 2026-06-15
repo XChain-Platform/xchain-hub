@@ -15,7 +15,7 @@ const { expect }     = require('chai');
 const Consensus      = require('../../src/Consensus');
 const { createMockHub }     = require('../helpers/mockHub');
 const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7, VALIDATORS_10, VALIDATORS_13,
-        makeValidator } = require('../helpers/fixtures');
+        makeValidator, WEIGHTED_VALIDATORS_4, makeWeightSnapshot } = require('../helpers/fixtures');
 
 describe('Consensus (PBFT)', function () {
 
@@ -525,7 +525,8 @@ describe('Consensus (PBFT)', function () {
             consensus._initiateViewChange(5, 5);
             expect(consensus.view).to.equal(1);
             expect(consensus.pendingProposals.has(5)).to.be.false;
-            expect(consensus.viewChangeQuorums.get(5)).to.equal(5);
+            expect(consensus.viewChangeQuorums.get(5).quorum).to.equal(5);
+            expect(consensus.viewChangeQuorums.get(5).weighted).to.equal(false);
             expect(pm.broadcast.callCount).to.equal(1);         // VIEW_CHANGE only
 
             // Churn: set shrinks to N=3 → live quorum 1.
@@ -545,7 +546,7 @@ describe('Consensus (PBFT)', function () {
 
             consensus._initiateViewChange(12, 7);
             expect(consensus.viewChangeQuorums.has(3)).to.be.false; // pruned
-            expect(consensus.viewChangeQuorums.get(12)).to.equal(7);
+            expect(consensus.viewChangeQuorums.get(12).quorum).to.equal(7);
         });
     });
 
@@ -676,8 +677,9 @@ describe('Consensus (PBFT)', function () {
                 getQuorum: sinon.stub().returns(3)
             };
             hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
-            let snap = await consensus._lockSnapshot();
-            expect(snap).to.deep.equal({ blockIndex: 800000 });
+            let { snapshot, weighted } = await consensus._lockSnapshot();
+            expect(snapshot).to.deep.equal({ blockIndex: 800000 });
+            expect(weighted).to.equal(false); // hub.network unset → count path
             expect(hub.capabilitySnapshot.getActiveValidatorSnapshot.calledWith(800000)).to.be.true;
         });
 
@@ -692,14 +694,14 @@ describe('Consensus (PBFT)', function () {
             expect(hub._resolveBtcLatestBlock.called).to.be.false;
         });
 
-        it('returns null when no capabilitySnapshot is wired', async function () {
-            expect(await consensus._lockSnapshot()).to.equal(null);
+        it('returns null snapshot when no capabilitySnapshot is wired', async function () {
+            expect((await consensus._lockSnapshot()).snapshot).to.equal(null);
         });
 
-        it('returns null when no BTC tip can be resolved', async function () {
+        it('returns null snapshot when no BTC tip can be resolved', async function () {
             hub.capabilitySnapshot = { getActiveValidatorSnapshot: sinon.stub(), getQuorum: sinon.stub() };
             hub._resolveBtcLatestBlock = sinon.stub().resolves(null);
-            expect(await consensus._lockSnapshot()).to.equal(null);
+            expect((await consensus._lockSnapshot()).snapshot).to.equal(null);
             expect(hub.capabilitySnapshot.getActiveValidatorSnapshot.called).to.be.false;
         });
 
@@ -984,6 +986,199 @@ describe('Consensus (PBFT)', function () {
             hub.db.doQuery.resolves([{ value: 'abc' }]);
             await consensus._loadSeq();
             expect(consensus.seq).to.equal(0);
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // STAKE_WEIGHTED_QUORUM (WI-1) — weighted config consensus
+    // -----------------------------------------------------------------
+
+    describe('STAKE_WEIGHTED_QUORUM (WI-1)', function () {
+
+        const WHALE = WEIGHTED_VALIDATORS_4[0];        // weight 1000, >2/3 of S=1300
+        const SMALL = WEIGHTED_VALIDATORS_4.slice(1);  // three sources of 100 each
+
+        // Validators as the engine stores them (lowercased pubkeys).
+        function normValidators() {
+            return WEIGHTED_VALIDATORS_4.map(v => ({
+                pubkey: v.pubkey.toLowerCase(), source: v.source, weight: v.weight
+            }));
+        }
+        // The address-set ({pubkey,addr}) form fed to setValidatorSet.
+        function addrSet() {
+            return WEIGHTED_VALIDATORS_4.map(v => ({ pubkey: v.pubkey, addr: v.addr }));
+        }
+        // Make the local node the whale (its self pubkey clears quorum alone).
+        function beWhale() {
+            consensus.setValidatorSet(addrSet());
+            pm.validatorAddr = WHALE.addr;
+            hub.getIdentity = sinon.stub().returns({ getPubkeyHex: () => WHALE.pubkey });
+        }
+
+        describe('_lockSnapshot()', function () {
+            it('weighted: locks the source-keyed weight snapshot at/above activation', async function () {
+                hub.network = 'testnet';   // activation height 0
+                hub._resolveBtcLatestBlock = sinon.stub().resolves(1);
+                hub.capabilitySnapshot = {
+                    getActiveWeightSnapshot:    sinon.stub().resolves(makeWeightSnapshot(WEIGHTED_VALIDATORS_4, 1)),
+                    getActiveValidatorSnapshot: sinon.stub().resolves({ blockIndex: 1, count: 4, validators: [] }),
+                    getQuorum:                  sinon.stub().returns(3)
+                };
+                let { snapshot, weighted } = await consensus._lockSnapshot();
+                expect(weighted).to.equal(true);
+                expect(hub.capabilitySnapshot.getActiveWeightSnapshot.calledWith(1)).to.be.true;
+                expect(hub.capabilitySnapshot.getActiveValidatorSnapshot.called).to.be.false;
+                expect(snapshot.validators[0].source).to.equal('srcWhale');
+            });
+
+            it('count: locks the legacy snapshot below the activation height', async function () {
+                hub.network = 'mainnet';   // activation height 999999999 (placeholder)
+                hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+                hub.capabilitySnapshot = {
+                    getActiveWeightSnapshot:    sinon.stub().resolves(null),
+                    getActiveValidatorSnapshot: sinon.stub().resolves({ blockIndex: 800000, count: 4, validators: [] }),
+                    getQuorum:                  sinon.stub().returns(3)
+                };
+                let { weighted } = await consensus._lockSnapshot();
+                expect(weighted).to.equal(false);
+                expect(hub.capabilitySnapshot.getActiveValidatorSnapshot.calledWith(800000)).to.be.true;
+                expect(hub.capabilitySnapshot.getActiveWeightSnapshot.called).to.be.false;
+            });
+        });
+
+        describe('_quorumMet()', function () {
+            it('count mode: vote-set size vs the round-locked quorum', function () {
+                let ctx = { weighted: false, quorum: 3 };
+                expect(consensus._quorumMet(ctx, new Set(['a', 'b']), null)).to.equal(false);
+                expect(consensus._quorumMet(ctx, new Set(['a', 'b', 'c']), null)).to.equal(true);
+            });
+
+            it('weighted mode: whale clears alone; a small-stake count-majority does not', function () {
+                let ctx = { weighted: true, validators: normValidators() };
+                // Whale alone (a COUNT minority of one) — 3·1000 > 2·1300.
+                expect(consensus._quorumMet(ctx, new Set(), new Set([WHALE.pubkey.toLowerCase()]))).to.equal(true);
+                // All three small sources (a COUNT majority) — 3·300 = 900 !> 2600.
+                expect(consensus._quorumMet(ctx, new Set(), new Set(SMALL.map(v => v.pubkey.toLowerCase())))).to.equal(false);
+            });
+        });
+
+        describe('_resolveSenderPubkey()', function () {
+            it('prefers envelope.sig_pubkey (lowercased)', function () {
+                expect(consensus._resolveSenderPubkey({ sender: 'ws://x', sig_pubkey: 'AABB' })).to.equal('aabb');
+            });
+            it('falls back to the addr→pubkey registry', function () {
+                pm.validatorPubkeys = new Map([['ws://x', 'CCDD']]);
+                expect(consensus._resolveSenderPubkey({ sender: 'ws://x' })).to.equal('ccdd');
+            });
+            it('returns null when neither resolves', function () {
+                pm.validatorPubkeys = new Map();
+                expect(consensus._resolveSenderPubkey({ sender: 'ws://x' })).to.equal(null);
+            });
+        });
+
+        it('propose() weighted: proposal carries weighted + source-keyed validators + self pubkey', async function () {
+            // Equal-weight snapshot so the proposer's lone self-vote stays sub-quorum
+            // (3·100 !> 2·400) and the proposal remains pending to inspect — with the
+            // real whale snapshot it would clear 3S>2S on its own vote and self-delete.
+            const EQUAL = WEIGHTED_VALIDATORS_4.map(v => ({ pubkey: v.pubkey, addr: v.addr, source: v.source, weight: '100' }));
+            hub.network = 'testnet';
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(1);
+            hub.capabilitySnapshot = {
+                getActiveWeightSnapshot:    sinon.stub().resolves(makeWeightSnapshot(EQUAL, 1)),
+                getActiveValidatorSnapshot: sinon.stub().resolves({ blockIndex: 1, count: 4, validators: [] }),
+                getQuorum:                  sinon.stub().returns(3)
+            };
+            beWhale();
+            consensus.seq = 3;   // → proposes seq 4, whose leader is validatorSet[0] (self)
+
+            let promise = consensus.propose({ cfg: 1 });
+            await new Promise(r => setImmediate(r));
+
+            let p = consensus.pendingProposals.get(4);
+            expect(p.weighted).to.equal(true);
+            expect(p.validators.length).to.equal(4);
+            expect(p.preparePubkeys.has(WHALE.pubkey.toLowerCase())).to.be.true;
+
+            clearTimeout(p.timer);
+            p.resolved = true;
+            p.reject(new Error('cleanup'));
+            await promise.catch(() => {});
+        });
+
+        describe('PREPARE / COMMIT weighted', function () {
+            // Hand-built weighted proposal (mirrors the count-path PBFT-flow tests).
+            function weightedProposal(quorum) {
+                return {
+                    config: { cfg: 1 }, digest: 'd', prepares: new Set(), commits: new Set(),
+                    resolved: false, applied: false, timer: null, resolve: null, reject: null,
+                    snapshot: null, quorum: (quorum != null ? quorum : 3), btcBlockHeight: 1,
+                    weighted: true, validators: normValidators(),
+                    preparePubkeys: new Set(), commitPubkeys: new Set()
+                };
+            }
+
+            beforeEach(beWhale);
+
+            it('whale PREPARE alone triggers COMMIT broadcast + seeds self commit pubkey', function () {
+                let p = weightedProposal();
+                p.preparePubkeys.add(WHALE.pubkey.toLowerCase());
+                consensus.pendingProposals.set(1, p);
+                consensus._checkPrepareQuorum(1);
+                expect(p._commitSent).to.equal(true);
+                expect(pm.broadcast.calledWith('PBFT_COMMIT')).to.be.true;
+                expect(p.commitPubkeys.has(WHALE.pubkey.toLowerCase())).to.be.true;
+            });
+
+            it('a small-stake COUNT majority PREPARE does NOT trigger COMMIT', function () {
+                let p = weightedProposal();
+                for (let v of SMALL) p.preparePubkeys.add(v.pubkey.toLowerCase());
+                consensus.pendingProposals.set(1, p);
+                consensus._checkPrepareQuorum(1);
+                expect(p._commitSent).to.not.equal(true);
+                expect(pm.broadcast.called).to.be.false;
+            });
+
+            it('whale COMMIT alone applies the config', async function () {
+                let p = weightedProposal();
+                p.commitPubkeys.add(WHALE.pubkey.toLowerCase());
+                consensus.pendingProposals.set(1, p);
+                consensus._checkCommitQuorum(1);
+                await new Promise(r => setImmediate(r));   // _applyConfig is async
+                expect(hub.applyConfig.calledWith({ cfg: 1 })).to.be.true;
+            });
+        });
+
+        describe('view-change weighted', function () {
+            beforeEach(beWhale);
+
+            it('_initiateViewChange stashes the weighted context + seeds self view-change pubkey', function () {
+                consensus._initiateViewChange(5, 3, true, normValidators());
+                let ctx = consensus.viewChangeQuorums.get(5);
+                expect(ctx.quorum).to.equal(3);
+                expect(ctx.weighted).to.equal(true);
+                expect(ctx.validators.length).to.equal(4);
+                expect(consensus.pendingViewChangePubkeys.get(consensus.view).has(WHALE.pubkey.toLowerCase())).to.be.true;
+            });
+
+            it('whale view-change vote alone promotes the view (proposal-gone initiator path)', function () {
+                // No proposal in pendingProposals — context recovered from the stash.
+                consensus.viewChangeQuorums.set(5, { quorum: 3, weighted: true, validators: normValidators() });
+                consensus._handleViewChange({ sender: WHALE.addr, sig_pubkey: WHALE.pubkey, data: { view: 1, seq: 5 } });
+                expect(consensus.view).to.equal(1);
+            });
+
+            it('a small-stake COUNT majority view-change does NOT promote the view', function () {
+                consensus.viewChangeQuorums.set(5, { quorum: 3, weighted: true, validators: normValidators() });
+                for (let v of SMALL)
+                    consensus._handleViewChange({ sender: v.addr, sig_pubkey: v.pubkey, data: { view: 1, seq: 5 } });
+                expect(consensus.view).to.equal(0);
+            });
+        });
+
+        it('stop() clears pendingViewChangePubkeys', async function () {
+            consensus.pendingViewChangePubkeys.set(1, new Set(['x']));
+            await consensus.stop();
+            expect(consensus.pendingViewChangePubkeys.size).to.equal(0);
         });
     });
 });

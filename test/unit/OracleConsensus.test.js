@@ -284,6 +284,41 @@ describe('OracleConsensus', function () {
     });
 
     // -----------------------------------------------------------------
+    // _quorumMet() — count vs STAKE_WEIGHTED_QUORUM
+    // -----------------------------------------------------------------
+
+    describe('_quorumMet()', function () {
+
+        it('count mode: vote-set size vs the round\'s locked quorum', function () {
+            let pending = { weighted: false, quorum: 3, signatures: new Map() };
+            expect(oc._quorumMet(pending, new Set(['a', 'b']))).to.equal(false);
+            expect(oc._quorumMet(pending, new Set(['a', 'b', 'c']))).to.equal(true);
+        });
+
+        it('weighted mode: tallies SIGNER STAKE from the signatures map, ignoring the address vote set', function () {
+            // One whale (>2/3 of stake) + nine 1-unit Sybils. S = 100009.
+            let validators = [{ pubkey: 'a'.repeat(64), source: 'WHALE', weight: '100000' }];
+            let sybils = [];
+            for (let i = 0; i < 9; i++) {
+                let pk = i.toString(16).padStart(2, '0').repeat(32);
+                validators.push({ pubkey: pk, source: 'SYB' + i, weight: '1' });
+                sybils.push(pk);
+            }
+
+            // All nine Sybils signed — a COUNT landslide — but hold minority stake.
+            // Even a full address vote set cannot finalize.
+            let sybilPending = { weighted: true, validators, quorum: 0,
+                signatures: new Map(sybils.map(pk => [pk, 'sig'])) };
+            expect(oc._quorumMet(sybilPending, new Set(sybils))).to.equal(false);
+
+            // The whale alone clears it — despite an EMPTY address vote set, proving
+            // the tally is over signer stake, not the prepares/commits sets.
+            let whalePending = { weighted: true, validators, quorum: 0,
+                signatures: new Map([['a'.repeat(64), 'sig']]) };
+            expect(oc._quorumMet(whalePending, new Set())).to.equal(true);
+        });
+    });
+
     // finalizeRound()
     // -----------------------------------------------------------------
 

@@ -28,6 +28,35 @@ const VALIDATORS_7  = Array.from({ length: 7 }, (_, i) => makeValidator(i + 1));
 const VALIDATORS_10 = Array.from({ length: 10 }, (_, i) => makeValidator(i + 1));
 const VALIDATORS_13 = Array.from({ length: 13 }, (_, i) => makeValidator(i + 1));
 
+// STAKE_WEIGHTED_QUORUM fixtures — validators carry a staking source + weight.
+function makeWeightedValidator(i, source, weight) {
+    let v = makeValidator(i);
+    return { pubkey: v.pubkey, addr: v.addr, source: source, weight: String(weight) };
+}
+
+// One whale source holding >2/3 of stake + three small distinct sources.
+// S = 1000 + 100 + 100 + 100 = 1300. Whale alone: 3·1000 = 3000 > 2·1300 = 2600
+// (a COUNT minority of one clears the weighted threshold); any subset of the
+// three small sources is a COUNT majority but a STAKE minority.
+const WEIGHTED_VALIDATORS_4 = [
+    makeWeightedValidator(1, 'srcWhale', '1000'),
+    makeWeightedValidator(2, 'src2', '100'),
+    makeWeightedValidator(3, 'src3', '100'),
+    makeWeightedValidator(4, 'src4', '100')
+];
+
+// Build a getActiveWeightSnapshot-shaped result from weighted validators.
+function makeWeightSnapshot(validators, blockIndex) {
+    let sources = new Set(validators.map(v => v.source));
+    return {
+        capability:  '*',
+        blockIndex:  blockIndex,
+        count:       validators.length,
+        sourceCount: sources.size,
+        validators:  validators.map(v => ({ pubkey: v.pubkey, source: v.source, weight: v.weight }))
+    };
+}
+
 // Sample price data
 const SAMPLE_PRICES = [
     { coinPair: 'BTC/USD', price: '100000.12345678', sources: 2 },
@@ -59,12 +88,15 @@ function buildUniformSubmissions(validators, prices) {
 
 module.exports = {
     makeValidator,
+    makeWeightedValidator,
+    makeWeightSnapshot,
     VALIDATORS_1,
     VALIDATORS_3,
     VALIDATORS_4,
     VALIDATORS_7,
     VALIDATORS_10,
     VALIDATORS_13,
+    WEIGHTED_VALIDATORS_4,
     SAMPLE_PRICES,
     buildSubmissions,
     buildUniformSubmissions

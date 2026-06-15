@@ -26,6 +26,7 @@
  ********************************************************************/
 
 const crypto = require('crypto');
+const swq    = require('./stake_weighted_quorum.js');
 
 const PBFT_PRE_PREPARE = 'PBFT_PRE_PREPARE';
 const PBFT_PREPARE     = 'PBFT_PREPARE';
@@ -57,6 +58,12 @@ class Consensus {
 
         // Pending view changes: Map<view, Set<sender>>
         this.pendingViewChanges = new Map();
+
+        // STAKE_WEIGHTED_QUORUM: parallel pubkey vote tally for view changes,
+        // Map<view, Set<pubkey>>. Populated only on weighted rounds (the address
+        // set above stays authoritative for the legacy count path). The weighted
+        // view-change quorum is checked against this set's summed source stake.
+        this.pendingViewChangePubkeys = new Map();
 
         // Round-locked quorum captured when THIS node initiates a view change,
         // keyed by seq (the proposal round). The proposal is removed from
@@ -121,6 +128,7 @@ class Consensus {
         // (e.g. a hub reconfiguration that tears down and re-inits the engine)
         // doesn't inherit stale entries from the previous run.
         this.pendingViewChanges.clear();
+        this.pendingViewChangePubkeys.clear();
     }
 
     // Propose a config change — returns a Promise that resolves when consensus is reached
@@ -132,7 +140,7 @@ class Consensus {
         // Falls back to live _getQuorum() when the indexer or BTC tip
         // can't be resolved (graceful degradation; same behavior as before
         // the snapshot wiring landed).
-        let snapshot = await this._lockSnapshot();
+        let { snapshot, weighted } = await this._lockSnapshot();
         let quorum = snapshot
             ? this.hub.capabilitySnapshot.getQuorum(snapshot)
             : this._getQuorum();
@@ -177,11 +185,20 @@ class Consensus {
                 // stake state drifts mid-round.
                 snapshot:       snapshot || null,
                 quorum:         quorum,
-                btcBlockHeight: snapshot ? snapshot.blockIndex : null
+                btcBlockHeight: snapshot ? snapshot.blockIndex : null,
+                // STAKE_WEIGHTED_QUORUM round? Carry the source-keyed validator
+                // weights + parallel pubkey vote sets (the address Sets above stay
+                // authoritative for the count path; these are consulted only when
+                // weighted). One vote per staking source — DELEGATE v0 is additive.
+                weighted:       !!weighted,
+                validators:     this._normalizeValidators(snapshot, weighted),
+                preparePubkeys: weighted ? new Set() : null,
+                commitPubkeys:  weighted ? new Set() : null
             };
 
             // Add own PREPARE vote
             proposal.prepares.add(this.peerManager.validatorAddr);
+            if (proposal.weighted) this._addSelfPubkey(proposal.preparePubkeys);
 
             this.pendingProposals.set(seq, proposal);
 
@@ -191,10 +208,11 @@ class Consensus {
                     proposal.resolved = true;
                     this.pendingProposals.delete(seq);
                     // Initiate view change so a new leader can take over.
-                    // Pass the round-locked quorum so the view-change vote
-                    // tally uses the same N this proposal round used, even
-                    // though we've just removed the proposal from the map.
-                    this._initiateViewChange(seq, proposal.quorum);
+                    // Pass the round-locked quorum + weighted context so the
+                    // view-change vote tally uses the same rule (count or stake)
+                    // this proposal round used, even though we've just removed the
+                    // proposal from the map. Captured here, before deletion.
+                    this._initiateViewChange(seq, proposal.quorum, proposal.weighted, proposal.validators);
                     reject(new Error('Consensus timeout for seq ' + seq + ' (received ' +
                         proposal.prepares.size + ' prepares, ' + proposal.commits.size + ' commits, need ' + quorum + ')'));
                 }
@@ -202,13 +220,15 @@ class Consensus {
 
             // Broadcast PRE_PREPARE with the full config + the BTC block
             // height the leader snapshotted at, so followers can resolve the
-            // same validator set at the same block boundary.
+            // same validator set at the same block boundary. `weighted` is a hint
+            // only — followers re-derive it from the block height + network.
             this.peerManager.broadcast(PBFT_PRE_PREPARE, {
                 seq:            seq,
                 view:           this.view,
                 configDigest:   digest,
                 config:         config,
-                btcBlockHeight: proposal.btcBlockHeight
+                btcBlockHeight: proposal.btcBlockHeight,
+                weighted:       proposal.weighted
             });
 
             // Check if we already have quorum (unlikely but handles edge case)
@@ -220,8 +240,16 @@ class Consensus {
     // Used by both the leader (in propose) and followers (in _handlePrePrepare)
     // — the leader stamps its tip into the PRE_PREPARE envelope so followers
     // call this with the matching blockIndex.
+    // Returns { snapshot, weighted }. STAKE_WEIGHTED_QUORUM: at/above the
+    // activation block on this hub's network, lock the SOURCE-KEYED weight
+    // snapshot (getActiveWeightSnapshot → [{pubkey,source,weight}]) so quorum is
+    // tallied by stake; below activation, the count snapshot (byte-identical to
+    // the legacy path). `weighted` is gated on the BTC block boundary + network so
+    // the hub and every other hub flip on the same anchor. Returns
+    // { snapshot: null, weighted } when no snapshot can be acquired (the caller
+    // then falls back to live _getQuorum(), as before).
     async _lockSnapshot(blockHeightOverride) {
-        if (!this.hub || !this.hub.capabilitySnapshot) return null;
+        if (!this.hub || !this.hub.capabilitySnapshot) return { snapshot: null, weighted: false };
         let blockHeight = blockHeightOverride;
         if (blockHeight === undefined || blockHeight === null) {
             // _resolveBtcLatestBlock checks hub.db.getChainTip first, then
@@ -229,8 +257,12 @@ class Consensus {
             // indexer. So this works whether or not chain-tip-push is wired.
             blockHeight = await this.hub._resolveBtcLatestBlock();
         }
-        if (!blockHeight) return null;
-        return this.hub.capabilitySnapshot.getActiveValidatorSnapshot(blockHeight);
+        if (!blockHeight) return { snapshot: null, weighted: false };
+        let weighted = swq.isStakeWeightedQuorumActive(blockHeight, this.hub.network);
+        let snapshot = weighted
+            ? await this.hub.capabilitySnapshot.getActiveWeightSnapshot(blockHeight)
+            : await this.hub.capabilitySnapshot.getActiveValidatorSnapshot(blockHeight);
+        return { snapshot: snapshot, weighted: weighted };
     }
 
     // --- Private methods ---
@@ -326,7 +358,7 @@ class Consensus {
             // the leader snapshotted at (stamped into the PRE_PREPARE
             // envelope). Follower quorum-checks use proposal.quorum, so we
             // stay in lockstep with the leader for the whole round.
-            let snapshot = await this._lockSnapshot(btcBlockHeight);
+            let { snapshot, weighted } = await this._lockSnapshot(btcBlockHeight);
             let quorum = snapshot
                 ? this.hub.capabilitySnapshot.getQuorum(snapshot)
                 : this._getQuorum();
@@ -344,7 +376,11 @@ class Consensus {
                 reject:   null,
                 snapshot:       snapshot || null,
                 quorum:         quorum,
-                btcBlockHeight: btcBlockHeight || null
+                btcBlockHeight: btcBlockHeight || null,
+                weighted:       !!weighted,
+                validators:     this._normalizeValidators(snapshot, weighted),
+                preparePubkeys: weighted ? new Set() : null,
+                commitPubkeys:  weighted ? new Set() : null
             };
 
             // Set cleanup timeout (follower proposals expire too)
@@ -375,6 +411,11 @@ class Consensus {
         proposal.prepares.add(envelope.sender);
         // Add our own PREPARE
         proposal.prepares.add(this.peerManager.validatorAddr);
+        if (proposal.weighted) {
+            let proposerPk = this._resolveSenderPubkey(envelope);
+            if (proposerPk) proposal.preparePubkeys.add(proposerPk);
+            this._addSelfPubkey(proposal.preparePubkeys);
+        }
 
         // Broadcast PREPARE
         this.peerManager.broadcast(PBFT_PREPARE, {
@@ -402,9 +443,61 @@ class Consensus {
 
         // Record the PREPARE vote
         proposal.prepares.add(envelope.sender);
+        if (proposal.weighted && proposal.preparePubkeys) {
+            let pk = this._resolveSenderPubkey(envelope);
+            if (pk) proposal.preparePubkeys.add(pk);
+        }
 
         // Check if we have enough PREPAREs to move to COMMIT
         this._checkPrepareQuorum(seq);
+    }
+
+    // Normalize a locked snapshot's validators into the source-keyed shape the
+    // weighted predicate needs ([{pubkey:lower, source, weight}]); [] in count mode.
+    _normalizeValidators(snapshot, weighted) {
+        if (!weighted || !snapshot || !Array.isArray(snapshot.validators)) return [];
+        return snapshot.validators.map(v => ({
+            pubkey: String(v.pubkey).toLowerCase(),
+            source: String(v.source != null ? v.source : ''),
+            weight: String(v.weight != null ? v.weight : '0')
+        }));
+    }
+
+    // Add this hub's own signing pubkey to a weighted vote set (no-op if the
+    // identity isn't available yet — e.g. before the hub finishes initializing).
+    _addSelfPubkey(pubkeySet) {
+        if (!pubkeySet) return;
+        let identity = this.hub.getIdentity && this.hub.getIdentity();
+        if (identity) pubkeySet.add(identity.getPubkeyHex().toLowerCase());
+    }
+
+    // Resolve a voting peer's signing pubkey from an authenticated envelope.
+    // Prefer envelope.sig_pubkey (PeerManager already verified the envelope with
+    // it), fall back to the addr→pubkey registry, else null — in which case the
+    // vote still counts in the address set and is only omitted from the weighted
+    // stake tally (a known validator on a transient version mismatch; weighted
+    // mode only activates post-flag-day when every hub stamps sig_pubkey).
+    _resolveSenderPubkey(envelope) {
+        if (envelope && envelope.sig_pubkey && typeof envelope.sig_pubkey === 'string')
+            return envelope.sig_pubkey.toLowerCase();
+        let registry = this.peerManager && this.peerManager.validatorPubkeys;
+        if (registry && envelope) {
+            let pk = registry.get(envelope.sender);
+            if (pk) return String(pk).toLowerCase();
+        }
+        return null;
+    }
+
+    // Quorum predicate shared by PREPARE / COMMIT / VIEW_CHANGE. Under
+    // STAKE_WEIGHTED_QUORUM: 3·Σ(distinct-source signer weight) > 2·S over the
+    // pubkeys that voted; below activation: the legacy 2f+1 count of the address
+    // vote set against the round-locked quorum. `ctx` is a proposal (PREPARE/COMMIT)
+    // or a {quorum, weighted, validators} view-change context.
+    _quorumMet(ctx, addrSet, pubkeySet) {
+        if (ctx.weighted)
+            return swq.meetsStakeThreshold(ctx.validators, pubkeySet || new Set());
+        let quorum = (typeof ctx.quorum === 'number') ? ctx.quorum : this._getQuorum();
+        return addrSet.size >= quorum;
     }
 
     // Check if PREPARE quorum is reached → broadcast COMMIT
@@ -414,15 +507,15 @@ class Consensus {
 
         // Use the round's locked quorum (federation snapshot at the BTC
         // block boundary), not a live recompute — keeps every hub in
-        // lockstep across the round.
-        let quorum = (typeof proposal.quorum === 'number') ? proposal.quorum : this._getQuorum();
-        if (proposal.prepares.size >= quorum) {
+        // lockstep across the round. Weighted rounds tally signer stake.
+        if (this._quorumMet(proposal, proposal.prepares, proposal.preparePubkeys)) {
             // Only broadcast COMMIT once
             if (!proposal._commitSent) {
                 proposal._commitSent = true;
 
                 // Add own COMMIT vote
                 proposal.commits.add(this.peerManager.validatorAddr);
+                if (proposal.weighted) this._addSelfPubkey(proposal.commitPubkeys);
 
                 this.peerManager.broadcast(PBFT_COMMIT, {
                     seq:          seq,
@@ -451,6 +544,10 @@ class Consensus {
 
         // Record the COMMIT vote
         proposal.commits.add(envelope.sender);
+        if (proposal.weighted && proposal.commitPubkeys) {
+            let pk = this._resolveSenderPubkey(envelope);
+            if (pk) proposal.commitPubkeys.add(pk);
+        }
 
         // Check if we have enough COMMITs to apply
         this._checkCommitQuorum(seq);
@@ -461,9 +558,8 @@ class Consensus {
         let proposal = this.pendingProposals.get(seq);
         if (!proposal || proposal.applied) return;
 
-        // Same locked quorum as _checkPrepareQuorum — see comment there.
-        let quorum = (typeof proposal.quorum === 'number') ? proposal.quorum : this._getQuorum();
-        if (proposal.commits.size >= quorum) {
+        // Same quorum rule as _checkPrepareQuorum — see _quorumMet.
+        if (this._quorumMet(proposal, proposal.commits, proposal.commitPubkeys)) {
             proposal.applied = true;
 
             // Apply the config
@@ -518,25 +614,33 @@ class Consensus {
         }
         this.pendingViewChanges.get(view).add(envelope.sender);
 
-        // Use the round's locked quorum, matching _checkPrepareQuorum and
-        // _checkCommitQuorum, so view-change acceptance can't diverge from the
-        // rest of the round under validator churn. Followers still hold the
-        // proposal (proposal.quorum); the node that initiated the view change
-        // recovers it from viewChangeQuorums (its proposal was removed by the
-        // triggering timeout). Live _getQuorum() is the last-resort fallback,
-        // as elsewhere.
+        // Resolve the round-locked quorum CONTEXT (count vs stake), matching
+        // _checkPrepareQuorum/_checkCommitQuorum so view-change acceptance can't
+        // diverge from the rest of the round under validator churn. Followers
+        // still hold the proposal; the node that initiated the view change
+        // recovers the context from viewChangeQuorums (its proposal was removed by
+        // the triggering timeout). A live count quorum is the last-resort fallback.
         let proposal = this.pendingProposals.get(seq);
-        let quorum;
+        let vcCtx;
         if (proposal && typeof proposal.quorum === 'number') {
-            quorum = proposal.quorum;
+            vcCtx = { quorum: proposal.quorum, weighted: !!proposal.weighted, validators: proposal.validators || [] };
         } else if (this.viewChangeQuorums.has(seq)) {
-            quorum = this.viewChangeQuorums.get(seq);
+            vcCtx = this.viewChangeQuorums.get(seq);
         } else {
-            quorum = this._getQuorum();
+            vcCtx = { quorum: this._getQuorum(), weighted: false, validators: [] };
         }
-        if (quorum === 0) return;
+        if (vcCtx.quorum === 0) return;
 
-        if (this.pendingViewChanges.get(view).size >= quorum) {
+        // Weighted rounds tally view-change votes by signer stake (parallel pubkey
+        // set); the address set above stays authoritative for the count path.
+        if (vcCtx.weighted) {
+            if (!this.pendingViewChangePubkeys.has(view))
+                this.pendingViewChangePubkeys.set(view, new Set());
+            let pk = this._resolveSenderPubkey(envelope);
+            if (pk) this.pendingViewChangePubkeys.get(view).add(pk);
+        }
+
+        if (this._quorumMet(vcCtx, this.pendingViewChanges.get(view), this.pendingViewChangePubkeys.get(view))) {
             // View change accepted — update view and check if we're the new leader
             this.view = view;
             let newLeader = this._getLeader(seq);
@@ -545,6 +649,7 @@ class Consensus {
                 this.peerManager.broadcast(PBFT_NEW_VIEW, { view: view, seq: seq });
             }
             this.pendingViewChanges.delete(view);
+            this.pendingViewChangePubkeys.delete(view);
             this.viewChangeQuorums.delete(seq);
 
             // Prune sub-quorum entries for any view we've now advanced past.
@@ -556,6 +661,9 @@ class Consensus {
             // Mirrors the viewChangeQuorums prune in _initiateViewChange.
             for (let v of this.pendingViewChanges.keys()) {
                 if (v < this.view) this.pendingViewChanges.delete(v);
+            }
+            for (let v of this.pendingViewChangePubkeys.keys()) {
+                if (v < this.view) this.pendingViewChangePubkeys.delete(v);
             }
         }
     }
@@ -604,22 +712,30 @@ class Consensus {
         console.log('PBFT: New view ' + view + ' announced by ' + envelope.sender);
     }
 
-    // Initiate a view change (called when leader times out)
-    _initiateViewChange(seq, lockedQuorum) {
+    // Initiate a view change (called when leader times out). The weighted context
+    // (lockedWeighted + lockedValidators) is captured by the caller BEFORE the
+    // proposal is deleted, so the stake-weighted view-change tally can run even
+    // though the proposal is gone.
+    _initiateViewChange(seq, lockedQuorum, lockedWeighted, lockedValidators) {
         this.view++;
         console.log('PBFT: Initiating view change to view ' + this.view + ' (seq ' + seq + ')');
 
-        // Stash the round-locked quorum for this seq so _handleViewChange tallies
-        // view-change votes against the proposal-creation snapshot — the proposal
-        // is already gone from pendingProposals (the triggering timeout removed it
-        // before calling us), so this is the only place the initiator can recover
-        // it. Prune rounds already applied to keep the map bounded (seq is
+        // Stash the round-locked quorum CONTEXT for this seq so _handleViewChange
+        // tallies view-change votes against the proposal-creation snapshot — the
+        // proposal is already gone from pendingProposals (the triggering timeout
+        // removed it before calling us), so this is the only place the initiator
+        // can recover it. Carries weighted + validators so the weighted tally can
+        // resolve. Prune rounds already applied to keep the map bounded (seq is
         // monotonic, so applied seqs never recur).
         if (typeof lockedQuorum === 'number') {
             for (let s of this.viewChangeQuorums.keys()) {
                 if (s <= this.lastAppliedSeq) this.viewChangeQuorums.delete(s);
             }
-            this.viewChangeQuorums.set(seq, lockedQuorum);
+            this.viewChangeQuorums.set(seq, {
+                quorum:     lockedQuorum,
+                weighted:   !!lockedWeighted,
+                validators: lockedValidators || []
+            });
         }
 
         this.peerManager.broadcast(PBFT_VIEW_CHANGE, {
@@ -632,6 +748,11 @@ class Consensus {
             this.pendingViewChanges.set(this.view, new Set());
         }
         this.pendingViewChanges.get(this.view).add(this.peerManager.validatorAddr);
+        if (lockedWeighted) {
+            if (!this.pendingViewChangePubkeys.has(this.view))
+                this.pendingViewChangePubkeys.set(this.view, new Set());
+            this._addSelfPubkey(this.pendingViewChangePubkeys.get(this.view));
+        }
     }
 
     // Get the leader for a given sequence number
