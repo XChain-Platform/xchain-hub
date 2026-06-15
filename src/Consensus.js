@@ -205,6 +205,7 @@ class Consensus {
             // same validator set at the same block boundary.
             this.peerManager.broadcast(PBFT_PRE_PREPARE, {
                 seq:            seq,
+                view:           this.view,
                 configDigest:   digest,
                 config:         config,
                 btcBlockHeight: proposal.btcBlockHeight
@@ -274,7 +275,7 @@ class Consensus {
 
     // Handle PRE_PREPARE: validate and respond with PREPARE
     async _handlePrePrepare(envelope) {
-        let { seq, configDigest, config, btcBlockHeight } = envelope.data;
+        let { seq, view, configDigest, config, btcBlockHeight } = envelope.data;
 
         // Validate
         if (!seq || !configDigest || !config) return;
@@ -283,6 +284,28 @@ class Consensus {
         // Discard proposals from senders that are not registered validators
         // before doing any snapshot/indexer work for them.
         if (!this._isKnownSender(envelope.sender)) return;
+
+        // Leader-identity guard: a PRE_PREPARE must come from the validator the
+        // rotation designates as leader for the CLAIMED (seq, view), mirroring
+        // the check _handleNewView applies to NEW_VIEW and OracleConsensus
+        // applies to PROPOSE. Without it any registered validator could inject a
+        // PRE_PREPARE for an uncontested seq and drive every follower to PREPARE/
+        // COMMIT its config. The leader stamps its view into the envelope, so
+        // (seq + view) % N matches _getLeader's rotation evaluated at the claimed
+        // view. A Byzantine node can therefore only ever propose in a (seq, view)
+        // for which it is already the legitimate leader.
+        if (typeof view !== 'number') {
+            console.warn('PBFT: Rejecting PRE_PREPARE with no view from ' + envelope.sender + ' (seq ' + seq + ')');
+            return;
+        }
+        let N = this.validatorSet.length;
+        if (N === 0) return;
+        let expectedLeader = this.validatorSet[(seq + view) % N];
+        if (!expectedLeader || envelope.sender !== expectedLeader.addr) {
+            console.warn('PBFT: Rejecting PRE_PREPARE for seq ' + seq + ' view ' + view +
+                ' from non-leader ' + envelope.sender);
+            return;
+        }
 
         // Reject stale/replayed sequence numbers
         if (seq <= this.lastAppliedSeq) {

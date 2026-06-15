@@ -81,28 +81,29 @@ describe('Chaos: Network Partition (NET-3)', function () {
         let config = { coin: 'BTC', param: 'test' };
         let digest = makeDigest(config);
 
-        // Leader (validators[0]) sends PRE_PREPARE for seq 1
+        // Leader (validators[0]) sends PRE_PREPARE for seq 4 — at view 0,
+        // (4+0)%4 = 0, so validators[0] is the legitimate rotation leader.
         hub2._peerManager.emit('message', buildEnvelope('PBFT_PRE_PREPARE', {
-            seq: 1, configDigest: digest, config: config
+            seq: 4, view: 0, configDigest: digest, config: config
         }, VALIDATORS_4[0].addr));
 
         // Validator 3 sends PREPARE (quorum = 3 for N=4)
         hub2._peerManager.emit('message', buildEnvelope('PBFT_PREPARE', {
-            seq: 1, configDigest: digest
+            seq: 4, configDigest: digest
         }, VALIDATORS_4[2].addr));
 
         // With prepares from validators 0, 1, 2 = 3, quorum met
-        let proposal = consensus2.pendingProposals.get(1);
+        let proposal = consensus2.pendingProposals.get(4);
         expect(proposal).to.exist;
         expect(proposal.prepares.size).to.be.gte(3);
 
         // COMMITs from validators 0, 2
         hub2._peerManager.emit('message', buildEnvelope('PBFT_COMMIT', {
-            seq: 1, configDigest: digest
+            seq: 4, configDigest: digest
         }, VALIDATORS_4[0].addr));
 
         hub2._peerManager.emit('message', buildEnvelope('PBFT_COMMIT', {
-            seq: 1, configDigest: digest
+            seq: 4, configDigest: digest
         }, VALIDATORS_4[2].addr));
 
         await new Promise(r => setTimeout(r, 50));
@@ -172,8 +173,10 @@ describe('Chaos: Network Partition (NET-3)', function () {
         let config = { key: 'stale' };
         let digest = makeDigest(config);
 
+        // sender is the legit (seq 5, view 0) leader, so the stale-seq guard
+        // — not the identity guard — is what rejects it.
         pm.emit('message', buildEnvelope('PBFT_PRE_PREPARE', {
-            seq: 5, configDigest: digest, config: config
+            seq: 5, view: 0, configDigest: digest, config: config
         }, VALIDATORS_4[1].addr));
 
         // Should be rejected — no proposal created

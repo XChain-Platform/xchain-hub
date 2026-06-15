@@ -79,9 +79,10 @@ describe('Regression: Consensus (PBFT)', function () {
             let digest = consensus._digest(config);
 
             // Step 1: PRE_PREPARE from leader creates proposal
+            // (seq 5, view 0 → (5+0)%4 = 1 → VALIDATORS_4[1] is the rotation leader)
             consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
-                data: { seq: 5, configDigest: digest, config }
+                data: { seq: 5, view: 0, configDigest: digest, config }
             });
             expect(consensus.pendingProposals.has(5)).to.be.true;
 
@@ -135,8 +136,8 @@ describe('Regression: Consensus (PBFT)', function () {
 
             // Only 1 prepare (from PRE_PREPARE sender) + self = 2, need 3
             consensus._handlePrePrepare({
-                sender: VALIDATORS_4[1].addr,
-                data: { seq: 5, configDigest: digest, config }
+                sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
+                data: { seq: 5, view: 0, configDigest: digest, config }
             });
 
             // PREPARE broadcast sent, but no COMMIT should be broadcast yet
@@ -237,9 +238,11 @@ describe('Regression: Consensus (PBFT)', function () {
             let digest = consensus._digest(config);
 
             // Attempt with seq 5 (below lastAppliedSeq)
+            // (sender is the legit (seq 5, view 0) leader, so the stale-seq guard
+            // — not the identity guard — is what rejects it)
             consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
-                data: { seq: 5, configDigest: digest, config }
+                data: { seq: 5, view: 0, configDigest: digest, config }
             });
 
             expect(consensus.pendingProposals.has(5)).to.be.false;
@@ -285,6 +288,25 @@ describe('Regression: Consensus (PBFT)', function () {
     // -----------------------------------------------------------------
 
     describe('REG-CON-010: PRE_PREPARE with invalid data rejected', function () {
+        it('PRE_PREPARE from a non-leader for the claimed view is rejected @regression-p1', function () {
+            consensus.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+
+            let config = { x: 1 };
+            let digest = consensus._digest(config);
+
+            // (seq 5, view 0) → leader is VALIDATORS_4[1]; a PRE_PREPARE from any
+            // other validator must not create a proposal — the identity guard stops
+            // an authenticated non-leader from driving an uncontested seq to commit.
+            consensus._handlePrePrepare({
+                sender: VALIDATORS_4[3].addr,
+                data: { seq: 5, view: 0, configDigest: digest, config }
+            });
+
+            expect(consensus.pendingProposals.size).to.equal(0);
+            expect(pm.broadcast.called).to.be.false;
+        });
+
         it('PRE_PREPARE with wrong digest is rejected @regression-p1', function () {
             consensus.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[0].addr;
@@ -292,8 +314,8 @@ describe('Regression: Consensus (PBFT)', function () {
             let config = { x: 1 };
 
             consensus._handlePrePrepare({
-                sender: VALIDATORS_4[1].addr,
-                data: { seq: 5, configDigest: 'bad-digest', config }
+                sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
+                data: { seq: 5, view: 0, configDigest: 'bad-digest', config }
             });
 
             expect(consensus.pendingProposals.size).to.equal(0);

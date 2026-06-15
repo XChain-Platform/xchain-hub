@@ -186,8 +186,8 @@ describe('Boundary: Consensus (PBFT)', function () {
 
         it('rejects mismatched digest', function () {
             consensus._handlePrePrepare({
-                sender: VALIDATORS_4[1].addr,
-                data: { seq: 1, configDigest: 'wrong', config: { x: 1 } }
+                sender: VALIDATORS_4[1].addr,                       // leader for (seq 1, view 0)
+                data: { seq: 1, view: 0, configDigest: 'wrong', config: { x: 1 } }
             });
             expect(consensus.pendingProposals.size).to.equal(0);
         });
@@ -196,8 +196,8 @@ describe('Boundary: Consensus (PBFT)', function () {
             let config = { x: 1 };
             let digest = consensus._digest(config);
             await consensus._handlePrePrepare({
-                sender: VALIDATORS_4[1].addr,
-                data: { seq: 5, configDigest: digest, config }
+                sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
+                data: { seq: 5, view: 0, configDigest: digest, config }
             });
             expect(consensus.pendingProposals.has(5)).to.be.true;
             let p = consensus.pendingProposals.get(5);

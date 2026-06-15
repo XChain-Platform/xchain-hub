@@ -219,8 +219,8 @@ describe('Security Hardening', function () {
             let digest = consensus._digest(config);
             let envelope = {
                 type: 'PBFT_PRE_PREPARE',
-                sender: VALIDATORS_4[1].addr,
-                data: { seq: 3, configDigest: digest, config: config }
+                sender: VALIDATORS_4[1].addr,                       // leader for (seq 3, view 2): (3+2)%4 = 1
+                data: { seq: 3, view: 2, configDigest: digest, config: config }
             };
             consensus._handlePrePrepare(envelope);
             expect(consensus.pendingProposals.has(3)).to.be.false;
@@ -233,8 +233,8 @@ describe('Security Hardening', function () {
             let digest = consensus._digest(config);
             let envelope = {
                 type: 'PBFT_PRE_PREPARE',
-                sender: VALIDATORS_4[0].addr,
-                data: { seq: 3, configDigest: digest, config: config }
+                sender: VALIDATORS_4[0].addr,                       // leader for (seq 3, view 1): (3+1)%4 = 0
+                data: { seq: 3, view: 1, configDigest: digest, config: config }
             };
             await consensus._handlePrePrepare(envelope);
             expect(consensus.pendingProposals.has(3)).to.be.true;

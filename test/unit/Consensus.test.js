@@ -185,6 +185,7 @@ describe('Consensus (PBFT)', function () {
             let [type, data] = pm.broadcast.getCall(0).args;
             expect(type).to.equal('PBFT_PRE_PREPARE');
             expect(data.seq).to.equal(1);
+            expect(data.view).to.equal(0);              // leader stamps its view for the follower identity-guard
             expect(data.config).to.deep.equal({ cfg: 1 });
             expect(data.configDigest).to.be.a('string');
 
@@ -215,9 +216,10 @@ describe('Consensus (PBFT)', function () {
             let config = { x: 1 };
             let digest = consensus._digest(config);
 
+            // seq 5, view 0 → (5+0)%4 = 1 → VALIDATORS_4[1] is the rotation leader.
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
-                data: { seq: 5, configDigest: digest, config }
+                data: { seq: 5, view: 0, configDigest: digest, config }
             });
 
             expect(consensus.pendingProposals.has(5)).to.be.true;
@@ -231,10 +233,39 @@ describe('Consensus (PBFT)', function () {
             if (proposal.timer) clearTimeout(proposal.timer);
         });
 
+        it('PRE_PREPARE from a non-leader for the claimed view is rejected (no proposal, no PREPARE)', async function () {
+            // seq 5, view 0 → (5+0)%4 = 1, so VALIDATORS_4[1] is the only legitimate
+            // proposer. A PRE_PREPARE from any other registered validator must NOT
+            // create a pending proposal or broadcast a PREPARE — otherwise any
+            // authenticated validator could drive an uncontested seq to commit its
+            // own config. (Without the identity guard this would have been accepted.)
+            let config = { x: 1 };
+            let digest = consensus._digest(config);
+            await consensus._handlePrePrepare({
+                sender: VALIDATORS_4[2].addr,                       // not the leader for (seq 5, view 0)
+                data: { seq: 5, view: 0, configDigest: digest, config }
+            });
+            expect(consensus.pendingProposals.has(5)).to.be.false;
+            expect(pm.broadcast.called).to.be.false;
+        });
+
+        it('PRE_PREPARE with no view field is rejected', async function () {
+            // The leader must stamp its view so followers can resolve the rotation
+            // leader; a viewless envelope cannot be identity-checked and is dropped.
+            let config = { x: 1 };
+            let digest = consensus._digest(config);
+            await consensus._handlePrePrepare({
+                sender: VALIDATORS_4[1].addr,
+                data: { seq: 5, configDigest: digest, config }
+            });
+            expect(consensus.pendingProposals.has(5)).to.be.false;
+            expect(pm.broadcast.called).to.be.false;
+        });
+
         it('PRE_PREPARE with wrong digest is rejected', function () {
             consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
-                data: { seq: 5, configDigest: 'bad-digest', config: { x: 1 } }
+                data: { seq: 5, view: 0, configDigest: 'bad-digest', config: { x: 1 } }
             });
             expect(consensus.pendingProposals.has(5)).to.be.false;
         });
@@ -252,8 +283,8 @@ describe('Consensus (PBFT)', function () {
             let configA = { x: 1 };
             let digestA = consensus._digest(configA);
             await consensus._handlePrePrepare({
-                sender: VALIDATORS_4[1].addr,
-                data: { seq: 5, configDigest: digestA, config: configA }
+                sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
+                data: { seq: 5, view: 0, configDigest: digestA, config: configA }
             });
 
             expect(consensus.pendingProposals.has(5)).to.be.true;
@@ -266,9 +297,12 @@ describe('Consensus (PBFT)', function () {
             let digestB = consensus._digest(configB);
             expect(digestB).to.not.equal(digestA);
 
+            // A competing leader from view 1: (5+1)%4 = 2 → VALIDATORS_4[2] is the
+            // legitimate proposer at view 1, so this passes the identity guard and
+            // is dropped only by the digest-conflict rule (two leaders, one seq).
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[2].addr,
-                data: { seq: 5, configDigest: digestB, config: configB }
+                data: { seq: 5, view: 1, configDigest: digestB, config: configB }
             });
 
             // The conflicting message must be dropped: the existing proposal
@@ -624,7 +658,7 @@ describe('Consensus (PBFT)', function () {
             consensus._handleMessage({
                 type: 'PBFT_PRE_PREPARE',
                 sender: VALIDATORS_4[1].addr,
-                data: { seq: 5, configDigest: digest, config, btcBlockHeight: 800000 }
+                data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 800000 }
             });
             await new Promise(r => setImmediate(r));
             expect(consensus.pendingProposals.has(5)).to.be.false; // threw before creating
@@ -745,8 +779,8 @@ describe('Consensus (PBFT)', function () {
             let config = { x: 1 };
             let digest = consensus._digest(config);
             await consensus._handlePrePrepare({
-                sender: VALIDATORS_4[1].addr,
-                data: { seq: 5, configDigest: digest, config }
+                sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
+                data: { seq: 5, view: 0, configDigest: digest, config }
             });
             expect(consensus.pendingProposals.has(5)).to.be.false;
         });
@@ -757,8 +791,8 @@ describe('Consensus (PBFT)', function () {
             let config = { x: 1 };
             let digest = consensus._digest(config);
             await consensus._handlePrePrepare({
-                sender: VALIDATORS_4[1].addr,
-                data: { seq: 5, configDigest: digest, config }
+                sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
+                data: { seq: 5, view: 0, configDigest: digest, config }
             });
             expect(consensus.pendingProposals.has(5)).to.be.true;
             await clock.tickAsync(2001); // followers wait timeout * 2
@@ -873,8 +907,8 @@ describe('Consensus (PBFT)', function () {
             let config = { x: 1 };
             let digest = consensus._digest(config);
             await consensus._handlePrePrepare({
-                sender: VALIDATORS_4[1].addr,
-                data: { seq: 5, configDigest: digest, config, btcBlockHeight: 900000 }
+                sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
+                data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 900000 }
             });
             let p = consensus.pendingProposals.get(5);
             expect(p.quorum).to.equal(3);

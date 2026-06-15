@@ -48,19 +48,21 @@ describe('Chaos: PBFT Leader Crash (CON-1)', function () {
         let config = { coin: 'BTC', action: 'test' };
         let digest = makeDigest(config);
 
-        // Leader sends PRE_PREPARE then "crashes"
+        // Leader sends PRE_PREPARE then "crashes". seq 4, view 0 → (4+0)%4 = 0,
+        // so validators[0] is the legitimate leader and this node (validators[1])
+        // is a follower.
         hub._peerManager.emit('message', buildEnvelope('PBFT_PRE_PREPARE', {
-            seq: 1, configDigest: digest, config: config
+            seq: 4, view: 0, configDigest: digest, config: config
         }, VALIDATORS_4[0].addr));
 
-        let proposal = con.pendingProposals.get(1);
+        let proposal = con.pendingProposals.get(4);
         expect(proposal).to.exist;
 
         // Wait for follower timeout (2x leader timeout = 400ms)
         await new Promise(r => setTimeout(r, 500));
 
         // Proposal should have been cleaned up by timeout
-        expect(con.pendingProposals.has(1)).to.be.false;
+        expect(con.pendingProposals.has(4)).to.be.false;
 
         con.stop();
     });
