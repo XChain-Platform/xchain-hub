@@ -88,7 +88,10 @@ class HubDbBroadcaster {
                 maxIds.oracle_prices = (op.length > 0 && op[0].max_id != null) ? Number(op[0].max_id) : 0;
             } catch (e) { /* table may not exist yet */ }
             try {
-                let cm = await this.db.doQuery('SELECT MAX(id) AS max_id FROM cross_chain_matches');
+                // Exclude retracted rows so the advertised max_id matches what the snapshot feed
+                // serves (it filters status<>'retracted'); otherwise a retracted max-id row keeps
+                // the consumer's gap-detection catch-up firing forever (localMax never reaches it).
+                let cm = await this.db.doQuery("SELECT MAX(id) AS max_id FROM cross_chain_matches WHERE status <> 'retracted'");
                 maxIds.cross_chain_matches = (cm.length > 0 && cm[0].max_id != null) ? Number(cm[0].max_id) : 0;
             } catch (e) { /* table may not exist yet */ }
             try {
@@ -100,7 +103,7 @@ class HubDbBroadcaster {
                 maxIds.state_checkpoints = (sc.length > 0 && sc[0].max_id != null) ? Number(sc[0].max_id) : 0;
             } catch (e) { /* table may not exist yet */ }
             try {
-                let cc = await this.db.doQuery('SELECT MAX(id) AS max_id FROM cross_chain_calls');
+                let cc = await this.db.doQuery("SELECT MAX(id) AS max_id FROM cross_chain_calls WHERE status <> 'retracted'");
                 maxIds.cross_chain_calls = (cc.length > 0 && cc[0].max_id != null) ? Number(cc[0].max_id) : 0;
             } catch (e) { /* table may not exist yet */ }
         }

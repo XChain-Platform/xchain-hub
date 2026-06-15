@@ -104,7 +104,18 @@ if (P2P_VALIDATOR_ADDR && !process.env.ORACLE_EPOCH_START) {
     console.error('Missing required environment variable: ORACLE_EPOCH_START (Unix ms timestamp anchoring oracle round numbering; all hubs must share the same value)');
     process.exit(1);
 }
+// HUB_NETWORK names the deployment network (mainnet|testnet|regtest) for the hub's
+// consensus gates — notably STAKE_WEIGHTED_QUORUM, whose activation height is per
+// network. Consensus-critical, so it is REQUIRED in validator mode and validated
+// (no silent default: a wrong/blank value would mis-gate the quorum rule). Must
+// match the INDEXER_NETWORK of the chains this hub federates.
+const HUB_NETWORK = (process.env.HUB_NETWORK || '').toLowerCase();
+if (P2P_VALIDATOR_ADDR && !['mainnet', 'testnet', 'regtest'].includes(HUB_NETWORK)) {
+    console.error('Missing/invalid required environment variable: HUB_NETWORK (must be one of mainnet|testnet|regtest; names the deployment network for consensus activation gating — must match the indexers this hub federates)');
+    process.exit(1);
+}
 const p2pConfig = P2P_VALIDATOR_ADDR ? {
+    HUB_NETWORK:            HUB_NETWORK,
     P2P_PORT:               parseInt(process.env.P2P_PORT) || 10001,
     P2P_HOST:               process.env.P2P_HOST || '0.0.0.0',
     SEED_NODES:             (process.env.SEED_NODES || '').split(',').map(s => s.trim()).filter(s => s),
@@ -804,8 +815,14 @@ async function startApi(){
         try {
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
+            // Exclude retracted rows: the streaming path DELETEs them on reorg
+            // (retractMatchesForReorg marks status='retracted' for the ANCHOR archive and
+            // broadcasts a deletion), so a bootstrapping mirror must skip them too or it
+            // diverges byte-for-byte from a long-running streamed mirror. status<>'retracted'
+            // (not ='finalized') excludes exactly what the stream deletes and keeps every
+            // other status the stream retains.
             let rows = await hub.db.doQuery(
-                'SELECT * FROM cross_chain_matches WHERE id > ? ORDER BY id ASC LIMIT ?',
+                "SELECT * FROM cross_chain_matches WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?",
                 [since, limit]
             );
             res.json({ table: 'cross_chain_matches', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000) });
@@ -836,11 +853,14 @@ async function startApi(){
         try {
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
+            // Exclude retracted rows — see the cross_chain_matches snapshot above: the
+            // streaming path DELETEs them on reorg (retractCallsForReorg), so a bootstrapping
+            // mirror must skip them to stay byte-identical with streamed mirrors.
             let rows = await hub.db.doQuery(
                 'SELECT id, call_id, phase, snapshot_block, network, source_chain, source_action_index, ' +
                 'source_contract_index, target_chain, target_contract_index, method, params_json, gas_limit, ' +
-                'cross_hops, effective_time, status, result_status, return_payload_b64, validator_signatures, created_at ' +
-                'FROM cross_chain_calls WHERE id > ? ORDER BY id ASC LIMIT ?',
+                "cross_hops, effective_time, status, result_status, return_payload_b64, validator_signatures, created_at " +
+                "FROM cross_chain_calls WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?",
                 [since, limit]
             );
             res.json({ table: 'cross_chain_calls', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000) });
