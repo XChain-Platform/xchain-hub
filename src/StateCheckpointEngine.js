@@ -52,6 +52,7 @@ const EventEmitter      = require('events');
 const axios             = require('axios');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const swq               = require('./stake_weighted_quorum.js');
+const eq                = require('./equivocation_header.js');
 
 const XCHK_SIGN_REQ  = 'XCHK_SIGN_REQ';
 const XCHK_SIGN      = 'XCHK_SIGN';
@@ -406,11 +407,25 @@ class StateCheckpointEngine extends EventEmitter {
 
     // ── Canonical / helpers ─────────────────────────────────────────────────────
 
-    // Byte-identical to the indexer ANCHOR verifier + SDK CheckpointVerifier.
-    static canonicalCheckpoint(cp){
+    // RAW (ungated) v0 checkpoint canonical — the bare pipe-join. The v1 archive
+    // (StateAnchorPublisher._archiveCanonical) nests THIS, not the gated form, so the
+    // EQUIV header is applied exactly once around the whole archive content.
+    static _rawCanonicalCheckpoint(cp){
         return ['XCHECKPOINT', cp.chain, cp.network, String(cp.block_index), cp.block_hash,
                 cp.ledger_hash, cp.actions_hash, cp.contract_hash,
                 String(cp.checkpoint_seq), String(cp.snapshot_block)].join('|');
+    }
+
+    // Byte-identical to the indexer ANCHOR verifier + SDK CheckpointVerifier. At/above
+    // the EQUIV flag-day (gated on the BTC snapshot_block + network) the v0 canonical is
+    // wrapped in the uniform signed header (TAG=XCHECKPOINT, ROUND_ID=v0 round id,
+    // VIEW=0 — checkpoints have no view change); below it, the bare raw bytes (regression-safe).
+    static canonicalCheckpoint(cp){
+        let raw = StateCheckpointEngine._rawCanonicalCheckpoint(cp);
+        if(eq.isEquivHeaderActive(cp.snapshot_block, cp.network))
+            return eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
+                cp.chain + '|' + cp.network + '|' + cp.block_index + '|' + cp.checkpoint_seq, 0, raw);
+        return raw;
     }
 
     _roundId(cp){ return cp.chain + '|' + cp.network + '|' + cp.block_index + '|' + cp.checkpoint_seq; }

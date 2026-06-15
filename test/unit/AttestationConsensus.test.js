@@ -544,6 +544,7 @@ describe('AttestationConsensus — PREPARE signatures verified against the winne
     function seedWithWinner(responsibleIds, winnerBody) {
         let pending = {
             requestId:   RID,
+            request:     { block_index: 0 },   // prod always sets this; the EQUIV gate reads request.block_index
             providerId:  'http_get',
             redundancy:  responsibleIds.length,
             quorum:      responsibleIds.length + 1, // unreachable here

@@ -27,6 +27,7 @@
 
 const crypto = require('crypto');
 const swq    = require('./stake_weighted_quorum.js');
+const eq     = require('./equivocation_header.js');
 
 const PBFT_PRE_PREPARE = 'PBFT_PRE_PREPARE';
 const PBFT_PREPARE     = 'PBFT_PREPARE';
@@ -172,6 +173,7 @@ class Consensus {
             let proposal = {
                 config:   config,
                 digest:   digest,
+                view:     this.view,    // EQUIV (WI-2 bump 2): all 3 votes for this round sign (seq, view, digest)
                 prepares: new Set(),
                 commits:  new Set(),
                 resolved: false,
@@ -222,14 +224,14 @@ class Consensus {
             // height the leader snapshotted at, so followers can resolve the
             // same validator set at the same block boundary. `weighted` is a hint
             // only — followers re-derive it from the block height + network.
-            this.peerManager.broadcast(PBFT_PRE_PREPARE, {
+            this.peerManager.broadcast(PBFT_PRE_PREPARE, Object.assign({
                 seq:            seq,
                 view:           this.view,
                 configDigest:   digest,
                 config:         config,
                 btcBlockHeight: proposal.btcBlockHeight,
                 weighted:       proposal.weighted
-            });
+            }, this._equivVote(seq, this.view, digest, proposal.btcBlockHeight)));
 
             // Check if we already have quorum (unlikely but handles edge case)
             this._checkPrepareQuorum(seq);
@@ -367,6 +369,7 @@ class Consensus {
             let proposal = {
                 config:   config,
                 digest:   configDigest,
+                view:     view,         // EQUIV (WI-2 bump 2): the leader's view, stamped in the PRE_PREPARE
                 prepares: new Set(),
                 commits:  new Set(),
                 resolved: false,
@@ -418,10 +421,10 @@ class Consensus {
         }
 
         // Broadcast PREPARE
-        this.peerManager.broadcast(PBFT_PREPARE, {
+        this.peerManager.broadcast(PBFT_PREPARE, Object.assign({
             seq:          seq,
             configDigest: configDigest
-        });
+        }, this._equivVote(seq, proposal.view, proposal.digest, proposal.btcBlockHeight)));
 
         // Check quorum
         this._checkPrepareQuorum(seq);
@@ -471,6 +474,24 @@ class Consensus {
         if (identity) pubkeySet.add(identity.getPubkeyHex().toLowerCase());
     }
 
+    // EQUIV durable canonical (WI-2 bump 2 — the 6th engine, XCONFIG). Config-change
+    // PBFT signs only the ephemeral transport envelope today; this adds a durable
+    // per-validator signature over `buildEquivCanonical('XCONFIG', seq, view, digest)`
+    // (the config DIGEST only — never phase-tagged bytes; PRE_PREPARE/PREPARE/COMMIT all
+    // attest the SAME digest for a (seq,view), so the digest-conflict guard keeps an honest
+    // node from signing two configs for one slot). Carried as {equiv_sig, equiv_pubkey} in
+    // each vote message — parallel/additive to the existing count + weighted tally, gated on
+    // the round's BTC tip + network. The two header-identical-but-different-digest messages
+    // are the slashable artifact (verified by BTC indexers from the messages alone; no twin).
+    // Returns {} below the flag-day or when no identity is available (vote still counts).
+    _equivVote(seq, view, digest, blockHeight) {
+        if (!eq.isEquivHeaderActive(blockHeight, this.hub && this.hub.network)) return {};
+        let identity = this.hub.getIdentity && this.hub.getIdentity();
+        if (!identity) return {};
+        let canonical = eq.buildEquivCanonical(eq.ENGINE_TAGS.CONFIG, seq, view, digest);
+        return { equiv_sig: identity.sign(canonical), equiv_pubkey: identity.getPubkeyHex().toLowerCase() };
+    }
+
     // Resolve a voting peer's signing pubkey from an authenticated envelope.
     // Prefer envelope.sig_pubkey (PeerManager already verified the envelope with
     // it), fall back to the addr→pubkey registry, else null — in which case the
@@ -517,10 +538,10 @@ class Consensus {
                 proposal.commits.add(this.peerManager.validatorAddr);
                 if (proposal.weighted) this._addSelfPubkey(proposal.commitPubkeys);
 
-                this.peerManager.broadcast(PBFT_COMMIT, {
+                this.peerManager.broadcast(PBFT_COMMIT, Object.assign({
                     seq:          seq,
                     configDigest: proposal.digest
-                });
+                }, this._equivVote(seq, proposal.view, proposal.digest, proposal.btcBlockHeight)));
 
                 // Check if commit quorum is already met
                 this._checkCommitQuorum(seq);

@@ -32,6 +32,7 @@
 
 const EventEmitter      = require('events');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
+const eq                = require('./equivocation_header.js');
 
 class PriceAggregator extends EventEmitter {
 
@@ -53,11 +54,16 @@ class PriceAggregator extends EventEmitter {
                 if (a.pair > b.pair) return 1;
                 return 0;
             });
-        return JSON.stringify({
+        let raw = JSON.stringify({
             round:     parseInt(round),
             timestamp: parseInt(timestamp),
             pairs:     sortedPairs
         });
+        // EQUIV header (WI-2 bump 2): gated on the round (a BTC block height) + the hub's
+        // network, byte-matching ed25519.buildPriceV0Payload. XORACLE has no view → VIEW=0.
+        if (eq.isEquivHeaderActive(round, this.hub && this.hub.network))
+            return eq.buildEquivCanonical(eq.ENGINE_TAGS.ORACLE, parseInt(round), 0, raw);
+        return raw;
     }
 
     // Receive a validated PRICE v0 round from an indexer

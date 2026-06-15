@@ -200,7 +200,7 @@ class CrossChainDexConsensus extends EventEmitter {
         // flip on the same anchor. Below activation: byte-for-byte the count rule.
         let weighted   = swq.isStakeWeightedQuorumActive(row.snapshot_block, row.network);
         let quorum     = (snapCount <= 1) ? 0 : Math.max(2 * Math.floor((snapCount - 1) / 3) + 1, Math.ceil((snapCount + 1) / 2));
-        let canonical  = this.engine._canonicalMatch(row);
+        let canonical  = this.engine._canonicalMatch(row, 0);   // new round always starts at view 0
         let myPubkey   = this.identity.getPubkeyHex().toLowerCase();
 
         let pending = {
@@ -306,7 +306,7 @@ class CrossChainDexConsensus extends EventEmitter {
         // The proposed row must hash to this round's id.
         let row = d.row;
         if(!row || String(row[this.idField]).toLowerCase() !== rid) return;
-        let canonical = this.engine._canonicalMatch(row);
+        let canonical = this.engine._canonicalMatch(row, view);   // leader signed at THEIR view (d.view)
 
         // Verify the leader's signature over THEIR canonical.
         if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), senderPubkey)) return;
@@ -446,21 +446,26 @@ class CrossChainDexConsensus extends EventEmitter {
         let sigs = [];
         for(let [pk, sg] of pending.signatures) sigs.push({ pubkey: pk, sig: sg });
 
-        this._markFinalized(rid, pending.row, sigs);
+        this._markFinalized(rid, pending.row, sigs, pending.view);
         if(pending.timer){ clearTimeout(pending.timer); pending.timer = null; }
 
         console.log('CrossChainDexConsensus: finalized ' + rid.substring(0,16) + '... (' +
                     pending.prepares.size + ' prepares, ' + pending.commits.size + ' commits, ' + sigs.length + ' sigs)');
-        this.emit('match:finalized', { matchId: rid, row: pending.row, signatures: sigs });
+        // `view` = the PBFT view this round finalized at (incremented per view-change).
+        // Persisted as finalizing_view so the indexer rebuilds the exact EQUIV canonical
+        // (WI-2 bump 2); below the EQUIV flag-day it is stored but unused.
+        this.emit('match:finalized', { matchId: rid, row: pending.row, signatures: sigs, view: pending.view });
 
         let cleanup = setTimeout(() => this.pending.delete(rid), 10000);
         if(cleanup.unref) cleanup.unref();             // housekeeping timer — never pin process liveness
     }
 
-    _markFinalized(rid, row, signatures){
+    _markFinalized(rid, row, signatures, view){
         if(this.finalized.has(rid)) return;
         this.finalized.add(rid);
-        if(row) this.finalizedRows.set(rid, { row: row, signatures: signatures || [] });
+        // Store the finalizing view too: FINAL_SYNC state-transfer must tell a straggler
+        // which view the quorum signatures were taken at, so it rebuilds the exact EQUIV canonical.
+        if(row) this.finalizedRows.set(rid, { row: row, signatures: signatures || [], view: view || 0 });
         this._finalizedOrder.push(rid);
         if(this._finalizedOrder.length > this.finalizedMax){
             let oldest = this._finalizedOrder.shift();
@@ -497,7 +502,7 @@ class CrossChainDexConsensus extends EventEmitter {
             let fin = this.finalizedRows.get(rid);
             if(fin && this.peerManager){
                 this.peerManager.broadcast(this.types.FINAL_SYNC, {
-                    matchId: rid, row: fin.row, signatures: fin.signatures
+                    matchId: rid, row: fin.row, signatures: fin.signatures, view: fin.view
                 });
             }
             return;
@@ -544,7 +549,7 @@ class CrossChainDexConsensus extends EventEmitter {
 
         let row = d.row;
         if(!row || String(row[this.idField]).toLowerCase() !== rid) return;
-        let canonical = this.engine._canonicalMatch(row);
+        let canonical = this.engine._canonicalMatch(row, Number(d.view) || 0);   // sigs were taken at the finalizing view
 
         let offered = Array.isArray(d.signatures) ? d.signatures : [];
         let verified = new Map();

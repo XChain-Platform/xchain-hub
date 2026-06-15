@@ -67,14 +67,21 @@ describe('equivocation_header', function () {
                 .EQUIV_HEADER_ACTIVATION;
             expect(eq.EQUIV_HEADER_ACTIVATION).to.deep.equal(canonical);
         });
-        it('hub == indexer (map + builder bytes)', function () {
-            const ix = require('../../../xchain-indexer/src/equivocation_header.js');
-            expect(eq.EQUIV_HEADER_ACTIVATION).to.deep.equal(ix.EQUIV_HEADER_ACTIVATION);
-            expect(eq.ENGINE_TAGS).to.deep.equal(ix.ENGINE_TAGS);
-            // Builder must produce identical bytes on both sides for identical inputs.
-            const a = eq.buildEquivCanonical('XDEX', 'mid', 2, 'XMATCH|mid|x');
-            const b = ix.buildEquivCanonical('XDEX', 'mid', 2, 'XMATCH|mid|x');
-            expect(a).to.equal(b);
+        it('all 5 copies == hub (map + tags + builder bytes)', function () {
+            // hub + indexer (server consensus) + sdk + explorer (client checkpoint
+            // verifiers). A drift in ANY copy flips the header on different blocks → fork.
+            const copies = {
+                indexer:  require('../../../xchain-indexer/src/equivocation_header.js'),
+                sdk:      require('../../../xchain-sdk/src/equivocation_header.js'),
+                explorer: require('../../../xchain-explorer/src/equivocation_header.js'),
+            };
+            const ref = eq.buildEquivCanonical('XDEX', 'mid', 2, 'XMATCH|mid|x');
+            for(const [name, copy] of Object.entries(copies)){
+                expect(copy.EQUIV_HEADER_ACTIVATION, name + ' activation map').to.deep.equal(eq.EQUIV_HEADER_ACTIVATION);
+                expect(copy.ENGINE_TAGS, name + ' engine tags').to.deep.equal(eq.ENGINE_TAGS);
+                // Builder must produce identical bytes on every side for identical inputs.
+                expect(copy.buildEquivCanonical('XDEX', 'mid', 2, 'XMATCH|mid|x'), name + ' builder bytes').to.equal(ref);
+            }
         });
     });
 });

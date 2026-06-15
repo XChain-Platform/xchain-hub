@@ -41,6 +41,7 @@
 const crypto            = require('crypto');
 const EventEmitter      = require('events');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
+const eq                = require('./equivocation_header.js');
 
 const ATTEST_PROPOSE = 'ATTEST_PROPOSE';
 const ATTEST_PREPARE = 'ATTEST_PREPARE';
@@ -209,7 +210,7 @@ class AttestationConsensus extends EventEmitter {
         let myPubkey  = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
         let myBody    = roundState.myProposal.body;
         let myMeta    = roundState.myProposal.meta;
-        let mySig     = this._signCanonical(rid, roundState.providerId, myBody, 'ok', myMeta);
+        let mySig     = this._signCanonical(rid, roundState.providerId, myBody, 'ok', myMeta, Number(roundState.request.block_index));
 
         let pending = {
             requestId:    rid,
@@ -332,7 +333,7 @@ class AttestationConsensus extends EventEmitter {
             body = Buffer.from(String(d.body_b64 || ''), 'base64');
         } catch (_) { return; }
         let meta = String(d.meta || '');
-        let canonical = this._buildCanonical(rid, pending.providerId, body, String(d.status || 'ok'), meta);
+        let canonical = this._buildCanonical(rid, pending.providerId, body, String(d.status || 'ok'), meta, Number(pending.request.block_index));
         if(!ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig || ''), senderPubkey)){
             console.warn('AttestationConsensus: bad PROPOSE sig from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '...');
             return;
@@ -448,7 +449,7 @@ class AttestationConsensus extends EventEmitter {
         // canonical winner here so THIS validator vouches for the agreed bytes.
         // Only validators that actually produced a proposal (did the work) sign.
         if(strategy === 'judge_model' && pending.myPubkey && pending.proposals.has(pending.myPubkey)){
-            let reSig = this._signCanonical(rid, pending.providerId, winner.body, pending.status, winner.meta);
+            let reSig = this._signCanonical(rid, pending.providerId, winner.body, pending.status, winner.meta, Number(pending.request.block_index));
             if(reSig) pending.signatures.set(pending.myPubkey, reSig);
         }
 
@@ -507,7 +508,7 @@ class AttestationConsensus extends EventEmitter {
             // signature over THEIR proposed body before adopting it — an
             // unverified PREPARE must not be allowed to set the winner.
             if(d.sig && d.sig_pubkey){
-                let canonical = this._buildCanonical(rid, pending.providerId, body, status, meta);
+                let canonical = this._buildCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index));
                 if(!ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
                     console.warn('AttestationConsensus: bad PREPARE sig from ' + senderPubkey.substring(0,16) + '...');
                     return;
@@ -526,7 +527,7 @@ class AttestationConsensus extends EventEmitter {
                     // judge-selected winner even though both are valid. Re-sign
                     // the canonical winner so our vote carries a verifying
                     // signature over the agreed bytes (see _maybeAdvanceFromProposals).
-                    let reSig = this._signCanonical(rid, pending.providerId, body, status, meta);
+                    let reSig = this._signCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index));
                     if(reSig) pending.signatures.set(pending.myPubkey, reSig);
                 } else {
                     // byte_equality: only sign if our independently-fetched body
@@ -547,7 +548,7 @@ class AttestationConsensus extends EventEmitter {
             // _checkCommitQuorum finalizes on — so the emitted on-chain response
             // could carry signatures that don't all verify over the winner (and
             // be deterministically rejected by the indexer).
-            let canonical = this._buildCanonical(rid, pending.providerId, pending.winner.body, pending.status, pending.winner.meta);
+            let canonical = this._buildCanonical(rid, pending.providerId, pending.winner.body, pending.status, pending.winner.meta, Number(pending.request.block_index));
             if(ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
                 pending.signatures.set(senderPubkey, String(d.sig));
             } else {
@@ -616,7 +617,7 @@ class AttestationConsensus extends EventEmitter {
         if(!pending.responsible.some(v => v.pubkey === senderPubkey)) return;
 
         if(d.sig && d.sig_pubkey){
-            let canonical = this._buildCanonical(rid, pending.providerId, pending.winner.body, pending.status, pending.winner.meta);
+            let canonical = this._buildCanonical(rid, pending.providerId, pending.winner.body, pending.status, pending.winner.meta, Number(pending.request.block_index));
             if(ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
                 pending.signatures.set(senderPubkey, String(d.sig));
             }
@@ -689,19 +690,28 @@ class AttestationConsensus extends EventEmitter {
         }
     }
 
-    // Build the indexer-canonical signing message:
+    // Build the indexer-canonical signing message (returned as UTF-8 Buffer):
     //   request_id || provider_id || sha256(response_payload) || status || meta
-    _buildCanonical(requestId, providerId, body, status, meta){
+    // At/above the EQUIV flag-day (WI-2 bump 2) the raw STRING is wrapped in the uniform
+    // header (TAG=XATTEST, ROUND_ID=request_id, VIEW=0 — attestation has no view change)
+    // before the Buffer conversion. The gate keys on the REQUEST's block (deterministic
+    // from request_id; the indexer derives the same via request.block_index) + the hub's
+    // network, so the hub and the on-chain verifier flip identically. `requestBlock`
+    // undefined (no request in scope) → gate OFF → bare bytes (safe).
+    _buildCanonical(requestId, providerId, body, status, meta, requestBlock){
         let responseHash = crypto.createHash('sha256').update(body, 'utf8').digest('hex');
-        return Buffer.from(String(requestId) + String(providerId) + responseHash + String(status) + String(meta || ''), 'utf8');
+        let raw = String(requestId) + String(providerId) + responseHash + String(status) + String(meta || '');
+        if(eq.isEquivHeaderActive(requestBlock, this.hub && this.hub.network))
+            raw = eq.buildEquivCanonical(eq.ENGINE_TAGS.ATTEST, requestId, 0, raw);
+        return Buffer.from(raw, 'utf8');
     }
 
     // Sign the canonical bytes with this validator's identity. Returns
     // 128-hex-char sig or null when no identity is available.
-    _signCanonical(requestId, providerId, body, status, meta){
+    _signCanonical(requestId, providerId, body, status, meta, requestBlock){
         if(!this.identity) return null;
         try {
-            let canonical = this._buildCanonical(requestId, providerId, body, status, meta);
+            let canonical = this._buildCanonical(requestId, providerId, body, status, meta, requestBlock);
             return this.identity.sign(canonical.toString('utf8'));
         } catch (e) {
             console.warn('AttestationConsensus: sign failed:', e);

@@ -21,6 +21,7 @@ const crypto                = require('crypto');
 const StateAnchorPublisher  = require('../../src/StateAnchorPublisher');
 const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
 const ValidatorIdentity     = require('../../src/ValidatorIdentity');
+const eq                    = require('../../src/equivocation_header.js');
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -46,12 +47,16 @@ function matchRow(id, status) {
 // XMATCH canonical (mirror of the publisher's _matchCanonical) — fixtures sign
 // real Ed25519 sigs over it so the follower's cryptographic verification passes.
 function matchCanonical(m) {
-    return ['XMATCH', m.match_id, String(m.snapshot_block),
+    let raw = ['XMATCH', m.match_id, String(m.snapshot_block),
         m.a_chain, String(m.a_action_index), m.a_tick || '', String(m.a_amount), String(m.a_ownership), m.a_payout_addr,
         m.b_chain, String(m.b_action_index), m.b_tick || '', String(m.b_amount), String(m.b_ownership), m.b_payout_addr,
         String(m.effective_time), m.network || '',
         m.a_kind || 'swap', String(m.a_filled_before != null ? m.a_filled_before : '0'),
         m.b_kind || 'swap', String(m.b_filled_before != null ? m.b_filled_before : '0')].join('|');
+    // EQUIV active in regtest: TAG=XDEX, ROUND_ID=match_id, VIEW=finalizing_view (default 0).
+    if (eq.isEquivHeaderActive(m.snapshot_block, m.network))
+        return eq.buildEquivCanonical(eq.ENGINE_TAGS.DEX, m.match_id, (m.finalizing_view != null ? m.finalizing_view : 0), raw);
+    return raw;
 }
 
 function callRow(id, phase, status) {
@@ -72,14 +77,21 @@ function callRow(id, phase, status) {
 // XCALL phase canonicals (mirror of the publisher's _callCanonical).
 function callCanonical(c) {
     let sha = (s) => crypto.createHash('sha256').update(String(s == null ? '' : s), 'utf8').digest('hex');
+    let phase = (c.phase === 'result') ? 'result' : 'dispatch';
+    let raw;
     if (c.phase === 'result') {
-        return ['XCALL', 'RESULT', c.call_id, String(c.snapshot_block), c.network || '',
+        raw = ['XCALL', 'RESULT', c.call_id, String(c.snapshot_block), c.network || '',
             c.target_chain, String(c.result_status || ''), sha(c.return_payload_b64), String(c.effective_time)].join('|');
+    } else {
+        raw = ['XCALL', 'DISPATCH', c.call_id, String(c.snapshot_block), c.network || '',
+            c.source_chain, String(c.source_action_index), String(c.source_contract_index),
+            c.target_chain, String(c.target_contract_index), c.method, sha(c.params_json),
+            String(c.gas_limit), String(c.cross_hops), String(c.effective_time)].join('|');
     }
-    return ['XCALL', 'DISPATCH', c.call_id, String(c.snapshot_block), c.network || '',
-        c.source_chain, String(c.source_action_index), String(c.source_contract_index),
-        c.target_chain, String(c.target_contract_index), c.method, sha(c.params_json),
-        String(c.gas_limit), String(c.cross_hops), String(c.effective_time)].join('|');
+    // EQUIV active in regtest: TAG=XCALL, ROUND_ID=sha256('XCALLROUND|'+phase+'|'+call_id), VIEW=finalizing_view.
+    if (eq.isEquivHeaderActive(c.snapshot_block, c.network))
+        return eq.buildEquivCanonical(eq.ENGINE_TAGS.XCALL, sha('XCALLROUND|' + phase + '|' + c.call_id), (c.finalizing_view != null ? c.finalizing_view : 0), raw);
+    return raw;
 }
 
 // In-memory hub DB for the publisher's query surface.

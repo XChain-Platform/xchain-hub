@@ -48,6 +48,7 @@ const axios        = require('axios');
 
 const bc                     = require('./bcmath.js');
 const swq                    = require('./stake_weighted_quorum.js');
+const eq                     = require('./equivocation_header.js');
 const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
 
 const ALLOWED_CHAINS = ['BTC', 'LTC', 'DOGE'];
@@ -447,6 +448,7 @@ class CrossChainDexEngine extends EventEmitter {
     async _writeFinalizedMatch(ev){
         let row = ev.row;
         row.validator_signatures = JSON.stringify(ev.signatures || []);
+        row.finalizing_view = ev.view != null ? ev.view : 0;   // PBFT view at finalization; signed into the EQUIV canonical (WI-2 bump 2)
         // EVERY hub persists the capability snapshot for the row's snapshot_block,
         // not just the round leader: the indexers verify the row's signatures
         // against capability_snapshots in whichever hub DB they mirror, and a
@@ -512,8 +514,14 @@ class CrossChainDexEngine extends EventEmitter {
     // settlement pass rebuilds this from the mirrored row). Phase B appends the fill fields
     // after `network` so the Phase-A field order is preserved. a_amount/b_amount carry the
     // FILL settled by this match; *_kind + *_filled_before disambiguate sequential fills.
-    _canonicalMatch(r){
-        return [
+    // `view` = the PBFT view this signature is taken at (the consensus passes the live
+    // pending.view; the indexer/archive twins pass the persisted finalizing_view). At/above
+    // the EQUIV flag-day the XMATCH content is wrapped in the uniform header (TAG=XDEX,
+    // ROUND_ID=match_id, VIEW=view) — putting <view> in the signed bytes is what lets a
+    // legitimate view change (re-sign at a higher view) be told apart from equivocation.
+    // The view is NOT a content field; it lives only in the header.
+    _canonicalMatch(r, view){
+        let raw = [
             'XMATCH', r.match_id, String(r.snapshot_block),
             r.a_chain, String(r.a_action_index), r.a_tick || '', String(r.a_amount), String(r.a_ownership), r.a_payout_addr,
             r.b_chain, String(r.b_action_index), r.b_tick || '', String(r.b_amount), String(r.b_ownership), r.b_payout_addr,
@@ -521,6 +529,9 @@ class CrossChainDexEngine extends EventEmitter {
             r.a_kind || 'swap', String(r.a_filled_before != null ? r.a_filled_before : '0'),
             r.b_kind || 'swap', String(r.b_filled_before != null ? r.b_filled_before : '0')
         ].join('|');
+        if(eq.isEquivHeaderActive(r.snapshot_block, r.network))
+            return eq.buildEquivCanonical(eq.ENGINE_TAGS.DEX, r.match_id, (view != null ? view : 0), raw);
+        return raw;
     }
 
     // Returns true iff the row was actually inserted (false on INSERT IGNORE dedupe), so the
@@ -529,7 +540,7 @@ class CrossChainDexEngine extends EventEmitter {
         let cols = ['match_id','snapshot_block','network',
                     'a_chain','a_action_index','a_kind','a_tick','a_amount','a_filled_before','a_ownership','a_payout_addr',
                     'b_chain','b_action_index','b_kind','b_tick','b_amount','b_filled_before','b_ownership','b_payout_addr',
-                    'effective_time','validator_signatures'];
+                    'effective_time','finalizing_view','validator_signatures'];
         let vals = cols.map(c => row[c]);
         // INSERT IGNORE — match_id is unique, so a re-finalize (e.g. another hub or a
         // restart racing the poll) is a harmless no-op.

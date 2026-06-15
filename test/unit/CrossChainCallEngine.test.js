@@ -22,6 +22,7 @@ const sinon      = require('sinon');
 const crypto     = require('crypto');
 
 const CrossChainCallEngine = require('../../src/CrossChainCallEngine');
+const eq         = require('../../src/equivocation_header.js');
 
 const CALL_ID = 'c'.repeat(64);
 const sha256  = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest('hex');
@@ -47,7 +48,7 @@ function memDb() {
                             'source_chain','source_action_index','source_contract_index',
                             'target_chain','target_contract_index','method','params_json',
                             'gas_limit','cross_hops','effective_time','result_status','return_payload_b64',
-                            'validator_signatures'];
+                            'finalizing_view','validator_signatures'];
                 let row = { id: rows.length + 1, status: 'finalized' };
                 cols.forEach((c, i) => row[c] = params[i]);
                 if (!rows.some(r => r.call_id === row.call_id && r.phase === row.phase)) rows.push(row);
@@ -211,10 +212,13 @@ describe('CrossChainCallEngine', function () {
                 target_chain: 'DOGE', target_contract_index: 99, method: 'onArrival',
                 params_json: '["x"]', gas_limit: 50000, cross_hops: 1, effective_time: 1700000000
             };
-            expect(engine._canonicalMatch(row)).to.equal([
+            // EQUIV active in regtest: TAG=XCALL, ROUND_ID=sha256('XCALLROUND|dispatch|'+call_id), VIEW=0.
+            const raw = [
                 'XCALL', 'DISPATCH', CALL_ID, '150', 'regtest', 'BTC', '41', '5', 'DOGE', '99',
                 'onArrival', sha256('["x"]'), '50000', '1', '1700000000'
-            ].join('|'));
+            ].join('|');
+            expect(engine._canonicalMatch(row)).to.equal(
+                eq.buildEquivCanonical(eq.ENGINE_TAGS.XCALL, sha256('XCALLROUND|dispatch|' + CALL_ID), 0, raw));
         });
 
         it('result canonical hashes the payload and binds result_status', function () {
@@ -224,10 +228,13 @@ describe('CrossChainCallEngine', function () {
                 target_chain: 'DOGE', result_status: 'ok', return_payload_b64: 'cGF5bG9hZA',
                 effective_time: 1700000050
             };
-            expect(engine._canonicalMatch(row)).to.equal([
+            // EQUIV active in regtest: TAG=XCALL, ROUND_ID=sha256('XCALLROUND|result|'+call_id), VIEW=0.
+            const raw = [
                 'XCALL', 'RESULT', CALL_ID, '160', 'regtest', 'DOGE', 'ok',
                 sha256('cGF5bG9hZA'), '1700000050'
-            ].join('|'));
+            ].join('|');
+            expect(engine._canonicalMatch(row)).to.equal(
+                eq.buildEquivCanonical(eq.ENGINE_TAGS.XCALL, sha256('XCALLROUND|result|' + CALL_ID), 0, raw));
         });
     });
 

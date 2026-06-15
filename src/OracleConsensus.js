@@ -28,6 +28,7 @@ const PriceFetcher      = require('./PriceFetcher.js');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD } = require('./constants.js');
 const swq               = require('./stake_weighted_quorum.js');
+const eq                = require('./equivocation_header.js');
 const bcmath            = require('./bcmath.js');
 
 const ORACLE_PROPOSE = 'ORACLE_PROPOSE';
@@ -903,11 +904,16 @@ class OracleConsensus extends EventEmitter {
             if (a.pair > b.pair) return 1;
             return 0;
         });
-        return JSON.stringify({
+        let raw = JSON.stringify({
             round:     parseInt(round),
             timestamp: parseInt(btcBlockTime),
             pairs:     sortedPairs
         });
+        // EQUIV header (WI-2 bump 2): gated on the round (a BTC block height) + the hub's
+        // network, byte-matching ed25519.buildPriceV0Payload. XORACLE has no view → VIEW=0.
+        if (eq.isEquivHeaderActive(round, this.hub && this.hub.network))
+            return eq.buildEquivCanonical(eq.ENGINE_TAGS.ORACLE, parseInt(round), 0, raw);
+        return raw;
     }
 
     // Sign the canonical PRICE v0 payload with the local validator identity

@@ -14,6 +14,7 @@ const sinon          = require('sinon');
 const { expect }     = require('chai');
 const proxyquire     = require('proxyquire');
 const { createMockHub } = require('../helpers/mockHub');
+const eq             = require('../../src/equivocation_header.js');
 
 // Warm the mathjs/bcmath require cache once, OUTSIDE any timed hook (mathjs is large and the
 // first load on the Parallels share can exceed a 5s hook timeout).
@@ -362,8 +363,9 @@ describe('CrossChainDexEngine', function () {
         }
 
         // The indexer's cross_settle._canonical — kept here byte-for-byte so a drift breaks CI.
+        // EQUIV active in regtest (WI-2 bump 2): TAG=XDEX, ROUND_ID=match_id, VIEW=finalizing_view (default 0).
         function indexerCanonical(m) {
-            return [
+            let raw = [
                 'XMATCH', m.match_id, String(m.snapshot_block),
                 m.a_chain, String(m.a_action_index), m.a_tick || '', String(m.a_amount), String(m.a_ownership), m.a_payout_addr,
                 m.b_chain, String(m.b_action_index), m.b_tick || '', String(m.b_amount), String(m.b_ownership), m.b_payout_addr,
@@ -371,11 +373,14 @@ describe('CrossChainDexEngine', function () {
                 m.a_kind || 'swap', String(m.a_filled_before != null ? m.a_filled_before : '0'),
                 m.b_kind || 'swap', String(m.b_filled_before != null ? m.b_filled_before : '0')
             ].join('|');
+            if (eq.isEquivHeaderActive(m.snapshot_block, m.network))
+                return eq.buildEquivCanonical(eq.ENGINE_TAGS.DEX, m.match_id, (m.finalizing_view != null ? m.finalizing_view : 0), raw);
+            return raw;
         }
 
-        it('starts with XMATCH and appends the fill fields after network', function () {
+        it('wraps the XMATCH content in the EQUIV header and appends the fill fields after network', function () {
             let canon = eng._canonicalMatch(sampleRow());
-            expect(canon).to.match(/^XMATCH\|/);
+            expect(canon).to.match(/^EQUIV\|XDEX\|abc\|0\|\|XMATCH\|/);   // gated (regtest); header then content
             expect(canon.endsWith('|regtest|order|0|order|40')).to.be.true;
         });
 

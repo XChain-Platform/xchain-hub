@@ -60,6 +60,7 @@ const EventEmitter = require('events');
 const axios        = require('axios');
 
 const swq                    = require('./stake_weighted_quorum.js');
+const eq                     = require('./equivocation_header.js');
 const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
 
 const ALLOWED_CHAINS  = ['BTC', 'LTC', 'DOGE'];
@@ -343,22 +344,31 @@ class CrossChainCallEngine extends EventEmitter {
     // (xexec.js for dispatch, the callback pass for result). Variable-length
     // fields (params, return payload) enter as sha256 so the canonical stays
     // fixed-arity and '|'-safe.
-    _canonicalMatch(r){
+    // `view` = the live pending.view (consensus) / persisted finalizing_view (twins). At/above
+    // the EQUIV flag-day the content is wrapped (TAG=XCALL, ROUND_ID = the sha256 round id —
+    // which folds in `phase`, so dispatch and result get DISTINCT keys, VIEW=view). The view
+    // lives in the header only (not a content field).
+    _canonicalMatch(r, view){
+        let raw;
         if(r.phase === 'result'){
-            return [
+            raw = [
                 'XCALL', 'RESULT', r.call_id, String(r.snapshot_block), r.network || '',
                 r.target_chain, String(r.result_status || ''),
                 this._sha256(String(r.return_payload_b64 == null ? '' : r.return_payload_b64)),
                 String(r.effective_time)
             ].join('|');
+        } else {
+            raw = [
+                'XCALL', 'DISPATCH', r.call_id, String(r.snapshot_block), r.network || '',
+                r.source_chain, String(r.source_action_index), String(r.source_contract_index),
+                r.target_chain, String(r.target_contract_index),
+                r.method, this._sha256(String(r.params_json == null ? '' : r.params_json)),
+                String(r.gas_limit), String(r.cross_hops), String(r.effective_time)
+            ].join('|');
         }
-        return [
-            'XCALL', 'DISPATCH', r.call_id, String(r.snapshot_block), r.network || '',
-            r.source_chain, String(r.source_action_index), String(r.source_contract_index),
-            r.target_chain, String(r.target_contract_index),
-            r.method, this._sha256(String(r.params_json == null ? '' : r.params_json)),
-            String(r.gas_limit), String(r.cross_hops), String(r.effective_time)
-        ].join('|');
+        if(eq.isEquivHeaderActive(r.snapshot_block, r.network))
+            return eq.buildEquivCanonical(eq.ENGINE_TAGS.XCALL, this._roundId(r.phase, r.call_id), (view != null ? view : 0), raw);
+        return raw;
     }
 
     // Independent confirmation a peer runs before signing a leader's proposed
@@ -439,6 +449,7 @@ class CrossChainCallEngine extends EventEmitter {
     async _writeFinalizedRow(ev){
         let row = ev.row;
         row.validator_signatures = JSON.stringify(ev.signatures || []);
+        row.finalizing_view = ev.view != null ? ev.view : 0;   // PBFT view at finalization; signed into the EQUIV canonical (WI-2 bump 2)
         // EVERY hub persists the capability snapshot for the row's snapshot_block,
         // not just the round leader: the indexers verify the row's signatures
         // against capability_snapshots in whichever hub DB they mirror, and a
@@ -450,7 +461,7 @@ class CrossChainCallEngine extends EventEmitter {
                     'source_chain','source_action_index','source_contract_index',
                     'target_chain','target_contract_index','method','params_json',
                     'gas_limit','cross_hops','effective_time','result_status','return_payload_b64',
-                    'validator_signatures'];
+                    'finalizing_view','validator_signatures'];
         let vals = cols.map(c => row[c]);
         // INSERT IGNORE — (call_id, phase) is unique, so a re-finalize (another
         // hub / restart racing the poll) is a harmless no-op.

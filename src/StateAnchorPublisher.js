@@ -78,6 +78,7 @@ const EncoderClient     = require('./EncoderClient.js');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const StateCheckpointEngine = require('./StateCheckpointEngine.js');
 const swq                   = require('./stake_weighted_quorum.js');
+const eq                    = require('./equivocation_header.js');
 
 const XANC_SIGN_REQ  = 'XANC_SIGN_REQ';
 const XANC_SIGN      = 'XANC_SIGN';
@@ -95,7 +96,7 @@ const XANC_V0_DONE   = 'XANC_V0_DONE';
 const MATCH_KEYS = ['id', 'match_id', 'snapshot_block', 'network',
     'a_chain', 'a_action_index', 'a_kind', 'a_tick', 'a_amount', 'a_filled_before', 'a_ownership', 'a_payout_addr',
     'b_chain', 'b_action_index', 'b_kind', 'b_tick', 'b_amount', 'b_filled_before', 'b_ownership', 'b_payout_addr',
-    'effective_time', 'validator_signatures', 'status'];
+    'effective_time', 'finalizing_view', 'validator_signatures', 'status'];
 
 // Fixed serialization order for an archived cross-chain CALL relay row (XCALL
 // dispatch/result phases) — same crc32/byte-comparison rules as MATCH_KEYS.
@@ -108,7 +109,7 @@ const MATCH_KEYS = ['id', 'match_id', 'snapshot_block', 'network',
 const CALL_KEYS = ['id', 'call_id', 'phase', 'snapshot_block', 'network',
     'source_chain', 'source_action_index', 'source_contract_index',
     'target_chain', 'target_contract_index', 'method', 'params_json',
-    'gas_limit', 'cross_hops', 'effective_time', 'result_status',
+    'gas_limit', 'cross_hops', 'effective_time', 'finalizing_view', 'result_status',
     'return_payload_b64', 'validator_signatures', 'status'];
 
 class StateAnchorPublisher {
@@ -645,6 +646,8 @@ class StateAnchorPublisher {
             let v = m[k];
             if(k === 'id' || k === 'a_action_index' || k === 'b_action_index' || k === 'snapshot_block' || k === 'effective_time')
                 out[k] = Number(v);
+            else if(k === 'finalizing_view')
+                out[k] = Number(v) || 0;   // EQUIV VIEW; archived so recovery rebuilds the exact signed bytes
             else if(k === 'a_ownership' || k === 'b_ownership')
                 out[k] = Number(v) ? 1 : 0;
             else if(k === 'a_tick' || k === 'b_tick')
@@ -664,6 +667,8 @@ class StateAnchorPublisher {
             if(k === 'id' || k === 'snapshot_block' || k === 'source_action_index' || k === 'source_contract_index' ||
                k === 'target_contract_index' || k === 'gas_limit' || k === 'cross_hops' || k === 'effective_time')
                 out[k] = Number(v);
+            else if(k === 'finalizing_view')
+                out[k] = Number(v) || 0;   // EQUIV VIEW; archived so recovery rebuilds the exact signed bytes
             else if(k === 'result_status' || k === 'return_payload_b64')
                 out[k] = (v == null) ? null : String(v);
             else
@@ -688,9 +693,19 @@ class StateAnchorPublisher {
         };
     }
 
+    // v1 archive canonical = the RAW v0 checkpoint content + the batch extension, then
+    // (at/above the EQUIV flag-day) wrapped ONCE in the uniform header. The v1 ROUND_ID
+    // appends `batch_seq` to the v0 round id so the v0 (per-block) and v1 (archive)
+    // canonicals — which legitimately share checkpoint_seq — get DISTINCT equivocation
+    // keys; otherwise an honest validator that signs both is falsely slashable (R-4 fix).
+    // Nests _rawCanonicalCheckpoint (not canonicalCheckpoint) so the header lands outside.
     _archiveCanonical(cp, batchSeq, count, crc, totalChunks){
-        return StateCheckpointEngine.canonicalCheckpoint(cp) + '|' +
-               String(batchSeq) + '|' + String(count) + '|' + crc + '|' + String(totalChunks);
+        let raw = StateCheckpointEngine._rawCanonicalCheckpoint(cp) + '|' +
+                  String(batchSeq) + '|' + String(count) + '|' + crc + '|' + String(totalChunks);
+        if(eq.isEquivHeaderActive(cp.snapshot_block, cp.network))
+            return eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
+                cp.chain + '|' + cp.network + '|' + cp.block_index + '|' + cp.checkpoint_seq + '|' + batchSeq, 0, raw);
+        return raw;
     }
 
     _splitChunks(b64){
@@ -1105,7 +1120,7 @@ class StateAnchorPublisher {
     // the indexer's cross_settle._canonical (kept local so archive verification
     // never depends on the DEX engine being constructed).
     _matchCanonical(m){
-        return [
+        let raw = [
             'XMATCH', m.match_id, String(m.snapshot_block),
             m.a_chain, String(m.a_action_index), m.a_tick || '', String(m.a_amount), String(m.a_ownership), m.a_payout_addr,
             m.b_chain, String(m.b_action_index), m.b_tick || '', String(m.b_amount), String(m.b_ownership), m.b_payout_addr,
@@ -1113,26 +1128,39 @@ class StateAnchorPublisher {
             m.a_kind || 'swap', String(m.a_filled_before != null ? m.a_filled_before : '0'),
             m.b_kind || 'swap', String(m.b_filled_before != null ? m.b_filled_before : '0')
         ].join('|');
+        // EQUIV (WI-2 bump 2): VIEW = the archived row's finalizing_view. TAG=XDEX,
+        // ROUND_ID=match_id. Byte-matches the hub engine + indexer cross_settle.
+        if(eq.isEquivHeaderActive(m.snapshot_block, m.network))
+            return eq.buildEquivCanonical(eq.ENGINE_TAGS.DEX, m.match_id, (m.finalizing_view != null ? m.finalizing_view : 0), raw);
+        return raw;
     }
 
     // XCALL phase canonicals — byte-identical to CrossChainCallEngine._canonicalMatch
     // / the indexer's verifiers (kept local for the same reason as _matchCanonical).
     _callCanonical(c){
         let sha = (s) => crypto.createHash('sha256').update(String(s == null ? '' : s), 'utf8').digest('hex');
+        let phase = (c.phase === 'result') ? 'result' : 'dispatch';
+        let raw;
         if(c.phase === 'result'){
-            return [
+            raw = [
                 'XCALL', 'RESULT', c.call_id, String(c.snapshot_block), c.network || '',
                 c.target_chain, String(c.result_status || ''),
                 sha(c.return_payload_b64), String(c.effective_time)
             ].join('|');
+        } else {
+            raw = [
+                'XCALL', 'DISPATCH', c.call_id, String(c.snapshot_block), c.network || '',
+                c.source_chain, String(c.source_action_index), String(c.source_contract_index),
+                c.target_chain, String(c.target_contract_index),
+                c.method, sha(c.params_json),
+                String(c.gas_limit), String(c.cross_hops), String(c.effective_time)
+            ].join('|');
         }
-        return [
-            'XCALL', 'DISPATCH', c.call_id, String(c.snapshot_block), c.network || '',
-            c.source_chain, String(c.source_action_index), String(c.source_contract_index),
-            c.target_chain, String(c.target_contract_index),
-            c.method, sha(c.params_json),
-            String(c.gas_limit), String(c.cross_hops), String(c.effective_time)
-        ].join('|');
+        // EQUIV (WI-2 bump 2): TAG=XCALL, ROUND_ID = sha256('XCALLROUND|'+phase+'|'+call_id),
+        // VIEW = the archived row's finalizing_view. Byte-matches the hub engine + indexer twins.
+        if(eq.isEquivHeaderActive(c.snapshot_block, c.network))
+            return eq.buildEquivCanonical(eq.ENGINE_TAGS.XCALL, sha('XCALLROUND|' + phase + '|' + c.call_id), (c.finalizing_view != null ? c.finalizing_view : 0), raw);
+        return raw;
     }
 
     _quorumVerified(canonical, sigs, pubkeys){
