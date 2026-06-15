@@ -372,6 +372,25 @@ class AttestationConsensus extends EventEmitter {
             return;
         }
         let proposalsArr = [...pending.proposals.values()];
+
+        // judge_model is non-deterministic across hubs — each runs its own LLM
+        // judge over its own proposal ordering and may select a different winning
+        // body. If every hub broadcast its own PREPARE, followers would lock
+        // whichever arrived first and the federation could never converge on one
+        // canonical body. So for judge_model only the elected leader runs agree()
+        // and broadcasts the canonical winner; followers adopt + re-sign it via
+        // the leader's PREPARE (see _handlePrepare). If the leader never resolves
+        // (offline / failed self-test), the round falls through to deadline
+        // expiry rather than finalizing divergent bodies. byte_equality stays
+        // deterministic (the agreed body is the common one) so every hub resolves
+        // locally as before.
+        let agreeDef = this.providerRegistry.getDef(pending.providerId);
+        if(agreeDef && agreeDef.consensus_strategy === 'judge_model'
+           && pending.leaderPubkey && pending.myPubkey
+           && String(pending.leaderPubkey).toLowerCase() !== String(pending.myPubkey).toLowerCase()){
+            return;
+        }
+
         pending._agreeing = true;
         let winner;
         try {
@@ -483,16 +502,18 @@ class AttestationConsensus extends EventEmitter {
         let meta = String(d.meta || '');
         let status = String(d.status || 'ok');
 
-        if(d.sig && d.sig_pubkey){
-            let canonical = this._buildCanonical(rid, pending.providerId, body, status, meta);
-            if(!ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
-                console.warn('AttestationConsensus: bad PREPARE sig from ' + senderPubkey.substring(0,16) + '...');
-                return;
-            }
-            pending.signatures.set(senderPubkey, String(d.sig));
-        }
-
         if(!pending.winner){
+            // First PREPARE we accept establishes the winner. Verify the sender's
+            // signature over THEIR proposed body before adopting it — an
+            // unverified PREPARE must not be allowed to set the winner.
+            if(d.sig && d.sig_pubkey){
+                let canonical = this._buildCanonical(rid, pending.providerId, body, status, meta);
+                if(!ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
+                    console.warn('AttestationConsensus: bad PREPARE sig from ' + senderPubkey.substring(0,16) + '...');
+                    return;
+                }
+                pending.signatures.set(senderPubkey, String(d.sig));
+            }
             pending.winner = { body: body, meta: meta };
             pending.status = status;
             // Sign our own copy if we agreed (we might have proposed the same body)
@@ -517,6 +538,20 @@ class AttestationConsensus extends EventEmitter {
                         pending.signatures.set(pending.myPubkey, myProposal.sig);
                     }
                 }
+            }
+        } else if(d.sig && d.sig_pubkey){
+            // Winner already established: a later PREPARE's signature must verify
+            // over the CANONICAL WINNER body/status/meta (mirror _handleCommit),
+            // NOT over the sender's own (possibly divergent) body. Storing a sig
+            // over a divergent body would inflate signatures.size — the gate
+            // _checkCommitQuorum finalizes on — so the emitted on-chain response
+            // could carry signatures that don't all verify over the winner (and
+            // be deterministically rejected by the indexer).
+            let canonical = this._buildCanonical(rid, pending.providerId, pending.winner.body, pending.status, pending.winner.meta);
+            if(ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
+                pending.signatures.set(senderPubkey, String(d.sig));
+            } else {
+                console.warn('AttestationConsensus: PREPARE sig not over winner body from ' + senderPubkey.substring(0,16) + '... (not counted)');
             }
         }
 

@@ -521,6 +521,161 @@ describe('AttestationConsensus — three-validator round finalizes via peer vote
     });
 });
 
+describe('AttestationConsensus — PREPARE signatures verified against the winner (#3949)', function () {
+
+    let me, p1, p2, hub, c;
+    beforeEach(() => {
+        me  = mkIdentity();
+        p1  = mkIdentity();
+        p2  = mkIdentity();
+        hub = createMockHub({ identity: me });
+        c   = new AttestationConsensus(hub, makeRealProviderRegistry());
+    });
+    afterEach(() => {
+        for (let [, p] of c.pending) if (p.timer) clearTimeout(p.timer);
+        sinon.restore();
+    });
+
+    const RID = 'cd'.repeat(16);
+
+    // Seed a round already past PROPOSE→agree with a locked winner. quorum is
+    // set deliberately high so a couple of PREPAREs don't reach commit quorum,
+    // letting us observe pending.signatures membership directly.
+    function seedWithWinner(responsibleIds, winnerBody) {
+        let pending = {
+            requestId:   RID,
+            providerId:  'http_get',
+            redundancy:  responsibleIds.length,
+            quorum:      responsibleIds.length + 1, // unreachable here
+            responsible: responsibleIds.map(i => ({ pubkey: pub(i) })),
+            proposals:   new Map(),
+            prepares:    new Set(),
+            commits:     new Set(),
+            signatures:  new Map(),
+            winner:      { body: winnerBody, meta: '' },
+            status:      'ok',
+            finalized:   false,
+            myPubkey:    null,
+            timer:       null
+        };
+        c.pending.set(RID, pending);
+        return pending;
+    }
+
+    it('does NOT count a PREPARE signature taken over a divergent body', function () {
+        let WINNER  = Buffer.from('winner-body');
+        let pending = seedWithWinner([p1, p2], WINNER);
+        // p1's signature is valid — but over ITS OWN divergent body, not the winner.
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, Buffer.from('divergent-body')));
+        expect(pending.signatures.has(pub(p1))).to.equal(false);
+        expect(pending.signatures.size).to.equal(0);
+        // The PREPARE participation is still recorded (mirrors _handleCommit).
+        expect(pending.prepares.has(pub(p1))).to.equal(true);
+    });
+
+    it('DOES count a PREPARE signature taken over the winner body', function () {
+        let WINNER  = Buffer.from('winner-body');
+        let pending = seedWithWinner([p1, p2], WINNER);
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, WINNER));
+        expect(pending.signatures.has(pub(p2))).to.equal(true);
+        expect(pending.signatures.size).to.equal(1);
+        // And the stored signature actually verifies over the winner bytes.
+        let canon = buildCanonical(RID, 'http_get', WINNER, 'ok', '');
+        expect(ValidatorIdentity.verify(canon.toString('utf8'), pending.signatures.get(pub(p2)), pub(p2))).to.equal(true);
+    });
+
+    it('finalizes a round carrying ONLY winner-body signatures when a peer PREPAREs a divergent body', async function () {
+        // redundancy 2 over [me,p1,p2]: winner sets after me+p1 propose the same
+        // BODY; p2 then PREPAREs a divergent body whose sig must be excluded.
+        let BODY = Buffer.from('agreed-body');
+        let finalized = [];
+        c.on('request:finalized', e => finalized.push(e));
+        await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 2));
+        await flush();
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
+        await flush();
+        let pending = c.pending.get(RID);
+        expect(pending.winner.body.toString()).to.equal('agreed-body');
+        expect(pending.signatures.size).to.equal(2); // me + p1, both over BODY
+
+        // p2 PREPAREs a DIVERGENT body (validly signed over its own bytes).
+        c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, Buffer.from('p2-divergent')));
+        await flush();
+        // Prepare quorum (2) reached via me+p2 → COMMIT → commit quorum on the
+        // 2 winner-body sigs → finalize. p2's divergent sig must be absent.
+        expect(finalized).to.have.length(1);
+        expect(pending.signatures.has(pub(p2))).to.equal(false);
+        let canon = buildCanonical(RID, 'http_get', BODY, 'ok', '');
+        for (let s of finalized[0].signatures) {
+            expect(ValidatorIdentity.verify(canon.toString('utf8'), s.sig, s.pubkey)).to.equal(true);
+        }
+    });
+});
+
+describe('AttestationConsensus — judge_model winner-selection is leader-gated (#3949)', function () {
+
+    let me, p1, p2, hub, c;
+    beforeEach(() => {
+        me  = mkIdentity();
+        p1  = mkIdentity();
+        p2  = mkIdentity();
+        hub = createMockHub({ identity: me });
+    });
+    afterEach(() => {
+        for (let [, p] of (c ? c.pending : [])) if (p.timer) clearTimeout(p.timer);
+        sinon.restore();
+    });
+
+    const RID  = 'b2'.repeat(16);
+    const BODY = Buffer.from('body');
+
+    it('a non-leader does NOT run agree() (waits to adopt the leader PREPARE)', async function () {
+        let agreeSpy = sinon.spy(proposals => proposals[0]);
+        c = new AttestationConsensus(hub, makeRealProviderRegistry(agreeSpy, 'judge_model'));
+        let rs = roundState(me, [me, p1, p2], BODY, 'llm', 2);
+        rs.leaderPubkey = pub(p1); rs.role = 'follower';   // p1 is the elected leader
+        await c.propose(RID, rs);
+        await flush();
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
+        await flush();
+        let pending = c.pending.get(RID);
+        expect(agreeSpy.called).to.equal(false);
+        expect(pending.winner).to.equal(null);
+    });
+
+    it('the elected leader DOES run agree() and sets the winner', async function () {
+        let agreeSpy = sinon.spy(proposals => proposals[0]);
+        c = new AttestationConsensus(hub, makeRealProviderRegistry(agreeSpy, 'judge_model'));
+        // roundState() makes `me` the leader by default.
+        await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'llm', 2));
+        await flush();
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
+        await flush();
+        let pending = c.pending.get(RID);
+        expect(agreeSpy.called).to.equal(true);
+        expect(pending.winner).to.not.equal(null);
+    });
+
+    it('a follower converges by adopting + re-signing the leader\'s winning body', async function () {
+        c = new AttestationConsensus(hub, makeRealProviderRegistry(p => p[0], 'judge_model'));
+        let myBody = Buffer.from('my-own-divergent-body');
+        let rs = roundState(me, [me, p1], myBody, 'llm', 2);
+        rs.leaderPubkey = pub(p1); rs.role = 'follower';
+        await c.propose(RID, rs);
+        await flush();
+        let pending = c.pending.get(RID);
+        expect(pending.winner).to.equal(null);   // did not self-resolve
+
+        let leaderBody = Buffer.from('leader-winning-body');
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, leaderBody));
+        expect(pending.winner.body.toString()).to.equal('leader-winning-body');
+        // Our own vote is re-signed over the agreed (leader) bytes.
+        expect(pending.signatures.has(pub(me))).to.equal(true);
+        let canon = buildCanonical(RID, 'llm', leaderBody, 'ok', '');
+        expect(ValidatorIdentity.verify(canon.toString('utf8'), pending.signatures.get(pub(me)), pub(me))).to.equal(true);
+    });
+});
+
 describe('AttestationConsensus — _maybeAdvanceFromProposals consensus outcomes', function () {
 
     let me, p1, p2, hub, c;
