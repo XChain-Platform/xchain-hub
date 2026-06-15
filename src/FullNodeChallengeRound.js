@@ -181,16 +181,23 @@ class FullNodeChallengeRound {
         };
         this.rounds.set(epoch, state);
 
-        // Compute + broadcast our own answer if we claim the full_node capability
-        // and actually have a coin node. (A mirror has neither and stays silent.)
-        if(myPubkey && claimants.has(myPubkey) && this.coinRpcUrl){
+        // Compute our own answer if we can — a CLAIMANT (proving itself) or an
+        // eligible VERIFIER (needs the answer to lead a round and to confirm peers).
+        // Only a claimant BROADCASTS it as its own possession claim; a verifier that
+        // isn't also a claimant computes silently so it can still lead/verify. A
+        // light mirror has no coin RPC and stays silent on both counts.
+        let amClaimant = !!(myPubkey && claimants.has(myPubkey));
+        let amVerifier = !!(myPubkey && eligible.has(myPubkey));
+        if(myPubkey && this.coinRpcUrl && (amClaimant || amVerifier)){
             try {
                 state.myAnswer = await this._computeAnswer(target, seed);
-                state.answers.set(myPubkey, state.myAnswer);
-                let sig = this.identity.sign(this._answerCanonical(challengeId, state.myAnswer));
-                this.peerManager && this.peerManager.broadcast(XNODE_ANSWER, {
-                    epoch, challengeId, answer: state.myAnswer, sig_pubkey: myPubkey, sig
-                });
+                if(amClaimant){
+                    state.answers.set(myPubkey, state.myAnswer);
+                    let sig = this.identity.sign(this._answerCanonical(challengeId, state.myAnswer));
+                    this.peerManager && this.peerManager.broadcast(XNODE_ANSWER, {
+                        epoch, challengeId, answer: state.myAnswer, sig_pubkey: myPubkey, sig
+                    });
+                }
             } catch(e){
                 console.warn('FullNodeChallengeRound: own answer failed (epoch ' + epoch + '):', e && e.message ? e.message : e);
             }

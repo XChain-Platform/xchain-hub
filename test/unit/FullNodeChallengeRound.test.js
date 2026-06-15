@@ -328,5 +328,15 @@ describe('FullNodeChallengeRound', function () {
             // quorum is 2 (V=2) but only one self-sign so far → no finalize
             expect(eng.broadcastFn.called).to.equal(false);
         });
+
+        it('a verifier that is not a claimant computes its answer silently (so it can lead)', async function () {
+            // V2 is a genesis verifier but NOT in the claimant snapshot ([V1, P1]).
+            const hub = makeHub({ identity: makeIdentity(V2), fullnode: { GENESIS_VERIFIERS: [V1, V2] } });
+            const eng = await startEpoch(hub);
+            const st  = eng.rounds.get(288);
+            expect(st.myAnswer).to.equal(ANSWER);                 // computed for leading/verifying
+            const ans = hub._pm.broadcast.getCalls().find(c => c.args[0] === 'XNODE_ANSWER' && c.args[1].sig_pubkey === V2);
+            expect(ans, 'a verifier-only node must NOT broadcast a possession claim').to.not.exist;
+        });
     });
 });
