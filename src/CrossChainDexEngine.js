@@ -47,6 +47,7 @@ const EventEmitter = require('events');
 const axios        = require('axios');
 
 const bc                     = require('./bcmath.js');
+const swq                    = require('./stake_weighted_quorum.js');
 const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
 
 const ALLOWED_CHAINS = ['BTC', 'LTC', 'DOGE'];
@@ -424,7 +425,7 @@ class CrossChainDexEngine extends EventEmitter {
         // Resolve the cross_chain validator set at snapshot_block (deterministic,
         // BTC-anchored) so every node computes the same quorum. The leader of the
         // round persists + mirrors these rows to indexers (in consensus PROPOSE).
-        let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock));
+        let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
 
         // Reserve this fill in-flight so a later poll doesn't re-propose it before the
         // committed ledger is updated by _writeFinalizedMatch.
@@ -451,7 +452,7 @@ class CrossChainDexEngine extends EventEmitter {
         // against capability_snapshots in whichever hub DB they mirror, and a
         // follower's DB may be the only one they read. Deterministic from BTC
         // stakes + idempotent (INSERT IGNORE), so all hubs write identical rows.
-        try { await this._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block)); }
+        try { await this._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network); }
         catch(e){ console.warn('CrossChainDex: snapshot persist on finalize failed: ' + (e && e.message)); }
         let inserted = await this._insertMatchRow(row);
         if(inserted) this._applyCommit(row, +1);
@@ -548,27 +549,46 @@ class CrossChainDexEngine extends EventEmitter {
     // BTC indexer via CapabilitySnapshot (on-chain-deterministic), with the regtest
     // seam fallback (XDEX_SEED_LOCAL_VALIDATOR → this hub's own pubkey). Used for both
     // quorum (in _finalizeMatch) and the mirror persist (_persistCapabilitySnapshot).
-    async _resolveCapabilityValidators(capability, block){
+    // Resolve the qualifying validator set, normalized to { pubkey, source, weight, amount }.
+    // At/above STAKE_WEIGHTED_QUORUM activation (keyed on the BTC snapshot_block +
+    // network) this fetches the SOURCE-KEYED weights; below it, the legacy count set
+    // (source='' , weight=amount) — byte-for-byte the old membership/values, so the
+    // pre-activation path and mirror rows are unchanged.
+    async _resolveCapabilityValidators(capability, block, network){
         let validators = [];
+        let weighted = swq.isStakeWeightedQuorumActive(block, network);
         if(this.capSnapshot){
-            let snap = await this.capSnapshot.getSnapshot(capability, block);
-            if(snap && Array.isArray(snap.validators)) validators = snap.validators;
+            if(weighted){
+                let snap = await this.capSnapshot.getWeightSnapshot(capability, block);
+                if(snap && Array.isArray(snap.validators))
+                    validators = snap.validators.map(v => ({ pubkey: v.pubkey, source: String(v.source != null ? v.source : ''), weight: String(v.weight != null ? v.weight : '0'), amount: String(v.weight != null ? v.weight : '0') }));
+            } else {
+                let snap = await this.capSnapshot.getSnapshot(capability, block);
+                if(snap && Array.isArray(snap.validators))
+                    validators = snap.validators.map(v => ({ pubkey: v.pubkey, source: '', weight: String(v.amount != null ? v.amount : '0'), amount: String(v.amount != null ? v.amount : '0') }));
+            }
         }
-        if(validators.length === 0 && this._seedLocalValidator && this.identity)
-            validators = [{ pubkey: this.identity.getPubkeyHex(), amount: '1' }];
+        if(validators.length === 0 && this._seedLocalValidator && this.identity){
+            let pk = this.identity.getPubkeyHex();
+            // Synthetic single-source seed: weight 1 trivially clears 3·1 > 2·1.
+            validators = [{ pubkey: pk, source: 'seed:' + String(pk).toLowerCase(), weight: '1', amount: '1' }];
+        }
         return validators;
     }
 
     // Persist the qualifying validator set for `capability` at `block` to
-    // capability_snapshots (idempotent), and mirror each row to indexers.
-    async _persistCapabilitySnapshot(capability, block){
-        let validators = await this._resolveCapabilityValidators(capability, block);
+    // capability_snapshots (idempotent), and mirror each row to indexers. Writes the
+    // source-keyed weight (amount column) + the source discriminator so non-BTC
+    // indexers + recovery can dedupe quorum weight by staking address.
+    async _persistCapabilitySnapshot(capability, block, network){
+        let validators = await this._resolveCapabilityValidators(capability, block, network);
         for(let v of validators){
             let pubkey = String(v.pubkey).toLowerCase();
-            let amount = String(v.amount != null ? v.amount : '0');
+            let amount = String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0'));
+            let source = String(v.source != null ? v.source : '');
             await this.db.doQuery(
-                'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount) VALUES (?, ?, ?, ?)',
-                [block, capability, pubkey, amount]);
+                'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?)',
+                [block, capability, pubkey, amount, source]);
             if(this.broadcaster){
                 let r = await this.db.doQuery(
                     'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? LIMIT 1',

@@ -77,6 +77,7 @@ const crypto            = require('crypto');
 const EncoderClient     = require('./EncoderClient.js');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const StateCheckpointEngine = require('./StateCheckpointEngine.js');
+const swq                   = require('./stake_weighted_quorum.js');
 
 const XANC_SIGN_REQ  = 'XANC_SIGN_REQ';
 const XANC_SIGN      = 'XANC_SIGN';
@@ -118,6 +119,7 @@ class StateAnchorPublisher {
         this.identity    = hub.getIdentity ? hub.getIdentity() : null;
         this.peerManager = hub.getPeerManager ? hub.getPeerManager() : null;
         this.capSnapshot = hub.capabilitySnapshot || null;
+        this.network     = (hub && hub.network) ? hub.network : '';   // STAKE_WEIGHTED_QUORUM gate
 
         let cfg = hub.p2pConfig || {};
         this.enabled       = String(process.env.ANCHOR_ENABLED || cfg.ANCHOR_ENABLED || 'true') !== 'false';
@@ -570,17 +572,27 @@ class StateAnchorPublisher {
     // leading, so it can't be the shared source). Falls back to the local
     // table for seeded/regtest stacks with no live BTC resolution.
     async _resolveCapabilitySet(capability, block){
+        // Source-keyed at/above STAKE_WEIGHTED_QUORUM so the archived snapshot rows
+        // carry the staking source recovery needs to dedupe weight; legacy set
+        // below it (source=''). amount carries the source's weight when weighted.
+        let weighted = swq.isStakeWeightedQuorumActive(Number(block), this.network);
         if(this.capSnapshot){
             try {
-                let snap = await this.capSnapshot.getSnapshot(capability, Number(block));
-                if(snap && Array.isArray(snap.validators) && snap.validators.length > 0)
-                    return snap.validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), amount: String(v.amount != null ? v.amount : '0') }));
+                if(weighted){
+                    let snap = await this.capSnapshot.getWeightSnapshot(capability, Number(block));
+                    if(snap && Array.isArray(snap.validators) && snap.validators.length > 0)
+                        return snap.validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), amount: String(v.weight != null ? v.weight : '0'), source: String(v.source != null ? v.source : '') }));
+                } else {
+                    let snap = await this.capSnapshot.getSnapshot(capability, Number(block));
+                    if(snap && Array.isArray(snap.validators) && snap.validators.length > 0)
+                        return snap.validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), amount: String(v.amount != null ? v.amount : '0'), source: '' }));
+                }
             } catch(e){ /* fall through to the local table */ }
         }
         let rows = await this.db.doQuery(
-            "SELECT signing_pubkey, amount FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? ORDER BY signing_pubkey ASC",
+            "SELECT signing_pubkey, amount, source FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? ORDER BY signing_pubkey ASC",
             [Number(block), String(capability)]);
-        return (rows || []).map(r => ({ pubkey: String(r.signing_pubkey).toLowerCase(), amount: String(r.amount) }));
+        return (rows || []).map(r => ({ pubkey: String(r.signing_pubkey).toLowerCase(), amount: String(r.amount), source: String(r.source != null ? r.source : '') }));
     }
 
     // Archive JSON with fixed key order (crc32-bearing bytes — see MATCH_KEYS).
@@ -608,7 +620,8 @@ class StateAnchorPublisher {
             let set = await this._resolveCapabilitySet(w.capability, w.block);
             for(let v of set.slice().sort((a, b) => a.pubkey < b.pubkey ? -1 : 1))
                 snaps.push({ snapshot_block: w.block, capability: w.capability,
-                             signing_pubkey: v.pubkey, amount: v.amount });
+                             signing_pubkey: v.pubkey, amount: v.amount,
+                             source: String(v.source != null ? v.source : '') });
         }
         // `calls` and `rewards` are additive to the v1 archive shape: recovery
         // treats a missing key as an empty list, so older on-chain archives stay
@@ -926,11 +939,12 @@ class StateAnchorPublisher {
                 console.log('StateAnchorPublisher: archive reward ' + tag + ' predates our local history — accepting on re-derivation alone');
             }
         }
-        let groups = new Map();              // block|capability → Map<pubkey, amount>
+        let groups = new Map();              // block|capability → Map<pubkey, {amount, source}>
         for(let s of (archive.capability_snapshots || [])){
             let key = Number(s.snapshot_block) + '|' + String(s.capability);
             if(!groups.has(key)) groups.set(key, new Map());
-            groups.get(key).set(String(s.signing_pubkey).toLowerCase(), String(s.amount));
+            groups.get(key).set(String(s.signing_pubkey).toLowerCase(),
+                                { amount: String(s.amount), source: String(s.source != null ? s.source : '') });
         }
         for(let [key, archived] of groups){
             let [block, capability] = key.split('|');
@@ -941,10 +955,12 @@ class StateAnchorPublisher {
                 return false;
             }
             for(let v of resolved){
-                if(!archived.has(v.pubkey) || archived.get(v.pubkey) !== v.amount){
+                let a = archived.get(v.pubkey);
+                let vSource = String(v.source != null ? v.source : '');
+                if(!a || a.amount !== v.amount || a.source !== vSource){
                     console.warn("StateAnchorPublisher: archive snapshot group " + key + " diverges for pubkey " +
-                                 v.pubkey.substring(0, 12) + "... (local amount " + v.amount + ", archived " +
-                                 (archived.get(v.pubkey) || "<absent>") + ")");
+                                 v.pubkey.substring(0, 12) + "... (local amount/source " + v.amount + "/" + vSource +
+                                 ", archived " + (a ? (a.amount + "/" + a.source) : "<absent>") + ")");
                     return false;
                 }
             }

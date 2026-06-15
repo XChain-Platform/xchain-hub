@@ -96,6 +96,51 @@ class CapabilitySnapshot {
         }
     }
 
+    // Source-keyed weight snapshot for STAKE_WEIGHTED_QUORUM. Like getSnapshot but
+    // each row carries { pubkey, source, weight } (the staking address + its
+    // aggregate stake), so the quorum tally can dedupe by source. Cache key is
+    // disjoint from the count snapshot ('w:' prefix). Returns null on indexer error.
+    async getWeightSnapshot(capability, blockIndex) {
+        if (blockIndex === undefined || blockIndex === null) return null;
+        let key = 'w:' + capability + ':' + blockIndex;
+        let cached = this.cache.get(key);
+        let now = Date.now();
+        if (cached && cached.expiresAt > now) return cached;
+
+        let url = await this.hub._resolveBtcIndexerUrl();
+        if (!url) return null;
+
+        let minStake = (this.hub.capabilityRegistry && typeof this.hub.capabilityRegistry.getMinStake === 'function')
+            ? this.hub.capabilityRegistry.getMinStake(capability)
+            : null;
+        let params = { capability: capability, block_index: blockIndex };
+        if (minStake !== null && minStake !== undefined) params.min_stake = String(minStake);
+
+        try {
+            let res = await axios.post(url, {
+                jsonrpc: '2.0',
+                id:      now,
+                method:  'getstakeweightsbycapability',
+                params:  params
+            }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
+            let result = res && res.data && res.data.result;
+            if (!result || result.error) return null;
+            let snapshot = {
+                capability:  result.capability,
+                blockIndex:  result.block_index,
+                count:       result.count,
+                sourceCount: result.source_count,
+                validators:  result.validators || [],     // [{pubkey, source, weight}]
+                expiresAt:   now + this.cacheTtlMs
+            };
+            this.cache.set(key, snapshot);
+            this._prune(now);
+            return snapshot;
+        } catch (err) {
+            return null;
+        }
+    }
+
     // Whole-federation snapshot — every pubkey with ANY active stake at the
     // block, regardless of capability. Used by Consensus (config-change PBFT)
     // where quorum is over all stakers, not a capability subset. Cache key is

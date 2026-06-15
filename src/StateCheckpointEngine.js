@@ -51,6 +51,7 @@
 const EventEmitter      = require('events');
 const axios             = require('axios');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
+const swq               = require('./stake_weighted_quorum.js');
 
 const XCHK_SIGN_REQ  = 'XCHK_SIGN_REQ';
 const XCHK_SIGN      = 'XCHK_SIGN';
@@ -68,6 +69,10 @@ class StateCheckpointEngine extends EventEmitter {
         this.identity    = hub.getIdentity ? hub.getIdentity() : null;
         this.broadcaster = hub.hubDbBroadcaster || null;
         this.capSnapshot = hub.capabilitySnapshot || null;
+        // Deployment network for the STAKE_WEIGHTED_QUORUM gate (cp.network == this
+        // for every checkpoint this hub signs). Available before the per-chain network
+        // is known, so the cadence-leader set + snapshot persist use the right rule.
+        this.network     = (hub && hub.network) ? hub.network : '';
 
         let cfg = hub.p2pConfig || {};
         this.enabled        = String(process.env.CHECKPOINT_ENABLED || cfg.CHECKPOINT_ENABLED || 'true') !== 'false';
@@ -223,17 +228,20 @@ class StateCheckpointEngine extends EventEmitter {
         let myPubkey = this.identity.getPubkeyHex().toLowerCase();
         let mySig    = this.identity.sign(canonical);
         let snapCount = validators.length;
+        // STAKE_WEIGHTED_QUORUM: weighted (source-deduped) at/above activation, else count.
+        let weighted  = swq.isStakeWeightedQuorumActive(cp.snapshot_block, this.network);
         let quorum    = (snapCount <= 1) ? 1 : Math.max(2 * Math.floor((snapCount - 1) / 3) + 1, Math.ceil((snapCount + 1) / 2));
 
-        // Single-node set: self-sign satisfies the quorum — finalize immediately.
+        // Single-node set: self-sign satisfies the quorum (in both modes — the sole
+        // validator's stake is the whole snapshot) — finalize immediately.
         if(snapCount <= 1){
             await this._acceptFinalized(cp, [{ pubkey: myPubkey, sig: mySig }], quorum, true);
             return;
         }
 
         let pending = {
-            id, cp, canonical, quorum,
-            validators: validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase() })),
+            id, cp, canonical, quorum, weighted,
+            validators: validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), source: String(v.source != null ? v.source : ''), weight: String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0')) })),
             signatures: new Map([[myPubkey, mySig]]),
             done:       false,
             timer:      null
@@ -320,7 +328,11 @@ class StateCheckpointEngine extends EventEmitter {
 
     _checkQuorum(id){
         let pending = this.pending.get(id);
-        if(!pending || pending.done || pending.signatures.size < pending.quorum) return;
+        if(!pending || pending.done) return;
+        let met = pending.weighted
+            ? swq.meetsStakeThreshold(pending.validators, pending.signatures.keys())
+            : (pending.signatures.size >= pending.quorum);
+        if(!met) return;
         pending.done = true;
         if(pending.timer){ clearTimeout(pending.timer); pending.timer = null; }
         this.pending.delete(id);
@@ -341,6 +353,7 @@ class StateCheckpointEngine extends EventEmitter {
         let validators = await this._resolveCapabilityValidators('oracle_publish', cp.snapshot_block);
         let pubkeys    = new Set(validators.map(v => String(v.pubkey).toLowerCase()));
         let snapCount  = pubkeys.size;
+        let weighted   = swq.isStakeWeightedQuorumActive(cp.snapshot_block, this.network);
         let quorum     = (snapCount <= 1) ? 1 : Math.max(2 * Math.floor((snapCount - 1) / 3) + 1, Math.ceil((snapCount + 1) / 2));
 
         let canonical = StateCheckpointEngine.canonicalCheckpoint(cp);
@@ -352,7 +365,10 @@ class StateCheckpointEngine extends EventEmitter {
             seen.add(pk);
             sigs.push({ pubkey: pk, sig: String(s.sig) });
         }
-        if(sigs.length < quorum) return;                           // sub-quorum — ignore
+        let met = weighted
+            ? swq.meetsStakeThreshold(validators, sigs.map(s => s.pubkey))
+            : (sigs.length >= quorum);
+        if(!met) return;                                           // sub-quorum — ignore
         await this._acceptFinalized(cp, sigs, quorum, false);
     }
 
@@ -431,14 +447,27 @@ class StateCheckpointEngine extends EventEmitter {
     }
 
     // Mirror CrossChainDexEngine._resolveCapabilityValidators (incl. regtest seam).
+    // Source-keyed at/above STAKE_WEIGHTED_QUORUM (this.network + block), else legacy
+    // count set (source='' , weight=amount). Uses the deployment network so the set is
+    // resolved correctly at _tick, before the per-chain network is known.
     async _resolveCapabilityValidators(capability, block){
         let validators = [];
+        let weighted = swq.isStakeWeightedQuorumActive(block, this.network);
         if(this.capSnapshot){
-            let snap = await this.capSnapshot.getSnapshot(capability, block);
-            if(snap && Array.isArray(snap.validators)) validators = snap.validators;
+            if(weighted){
+                let snap = await this.capSnapshot.getWeightSnapshot(capability, block);
+                if(snap && Array.isArray(snap.validators))
+                    validators = snap.validators.map(v => ({ pubkey: v.pubkey, source: String(v.source != null ? v.source : ''), weight: String(v.weight != null ? v.weight : '0'), amount: String(v.weight != null ? v.weight : '0') }));
+            } else {
+                let snap = await this.capSnapshot.getSnapshot(capability, block);
+                if(snap && Array.isArray(snap.validators))
+                    validators = snap.validators.map(v => ({ pubkey: v.pubkey, source: '', weight: String(v.amount != null ? v.amount : '0'), amount: String(v.amount != null ? v.amount : '0') }));
+            }
         }
-        if(validators.length === 0 && this._seedLocalValidator && this.identity)
-            validators = [{ pubkey: this.identity.getPubkeyHex(), amount: '1' }];
+        if(validators.length === 0 && this._seedLocalValidator && this.identity){
+            let pk = this.identity.getPubkeyHex();
+            validators = [{ pubkey: pk, source: 'seed:' + String(pk).toLowerCase(), weight: '1', amount: '1' }];
+        }
         return validators;
     }
 
@@ -448,10 +477,11 @@ class StateCheckpointEngine extends EventEmitter {
         let validators = await this._resolveCapabilityValidators(capability, block);
         for(let v of validators){
             let pubkey = String(v.pubkey).toLowerCase();
-            let amount = String(v.amount != null ? v.amount : '0');
+            let amount = String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0'));
+            let source = String(v.source != null ? v.source : '');
             await this.db.doQuery(
-                'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount) VALUES (?, ?, ?, ?)',
-                [block, capability, pubkey, amount]);
+                'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?)',
+                [block, capability, pubkey, amount, source]);
             if(this.broadcaster){
                 let r = await this.db.doQuery(
                     'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? LIMIT 1',

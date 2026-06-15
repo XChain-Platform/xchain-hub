@@ -45,6 +45,7 @@
 
 const EventEmitter      = require('events');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
+const swq               = require('./stake_weighted_quorum.js');
 
 const XDEX_MATCH_PROPOSE     = 'XDEX_MATCH_PROPOSE';
 const XDEX_MATCH_PREPARE     = 'XDEX_MATCH_PREPARE';
@@ -193,6 +194,11 @@ class CrossChainDexConsensus extends EventEmitter {
         let row        = ctx.row;
         let validators = (ctx.snapshot && Array.isArray(ctx.snapshot.validators)) ? ctx.snapshot.validators : [];
         let snapCount  = validators.length;
+        // STAKE_WEIGHTED_QUORUM: at/above the activation snapshot_block, finalize on
+        // summed signer STAKE (>2/3 of S, source-deduped) rather than signer COUNT.
+        // Gated on the row's BTC snapshot_block + network so hub and every indexer
+        // flip on the same anchor. Below activation: byte-for-byte the count rule.
+        let weighted   = swq.isStakeWeightedQuorumActive(row.snapshot_block, row.network);
         let quorum     = (snapCount <= 1) ? 0 : Math.max(2 * Math.floor((snapCount - 1) / 3) + 1, Math.ceil((snapCount + 1) / 2));
         let canonical  = this.engine._canonicalMatch(row);
         let myPubkey   = this.identity.getPubkeyHex().toLowerCase();
@@ -201,8 +207,11 @@ class CrossChainDexConsensus extends EventEmitter {
             matchId:      rid,
             row:          row,
             canonical:    canonical,
-            validators:   validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase() })),
+            // Carry source + weight so the weighted tally can dedupe by staking
+            // address (DELEGATE v0 is additive — one source, many keys, one vote).
+            validators:   validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), source: String(v.source != null ? v.source : ''), weight: String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0')) })),
             quorum:       quorum,
+            weighted:     weighted,
             view:         0,
             myPubkey:     myPubkey,
             prepares:     new Set(),
@@ -218,8 +227,11 @@ class CrossChainDexConsensus extends EventEmitter {
         // Single-operator / no-federation: persist the snapshot (so the indexer can
         // verify), sign with our own identity, and finalize immediately — byte-for-byte
         // the pre-PBFT behavior (there is no PROPOSE round to carry the persist).
+        // snapCount<=1 (quorum===0) is the single-operator fast path in BOTH modes:
+        // the sole validator's own stake is the whole snapshot, so it trivially
+        // satisfies 3·weight>2·S as well.
         if(quorum === 0){
-            try { await this.engine._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block)); }
+            try { await this.engine._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network); }
             catch(e){ console.warn('CrossChainDexConsensus: snapshot persist failed: ' + (e && e.message)); }
             let sig = this.identity.sign(canonical);
             pending.signatures.set(myPubkey, sig);
@@ -250,7 +262,7 @@ class CrossChainDexConsensus extends EventEmitter {
 
     // Leader action: persist snapshot, sign canonical, seed own vote, broadcast PROPOSE.
     async _broadcastPropose(pending){
-        try { await this.engine._persistCapabilitySnapshot('cross_chain', Number(pending.row.snapshot_block)); }
+        try { await this.engine._persistCapabilitySnapshot('cross_chain', Number(pending.row.snapshot_block), pending.row.network); }
         catch(e){ console.warn('CrossChainDexConsensus: snapshot persist failed: ' + (e && e.message)); }
         let mySig = this.identity.sign(pending.canonical);
         pending.signatures.set(pending.myPubkey, mySig);
@@ -373,10 +385,18 @@ class CrossChainDexConsensus extends EventEmitter {
         this._checkPrepareQuorum(rid);
     }
 
+    // Quorum test for a collected vote set (prepares or commits). Stake-weighted
+    // (source-deduped 3·Σ>2·S) at/above activation; signer COUNT (≥2f+1) below it.
+    _meetsQuorum(pending, voteSet){
+        if(pending.weighted)
+            return swq.meetsStakeThreshold(pending.validators, voteSet);
+        return voteSet.size >= pending.quorum;
+    }
+
     _checkPrepareQuorum(rid){
         let pending = this.pending.get(rid);
         if(!pending || pending.finalized || pending._commitSent) return;
-        if(pending.prepares.size < pending.quorum) return;
+        if(!this._meetsQuorum(pending, pending.prepares)) return;
         pending._commitSent = true;
         pending.commits.add(pending.myPubkey);
         let mySig = pending.signatures.get(pending.myPubkey) || null;
@@ -413,7 +433,7 @@ class CrossChainDexConsensus extends EventEmitter {
     _checkCommitQuorum(rid){
         let pending = this.pending.get(rid);
         if(!pending || pending.finalized) return;
-        if(pending.commits.size < pending.quorum) return;
+        if(!this._meetsQuorum(pending, pending.commits)) return;
         this._finalize(rid);
     }
 
@@ -500,7 +520,7 @@ class CrossChainDexConsensus extends EventEmitter {
         let pending = this.pending.get(rid);
         if(!pending || pending.finalized) return;
         let votes = pending.viewChanges.get(view);
-        if(!votes || votes.size < pending.quorum) return;
+        if(!votes || !this._meetsQuorum(pending, votes)) return;
         if(view > pending.view) pending.view = view;
         let newLeader = this._leaderFor(rid, pending.validators, view);
         if(newLeader === pending.myPubkey){
@@ -535,7 +555,12 @@ class CrossChainDexConsensus extends EventEmitter {
             if(!ValidatorIdentity.verify(canonical, String(s.sig), pk)) continue;
             verified.set(pk, String(s.sig));
         }
-        if(verified.size < Math.max(pending.quorum, 1)) return;            // not a quorum proof — ignore
+        // The offered signatures must themselves clear the round's quorum (weighted
+        // at/above activation, else ≥2f+1) — a forged sync would need a real quorum.
+        let proofOk = pending.weighted
+            ? swq.meetsStakeThreshold(pending.validators, verified.keys())
+            : (verified.size >= Math.max(pending.quorum, 1));
+        if(!proofOk) return;                                               // not a quorum proof — ignore
 
         pending.row        = row;
         pending.canonical  = canonical;

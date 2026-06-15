@@ -59,6 +59,7 @@ const crypto       = require('crypto');
 const EventEmitter = require('events');
 const axios        = require('axios');
 
+const swq                    = require('./stake_weighted_quorum.js');
 const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
 
 const ALLOWED_CHAINS  = ['BTC', 'LTC', 'DOGE'];
@@ -228,7 +229,7 @@ class CrossChainCallEngine extends EventEmitter {
             return_payload_b64:    null
         };
 
-        let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock));
+        let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
         this._inflight.add(roundId);
         try {
             await this.consensus.propose(roundId, { row: row, snapshot: { validators: validators, count: validators.length } });
@@ -295,7 +296,7 @@ class CrossChainCallEngine extends EventEmitter {
             return_payload_b64:    (res.return_payload_b64 == null) ? '' : String(res.return_payload_b64)
         };
 
-        let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock));
+        let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
         this._inflight.add(roundId);
         try {
             await this.consensus.propose(roundId, { row: row, snapshot: { validators: validators, count: validators.length } });
@@ -412,7 +413,7 @@ class CrossChainCallEngine extends EventEmitter {
         // against capability_snapshots in whichever hub DB they mirror, and a
         // follower's DB may be the only one they read. Deterministic from BTC
         // stakes + idempotent (INSERT IGNORE), so all hubs write identical rows.
-        try { await this._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block)); }
+        try { await this._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network); }
         catch(e){ console.warn('CrossChainCall: snapshot persist on finalize failed: ' + (e && e.message)); }
         let cols = ['call_id','phase','snapshot_block','network',
                     'source_chain','source_action_index','source_contract_index',
@@ -441,14 +442,15 @@ class CrossChainCallEngine extends EventEmitter {
 
     // Persist + mirror the qualifying validator set (consensus leader path —
     // same contract as CrossChainDexEngine._persistCapabilitySnapshot).
-    async _persistCapabilitySnapshot(capability, block){
-        let validators = await this._resolveCapabilityValidators(capability, block);
+    async _persistCapabilitySnapshot(capability, block, network){
+        let validators = await this._resolveCapabilityValidators(capability, block, network);
         for(let v of validators){
             let pubkey = String(v.pubkey).toLowerCase();
-            let amount = String(v.amount != null ? v.amount : '0');
+            let amount = String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0'));
+            let source = String(v.source != null ? v.source : '');
             await this.db.doQuery(
-                'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount) VALUES (?, ?, ?, ?)',
-                [block, capability, pubkey, amount]);
+                'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?)',
+                [block, capability, pubkey, amount, source]);
             if(this.broadcaster){
                 let r = await this.db.doQuery(
                     'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? LIMIT 1',
@@ -458,14 +460,26 @@ class CrossChainCallEngine extends EventEmitter {
         }
     }
 
-    async _resolveCapabilityValidators(capability, block){
+    // Source-keyed at/above STAKE_WEIGHTED_QUORUM activation, legacy count set below
+    // it (source='' , weight=amount). Mirrors CrossChainDexEngine._resolveCapabilityValidators.
+    async _resolveCapabilityValidators(capability, block, network){
         let validators = [];
+        let weighted = swq.isStakeWeightedQuorumActive(block, network);
         if(this.capSnapshot){
-            let snap = await this.capSnapshot.getSnapshot(capability, block);
-            if(snap && Array.isArray(snap.validators)) validators = snap.validators;
+            if(weighted){
+                let snap = await this.capSnapshot.getWeightSnapshot(capability, block);
+                if(snap && Array.isArray(snap.validators))
+                    validators = snap.validators.map(v => ({ pubkey: v.pubkey, source: String(v.source != null ? v.source : ''), weight: String(v.weight != null ? v.weight : '0'), amount: String(v.weight != null ? v.weight : '0') }));
+            } else {
+                let snap = await this.capSnapshot.getSnapshot(capability, block);
+                if(snap && Array.isArray(snap.validators))
+                    validators = snap.validators.map(v => ({ pubkey: v.pubkey, source: '', weight: String(v.amount != null ? v.amount : '0'), amount: String(v.amount != null ? v.amount : '0') }));
+            }
         }
-        if(validators.length === 0 && this._seedLocalValidator && this.identity)
-            validators = [{ pubkey: this.identity.getPubkeyHex(), amount: '1' }];
+        if(validators.length === 0 && this._seedLocalValidator && this.identity){
+            let pk = this.identity.getPubkeyHex();
+            validators = [{ pubkey: pk, source: 'seed:' + String(pk).toLowerCase(), weight: '1', amount: '1' }];
+        }
         return validators;
     }
 

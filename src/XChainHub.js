@@ -60,6 +60,10 @@ class XChainHub {
         this.dbUser    = dbUser;
         this.dbPass    = dbPass;
         this.p2pConfig = p2pConfig || null;
+        // Deployment network (mainnet|testnet|regtest) for consensus activation gating
+        // — notably STAKE_WEIGHTED_QUORUM. Set in validator mode (validated in api.js);
+        // '' in standalone (no consensus runs there).
+        this.network   = (this.p2pConfig && this.p2pConfig.HUB_NETWORK) ? String(this.p2pConfig.HUB_NETWORK) : '';
         this.db               = null;
         this.peerManager      = null;
         this.consensus        = null;
