@@ -201,6 +201,54 @@ describe('OracleConsensus', function () {
     });
 
     // -----------------------------------------------------------------
+    // L4 determinism — trimmed-median aggregation (spec §6 / validator-test-spec)
+    //
+    // spec §6 "Determinism (L4)" item 3: same oracle round inputs → the same
+    // trimmed-median on every finalizing hub. The median VALUE must not depend on
+    // submission/iteration order, and two independently-constructed hubs must
+    // agree on the per-pair result for the same submission multiset.
+    // -----------------------------------------------------------------
+    describe('L4 determinism — trimmed-median aggregation', function () {
+        // Same multiset of {sender → price} submissions, two insertion orders.
+        const fwd = [
+            { sender: 'v1', prices: [{ coinPair: 'BTC/USD', price: '100000' }, { coinPair: 'LTC/USD', price: '80' }] },
+            { sender: 'v2', prices: [{ coinPair: 'BTC/USD', price: '100010' }, { coinPair: 'LTC/USD', price: '82' }] },
+            { sender: 'v3', prices: [{ coinPair: 'BTC/USD', price: '100005' }, { coinPair: 'LTC/USD', price: '81' }] },
+            { sender: 'v4', prices: [{ coinPair: 'BTC/USD', price: '99995'  }, { coinPair: 'LTC/USD', price: '79' }] },
+            { sender: 'v5', prices: [{ coinPair: 'BTC/USD', price: '100020' }, { coinPair: 'LTC/USD', price: '83' }] }
+        ];
+        const rev  = fwd.slice().reverse();
+        const norm = (arr) => new Map(arr.map(a => [a.coinPair, a.price]));
+        const mkOc = () => new OracleConsensus(createMockHub(), { getSubmissions: sinon.stub().returns(new Map()) });
+
+        it('per-pair median is invariant to submission/insertion order', function () {
+            expect(oc._aggregate(buildSubmissions(fwd), 'BTC/USD'))
+                .to.equal(oc._aggregate(buildSubmissions(rev), 'BTC/USD'));
+            expect(oc._aggregate(buildSubmissions(fwd), 'LTC/USD'))
+                .to.equal(oc._aggregate(buildSubmissions(rev), 'LTC/USD'));
+        });
+
+        it('two independent hubs derive the identical {pair → median} from the same submissions', function () {
+            const ocA = mkOc(), ocB = mkOc();
+            expect(norm(ocA._aggregateAll(buildSubmissions(fwd))))
+                .to.deep.equal(norm(ocB._aggregateAll(buildSubmissions(rev))));
+        });
+
+        // FLAG (pinned invariant boundary): _aggregateAll builds its results array
+        // in coinPairs Set insertion order (first-seen across submissions), and
+        // _digest hashes the array IN ORDER (JSON.stringify). The per-pair VALUES
+        // are deterministic (above), but the array ORDER is not canonicalized — so
+        // a digest computed from a hub's OWN aggregation depends on submission
+        // iteration order. Today this is masked because followers hash the LEADER's
+        // propagated array; if any path re-derives a digest/signature from local
+        // aggregation, the pair order must be canonicalized first.
+        it('the {pair → median} mapping is order-insensitive (raw array order is NOT canonical — see flag)', function () {
+            expect(norm(oc._aggregateAll(buildSubmissions(fwd))))
+                .to.deep.equal(norm(oc._aggregateAll(buildSubmissions(rev))));
+        });
+    });
+
+    // -----------------------------------------------------------------
     // _getQuorum()
     // -----------------------------------------------------------------
 

@@ -108,6 +108,55 @@ describe('Consensus (PBFT)', function () {
     });
 
     // -----------------------------------------------------------------
+    // L4 determinism — leader/quorum derivation (spec §6 / validator-test-spec)
+    //
+    // The validator-specific risk is *quiet divergence*: two hubs at the same
+    // block_index must derive the SAME quorum N and elect the SAME leader for
+    // each (seq, view), or the federation forks. These pin that contract for
+    // the config-PBFT path across two independently-constructed Consensus
+    // instances (the L1-level half of spec §6 "Determinism (L4)" item 1).
+    // -----------------------------------------------------------------
+    describe('L4 determinism — leader/quorum derivation', function () {
+        const buildSet = (n) => Array.from({ length: n }, (_, i) => makeValidator(i + 1));
+        const freshConsensus = () => new Consensus(createMockHub());
+
+        it('identical validator set → identical leader for every (seq, view) on two independent hubs', function () {
+            const set = buildSet(7);
+            const a = freshConsensus(); a.setValidatorSet(set);
+            // b gets a deep copy — different object identities, same content — so
+            // matching leaders prove content-level determinism, not shared refs.
+            const b = freshConsensus(); b.setValidatorSet(set.map(v => ({ ...v })));
+            for (let view = 0; view < 3; view++) {
+                a.view = view; b.view = view;
+                for (let seq = 0; seq < set.length * 2 + 1; seq++) {
+                    expect(a._getLeader(seq)).to.deep.equal(b._getLeader(seq));
+                }
+            }
+        });
+
+        it('quorum N is identical regardless of validator ordering (depends only on |set|)', function () {
+            const set = buildSet(7);
+            const a = freshConsensus(); a.setValidatorSet(set.slice());
+            const b = freshConsensus(); b.setValidatorSet(set.slice().reverse());
+            expect(a._getQuorum()).to.equal(b._getQuorum());
+        });
+
+        // Leader election is (seq + view) % N over the set AS GIVEN — setValidatorSet
+        // does NOT canonicalize order. So cross-hub determinism REQUIRES every hub to
+        // receive the set in identical order (today the indexer's getcapabilityvalidators
+        // response is that source of truth). This pins the dependency: if a future change
+        // sorts the set inside setValidatorSet, that is a deliberate consensus-breaking
+        // change (atomic fleet deploy + re-baseline) and must update this test.
+        it('leader election is order-sensitive — divergent ordering elects divergent leaders', function () {
+            const set = buildSet(7);
+            const a = freshConsensus(); a.setValidatorSet(set.slice());
+            const b = freshConsensus(); b.setValidatorSet(set.slice().reverse());
+            // Same membership, reversed order → the seq-0 leader differs (set[0] vs set[N-1]).
+            expect(a._getLeader(0)).to.not.deep.equal(b._getLeader(0));
+        });
+    });
+
+    // -----------------------------------------------------------------
     // _isLeader()
     // -----------------------------------------------------------------
 
