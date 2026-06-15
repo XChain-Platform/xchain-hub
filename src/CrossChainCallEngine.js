@@ -76,6 +76,29 @@ const DEFAULT_CONFIRMATIONS = { BTC: 6, LTC: 12, DOGE: 60 };
 // is belt-and-suspenders against a confused indexer response).
 const RESULT_STATUSES = ['ok', 'reverted', 'out_of_gas', 'no_contract', 'not_callable', 'payload_too_large', 'error'];
 
+// Relay margin: a relayed row's effective_time is stamped this many blocks (of
+// the chain that GATES the row) into the future, so the row is written and
+// propagated everywhere BEFORE any chain reaches the block it applies at.
+// Without a margin, effective_time = the finalization instant, so a chain whose
+// tip already sits at that second can reach the eligible block before the row
+// has landed — injecting the execution/callback a block (or more) late and
+// permanently shifting its action-index counter relative to a node that sees
+// the row on time (EMITTER_ACTION_INDEX is in the call_id preimage → ledger
+// fork). Tunable via XCALL_RELAY_MARGIN_BLOCKS (env / p2pConfig).
+const DEFAULT_RELAY_MARGIN_BLOCKS = 4;
+
+// Nominal block interval (seconds) per chain, used ONLY to size the relay
+// margin in wall-clock seconds. Not consensus-critical: the margin need only
+// comfortably exceed realistic hub→indexer row-arrival lag, so an approximate
+// interval is fine.
+const NOMINAL_BLOCK_INTERVAL_S = { BTC: 600, LTC: 150, DOGE: 60 };
+
+// Hard ceiling (seconds) on the computed margin. validateProposedMatch refuses
+// a row whose effective_time is more than 3600s off the validator's clock, so
+// the margin must stay safely under that or a follower would reject the
+// leader's row and break the round. Caps a mis-set XCALL_RELAY_MARGIN_BLOCKS.
+const RELAY_MARGIN_MAX_S = 3000;
+
 class CrossChainCallEngine extends EventEmitter {
 
     constructor(hub){
@@ -97,6 +120,14 @@ class CrossChainCallEngine extends EventEmitter {
             let key = 'XCHAIN_CONFIRMATIONS_' + coin;
             this.confirmations[coin] = parseInt(process.env[key], 10) || parseInt(cfg[key], 10) || DEFAULT_CONFIRMATIONS[coin];
         }
+
+        // Relay margin in blocks (env → p2pConfig → default). Stamped onto every
+        // relayed row's effective_time, sized by the gating chain's nominal block
+        // interval. See DEFAULT_RELAY_MARGIN_BLOCKS.
+        let marginBlocks = parseInt(process.env.XCALL_RELAY_MARGIN_BLOCKS, 10);
+        if(!Number.isFinite(marginBlocks)) marginBlocks = parseInt(cfg.XCALL_RELAY_MARGIN_BLOCKS, 10);
+        if(!Number.isFinite(marginBlocks) || marginBlocks < 0) marginBlocks = DEFAULT_RELAY_MARGIN_BLOCKS;
+        this.relayMarginBlocks = marginBlocks;
 
         // Regtest seams — deliberately the SAME env names as the DEX engine so a
         // no-BTC regtest stack configures the anchor + seeded validator once.
@@ -224,7 +255,7 @@ class CrossChainCallEngine extends EventEmitter {
             params_json:           String(call.params_json || '[]'),
             gas_limit:             Number(call.gas_limit),
             cross_hops:            Number(call.cross_hops) || 0,
-            effective_time:        this._nowSeconds(),
+            effective_time:        this._relayEffectiveTime(String(call.target_chain)),
             result_status:         null,
             return_payload_b64:    null
         };
@@ -291,7 +322,7 @@ class CrossChainCallEngine extends EventEmitter {
             params_json:           String(dispatch.params_json),
             gas_limit:             Number(dispatch.gas_limit),
             cross_hops:            Number(dispatch.cross_hops) || 0,
-            effective_time:        this._nowSeconds(),
+            effective_time:        this._relayEffectiveTime(String(dispatch.source_chain)),
             result_status:         resultStatus,
             return_payload_b64:    (res.return_payload_b64 == null) ? '' : String(res.return_payload_b64)
         };
@@ -540,6 +571,20 @@ class CrossChainCallEngine extends EventEmitter {
     }
 
     _nowSeconds(){ return Math.floor(Date.now() / 1000); }
+
+    // effective_time to stamp on a relayed row: now + a forward margin sized to
+    // the chain that GATES the row (dispatch → the TARGET chain injects the
+    // execution; result → the SOURCE chain delivers the callback). Putting it in
+    // the future of every chain's tip guarantees the row is present everywhere
+    // before any chain reaches the block it applies at — so a live node and a
+    // replaying node always inject at the same block. Capped under the follower
+    // clock-skew bound (RELAY_MARGIN_MAX_S) so a large XCALL_RELAY_MARGIN_BLOCKS
+    // can never produce a row a peer would reject.
+    _relayEffectiveTime(gatingChain){
+        let interval = NOMINAL_BLOCK_INTERVAL_S[gatingChain] || NOMINAL_BLOCK_INTERVAL_S.BTC;
+        let margin   = Math.min(this.relayMarginBlocks * interval, RELAY_MARGIN_MAX_S);
+        return this._nowSeconds() + margin;
+    }
 }
 
 module.exports = CrossChainCallEngine;
