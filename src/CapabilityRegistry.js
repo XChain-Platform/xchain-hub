@@ -25,7 +25,7 @@
  *
  ********************************************************************/
 
-const KNOWN_CAPABILITIES = ['price', 'cross_chain', 'oracle_publish', 'attestation'];
+const KNOWN_CAPABILITIES = ['price', 'cross_chain', 'oracle_publish', 'attestation', 'full_node'];
 const SELF_TESTS = require('./capabilities/index.js');
 
 class CapabilityRegistry {

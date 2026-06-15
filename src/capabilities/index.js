@@ -22,5 +22,6 @@ module.exports = {
     price:          require('./price.js'),
     cross_chain:    require('./cross_chain.js'),
     oracle_publish: require('./oracle_publish.js'),
-    attestation:    require('./attestation.js')
+    attestation:    require('./attestation.js'),
+    full_node:      require('./full_node.js')
 };

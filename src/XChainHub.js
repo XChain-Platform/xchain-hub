@@ -45,6 +45,7 @@ const ProviderRegistry      = require('./ProviderRegistry.js');
 const AttestationRound       = require('./AttestationRound.js');
 const AttestationConsensus   = require('./AttestationConsensus.js');
 const AttestationPublisher   = require('./AttestationPublisher.js');
+const FullNodeChallengeRound = require('./FullNodeChallengeRound.js');
 const AttestationSpotChecker = require('./AttestationSpotChecker.js');
 const fs                 = require('fs');
 const axios              = require('axios');
@@ -336,9 +337,22 @@ class XChainHub {
         }
 
         console.log('Attestation framework started (providers: ' + this.providerRegistry.listProviderIds().join(', ') + ')');
+
+        // Full-node challenge round (verified-validator tier). Shares the same
+        // operator signer wiring as the attestation/oracle publishers — without a
+        // broadcast hook (or encoder + wallet-sign) the elected leader assembles
+        // verdicts but can't post them, so the engine stays observe-only.
+        this.fullNodeChallenge = new FullNodeChallengeRound(this);
+        let fnSignerHooks = loadSignerHooks();
+        if(fnSignerHooks){
+            applySignerHooks(this.fullNodeChallenge, fnSignerHooks);
+            console.log('FullNodeChallengeRound: operator signer wired (' + fnSignerHooks.source + ')');
+        }
+        await this.fullNodeChallenge.start();
     }
 
     // Accessors
+    getFullNodeChallenge(){      return this.fullNodeChallenge; }
     getAttestationRound(){       return this.attestationRound; }
     getAttestationConsensus(){   return this.attestationConsensus; }
     getAttestationPublisher(){   return this.attestationPublisher; }
