@@ -81,7 +81,14 @@ function makeEngine(opts) {
         db,
         p2pConfig: { BTC_INDEXER_URL: 'http://btc', DOGE_INDEXER_URL: 'http://doge', LTC_INDEXER_URL: 'http://ltc' },
         hubDbBroadcaster: broadcaster,
-        capabilitySnapshot: { async getSnapshot() { return { validators: [{ pubkey: 'a'.repeat(64), amount: '1' }] }; } },
+        capabilitySnapshot: {
+            async getSnapshot() { return { validators: [{ pubkey: 'a'.repeat(64), amount: '1' }] }; },
+            // STAKE_WEIGHTED_QUORUM (WI-1) is active at regtest/testnet block 0+, so
+            // _resolveCapabilityValidators takes the weighted path: source-keyed rows.
+            async getWeightSnapshot() {
+                return { validators: [{ pubkey: 'a'.repeat(64), source: 's1', weight: '1' }], count: 1, sourceCount: 1 };
+            }
+        },
         getPeerManager: () => null,
         getIdentity: () => null,
         _resolveBtcLatestBlock: async () => 150

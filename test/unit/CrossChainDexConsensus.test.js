@@ -83,7 +83,12 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         buses.push(bus);
         return bus;
     }
-    function validatorsOf(bus) { return bus.nodes.map(nd => ({ pubkey: nd.pubkey, amount: '1' })); }
+    // STAKE_WEIGHTED_QUORUM (WI-1) is active at regtest snapshot_block 0+, so the
+    // round finalizes on summed signer STAKE (source-deduped, 3·Σweight > 2·S) rather
+    // than signer count. Each node is its OWN distinct staking source with weight 1,
+    // so the equal-stake mesh reduces to the same 2f+1 threshold the count rule gave:
+    // a blank/missing source fails closed in meetsStakeThreshold (never finalizes).
+    function validatorsOf(bus) { return bus.nodes.map(nd => ({ pubkey: nd.pubkey, source: 'src:' + nd.pubkey, weight: '1', amount: '1' })); }
     async function startAll(bus) { for (let nd of bus.nodes) await nd.consensus.start(); }
     function leaderPubkey(bus, matchId, view) {
         let sorted = bus.nodes.map(nd => nd.pubkey).sort();

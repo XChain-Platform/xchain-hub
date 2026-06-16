@@ -702,7 +702,7 @@ describe('XChainHub', function () {
             }, stubs.modules));
 
             let hub = new HubWithSigner('host', 3306, 'db', 'user', 'pass', { P2P_PORT: 10001 });
-            hub.peerManager = {};
+            hub.peerManager = { on: () => {} }; // startAttestation now starts FullNodeChallengeRound, which registers a peerManager 'message' handler
             await hub.startAttestation();
 
             expect(stubs.publisher.setWalletSignHook.calledOnceWith(fakeHooks.walletSignFn)).to.be.true;
@@ -722,7 +722,7 @@ describe('XChainHub', function () {
             }, stubs.modules));
 
             let hub = new HubNoSigner('host', 3306, 'db', 'user', 'pass', { P2P_PORT: 10001 });
-            hub.peerManager = {};
+            hub.peerManager = { on: () => {} }; // startAttestation now starts FullNodeChallengeRound, which registers a peerManager 'message' handler
             await hub.startAttestation();
 
             expect(stubs.publisher.setWalletSignHook.called).to.be.false;

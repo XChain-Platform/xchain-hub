@@ -23,7 +23,7 @@ let CapabilityRegistry;
 
 function loadModule(selfTestResults) {
     selfTestStubs = {};
-    let CAPS = ['price', 'cross_chain', 'oracle_publish', 'attestation'];
+    let CAPS = ['price', 'cross_chain', 'oracle_publish', 'attestation', 'full_node'];
     for (let cap of CAPS) {
         selfTestStubs[cap] = {
             selfTest: sinon.stub().resolves(
@@ -78,7 +78,7 @@ describe('CapabilityRegistry', function () {
         it('loads KNOWN_CAPABILITIES from module export', function () {
             loadModule();
             let { KNOWN_CAPABILITIES } = require('../../src/CapabilityRegistry');
-            expect(KNOWN_CAPABILITIES).to.deep.equal(['price', 'cross_chain', 'oracle_publish', 'attestation']);
+            expect(KNOWN_CAPABILITIES).to.deep.equal(['price', 'cross_chain', 'oracle_publish', 'attestation', 'full_node']);
         });
 
         it('seeds capConfig from p2pConfig.CAPABILITIES', function () {
@@ -106,11 +106,11 @@ describe('CapabilityRegistry', function () {
     // ── getCapabilities ──────────────────────────────────────────────────────
 
     describe('getCapabilities()', function () {
-        it('returns all four known capabilities', function () {
+        it('returns all five known capabilities', function () {
             loadModule();
             let hub = makeHub();
             let reg = new CapabilityRegistry(hub);
-            expect(reg.getCapabilities()).to.deep.equal(['price', 'cross_chain', 'oracle_publish', 'attestation']);
+            expect(reg.getCapabilities()).to.deep.equal(['price', 'cross_chain', 'oracle_publish', 'attestation', 'full_node']);
         });
 
         it('returns a copy (mutations do not affect internal state)', function () {
@@ -119,7 +119,7 @@ describe('CapabilityRegistry', function () {
             let reg = new CapabilityRegistry(hub);
             let caps = reg.getCapabilities();
             caps.push('bogus');
-            expect(reg.getCapabilities()).to.have.length(4);
+            expect(reg.getCapabilities()).to.have.length(5);
         });
     });
 
@@ -426,7 +426,7 @@ describe('CapabilityRegistry', function () {
             let hub = makeHub({ db, p2pConfig: { DISABLED_CAPABILITIES: [] } });
             let reg = new CapabilityRegistry(hub);
             let results = await reg.runAllSelfTests('mypubkey');
-            expect(results).to.have.length(4);
+            expect(results).to.have.length(5);
             let priceResult = results.find(r => r.capability === 'price');
             expect(priceResult.ok).to.be.true;
             let ccResult = results.find(r => r.capability === 'cross_chain');
