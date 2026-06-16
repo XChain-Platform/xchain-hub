@@ -688,7 +688,7 @@ describe('XChainHub', function () {
             return {
                 publisher,
                 modules: {
-                    './ProviderRegistry.js':       function () { return { load: sinon.stub().resolves(), listProviderIds: sinon.stub().returns([]) }; },
+                    './ProviderRegistry.js':       function () { return { load: sinon.stub().resolves(), loadGovernanceHistory: sinon.stub().resolves(), listProviderIds: sinon.stub().returns([]) }; },
                     './AttestationConsensus.js':   function () { return { start: sinon.stub().resolves(), on: sinon.stub() }; },
                     './AttestationRound.js':       function () { return { start: sinon.stub().resolves(), setConsensus: sinon.stub() }; },
                     './AttestationPublisher.js':   function () { return publisher; },

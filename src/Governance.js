@@ -25,6 +25,7 @@
 const crypto = require('crypto');
 const EventEmitter = require('events');
 const { parseCapabilityMinStakeParam } = require('./CapabilityRegistry.js');
+const { parseAttestationProviderParam } = require('./ProviderRegistry.js');
 
 const GOV_PROPOSE = 'GOV_PROPOSE';
 const GOV_VOTE    = 'GOV_VOTE';
@@ -183,8 +184,11 @@ class Governance extends EventEmitter {
         // Validate change bounds
         this._validateChangeBounds(parameter, currentValue, proposedValue);
 
-        // Block-anchor capability MIN_STAKE changes (#3703); other parameters carry no activation block.
-        let activation = parseCapabilityMinStakeParam(parameter)
+        // Block-anchor capability MIN_STAKE changes (#3703) and ATTESTATION_PROVIDER
+        // config changes (so the LLM fetch/judge model is federation-deterministic at
+        // the request's block); other parameters carry no activation block because their
+        // consumers are not block-anchored.
+        let activation = (parseCapabilityMinStakeParam(parameter) || parseAttestationProviderParam(parameter))
             ? this._computeActivationBlock(activationBlock)
             : null;
 

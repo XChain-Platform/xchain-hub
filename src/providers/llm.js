@@ -90,7 +90,14 @@ exports.fetch = async (payload, options) => {
     if (envelope.envelope_version !== undefined && Number(envelope.envelope_version) > PROMPT_ENVELOPE_VERSION)
         throw new Error('llm: unsupported envelope_version (got ' + envelope.envelope_version + ', max ' + PROMPT_ENVELOPE_VERSION + ')');
 
-    let model = process.env.LLM_DEFAULT_MODEL || APPROVED_MODELS[0];
+    // The fetch model is supplied by the caller as options.pinnedModel, resolved
+    // from the block-anchored provider config at the request's block so every
+    // validator fetches with the SAME model. The per-operator process.env
+    // LLM_DEFAULT_MODEL override is deliberately NOT consulted here: it was an
+    // un-governed divergence source (different validators fetching with different
+    // models produce more divergent bodies, making the leader's judge return
+    // equivalent=false and the round fail to no_quorum).
+    let model = options.pinnedModel || APPROVED_MODELS[0];
     if (APPROVED_MODELS.indexOf(model) === -1) model = APPROVED_MODELS[0];
 
     let maxTokens   = Math.min(Number(envelope.max_tokens) || MAX_TOKENS_DEFAULT, MAX_TOKENS_DEFAULT);
@@ -119,11 +126,19 @@ exports.fetch = async (payload, options) => {
 // candidate responses, run JUDGE_MODEL at temperature=0, parse JSON
 // verdict { equivalent, canonical_index } and return the canonical
 // proposal (or null on no_quorum).
-exports.agree = async (proposals) => {
+exports.agree = async (proposals, options) => {
+    options = options || {};
     if (!Array.isArray(proposals) || proposals.length === 0) return null;
     if (proposals.length === 1) {
         return { body: proposals[0].body, meta: proposals[0].meta };
     }
+
+    // The judge model is supplied by the leader as options.pinnedJudgeModel,
+    // resolved from the block-anchored provider config at the request's block, so
+    // it does not depend on this hub's module-mutable JUDGE_MODEL (which a
+    // governance hotReload can change mid-round). Fall back to JUDGE_MODEL only
+    // when no pinned value is provided (e.g. a non-consensus caller).
+    let judgeModel = options.pinnedJudgeModel || JUDGE_MODEL;
 
     let candidates = proposals.map(p => Buffer.isBuffer(p.body) ? p.body.toString('utf8') : String(p.body || ''));
     let judgePrompt = _buildJudgePrompt(candidates);
@@ -132,7 +147,7 @@ exports.agree = async (proposals) => {
     try {
         judgeText = await _runLlm({
             prompt:      judgePrompt,
-            model:       JUDGE_MODEL,
+            model:       judgeModel,
             maxTokens:   256,
             temperature: 0
         });

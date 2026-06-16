@@ -449,26 +449,84 @@ describe('llm provider — fetch via anthropic_api', function () {
         expect(err.message).to.match(/empty text/);
     });
 
-    it('rejects when the LLM_DEFAULT_MODEL env var is set to an unapproved model (falls back to approved)', async function () {
+    it('ignores process.env.LLM_DEFAULT_MODEL (removed from the consensus path)', async function () {
         const llm = _reloadProvider();
+        let capturedBody;
         nock('https://api.anthropic.com')
-            .post('/v1/messages')
+            .post('/v1/messages', (body) => { capturedBody = body; return true; })
             .reply(200, {
                 content: [{ type: 'text', text: 'ok' }],
                 usage:   { input_tokens: 5, output_tokens: 1 }
             });
 
-        process.env.LLM_DEFAULT_MODEL = 'gpt-4-not-approved';
+        process.env.LLM_DEFAULT_MODEL = 'claude-opus-4-7';  // an APPROVED model, but env must be ignored
         let result;
         try {
             result = await withApiKey(() =>
-                llm.fetch(JSON.stringify({ prompt: 'Q?' }), {})
+                // pinnedModel is the only model source; env is no longer consulted
+                llm.fetch(JSON.stringify({ prompt: 'Q?' }), { pinnedModel: 'claude-sonnet-4-6' })
             );
         } finally {
             delete process.env.LLM_DEFAULT_MODEL;
         }
-        // Should succeed using the first approved model as fallback
         expect(result).to.exist;
+        expect(capturedBody.model).to.equal('claude-sonnet-4-6');  // pinnedModel wins, env disregarded
+    });
+
+    it('fetch() uses options.pinnedModel for the request model', async function () {
+        const llm = _reloadProvider();
+        let capturedBody;
+        nock('https://api.anthropic.com')
+            .post('/v1/messages', (body) => { capturedBody = body; return true; })
+            .reply(200, { content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 1, output_tokens: 1 } });
+
+        await withApiKey(() =>
+            llm.fetch(JSON.stringify({ prompt: 'Q?' }), { pinnedModel: 'claude-opus-4-7' })
+        );
+        expect(capturedBody.model).to.equal('claude-opus-4-7');
+    });
+
+    it('fetch() falls back to APPROVED_MODELS[0] when pinnedModel is not approved', async function () {
+        const llm = _reloadProvider();
+        let capturedBody;
+        nock('https://api.anthropic.com')
+            .post('/v1/messages', (body) => { capturedBody = body; return true; })
+            .reply(200, { content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 1, output_tokens: 1 } });
+
+        await withApiKey(() =>
+            llm.fetch(JSON.stringify({ prompt: 'Q?' }), { pinnedModel: 'gpt-4-not-approved' })
+        );
+        expect(capturedBody.model).to.equal('claude-sonnet-4-6');  // default APPROVED_MODELS[0]
+    });
+
+    it('agree() uses options.pinnedJudgeModel for the judge call', async function () {
+        const llm = _reloadProvider();
+        let capturedBody;
+        nock('https://api.anthropic.com')
+            .post('/v1/messages', (body) => { capturedBody = body; return true; })
+            .reply(200, {
+                content: [{ type: 'text', text: '{"equivalent":true,"canonical_index":1}' }],
+                usage:   { input_tokens: 1, output_tokens: 1 }
+            });
+
+        const proposals = [{ body: Buffer.from('a'), meta: 'm' }, { body: Buffer.from('a'), meta: 'm' }];
+        await withApiKey(() => llm.agree(proposals, { pinnedJudgeModel: 'claude-opus-4-7' }));
+        expect(capturedBody.model).to.equal('claude-opus-4-7');
+    });
+
+    it('agree() falls back to the module JUDGE_MODEL when no pinnedJudgeModel is given', async function () {
+        const llm = _reloadProvider();
+        let capturedBody;
+        nock('https://api.anthropic.com')
+            .post('/v1/messages', (body) => { capturedBody = body; return true; })
+            .reply(200, {
+                content: [{ type: 'text', text: '{"equivalent":true,"canonical_index":1}' }],
+                usage:   { input_tokens: 1, output_tokens: 1 }
+            });
+
+        const proposals = [{ body: Buffer.from('a'), meta: 'm' }, { body: Buffer.from('a'), meta: 'm' }];
+        await withApiKey(() => llm.agree(proposals));  // no options
+        expect(capturedBody.model).to.equal('claude-haiku-4-5');  // module default JUDGE_MODEL
     });
 
     it('accumulates token usage across multiple calls', async function () {

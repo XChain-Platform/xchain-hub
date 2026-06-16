@@ -7,7 +7,7 @@
  *
  * This file is part of XChain Platform. Licensed under the GNU Affero
  * General Public License v3.0 or later; see LICENSE.md. A commercial
- * license (without AGPL source-disclosure terms) is available —
+ * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
  **********************************************************************
@@ -234,6 +234,11 @@ class AttestationConsensus extends EventEmitter {
             // Set once provider.agree() picks a winner from accumulated proposals
             winner:       null,
             status:       'ok',
+            // Model identity snapshotted by AttestationRound at round start (Phase
+            // 2: block-anchored at the request's block). Threaded into the leader's
+            // provider.agree() call so the judge model cannot drift mid-round via a
+            // governance hotReload of the module-mutable JUDGE_MODEL.
+            pinnedJudgeModel: roundState.pinnedJudgeModel || null,
             finalized:    false,
             timer:        null
         };
@@ -395,7 +400,7 @@ class AttestationConsensus extends EventEmitter {
         pending._agreeing = true;
         let winner;
         try {
-            winner = await Promise.resolve(providerModule.agree(proposalsArr));
+            winner = await Promise.resolve(providerModule.agree(proposalsArr, { pinnedJudgeModel: pending.pinnedJudgeModel || null }));
         } catch (e) {
             console.warn('AttestationConsensus: agree() threw for ' + rid.substring(0,16) + '...: ', e);
             winner = null;
@@ -695,7 +700,8 @@ class AttestationConsensus extends EventEmitter {
 
         // Free memory shortly
         this.earlyCommits.delete(rid);
-        setTimeout(() => this.pending.delete(rid), 10000);
+        let evictTimer = setTimeout(() => this.pending.delete(rid), 10000);
+        if (evictTimer.unref) evictTimer.unref();  // housekeeping timer — never pin process liveness
     }
 
     // Record a finalized request ID, evicting the oldest once the ring-buffer

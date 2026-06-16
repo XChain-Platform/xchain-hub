@@ -317,4 +317,93 @@ describe('ProviderRegistry', function () {
             expect(reg.isDeadlineAllowed('bogus', 100, 110)).to.be.false;
         });
     });
+
+    // ── Block-anchored provider-config history (consensus model identity) ─────
+
+    describe('parseAttestationProviderParam', function () {
+        it('parses ATTESTATION_PROVIDER:<id> into the provider id', function () {
+            expect(ProviderRegistry.parseAttestationProviderParam('ATTESTATION_PROVIDER:llm')).to.equal('llm');
+        });
+        it('returns null for non-provider parameters', function () {
+            expect(ProviderRegistry.parseAttestationProviderParam('CAPABILITY_PRICE_MIN_STAKE')).to.equal(null);
+            expect(ProviderRegistry.parseAttestationProviderParam('')).to.equal(null);
+            expect(ProviderRegistry.parseAttestationProviderParam(null)).to.equal(null);
+        });
+    });
+
+    describe('getAdditionalConfig (block-anchored)', function () {
+        it('returns the genesis config before any activation', function () {
+            let reg = new ProviderRegistry(makeHub());
+            reg._seedProviderConfigGenesis();
+            let ac = reg.getAdditionalConfig('llm', 500);
+            expect(ac.approved_models[0]).to.equal('claude-sonnet-4-6');
+            expect(ac.judge_model).to.equal('claude-haiku-4-5');
+        });
+
+        it('resolves the activation-N config at block N and later, genesis before', function () {
+            let reg = new ProviderRegistry(makeHub());
+            reg._seedProviderConfigGenesis();
+            reg.applyProviderConfigActivation('llm', 1000, { approved_models: ['claude-opus-4-8'], judge_model: 'claude-haiku-4-6' });
+            expect(reg.getAdditionalConfig('llm', 999).approved_models[0]).to.equal('claude-sonnet-4-6');
+            expect(reg.getAdditionalConfig('llm', 1000).approved_models[0]).to.equal('claude-opus-4-8');
+            expect(reg.getAdditionalConfig('llm', 5000).judge_model).to.equal('claude-haiku-4-6');
+        });
+
+        it('falls back to the current def additional_config when no history exists', function () {
+            let reg = new ProviderRegistry(makeHub());
+            // No _seedProviderConfigGenesis call: history is empty.
+            let ac = reg.getAdditionalConfig('llm', 100);
+            expect(ac.approved_models[0]).to.equal('claude-sonnet-4-6');
+        });
+    });
+
+    describe('applyProviderConfigActivation', function () {
+        it('is idempotent by activation_block (overwrites, no duplicate entry)', function () {
+            let reg = new ProviderRegistry(makeHub());
+            reg._seedProviderConfigGenesis();
+            reg.applyProviderConfigActivation('llm', 2000, { approved_models: ['a'] });
+            reg.applyProviderConfigActivation('llm', 2000, { approved_models: ['b'] });
+            let hist = reg.providerConfigHistory.get('llm');
+            expect(hist.filter(e => e.activation_block === 2000).length).to.equal(1);
+            expect(reg.getAdditionalConfig('llm', 2000).approved_models[0]).to.equal('b');
+        });
+
+        it('rejects an invalid activation_block', function () {
+            let reg = new ProviderRegistry(makeHub());
+            expect(() => reg.applyProviderConfigActivation('llm', -1, {})).to.throw(/invalid activation_block/);
+            expect(() => reg.applyProviderConfigActivation('llm', 'x', {})).to.throw(/invalid activation_block/);
+        });
+    });
+
+    describe('loadGovernanceHistory', function () {
+        it('seeds genesis then layers passed ATTESTATION_PROVIDER proposals by activation_block', async function () {
+            let db = {
+                getConfig: sinon.stub().resolves({}),
+                doQuery:   sinon.stub().resolves([
+                    { parameter: 'ATTESTATION_PROVIDER:llm', activation_block: 3000,
+                      proposed_value: JSON.stringify({ additional_config: { approved_models: ['claude-opus-4-8'], judge_model: 'claude-haiku-4-6' } }) },
+                    { parameter: 'CAPABILITY_PRICE_MIN_STAKE', activation_block: 3500, proposed_value: '50000' }
+                ])
+            };
+            let reg = new ProviderRegistry(makeHub({ db }));
+            await reg.loadGovernanceHistory();
+            // Genesis still resolves below the activation.
+            expect(reg.getAdditionalConfig('llm', 2999).approved_models[0]).to.equal('claude-sonnet-4-6');
+            // The provider proposal applies at its block; the capability row is ignored.
+            expect(reg.getAdditionalConfig('llm', 3000).approved_models[0]).to.equal('claude-opus-4-8');
+        });
+
+        it('accepts a bare additional_config object as proposed_value', async function () {
+            let db = {
+                getConfig: sinon.stub().resolves({}),
+                doQuery:   sinon.stub().resolves([
+                    { parameter: 'ATTESTATION_PROVIDER:llm', activation_block: 4000,
+                      proposed_value: JSON.stringify({ approved_models: ['claude-opus-4-8'] }) }
+                ])
+            };
+            let reg = new ProviderRegistry(makeHub({ db }));
+            await reg.loadGovernanceHistory();
+            expect(reg.getAdditionalConfig('llm', 4000).approved_models[0]).to.equal('claude-opus-4-8');
+        });
+    });
 });

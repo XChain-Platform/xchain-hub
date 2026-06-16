@@ -294,6 +294,10 @@ class XChainHub {
 
         this.providerRegistry = new ProviderRegistry(this);
         await this.providerRegistry.load();
+        // Rebuild the block-anchored provider-config history from finalized governance
+        // proposals so a freshly-started hub resolves the same fetch/judge model for every
+        // block as a long-running one (mirror of capabilityRegistry.loadGovernanceHistory).
+        await this.providerRegistry.loadGovernanceHistory();
 
         this.attestationConsensus = new AttestationConsensus(this, this.providerRegistry);
         this.attestationRound     = new AttestationRound(this, this.providerRegistry);
@@ -333,6 +337,14 @@ class XChainHub {
             this.governance.on('proposal:finalized', (ev) => {
                 this._applyCapabilityGovernanceChange(ev).catch(e =>
                     console.error('Capability config hot-reload failed:', e));
+            });
+
+            // Append block-anchored ATTESTATION_PROVIDER config changes to the provider
+            // config history so the LLM fetch/judge model resolves deterministically at the
+            // request's block on every hub. No-op for non-provider params.
+            this.governance.on('proposal:finalized', (ev) => {
+                this._applyProviderGovernanceChange(ev).catch(e =>
+                    console.error('Provider config history update failed:', e));
             });
         }
 
@@ -1289,6 +1301,33 @@ class XChainHub {
         // stake poll (_pollOwnStake) reconciles with fresh on-chain truth on its
         // next tick; doing it here too closes the window without waiting for it.
         await this.refreshOwnQualification(this._latestStakeAmount, this._latestBlockIndex);
+    }
+
+    // Apply a finalized ATTESTATION_PROVIDER governance change to the block-anchored
+    // provider-config history. Mirror of _applyCapabilityGovernanceChange: append the new
+    // config keyed by the proposer-declared activation_block rather than overwriting a live
+    // value, so every hub resolves the same fetch/judge model for every block even though
+    // they finalize at different wall-clock moments. A finalized provider-config proposal
+    // with no activation_block is ignored here rather than applied unanchored.
+    async _applyProviderGovernanceChange(ev){
+        if(!ev || !ev.parameter || !this.providerRegistry) return;
+        let providerId = ProviderRegistry.parseAttestationProviderParam(ev.parameter);
+        if(!providerId) return;
+        if(ev.activationBlock === undefined || ev.activationBlock === null || !Number.isInteger(Number(ev.activationBlock))){
+            console.warn('Governance ATTESTATION_PROVIDER change for ' + providerId +
+                ' has no activation_block; not applying (would be unanchored, risking cross-hub divergence)');
+            return;
+        }
+        let ac;
+        try {
+            let parsed = JSON.parse(String(ev.newValue));
+            ac = (parsed && parsed.additional_config) ? parsed.additional_config : parsed;
+        } catch (e) {
+            console.warn('Governance ATTESTATION_PROVIDER change for ' + providerId +
+                ' has unparseable proposed_value; not applying:', e && e.message ? e.message : e);
+            return;
+        }
+        this.providerRegistry.applyProviderConfigActivation(providerId, Number(ev.activationBlock), ac);
     }
 
     // Parse a governance parameter name of the form CAPABILITY_<CAP>_MIN_STAKE

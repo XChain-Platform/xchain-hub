@@ -268,6 +268,20 @@ class AttestationRound {
 
         let providerDef = this.providerRegistry.getDef(providerId);
 
+        // Resolve the provider's model identity from the BLOCK-ANCHORED provider
+        // config at the request's block (snapshotBlk), so every hub fetches and
+        // judges with the same model for this request regardless of when its local
+        // governance change finalized, and a governance change activated at a later
+        // block cannot alter an in-flight round. Mirrors the block-anchored MIN_STAKE
+        // resolution that locks the responsible set.
+        let pinnedAc = this.providerRegistry.getAdditionalConfig(providerId, snapshotBlk) || {};
+        let pinnedFetchModel = (Array.isArray(pinnedAc.approved_models) && pinnedAc.approved_models[0]) || null;
+        let pinnedJudgeModel = pinnedAc.judge_model || null;
+        if(!pinnedFetchModel){
+            console.warn('AttestationRound: provider "' + providerId + '" has no approved_models at block ' +
+                         snapshotBlk + '; fetch falls back to the provider module default (un-pinned)');
+        }
+
         // Hub-local min_fee floor (E1, governance-synced via the provider
         // definition). Below-floor requests are skipped BEFORE any provider
         // fetch; with every hub applying the same floor the request simply
@@ -288,7 +302,8 @@ class AttestationRound {
         try {
             fetched = await providerModule.fetch(request.payload, {
                 maxResponseBytes: providerDef.max_response_bytes,
-                timeoutMs:        this.fetchTimeoutMs
+                timeoutMs:        this.fetchTimeoutMs,
+                pinnedModel:      pinnedFetchModel
             });
         } catch (e) {
             console.warn('AttestationRound: fetch failed for ' + rid.substring(0,16) + '...: ', e);
@@ -307,6 +322,7 @@ class AttestationRound {
             redundancy:     redundancy,
             providerId:     providerId,
             myProposal:     { body: fetched.body, meta: fetched.meta },
+            pinnedJudgeModel: pinnedJudgeModel,
             proposedAt:     Date.now()
         };
         this.rounds.set(rid, roundState);

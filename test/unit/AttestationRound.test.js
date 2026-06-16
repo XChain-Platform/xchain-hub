@@ -55,6 +55,7 @@ function makeProviderRegistry(overrides) {
         isKnown:   sinon.stub().returns(true),
         getModule: sinon.stub().returns({ fetch: sinon.stub().resolves({ body: 'data', meta: '200' }) }),
         getDef:    sinon.stub().returns({ max_response_bytes: 32768 }),
+        getAdditionalConfig: sinon.stub().returns({ approved_models: ['claude-sonnet-4-6'], judge_model: 'claude-haiku-4-5' }),
         ...(overrides || {})
     };
 }
@@ -557,6 +558,31 @@ describe('AttestationRound', function () {
             let [rid, state] = consensus.propose.firstCall.args;
             expect(rid).to.equal('rid0001');
             expect(state.role).to.equal('leader');
+        });
+
+        it('snapshots the block-anchored model: pinnedModel into fetch, pinnedJudgeModel into roundState', async function () {
+            let myPubkey = 'aa'.repeat(32);
+            let capSS = { getSnapshot: sinon.stub().resolves({ validators: [{ pubkey: myPubkey }] }) };
+            let hub   = makeHub({ capabilitySnapshot: capSS });
+            hub.getIdentity = () => makeIdentity(myPubkey);
+            let fetchStub = sinon.stub().resolves({ body: Buffer.from('ok'), meta: 'claude-opus-4-8' });
+            let reg = makeProviderRegistry({
+                getModule: sinon.stub().returns({ fetch: fetchStub }),
+                // Block-anchored config resolved at the request's block.
+                getAdditionalConfig: sinon.stub().returns({ approved_models: ['claude-opus-4-8'], judge_model: 'claude-haiku-4-6' })
+            });
+            let ar  = new AttestationRound(hub, reg);
+            sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: myPubkey, hash: '00' }]);
+            let consensus = { propose: sinon.stub().resolves() };
+            ar.setConsensus(consensus);
+            await ar._startRound(makeRequest());
+            // fetch() received the block-anchored fetch model (approved_models[0]).
+            expect(fetchStub.firstCall.args[1].pinnedModel).to.equal('claude-opus-4-8');
+            // roundState carries the block-anchored judge model into consensus.
+            let state = consensus.propose.firstCall.args[1];
+            expect(state.pinnedJudgeModel).to.equal('claude-haiku-4-6');
+            // getAdditionalConfig was resolved at the request's block_index.
+            expect(reg.getAdditionalConfig.calledWith('http_get', sinon.match.any)).to.be.true;
         });
     });
 

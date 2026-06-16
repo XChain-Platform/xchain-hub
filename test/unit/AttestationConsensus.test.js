@@ -657,6 +657,22 @@ describe('AttestationConsensus — judge_model winner-selection is leader-gated 
         expect(pending.winner).to.not.equal(null);
     });
 
+    it('threads the round-snapshotted pinnedJudgeModel into agree() (immune to module JUDGE_MODEL drift)', async function () {
+        let agreeSpy = sinon.spy(proposals => proposals[0]);
+        c = new AttestationConsensus(hub, makeRealProviderRegistry(agreeSpy, 'judge_model'));
+        // roundState() makes `me` the leader. AttestationRound snapshots the judge
+        // model at round start; a later governance hotReload of the module-mutable
+        // JUDGE_MODEL must not change what THIS round judges with.
+        let rs = roundState(me, [me, p1, p2], BODY, 'llm', 2);
+        rs.pinnedJudgeModel = 'claude-opus-4-7';
+        await c.propose(RID, rs);
+        await flush();
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
+        await flush();
+        expect(agreeSpy.called).to.equal(true);
+        expect(agreeSpy.firstCall.args[1]).to.deep.equal({ pinnedJudgeModel: 'claude-opus-4-7' });
+    });
+
     it('a follower converges by adopting + re-signing the leader\'s winning body', async function () {
         c = new AttestationConsensus(hub, makeRealProviderRegistry(p => p[0], 'judge_model'));
         let myBody = Buffer.from('my-own-divergent-body');
