@@ -175,14 +175,12 @@ describe('FullNodeChallengeRound', function () {
             expect(eng._isLeader(st, ranked[0])).to.equal(true);
             expect(eng._isLeader(st, ranked[1])).to.equal(false);
         });
-        it('promotes the next rank after a collection window (failover)', function () {
+        it('promotes the next rank as a chain-based failover (state.leadRank)', function () {
             const eng = new FullNodeChallengeRound(makeHub());
-            eng.collectMs = 1000;
             const ranked = [V1, V2].map(pk => ({ pk, h: crypto.createHash('sha256').update('cid').update(pk).digest('hex') }))
                 .sort((a, b) => a.h < b.h ? -1 : 1).map(r => r.pk);
-            const start = 10000;
-            const st = state([V1, V2], start);
-            sinon.stub(Date, 'now').returns(start + 1500);        // 1 window elapsed
+            const st = state([V1, V2], 0);
+            st.leadRank = 1;                                      // _tick promoted rank 1 (no verdict landed)
             expect(eng._isLeader(st, ranked[1])).to.equal(true);
             expect(eng._isLeader(st, ranked[0])).to.equal(false); // rank-0 stood down
         });
@@ -291,15 +289,38 @@ describe('FullNodeChallengeRound', function () {
             expect(hub.slashDetector._recordSlashProposal.called).to.equal(false);
         });
 
-        it('records a slash proposal for a claimant with no answer', async function () {
-            const hub = makeHub();
-            const eng = await startEpoch(hub);
-            // P1 is a staked claimant (in the snapshot) but submits nothing.
+        it('window-based slashing: slashes a claimant with no passing verdict across the window, sparing verified ones', async function () {
+            const hub = makeHub();   // identity V1 (genesis verifier + claimant)
+            hub.capabilitySnapshot.getSnapshot.resolves({ validators: [{ pubkey: V1 }, { pubkey: P1 }, { pubkey: P2 }] });
+            // Verified set within the proof window: P2 + V1 have a passing verdict; P1 never did.
+            wireRpc({ ledgerHash: SEED, tip: 300, verifiers: [{ pubkey: P2 }, { pubkey: V1 }], block });
+            const eng = new FullNodeChallengeRound(hub);
+            eng.broadcastFn = sinon.stub().resolves({ txid: 'TX' });
+            await eng._runEpoch(288, 300);
+            // All three have been full_node claimants for at least a full proof window.
+            for (const pk of [V1, P1, P2]) eng.claimantFirstSeen.set(pk, 288 - eng.proofWindow);
             await eng._closeCollection(288);
-            const call = hub.slashDetector._recordSlashProposal.getCalls()
-                .find(c => c.args[0] === P1 && c.args[1] === 'failed_full_node_challenge');
-            expect(call, 'slash proposal for the silent claimant').to.exist;
-            expect(call.args[3].reason).to.equal('no_answer');
+
+            const slashed = hub.slashDetector._recordSlashProposal.getCalls()
+                .filter(c => c.args[1] === 'failed_full_node_challenge').map(c => c.args[0]);
+            expect(slashed, 'P1 (no verdict in window) is slashed').to.include(P1);
+            expect(slashed, 'P2 (verified in window) is spared').to.not.include(P2);
+            expect(slashed, 'V1 (verified in window) is spared').to.not.include(V1);
+            const ev = JSON.parse(hub.slashDetector._recordSlashProposal.getCalls()
+                .find(c => c.args[0] === P1).args[3]);
+            expect(ev.reason).to.equal('no_verdict_in_window');
+        });
+
+        it('does not slash a claimant before a full proof window has elapsed', async function () {
+            const hub = makeHub();
+            hub.capabilitySnapshot.getSnapshot.resolves({ validators: [{ pubkey: V1 }, { pubkey: P1 }] });
+            wireRpc({ ledgerHash: SEED, tip: 300, verifiers: [], block });
+            const eng = new FullNodeChallengeRound(hub);
+            eng.broadcastFn = sinon.stub().resolves({ txid: 'TX' });
+            await eng._runEpoch(288, 300);   // first-seen = 288, window not yet elapsed
+            await eng._closeCollection(288);
+            expect(hub.slashDetector._recordSlashProposal.called,
+                'no slash within the first window').to.equal(false);
         });
 
         it('finalizes on quorum and broadcasts the on-chain verdict', async function () {
@@ -337,6 +358,35 @@ describe('FullNodeChallengeRound', function () {
             expect(st.myAnswer).to.equal(ANSWER);                 // computed for leading/verifying
             const ans = hub._pm.broadcast.getCalls().find(c => c.args[0] === 'XNODE_ANSWER' && c.args[1].sig_pubkey === V2);
             expect(ans, 'a verifier-only node must NOT broadcast a possession claim').to.not.exist;
+        });
+    });
+
+    // ── chain-anchored collection close (the keystone: all hubs close a round at
+    //    the same chain height, so the leader has every answer regardless of when
+    //    each hub locally detected the epoch) ──────────────────────────────────────
+    describe('_tick chain-anchored close', function () {
+        const block = { tx: [{ vout: [{ scriptPubKey: { hex: 'deadbeef' } }] }] };
+        it('closes a round only once the tip reaches epoch + closeDepth', async function () {
+            const hub = makeHub();   // identity V1 (genesis verifier + claimant)
+            hub.capabilitySnapshot.getSnapshot.resolves({ validators: [{ pubkey: V1 }] });
+            const eng = new FullNodeChallengeRound(hub);   // closeDepth defaults to 3
+            eng.broadcastFn = sinon.stub().resolves({ txid: 'TX' });
+
+            // tip = 288 → round created for epoch 288; close not due until tip ≥ 291.
+            wireRpc({ ledgerHash: SEED, tip: 288, verifiers: [], block });
+            await eng._tick();
+            expect(eng.rounds.has(288), 'round started').to.equal(true);
+            expect(eng.rounds.get(288).closed, 'open at tip 288').to.equal(false);
+
+            // tip = 290 (< epoch + closeDepth) → still open.
+            wireRpc({ ledgerHash: SEED, tip: 290, verifiers: [], block });
+            await eng._tick();
+            expect(eng.rounds.get(288).closed, 'open at tip 290').to.equal(false);
+
+            // tip = 291 (= epoch + closeDepth) → closes.
+            wireRpc({ ledgerHash: SEED, tip: 291, verifiers: [], block });
+            await eng._tick();
+            expect(eng.rounds.get(288).closed, 'closed at tip 291').to.equal(true);
         });
     });
 });

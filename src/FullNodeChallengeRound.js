@@ -69,6 +69,11 @@ class FullNodeChallengeRound {
         this.acceptWindow  = parseInt(process.env.FULLNODE_VERDICT_ACCEPT_WINDOW_BLOCKS || fn.VERDICT_ACCEPT_WINDOW_BLOCKS || '24');
         this.pollMs        = parseInt(process.env.FULLNODE_POLL_MS    || fn.POLL_MS    || '30000');
         this.collectMs     = parseInt(process.env.FULLNODE_COLLECT_MS || fn.COLLECT_MS || '20000');
+        this.proofWindow   = parseInt(process.env.FULLNODE_PROOF_WINDOW_BLOCKS || fn.PROOF_WINDOW_BLOCKS || '300');
+        // Collection closes when the tip reaches epoch + closeDepth blocks — anchored
+        // to chain height (shared by all hubs), NOT each hub's local detection time,
+        // so the leader has every claimant's answer before it proposes the PASS list.
+        this.closeDepth    = parseInt(process.env.FULLNODE_COLLECT_DEPTH_BLOCKS || fn.COLLECT_DEPTH_BLOCKS || '3');
         this.genesis       = new Set((fn.GENESIS_VERIFIERS || [])
                                 .filter(p => /^[0-9a-fA-F]{64}$/.test(String(p)))
                                 .map(p => String(p).toLowerCase()));
@@ -95,6 +100,9 @@ class FullNodeChallengeRound {
         this.btcAddress   = process.env.BTC_ADDRESS || cfg.BTC_ADDRESS || '';
 
         this.rounds   = new Map();  // epoch → round state
+        // Window-based slashing bookkeeping (see _evaluatePersistentFailures).
+        this.claimantFirstSeen = new Map();  // pubkey → first epoch observed as a full_node claimant (local; resets on restart)
+        this.persistentSlashed = new Set();  // pubkeys already slash-proposed for persistent failure (re-armed on recovery)
         this._timer   = null;
         this._handler = (env) => this._handleMessage(env);
     }
@@ -155,6 +163,24 @@ class FullNodeChallengeRound {
         let tipBlock = tip && tip.block_index != null ? Number(tip.block_index) : null;
         if(tipBlock == null) return;
 
+        // Close (and eventually prune) open rounds by CHAIN HEIGHT: every hub closes
+        // a round at the same chain point (tip ≥ epoch + closeDepth), regardless of
+        // when it locally detected the epoch — so the leader has collected every
+        // claimant's answer (which were all broadcast within ~1 block of the epoch).
+        for(let [e, st] of this.rounds){
+            if(!st.finalized && tipBlock >= e + this.closeDepth){
+                // Chain-based leader failover: rank 0 leads at the close point; each
+                // further closeDepth of height with no verdict promotes the next rank.
+                let rank = Math.floor((tipBlock - (e + this.closeDepth)) / Math.max(1, this.closeDepth));
+                if(!st.closed || rank > st.leadRank){
+                    st.closed = true;
+                    st.leadRank = rank;
+                    this._closeCollection(e).catch(err => console.warn('FullNodeChallengeRound close:', err && err.message));
+                }
+            }
+            if((tipBlock - e) > (this.acceptWindow + this.closeDepth + this.interval)) this.rounds.delete(e);
+        }
+
         // The most recent epoch boundary that is both buried enough for a stable
         // target block and still inside the verdict-acceptance window.
         let epoch = Math.floor(tipBlock / this.interval) * this.interval;
@@ -185,6 +211,8 @@ class FullNodeChallengeRound {
             myAnswer: null,
             finalized: false,
             slashed: false,
+            closed: false,
+            leadRank: 0,
             startedAt: Date.now(),
             txid: null,
         };
@@ -216,9 +244,11 @@ class FullNodeChallengeRound {
                     '... target=' + target + ' eligible=' + eligible.size + ' claimants=' + claimants.size +
                     ' leader=' + (this._isLeader(state, myPubkey) ? 'me' : 'peer'));
 
-        // After the collection window: the leader proposes the PASS list; every
-        // node records local slash proposals for claimants that didn't pass.
-        setTimeout(() => { this._closeCollection(epoch).catch(e => console.warn('FullNodeChallengeRound close:', e && e.message)); }, this.collectMs);
+        // Collection closes from _tick once the tip reaches epoch + closeDepth
+        // (chain-anchored) — the leader then proposes the PASS list and every node
+        // evaluates window-based slashing. No wall-clock timer: a hub that detects
+        // the epoch earlier must not close before peers (on a slightly later poll)
+        // have broadcast their answers.
     }
 
     async _closeCollection(epoch){
@@ -226,27 +256,16 @@ class FullNodeChallengeRound {
         if(!state) return;
         let myPubkey = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
 
-        // Local slash proposals: a claimant that staked full_node but produced no
-        // answer — or a WRONG one vs. our own — failed the challenge. Recorded
-        // locally on every verifying hub (matches SlashDetector's local model).
-        // Done BEFORE the finalized check: a fast quorum may have already landed a
-        // verdict (and XNODE_DONE flipped state.finalized) before this collection
-        // timer fires — the local failure observation still stands. Evidence is
-        // JSON-stringified to match SlashDetector's other callers / the column type.
-        if(!state.slashed && this.slashDetector && myPubkey && state.myAnswer){
+        // Slashing is WINDOW-based, not per-epoch: a single epoch's local answer
+        // collection is unreliable (hubs detect the epoch up to POLL_MS apart, so a
+        // hub can close its collection window before a peer has even broadcast — see
+        // _evaluatePersistentFailures). Slashing on that local view falsely penalises
+        // honest validators. Instead, only propose a slash for a claimant with NO
+        // passing verdict across the proof window.
+        if(!state.slashed){
             state.slashed = true;
-            for(let pk of state.claimants){
-                let a = state.answers.get(pk);
-                if(a === state.myAnswer) continue;
-                let reason = (a === undefined) ? 'no_answer' : 'wrong_answer';
-                try {
-                    await this.slashDetector._recordSlashProposal(pk, 'failed_full_node_challenge', epoch, JSON.stringify({
-                        challengeId: state.challengeId, epoch, target: state.target, reason,
-                        submittedAnswerHash: a ? crypto.createHash('sha256').update(a).digest('hex') : null,
-                        expectedAnswerHash: crypto.createHash('sha256').update(state.myAnswer).digest('hex')
-                    }));
-                } catch(_){}
-            }
+            try { await this._evaluatePersistentFailures(epoch, state); }
+            catch(e){ console.warn('FullNodeChallengeRound slash-eval:', e && e.message ? e.message : e); }
         }
 
         // The PASS proposal below only applies while the round is still live.
@@ -270,6 +289,56 @@ class FullNodeChallengeRound {
                 });
                 await this._maybeFinalize(epoch);
             }
+        }
+    }
+
+    // Window-based slashing. A single epoch's local answer view is unreliable
+    // (detection skew: each hub's collection window is anchored to its OWN epoch
+    // detection, and hubs detect up to POLL_MS apart — so a hub routinely closes
+    // before a peer broadcasts, and POLL_MS can exceed COLLECT_MS). Penalising on
+    // that view falsely slashes honest validators. Instead, mirror the indexer's
+    // verification-window model: a claimant is at fault only if it has been a
+    // full_node claimant for at least a full proof window yet has NO passing verdict
+    // anywhere in that window (the indexer's verified set). A light mirror, which can
+    // never answer, fails the whole window and is caught; an honest node that misses
+    // an epoch to timing/skew passes some other epoch in the window and is spared.
+    // Only eligible verifiers attest, and each persistent failure is proposed once
+    // (re-armed if the node later recovers).
+    async _evaluatePersistentFailures(epoch, state){
+        if(!this.slashDetector) return;
+        let myPubkey = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
+        if(!myPubkey || !state.eligible.has(myPubkey)) return;   // only eligible verifiers attest failures
+
+        // Record first-seen epoch for current claimants; forget those no longer staked.
+        for(let pk of state.claimants){
+            if(!this.claimantFirstSeen.has(pk)) this.claimantFirstSeen.set(pk, epoch);
+        }
+        for(let pk of Array.from(this.claimantFirstSeen.keys())){
+            if(!state.claimants.has(pk)){ this.claimantFirstSeen.delete(pk); this.persistentSlashed.delete(pk); }
+        }
+
+        // Consensus verified set within the proof window at this epoch (on-chain verdicts).
+        let verified = new Set();
+        try {
+            let res = await this._indexerCall('getfullnodeverifiers', { block_index: epoch });
+            for(let v of ((res && res.validators) || [])){
+                let pk = String(v.pubkey || v).toLowerCase();
+                if(/^[0-9a-f]{64}$/.test(pk)) verified.add(pk);
+            }
+        } catch(_){ return; }   // can't assess without the verified set — skip this epoch
+
+        for(let pk of state.claimants){
+            if(verified.has(pk)){ this.persistentSlashed.delete(pk); continue; }   // passed in-window → re-arm
+            let firstSeen = this.claimantFirstSeen.get(pk);
+            if(firstSeen == null || (epoch - firstSeen) < this.proofWindow) continue; // not yet a full window of opportunity
+            if(this.persistentSlashed.has(pk)) continue;                              // already proposed
+            this.persistentSlashed.add(pk);
+            try {
+                await this.slashDetector._recordSlashProposal(pk, 'failed_full_node_challenge', epoch, JSON.stringify({
+                    challengeId: state.challengeId, epoch, target: state.target,
+                    reason: 'no_verdict_in_window', windowBlocks: this.proofWindow, firstSeenEpoch: firstSeen
+                }));
+            } catch(_){}
         }
     }
 
@@ -417,10 +486,10 @@ class FullNodeChallengeRound {
         })).sort((a, b) => (a.h < b.h ? -1 : a.h > b.h ? 1 : 0));
         let myRank = ranked.findIndex(r => r.pk === myPubkey);
         if(myRank < 0) return false;
-        // Rank 0 leads immediately; each elapsed collection window promotes the
-        // next rank as a failover (so a dead leader doesn't stall the epoch).
-        let elapsedWindows = Math.floor((Date.now() - state.startedAt) / Math.max(1, this.collectMs));
-        let unlockedRank = Math.min(elapsedWindows, ranked.length - 1);
+        // Rank 0 leads at the chain-anchored close; if no verdict lands, each further
+        // closeDepth of chain height promotes the next rank as a failover (chain-based
+        // so all hubs agree on who leads — escalated in _tick via state.leadRank).
+        let unlockedRank = Math.min(state.leadRank || 0, ranked.length - 1);
         return myRank === unlockedRank;
     }
 
