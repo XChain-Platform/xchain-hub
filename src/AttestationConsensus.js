@@ -471,8 +471,10 @@ class AttestationConsensus extends EventEmitter {
         this._checkPrepareQuorum(rid);
 
         // Winner is now set — replay any COMMITs that arrived (and were
-        // buffered) before this point so their votes count toward quorum.
+        // buffered) before this point so their votes count toward quorum, plus any
+        // non-leader judge_model PREPAREs buffered before the leader established it.
         this._drainEarlyCommits(rid);
+        this._drainEarlyMessages(rid);
     }
 
     _handlePrepare(envelope){
@@ -504,6 +506,21 @@ class AttestationConsensus extends EventEmitter {
         let status = String(d.status || 'ok');
 
         if(!pending.winner){
+            // judge_model is non-deterministic across hubs: only the ELECTED LEADER
+            // runs agree() and its selected body is the canonical winner. So only the
+            // leader's PREPARE may establish the winner — a Byzantine responsible
+            // non-leader that broadcasts a divergent body FIRST must not have honest
+            // followers adopt it. Buffer a non-leader judge_model PREPARE until the
+            // leader's winner lands (it then replays through the "winner already
+            // established" path below and verifies over the canonical winner) or the
+            // round expires. byte_equality is deterministic (independently-fetched
+            // identical bodies) and stays first-verified-PREPARE-wins.
+            let providerDef = this.providerRegistry.getDef(pending.providerId);
+            if(providerDef && providerDef.consensus_strategy === 'judge_model' && pending.leaderPubkey &&
+               senderPubkey !== String(pending.leaderPubkey).toLowerCase()){
+                this._bufferEarlyMessage(rid, envelope);
+                return;
+            }
             // First PREPARE we accept establishes the winner. Verify the sender's
             // signature over THEIR proposed body before adopting it — an
             // unverified PREPARE must not be allowed to set the winner.
@@ -561,8 +578,12 @@ class AttestationConsensus extends EventEmitter {
 
         // A PREPARE can be the first thing to establish our winner (when we
         // adopt the leader's body above). Replay any COMMITs buffered before
-        // then so their votes aren't lost.
-        if(pending.winner) this._drainEarlyCommits(rid);
+        // then so their votes aren't lost — and any non-leader judge_model
+        // PREPAREs buffered pre-winner, which now verify over the canonical winner.
+        if(pending.winner){
+            this._drainEarlyCommits(rid);
+            this._drainEarlyMessages(rid);
+        }
     }
 
     _checkPrepareQuorum(rid){

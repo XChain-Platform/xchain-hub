@@ -675,6 +675,37 @@ describe('AttestationConsensus — judge_model winner-selection is leader-gated 
         let canon = buildCanonical(RID, 'llm', leaderBody, 'ok', '');
         expect(ValidatorIdentity.verify(canon.toString('utf8'), pending.signatures.get(pub(me)), pub(me))).to.equal(true);
     });
+
+    it('a Byzantine non-leader PREPARE arriving FIRST does not set the winner (#4195)', async function () {
+        c = new AttestationConsensus(hub, makeRealProviderRegistry(p => p[0], 'judge_model'));
+        let rs = roundState(me, [me, p1, p2], Buffer.from('my-body'), 'llm', 2);
+        rs.leaderPubkey = pub(p1); rs.role = 'follower';   // p1 leader; p2 = Byzantine non-leader
+        await c.propose(RID, rs);
+        await flush();
+        let pending = c.pending.get(RID);
+
+        // p2 (responsible but NOT the leader) races a divergent body in first.
+        // It must be buffered, not adopted as the winner.
+        let byzBody = Buffer.from('byzantine-divergent-body');
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p2, byzBody));
+        expect(pending.winner, 'a non-leader judge_model PREPARE must not set the winner').to.equal(null);
+
+        // The leader's PREPARE establishes the real winner; the buffered Byzantine
+        // PREPARE then replays and is verified over the CANONICAL WINNER, so its
+        // signature (taken over a divergent body) cannot be credited.
+        let leaderBody = Buffer.from('leader-winning-body');
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, leaderBody));
+        await flush();
+        expect(pending.winner.body.toString(), 'winner is the leader body').to.equal('leader-winning-body');
+
+        if (pending.signatures.has(pub(p2))) {
+            let winnerCanon = buildCanonical(RID, 'llm', leaderBody, 'ok', '');
+            expect(ValidatorIdentity.verify(winnerCanon.toString('utf8'), pending.signatures.get(pub(p2)), pub(p2)),
+                'a stored p2 signature must verify over the winner, never the Byzantine body').to.equal(true);
+        }
+        // The round never adopted the Byzantine body as winner.
+        expect(pending.winner.body.toString()).to.not.equal('byzantine-divergent-body');
+    });
 });
 
 describe('AttestationConsensus — _maybeAdvanceFromProposals consensus outcomes', function () {
