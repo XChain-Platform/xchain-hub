@@ -95,4 +95,56 @@ describe('CapabilitySnapshot', function () {
             expect(Object.prototype.hasOwnProperty.call(body.params, 'min_stake')).to.equal(false);
         });
     });
+
+    // Finding #4136/#4220: a 401 (hub BTC_INDEXER_API_KEY != indexer
+    // INDEXER_API_KEY) must NOT be swallowed as an anonymous null snapshot — that
+    // makes an auth misconfig indistinguishable from a dead indexer and silently
+    // collapses every attestation + config-change quorum.
+    describe('indexer auth failure (401/403)', function () {
+
+        function err401(status) {
+            let e = new Error('Request failed with status code ' + status);
+            e.response = { status: status };
+            return e;
+        }
+
+        it('returns null AND logs a distinct auth warning on a 401', async function () {
+            axiosStub.post.rejects(err401(401));
+            let spy = sinon.spy(console, 'error');
+            let snap = new CapabilitySnapshot(makeHub(null));
+
+            let result = await snap.getSnapshot('attestation', 100);
+
+            expect(result).to.equal(null);
+            expect(spy.calledOnce).to.equal(true);
+            let msg = spy.firstCall.args[0];
+            expect(msg).to.contain('BTC_INDEXER_API_KEY');
+            expect(msg).to.contain('INDEXER_API_KEY');
+            expect(msg).to.contain('401');
+        });
+
+        it('throttles repeated auth warnings (one per cache TTL window)', async function () {
+            axiosStub.post.rejects(err401(401));
+            let spy = sinon.spy(console, 'error');
+            let snap = new CapabilitySnapshot(makeHub(null));
+
+            // Distinct keys/methods so the 60s snapshot cache never short-circuits the call.
+            await snap.getSnapshot('attestation', 100);
+            await snap.getWeightSnapshot('attestation', 101);
+            await snap.getActiveValidatorSnapshot(102);
+
+            expect(spy.callCount).to.equal(1);                 // throttled to one inside the TTL window
+        });
+
+        it('does NOT log for a transport error (no HTTP status)', async function () {
+            axiosStub.post.rejects(new Error('ECONNREFUSED'));
+            let spy = sinon.spy(console, 'error');
+            let snap = new CapabilitySnapshot(makeHub(null));
+
+            let result = await snap.getSnapshot('attestation', 100);
+
+            expect(result).to.equal(null);                     // still falls back
+            expect(spy.called).to.equal(false);                // but not flagged as auth
+        });
+    });
 });

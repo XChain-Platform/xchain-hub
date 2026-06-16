@@ -42,6 +42,31 @@ class CapabilitySnapshot {
         this.cache = new Map();
         // How long to keep a snapshot. 60s default — enough to span a PBFT round.
         this.cacheTtlMs = 60 * 1000;
+        // Last time we logged an indexer auth (401/403) failure — throttles the
+        // warning so a persistent key mismatch doesn't spam the poll loop.
+        this._authWarnAt = 0;
+    }
+
+    // Classify a federation-read failure and return null (the fetch helpers'
+    // "indexer unavailable" sentinel). A 401/403 is NOT "indexer down": it means
+    // the hub's x-api-key (BTC_INDEXER_API_KEY) does not match the indexer's
+    // INDEXER_API_KEY. Swallowed silently (as every catch did), that misconfig is
+    // indistinguishable from a dead indexer or an empty validator set, so every
+    // attestation round and config-change quorum collapses to a null snapshot
+    // while nothing points the operator at auth. Surface it distinctly, throttled.
+    _onFetchError(method, err) {
+        let status = err && err.response && err.response.status;
+        if (status === 401 || status === 403) {
+            let now = Date.now();
+            if (now - this._authWarnAt > this.cacheTtlMs) {
+                this._authWarnAt = now;
+                console.error('CapabilitySnapshot: ' + method + ' got HTTP ' + status +
+                    ' from the BTC indexer — the hub\'s x-api-key (BTC_INDEXER_API_KEY) does not match the ' +
+                    'indexer\'s INDEXER_API_KEY. Federation snapshots are NULL (attestation + config-change ' +
+                    'quorum collapse) until the two keys match.');
+            }
+        }
+        return null;
     }
 
     // Fetch (or read from cache) the deterministic validator set for the given
@@ -91,8 +116,9 @@ class CapabilitySnapshot {
             this._prune(now);
             return snapshot;
         } catch (err) {
-            // Indexer unreachable / down — caller falls back to local validator set.
-            return null;
+            // Indexer unreachable / down (or 401/403 auth mismatch) — caller falls
+            // back to local validator set; _onFetchError surfaces an auth misconfig.
+            return this._onFetchError('getcapabilityvalidators', err);
         }
     }
 
@@ -137,7 +163,7 @@ class CapabilitySnapshot {
             this._prune(now);
             return snapshot;
         } catch (err) {
-            return null;
+            return this._onFetchError('getstakeweightsbycapability', err);
         }
     }
 
@@ -175,7 +201,7 @@ class CapabilitySnapshot {
             this._prune(now);
             return snapshot;
         } catch (err) {
-            return null;
+            return this._onFetchError('getactivevalidators', err);
         }
     }
 
@@ -215,7 +241,7 @@ class CapabilitySnapshot {
             this._prune(now);
             return snapshot;
         } catch (err) {
-            return null;
+            return this._onFetchError('getactivestakeweights', err);
         }
     }
 
