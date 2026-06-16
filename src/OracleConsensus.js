@@ -304,7 +304,7 @@ class OracleConsensus extends EventEmitter {
             if (this.pendingRounds.has(round) || this.finalized.has(round)) return;
             let subs = this.oracleRound.getSubmissions(round);
             if (!subs || subs.size === 0) return;
-            this._proposeRound(round, subs, true, btcBlockHeight, btcBlockTime, snapshot, quorum);
+            this._proposeRound(round, subs, true, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted);
         }, FALLBACK_GRACE_MS);
     }
 
