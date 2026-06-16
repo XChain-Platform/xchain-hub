@@ -136,6 +136,24 @@ class ReorgHandler extends EventEmitter {
 
     // --- Message handlers ---
 
+    // Defense-in-depth: only tally votes from senders that are registered
+    // validators. PeerManager already drops any message whose signature doesn't
+    // match a registered pubkey, but counting raw envelope.sender values means a
+    // forged sender that slipped past that layer (e.g. during a null-registry
+    // window) could otherwise inflate quorum from a single connection. That risk
+    // is most acute here: reorg quorum triggers destructive cross-chain rollback
+    // (attestation deletes, price-snapshot disputes). The registry is keyed by
+    // addr — the same value used as the sender. A null registry fails closed (the
+    // vulnerability scenario); an empty registry stays lenient (genuine
+    // pre-bootstrap, where the sig layer already rejects unknown senders and no
+    // peer votes should be arriving).
+    _isKnownSender(sender) {
+        let registry = this.peerManager && this.peerManager.validatorPubkeys;
+        if (!registry) return false;
+        if (registry.size === 0) return true;
+        return registry.has(sender);
+    }
+
     _handleMessage(envelope) {
         switch (envelope.type) {
             case REORG_ALERT:          this._handleAlert(envelope);   break;
@@ -145,6 +163,7 @@ class ReorgHandler extends EventEmitter {
     }
 
     _handleAlert(envelope) {
+        if (!this._isKnownSender(envelope.sender)) return;
         let { chain, reorgHeight, timestamp, reorgId } = envelope.data;
         if (!chain || !reorgHeight || !timestamp || !reorgId) return;
         if (this.processed.has(reorgId)) return;
@@ -209,6 +228,7 @@ class ReorgHandler extends EventEmitter {
     }
 
     _handlePrepare(envelope) {
+        if (!this._isKnownSender(envelope.sender)) return;
         let { reorgId, chain, reorgHeight, timestamp, affectedChains, digest } = envelope.data;
         if (!reorgId || !digest) return;
 
@@ -254,6 +274,7 @@ class ReorgHandler extends EventEmitter {
     }
 
     _handleCommit(envelope) {
+        if (!this._isKnownSender(envelope.sender)) return;
         let { reorgId, digest } = envelope.data;
         if (!reorgId || !digest) return;
 
