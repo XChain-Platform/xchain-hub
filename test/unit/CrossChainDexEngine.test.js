@@ -661,4 +661,48 @@ describe('CrossChainDexEngine', function () {
             expect(emitted).to.be.true;
         });
     });
+
+    // ── L4 determinism — match canonicalization (spec §6) ─────────────────────
+    // Two hubs must derive a byte-identical canonical (→ match_id / settlement
+    // digest) for the same cross-chain match, or settlement forks. _canonicalMatch
+    // reads fields by name and String()-coerces, so its output must be invariant
+    // to object key order and field value TYPE, and stable for absent optional
+    // fields. "Same input → same output" holds regardless of the equiv-header
+    // branch, so these are independent of the concurrently-evolving equiv path.
+    describe('L4 determinism — match canonicalization', function () {
+        const baseMatch = () => ({
+            match_id: 'm1', snapshot_block: 800000, network: 'mainnet',
+            a_chain: 'BTC', a_action_index: 5, a_tick: 'XCH', a_amount: '100', a_ownership: 0, a_payout_addr: 'bc1a', a_kind: 'swap', a_filled_before: '0',
+            b_chain: 'LTC', b_action_index: 9, b_tick: 'XCH', b_amount: '500', b_ownership: 0, b_payout_addr: 'ltc1b', b_kind: 'swap', b_filled_before: '0',
+            effective_time: 1700000000
+        });
+
+        it('two independent engines produce the identical canonical for the same match', function () {
+            const e1 = new CrossChainDexEngine(makeDexHub());
+            const e2 = new CrossChainDexEngine(makeDexHub());
+            expect(e1._canonicalMatch(baseMatch(), 0)).to.equal(e2._canonicalMatch(baseMatch(), 0));
+        });
+
+        it('is invariant to object key order', function () {
+            const eng = new CrossChainDexEngine(makeDexHub());
+            const r = baseMatch();
+            const shuffled = {};
+            for (const k of Object.keys(r).reverse()) shuffled[k] = r[k];
+            expect(eng._canonicalMatch(shuffled, 0)).to.equal(eng._canonicalMatch(r, 0));
+        });
+
+        it('is invariant to numeric field TYPE (String-coerced)', function () {
+            const eng = new CrossChainDexEngine(makeDexHub());
+            const v1 = { ...baseMatch(), a_action_index: 5,   a_amount: '100', snapshot_block: 800000 };
+            const v2 = { ...baseMatch(), a_action_index: '5', a_amount: 100,   snapshot_block: '800000' };
+            expect(eng._canonicalMatch(v1, 0)).to.equal(eng._canonicalMatch(v2, 0));
+        });
+
+        it('treats an absent optional tick as empty consistently (null vs undefined)', function () {
+            const eng = new CrossChainDexEngine(makeDexHub());
+            const withNull  = { ...baseMatch(), a_tick: null };
+            const withUndef = { ...baseMatch() }; delete withUndef.a_tick;
+            expect(eng._canonicalMatch(withNull, 0)).to.equal(eng._canonicalMatch(withUndef, 0));
+        });
+    });
 });
