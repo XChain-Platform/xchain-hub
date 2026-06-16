@@ -265,9 +265,11 @@ class StateAnchorPublisher {
     // May THIS hub publish for `order` right now? Rank 0 always may; each
     // additional rank unlocks after ANCHOR_ELECTION_TOLERANCE_BLOCKS more BTC
     // blocks past the election anchor point (deterministic failover ladder).
-    // A hub outside a non-empty eligible set never publishes.
+    // A hub outside a non-empty eligible set never publishes — and an empty
+    // (unresolved/unavailable) set means abstain (fail closed), never a
+    // free-for-all where every hub double-anchors the same checkpoint.
     _mayPublish(order, sinceBlocks){
-        if(order.length === 0) return true;
+        if(order.length === 0) return false;
         if(!this.identity) return false;
         let rank = order.indexOf(String(this.identity.getPubkeyHex()).toLowerCase());
         if(rank < 0) return false;
@@ -297,11 +299,13 @@ class StateAnchorPublisher {
         for(let row of (rows || [])){
             try {
                 let eligible = await this._getActiveOraclePublishPubkeys(Number(row.snapshot_block));
-                if(eligible.length > 0){
-                    let order = StateAnchorPublisher.hashOrder(this._v0ElectionKey(row), eligible);
-                    let since = Number.isFinite(btcBlock) ? btcBlock - Number(row.snapshot_block) : null;
-                    if(!this._mayPublish(order, since)) continue;        // someone else's anchor (or not unlocked yet)
-                }
+                // Fail closed: an empty/unresolved oracle_publish set is NOT a
+                // licence for every hub to anchor independently (a guaranteed
+                // N-way double-anchor + DOGE burn). Skip until the set resolves.
+                if(eligible.length === 0) continue;
+                let order = StateAnchorPublisher.hashOrder(this._v0ElectionKey(row), eligible);
+                let since = Number.isFinite(btcBlock) ? btcBlock - Number(row.snapshot_block) : null;
+                if(!this._mayPublish(order, since)) continue;            // someone else's anchor (or not unlocked yet)
                 let payload = this._buildV0Payload(row);
                 let broadcaster = signer.broadcastFn || ((p) => this._defaultBroadcast(p, signer));
                 // Multiple chains' v0 anchors go out back-to-back from the same
@@ -382,13 +386,19 @@ class StateAnchorPublisher {
         // count on-chain; that is the snapshot_block signing set resolved below.
         let electionPubkeys = await this._getActiveOraclePublishPubkeys(electionBlock);
         let me = this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
-        if(electionPubkeys.length > 0){
-            if(!me) return 'none';
-            if(!electionPubkeys.includes(me)){
-                console.log('StateAnchorPublisher: archive election at block ' + electionBlock +
-                            ' — own pubkey not in the oracle_publish election set (' + electionPubkeys.length + ' eligible)');
-                return 'none';                                               // not an eligible publisher right now
-            }
+        // Fail closed: an empty/unresolved oracle_publish set must defer the
+        // archive round, not let every hub drive it independently (each would
+        // broadcast a competing v1 + burn DOGE for the same batch slot).
+        if(electionPubkeys.length === 0){
+            console.log('StateAnchorPublisher: archive election at block ' + electionBlock +
+                        ' — empty oracle_publish set, deferring round (fail closed)');
+            return 'none';
+        }
+        if(!me) return 'none';
+        if(!electionPubkeys.includes(me)){
+            console.log('StateAnchorPublisher: archive election at block ' + electionBlock +
+                        ' — own pubkey not in the oracle_publish election set (' + electionPubkeys.length + ' eligible)');
+            return 'none';                                               // not an eligible publisher right now
         }
 
         let matches = await this.db.doQuery(

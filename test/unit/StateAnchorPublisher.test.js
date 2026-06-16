@@ -710,6 +710,42 @@ describe('StateAnchorPublisher', function () {
         expect(outsider.rewards.length).to.equal(0);
     });
 
+    // ── fail closed when the oracle_publish set is empty / unresolved ────────────
+    // An empty eligible set (empty validator snapshot, or an indexer that resolves
+    // to no oracle_publish members) must DEFER publication, not bypass the election
+    // gate. The pre-fix bug skipped the gate on an empty set, so every hub anchored
+    // the same checkpoint from its own DOGE wallet — a guaranteed N-way double-
+    // anchor + fee burn. Both call sites (v0 anchor + v1/v2 archive) fail closed.
+    it('an empty oracle_publish set defers publication (no v0 anchor, no v1 archive, no reward)', async function () {
+        let bus = buildMesh(3, { btcBlock: 200 });
+        let empty = { async getSnapshot() { return { validators: [] }; } };
+        for (let nd of bus.nodes) { nd.pub.capSnapshot = empty; nd.pub.hub.capabilitySnapshot = empty; }
+        await startAll(bus);
+        let summaries = [];
+        for (let nd of bus.nodes) summaries.push(await nd.pub.flush());
+        await sleep(50);
+        // Nothing went out from ANY hub, and no anchor reward was minted.
+        for (let nd of bus.nodes) {
+            expect(nd.published.length, 'node ' + nd.i + ' published nothing').to.equal(0);
+            expect(nd.rewards.length, 'node ' + nd.i + ' minted no reward').to.equal(0);
+        }
+        for (let s of summaries) {
+            expect(s.anchored.length, 'no checkpoints anchored').to.equal(0);
+            expect(s.archive, 'archive round deferred').to.equal('none');
+        }
+        // The pending checkpoint is still unanchored on every hub (deferred, not lost).
+        for (let nd of bus.nodes) expect(nd.db.checkpoints[0].anchor_txid).to.equal(null);
+    });
+
+    it('_mayPublish fails closed on an empty election order', function () {
+        let bus = buildMesh(1);
+        let nd = bus.nodes[0];
+        expect(nd.pub._mayPublish([], 0)).to.equal(false);
+        expect(nd.pub._mayPublish([], 1000)).to.equal(false);
+        // Sanity: a real single-member order in which this hub is rank 0 still may.
+        expect(nd.pub._mayPublish([nd.pubkey], 0)).to.equal(true);
+    });
+
     // ── signing set is resolved at snapshot_block, not the election block ────────
     // The published v1 declares the wrapper checkpoint's snapshot_block on the
     // wire, and the indexer + full-parse recovery verify the wrapper signatures
