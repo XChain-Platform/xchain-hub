@@ -47,6 +47,10 @@ function isStakeWeightedQuorumActive(snapshotBlock, network){
 function totalStake(validators){
     let weightBySource = new Map();
     for(let v of (validators || [])){
+        // Hard error on a blank/missing source — see meetsStakeThreshold: a blank source
+        // collapses every row into one bucket, so S over a blank-source snapshot is meaningless.
+        if(v.source === null || v.source === undefined || String(v.source).trim() === '')
+            throw new Error('stake_weighted_quorum.totalStake: blank/missing source would collapse the stake bucket');
         let src = String(v.source);
         if(!weightBySource.has(src))
             weightBySource.set(src, (v.weight === null || v.weight === undefined) ? '0' : String(v.weight));
@@ -61,11 +65,17 @@ function totalStake(validators){
 //   signerPubkeys — iterable of pubkeys that produced a VALID signature
 // Returns true iff 3·Σ(distinct signing-source weight) > 2·S. A source counts ONCE
 // no matter how many of its keys signed (DELEGATE v0 additive). Degenerate cases
-// fall out: single source → 3S>2S true; empty/zero set → 0>0 false.
+// fall out: single source → 3S>2S true; empty/zero set → 0>0 false. A blank/missing
+// source FAILS CLOSED (returns false) — it is NOT a legitimate single source.
 function meetsStakeThreshold(validators, signerPubkeys){
     let weightBySource = new Map();
     let pubkeyToSource = new Map();
     for(let v of (validators || [])){
+        // Fail CLOSED on a blank/missing source: an empty-string (the snapshot schema's
+        // NOT NULL DEFAULT '') or undefined source would collapse every row into ONE dedupe
+        // bucket, dropping stake-weighted quorum to 1-of-N (a single signature finalizes the
+        // round). A malformed snapshot must never finalize — reject the whole tally.
+        if(v.source === null || v.source === undefined || String(v.source).trim() === '') return false;
         let src = String(v.source);
         let pk  = String(v.pubkey).toLowerCase();
         pubkeyToSource.set(pk, src);

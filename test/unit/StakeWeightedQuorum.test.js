@@ -32,6 +32,28 @@ describe('stake_weighted_quorum', function () {
             expect(swq.meetsStakeThreshold(V, [])).to.equal(false);
         });
 
+        it('SECURITY: fails CLOSED when any snapshot row has a blank/missing source (no 1-of-N collapse)', function () {
+            // A blank '' source (the snapshot schema's NOT NULL DEFAULT '') or undefined source
+            // would collapse all rows into one dedupe bucket → a single signature finalizes.
+            const blank = [
+                { pubkey: 'a', source: '',   weight: '6000' },
+                { pubkey: 'b', source: '',   weight: '6000' },
+                { pubkey: 'c', source: 'S2', weight: '3000' },
+            ];
+            expect(swq.meetsStakeThreshold(blank, ['a'])).to.equal(false);
+            expect(swq.meetsStakeThreshold(blank, ['a', 'b', 'c'])).to.equal(false);
+            expect(swq.meetsStakeThreshold([{ pubkey: 'x', weight: '9000' }], ['x'])).to.equal(false);            // undefined source
+            expect(swq.meetsStakeThreshold([{ pubkey: 'y', source: '   ', weight: '9000' }], ['y'])).to.equal(false); // whitespace
+        });
+
+        it('a LEGITIMATE single non-blank source still finalizes on its own signature', function () {
+            expect(swq.meetsStakeThreshold([{ pubkey: 's', source: 'S1', weight: '9000' }], ['s'])).to.equal(true);
+        });
+
+        it('totalStake throws on a blank/missing source (cannot compute S over a collapsed bucket)', function () {
+            expect(() => swq.totalStake([{ pubkey: 'a', source: '', weight: '6000' }])).to.throw(/blank\/missing source/);
+        });
+
         it('SECURITY: a source\'s multiple keys count its stake ONCE (no delegation inflation)', function () {
             // a + b are both S1 → 6000, not 12000. 3·6000 = 18000 !> 2·12000 = 24000.
             expect(swq.meetsStakeThreshold(V, ['a', 'b'])).to.equal(false);
