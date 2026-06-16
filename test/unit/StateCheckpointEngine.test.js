@@ -112,7 +112,11 @@ describe('StateCheckpointEngine', function () {
             let db = memDb();
             let hub = {
                 db,
-                p2pConfig: { CHECKPOINT_CHAINS: 'BTC', CHECKPOINT_CONFIRMATIONS: '0', BTC_INDEXER_URL: 'http://stub' },
+                p2pConfig: {
+                    CHECKPOINT_CHAINS:        (opts.chains || ['BTC']).join(','),
+                    CHECKPOINT_CONFIRMATIONS: String(opts.confirmations != null ? opts.confirmations : 0),
+                    BTC_INDEXER_URL: 'http://stub', LTC_INDEXER_URL: 'http://stub', DOGE_INDEXER_URL: 'http://stub'
+                },
                 hubDbBroadcaster: { rows: [], broadcastRow(ev) { this.rows.push(ev); } },
                 capabilitySnapshot: { async getSnapshot() { return { validators: validators.slice(0, n) }; } },
                 getPeerManager: () => peerManager,
@@ -123,7 +127,7 @@ describe('StateCheckpointEngine', function () {
             self.hub = hub;
             self.engine = new StateCheckpointEngine(hub);
             self.engine._indexerCall = async (coin, method, params) => {
-                let h = opts.hashesFor ? opts.hashesFor(self, params) : TIP;
+                let h = opts.hashesFor ? opts.hashesFor(self, params, coin) : TIP;
                 return h ? Object.assign({}, h) : null;
             };
             self.finalized = [];
@@ -313,5 +317,45 @@ describe('StateCheckpointEngine', function () {
         });
         await sleep(60);
         for (let nd of bus.nodes) expect(nd.db.checkpoints.length, 'node ' + nd.i).to.equal(0);
+    });
+
+    it('multi-chain: one cadence tick checkpoints EVERY configured chain (BTC,LTC,DOGE)', async function () {
+        // The per-chain loop in _tick (one round per chain under a single cadence leader)
+        // is otherwise only exercised single-chain. A single-validator set self-signs each
+        // chain's round immediately, so one tick must land one row per configured chain.
+        let bus = buildMesh(1, { btcBlock: 100, chains: ['BTC', 'LTC', 'DOGE'] });
+        await startAll(bus);
+        await tickAll(bus);
+        await sleep(40);
+
+        let nd = bus.nodes[0];
+        expect(nd.db.checkpoints.map(r => r.chain).sort()).to.deep.equal(['BTC', 'DOGE', 'LTC']);
+        // Each chain's row carries its own valid self-signature over its own canonical
+        // (the chain name is part of the preimage, so the three sigs are distinct).
+        for (let row of nd.db.checkpoints) {
+            let sigs = JSON.parse(row.validator_signatures);
+            expect(sigs.length, row.chain + ' sigs').to.equal(1);
+            let canon = StateCheckpointEngine.canonicalCheckpoint(row);
+            expect(ValidatorIdentity.verify(canon, sigs[0].sig, sigs[0].pubkey), row.chain + ' verifies').to.be.true;
+        }
+    });
+
+    it('confirmations offset: checkpoints the tip MINUS CHECKPOINT_CONFIRMATIONS (snapshot_block unchanged)', async function () {
+        // tip.block_index = 500; _runRound re-fetches getblockhashes at (tip - confirmations),
+        // so the persisted block_index is 497 while snapshot_block tracks the BTC cadence block.
+        let bus = buildMesh(1, {
+            btcBlock: 100,
+            confirmations: 3,
+            hashesFor: (self, params) =>
+                Object.assign({}, TIP, (params && params.block_index != null) ? { block_index: params.block_index } : {})
+        });
+        await startAll(bus);
+        await tickAll(bus);
+        await sleep(40);
+
+        let nd = bus.nodes[0];
+        expect(nd.db.checkpoints.length).to.equal(1);
+        expect(nd.db.checkpoints[0].block_index, 'tip minus confirmations').to.equal(TIP.block_index - 3); // 497
+        expect(nd.db.checkpoints[0].snapshot_block, 'cadence block, not offset').to.equal(100);
     });
 });

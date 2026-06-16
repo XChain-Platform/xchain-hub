@@ -1074,4 +1074,172 @@ describe('StateAnchorPublisher', function () {
             expect(published, 'count regime fires on 3 ≥ quorum').to.equal(true);
         });
     });
+
+    it('ANCHOR_ENABLED=false: start() is a no-op (no message handler wired)', async function () {
+        let bus = buildMesh(1, { cfg: { ANCHOR_ENABLED: 'false' } });
+        let nd = bus.nodes[0];
+        await nd.pub.start();
+        expect(nd.pub._messageHandler, 'message handler stays null when disabled').to.be.null;
+        expect(nd.handler, 'peerManager.on(message) not wired when disabled').to.be.null;
+    });
+
+    it('flush() guards re-entry: a second flush while one is in flight is skipped', async function () {
+        let bus = buildMesh(1);
+        let nd = bus.nodes[0];
+        nd.pub._flushing = true;                                   // an in-flight flush holds the latch
+        let res = await nd.pub.flush();
+        expect(res.skipped).to.equal('already_flushing');
+        expect(nd.published.length, 'nothing published by the re-entrant call').to.equal(0);
+    });
+
+    it('flush() skips with no_pipeline when no broadcast pipeline is configured', async function () {
+        let bus = buildMesh(1);
+        let nd = bus.nodes[0];
+        nd.pub.setBroadcastHook(null);                             // drop the only signer path
+        let res = await nd.pub.flush();
+        expect(res.skipped).to.equal('no_pipeline');
+        expect(nd.published.length).to.equal(0);
+    });
+
+    it('low DOGE balance emits a LOW-balance warning during flush', async function () {
+        let bus = buildMesh(1);
+        let nd = bus.nodes[0];
+        nd.pub.setBalanceHook(async () => 0.5);                    // below the default 10 DOGE threshold
+        let warned = [];
+        let orig = console.warn;
+        console.warn = (...a) => warned.push(a.join(' '));
+        try { await nd.pub.flush(); } finally { console.warn = orig; }
+        expect(warned.some(w => /balance LOW/i.test(w)), 'a LOW-balance warning fired').to.be.true;
+    });
+
+    it('a __partial__ archive does NOT mirror the anchor_archive reward (a complete one does)', async function () {
+        let bus = buildMesh(2);
+        let follower = bus.nodes[0];
+        let leader   = bus.nodes[1];          // signature-verified sender; both are oracle_publish validators
+        let txid = 'dogetx_partialtest', snap = 100;
+
+        // (1) PARTIAL: a match carries the __partial__ sentinel → the follower must NOT mirror the reward.
+        let pMatches = [matchRow('mp', '__partial__')];
+        await follower.pub._handleFinalized({ data: {
+            batch_seq: 0, txid: txid, snapshot_block: snap, matches: pMatches, calls: [], rewards: [],
+            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(0, txid, pMatches.length))
+        }});
+        expect(follower.rewards.some(r => r.type === 'anchor_archive'),
+            'no archive reward on a __partial__ publish').to.be.false;
+
+        // (2) CONTROL — a COMPLETE archive (no sentinel) DOES mirror the reward. Also proves the
+        // envelope is well-formed enough to reach the reward gate (guards against a false pass
+        // where _backfillBatch silently failed for both cases).
+        let cMatches = [matchRow('mc', 'finalized')];
+        await follower.pub._handleFinalized({ data: {
+            batch_seq: 1, txid: txid, snapshot_block: snap, matches: cMatches, calls: [], rewards: [],
+            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(1, txid, cMatches.length))
+        }});
+        expect(follower.rewards.some(r => r.type === 'anchor_archive'),
+            'a complete publish DOES mirror the reward').to.be.true;
+    });
+
+    it('_handleSignReq bails on a stale tip (election_block far from our BTC view) before any election work', async function () {
+        let bus = buildMesh(2, { btcBlock: 1000 });    // follower's BTC tip = 1000
+        let follower = bus.nodes[0];
+        let leader   = bus.nodes[1];
+        let tol = follower.pub.electionToleranceBlocks;            // default 36
+
+        // Spy on the first post-guard step: reached only if the stale-tip guard passes.
+        let lookups = [];
+        follower.pub._getActiveOraclePublishPubkeys = async (blk) => { lookups.push(blk); return []; };
+
+        let mkReq = (electionBlock) => ({ data: {
+            checkpoint: Object.assign({}, CP_ROW), election_block: electionBlock, batch_seq: 0,
+            match_count: 1, batch_crc32: '0', total_chunks: 1, sig_pubkey: leader.pubkey, sig: 'deadbeef'
+        }});
+
+        // election_block well outside tolerance → bail at the stale-tip guard, no election lookup.
+        await follower.pub._handleSignReq(mkReq(1000 + tol + 50));
+        expect(lookups.length, 'no election lookup when the tip is stale').to.equal(0);
+
+        // election_block within tolerance → proceeds past the guard into the election lookup
+        // (which returns [] here, so the rest of the handler short-circuits harmlessly).
+        await follower.pub._handleSignReq(mkReq(1000 + Math.floor(tol / 2)));
+        expect(lookups.length, 'election lookup runs once the tip is within tolerance').to.be.greaterThan(0);
+    });
+
+    it('_resolveCapabilitySet uses the WEIGHTED snapshot (weight→amount, source kept) once SWQ is active', async function () {
+        let bus = buildMesh(1);
+        let nd = bus.nodes[0];
+        let weighted = false, plain = false;
+        nd.pub.capSnapshot = {
+            getWeightSnapshot: async () => { weighted = true; return { validators: [{ pubkey: 'PKA', weight: '7', source: 'srcA' }] }; },
+            getSnapshot:       async () => { plain = true;    return { validators: [{ pubkey: 'PKA', amount: '1' }] }; }
+        };
+
+        // SWQ activates at block >= 0 on regtest → weighted path, source-keyed.
+        nd.pub.network = 'regtest';
+        let set = await nd.pub._resolveCapabilitySet('oracle_publish', 100);
+        expect(weighted, 'weighted snapshot used').to.be.true;
+        expect(plain, 'plain snapshot not used').to.be.false;
+        expect(set).to.deep.equal([{ pubkey: 'pka', amount: '7', source: 'srcA' }]);
+
+        // mainnet activation is far in the future (999999999) → SWQ off → plain path, source ''.
+        weighted = false; plain = false;
+        nd.pub.network = 'mainnet';
+        let set2 = await nd.pub._resolveCapabilitySet('oracle_publish', 100);
+        expect(plain, 'plain snapshot used when SWQ off').to.be.true;
+        expect(weighted, 'weighted snapshot not used when SWQ off').to.be.false;
+        expect(set2).to.deep.equal([{ pubkey: 'pka', amount: '1', source: '' }]);
+    });
+
+    it('_handleSignReq: a follower NOT in the snapshot_block signing set does not co-sign', async function () {
+        let bus = buildMesh(2, { btcBlock: 500 });
+        let follower = bus.nodes[0];
+        let leader   = bus.nodes[1];
+        let cp = Object.assign({}, CP_ROW);                       // snapshot_block = 100
+
+        // Spy the first step AFTER the snapshot-set membership gate (line ~815).
+        let canonCalls = 0;
+        let origCanon = follower.pub._archiveCanonical.bind(follower.pub);
+        follower.pub._archiveCanonical = (...a) => { canonCalls++; return origCanon(...a); };
+
+        let mkReq = () => ({ data: {
+            checkpoint: cp, election_block: 500, batch_seq: 0, match_count: 1, batch_crc32: '0',
+            total_chunks: 1, sig_pubkey: leader.pubkey, sig: 'deadbeef'
+        }});
+
+        // (1) EXCLUDED: election set ≤1 (skips the rank ladder); snapshot_block set omits the follower
+        // → bail at the membership gate, never builds the archive canonical.
+        follower.pub._getActiveOraclePublishPubkeys = async (blk) =>
+            (Number(blk) === Number(cp.snapshot_block)) ? [leader.pubkey] : [];
+        await follower.pub._handleSignReq(mkReq());
+        expect(canonCalls, 'excluded follower stops before the archive canonical').to.equal(0);
+
+        // (2) CONTROL — INCLUDED in the snapshot_block set → proceeds to build the canonical (then the
+        // bogus sig fails verification harmlessly). Proves the membership gate is what stops case (1).
+        follower.pub._getActiveOraclePublishPubkeys = async (blk) =>
+            (Number(blk) === Number(cp.snapshot_block)) ? [leader.pubkey, follower.pubkey] : [];
+        await follower.pub._handleSignReq(mkReq());
+        expect(canonCalls, 'included follower builds the archive canonical').to.equal(1);
+    });
+
+    it('size-trigger: reaching batchSize match:finalized events fires a flush', async function () {
+        let EventEmitter = require('events');
+        let bus = buildMesh(1);
+        let nd = bus.nodes[0];
+        let dex = new EventEmitter();
+        nd.pub.hub.crossChainDex = dex;                           // wired into the match:finalized listener at start()
+        nd.pub.batchSize = 2;
+        nd.pub._pendingMatches = 0;
+
+        let flushes = 0;
+        let origFlush = nd.pub.flush.bind(nd.pub);
+        nd.pub.flush = async () => { flushes++; return origFlush(); };
+        await nd.pub.start();
+
+        dex.emit('match:finalized');                             // 1 < batchSize → no flush
+        await sleep(10);
+        expect(flushes, 'one event below batchSize does not flush').to.equal(0);
+
+        dex.emit('match:finalized');                             // 2 >= batchSize → flush
+        await sleep(20);
+        expect(flushes, 'reaching batchSize triggers a flush').to.be.greaterThan(0);
+    });
 });
