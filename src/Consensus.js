@@ -476,19 +476,24 @@ class Consensus {
 
     // EQUIV durable canonical (WI-2 bump 2 — the 6th engine, XCONFIG). Config-change
     // PBFT signs only the ephemeral transport envelope today; this adds a durable
-    // per-validator signature over `buildEquivCanonical('XCONFIG', seq, view, digest)`
-    // (the config DIGEST only — never phase-tagged bytes; PRE_PREPARE/PREPARE/COMMIT all
-    // attest the SAME digest for a (seq,view), so the digest-conflict guard keeps an honest
-    // node from signing two configs for one slot). Carried as {equiv_sig, equiv_pubkey} in
-    // each vote message — parallel/additive to the existing count + weighted tally, gated on
-    // the round's BTC tip + network. The two header-identical-but-different-digest messages
-    // are the slashable artifact (verified by BTC indexers from the messages alone; no twin).
+    // per-validator signature over
+    //   buildEquivCanonical('XCONFIG', seq, view, `${blockHeight}|${digest}`)
+    // i.e. content = `<snapshot_block>|<config-digest>`. The snapshot_block (the round's
+    // locked BTC tip — the whole-federation set that authorized this config slot) is carried
+    // IN the signed content so a BTC indexer can recover the membership set from the proof
+    // ALONE and slash a config equivocator (SLASH.md). It is constant for a (seq,view): every
+    // PRE_PREPARE/PREPARE/COMMIT vote locks the same snapshot, and the digest-conflict guard
+    // keeps an honest node from signing two configs for one slot — so the two header-identical,
+    // SAME-snapshot_block, DIFFERENT-digest messages are the slashable artifact. blockHeight is
+    // never null here (isEquivHeaderActive(null) is false ⇒ {} below). base-10 block + hex
+    // digest are pipe-free, so the wire action splits cleanly. Carried as {equiv_sig,
+    // equiv_pubkey} per vote — additive to the count + weighted tally, gated on tip + network.
     // Returns {} below the flag-day or when no identity is available (vote still counts).
     _equivVote(seq, view, digest, blockHeight) {
         if (!eq.isEquivHeaderActive(blockHeight, this.hub && this.hub.network)) return {};
         let identity = this.hub.getIdentity && this.hub.getIdentity();
         if (!identity) return {};
-        let canonical = eq.buildEquivCanonical(eq.ENGINE_TAGS.CONFIG, seq, view, digest);
+        let canonical = eq.buildEquivCanonical(eq.ENGINE_TAGS.CONFIG, seq, view, String(blockHeight) + '|' + digest);
         return { equiv_sig: identity.sign(canonical), equiv_pubkey: identity.getPubkeyHex().toLowerCase() };
     }
 

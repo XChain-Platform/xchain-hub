@@ -9,12 +9,13 @@
 // General Public License v3.0 or later; see LICENSE.md.
 
 // EQUIV header (WI-2 bump 2) — config-change PBFT (XCONFIG, the 6th engine).
-// Config PBFT signs only the ephemeral envelope today; A3 adds a durable
-// per-validator signature over buildEquivCanonical('XCONFIG', seq, view, digest)
-// (the config DIGEST only), carried as {equiv_sig, equiv_pubkey} in every vote
-// message — parallel/additive to the count + weighted tally, gated on the round's
-// BTC tip + network. No indexer twin: the two header-identical/different-digest
-// messages are verified by BTC indexers from the messages alone in a SLASH proof.
+// Config PBFT signs only the ephemeral envelope today; A3 adds a durable per-validator
+// signature over buildEquivCanonical('XCONFIG', seq, view, `${snapshot_block}|${digest}`),
+// carried as {equiv_sig, equiv_pubkey} in every vote message — parallel/additive to the
+// count + weighted tally, gated on the round's BTC tip + network. The Phase-A amendment
+// (WI-2 bump 2) carries the round's locked snapshot_block IN the signed content so config
+// equivocation is SLASHABLE: a BTC indexer recovers the whole-federation membership block
+// from the two header-identical / same-snapshot_block / different-digest messages alone.
 const { expect } = require('chai');
 const eq = require('../../src/equivocation_header.js');
 const Consensus = require('../../src/Consensus.js');
@@ -32,11 +33,12 @@ describe('EQUIV config canonical (WI-2 bump 2, XCONFIG)', function () {
         expect(c._equivVote(7, 0, 'deadbeef', 5)).to.deep.equal({});
     });
 
-    it('at/above the flag-day (regtest) → signs XCONFIG|seq|view||digest (DIGEST only)', function () {
+    it('at/above the flag-day (regtest) → signs XCONFIG|seq|view||snapshot_block|digest', function () {
         const c = mkConsensus('regtest');
         const out = c._equivVote(7, 2, 'deadbeef', 480);
-        const expectedCanonical = eq.buildEquivCanonical(eq.ENGINE_TAGS.CONFIG, 7, 2, 'deadbeef');
-        expect(expectedCanonical).to.equal('EQUIV|XCONFIG|7|2||deadbeef');
+        // content = `<snapshot_block>|<digest>` so a SLASH proof recovers the membership block.
+        const expectedCanonical = eq.buildEquivCanonical(eq.ENGINE_TAGS.CONFIG, 7, 2, '480|deadbeef');
+        expect(expectedCanonical).to.equal('EQUIV|XCONFIG|7|2||480|deadbeef');
         expect(out).to.deep.equal({ equiv_sig: 'SIG(' + expectedCanonical + ')', equiv_pubkey: 'abcdef' });
     });
 
