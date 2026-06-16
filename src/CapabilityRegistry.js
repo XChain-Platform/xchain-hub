@@ -39,6 +39,19 @@ function parseCapabilityMinStakeParam(parameter) {
     return { capability: capability };
 }
 
+// Pre-launch pin (#4352): hub governance CAPABILITY_*_MIN_STAKE changes are disabled.
+// The indexer's on-chain acceptance re-derives quorum N from the FROZEN configs/<COIN>.js
+// MIN_STAKE constant (no caller override), so the instant a hub governance MIN_STAKE change
+// activated, the hub's block-anchored snapshot threshold would diverge from the chain's
+// frozen one and fork (a raise stalls liveness; a lower diverges safety). Until the indexer
+// acceptance path resolves MIN_STAKE per-block from the same source (the option-(a)
+// block-height flag-day), the only safe posture is to forbid the hub from ever moving its
+// threshold via governance, so getMinStake(cap, block) stays pinned to the genesis value
+// seeded from HUB_CAPABILITY_CONFIG (which must equal the indexer constant). Pre-launch,
+// thresholds move only via a coordinated fleet upgrade of configs/<COIN>.js +
+// HUB_CAPABILITY_CONFIG. Flip to false when the indexer flag-day ships.
+const MIN_STAKE_GOVERNANCE_DISABLED = true;
+
 class CapabilityRegistry {
 
     constructor(hub) {
@@ -348,3 +361,4 @@ class CapabilityRegistry {
 module.exports = CapabilityRegistry;
 module.exports.KNOWN_CAPABILITIES = KNOWN_CAPABILITIES;
 module.exports.parseCapabilityMinStakeParam = parseCapabilityMinStakeParam;
+module.exports.MIN_STAKE_GOVERNANCE_DISABLED = MIN_STAKE_GOVERNANCE_DISABLED;

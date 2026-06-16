@@ -1099,6 +1099,18 @@ class XChainHub {
         }
 
         console.log('Capability registry initialized' + (this.identity ? ' (identity: ' + this.identity.getPubkeyHex().substring(0,16) + '...)' : ' (no identity — peer-receive only)'));
+
+        // Surface the genesis MIN_STAKE per capability so an operator can verify it matches
+        // the indexer's frozen configs/<COIN>.js constants. Governance MIN_STAKE changes are
+        // disabled pre-launch (#4352), so these genesis values are the thresholds the hub
+        // locks quorum against for every block; a mismatch with the indexer would fork.
+        try {
+            let genesis = this.capabilityRegistry.getCapabilities()
+                .map(cap => cap + '=' + String(this.capabilityRegistry.getMinStake(cap)))
+                .join(', ');
+            console.log('Capability MIN_STAKE (genesis, pinned #4352): ' + genesis +
+                ' (must equal the indexer configs/<COIN>.js constants)');
+        } catch (e) { /* best-effort operator log */ }
     }
 
     // Query the BTC indexer for own pubkey's current active stake amount + latest
@@ -1242,11 +1254,14 @@ class XChainHub {
             let minStake = this.capabilityRegistry.getMinStake(cap, blockIndex);
             let qualified;
             if(minStake === null || minStake === undefined){
-                // No MIN_STAKE configured for this capability. Fail CLOSED — do not
+                // No MIN_STAKE configured for this capability. Fail CLOSED: do not
                 // default the threshold to '0', which would qualify an unstaked node
                 // for everything and diverge from the indexer's authoritative
-                // (governance) threshold used to lock quorum N. A capability with no
-                // configured threshold simply stays inactive until one is supplied.
+                // threshold. That threshold is a FROZEN configs/<COIN>.js consensus
+                // constant, NOT a governance value (hub governance MIN_STAKE changes
+                // are disabled pre-launch, #4352); the hub's genesis MIN_STAKE from
+                // HUB_CAPABILITY_CONFIG must equal it. A capability with no configured
+                // threshold simply stays inactive until one is supplied.
                 qualified = false;
                 if(!this._warnedMissingMinStake) this._warnedMissingMinStake = new Set();
                 if(!this._warnedMissingMinStake.has(cap)){
@@ -1279,6 +1294,17 @@ class XChainHub {
         // even though they finalize at different wall-clock moments. A finalized MIN_STAKE proposal
         // with no activation_block (e.g. a legacy row) is ignored here rather than applied unanchored.
         if(parsed.parameterKey === 'MIN_STAKE'){
+            // Pre-launch pin (#4352): final safety net. Even if a MIN_STAKE proposal:finalized
+            // somehow fires (e.g. a mixed-version rollout where an un-pinned hub passed one),
+            // do NOT move the threshold: the indexer accepts against a frozen configs/<COIN>.js
+            // constant, so any hub-side move forks the federation from the chain. getMinStake
+            // stays pinned to the genesis value. Lift with MIN_STAKE_GOVERNANCE_DISABLED when
+            // the indexer flag-day (option a) ships.
+            if(CapabilityRegistry.MIN_STAKE_GOVERNANCE_DISABLED){
+                console.warn('Governance MIN_STAKE change for ' + parsed.capability +
+                    ' ignored: hub governance MIN_STAKE changes are disabled pre-launch (#4352)');
+                return;
+            }
             if(ev.activationBlock === undefined || ev.activationBlock === null || !Number.isInteger(Number(ev.activationBlock))){
                 console.warn('Governance MIN_STAKE change for ' + parsed.capability +
                     ' has no activation_block — not applying (would be unanchored, risking cross-hub divergence)');

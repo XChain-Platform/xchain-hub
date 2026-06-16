@@ -139,12 +139,15 @@ describe('Governance', function () {
             expect(pm.broadcast.getCall(0).args[1].activationBlock).to.equal(null);
         });
 
-        // ── Block-anchored MIN_STAKE activation (#3703) ───────────────────────
-        it('computes a block-anchored activation for a capability MIN_STAKE proposal', async function () {
+        // ── Block-anchored activation (#3703 / #3685) ─────────────────────────
+        // CAPABILITY_*_MIN_STAKE governance is pinned off pre-launch (#4352), so the
+        // activation-computation path is exercised here via ATTESTATION_PROVIDER:* params,
+        // which are also block-anchored (#3685) and NOT pinned.
+        it('computes a block-anchored activation for a block-anchored proposal', async function () {
             hub.db.doQuery.onFirstCall().resolves([]).onSecondCall().resolves([]).onThirdCall().resolves();
             hub._latestBlockIndex = 500;
             gov.votingPeriod = 604800000; // 7 days → ceil(/600000) = 1008 blocks
-            let result = await gov.propose('CAPABILITY_PRICE_MIN_STAKE', '10000', '12000');
+            let result = await gov.propose('ATTESTATION_PROVIDER:llm', '10000', '12000');
             // 500 (latest) + 1008 (voting period in blocks) + 50 (safety buffer)
             expect(result.activationBlock).to.equal(1558);
             let payload = pm.broadcast.getCall(0).args[1];
@@ -156,22 +159,36 @@ describe('Governance', function () {
             hub._latestBlockIndex = 500;
             gov.votingPeriod = 604800000;
             try {
-                await gov.propose('CAPABILITY_PRICE_MIN_STAKE', '10000', '12000', null, 600);
+                await gov.propose('ATTESTATION_PROVIDER:llm', '10000', '12000', null, 600);
                 expect.fail('should throw');
             } catch (e) {
                 expect(e.message).to.include('too soon');
             }
         });
 
-        it('throws when anchoring a MIN_STAKE change with no observed block height', async function () {
+        it('throws when anchoring a block-anchored change with no observed block height', async function () {
             hub.db.doQuery.onFirstCall().resolves([]).onSecondCall().resolves([]);
             hub._latestBlockIndex = null;
             try {
-                await gov.propose('CAPABILITY_PRICE_MIN_STAKE', '10000', '12000');
+                await gov.propose('ATTESTATION_PROVIDER:llm', '10000', '12000');
                 expect.fail('should throw');
             } catch (e) {
                 expect(e.message).to.include('no observed block height');
             }
+        });
+
+        // ── Pre-launch MIN_STAKE governance pin (#4352) ───────────────────────
+        it('refuses to create a CAPABILITY_*_MIN_STAKE proposal (pinned pre-launch)', async function () {
+            hub.db.doQuery.onFirstCall().resolves([]).onSecondCall().resolves([]);
+            hub._latestBlockIndex = 500;
+            try {
+                await gov.propose('CAPABILITY_PRICE_MIN_STAKE', '10000', '11000');
+                expect.fail('should throw');
+            } catch (e) {
+                expect(e.message).to.include('disabled pre-launch');
+            }
+            // No proposal row was inserted (the INSERT is the 3rd doQuery; only the 2 pre-checks ran).
+            expect(pm.broadcast.called).to.equal(false);
         });
 
         it('throws when no identity configured', async function () {
@@ -546,6 +563,20 @@ describe('Governance', function () {
             });
             expect(hub.db.doQuery.called).to.be.true;
             expect(hub.db.doQuery.getCall(0).args[0]).to.include('INSERT IGNORE');
+        });
+
+        it('_handlePropose DROPS an inbound CAPABILITY_*_MIN_STAKE proposal (pinned #4352)', function () {
+            gov._handlePropose({
+                sender: 'peer', type: 'GOV_PROPOSE',
+                data: {
+                    proposalId: 'gov:CAPABILITY_PRICE_MIN_STAKE:1', parameter: 'CAPABILITY_PRICE_MIN_STAKE',
+                    currentValue: '10000', proposedValue: '25000',
+                    rationale: 'raise', proposerPubkey: 'abc',
+                    votingEnd: new Date().toISOString(), activationBlock: 1000
+                }
+            });
+            // No INSERT issued: this hub never records or votes on a pinned MIN_STAKE proposal.
+            expect(hub.db.doQuery.called).to.be.false;
         });
 
         it('_handleVote stores vote locally', function () {

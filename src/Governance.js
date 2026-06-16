@@ -24,7 +24,7 @@
 
 const crypto = require('crypto');
 const EventEmitter = require('events');
-const { parseCapabilityMinStakeParam } = require('./CapabilityRegistry.js');
+const { parseCapabilityMinStakeParam, MIN_STAKE_GOVERNANCE_DISABLED } = require('./CapabilityRegistry.js');
 const { parseAttestationProviderParam } = require('./ProviderRegistry.js');
 
 const GOV_PROPOSE = 'GOV_PROPOSE';
@@ -184,6 +184,15 @@ class Governance extends EventEmitter {
         // Validate change bounds
         this._validateChangeBounds(parameter, currentValue, proposedValue);
 
+        // Pre-launch pin (#4352): refuse to create a CAPABILITY_*_MIN_STAKE proposal. The
+        // indexer's on-chain acceptance re-derives quorum from a frozen configs/<COIN>.js
+        // constant, so a hub governance MIN_STAKE change would fork the federation from the
+        // chain. Move thresholds pre-launch via a coordinated fleet upgrade instead.
+        if (MIN_STAKE_GOVERNANCE_DISABLED && parseCapabilityMinStakeParam(parameter))
+            throw new Error('CAPABILITY_*_MIN_STAKE governance changes are disabled pre-launch (#4352): the ' +
+                'indexer threshold is a frozen consensus constant; change it via a coordinated fleet upgrade of ' +
+                'configs/<COIN>.js + HUB_CAPABILITY_CONFIG, not governance');
+
         // Block-anchor capability MIN_STAKE changes (#3703) and ATTESTATION_PROVIDER
         // config changes (so the LLM fetch/judge model is federation-deterministic at
         // the request's block); other parameters carry no activation block because their
@@ -302,6 +311,15 @@ class Governance extends EventEmitter {
     _handlePropose(envelope) {
         let { proposalId, parameter, currentValue, proposedValue, rationale, proposerPubkey, votingEnd, activationBlock } = envelope.data;
         if (!proposalId || !parameter) return;
+
+        // Pre-launch pin (#4352): drop a peer's CAPABILITY_*_MIN_STAKE proposal so this hub
+        // never records or votes on it. With no local row, a later GOV_RESULT UPDATE matches
+        // 0 rows and never emits proposal:finalized, so the threshold stays pinned.
+        if (MIN_STAKE_GOVERNANCE_DISABLED && parseCapabilityMinStakeParam(parameter)) {
+            console.warn('Governance: dropping inbound CAPABILITY_*_MIN_STAKE proposal ' + proposalId +
+                ' (' + parameter + '); governance MIN_STAKE changes are disabled pre-launch (#4352)');
+            return;
+        }
 
         // Persist the proposer-declared activation block verbatim so every hub anchors a capability
         // MIN_STAKE change to the identical height (#3703). Coerce to integer or NULL.

@@ -319,38 +319,38 @@ describe('XChainHub', function () {
             expect(hub._parseCapabilityParameter('')).to.be.null;
         });
 
-        it('appends a block-anchored threshold on a finalized capability proposal (#3703)', async function () {
+        it('does NOT apply a finalized CAPABILITY_*_MIN_STAKE change (pinned pre-launch #4352)', async function () {
             expect(hub.capabilityRegistry.getMinStake('price')).to.equal('10000');
             await hub._applyCapabilityGovernanceChange({
                 parameter: 'CAPABILITY_PRICE_MIN_STAKE', oldValue: '10000', newValue: '25000',
                 activationBlock: 1000
             });
-            // Old threshold still applies BEFORE the activation block; new threshold AT/after it.
+            // The pin (#4352) keeps getMinStake pinned to the genesis value for every block,
+            // so it can never drift from the indexer's frozen configs/<COIN>.js constant.
             expect(hub.capabilityRegistry.getMinStake('price', 999)).to.equal('10000');
-            expect(hub.capabilityRegistry.getMinStake('price', 1000)).to.equal('25000');
-            // No-block lookup returns the latest configured threshold.
-            expect(hub.capabilityRegistry.getMinStake('price')).to.equal('25000');
+            expect(hub.capabilityRegistry.getMinStake('price', 1000)).to.equal('10000');
+            expect(hub.capabilityRegistry.getMinStake('price')).to.equal('10000');
         });
 
-        it('does NOT apply a MIN_STAKE change with no activation block (would be unanchored)', async function () {
+        it('does NOT apply a MIN_STAKE change with no activation block either', async function () {
             await hub._applyCapabilityGovernanceChange({
                 parameter: 'CAPABILITY_PRICE_MIN_STAKE', oldValue: '10000', newValue: '25000'
             });
             expect(hub.capabilityRegistry.getMinStake('price', 1000)).to.equal('10000');
         });
 
-        it('re-evaluates own qualification against the new threshold', async function () {
+        it('does not re-qualify on a pinned MIN_STAKE change (no apply, no setQualification)', async function () {
             let setQual = sinon.spy(hub.capabilityRegistry, 'setQualification');
-            hub._latestStakeAmount = '15000';   // between old (10000) and new (25000) thresholds
+            hub._latestStakeAmount = '15000';
             await hub._applyCapabilityGovernanceChange({
                 parameter: 'CAPABILITY_PRICE_MIN_STAKE', oldValue: '10000', newValue: '25000',
                 activationBlock: 1000
             });
-            // refreshOwnQualification resolves the latest threshold (25000) for the no-block case;
-            // 15000 < 25000 → no longer qualified for price under the raised threshold.
+            // The pin returns before flush + refreshOwnQualification, so price is not re-evaluated
+            // and the threshold is unchanged.
             let priceCall = setQual.getCalls().find(c => c.args[1] === 'price');
-            expect(priceCall, 'setQualification called for price').to.exist;
-            expect(priceCall.args[2]).to.equal(false);
+            expect(priceCall, 'no setQualification for a pinned MIN_STAKE change').to.equal(undefined);
+            expect(hub.capabilityRegistry.getMinStake('price')).to.equal('10000');
         });
 
         it('ignores non-capability proposals', async function () {
