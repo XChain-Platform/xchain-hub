@@ -972,4 +972,70 @@ describe('StateAnchorPublisher', function () {
         await sleep(50);
         for (let nd of bus.nodes) expect(nd.db.calls[0].batch_seq).to.equal(null);
     });
+
+    // ── STAKE_WEIGHTED_QUORUM (WI-1, finding #4120): the publisher's archive
+    //    quorum + on-chain VALIDITY gate must apply the SAME stake-weighted rule
+    //    the indexer (anchor.js) and full-parse recovery verify against. Pre-fix it
+    //    was count-only, so a count-met-but-stake-short batch was published+dequeued
+    //    while every indexer rejected it — stranding settled state in an
+    //    unrecoverable hole. (The mesh tests above run with hub.network undefined →
+    //    legacy count; here we drive network='regtest', activation=0 → weighted.)
+    describe('stake-weighted archive quorum', function () {
+        const CANON = 'XANC|test|canonical';
+        function weightedPub() {
+            return new StateAnchorPublisher({
+                db: { async doQuery() { return []; } },
+                network: 'regtest',                                   // activation = 0 → weighted on
+                getPeerManager: () => ({ on() {}, removeListener() {}, broadcast() {} }),
+                getIdentity: () => null,
+                p2pConfig: {}
+            });
+        }
+        // 4 validators, concentrated stake 70/10/10/10 over distinct sources.
+        function stakeSet() {
+            let ids = ['70', '11', '12', '13'].map(s => new ValidatorIdentity(s.repeat(32).slice(0, 64)));
+            let weights = ['70', '10', '10', '10'];
+            let set = ids.map((id, i) => ({ pubkey: id.getPubkeyHex().toLowerCase(), source: 'src' + i, weight: weights[i] }));
+            return { ids, set };
+        }
+        const sigsFrom = (ids) => ids.map(id => ({ pubkey: id.getPubkeyHex().toLowerCase(), sig: id.sign(CANON) }));
+
+        it('_quorumVerified: the three 10% holders meet 2f+1 COUNT but NOT 2/3 STAKE', function () {
+            let pub = weightedPub();
+            let { ids, set } = stakeSet();
+            let minority = sigsFrom(ids.slice(1));                    // 3×10% = 30 of 100
+            // Count regime would ACCEPT (3 of 4 ≥ 2f+1) — exactly the pre-fix producer bug.
+            expect(pub._quorumVerified(CANON, minority, set, false)).to.equal(true);
+            // Stake regime REJECTS (3·30 = 90 ≤ 2·100 = 200) — matches the indexer/recovery verdict.
+            expect(pub._quorumVerified(CANON, minority, set, true)).to.equal(false);
+        });
+
+        it('_quorumVerified: adding the 70% holder clears the stake threshold', function () {
+            let pub = weightedPub();
+            let { ids, set } = stakeSet();
+            let majority = sigsFrom([ids[0], ids[1]]);               // 70 + 10 = 80 of 100
+            expect(pub._quorumVerified(CANON, majority, set, true)).to.equal(true);    // 3·80 = 240 > 200
+        });
+
+        it('_checkArchiveQuorum: a count-met-but-stake-short round does NOT publish/dequeue', async function () {
+            let pub = weightedPub();
+            let { ids, set } = stakeSet();
+            let published = false;
+            pub._publishArchive = async () => { published = true; };  // observe the dequeue decision
+            pub._archiveRound = {
+                done: false, weighted: true, quorum: 3, validators: set,
+                signatures: new Map(sigsFrom(ids.slice(1)).map(s => [s.pubkey, s.sig])),   // 3×10%
+                timer: null
+            };
+            await pub._checkArchiveQuorum();
+            expect(published, 'sub-stake archive must not publish').to.equal(false);
+            expect(pub._archiveRound, 'round stays open for more sigs').to.not.equal(null);
+
+            // The SAME 3 sigs WOULD fire under legacy count — proving the regime, not
+            // the signature count, is what now gates the dequeue.
+            pub._archiveRound.weighted = false;
+            await pub._checkArchiveQuorum();
+            expect(published, 'count regime fires on 3 ≥ quorum').to.equal(true);
+        });
+    });
 });

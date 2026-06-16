@@ -493,24 +493,37 @@ class StateAnchorPublisher {
         // anyway (see the on-chain-validity gate in _publishArchive), permanently
         // losing settled cross-chain state. The election set above may differ
         // (liveness); the set that gates co-signature acceptance must not.
-        let signingPubkeys = await this._getActiveOraclePublishPubkeys(Number(cp.snapshot_block));
-        let snapCount = signingPubkeys.length;
-        let quorum    = (snapCount <= 1) ? 1 : Math.max(2 * Math.floor((snapCount - 1) / 3) + 1, Math.ceil((snapCount + 1) / 2));
+        // Resolve the SIGNING set as the full {pubkey, source, weight} snapshot via
+        // _resolveCapabilitySet — the SAME set the indexer (anchor.js) + full-parse
+        // recovery verify the wrapper signatures against (oracle_publish @
+        // snapshot_block, source-keyed). Bare pubkeys would lose the staking weight
+        // the stake-weighted gate needs, so the publisher's local quorum decision
+        // must use this set, not _getActiveOraclePublishPubkeys.
+        let signingSet     = await this._resolveCapabilitySet('oracle_publish', Number(cp.snapshot_block));
+        let signingPubkeys = signingSet.map(v => v.pubkey);
+        let snapCount      = signingPubkeys.length;
+        // STAKE_WEIGHTED_QUORUM: weighted (source-deduped) at/above activation, else
+        // legacy 2f+1 count — keyed on the BTC snapshot_block so the hub flips on the
+        // same anchor as anchor.js (`swq.isStakeWeightedQuorumActive(snapshotBlock, NETWORK)`).
+        let weighted       = swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block), this.network);
+        let quorum         = (snapCount <= 1) ? 1 : Math.max(2 * Math.floor((snapCount - 1) / 3) + 1, Math.ceil((snapCount + 1) / 2));
 
         // Seed the leader's own signature only if the leader is itself in the
         // signing set. A leader elected for liveness but absent from the
-        // snapshot_block set must not inflate the local quorum count with a
-        // signature the indexer will drop on-chain.
+        // snapshot_block set must not inflate the local quorum with a signature
+        // the indexer will drop on-chain.
         let signatures = new Map();
         if(snapCount <= 1 || signingPubkeys.includes(myPubkey)) signatures.set(myPubkey, mySig);
 
         let round = {
-            cp, batchSeq, crc, b64, chunks, canonical, quorum, signer, electionBlock,
+            cp, batchSeq, crc, b64, chunks, canonical, quorum, weighted, signer, electionBlock,
             count:      archive.count,
             matchIds:   matches.map(m => ({ match_id: m.match_id, status: m.status })),
             callIds:    calls.map(c => ({ call_id: c.call_id, phase: c.phase, status: c.status })),
             rewardIds:  rewardRows.map(({row}) => ({ reward_type: String(row.reward_type), round_number: Number(row.round_number), validator_pubkey: String(row.validator_pubkey).toLowerCase() })),
-            validators: signingPubkeys.slice(),
+            // Full {pubkey, source, weight} set so _checkArchiveQuorum can tally
+            // distinct-source stake (weight carries the source's stake when weighted).
+            validators: signingSet.map(v => ({ pubkey: v.pubkey, source: String(v.source != null ? v.source : ''), weight: String(v.amount != null ? v.amount : '0') })),
             signatures: signatures,
             done:       false,
             timer:      null
@@ -862,7 +875,7 @@ class StateAnchorPublisher {
 
             let set  = await this._resolveCapabilitySet('cross_chain', Number(am.snapshot_block));
             let sigs = this._parseSigs(am.validator_signatures);
-            if(!this._quorumVerified(this._matchCanonical(am), sigs, set.map(v => v.pubkey))){
+            if(!this._quorumVerified(this._matchCanonical(am), sigs, set, swq.isStakeWeightedQuorumActive(Number(am.snapshot_block), this.network))){
                 console.warn('StateAnchorPublisher: archive match ' + String(am.match_id).substring(0, 16) +
                              '... fails signature quorum against the cross_chain set at block ' + am.snapshot_block);
                 return false;
@@ -891,7 +904,7 @@ class StateAnchorPublisher {
 
             let set  = await this._resolveCapabilitySet('cross_chain', Number(ac.snapshot_block));
             let sigs = this._parseSigs(ac.validator_signatures);
-            if(!this._quorumVerified(this._callCanonical(ac), sigs, set.map(v => v.pubkey))){
+            if(!this._quorumVerified(this._callCanonical(ac), sigs, set, swq.isStakeWeightedQuorumActive(Number(ac.snapshot_block), this.network))){
                 console.warn('StateAnchorPublisher: archive call ' + String(ac.call_id).substring(0, 16) +
                              '... (' + ac.phase + ') fails signature quorum against the cross_chain set at block ' + ac.snapshot_block);
                 return false;
@@ -989,7 +1002,7 @@ class StateAnchorPublisher {
         let round = this._archiveRound;
         if(!round || round.done || Number(d.batch_seq) !== round.batchSeq) return;
         let pubkey = String(d.sig_pubkey || '').toLowerCase();
-        if(!round.validators.includes(pubkey)) return;
+        if(!round.validators.some(v => v.pubkey === pubkey)) return;
         if(!ValidatorIdentity.verify(round.canonical, String(d.sig || ''), pubkey)) return;
         round.signatures.set(pubkey, String(d.sig));
         await this._checkArchiveQuorum();
@@ -997,7 +1010,15 @@ class StateAnchorPublisher {
 
     async _checkArchiveQuorum(){
         let round = this._archiveRound;
-        if(!round || round.done || round.signatures.size < round.quorum) return;
+        if(!round || round.done) return;
+        // STAKE_WEIGHTED_QUORUM: fire on distinct-source signer stake > 2/3 of the
+        // snapshot when weighted, else legacy signature count. Matches the indexer
+        // anchor.js / recovery verdict so the publisher never dequeues a batch the
+        // chain then rejects (or stalls a stake-met-but-count-short batch).
+        let met = round.weighted
+            ? swq.meetsStakeThreshold(round.validators, round.signatures.keys())
+            : (round.signatures.size >= round.quorum);
+        if(!met) return;
         round.done = true;
         if(round.timer){ clearTimeout(round.timer); round.timer = null; }
         this._archiveRound = null;
@@ -1047,7 +1068,7 @@ class StateAnchorPublisher {
         // single-node / unresolvable-set degenerate (validators.length <= 1) keeps
         // today's behavior — the indexer stores those as recoverable 'unverified'.
         let onChainValid = (round.validators.length <= 1) ||
-                           this._quorumVerified(round.canonical, sigs, round.validators);
+                           this._quorumVerified(round.canonical, sigs, round.validators, round.weighted);
 
         // A partially-published archive is unrecoverable (recovery refuses
         // incomplete batches), so the rows must NOT be marked archived. Back-fill
@@ -1163,18 +1184,34 @@ class StateAnchorPublisher {
         return raw;
     }
 
-    _quorumVerified(canonical, sigs, pubkeys){
-        let qualified = new Set((pubkeys || []).map(p => String(p).toLowerCase()));
+    // Signature quorum over a resolved validator set, byte-for-byte the same verdict
+    // the indexer recovery (_quorumVerified) + anchor.js apply: stake-weighted
+    // (source-deduped, 3·Σ signer-source weight > 2·S) at/above STAKE_WEIGHTED_QUORUM,
+    // else legacy 2f+1 count. `validatorSet` is the full [{pubkey, source, weight|amount}]
+    // set (bare-pubkey callers must now pass objects). Used to gate the wrapper's own
+    // on-chain validity and every archived match/call against its cross_chain set.
+    _quorumVerified(canonical, sigs, validatorSet, weighted){
+        let qualified = new Set((validatorSet || []).map(v => String(v.pubkey).toLowerCase()));
         if(qualified.size === 0) return false;
-        let quorum = (qualified.size <= 1) ? 1 : Math.max(2 * Math.floor((qualified.size - 1) / 3) + 1, Math.ceil((qualified.size + 1) / 2));
-        let valid = 0, seen = new Set();
+        let validSigners = [], seen = new Set();
         for(let s of sigs){
             let pk = String(s.pubkey).toLowerCase();
             if(seen.has(pk) || !qualified.has(pk)) continue;
             seen.add(pk);
-            if(ValidatorIdentity.verify(canonical, String(s.sig), pk)) valid++;
+            if(ValidatorIdentity.verify(canonical, String(s.sig), pk)) validSigners.push(pk);
         }
-        return valid >= quorum;
+        if(weighted){
+            // source carries the staking source; weight (or amount, from
+            // _resolveCapabilitySet) carries its stake — normalize for swq.
+            let weightedSet = (validatorSet || []).map(v => ({
+                pubkey: String(v.pubkey).toLowerCase(),
+                source: String(v.source != null ? v.source : ''),
+                weight: String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0'))
+            }));
+            return swq.meetsStakeThreshold(weightedSet, validSigners);
+        }
+        let quorum = (qualified.size <= 1) ? 1 : Math.max(2 * Math.floor((qualified.size - 1) / 3) + 1, Math.ceil((qualified.size + 1) / 2));
+        return validSigners.length >= quorum;
     }
 
     async _backfillBatch(batchSeq, matchIds, txid, callIds, rewardIds){
