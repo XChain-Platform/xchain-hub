@@ -60,7 +60,6 @@ class FullNodeChallengeRound {
         this.peerManager      = hub.peerManager;
         this.identity         = hub.identity;
         this.capabilitySnapshot = hub.capabilitySnapshot;
-        this.slashDetector    = hub.slashDetector || null;
 
         let fn = cfg.FULLNODE || {};
         this.enabled       = String(process.env.FULLNODE_ENABLED || fn.ENABLED || 'true') !== 'false';
@@ -69,7 +68,6 @@ class FullNodeChallengeRound {
         this.acceptWindow  = parseInt(process.env.FULLNODE_VERDICT_ACCEPT_WINDOW_BLOCKS || fn.VERDICT_ACCEPT_WINDOW_BLOCKS || '24');
         this.pollMs        = parseInt(process.env.FULLNODE_POLL_MS    || fn.POLL_MS    || '30000');
         this.collectMs     = parseInt(process.env.FULLNODE_COLLECT_MS || fn.COLLECT_MS || '20000');
-        this.proofWindow   = parseInt(process.env.FULLNODE_PROOF_WINDOW_BLOCKS || fn.PROOF_WINDOW_BLOCKS || '300');
         // Collection closes when the tip reaches epoch + closeDepth blocks — anchored
         // to chain height (shared by all hubs), NOT each hub's local detection time,
         // so the leader has every claimant's answer before it proposes the PASS list.
@@ -100,9 +98,6 @@ class FullNodeChallengeRound {
         this.btcAddress   = process.env.BTC_ADDRESS || cfg.BTC_ADDRESS || '';
 
         this.rounds   = new Map();  // epoch → round state
-        // Window-based slashing bookkeeping (see _evaluatePersistentFailures).
-        this.claimantFirstSeen = new Map();  // pubkey → first epoch observed as a full_node claimant (local; resets on restart)
-        this.persistentSlashed = new Set();  // pubkeys already slash-proposed for persistent failure (re-armed on recovery)
         this._timer   = null;
         this._handler = (env) => this._handleMessage(env);
     }
@@ -256,18 +251,6 @@ class FullNodeChallengeRound {
         if(!state) return;
         let myPubkey = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
 
-        // Slashing is WINDOW-based, not per-epoch: a single epoch's local answer
-        // collection is unreliable (hubs detect the epoch up to POLL_MS apart, so a
-        // hub can close its collection window before a peer has even broadcast — see
-        // _evaluatePersistentFailures). Slashing on that local view falsely penalises
-        // honest validators. Instead, only propose a slash for a claimant with NO
-        // passing verdict across the proof window.
-        if(!state.slashed){
-            state.slashed = true;
-            try { await this._evaluatePersistentFailures(epoch, state); }
-            catch(e){ console.warn('FullNodeChallengeRound slash-eval:', e && e.message ? e.message : e); }
-        }
-
         // The PASS proposal below only applies while the round is still live.
         if(state.finalized) return;
 
@@ -289,56 +272,6 @@ class FullNodeChallengeRound {
                 });
                 await this._maybeFinalize(epoch);
             }
-        }
-    }
-
-    // Window-based slashing. A single epoch's local answer view is unreliable
-    // (detection skew: each hub's collection window is anchored to its OWN epoch
-    // detection, and hubs detect up to POLL_MS apart — so a hub routinely closes
-    // before a peer broadcasts, and POLL_MS can exceed COLLECT_MS). Penalising on
-    // that view falsely slashes honest validators. Instead, mirror the indexer's
-    // verification-window model: a claimant is at fault only if it has been a
-    // full_node claimant for at least a full proof window yet has NO passing verdict
-    // anywhere in that window (the indexer's verified set). A light mirror, which can
-    // never answer, fails the whole window and is caught; an honest node that misses
-    // an epoch to timing/skew passes some other epoch in the window and is spared.
-    // Only eligible verifiers attest, and each persistent failure is proposed once
-    // (re-armed if the node later recovers).
-    async _evaluatePersistentFailures(epoch, state){
-        if(!this.slashDetector) return;
-        let myPubkey = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
-        if(!myPubkey || !state.eligible.has(myPubkey)) return;   // only eligible verifiers attest failures
-
-        // Record first-seen epoch for current claimants; forget those no longer staked.
-        for(let pk of state.claimants){
-            if(!this.claimantFirstSeen.has(pk)) this.claimantFirstSeen.set(pk, epoch);
-        }
-        for(let pk of Array.from(this.claimantFirstSeen.keys())){
-            if(!state.claimants.has(pk)){ this.claimantFirstSeen.delete(pk); this.persistentSlashed.delete(pk); }
-        }
-
-        // Consensus verified set within the proof window at this epoch (on-chain verdicts).
-        let verified = new Set();
-        try {
-            let res = await this._indexerCall('getfullnodeverifiers', { block_index: epoch });
-            for(let v of ((res && res.validators) || [])){
-                let pk = String(v.pubkey || v).toLowerCase();
-                if(/^[0-9a-f]{64}$/.test(pk)) verified.add(pk);
-            }
-        } catch(_){ return; }   // can't assess without the verified set — skip this epoch
-
-        for(let pk of state.claimants){
-            if(verified.has(pk)){ this.persistentSlashed.delete(pk); continue; }   // passed in-window → re-arm
-            let firstSeen = this.claimantFirstSeen.get(pk);
-            if(firstSeen == null || (epoch - firstSeen) < this.proofWindow) continue; // not yet a full window of opportunity
-            if(this.persistentSlashed.has(pk)) continue;                              // already proposed
-            this.persistentSlashed.add(pk);
-            try {
-                await this.slashDetector._recordSlashProposal(pk, 'failed_full_node_challenge', epoch, JSON.stringify({
-                    challengeId: state.challengeId, epoch, target: state.target,
-                    reason: 'no_verdict_in_window', windowBlocks: this.proofWindow, firstSeenEpoch: firstSeen
-                }));
-            } catch(_){}
         }
     }
 

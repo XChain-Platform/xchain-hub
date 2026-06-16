@@ -65,7 +65,6 @@ function makeHub(overrides) {
         capabilitySnapshot: {
             getSnapshot: sinon.stub().resolves({ validators: [{ pubkey: P1 }] }),
         },
-        slashDetector: { _recordSlashProposal: sinon.stub().resolves() },
         network: 'regtest',
         p2pConfig: {
             FULLNODE: fullnodeCfg(overrides.fullnode),
@@ -242,7 +241,7 @@ describe('FullNodeChallengeRound', function () {
         });
     });
 
-    // ── round flow: answer → sign-req → sign → finalize + slash ────────────────
+    // ── round flow: answer → sign-req → sign → finalize ────────────────────────
     describe('round flow', function () {
         // single-tx block → deterministic answer; _computeAnswer lowercases the hex.
         const ANSWER = 'deadbeef';
@@ -273,54 +272,17 @@ describe('FullNodeChallengeRound', function () {
             expect(ans.args[1].answer).to.equal(ANSWER);
         });
 
-        it('leader proposes the PASS list and slashes a non-answering claimant', async function () {
+        it('leader proposes the PASS list of claimants whose answer matches', async function () {
             const hub = makeHub();
             const eng = await startEpoch(hub);
             const st = eng.rounds.get(288);
-            // P1 (a claimant) submitted the CORRECT answer; never answered → slash
+            // P1 (a claimant) submitted the CORRECT answer.
             eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer: ANSWER, sig_pubkey: P1, sig: 's' });
             await eng._closeCollection(288);
             // V1 is the only eligible verifier → it is leader → broadcasts a sign request
             const req = hub._pm.broadcast.getCalls().find(c => c.args[0] === 'XNODE_SIGN_REQ');
             expect(req, 'XNODE_SIGN_REQ broadcast').to.exist;
             expect(req.args[1].passList).to.include(P1);
-            // a claimant that never answered would be slashed; here all answered, so
-            // confirm the slash path fired only for genuine misses (none expected)
-            expect(hub.slashDetector._recordSlashProposal.called).to.equal(false);
-        });
-
-        it('window-based slashing: slashes a claimant with no passing verdict across the window, sparing verified ones', async function () {
-            const hub = makeHub();   // identity V1 (genesis verifier + claimant)
-            hub.capabilitySnapshot.getSnapshot.resolves({ validators: [{ pubkey: V1 }, { pubkey: P1 }, { pubkey: P2 }] });
-            // Verified set within the proof window: P2 + V1 have a passing verdict; P1 never did.
-            wireRpc({ ledgerHash: SEED, tip: 300, verifiers: [{ pubkey: P2 }, { pubkey: V1 }], block });
-            const eng = new FullNodeChallengeRound(hub);
-            eng.broadcastFn = sinon.stub().resolves({ txid: 'TX' });
-            await eng._runEpoch(288, 300);
-            // All three have been full_node claimants for at least a full proof window.
-            for (const pk of [V1, P1, P2]) eng.claimantFirstSeen.set(pk, 288 - eng.proofWindow);
-            await eng._closeCollection(288);
-
-            const slashed = hub.slashDetector._recordSlashProposal.getCalls()
-                .filter(c => c.args[1] === 'failed_full_node_challenge').map(c => c.args[0]);
-            expect(slashed, 'P1 (no verdict in window) is slashed').to.include(P1);
-            expect(slashed, 'P2 (verified in window) is spared').to.not.include(P2);
-            expect(slashed, 'V1 (verified in window) is spared').to.not.include(V1);
-            const ev = JSON.parse(hub.slashDetector._recordSlashProposal.getCalls()
-                .find(c => c.args[0] === P1).args[3]);
-            expect(ev.reason).to.equal('no_verdict_in_window');
-        });
-
-        it('does not slash a claimant before a full proof window has elapsed', async function () {
-            const hub = makeHub();
-            hub.capabilitySnapshot.getSnapshot.resolves({ validators: [{ pubkey: V1 }, { pubkey: P1 }] });
-            wireRpc({ ledgerHash: SEED, tip: 300, verifiers: [], block });
-            const eng = new FullNodeChallengeRound(hub);
-            eng.broadcastFn = sinon.stub().resolves({ txid: 'TX' });
-            await eng._runEpoch(288, 300);   // first-seen = 288, window not yet elapsed
-            await eng._closeCollection(288);
-            expect(hub.slashDetector._recordSlashProposal.called,
-                'no slash within the first window').to.equal(false);
         });
 
         it('finalizes on quorum and broadcasts the on-chain verdict', async function () {
