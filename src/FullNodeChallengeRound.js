@@ -223,12 +223,16 @@ class FullNodeChallengeRound {
 
     async _closeCollection(epoch){
         let state = this.rounds.get(epoch);
-        if(!state || state.finalized) return;
+        if(!state) return;
         let myPubkey = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
 
         // Local slash proposals: a claimant that staked full_node but produced no
         // answer — or a WRONG one vs. our own — failed the challenge. Recorded
         // locally on every verifying hub (matches SlashDetector's local model).
+        // Done BEFORE the finalized check: a fast quorum may have already landed a
+        // verdict (and XNODE_DONE flipped state.finalized) before this collection
+        // timer fires — the local failure observation still stands. Evidence is
+        // JSON-stringified to match SlashDetector's other callers / the column type.
         if(!state.slashed && this.slashDetector && myPubkey && state.myAnswer){
             state.slashed = true;
             for(let pk of state.claimants){
@@ -236,14 +240,17 @@ class FullNodeChallengeRound {
                 if(a === state.myAnswer) continue;
                 let reason = (a === undefined) ? 'no_answer' : 'wrong_answer';
                 try {
-                    await this.slashDetector._recordSlashProposal(pk, 'failed_full_node_challenge', epoch, {
+                    await this.slashDetector._recordSlashProposal(pk, 'failed_full_node_challenge', epoch, JSON.stringify({
                         challengeId: state.challengeId, epoch, target: state.target, reason,
                         submittedAnswerHash: a ? crypto.createHash('sha256').update(a).digest('hex') : null,
                         expectedAnswerHash: crypto.createHash('sha256').update(state.myAnswer).digest('hex')
-                    });
+                    }));
                 } catch(_){}
             }
         }
+
+        // The PASS proposal below only applies while the round is still live.
+        if(state.finalized) return;
 
         // Leader proposes the PASS list (claimants whose answer matches ours).
         if(this._isLeader(state, myPubkey) && state.myAnswer && !state.passList){

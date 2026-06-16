@@ -342,6 +342,10 @@ class XChainHub {
         // operator signer wiring as the attestation/oracle publishers — without a
         // broadcast hook (or encoder + wallet-sign) the elected leader assembles
         // verdicts but can't post them, so the engine stays observe-only.
+        // The slash detector is otherwise created by startOracle(); a hub that runs
+        // the full-node tier without the price-oracle subsystem still needs it to
+        // record failed-challenge slash proposals, so ensure one exists here.
+        if(!this.slashDetector) this.slashDetector = new SlashDetector(this);
         this.fullNodeChallenge = new FullNodeChallengeRound(this);
         let fnSignerHooks = loadSignerHooks();
         if(fnSignerHooks){
