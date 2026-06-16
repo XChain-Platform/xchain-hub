@@ -96,6 +96,85 @@ describe('CapabilitySnapshot', function () {
         });
     });
 
+    // A governance MIN_STAKE change must not be served a snapshot that was cached
+    // under the old threshold: the threshold controls which validators qualify, so
+    // two hubs caching contradictory sets for the same (capability, blockIndex)
+    // would lock different PBFT quorums for the same round. The fix folds the
+    // resolved min_stake into the cache key AND flushes the capability's entries
+    // when the threshold changes (XChainHub does this on 'proposal:finalized').
+    describe('MIN_STAKE change invalidation', function () {
+
+        // okResult with a controllable validator set so old vs new is observable.
+        function resultWith(validators) {
+            return { data: { result: { capability: 'attestation', block_index: 100, count: validators.length, validators } } };
+        }
+
+        it('does NOT serve a snapshot cached under a different min_stake', async function () {
+            // Mutable threshold — simulates a governance change between the two reads.
+            let threshold = '25000';
+            let registry = { getMinStake: () => threshold };
+            let snap = new CapabilitySnapshot(makeHub(registry));
+
+            axiosStub.post.onFirstCall().resolves(resultWith([{ pubkey: 'old', amount: '30000' }]));
+            axiosStub.post.onSecondCall().resolves(resultWith([{ pubkey: 'new', amount: '60000' }]));
+
+            let first = await snap.getSnapshot('attestation', 100);
+            expect(first.validators[0].pubkey).to.equal('old');
+
+            // Governance raises the threshold; the cache key now differs, so the
+            // stale entry is unreachable and a fresh indexer query runs.
+            threshold = '50000';
+            let second = await snap.getSnapshot('attestation', 100);
+
+            expect(axiosStub.post.calledTwice).to.equal(true);
+            expect(second.validators[0].pubkey).to.equal('new');
+        });
+
+        it('flushCapability drops both count- and weight-keyed entries, forcing a re-fetch', async function () {
+            let registry = { getMinStake: () => '25000' };
+            let snap = new CapabilitySnapshot(makeHub(registry));
+
+            axiosStub.post.resolves(resultWith([{ pubkey: 'old', amount: '30000' }]));
+            await snap.getSnapshot('attestation', 100);
+            await snap.getWeightSnapshot('attestation', 100);
+            // A different capability's entry must survive the flush.
+            await snap.getSnapshot('price', 100);
+            expect(snap.cache.size).to.equal(3);
+
+            let removed = snap.flushCapability('attestation');
+            expect(removed).to.equal(2);
+            expect(snap.cache.size).to.equal(1);
+
+            // Next read for the flushed capability hits the indexer again, not cache.
+            axiosStub.post.resetHistory();
+            await snap.getSnapshot('attestation', 100);
+            expect(axiosStub.post.calledOnce).to.equal(true);
+        });
+
+        it('end-to-end: a MIN_STAKE governance change yields the new validator set, not the stale one', async function () {
+            // Registry whose threshold is mutated by the governance apply path.
+            let threshold = '25000';
+            let registry = { getMinStake: () => threshold };
+            let snap = new CapabilitySnapshot(makeHub(registry));
+
+            axiosStub.post.onFirstCall().resolves(resultWith([{ pubkey: 'old', amount: '30000' }]));
+            axiosStub.post.onSecondCall().resolves(resultWith([{ pubkey: 'new', amount: '60000' }]));
+
+            // (a) prime the cache under the old threshold
+            let before = await snap.getSnapshot('attestation', 100);
+            expect(before.validators[0].pubkey).to.equal('old');
+
+            // (b) governance MIN_STAKE change lands: registry updates, hub flushes
+            //     (mirrors XChainHub._applyCapabilityGovernanceChange on the event).
+            threshold = '50000';
+            snap.flushCapability('attestation');
+
+            // (c) the next read reflects the new validator set
+            let after = await snap.getSnapshot('attestation', 100);
+            expect(after.validators[0].pubkey).to.equal('new');
+        });
+    });
+
     // Finding #4136/#4220: a 401 (hub BTC_INDEXER_API_KEY != indexer
     // INDEXER_API_KEY) must NOT be swallowed as an anonymous null snapshot — that
     // makes an auth misconfig indistinguishable from a dead indexer and silently

@@ -75,13 +75,6 @@ class CapabilitySnapshot {
     // Returns null when the indexer can't be reached or returns an error.
     async getSnapshot(capability, blockIndex) {
         if (blockIndex === undefined || blockIndex === null) return null;
-        let key = capability + ':' + blockIndex;
-        let cached = this.cache.get(key);
-        let now = Date.now();
-        if (cached && cached.expiresAt > now) return cached;
-
-        let url = await this.hub._resolveBtcIndexerUrl();
-        if (!url) return null;
 
         // The hub is the authoritative source of the MIN_STAKE threshold for its
         // own federation queries: passing it here makes the validator set depend
@@ -90,11 +83,23 @@ class CapabilitySnapshot {
         // indexers and silently break cross-hub snapshot determinism). When the
         // registry isn't ready yet (snapshot exists pre-startCapabilities), we
         // omit the field and the indexer falls back to its local config.
-        let minStake = (this.hub.capabilityRegistry && typeof this.hub.capabilityRegistry.getMinStake === 'function')
-            ? this.hub.capabilityRegistry.getMinStake(capability)
-            : null;
+        //
+        // The threshold also rides in the cache key: it controls which validators
+        // qualify for the round, so two reads resolving different thresholds for
+        // the same (capability, blockIndex) MUST NOT share a cache entry. Without
+        // this a governance MIN_STAKE change leaves a stale snapshot serving the
+        // old validator set for up to the TTL, splitting quorum across hubs.
+        let minStake = this._resolveMinStake(capability, blockIndex);
+        let key = capability + ':' + blockIndex + ':' + (minStake === null ? '' : minStake);
+        let cached = this.cache.get(key);
+        let now = Date.now();
+        if (cached && cached.expiresAt > now) return cached;
+
+        let url = await this.hub._resolveBtcIndexerUrl();
+        if (!url) return null;
+
         let params = { capability: capability, block_index: blockIndex };
-        if (minStake !== null && minStake !== undefined) params.min_stake = String(minStake);
+        if (minStake !== null) params.min_stake = minStake;
 
         try {
             let res = await axios.post(url, {
@@ -128,7 +133,12 @@ class CapabilitySnapshot {
     // disjoint from the count snapshot ('w:' prefix). Returns null on indexer error.
     async getWeightSnapshot(capability, blockIndex) {
         if (blockIndex === undefined || blockIndex === null) return null;
-        let key = 'w:' + capability + ':' + blockIndex;
+
+        // min_stake rides in the cache key for the same reason as getSnapshot:
+        // it determines the qualifying set, so a governance threshold change must
+        // force a fresh fetch rather than serve a snapshot keyed to the old one.
+        let minStake = this._resolveMinStake(capability, blockIndex);
+        let key = 'w:' + capability + ':' + blockIndex + ':' + (minStake === null ? '' : minStake);
         let cached = this.cache.get(key);
         let now = Date.now();
         if (cached && cached.expiresAt > now) return cached;
@@ -136,11 +146,8 @@ class CapabilitySnapshot {
         let url = await this.hub._resolveBtcIndexerUrl();
         if (!url) return null;
 
-        let minStake = (this.hub.capabilityRegistry && typeof this.hub.capabilityRegistry.getMinStake === 'function')
-            ? this.hub.capabilityRegistry.getMinStake(capability)
-            : null;
         let params = { capability: capability, block_index: blockIndex };
-        if (minStake !== null && minStake !== undefined) params.min_stake = String(minStake);
+        if (minStake !== null) params.min_stake = minStake;
 
         try {
             let res = await axios.post(url, {
@@ -272,6 +279,41 @@ class CapabilitySnapshot {
             if (String(v.pubkey).toLowerCase() === target) return true;
         }
         return false;
+    }
+
+    // Resolve this hub's authoritative MIN_STAKE threshold for a capability as a
+    // string (the form the indexer RPC and the cache key expect), or null when
+    // the registry isn't wired yet (pre-startCapabilities) or has no threshold
+    // for the capability — in which case the indexer falls back to its own config.
+    // Resolve the MIN_STAKE threshold for this capability AT the snapshot's block. Threading
+    // blockIndex is what makes the snapshot federation-deterministic: every hub resolves the same
+    // threshold for the same block from the block-anchored governance history, so they fold the
+    // identical min_stake into the cache key and request the identical qualifying set (#3703).
+    _resolveMinStake(capability, blockIndex) {
+        let reg = this.hub.capabilityRegistry;
+        if (!reg || typeof reg.getMinStake !== 'function') return null;
+        let v = reg.getMinStake(capability, blockIndex);
+        return (v === null || v === undefined) ? null : String(v);
+    }
+
+    // Drop every cached snapshot for a capability — both the count-keyed
+    // (capability:...) and the weight-keyed (w:capability:...) entries. Called
+    // when a governance MIN_STAKE change lands so the next consensus read
+    // re-queries the indexer under the new threshold. With min_stake folded into
+    // the cache key the stale entries are already unreachable; this reclaims them
+    // immediately instead of waiting for the TTL to prune them. Returns the count
+    // of entries removed. The '*'-keyed whole-federation snapshots carry no
+    // capability filter and are intentionally left untouched.
+    flushCapability(capability) {
+        if (!capability) return 0;
+        let prefixes = [capability + ':', 'w:' + capability + ':'];
+        let removed = 0;
+        for (let k of this.cache.keys()) {
+            for (let p of prefixes) {
+                if (k.indexOf(p) === 0) { this.cache.delete(k); removed++; break; }
+            }
+        }
+        return removed;
     }
 
     _prune(now) {

@@ -459,4 +459,83 @@ describe('CapabilityRegistry', function () {
             expect(hasDisableCall).to.be.true;
         });
     });
+
+    // ── Block-anchored MIN_STAKE history (#3703) ──────────────────────────────
+
+    describe('block-anchored MIN_STAKE history', function () {
+        function reg(minStake) {
+            loadModule();
+            return new CapabilityRegistry(makeHub({
+                p2pConfig: { CAPABILITIES: { price: { MIN_STAKE: String(minStake) } } }
+            }));
+        }
+
+        it('getMinStake(cap, N) resolves the threshold effective at block N across boundaries', function () {
+            let r = reg('10000');
+            r.applyMinStakeActivation('price', 1000, '25000');
+            r.applyMinStakeActivation('price', 2000, '5000');
+            expect(r.getMinStake('price', 0)).to.equal('10000');     // genesis
+            expect(r.getMinStake('price', 999)).to.equal('10000');
+            expect(r.getMinStake('price', 1000)).to.equal('25000');  // at activation
+            expect(r.getMinStake('price', 1999)).to.equal('25000');
+            expect(r.getMinStake('price', 2000)).to.equal('5000');
+            expect(r.getMinStake('price', 9999)).to.equal('5000');
+            expect(r.getMinStake('price')).to.equal('5000');         // no-block → latest
+        });
+
+        it('applyMinStakeActivation is idempotent by activation_block (re-apply replaces, no dup)', function () {
+            let r = reg('10000');
+            r.applyMinStakeActivation('price', 1000, '25000');
+            r.applyMinStakeActivation('price', 1000, '30000'); // same block, corrected value
+            expect(r.minStakeHistory.price.filter(e => e.activation_block === 1000)).to.have.length(1);
+            expect(r.getMinStake('price', 1000)).to.equal('30000');
+        });
+
+        it('out-of-order appends are sorted so resolution stays correct', function () {
+            let r = reg('10000');
+            r.applyMinStakeActivation('price', 2000, '5000');
+            r.applyMinStakeActivation('price', 1000, '25000'); // appended after, lower block
+            expect(r.getMinStake('price', 1500)).to.equal('25000');
+            expect(r.getMinStake('price', 2500)).to.equal('5000');
+        });
+
+        it('rejects an invalid activation_block', function () {
+            let r = reg('10000');
+            expect(() => r.applyMinStakeActivation('price', -1, '1')).to.throw('invalid activation_block');
+            expect(() => r.applyMinStakeActivation('price', 1.5, '1')).to.throw('invalid activation_block');
+            expect(() => r.applyMinStakeActivation('bogus', 10, '1')).to.throw('unknown capability');
+        });
+
+        it('two hubs fed the identical finalized history resolve identical thresholds at every block', function () {
+            let a = reg('10000'), b = reg('10000');
+            // Apply the same set of changes in DIFFERENT order (simulating different wall-clock arrival)
+            a.applyMinStakeActivation('price', 1000, '25000');
+            a.applyMinStakeActivation('price', 3000, '40000');
+            b.applyMinStakeActivation('price', 3000, '40000');
+            b.applyMinStakeActivation('price', 1000, '25000');
+            for (let n of [0, 999, 1000, 2999, 3000, 5000])
+                expect(a.getMinStake('price', n)).to.equal(b.getMinStake('price', n));
+        });
+
+        it('loadGovernanceHistory rebuilds appended history from finalized proposals', async function () {
+            loadModule();
+            let db = makeDb();
+            db.doQuery = sinon.stub().resolves([
+                { parameter: 'CAPABILITY_PRICE_MIN_STAKE', proposed_value: '25000', activation_block: 1000 },
+                { parameter: 'CAPABILITY_PRICE_MIN_STAKE', proposed_value: '5000',  activation_block: 2000 },
+                { parameter: 'ORACLE_ROUND_INTERVAL',       proposed_value: '900000', activation_block: 1500 } // ignored
+            ]);
+            let r = new CapabilityRegistry(makeHub({ db, p2pConfig: { CAPABILITIES: { price: { MIN_STAKE: '10000' } } } }));
+            await r.loadGovernanceHistory();
+            expect(r.getMinStake('price', 999)).to.equal('10000');
+            expect(r.getMinStake('price', 1000)).to.equal('25000');
+            expect(r.getMinStake('price', 2000)).to.equal('5000');
+        });
+
+        it('loadGovernanceHistory is best-effort when the table/doQuery is unavailable', async function () {
+            let r = reg('10000'); // makeHub default db has no doQuery
+            await r.loadGovernanceHistory();
+            expect(r.getMinStake('price', 5000)).to.equal('10000'); // genesis only, no crash
+        });
+    });
 });

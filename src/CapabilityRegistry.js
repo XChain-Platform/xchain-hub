@@ -28,6 +28,17 @@
 const KNOWN_CAPABILITIES = ['price', 'cross_chain', 'oracle_publish', 'attestation', 'full_node'];
 const SELF_TESTS = require('./capabilities/index.js');
 
+// Parse a governance parameter name of the form CAPABILITY_<CAP>_MIN_STAKE into
+// { capability } (lowercased), or null if it is not a known-capability MIN_STAKE field.
+// Mirrors XChainHub._parseCapabilityParameter; used here for governance-history rebuild.
+function parseCapabilityMinStakeParam(parameter) {
+    let m = /^CAPABILITY_(.+)_MIN_STAKE$/.exec(String(parameter || ''));
+    if (!m) return null;
+    let capability = m[1].toLowerCase();
+    if (KNOWN_CAPABILITIES.indexOf(capability) === -1) return null;
+    return { capability: capability };
+}
+
 class CapabilityRegistry {
 
     constructor(hub) {
@@ -36,8 +47,37 @@ class CapabilityRegistry {
         // Per-capability min_stake config. Sourced from p2pConfig.CAPABILITIES at startup;
         // long-term this comes from on-chain governance proposals.
         this.capConfig  = (hub.p2pConfig && hub.p2pConfig.CAPABILITIES) ? hub.p2pConfig.CAPABILITIES : {};
+        // Block-anchored MIN_STAKE history per capability: an array of
+        // { activation_block, value } ordered ascending by activation_block. Seeded from
+        // capConfig as a genesis entry (activation_block 0 — the operator-configured threshold
+        // effective from block 0), then APPENDED (never overwritten) when a governance MIN_STAKE
+        // change finalizes, each entry carrying the proposer-declared activation_block. Resolving
+        // the threshold for a given block (getMinStake(cap, blockIndex)) is then a deterministic
+        // function of block height — identical on every hub regardless of when each wall-clock
+        // applied the change — which is what makes CapabilitySnapshot's qualifying validator set
+        // (and therefore the quorum N it locks) federation-deterministic. See #3703.
+        this.minStakeHistory = {};
+        this._seedGenesisHistory();
         // Operator opt-out list (capabilities the operator does not want to serve even when qualified + self_test_ok)
         this.disabled   = new Set((hub.p2pConfig && hub.p2pConfig.DISABLED_CAPABILITIES) || []);
+    }
+
+    // (Re)seed the genesis (block-0) MIN_STAKE entry for each capability from the current
+    // capConfig. Called at construction and on hot-reload of the capability config. Preserves
+    // any already-appended future activation entries (only the activation_block-0 entry is reset),
+    // so a reload of operator config does not wipe finalized governance history.
+    _seedGenesisHistory() {
+        for (let cap of KNOWN_CAPABILITIES) {
+            let entry = this.capConfig[cap];
+            // Preserve the pre-history getMinStake semantics: an entry present but without a
+            // MIN_STAKE key resolves to '0'; an absent entry resolves to null (no genesis seeded).
+            if (!entry) continue;
+            let genesisValue = entry.MIN_STAKE || '0';
+            let hist = this.minStakeHistory[cap] || (this.minStakeHistory[cap] = []);
+            let g = hist.find(e => e.activation_block === 0);
+            if (g) g.value = String(genesisValue);
+            else { hist.push({ activation_block: 0, value: String(genesisValue) }); hist.sort((a, b) => a.activation_block - b.activation_block); }
+        }
     }
 
     // Run self-tests for every known capability for this hub's signing pubkey.
@@ -70,11 +110,27 @@ class CapabilityRegistry {
         return KNOWN_CAPABILITIES.slice();
     }
 
-    // Min stake required to qualify for a capability (as decimal string)
-    getMinStake(capability) {
-        let entry = this.capConfig[capability];
-        if (!entry) return null;
-        return entry.MIN_STAKE || '0';
+    // Min stake required to qualify for a capability (as decimal string), resolved at a block.
+    //   getMinStake(cap, blockIndex) → the threshold effective AT blockIndex = the value of the
+    //     history entry with the greatest activation_block <= blockIndex. This is the
+    //     CONSENSUS path: every hub resolves the same value for the same block, so the
+    //     qualifying validator set (and quorum N) is federation-deterministic (#3703).
+    //   getMinStake(cap)           → the latest configured threshold (no block context). Used by
+    //     non-consensus callers (operator status display, self-test/qualification gossip).
+    // Returns null when the capability has no configured threshold (preserve fail-closed
+    // semantics in refreshOwnQualification — never default to '0').
+    getMinStake(capability, blockIndex) {
+        let hist = this.minStakeHistory[capability];
+        if (!hist || hist.length === 0) return null;
+        if (blockIndex === undefined || blockIndex === null) return hist[hist.length - 1].value;
+        let resolved = null;
+        for (let e of hist) {
+            if (e.activation_block <= blockIndex) resolved = e.value;
+            else break; // ascending — no later entry can be in effect at blockIndex
+        }
+        // blockIndex before the genesis entry (activation_block 0) cannot happen for a real
+        // block, but fall back to genesis rather than null to stay fail-safe.
+        return resolved !== null ? resolved : hist[0].value;
     }
 
     // Whether the operator has opted out of serving this capability
@@ -86,24 +142,56 @@ class CapabilityRegistry {
      * State mutations (called by qualification sync + self-tests + operator config)
      ****************************************************************/
 
-    // Apply a governance-approved parameter change to the in-memory capability
-    // config — the object getMinStake() reads from. capConfig is seeded from
-    // p2pConfig.CAPABILITIES at startup and would otherwise stay frozen for the
-    // life of the process, so a passed proposal (e.g. raising a capability's
-    // MIN_STAKE) would only take effect after a restart. Calling this keeps
-    // long-running nodes in sync with freshly-started peers, so the federation
-    // computes the same qualified validator set from the same thresholds.
-    //
-    // The common case is parameterKey === 'MIN_STAKE'. This only mutates config;
-    // re-evaluating this node's own qualification against the new threshold is
-    // the caller's responsibility, because the on-chain stake amount lives on
-    // the hub (see XChainHub.refreshOwnQualification).
+    // Append a block-anchored governance MIN_STAKE change to the history (idempotent by
+    // activation_block; kept sorted ascending). Unlike an in-place scalar overwrite, the
+    // change does NOT take effect until the chain reaches activation_block —
+    // getMinStake(cap, N) resolves the value effective at N — so two hubs that append at
+    // different wall-clock moments still agree on the threshold for every block. The
+    // proposer-declared activation_block is the federation-wide deterministic anchor (it
+    // rides in the agreed, authenticated governance proposal). Re-evaluating this node's own
+    // qualification is the caller's responsibility (XChainHub.refreshOwnQualification).
+    applyMinStakeActivation(capability, activationBlock, newValue) {
+        if (KNOWN_CAPABILITIES.indexOf(capability) === -1)
+            throw new Error('unknown capability: ' + capability);
+        let ab = Number(activationBlock);
+        if (!Number.isInteger(ab) || ab < 0)
+            throw new Error('invalid activation_block: ' + activationBlock);
+        let hist = this.minStakeHistory[capability] || (this.minStakeHistory[capability] = []);
+        let existing = hist.find(e => e.activation_block === ab);
+        if (existing) { existing.value = String(newValue); }
+        else { hist.push({ activation_block: ab, value: String(newValue) }); hist.sort((a, b) => a.activation_block - b.activation_block); }
+        return hist;
+    }
+
+    // Reconstruct block-anchored MIN_STAKE history from finalized governance proposals after a
+    // restart so a long-running hub and a freshly-started one resolve identical thresholds for
+    // every block. Genesis entries (from p2pConfig) are seeded in the constructor; this layers
+    // the passed proposals on top, ordered by activation_block. Idempotent. Best-effort: a fresh
+    // hub without the governance_proposals table simply gets the genesis seed.
+    async loadGovernanceHistory() {
+        let rows;
+        try {
+            rows = await this.db.doQuery(
+                `SELECT parameter, proposed_value, activation_block
+                   FROM governance_proposals
+                  WHERE status = 'passed' AND activation_block IS NOT NULL
+                  ORDER BY activation_block ASC, id ASC`, []);
+        } catch (e) { return; }
+        for (let r of rows) {
+            let parsed = parseCapabilityMinStakeParam(r.parameter);
+            if (!parsed) continue;
+            this.applyMinStakeActivation(parsed.capability, r.activation_block, r.proposed_value);
+        }
+    }
+
+    // Back-compat shim (test-only / non-block-anchored callers): set the baseline (block-0)
+    // MIN_STAKE for a capability. The real governance path is applyMinStakeActivation with a
+    // proposer-declared activation_block, driven from XChainHub._applyCapabilityGovernanceChange.
     _applyGovernanceChange(capability, parameterKey, newValue) {
         if (KNOWN_CAPABILITIES.indexOf(capability) === -1)
             throw new Error('unknown capability: ' + capability);
-        if (!this.capConfig[capability]) this.capConfig[capability] = {};
-        this.capConfig[capability][parameterKey] = newValue;
-        return this.capConfig[capability][parameterKey];
+        if (parameterKey === 'MIN_STAKE') return this.applyMinStakeActivation(capability, 0, newValue);
+        return null;
     }
 
     // Upsert qualified flag for (pubkey, capability)
@@ -259,3 +347,4 @@ class CapabilityRegistry {
 
 module.exports = CapabilityRegistry;
 module.exports.KNOWN_CAPABILITIES = KNOWN_CAPABILITIES;
+module.exports.parseCapabilityMinStakeParam = parseCapabilityMinStakeParam;

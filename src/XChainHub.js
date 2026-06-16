@@ -991,6 +991,9 @@ class XChainHub {
         // Keep a live registry's view in sync so hot-reload applies without a restart.
         if(this.capabilityRegistry){
             this.capabilityRegistry.capConfig = this.p2pConfig.CAPABILITIES || {};
+            // Re-seed the block-0 genesis threshold from the reloaded config (#3703). Preserves
+            // any already-appended governance activation entries; only the genesis entry is reset.
+            this.capabilityRegistry._seedGenesisHistory();
             this.capabilityRegistry.disabled  = new Set(this.p2pConfig.DISABLED_CAPABILITIES || []);
         }
         console.log('Loaded capability config from ' + configFilePath +
@@ -1011,6 +1014,9 @@ class XChainHub {
             }
         }
         this.capabilityRegistry = new CapabilityRegistry(this);
+        // Rebuild block-anchored MIN_STAKE history from finalized governance proposals so a
+        // restarted hub resolves the same per-block thresholds as long-running peers (#3703).
+        await this.capabilityRegistry.loadGovernanceHistory();
 
         // Subscribe to peer capability messages (only meaningful if P2P is active)
         if(this.peerManager){
@@ -1219,7 +1225,9 @@ class XChainHub {
         let amount = String(stakeAmount || '0');
         this._latestStakeAmount = amount;
         for(let cap of this.capabilityRegistry.getCapabilities()){
-            let minStake = this.capabilityRegistry.getMinStake(cap);
+            // Resolve the threshold AT this block so own-qualification tracks the same
+            // block-anchored value the federation locks quorum against (#3703).
+            let minStake = this.capabilityRegistry.getMinStake(cap, blockIndex);
             let qualified;
             if(minStake === null || minStake === undefined){
                 // No MIN_STAKE configured for this capability. Fail CLOSED — do not
@@ -1252,7 +1260,30 @@ class XChainHub {
         if(!ev || !ev.parameter || !this.capabilityRegistry) return;
         let parsed = this._parseCapabilityParameter(ev.parameter);
         if(!parsed) return;
-        this.capabilityRegistry._applyGovernanceChange(parsed.capability, parsed.parameterKey, String(ev.newValue));
+        // Block-anchored apply (#3703): append the new threshold to the capability's history keyed
+        // by the proposer-declared activation_block rather than overwriting a live scalar. The
+        // change does not take effect until the chain reaches activation_block — getMinStake(cap, N)
+        // resolves the value effective at N — so all hubs agree on the threshold for every block
+        // even though they finalize at different wall-clock moments. A finalized MIN_STAKE proposal
+        // with no activation_block (e.g. a legacy row) is ignored here rather than applied unanchored.
+        if(parsed.parameterKey === 'MIN_STAKE'){
+            if(ev.activationBlock === undefined || ev.activationBlock === null || !Number.isInteger(Number(ev.activationBlock))){
+                console.warn('Governance MIN_STAKE change for ' + parsed.capability +
+                    ' has no activation_block — not applying (would be unanchored, risking cross-hub divergence)');
+                return;
+            }
+            this.capabilityRegistry.applyMinStakeActivation(parsed.capability, Number(ev.activationBlock), String(ev.newValue));
+        } else {
+            this.capabilityRegistry._applyGovernanceChange(parsed.capability, parsed.parameterKey, String(ev.newValue));
+        }
+        // Drop cached validator-set snapshots for this capability so the next
+        // consensus read re-queries the indexer under the new threshold instead
+        // of serving a snapshot computed from the old one. The snapshot cache key
+        // already folds in min_stake (so the stale entries are unreachable), but
+        // flushing reclaims them at once rather than waiting out the TTL.
+        if(this.capabilitySnapshot && typeof this.capabilitySnapshot.flushCapability === 'function'){
+            this.capabilitySnapshot.flushCapability(parsed.capability);
+        }
         // Re-evaluate own qualification immediately against the new threshold,
         // using the most recent observed on-chain stake amount. The periodic
         // stake poll (_pollOwnStake) reconciles with fresh on-chain truth on its

@@ -134,6 +134,44 @@ describe('Governance', function () {
             expect(result.status).to.equal('voting');
             expect(pm.broadcast.calledOnce).to.be.true;
             expect(pm.broadcast.getCall(0).args[0]).to.equal('GOV_PROPOSE');
+            // Non-capability parameters carry no activation block.
+            expect(result.activationBlock).to.equal(null);
+            expect(pm.broadcast.getCall(0).args[1].activationBlock).to.equal(null);
+        });
+
+        // ── Block-anchored MIN_STAKE activation (#3703) ───────────────────────
+        it('computes a block-anchored activation for a capability MIN_STAKE proposal', async function () {
+            hub.db.doQuery.onFirstCall().resolves([]).onSecondCall().resolves([]).onThirdCall().resolves();
+            hub._latestBlockIndex = 500;
+            gov.votingPeriod = 604800000; // 7 days → ceil(/600000) = 1008 blocks
+            let result = await gov.propose('CAPABILITY_PRICE_MIN_STAKE', '10000', '12000');
+            // 500 (latest) + 1008 (voting period in blocks) + 50 (safety buffer)
+            expect(result.activationBlock).to.equal(1558);
+            let payload = pm.broadcast.getCall(0).args[1];
+            expect(payload.activationBlock).to.equal(1558);
+        });
+
+        it('rejects an explicit activation block that is too soon', async function () {
+            hub.db.doQuery.onFirstCall().resolves([]).onSecondCall().resolves([]);
+            hub._latestBlockIndex = 500;
+            gov.votingPeriod = 604800000;
+            try {
+                await gov.propose('CAPABILITY_PRICE_MIN_STAKE', '10000', '12000', null, 600);
+                expect.fail('should throw');
+            } catch (e) {
+                expect(e.message).to.include('too soon');
+            }
+        });
+
+        it('throws when anchoring a MIN_STAKE change with no observed block height', async function () {
+            hub.db.doQuery.onFirstCall().resolves([]).onSecondCall().resolves([]);
+            hub._latestBlockIndex = null;
+            try {
+                await gov.propose('CAPABILITY_PRICE_MIN_STAKE', '10000', '12000');
+                expect.fail('should throw');
+            } catch (e) {
+                expect(e.message).to.include('no observed block height');
+            }
         });
 
         it('throws when no identity configured', async function () {

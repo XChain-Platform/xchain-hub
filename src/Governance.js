@@ -24,10 +24,20 @@
 
 const crypto = require('crypto');
 const EventEmitter = require('events');
+const { parseCapabilityMinStakeParam } = require('./CapabilityRegistry.js');
 
 const GOV_PROPOSE = 'GOV_PROPOSE';
 const GOV_VOTE    = 'GOV_VOTE';
 const GOV_RESULT  = 'GOV_RESULT';
+
+// Block-anchored activation for capability MIN_STAKE changes (#3703). Capability snapshots are
+// BTC-anchored, so activation heights are reasoned in BTC blocks. A MIN_STAKE change must not
+// take effect until every hub has finalized it — i.e. comfortably after the voting period ends
+// plus a propagation/apply margin — so the activation block is computed as the proposer's latest
+// observed block + (voting period in blocks) + a safety buffer. The proposer's value rides in the
+// agreed, authenticated proposal, so every hub anchors the change to the identical block.
+const BTC_BLOCK_MS                    = 600000; // ~10 min/block
+const ACTIVATION_SAFETY_BUFFER_BLOCKS = 50;     // ≈8h past finalize for GOV_RESULT propagation
 
 // Change bounds
 const MAX_INCREASE         = 0.50;  // 50% max increase
@@ -107,8 +117,36 @@ class Governance extends EventEmitter {
         }
     }
 
-    // Submit a governance proposal
-    async propose(parameter, currentValue, proposedValue, rationale) {
+    // Compute the block-anchored activation height for a capability MIN_STAKE change. The change
+    // can only safely apply after every hub has finalized it, so the earliest valid activation is
+    // the current observed block + the voting period (in blocks) + a propagation/apply buffer. An
+    // explicit proposer-supplied block is accepted only if it is at or beyond that minimum. Throws
+    // if the hub has not observed a block height yet (cannot anchor) or the explicit value is too
+    // soon. The returned value is broadcast in the proposal so every hub anchors to the same block.
+    _computeActivationBlock(explicit) {
+        let raw = this.hub ? this.hub._latestBlockIndex : null;
+        if (raw === null || raw === undefined)   // Number(null) === 0 — must reject explicitly
+            throw new Error('cannot anchor a MIN_STAKE change: no observed block height yet');
+        let latest = Number(raw);
+        if (!Number.isInteger(latest))
+            throw new Error('cannot anchor a MIN_STAKE change: no observed block height yet');
+        let votingBlocks = Math.ceil(this.votingPeriod / BTC_BLOCK_MS);
+        let minActivation = latest + votingBlocks + ACTIVATION_SAFETY_BUFFER_BLOCKS;
+        if (explicit === undefined || explicit === null) return minActivation;
+        let ab = Number(explicit);
+        if (!Number.isInteger(ab) || ab < 0)
+            throw new Error('invalid activation_block: ' + explicit);
+        if (ab < minActivation)
+            throw new Error('activation_block ' + ab + ' is too soon — must be >= ' + minActivation +
+                ' (current block + voting period + safety buffer) so every hub finalizes before activation');
+        return ab;
+    }
+
+    // Submit a governance proposal. For capability MIN_STAKE parameters
+    // (CAPABILITY_<CAP>_MIN_STAKE) an activation block is computed/validated and carried with the
+    // proposal so the threshold change is block-anchored federation-wide (#3703); activationBlock
+    // is ignored for other parameters (their consumers are not block-anchored).
+    async propose(parameter, currentValue, proposedValue, rationale, activationBlock) {
         // Validate proposer is an active validator
         let proposerPubkey = this.identity ? this.identity.getPubkeyHex() : null;
         if (!proposerPubkey) throw new Error('No validator identity configured');
@@ -145,6 +183,11 @@ class Governance extends EventEmitter {
         // Validate change bounds
         this._validateChangeBounds(parameter, currentValue, proposedValue);
 
+        // Block-anchor capability MIN_STAKE changes (#3703); other parameters carry no activation block.
+        let activation = parseCapabilityMinStakeParam(parameter)
+            ? this._computeActivationBlock(activationBlock)
+            : null;
+
         // Create the proposal
         let proposalId = 'gov:' + parameter + ':' + Date.now();
         let now = new Date();
@@ -153,21 +196,22 @@ class Governance extends EventEmitter {
         await this.db.doQuery(
             `INSERT INTO governance_proposals
                 (proposal_id, proposer_pubkey, parameter, current_value, proposed_value,
-                 rationale, status, voting_start, voting_end)
-             VALUES (?, ?, ?, ?, ?, ?, 'voting', ?, ?)`,
+                 rationale, status, voting_start, voting_end, activation_block)
+             VALUES (?, ?, ?, ?, ?, ?, 'voting', ?, ?, ?)`,
             [proposalId, proposerPubkey, parameter, currentValue, proposedValue,
-             rationale || '', now, votingEnd]
+             rationale || '', now, votingEnd, activation]
         );
 
         // Broadcast the proposal
         this.peerManager.broadcast(GOV_PROPOSE, {
             proposalId, parameter, currentValue, proposedValue, rationale,
-            proposerPubkey, votingEnd: votingEnd.toISOString()
+            proposerPubkey, votingEnd: votingEnd.toISOString(), activationBlock: activation
         });
 
-        console.log('Governance: Proposal created — ' + proposalId + ' (' + parameter + ': ' + currentValue + ' → ' + proposedValue + ')');
+        console.log('Governance: Proposal created — ' + proposalId + ' (' + parameter + ': ' + currentValue + ' → ' + proposedValue + ')' +
+            (activation !== null ? ' [activation block ' + activation + ']' : ''));
 
-        return { proposalId, parameter, status: 'voting', votingEnd: votingEnd.toISOString() };
+        return { proposalId, parameter, status: 'voting', votingEnd: votingEnd.toISOString(), activationBlock: activation };
     }
 
     // Cast a vote on a proposal
@@ -252,17 +296,22 @@ class Governance extends EventEmitter {
     }
 
     _handlePropose(envelope) {
-        let { proposalId, parameter, currentValue, proposedValue, rationale, proposerPubkey, votingEnd } = envelope.data;
+        let { proposalId, parameter, currentValue, proposedValue, rationale, proposerPubkey, votingEnd, activationBlock } = envelope.data;
         if (!proposalId || !parameter) return;
+
+        // Persist the proposer-declared activation block verbatim so every hub anchors a capability
+        // MIN_STAKE change to the identical height (#3703). Coerce to integer or NULL.
+        let activation = (activationBlock === undefined || activationBlock === null || !Number.isInteger(Number(activationBlock)))
+            ? null : Number(activationBlock);
 
         // Store the proposal locally if we don't have it
         this.db.doQuery(
             `INSERT IGNORE INTO governance_proposals
                 (proposal_id, proposer_pubkey, parameter, current_value, proposed_value,
-                 rationale, status, voting_start, voting_end)
-             VALUES (?, ?, ?, ?, ?, ?, 'voting', NOW(), ?)`,
+                 rationale, status, voting_start, voting_end, activation_block)
+             VALUES (?, ?, ?, ?, ?, ?, 'voting', NOW(), ?, ?)`,
             [proposalId, proposerPubkey || '', parameter, currentValue, proposedValue,
-             rationale || '', votingEnd]
+             rationale || '', votingEnd, activation]
         ).catch(e => {}); // Ignore duplicate
     }
 
@@ -338,7 +387,7 @@ class Governance extends EventEmitter {
         if (status === 'passed' && res && res.affectedRows > 0) {
             try {
                 let rows = await this.db.doQuery(
-                    'SELECT parameter, current_value, proposed_value FROM governance_proposals WHERE proposal_id = ? LIMIT 1',
+                    'SELECT parameter, current_value, proposed_value, activation_block FROM governance_proposals WHERE proposal_id = ? LIMIT 1',
                     [proposalId]
                 );
                 if (rows.length) {
@@ -346,7 +395,8 @@ class Governance extends EventEmitter {
                         proposalId: proposalId,
                         parameter:  rows[0].parameter,
                         oldValue:   rows[0].current_value,
-                        newValue:   rows[0].proposed_value
+                        newValue:   rows[0].proposed_value,
+                        activationBlock: rows[0].activation_block
                     });
                 }
             } catch (e) { /* best-effort: status already persisted */ }
@@ -444,7 +494,8 @@ class Governance extends EventEmitter {
                 proposalId: proposal.proposal_id,
                 parameter:  proposal.parameter,
                 oldValue:   proposal.current_value,
-                newValue:   proposal.proposed_value
+                newValue:   proposal.proposed_value,
+                activationBlock: proposal.activation_block
             });
         }
     }

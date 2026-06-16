@@ -319,21 +319,35 @@ describe('XChainHub', function () {
             expect(hub._parseCapabilityParameter('')).to.be.null;
         });
 
-        it('mutates capConfig in place on a finalized capability proposal', async function () {
+        it('appends a block-anchored threshold on a finalized capability proposal (#3703)', async function () {
             expect(hub.capabilityRegistry.getMinStake('price')).to.equal('10000');
+            await hub._applyCapabilityGovernanceChange({
+                parameter: 'CAPABILITY_PRICE_MIN_STAKE', oldValue: '10000', newValue: '25000',
+                activationBlock: 1000
+            });
+            // Old threshold still applies BEFORE the activation block; new threshold AT/after it.
+            expect(hub.capabilityRegistry.getMinStake('price', 999)).to.equal('10000');
+            expect(hub.capabilityRegistry.getMinStake('price', 1000)).to.equal('25000');
+            // No-block lookup returns the latest configured threshold.
+            expect(hub.capabilityRegistry.getMinStake('price')).to.equal('25000');
+        });
+
+        it('does NOT apply a MIN_STAKE change with no activation block (would be unanchored)', async function () {
             await hub._applyCapabilityGovernanceChange({
                 parameter: 'CAPABILITY_PRICE_MIN_STAKE', oldValue: '10000', newValue: '25000'
             });
-            expect(hub.capabilityRegistry.getMinStake('price')).to.equal('25000');
+            expect(hub.capabilityRegistry.getMinStake('price', 1000)).to.equal('10000');
         });
 
         it('re-evaluates own qualification against the new threshold', async function () {
             let setQual = sinon.spy(hub.capabilityRegistry, 'setQualification');
             hub._latestStakeAmount = '15000';   // between old (10000) and new (25000) thresholds
             await hub._applyCapabilityGovernanceChange({
-                parameter: 'CAPABILITY_PRICE_MIN_STAKE', oldValue: '10000', newValue: '25000'
+                parameter: 'CAPABILITY_PRICE_MIN_STAKE', oldValue: '10000', newValue: '25000',
+                activationBlock: 1000
             });
-            // 15000 < 25000 → no longer qualified for price under the raised threshold
+            // refreshOwnQualification resolves the latest threshold (25000) for the no-block case;
+            // 15000 < 25000 → no longer qualified for price under the raised threshold.
             let priceCall = setQual.getCalls().find(c => c.args[1] === 'price');
             expect(priceCall, 'setQualification called for price').to.exist;
             expect(priceCall.args[2]).to.equal(false);
