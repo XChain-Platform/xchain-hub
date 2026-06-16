@@ -194,6 +194,18 @@ class Database {
         // but its index had to be added by hand on every box — this folds that
         // hand-step into the code-side self-heal.
         await this._migrateIndex('validator_rewards', 'idx_batch_seq', '(batch_seq)');
+        // The capability ENUM gains values as new capability tiers ship (e.g.
+        // 'full_node' added for WI-2). alterTableForDrift only adds missing
+        // columns / relaxes NULL — it never MODIFYs a column's type — so an
+        // already-deployed validator_capabilities keeps the narrower ENUM and
+        // rejects the new value (WARN_DATA_TRUNCATED) on the capability self-test
+        // INSERT. Widen it in place to match CapabilityRegistry.KNOWN_CAPABILITIES.
+        await this._migrateEnumColumn(
+            'validator_capabilities',
+            'capability',
+            ['price', 'cross_chain', 'oracle_publish', 'attestation', 'full_node'],
+            'NOT NULL'
+        );
     }
 
     // Add a UNIQUE KEY to a table, removing duplicate rows first
@@ -247,6 +259,33 @@ class Database {
             console.log('Migration: added INDEX ' + indexName + ' on ' + table);
         } catch(e){
             console.error('Migration error on ' + table + ':', e);
+        } finally {
+            await db.release();
+        }
+    }
+
+    // Widen an ENUM column in place to the target value set. Idempotent: skips
+    // when the live COLUMN_TYPE already contains every target value, so it is a
+    // no-op on fresh installs (which get the full set from the CREATE TABLE) and
+    // on already-migrated nodes. Used to roll out new capability tiers without a
+    // manual ALTER on every deployed hub.
+    async _migrateEnumColumn(table, column, enumValues, nullClause){
+        let db = await this.getConnection();
+        try {
+            let rows = await db.query(
+                "SELECT COLUMN_TYPE FROM information_schema.columns " +
+                "WHERE table_schema = ? AND table_name = ? AND column_name = ?",
+                [this.dbName, table, column]
+            );
+            if(!rows[0]) return; // table/column not present yet — CREATE TABLE covers it
+            let liveType = String(rows[0].COLUMN_TYPE || '').toLowerCase();
+            let missing = enumValues.filter(v => liveType.indexOf("'" + v.toLowerCase() + "'") === -1);
+            if(missing.length === 0) return; // already covers every target value
+            let enumDef = 'ENUM(' + enumValues.map(v => "'" + v + "'").join(',') + ')';
+            await db.query('ALTER TABLE `' + table + '` MODIFY `' + column + '` ' + enumDef + ' ' + (nullClause || ''));
+            console.log('Migration: widened ' + table + '.' + column + ' ENUM (added ' + missing.join(', ') + ')');
+        } catch(e){
+            console.error('Migration error widening ' + table + '.' + column + ':', e);
         } finally {
             await db.release();
         }

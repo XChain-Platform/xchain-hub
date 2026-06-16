@@ -1,7 +1,7 @@
 CREATE TABLE validator_capabilities (
     id              BIGINT AUTO_INCREMENT PRIMARY KEY,
     signing_pubkey  CHAR(64) NOT NULL,
-    capability      ENUM('price','cross_chain','oracle_publish','attestation') NOT NULL,
+    capability      ENUM('price','cross_chain','oracle_publish','attestation','full_node') NOT NULL,
     qualified       TINYINT(1) NOT NULL DEFAULT 0,             -- stake amount meets min_stake[capability]
     self_test_ok    TINYINT(1) NOT NULL DEFAULT 0,             -- latest selfTest() passed
     enabled         TINYINT(1) NOT NULL DEFAULT 1,             -- operator hasn't opted out via config

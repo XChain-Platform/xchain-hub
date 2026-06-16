@@ -265,14 +265,66 @@ describe('Database — extended coverage', function () {
             expect(mockConn.release.called).to.be.true;
         });
 
-        it('runMigrations migrates both oracle_submissions and validator_rewards', async function () {
+        it('runMigrations migrates unique keys, the batch index, and the capability ENUM', async function () {
             const { db } = makeDb();
             const mig = sinon.stub(db, '_migrateUniqueKey').resolves();
             const idx = sinon.stub(db, '_migrateIndex').resolves();
+            const en  = sinon.stub(db, '_migrateEnumColumn').resolves();
             await db.runMigrations();
             expect(mig.calledWith('oracle_submissions', 'uq_submission')).to.be.true;
             expect(mig.calledWith('validator_rewards', 'uq_reward')).to.be.true;
             expect(idx.calledWith('validator_rewards', 'idx_batch_seq', '(batch_seq)')).to.be.true;
+            const enCall = en.getCall(0);
+            expect(enCall.args[0]).to.equal('validator_capabilities');
+            expect(enCall.args[1]).to.equal('capability');
+            expect(enCall.args[2]).to.include('full_node');
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // _migrateEnumColumn()
+    // -----------------------------------------------------------------
+
+    describe('_migrateEnumColumn()', function () {
+        const TARGET = ['price', 'cross_chain', 'oracle_publish', 'attestation', 'full_node'];
+
+        it('skips when the live column already covers every target value', async function () {
+            const { db, mockConn } = makeDb();
+            mockConn.query.resolves([{ COLUMN_TYPE: "enum('price','cross_chain','oracle_publish','attestation','full_node')" }]);
+            await db._migrateEnumColumn('validator_capabilities', 'capability', TARGET, 'NOT NULL');
+            // only the COLUMN_TYPE SELECT runs — no ALTER
+            expect(mockConn.query.callCount).to.equal(1);
+            expect(mockConn.release.called).to.be.true;
+        });
+
+        it('widens the column in place when a target value is missing', async function () {
+            const { db, mockConn } = makeDb();
+            mockConn.query
+                .onCall(0).resolves([{ COLUMN_TYPE: "enum('price','cross_chain','oracle_publish','attestation')" }])
+                .onCall(1).resolves([]); // ALTER MODIFY
+            await db._migrateEnumColumn('validator_capabilities', 'capability', TARGET, 'NOT NULL');
+            const alter = mockConn.query.getCall(1).args[0];
+            expect(alter).to.include('ALTER TABLE `validator_capabilities` MODIFY `capability`');
+            expect(alter).to.include("'full_node'");
+            expect(alter).to.include('NOT NULL');
+            expect(console.log.calledWithMatch(/widened validator_capabilities\.capability/)).to.be.true;
+        });
+
+        it('is a no-op when the table/column is absent (fresh install)', async function () {
+            const { db, mockConn } = makeDb();
+            mockConn.query.resolves([]); // information_schema returns no row
+            await db._migrateEnumColumn('validator_capabilities', 'capability', TARGET, 'NOT NULL');
+            expect(mockConn.query.callCount).to.equal(1); // no ALTER
+        });
+
+        it('catches and logs an error, still releasing the connection', async function () {
+            const { db, mockConn } = makeDb();
+            mockConn.query
+                .onCall(0).resolves([{ COLUMN_TYPE: "enum('price')" }])
+                .onCall(1).rejects(new Error('alter failed'));
+            await db._migrateEnumColumn('validator_capabilities', 'capability', TARGET, 'NOT NULL');
+            expect(console.error.calledWithMatch(/Migration error widening validator_capabilities\.capability/)).to.be.true;
+            expect(mockConn.release.called).to.be.true;
         });
     });
 
