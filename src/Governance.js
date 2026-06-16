@@ -279,9 +279,45 @@ class Governance extends EventEmitter {
         ).catch(e => {}); // Ignore errors
     }
 
+    // True if `sender` is a registered validator. Mirrors OracleConsensus._isKnownSender:
+    // the P2P sig layer already authenticates the sender, but a forged sender that slipped
+    // past a null-registry window must not be trusted. Null registry fails closed; an empty
+    // registry stays lenient (genuine pre-bootstrap, where the sig layer rejects unknowns).
+    _isKnownSender(sender) {
+        let registry = this.peerManager && this.peerManager.validatorPubkeys;
+        if (!registry) return false;
+        if (registry.size === 0) return true;
+        return registry.has(sender);
+    }
+
     async _handleResult(envelope) {
         let { proposalId, status } = envelope.data;
         if (!proposalId || !status) return;
+
+        // Authenticate the result. GOV_RESULT is the federation-final outcome, applied
+        // first-writer-wins under the status='voting' guard below — so it MUST come only from
+        // the proposal's deterministic tally leader (the single hub that runs _tallyProposal).
+        // Without this, any one registered validator could broadcast a forged 'passed' that
+        // every follower records while the real leader tallies the true outcome locally —
+        // a permanent governance split-brain. The tally side is already leader-pinned
+        // (_isTallyLeader); this closes the result-ACCEPTANCE side. The leader's own loopback
+        // of its broadcast still passes (sender == leader) and is absorbed by the 0-row guard.
+        if (!this._isKnownSender(envelope.sender)) return;
+        let leader = this._getProposalLeader(proposalId);
+        if (!leader || leader.addr !== envelope.sender) return;
+
+        // Reject a result that arrives before the voting window closes: the legitimate leader
+        // only tallies after voting_end (_checkExpiredProposals), so an early result is
+        // spurious. Compare the LOCALLY-stored voting_end (recorded from GOV_PROPOSE on every
+        // hub); a proposal this hub never saw has no row and is dropped rather than applied
+        // blind. Safe against clock skew in practice — the timer-driven tally fires well after
+        // voting_end, so a follower receiving the result is already past it too.
+        let prows;
+        try {
+            prows = await this.db.doQuery(
+                'SELECT voting_end FROM governance_proposals WHERE proposal_id = ? LIMIT 1', [proposalId]);
+        } catch (e) { return; }
+        if (!prows.length || new Date(prows[0].voting_end).getTime() > Date.now()) return;
 
         // Update proposal status locally. Guard side effects on the status-transition (was 'voting')
         // so the tally leader's own loopback of this GOV_RESULT — which already applied + emitted in

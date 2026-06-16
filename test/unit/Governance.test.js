@@ -307,15 +307,21 @@ describe('Governance', function () {
 
     describe('_handleResult()', function () {
 
+        // Authenticated GOV_RESULT comes only from the proposal's deterministic tally
+        // leader, after voting_end. Call order is now: SELECT voting_end → UPDATE → SELECT row.
+        const PAST = '2020-01-01T00:00:00Z';                  // voting_end already elapsed
+        const leaderAddr = () => gov._getProposalLeader('gov:P:1').addr;
+
         it('emits proposal:finalized on a passed status transition (affectedRows > 0)', async function () {
-            hub.db.doQuery.onFirstCall().resolves({ affectedRows: 1 });   // UPDATE: voting → passed
-            hub.db.doQuery.onSecondCall().resolves([                      // SELECT proposal row
+            hub.db.doQuery.onCall(0).resolves([{ voting_end: PAST }]);    // SELECT voting_end
+            hub.db.doQuery.onCall(1).resolves({ affectedRows: 1 });       // UPDATE: voting → passed
+            hub.db.doQuery.onCall(2).resolves([                           // SELECT proposal row
                 { parameter: 'CAPABILITY_PRICE_MIN_STAKE', current_value: '100', proposed_value: '200' }
             ]);
             let emitted = null;
             gov.on('proposal:finalized', (d) => { emitted = d; });
 
-            await gov._handleResult({ data: { proposalId: 'gov:P:1', status: 'passed' } });
+            await gov._handleResult({ sender: leaderAddr(), data: { proposalId: 'gov:P:1', status: 'passed' } });
 
             expect(emitted).to.not.be.null;
             expect(emitted.proposalId).to.equal('gov:P:1');
@@ -325,19 +331,47 @@ describe('Governance', function () {
         });
 
         it('does NOT emit when already finalized (affectedRows = 0 — tally-leader loopback)', async function () {
-            hub.db.doQuery.onFirstCall().resolves({ affectedRows: 0 });
+            hub.db.doQuery.onCall(0).resolves([{ voting_end: PAST }]);
+            hub.db.doQuery.onCall(1).resolves({ affectedRows: 0 });
             let emitted = false;
             gov.on('proposal:finalized', () => { emitted = true; });
-            await gov._handleResult({ data: { proposalId: 'gov:P:1', status: 'passed' } });
+            await gov._handleResult({ sender: leaderAddr(), data: { proposalId: 'gov:P:1', status: 'passed' } });
             expect(emitted).to.be.false;
         });
 
         it('does NOT emit for a failed proposal', async function () {
-            hub.db.doQuery.onFirstCall().resolves({ affectedRows: 1 });
+            hub.db.doQuery.onCall(0).resolves([{ voting_end: PAST }]);
+            hub.db.doQuery.onCall(1).resolves({ affectedRows: 1 });
             let emitted = false;
             gov.on('proposal:finalized', () => { emitted = true; });
-            await gov._handleResult({ data: { proposalId: 'gov:P:1', status: 'failed' } });
+            await gov._handleResult({ sender: leaderAddr(), data: { proposalId: 'gov:P:1', status: 'failed' } });
             expect(emitted).to.be.false;
+        });
+
+        // --- authentication (the #3704 fix): only the tally leader, only after voting_end ---
+
+        it('DROPS a result from a non-leader validator (no DB write, no split-brain)', async function () {
+            let notLeader = VALIDATORS_3.find(v => v.addr !== leaderAddr()).addr;
+            let emitted = false;
+            gov.on('proposal:finalized', () => { emitted = true; });
+            await gov._handleResult({ sender: notLeader, data: { proposalId: 'gov:P:1', status: 'passed' } });
+            expect(hub.db.doQuery.called).to.be.false;   // never reaches the voting_end SELECT / UPDATE
+            expect(emitted).to.be.false;
+        });
+
+        it('DROPS a result that arrives before voting_end (spurious early finalize)', async function () {
+            hub.db.doQuery.onCall(0).resolves([{ voting_end: '2999-01-01T00:00:00Z' }]); // not yet ended
+            let emitted = false;
+            gov.on('proposal:finalized', () => { emitted = true; });
+            await gov._handleResult({ sender: leaderAddr(), data: { proposalId: 'gov:P:1', status: 'passed' } });
+            expect(hub.db.doQuery.callCount).to.equal(1);  // only the voting_end SELECT; no UPDATE
+            expect(emitted).to.be.false;
+        });
+
+        it('DROPS a result for a proposal this hub never saw (no local row)', async function () {
+            hub.db.doQuery.onCall(0).resolves([]);          // no proposal row
+            await gov._handleResult({ sender: leaderAddr(), data: { proposalId: 'gov:P:1', status: 'passed' } });
+            expect(hub.db.doQuery.callCount).to.equal(1);   // SELECT only, no UPDATE
         });
     });
 
@@ -508,13 +542,16 @@ describe('Governance', function () {
             expect(args[5]).to.equal(''); // signature (on-duplicate update)
         });
 
-        it('_handleResult updates proposal status', function () {
-            gov._handleResult({
-                sender: 'peer', type: 'GOV_RESULT',
+        it('_handleResult updates proposal status (from the tally leader, post voting_end)', async function () {
+            hub.db.doQuery.onCall(0).resolves([{ voting_end: '2020-01-01T00:00:00Z' }]); // SELECT voting_end
+            hub.db.doQuery.onCall(1).resolves({ affectedRows: 1 });                       // UPDATE
+            await gov._handleResult({
+                sender: gov._getProposalLeader('gov:P:1').addr, type: 'GOV_RESULT',
                 data: { proposalId: 'gov:P:1', status: 'passed' }
             });
             expect(hub.db.doQuery.called).to.be.true;
-            expect(hub.db.doQuery.getCall(0).args[0]).to.include('UPDATE');
+            expect(hub.db.doQuery.getCall(0).args[0]).to.include('voting_end');
+            expect(hub.db.doQuery.getCall(1).args[0]).to.include('UPDATE');
         });
 
         it('ignores messages with missing fields', function () {
