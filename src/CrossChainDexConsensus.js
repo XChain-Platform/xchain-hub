@@ -18,13 +18,13 @@
  * is written to cross_chain_matches and mirrored to indexers. The indexer's
  * settlement pass (cross_settle) releases escrow only after verifying 2f+1
  * `cross_chain` signatures over the canonical match; this engine produces those
- * signatures through a 3-phase PBFT round (PROPOSE → PREPARE → COMMIT) with
- * leader-failover (VIEW_CHANGE → NEW_VIEW).
+ * signatures through a 3-phase PBFT round (PROPOSE -> PREPARE -> COMMIT) with
+ * leader-failover (VIEW_CHANGE -> NEW_VIEW).
  *
- * Unlike attestation consensus (divergent provider bodies → provider.agree()
+ * Unlike attestation consensus (divergent provider bodies -> provider.agree()
  * picks a winner), a cross-chain match is DETERMINISTIC: given the same confirmed
  * order books at snapshot_block, every honest validator derives the identical
- * canonical (engine._canonicalMatch). So there is no winner to agree on — the
+ * canonical (engine._canonicalMatch). There is no winner to agree on: the
  * round is independent re-derivation + signature collection:
  *   - the match-designated leader broadcasts XDEX_MATCH_PROPOSE(row);
  *   - each peer re-derives + validates the match against its OWN order book
@@ -38,8 +38,8 @@
  * deterministic id, signature collection, early-message buffer, finalize-emit)
  * merged with Consensus.js's leader-failover (view-change keyed here by match_id).
  *
- * Single-node fallback: quorum 0 (N≤1, e.g. a single-operator regtest) collapses
- * to immediate self-sign + finalize — identical to the pre-PBFT behavior.
+ * Single-node fallback: quorum 0 (N<=1, e.g. a single-operator regtest) collapses
+ * to immediate self-sign + finalize, identical to the pre-PBFT behavior.
  *
  ********************************************************************/
 
@@ -55,10 +55,11 @@ const XDEX_MATCH_NEW_VIEW    = 'XDEX_MATCH_NEW_VIEW';
 const XDEX_MATCH_FINAL_SYNC  = 'XDEX_MATCH_FINAL_SYNC';
 
 const DEFAULT_ROUND_TIMEOUT_MS = 120000;  // 2 minutes per match round before view-change
+const PENDING_EVICT_MS         = 10000;   // hold finalized state ~10s for late-arriving duplicates, then evict
 
 class CrossChainDexConsensus extends EventEmitter {
 
-    // engine: the CrossChainDexEngine — used for _canonicalMatch (the signable
+    // engine: the CrossChainDexEngine. Used for _canonicalMatch (the signable
     // payload, byte-identical to the indexer verifier), validateProposedMatch
     // (independent re-derivation), and _persistCapabilitySnapshot (leader path).
     //
@@ -66,9 +67,9 @@ class CrossChainDexConsensus extends EventEmitter {
     // type without sharing gossip traffic with DEX match rounds. The engine
     // contract is unchanged (duck-typed _canonicalMatch / validateProposedMatch /
     // _persistCapabilitySnapshot; rows carry snapshot_block + the id field):
-    //   opts.messageTypes — {PROPOSE, PREPARE, COMMIT, VIEW_CHANGE, NEW_VIEW}
-    //   opts.controlTags  — {vc, nv} signed-control payload tags
-    //   opts.idField      — row field that must equal the round id (default 'match_id')
+    //   opts.messageTypes: {PROPOSE, PREPARE, COMMIT, VIEW_CHANGE, NEW_VIEW}
+    //   opts.controlTags:  {vc, nv} signed-control payload tags
+    //   opts.idField:      row field that must equal the round id (default 'match_id')
     constructor(engine, opts){
         super();
         opts = opts || {};
@@ -92,7 +93,7 @@ class CrossChainDexConsensus extends EventEmitter {
         // Per-match round state: Map<match_id, pending>
         this.pending = new Map();
 
-        // Finalized match ids — ring-buffer bounded, FIFO eviction (mirrors
+        // Finalized match ids (ring-buffer bounded, FIFO eviction; mirrors
         // AttestationConsensus.finalized). Suppresses duplicate finalize/late COMMITs.
         this.finalized       = new Set();
         this._finalizedOrder = [];
@@ -101,7 +102,7 @@ class CrossChainDexConsensus extends EventEmitter {
         // Finalized round payloads (row + quorum signatures), same eviction as
         // `finalized`. Serves FINAL_SYNC catch-up: a straggler that missed a
         // round (e.g. its local validation raced confirmation depth) keeps
-        // emitting VIEW_CHANGEs, but peers that finalized ignore the round —
+        // emitting VIEW_CHANGEs; peers that finalized ignore the round, so
         // without state transfer the straggler's mirror NEVER gets the row.
         this.finalizedRows   = new Map();
 
@@ -120,7 +121,7 @@ class CrossChainDexConsensus extends EventEmitter {
 
     async start(){
         if(!this.peerManager){
-            console.log('CrossChainDexConsensus: no peer manager — single-node finalize only');
+            console.log('CrossChainDexConsensus: no peer manager; single-node finalize only');
             return;
         }
         this._messageHandler = (env) => this._handleMessage(env);
@@ -163,9 +164,9 @@ class CrossChainDexConsensus extends EventEmitter {
     }
 
     // Signed control message (VIEW_CHANGE / NEW_VIEW). Authenticated by pubkey +
-    // signature like the PROPOSE/PREPARE/COMMIT phases — NOT by envelope.sender,
+    // signature like the PROPOSE/PREPARE/COMMIT phases (NOT by envelope.sender,
     // which the transport sets to a validator address while our snapshot set is
-    // pubkey-keyed. Binds tag+matchId+view so a vote can't be replayed elsewhere.
+    // pubkey-keyed). Binds tag+matchId+view so a vote can't be replayed elsewhere.
     _controlPayload(tag, rid, view){ return tag + '|' + rid + '|' + view; }
     _signControl(tag, rid, view){ return this.identity.sign(this._controlPayload(tag, rid, view)); }
     _verifyControl(tag, rid, view, pubkey, sig){
@@ -185,11 +186,11 @@ class CrossChainDexConsensus extends EventEmitter {
     // ── Round entry (called by the engine for every discovered match) ──────────
     // Every node runs this on discovery: the leader broadcasts PROPOSE; followers
     // create the round (so they hold the failover timer + can validate the
-    // leader's PROPOSE). quorum 0 → single-node immediate self-sign + finalize.
+    // leader's PROPOSE). quorum 0 -> single-node immediate self-sign + finalize.
     async propose(matchId, ctx){
         let rid = String(matchId).toLowerCase();
         if(this.finalized.has(rid) || this.pending.has(rid)) return;
-        if(!this.identity) throw new Error('no validator identity — cannot run cross-chain match consensus');
+        if(!this.identity) throw new Error('no validator identity: cannot run cross-chain match consensus');
 
         let row        = ctx.row;
         let validators = (ctx.snapshot && Array.isArray(ctx.snapshot.validators)) ? ctx.snapshot.validators : [];
@@ -208,7 +209,7 @@ class CrossChainDexConsensus extends EventEmitter {
             row:          row,
             canonical:    canonical,
             // Carry source + weight so the weighted tally can dedupe by staking
-            // address (DELEGATE v0 is additive — one source, many keys, one vote).
+            // address (DELEGATE v0 is additive: one source, many keys, one vote).
             validators:   validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), source: String(v.source != null ? v.source : ''), weight: String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0')) })),
             quorum:       quorum,
             weighted:     weighted,
@@ -216,8 +217,8 @@ class CrossChainDexConsensus extends EventEmitter {
             myPubkey:     myPubkey,
             prepares:     new Set(),
             commits:      new Set(),
-            signatures:   new Map(),     // pubkey → sig over canonical
-            viewChanges:  new Map(),     // view → Set<pubkey>
+            signatures:   new Map(),     // pubkey -> sig over canonical
+            viewChanges:  new Map(),     // view -> Set<pubkey>
             finalized:    false,
             _commitSent:  false,
             timer:        null
@@ -225,11 +226,11 @@ class CrossChainDexConsensus extends EventEmitter {
         this.pending.set(rid, pending);
 
         // Single-operator / no-federation: persist the snapshot (so the indexer can
-        // verify), sign with our own identity, and finalize immediately — byte-for-byte
-        // the pre-PBFT behavior (there is no PROPOSE round to carry the persist).
-        // snapCount<=1 (quorum===0) is the single-operator fast path in BOTH modes:
-        // the sole validator's own stake is the whole snapshot, so it trivially
-        // satisfies 3·weight>2·S as well.
+        // verify), sign with our own identity, and finalize immediately. This is
+        // byte-for-byte the pre-PBFT behavior (there is no PROPOSE round to carry
+        // the persist). snapCount<=1 (quorum===0) is the single-operator fast path
+        // in BOTH modes: the sole validator's own stake is the whole snapshot, so
+        // it trivially satisfies 3·weight>2·S as well.
         if(quorum === 0){
             try { await this.engine._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network); }
             catch(e){ console.warn('CrossChainDexConsensus: snapshot persist failed: ' + (e && e.message)); }
@@ -256,7 +257,7 @@ class CrossChainDexConsensus extends EventEmitter {
             let p = this.pending.get(rid);
             if(p && !p.finalized) this._initiateViewChange(rid);
         }, this.roundTimeoutMs);
-        if(t.unref) t.unref();                          // housekeeping timer — never pin process liveness
+        if(t.unref) t.unref();                          // housekeeping timer; never pin process liveness
         return t;
     }
 
@@ -312,13 +313,13 @@ class CrossChainDexConsensus extends EventEmitter {
         if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), senderPubkey)) return;
 
         // INDEPENDENT confirmation: re-derive + validate against our own view of
-        // the underlying data. This — not byte-equality with our locally pre-built
-        // row — is the gate against a Byzantine leader.
+        // the underlying data. This (not byte-equality with our locally pre-built
+        // row) is the gate against a Byzantine leader.
         let ok = false;
         try { ok = await this.engine.validateProposedMatch(row); }
         catch(e){ ok = false; }
         if(!ok){
-            console.warn('CrossChainDexConsensus: PROPOSE ' + rid.substring(0,16) + '... failed local validation — not signing');
+            console.warn('CrossChainDexConsensus: PROPOSE ' + rid.substring(0,16) + '... failed local validation; not signing');
             return;
         }
 
@@ -328,7 +329,7 @@ class CrossChainDexConsensus extends EventEmitter {
             // snapshot_block = the leader's chain-tip view) legitimately differ
             // from the row WE pre-built at discovery, so byte-equality here
             // deadlocked every round whose hubs polled in different seconds.
-            // The leader's row passed independent validation above — adopt it as
+            // The leader's row passed independent validation above; adopt it as
             // the round canonical, unless we already committed to another.
             if(pending._commitSent) return;
             pending.row       = row;
@@ -358,7 +359,7 @@ class CrossChainDexConsensus extends EventEmitter {
         this._checkPrepareQuorum(rid);
 
         // PREPARE/COMMIT votes that raced ahead of this PROPOSE failed signature
-        // verification against our stale canonical and were buffered — replay them
+        // verification against our stale canonical and were buffered; replay them
         // now that the round canonical matches what they signed.
         if(adopted) this._drainEarlyMessages(rid);
     }
@@ -375,7 +376,7 @@ class CrossChainDexConsensus extends EventEmitter {
         if(!d.sig || !ValidatorIdentity.verify(pending.canonical, String(d.sig), senderPubkey)){
             // A vote only counts with a verifying signature over the round
             // canonical. A mismatch usually means this vote raced ahead of the
-            // leader's PROPOSE (we still hold our pre-built canonical) — buffer
+            // leader's PROPOSE (we still hold our pre-built canonical); buffer
             // it for replay after adoption rather than losing it.
             this._bufferEarlyMessage(rid, envelope);
             return;
@@ -386,7 +387,7 @@ class CrossChainDexConsensus extends EventEmitter {
     }
 
     // Quorum test for a collected vote set (prepares or commits). Stake-weighted
-    // (source-deduped 3·Σ>2·S) at/above activation; signer COUNT (≥2f+1) below it.
+    // (source-deduped 3·Sigma>2·S) at/above activation; signer COUNT (>=2f+1) below it.
     _meetsQuorum(pending, voteSet){
         if(pending.weighted)
             return swq.meetsStakeThreshold(pending.validators, voteSet);
@@ -456,8 +457,8 @@ class CrossChainDexConsensus extends EventEmitter {
         // (WI-2 bump 2); below the EQUIV flag-day it is stored but unused.
         this.emit('match:finalized', { matchId: rid, row: pending.row, signatures: sigs, view: pending.view });
 
-        let cleanup = setTimeout(() => this.pending.delete(rid), 10000);
-        if(cleanup.unref) cleanup.unref();             // housekeeping timer — never pin process liveness
+        let cleanup = setTimeout(() => this.pending.delete(rid), PENDING_EVICT_MS);
+        if(cleanup.unref) cleanup.unref();             // housekeeping timer; never pin process liveness
     }
 
     _markFinalized(rid, row, signatures, view){
@@ -496,7 +497,7 @@ class CrossChainDexConsensus extends EventEmitter {
         if(!rid) return;
         if(this.finalized.has(rid)){
             // A VIEW_CHANGE for a round we finalized means the voter is a
-            // straggler stuck in failover purgatory — the round can never
+            // straggler stuck in failover purgatory. The round can never
             // re-reach quorum (everyone else moved on), so answer with the
             // finalized row + its quorum signatures (state transfer).
             let fin = this.finalizedRows.get(rid);
@@ -538,7 +539,7 @@ class CrossChainDexConsensus extends EventEmitter {
 
     // FINAL_SYNC (straggler catch-up): a peer answered our VIEW_CHANGE for a
     // round the federation already finalized. The quorum signatures over the
-    // canonical ARE the proof — the same proof the indexers verify — so a
+    // canonical ARE the proof (the same proof the indexers verify), so a
     // forged sync would need 2f+1 real validator signatures. Adopt + finalize.
     _handleFinalSync(envelope){
         let d = envelope.data;
@@ -561,11 +562,11 @@ class CrossChainDexConsensus extends EventEmitter {
             verified.set(pk, String(s.sig));
         }
         // The offered signatures must themselves clear the round's quorum (weighted
-        // at/above activation, else ≥2f+1) — a forged sync would need a real quorum.
+        // at/above activation, else >=2f+1). A forged sync would need a real quorum.
         let proofOk = pending.weighted
             ? swq.meetsStakeThreshold(pending.validators, verified.keys())
             : (verified.size >= Math.max(pending.quorum, 1));
-        if(!proofOk) return;                                               // not a quorum proof — ignore
+        if(!proofOk) return;                                               // not a quorum proof; ignore
 
         pending.row        = row;
         pending.canonical  = canonical;
@@ -585,7 +586,7 @@ class CrossChainDexConsensus extends EventEmitter {
         let announcer = String(d.sig_pubkey || '').toLowerCase();
         // Announcer must be the designated leader for the CLAIMED view, and prove it
         // with a valid signature (mirrors Consensus._handleNewView's leader-identity
-        // guard — a Byzantine node can only announce views in which it is the leader).
+        // guard: a Byzantine node can only announce views in which it is the leader).
         let expected = this._leaderFor(rid, pending.validators, view);
         if(!expected || announcer !== expected) {
             console.warn('CrossChainDexConsensus: ignoring NEW_VIEW for view ' + view + ' from non-leader');

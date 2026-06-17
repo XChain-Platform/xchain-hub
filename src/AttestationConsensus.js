@@ -21,7 +21,7 @@
  *     -> if I'm responsible, broadcast ATTEST_PROPOSE with my fetched body
  *   ATTEST_PROPOSE handler
  *     -> collect proposals; once REDUNDANCY are in (or timeout), run
- *        provider.agree(proposals) → winner. Sign canonical bytes for the
+ *        provider.agree(proposals) -> winner. Sign canonical bytes for the
  *        winner. Broadcast ATTEST_PREPARE.
  *   ATTEST_PREPARE handler
  *     -> collect prepares; on PBFT quorum (2f+1 over responsible set, size=REDUNDANCY),
@@ -31,7 +31,7 @@
  *        publisher to ship the on-chain ATTEST v1 (response).
  *
  * Validator-set snapshot is locked at the request's block_index via
- * CapabilitySnapshot — every hub derives the same responsible set (and thus
+ * CapabilitySnapshot: every hub derives the same responsible set (and thus
  * the same PBFT quorum over it) for the round.
  *
  * Spec: claude/reports/specs/2026-05-24_external-attestation-framework.md
@@ -48,6 +48,7 @@ const ATTEST_PREPARE = 'ATTEST_PREPARE';
 const ATTEST_COMMIT  = 'ATTEST_COMMIT';
 
 const DEFAULT_ROUND_TIMEOUT_MS = 120000;  // 2 minutes per request lifecycle
+const PENDING_EVICT_MS         = 10000;   // hold finalized state ~10s for late-arriving duplicates, then evict
 
 class AttestationConsensus extends EventEmitter {
 
@@ -67,7 +68,7 @@ class AttestationConsensus extends EventEmitter {
         // Ring-buffer bounded to the most-recent `finalizedMax` request IDs:
         // a finalized request only needs duplicate suppression within its
         // active round window, so aged-out IDs are safe to forget. Bounds
-        // memory — a plain unbounded Set grew with lifetime request volume.
+        // memory (a plain unbounded Set grew with lifetime request volume).
         // `_finalizedOrder` tracks insertion order for FIFO eviction while
         // `finalized` keeps O(1) Set semantics for the `.has(rid)` guards.
         this.finalized       = new Set();
@@ -75,7 +76,7 @@ class AttestationConsensus extends EventEmitter {
         this.finalizedMax    = parseInt(this.config.ATTESTATION_FINALIZED_MAX) || 10000;
 
         // Early-arrival buffer. With staggered hub polls, the first proposer's
-        // PROPOSE often reaches peers before they start their own round —
+        // PROPOSE often reaches peers before they start their own round.
         // _handlePropose silently returns at `if(!pending)`, losing the vote.
         // Buffer envelopes here keyed by rid and drain in propose() once
         // pending exists. Bounded TTL prevents leaks if pending never starts.
@@ -87,9 +88,9 @@ class AttestationConsensus extends EventEmitter {
         this.earlyMessageMaxPerRid = 32;
 
         // Early-COMMIT buffer. A COMMIT can arrive after `pending` exists but
-        // before a winner is established: the PROPOSE→agree() transition is
+        // before a winner is established: the PROPOSE->agree() transition is
         // async, and _drainEarlyMessages replays buffered envelopes in arrival
-        // order — so a COMMIT can be replayed ahead of its own PROPOSE. Without
+        // order, so a COMMIT can be replayed ahead of its own PROPOSE. Without
         // buffering, such a COMMIT hits the `!winner` guard in _handleCommit and
         // is permanently dropped, costing the round that peer's vote and
         // stalling finalization in quorum>1 federations until a re-broadcast or
@@ -105,7 +106,7 @@ class AttestationConsensus extends EventEmitter {
 
     async start(){
         if(!this.peerManager){
-            console.log('AttestationConsensus: no peer manager — skipping start');
+            console.log('AttestationConsensus: no peer manager; skipping start');
             return;
         }
         this._messageHandler = (env) => this._handleMessage(env);
@@ -196,11 +197,11 @@ class AttestationConsensus extends EventEmitter {
         let snapshot = roundState.snapshot;
         // PBFT messages (PROPOSE/PREPARE/COMMIT) only flow within the
         // REDUNDANCY-sized responsible set, so prepares/commits are bounded by
-        // responsible.length — NOT the full attestation-validator count N.
+        // responsible.length (NOT the full attestation-validator count N).
         // Compute the quorum over the responsible set; computing it over N
         // would make the threshold unreachable whenever N > REDUNDANCY and
         // deadlock every round until timeout. The 2f+1 form is floored at a
-        // simple majority — bare 2f+1 degenerates to quorum=1 at size 3.
+        // simple majority (bare 2f+1 degenerates to quorum=1 at size 3).
         let responsible = roundState.responsible || [];
         let quorum      = responsible.length <= 1
             ? 0
@@ -225,7 +226,7 @@ class AttestationConsensus extends EventEmitter {
             myPubkey:     myPubkey,
             // Map<pubkey, { body, meta, sig }>
             proposals:    new Map(),
-            // Set <pubkey>  — PREPARE/COMMIT votes (track by pubkey, not addr,
+            // Set<pubkey>: PREPARE/COMMIT votes (track by pubkey, not addr,
             // because attestation responsibility is pubkey-scoped)
             prepares:     new Set(),
             commits:      new Set(),
@@ -272,7 +273,7 @@ class AttestationConsensus extends EventEmitter {
 
         // Replay messages that arrived before our round was set up. With
         // staggered hub polls, the first proposer's PROPOSE typically lands
-        // before peers create their pending entry — without this drain,
+        // before peers create their pending entry; without this drain,
         // _handlePropose's `if(!pending) return` loses those votes.
         this._drainEarlyMessages(rid);
 
@@ -290,10 +291,10 @@ class AttestationConsensus extends EventEmitter {
     }
 
     // Maximum allowed base64 length for a peer-supplied body, derived from the
-    // provider's configured max_response_bytes (×1.4 base64 expansion factor).
+    // provider's configured max_response_bytes (x1.4 base64 expansion factor).
     // The only transport gate on an incoming PROPOSE/PREPARE is the WebSocket
-    // frame limit (~1 MB), which is 22–46× larger than any legitimate provider
-    // response — so a peer could otherwise force multi-hundred-KB Buffer
+    // frame limit (~1 MB), which is 22-46x larger than any legitimate provider
+    // response, so a peer could otherwise force multi-hundred-KB Buffer
     // allocations per message. Falls back to a 64 KB cap when the provider def
     // or its max_response_bytes is unavailable.
     _maxBodyB64Length(providerId){
@@ -309,7 +310,7 @@ class AttestationConsensus extends EventEmitter {
         if(this.finalized.has(rid)) return;
         let pending = this.pending.get(rid);
         if(!pending){
-            // Round not started yet — buffer for drain in propose(). Without
+            // Round not started yet; buffer for drain in propose(). Without
             // this, the first proposer's PROPOSE is lost to peers whose
             // _startRound hasn't run yet, and PBFT can't reach 2f+1.
             this._bufferEarlyMessage(rid, envelope);
@@ -321,7 +322,7 @@ class AttestationConsensus extends EventEmitter {
 
         // Sender must be in the responsible set for this request
         if(!pending.responsible.some(v => v.pubkey === senderPubkey)){
-            return;  // Outsider proposal — ignore
+            return;  // Outsider proposal; ignore
         }
 
         // Reject oversized payloads before allocating a Buffer. A responsible
@@ -344,7 +345,7 @@ class AttestationConsensus extends EventEmitter {
             return;
         }
 
-        // Store (idempotent — dedup by sender pubkey)
+        // Store (idempotent; dedup by sender pubkey)
         if(!pending.proposals.has(senderPubkey)){
             pending.proposals.set(senderPubkey, { body: body, meta: meta, sig: String(d.sig) });
         }
@@ -354,7 +355,7 @@ class AttestationConsensus extends EventEmitter {
     }
 
     // Once enough proposals are in, run provider.agree() to pick a winner and
-    // transition to PREPARE phase. Idempotent — extra proposals after a winner
+    // transition to PREPARE phase. Idempotent: extra proposals after a winner
     // is picked are validated against the winner and their sigs collected.
     //
     // provider.agree() may be sync (http_get returns the winner immediately)
@@ -364,7 +365,7 @@ class AttestationConsensus extends EventEmitter {
         let pending = this.pending.get(rid);
         if(!pending || pending.finalized) return;
         if(pending.winner) return;  // Already advanced; new proposals handled in PREPARE
-        if(pending._agreeing) return;  // judge_model API call in flight — don't fire twice
+        if(pending._agreeing) return;  // judge_model API call in flight; don't fire twice
 
         // Wait until we have at least REDUNDANCY proposals (or all responsible
         // validators have submitted). Single-validator collapses to immediate.
@@ -374,12 +375,12 @@ class AttestationConsensus extends EventEmitter {
         // Run provider's consensus strategy
         let providerModule = this.providerRegistry.getModule(pending.providerId);
         if(!providerModule || typeof providerModule.agree !== 'function'){
-            console.warn('AttestationConsensus: provider ' + pending.providerId + ' has no agree() — cannot finalize ' + rid.substring(0,16) + '...');
+            console.warn('AttestationConsensus: provider ' + pending.providerId + ' has no agree(); cannot finalize ' + rid.substring(0,16) + '...');
             return;
         }
         let proposalsArr = [...pending.proposals.values()];
 
-        // judge_model is non-deterministic across hubs — each runs its own LLM
+        // judge_model is non-deterministic across hubs: each runs its own LLM
         // judge over its own proposal ordering and may select a different winning
         // body. If every hub broadcast its own PREPARE, followers would lock
         // whichever arrived first and the federation could never converge on one
@@ -422,7 +423,7 @@ class AttestationConsensus extends EventEmitter {
 
         // Walk back through the proposals and collect any sigs that match the winner.
         // Proposals that diverge from the winner are slash candidates for
-        // byte_equality providers (e.g. http_get) — for judge_model the
+        // byte_equality providers (e.g. http_get). For judge_model the
         // winner is one of many semantically-equivalent candidates, so
         // non-match doesn't imply wrong.
         let winnerHash = crypto.createHash('sha256').update(winner.body).digest();
@@ -435,7 +436,7 @@ class AttestationConsensus extends EventEmitter {
             if(matchesWinner){
                 pending.signatures.set(pubkey, p.sig);
             } else if(strategy === 'byte_equality' && this.hub.slashDetector){
-                // Diverged proposal under byte_equality — record as slash candidate.
+                // Diverged proposal under byte_equality; record as slash candidate.
                 // Best-effort; failures don't disrupt the round.
                 this.hub.slashDetector.recordAttestationDivergence(
                     pubkey, rid, pending.providerId, pHash.toString('hex'), winnerHashHex
@@ -447,7 +448,7 @@ class AttestationConsensus extends EventEmitter {
         // its own model call and produces a byte-divergent body that the judge
         // deems equivalent, then selects ONE as canonical. The match-based sig
         // collection above therefore captures at most the single validator
-        // whose body happened to be chosen — every other responsible validator
+        // whose body happened to be chosen. Every other responsible validator
         // contributes nothing, so an N>=3 round would finalize with one
         // signature and the on-chain response would be rejected (it requires
         // REDUNDANCY signatures over the single canonical body). Re-sign the
@@ -475,7 +476,7 @@ class AttestationConsensus extends EventEmitter {
 
         this._checkPrepareQuorum(rid);
 
-        // Winner is now set — replay any COMMITs that arrived (and were
+        // Winner is now set; replay any COMMITs that arrived (and were
         // buffered) before this point so their votes count toward quorum, plus any
         // non-leader judge_model PREPAREs buffered before the leader established it.
         this._drainEarlyCommits(rid);
@@ -513,7 +514,7 @@ class AttestationConsensus extends EventEmitter {
         if(!pending.winner){
             // judge_model is non-deterministic across hubs: only the ELECTED LEADER
             // runs agree() and its selected body is the canonical winner. So only the
-            // leader's PREPARE may establish the winner — a Byzantine responsible
+            // leader's PREPARE may establish the winner. A Byzantine responsible
             // non-leader that broadcasts a divergent body FIRST must not have honest
             // followers adopt it. Buffer a non-leader judge_model PREPARE until the
             // leader's winner lands (it then replays through the "winner already
@@ -527,7 +528,7 @@ class AttestationConsensus extends EventEmitter {
                 return;
             }
             // First PREPARE we accept establishes the winner. Verify the sender's
-            // signature over THEIR proposed body before adopting it — an
+            // signature over THEIR proposed body before adopting it. An
             // unverified PREPARE must not be allowed to set the winner.
             if(d.sig && d.sig_pubkey){
                 let canonical = this._buildCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index));
@@ -566,8 +567,8 @@ class AttestationConsensus extends EventEmitter {
             // Winner already established: a later PREPARE's signature must verify
             // over the CANONICAL WINNER body/status/meta (mirror _handleCommit),
             // NOT over the sender's own (possibly divergent) body. Storing a sig
-            // over a divergent body would inflate signatures.size — the gate
-            // _checkCommitQuorum finalizes on — so the emitted on-chain response
+            // over a divergent body would inflate signatures.size, which is the gate
+            // _checkCommitQuorum finalizes on, so the emitted on-chain response
             // could carry signatures that don't all verify over the winner (and
             // be deterministically rejected by the indexer).
             let canonical = this._buildCanonical(rid, pending.providerId, pending.winner.body, pending.status, pending.winner.meta, Number(pending.request.block_index));
@@ -583,7 +584,7 @@ class AttestationConsensus extends EventEmitter {
 
         // A PREPARE can be the first thing to establish our winner (when we
         // adopt the leader's body above). Replay any COMMITs buffered before
-        // then so their votes aren't lost — and any non-leader judge_model
+        // then so their votes aren't lost, and any non-leader judge_model
         // PREPAREs buffered pre-winner, which now verify over the canonical winner.
         if(pending.winner){
             this._drainEarlyCommits(rid);
@@ -598,7 +599,7 @@ class AttestationConsensus extends EventEmitter {
 
         let quorum = pending.quorum;
         // For very small federations (e.g. N=1) quorum can be 0 from
-        // getQuorum — collapse to REDUNDANCY in that case.
+        // getQuorum; collapse to REDUNDANCY in that case.
         let needed = Math.max(quorum, pending.redundancy);
 
         if(pending.prepares.size >= needed){
@@ -632,7 +633,7 @@ class AttestationConsensus extends EventEmitter {
             return;
         }
         if(!pending.winner){
-            // Winner not yet established (the PROPOSE→agree() transition is
+            // Winner not yet established (the PROPOSE->agree() transition is
             // async). Hold this COMMIT and replay it once the winner is set,
             // rather than dropping the peer's vote. See _drainEarlyCommits.
             this._bufferEarlyCommit(rid, envelope);
@@ -660,7 +661,7 @@ class AttestationConsensus extends EventEmitter {
         // raw participation (commits.size). A COMMIT vote is counted even when it
         // carries no verifying signature (null sig, or a sig over a divergent
         // body), so finalizing on commits.size would emit an on-chain response
-        // with fewer signatures than REDUNDANCY — which the indexer
+        // with fewer signatures than REDUNDANCY, which the indexer
         // deterministically rejects. Requiring `needed` signatures guarantees the
         // emitted response is on-chain-fulfillable; rounds that can't reach it
         // (genuine divergence under byte_equality) correctly fall through to
@@ -698,10 +699,10 @@ class AttestationConsensus extends EventEmitter {
             role:         pending.role
         });
 
-        // Free memory shortly
+        // Free memory shortly after finalization
         this.earlyCommits.delete(rid);
-        let evictTimer = setTimeout(() => this.pending.delete(rid), 10000);
-        if (evictTimer.unref) evictTimer.unref();  // housekeeping timer — never pin process liveness
+        let evictTimer = setTimeout(() => this.pending.delete(rid), PENDING_EVICT_MS);
+        if (evictTimer.unref) evictTimer.unref();  // housekeeping timer; never pin process liveness
     }
 
     // Record a finalized request ID, evicting the oldest once the ring-buffer
@@ -720,11 +721,11 @@ class AttestationConsensus extends EventEmitter {
     // Build the indexer-canonical signing message (returned as UTF-8 Buffer):
     //   request_id || provider_id || sha256(response_payload) || status || meta
     // At/above the EQUIV flag-day (WI-2 bump 2) the raw STRING is wrapped in the uniform
-    // header (TAG=XATTEST, ROUND_ID=request_id, VIEW=0 — attestation has no view change)
+    // header (TAG=XATTEST, ROUND_ID=request_id, VIEW=0; attestation has no view change)
     // before the Buffer conversion. The gate keys on the REQUEST's block (deterministic
     // from request_id; the indexer derives the same via request.block_index) + the hub's
     // network, so the hub and the on-chain verifier flip identically. `requestBlock`
-    // undefined (no request in scope) → gate OFF → bare bytes (safe).
+    // undefined (no request in scope) -> gate OFF -> bare bytes (safe).
     _buildCanonical(requestId, providerId, body, status, meta, requestBlock){
         let responseHash = crypto.createHash('sha256').update(body, 'utf8').digest('hex');
         let raw = String(requestId) + String(providerId) + responseHash + String(status) + String(meta || '');

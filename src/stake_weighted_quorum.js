@@ -10,44 +10,46 @@
  *
  **********************************************************************
  *
- * XChain Hub — Stake-Weighted Quorum (STAKE_WEIGHTED_QUORUM / WI-1)
+ * XChain Hub - Stake-Weighted Quorum (STAKE_WEIGHTED_QUORUM / WI-1)
  *
  * The single, CONSENSUS-CRITICAL implementation of the stake-weighted quorum
  * predicate for the hub. Every PBFT tally engine (CrossChainDexConsensus,
  * CrossChainCallEngine, CrossChainEngine, OracleConsensus, StateCheckpointEngine,
- * Consensus) resolves through here so they can never drift. The indexer keeps a
- * byte-equivalent copy in xchain-indexer/src/stake_weighted_quorum.js; the
- * cross-service regression suite asserts both agree (a divergence forks the chain).
+ * Consensus) resolves through here so they can never drift. Four copies exist
+ * (hub, indexer, sdk, explorer); they are BEHAVIORALLY equivalent (same predicate
+ * logic: source-deduped 3*tally > 2*S, lowercased pubkeys, blank-source fail-closed)
+ * but differ in function signature and bignum backend. Per-repo unit suites exercise
+ * each copy independently. A divergence in predicate logic forks the chain.
  *
  ********************************************************************/
 
 const bc = require('./bcmath');
 
 // Per-network activation height (LOCAL COPY of the canonical map in
-// xchain-documentation/protocol/constants.js — kept equal by the cross-service
+// xchain-documentation/protocol/constants.js; kept equal by the cross-service
 // regression suite). Keyed on the BTC-anchored snapshot_block, NOT each chain's
 // local height, so the hub and all indexers flip on the same anchor.
 const STAKE_WEIGHTED_QUORUM_ACTIVATION = {
-    mainnet: 999999999,   // PLACEHOLDER — set the real BTC flag-day height before mainnet enable
+    mainnet: 999999999,   // PLACEHOLDER: set the real BTC flag-day height before mainnet enable
     testnet: 0,
     regtest: 0,
 };
 
 // Whether stake-weighted quorum is in effect for a round whose BTC-anchored
-// snapshot is at `snapshotBlock` on `network`. Below this → legacy count quorum.
+// snapshot is at `snapshotBlock` on `network`. Below this -> legacy count quorum.
 function isStakeWeightedQuorumActive(snapshotBlock, network){
     let sb = parseInt(snapshotBlock);
     if(!Number.isFinite(sb)) return false;
     let threshold = STAKE_WEIGHTED_QUORUM_ACTIVATION[network];
-    if(threshold === undefined) return false;   // unknown network → off (safe)
+    if(threshold === undefined) return false;   // unknown network -> off (safe)
     return sb >= threshold;
 }
 
-// Total active snapshot stake S = Σ weight over DISTINCT sources.
+// Total active snapshot stake S = sum of weight over DISTINCT sources.
 function totalStake(validators){
     let weightBySource = new Map();
     for(let v of (validators || [])){
-        // Hard error on a blank/missing source — see meetsStakeThreshold: a blank source
+        // Hard error on a blank/missing source. See meetsStakeThreshold: a blank source
         // collapses every row into one bucket, so S over a blank-source snapshot is meaningless.
         if(v.source === null || v.source === undefined || String(v.source).trim() === '')
             throw new Error('stake_weighted_quorum.totalStake: blank/missing source would collapse the stake bucket');
@@ -61,12 +63,12 @@ function totalStake(validators){
 }
 
 // Source-deduped stake-weighted quorum test.
-//   validators    — full snapshot: [{ pubkey, source, weight }]
-//   signerPubkeys — iterable of pubkeys that produced a VALID signature
-// Returns true iff 3·Σ(distinct signing-source weight) > 2·S. A source counts ONCE
+//   validators:    full snapshot: [{ pubkey, source, weight }]
+//   signerPubkeys: iterable of pubkeys that produced a VALID signature
+// Returns true iff 3*sum(distinct signing-source weight) > 2*S. A source counts ONCE
 // no matter how many of its keys signed (DELEGATE v0 additive). Degenerate cases
-// fall out: single source → 3S>2S true; empty/zero set → 0>0 false. A blank/missing
-// source FAILS CLOSED (returns false) — it is NOT a legitimate single source.
+// fall out: single source -> 3S>2S true; empty/zero set -> 0>0 false. A blank/missing
+// source FAILS CLOSED (returns false); it is NOT a legitimate single source.
 function meetsStakeThreshold(validators, signerPubkeys){
     let weightBySource = new Map();
     let pubkeyToSource = new Map();
@@ -74,7 +76,7 @@ function meetsStakeThreshold(validators, signerPubkeys){
         // Fail CLOSED on a blank/missing source: an empty-string (the snapshot schema's
         // NOT NULL DEFAULT '') or undefined source would collapse every row into ONE dedupe
         // bucket, dropping stake-weighted quorum to 1-of-N (a single signature finalizes the
-        // round). A malformed snapshot must never finalize — reject the whole tally.
+        // round). A malformed snapshot must never finalize; reject the whole tally.
         if(v.source === null || v.source === undefined || String(v.source).trim() === '') return false;
         let src = String(v.source);
         let pk  = String(v.pubkey).toLowerCase();

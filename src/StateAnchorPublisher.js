@@ -14,17 +14,17 @@
  *
  * XChain Hub - State Anchor Publisher (the ANCHOR action pipeline)
  *
- * Publishes the protocol's on-chain commitments on DOGE — and ONLY on DOGE,
- * so BTC/LTC carry zero anchor bytes (spec: protocol/actions/ANCHOR.md):
+ * Publishes the protocol's on-chain commitments on DOGE (and ONLY on DOGE,
+ * so BTC/LTC carry zero anchor bytes; spec: protocol/actions/ANCHOR.md):
  *
- *   ANCHOR v0 — the latest quorum-signed state checkpoint per chain (signatures
+ *   ANCHOR v0: the latest quorum-signed state checkpoint per chain (signatures
  *               come straight from state_checkpoints; no new signing round).
- *   ANCHOR v1 — a checkpoint + a compressed archive of full cross_chain_matches
+ *   ANCHOR v1: a checkpoint + a compressed archive of full cross_chain_matches
  *               rows (incl. their validator_signatures + the cross_chain
  *               capability_snapshots needed to re-verify them). This is what
  *               makes cross-chain match data recoverable from a full chain
  *               parse with no surviving hub DB.
- *   ANCHOR v2 — continuation chunks when a v1 archive exceeds the per-action
+ *   ANCHOR v2: continuation chunks when a v1 archive exceeds the per-action
  *               data budget.
  *
  * The v1 canonical covers the archive structure (batch_seq, count, crc32 of the
@@ -32,38 +32,38 @@
  * authenticate an archive. The publisher therefore runs a fresh signing round
  * (XANC_SIGN_REQ / XANC_SIGN) in which every follower verifies the proposed
  * archive AGAINST ITS OWN cross_chain_matches + capability_snapshots before
- * co-signing — a Byzantine elected publisher cannot collect a quorum for
- * fabricated matches or fabricated snapshots. After on-chain publication the
+ * co-signing (a Byzantine elected publisher cannot collect a quorum for
+ * fabricated matches or fabricated snapshots). After on-chain publication the
  * leader broadcasts XANC_FINALIZED so every hub back-fills batch_seq /
- * archived_status (audit metadata; harmless if missed — re-archival is
+ * archived_status (audit metadata; harmless if missed, re-archival is
  * deduplicated by recovery's latest-status-wins).
  *
  * Re-archival rule: a match is pending when batch_seq IS NULL (never archived)
  * OR archived_status <> status (retracted after being archived as finalized).
  *
  * Election (attestation-style hash-ordering, spec §8.2 idiom): each pending
- * checkpoint elects its OWN publisher — oracle_publish validators at the
+ * checkpoint elects its OWN publisher (oracle_publish validators at the
  * checkpoint's snapshot_block ordered by SHA256(election key ‖ pubkey)
- * ascending, where the key binds chain/network/seq/snapshot_block. Rank 0
+ * ascending, where the key binds chain/network/seq/snapshot_block). Rank 0
  * publishes; if it hasn't after ANCHOR_ELECTION_TOLERANCE_BLOCKS BTC blocks,
  * rank 1 also qualifies, and so on (the DB row's anchor_txid IS NULL is the
  * shared "still pending" signal, so a late rank-0 and an early rank-1 can both
- * publish). The on-chain state never diverges — both build byte-identical
- * commitments — and the anchor-reward rail does NOT inflate: recordAnchorReward
+ * publish). The on-chain state never diverges: both build byte-identical
+ * commitments, and the anchor-reward rail does NOT inflate: recordAnchorReward
  * deterministically keeps a single reward per (checkpoint_seq, reward_type)
  * across distinct publisher pubkeys (see below), so the only residual cost of
  * the race is the duplicate DOGE tx fee. A different
  * validator therefore publishes each chain's anchor in a cycle, FROM ITS OWN
- * DOGE WALLET — no UTXO contention between the per-chain anchors, per-chain
- * fault isolation, and publish work (plus its DOGE cost) spreads across the
- * federation. Each successful publish records an `anchor_<chain>` /
+ * DOGE WALLET (no UTXO contention between the per-chain anchors, per-chain
+ * fault isolation, and publish work plus its DOGE cost spreads across the
+ * federation). Each successful publish records an `anchor_<chain>` /
  * `anchor_archive` reward on the validator_rewards rail (oracle-round
  * pattern; recordAnchorReward collapses failover-race duplicates to a single
  * deterministic per-(round,type) winner, best-effort push to the BTC indexer
  * for COLLECT). The v1 archive round elects a single leader the same way with a
  * per-election-block key. Signer resolution, balance checks and the DOGE
  * broadcast pipeline mirror OraclePublisher (the DB is
- * the durable queue — pending checkpoints are rows with anchor_txid IS NULL,
+ * the durable queue: pending checkpoints are rows with anchor_txid IS NULL,
  * pending matches per the rule above; crash-safe with no separate WAL file).
  * The degenerate single-validator federation keeps today's behavior: one
  * publisher, serialized spends from one wallet. Supersedes the legacy
@@ -85,8 +85,8 @@ const XANC_SIGN      = 'XANC_SIGN';
 const XANC_FINALIZED = 'XANC_FINALIZED';
 const XANC_V0_DONE   = 'XANC_V0_DONE';
 
-// Fixed serialization order for an archived match row — the crc32 (and the
-// follower byte-comparison) depend on this exact order. Spec §Archive JSON.
+// Fixed serialization order for an archived match row (the crc32 and the
+// follower byte-comparison depend on this exact order). Spec §Archive JSON.
 // `id` (the hub-assigned mirror cursor) is archived because it is the
 // indexers' settlement-order key (getEffectiveUnsettledMatches ORDER BY id):
 // recovery must rebuild rows under their original ids or a reindexing node
@@ -99,7 +99,7 @@ const MATCH_KEYS = ['id', 'match_id', 'snapshot_block', 'network',
     'effective_time', 'finalizing_view', 'validator_signatures', 'status'];
 
 // Fixed serialization order for an archived cross-chain CALL relay row (XCALL
-// dispatch/result phases) — same crc32/byte-comparison rules as MATCH_KEYS.
+// dispatch/result phases); same crc32/byte-comparison rules as MATCH_KEYS.
 // Without these in the archive, a full-chain-parse recovery could not rebuild
 // the injected executions/callbacks and would diverge from live nodes.
 // `id` (the hub-assigned mirror cursor) IS archived: it is the indexers'
@@ -135,8 +135,8 @@ class StateAnchorPublisher {
         // Decouple on-chain anchoring from checkpoint production: checkpoints are
         // free (off-chain hub-DB mirror, good for light-client verify) but each
         // on-chain v0 anchor spends real DOGE on 3 chains. Only anchor every Nth
-        // checkpoint_seq — recovery needs just the LATEST anchored checkpoint per
-        // chain, so the skipped (non-multiple) seqs stay off-chain. N=1 keeps the
+        // checkpoint_seq (recovery needs just the LATEST anchored checkpoint per
+        // chain, so the skipped non-multiple seqs stay off-chain). N=1 keeps the
         // original anchor-every-checkpoint behaviour. checkpoint_seq is consensus
         // data (identical on every hub) so `seq % N` is deterministic fleet-wide.
         this.anchorEveryNCheckpoints = Math.max(1,
@@ -148,24 +148,37 @@ class StateAnchorPublisher {
         let encoderKey = process.env.DOGE_ENCODER_API_KEY || cfg.DOGE_ENCODER_API_KEY || '';
         this.encoder   = encoderUrl ? new EncoderClient(encoderUrl, encoderKey) : null;
 
-        // Pluggable hooks; unset → borrow the price publisher's DOGE signer.
+        // Pluggable hooks; unset -> borrow the price publisher's DOGE signer.
         this.broadcastFn  = null;
         this.walletSignFn = null;
         this.getBalanceFn = null;
 
-        this._archiveRound   = null;     // leader-side archive signing round (one at a time)
-        this._pendingMatches = 0;        // size trigger; DB is the source of truth
-        this._callHandler    = null;
-        this._flushing       = false;
-        this._timer          = null;
-        this._messageHandler = null;
-        this._matchHandler   = null;
+        this._archiveRound     = null;  // leader-side archive signing round (one at a time)
+        this._pendingMatches   = 0;     // size trigger; DB is the source of truth
+        this._callHandler      = null;
+        this._flushing         = false;
+        this._timer            = null;
+        this._messageHandler   = null;
+        this._matchHandler     = null;
         this._loggedNoPipeline = false;
+        // Cumulative count of archive chunks that failed all broadcast retries.
+        // A lost chunk is a durability failure (recovery needs every chunk), so
+        // a pattern of losses is surfaced here for operator visibility rather
+        // than requiring a log-grep.
+        this._archiveChunkLosses = 0;
     }
 
     setBroadcastHook(fn){ this.broadcastFn = fn; }
     setWalletSignHook(fn){ this.walletSignFn = fn; }
     setBalanceHook(fn){ this.getBalanceFn = fn; }
+
+    // Operator-facing stats. Exposed here so callers (hub RPC, status routes)
+    // can surface cumulative archive health without grepping logs.
+    getAnchorStats(){
+        return {
+            archiveChunkLosses: this._archiveChunkLosses
+        };
+    }
 
     async start(){
         if(!this.enabled){ console.log('StateAnchorPublisher: disabled (ANCHOR_ENABLED=false)'); return; }
@@ -178,12 +191,12 @@ class StateAnchorPublisher {
                 if(++this._pendingMatches >= this.batchSize)
                     this.flush().catch(err => console.error('StateAnchorPublisher: size-trigger flush error:', err && err.message));
             };
-            // Engine-level event — fires after the match row is written (the archive
+            // Engine-level event; fires after the match row is written (the archive
             // round reads cross_chain_matches), unlike the consensus-level event.
             this.hub.crossChainDex.on('match:finalized', this._matchHandler);
         }
         if(this.hub.crossChainCalls){
-            // XCALL relay rows share the size trigger — they ride the same archive.
+            // XCALL relay rows share the size trigger: they ride the same archive.
             this._callHandler = () => {
                 if(++this._pendingMatches >= this.batchSize)
                     this.flush().catch(err => console.error('StateAnchorPublisher: size-trigger flush error:', err && err.message));
@@ -217,7 +230,7 @@ class StateAnchorPublisher {
         this._archiveRound = null;
     }
 
-    // ── Flush: publish pending v0 checkpoints + the pending archive batch ──────
+    // Flush: publish pending v0 checkpoints + the pending archive batch.
     // Returns a summary (also served by the hub's `anchorflush` RPC):
     // { anchored: [{chain, network, block_index, txid}], archive: 'published'|
     //   'round_started'|'none', skipped: 'already_flushing'|'no_pipeline'? }
@@ -230,7 +243,7 @@ class StateAnchorPublisher {
             let signer = this._resolveSigner();
             if(!signer.broadcastFn && !(signer.encoder && signer.walletSignFn)){
                 if(!this._loggedNoPipeline){
-                    console.warn('StateAnchorPublisher: no DOGE broadcast pipeline configured — anchors deferred (set DOGE_ENCODER_URL + a wallet-sign hook)');
+                    console.warn('StateAnchorPublisher: no DOGE broadcast pipeline configured; anchors deferred (set DOGE_ENCODER_URL + a wallet-sign hook)');
                     this._loggedNoPipeline = true;
                 }
                 return { anchored: [], archive: 'none', skipped: 'no_pipeline' };
@@ -248,8 +261,8 @@ class StateAnchorPublisher {
         }
     }
 
-    // Deterministic publisher ordering — AttestationRound's responsible-set
-    // idiom: sort the eligible set by SHA256(key ‖ pubkey) ascending. Every
+    // Deterministic publisher ordering (AttestationRound's responsible-set
+    // idiom): sort the eligible set by SHA256(key ‖ pubkey) ascending. Every
     // hub computes the identical order from the block-boundary snapshot.
     static hashOrder(key, pubkeys){
         return (pubkeys || []).map(pk => {
@@ -265,7 +278,7 @@ class StateAnchorPublisher {
     // May THIS hub publish for `order` right now? Rank 0 always may; each
     // additional rank unlocks after ANCHOR_ELECTION_TOLERANCE_BLOCKS more BTC
     // blocks past the election anchor point (deterministic failover ladder).
-    // A hub outside a non-empty eligible set never publishes — and an empty
+    // A hub outside a non-empty eligible set never publishes, and an empty
     // (unresolved/unavailable) set means abstain (fail closed), never a
     // free-for-all where every hub double-anchors the same checkpoint.
     _mayPublish(order, sinceBlocks){
@@ -278,14 +291,14 @@ class StateAnchorPublisher {
         return rank <= unlocked;
     }
 
-    // v0: one per chain/network — the LATEST checkpoint that has no anchor yet.
+    // v0: one per chain/network (the LATEST checkpoint that has no anchor yet).
     // Older unanchored checkpoints are superseded (the chained hashes commit to
     // all prior history), so only the newest per chain costs DOGE bytes.
     // Each row elects its own publisher (hash-order at its snapshot_block).
     async _publishPendingCheckpoints(signer, btcBlock){
         // Pick, per chain, the latest ANCHOR-ELIGIBLE checkpoint (seq divisible by
         // anchorEveryNCheckpoints) that is not yet on-chain. Selecting the max
-        // eligible seq — rather than the absolute max — means accumulated
+        // eligible seq rather than the absolute max means accumulated
         // non-multiple seqs never block: they simply stay off-chain. With N=1
         // (MOD(seq,1)=0 for all) this is identical to anchoring every checkpoint.
         let rows = await this.db.doQuery(
@@ -302,14 +315,18 @@ class StateAnchorPublisher {
                 // Fail closed: an empty/unresolved oracle_publish set is NOT a
                 // licence for every hub to anchor independently (a guaranteed
                 // N-way double-anchor + DOGE burn). Skip until the set resolves.
-                if(eligible.length === 0) continue;
+                if(eligible.length === 0){
+                    console.warn('StateAnchorPublisher: v0 anchor for ' + row.chain + '/' + row.network +
+                                 ' @ ' + row.block_index + ' deferred: empty oracle_publish set (fail closed)');
+                    continue;
+                }
                 let order = StateAnchorPublisher.hashOrder(this._v0ElectionKey(row), eligible);
                 let since = Number.isFinite(btcBlock) ? btcBlock - Number(row.snapshot_block) : null;
                 if(!this._mayPublish(order, since)) continue;            // someone else's anchor (or not unlocked yet)
                 let payload = this._buildV0Payload(row);
                 let broadcaster = signer.broadcastFn || ((p) => this._defaultBroadcast(p, signer));
                 // Multiple chains' v0 anchors go out back-to-back from the same
-                // wallet — without the retry, every cycle lands only the first
+                // wallet; without the retry, every cycle lands only the first
                 // and the rest stagger one chain per 30-min flush (live prod
                 // finding, first post-deploy cycle).
                 let result = await this._broadcastWithRetry(broadcaster, payload);
@@ -323,8 +340,8 @@ class StateAnchorPublisher {
                 this._recordReward('anchor_' + row.chain, Number(row.checkpoint_seq),
                                    this.identity ? this.identity.getPubkeyHex() : null,
                                    Number(row.snapshot_block));
-                // Tell peers so THEIR copy of the row stops being pending —
-                // without this, every hub whose failover rank unlocks would
+                // Tell peers so THEIR copy of the row stops being pending.
+                // Without this, every hub whose failover rank unlocks would
                 // re-anchor a checkpoint someone else already paid for.
                 if(this.peerManager && this.identity){
                     this.peerManager.broadcast(XANC_V0_DONE, {
@@ -342,11 +359,11 @@ class StateAnchorPublisher {
     }
 
     // Anchor-publish reward: the validator that paid the DOGE earns it. Recorded
-    // on EVERY hub — by the publisher at publish time and by peers from the
-    // signature-verified V0_DONE / FINALIZED announcements — with blockIndex =
+    // on EVERY hub (by the publisher at publish time and by peers from the
+    // signature-verified V0_DONE / FINALIZED announcements) with blockIndex =
     // the quorum-agreed snapshot_block of the rewarded checkpoint, so all hubs
     // hold identical row bytes and the archived rewards section verifies by
-    // re-derivation. recordAnchorReward dedups all paths — including a failover
+    // re-derivation. recordAnchorReward dedups all paths, including a failover
     // race that hands the same (round, type) to two different publisher pubkeys,
     // which it collapses to a single deterministic per-(round,type) winner.
     _recordReward(rewardType, roundNumber, pubkey, blockIndex){
@@ -366,10 +383,10 @@ class StateAnchorPublisher {
         return parts.join('|');
     }
 
-    // ── Archive round (v1/v2) ───────────────────────────────────────────────────
+    // Archive round (v1/v2).
     // Leader = hash-order rank 0 over the oracle_publish set, with the same
     // failover ladder as v0 anchors: the election key is anchored on the archive
-    // CONTENT (wrapper checkpoint + batch seq — deterministic + identical on
+    // CONTENT (wrapper checkpoint + batch seq; deterministic + identical on
     // every hub, and stable while the batch is stalled), and each further rank
     // unlocks after another ANCHOR_ELECTION_TOLERANCE_BLOCKS past the wrapper
     // checkpoint's snapshot_block. Without the ladder a signer-less elected
@@ -382,8 +399,8 @@ class StateAnchorPublisher {
         // Leader ELECTION runs over the set at the current BTC block (liveness: a
         // freshly-joined validator can take over a stalled publish even when the
         // wrapper checkpoint's snapshot_block is hours old). This set decides only
-        // WHO drives the round + pays the DOGE — it does NOT gate which signatures
-        // count on-chain; that is the snapshot_block signing set resolved below.
+        // WHO drives the round + pays the DOGE; it does NOT gate which signatures
+        // count on-chain (that is the snapshot_block signing set resolved below).
         let electionPubkeys = await this._getActiveOraclePublishPubkeys(electionBlock);
         let me = this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
         // Fail closed: an empty/unresolved oracle_publish set must defer the
@@ -391,13 +408,13 @@ class StateAnchorPublisher {
         // broadcast a competing v1 + burn DOGE for the same batch slot).
         if(electionPubkeys.length === 0){
             console.log('StateAnchorPublisher: archive election at block ' + electionBlock +
-                        ' — empty oracle_publish set, deferring round (fail closed)');
+                        ': empty oracle_publish set, deferring round (fail closed)');
             return 'none';
         }
         if(!me) return 'none';
         if(!electionPubkeys.includes(me)){
             console.log('StateAnchorPublisher: archive election at block ' + electionBlock +
-                        ' — own pubkey not in the oracle_publish election set (' + electionPubkeys.length + ' eligible)');
+                        ': own pubkey not in the oracle_publish election set (' + electionPubkeys.length + ' eligible)');
             return 'none';                                               // not an eligible publisher right now
         }
 
@@ -408,7 +425,7 @@ class StateAnchorPublisher {
             "SELECT * FROM cross_chain_calls WHERE batch_seq IS NULL OR archived_status <> status " +
             "ORDER BY call_id ASC, phase ASC LIMIT ?", [this.maxBatch]);
         // Anchor-publish rewards are hub-pushed rows the BTC indexer can never
-        // re-derive from a chain parse — the archive is their recovery transport
+        // re-derive from a chain parse; the archive is their recovery transport
         // (oracle_round/attest_fee rows are indexer-derived and NEVER archived).
         // Rows are immutable, so batch_seq IS NULL is the only pending test;
         // pre-upgrade rows without a deterministic block_index stay local.
@@ -420,13 +437,13 @@ class StateAnchorPublisher {
         calls   = calls   || [];
         rewards = rewards || [];
 
-        // The checkpoint wrapper: latest checkpoint (prefer BTC — its height also
+        // The checkpoint wrapper: latest checkpoint (prefer BTC; its height also
         // selects validator sets). Without any checkpoint there is nothing to bind
-        // the archive's signatures to — defer until the checkpoint engine has run.
+        // the archive's signatures to, so defer until the checkpoint engine has run.
         let cps = await this.db.doQuery(
             "SELECT * FROM state_checkpoints ORDER BY (chain = 'BTC') DESC, id DESC LIMIT 1");
         if(!cps || cps.length === 0){
-            console.log('StateAnchorPublisher: no state checkpoint yet — archive deferred');
+            console.log('StateAnchorPublisher: no state checkpoint yet; archive deferred');
             return 'none';
         }
         let cp = this._cpFromRow(cps[0]);
@@ -442,14 +459,14 @@ class StateAnchorPublisher {
                 // election (e.g. signer-less peers keep ranking first) is
                 // indistinguishable from a broken publisher without this.
                 console.log('StateAnchorPublisher: archive election (batch ' + batchSeq + ') at block ' + electionBlock +
-                            ' — rank ' + order.indexOf(me) + '/' + order.length + ' (leader ' +
+                            ': rank ' + order.indexOf(me) + '/' + order.length + ' (leader ' +
                             order[0].substring(0, 12) + '..., ladder unlocks a rank every ' +
                             this.electionToleranceBlocks + ' blocks), not publishing');
                 return 'none';                                               // not unlocked on the failover ladder
             }
         }
         // Pin each reward's earn-time source into the archive (resolved via the
-        // BTC indexer, block-scoped — every hub gets the same answer, and
+        // BTC indexer, block-scoped; every hub gets the same answer, and
         // recovery restores rewards BEFORE the BTC reindex so it cannot resolve
         // them itself). An unresolvable source leaves the row for a later batch
         // rather than archiving a hole.
@@ -460,7 +477,7 @@ class StateAnchorPublisher {
                 : null;
             if(!source){
                 console.warn('StateAnchorPublisher: reward ' + r.reward_type + '/#' + r.round_number +
-                             ' source unresolved for ' + String(r.validator_pubkey).substring(0, 12) + '… — deferred to a later batch');
+                             ' source unresolved for ' + String(r.validator_pubkey).substring(0, 12) + '... deferred to a later batch');
                 continue;
             }
             rewardRows.push({ row: r, source: source });
@@ -471,7 +488,7 @@ class StateAnchorPublisher {
         // counts unresolvable rewards as pending, so without this an unstaked
         // single-validator hub (its own anchor-reward pubkey resolves to no
         // stake source) re-publishes an empty 0/0/0 archive to DOGE every cycle
-        // — a live prod fee-burn finding. The unresolvable rows stay pending
+        // (a live prod fee-burn finding). The unresolvable rows stay pending
         // (batch_seq NULL) for a later batch that can resolve them; recording is
         // deliberately unconditional (every hub holds identical rows for the
         // federation re-derivation invariant), so we suppress the empty PUBLISH,
@@ -489,23 +506,23 @@ class StateAnchorPublisher {
         let chunks   = this._splitChunks(b64);
 
         let canonical = this._archiveCanonical(cp, batchSeq, archive.count, crc, chunks.length);
-        if(!this.identity) throw new Error('no validator identity — cannot sign archives');
+        if(!this.identity) throw new Error('no validator identity: cannot sign archives');
         let myPubkey = this.identity.getPubkeyHex().toLowerCase();
         let mySig    = this.identity.sign(canonical);
 
-        // SIGNING/QUORUM set: resolved at the wrapper checkpoint's snapshot_block —
-        // the block the published v1 declares on the wire and the block the indexer
+        // SIGNING/QUORUM set: resolved at the wrapper checkpoint's snapshot_block.
+        // The block the published v1 declares on the wire is the block the indexer
         // (anchor.js) + full-parse recovery verify the wrapper signatures against
         // (oracle_publish @ snapshot_block). Resolving it at the current election
         // block instead would let signers present only in the current set
         // contribute signatures the indexer later drops, pushing validSigs below
-        // quorum, marking the v1 invalid on-chain — while the rows get dequeued
+        // quorum, marking the v1 invalid on-chain while the rows get dequeued
         // anyway (see the on-chain-validity gate in _publishArchive), permanently
         // losing settled cross-chain state. The election set above may differ
         // (liveness); the set that gates co-signature acceptance must not.
         // Resolve the SIGNING set as the full {pubkey, source, weight} snapshot via
-        // _resolveCapabilitySet — the SAME set the indexer (anchor.js) + full-parse
-        // recovery verify the wrapper signatures against (oracle_publish @
+        // _resolveCapabilitySet (the SAME set the indexer anchor.js + full-parse
+        // recovery verify the wrapper signatures against, oracle_publish @
         // snapshot_block, source-keyed). Bare pubkeys would lose the staking weight
         // the stake-weighted gate needs, so the publisher's local quorum decision
         // must use this set, not _getActiveOraclePublishPubkeys.
@@ -513,7 +530,7 @@ class StateAnchorPublisher {
         let signingPubkeys = signingSet.map(v => v.pubkey);
         let snapCount      = signingPubkeys.length;
         // STAKE_WEIGHTED_QUORUM: weighted (source-deduped) at/above activation, else
-        // legacy 2f+1 count — keyed on the BTC snapshot_block so the hub flips on the
+        // legacy 2f+1 count; keyed on the BTC snapshot_block so the hub flips on the
         // same anchor as anchor.js (`swq.isStakeWeightedQuorumActive(snapshotBlock, NETWORK)`).
         let weighted       = swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block), this.network);
         let quorum         = (snapCount <= 1) ? 1 : Math.max(2 * Math.floor((snapCount - 1) / 3) + 1, Math.ceil((snapCount + 1) / 2));
@@ -549,7 +566,7 @@ class StateAnchorPublisher {
         round.timer = setTimeout(() => {
             if(this._archiveRound === round && !round.done){
                 console.warn('StateAnchorPublisher: archive round (batch ' + batchSeq + ') timed out at ' +
-                             round.signatures.size + '/' + quorum + ' sigs — retrying next flush');
+                             round.signatures.size + '/' + quorum + ' sigs; retrying next flush');
                 this._archiveRound = null;
             }
         }, this.roundTimeoutMs);
@@ -567,8 +584,8 @@ class StateAnchorPublisher {
 
     // Content-anchored election key: deterministic + identical on every hub
     // (both fields come from quorum-agreed state) and STABLE while the batch is
-    // stalled, so the failover ladder has a fixed anchor to climb against —
-    // unlike the old current-block key, which re-elected fresh every block (and
+    // stalled, so the failover ladder has a fixed anchor to climb against.
+    // Unlike the old current-block key, which re-elected fresh every block (and
     // on a static regtest tip elected the SAME leader forever).
     _archiveElectionKey(cp, batchSeq){
         return 'XANCV1|' + cp.chain + '|' + cp.network + '|' + String(cp.checkpoint_seq) + '|' + String(batchSeq);
@@ -589,8 +606,8 @@ class StateAnchorPublisher {
     }
 
     // Resolve the qualifying set for (capability, block). Primary source is
-    // CapabilitySnapshot.getSnapshot — deterministic from on-chain BTC stakes,
-    // identical on EVERY hub — so the archive builder (leader) and the archive
+    // CapabilitySnapshot.getSnapshot (deterministic from on-chain BTC stakes,
+    // identical on EVERY hub), so the archive builder (leader) and the archive
     // verifier (followers) agree regardless of which hub led past rounds (the
     // local capability_snapshots table only holds rows a hub persisted while
     // leading, so it can't be the shared source). Falls back to the local
@@ -619,19 +636,19 @@ class StateAnchorPublisher {
         return (rows || []).map(r => ({ pubkey: String(r.signing_pubkey).toLowerCase(), amount: String(r.amount), source: String(r.source != null ? r.source : '') }));
     }
 
-    // Archive JSON with fixed key order (crc32-bearing bytes — see MATCH_KEYS).
+    // Archive JSON with fixed key order (crc32-bearing bytes; see MATCH_KEYS).
     // capability_snapshots makes recovery self-contained: cross_chain rows for
     // every match's snapshot_block (to re-verify match signatures) PLUS the
     // oracle_publish rows at the wrapper checkpoint's snapshot_block (to
     // re-verify the v1 anchor's own signatures). Recovery additionally
-    // cross-checks archived pubkeys against on-chain BTC stakes — archived
+    // cross-checks archived pubkeys against on-chain BTC stakes; archived
     // sets are a convenience, the chain remains the root of trust.
     async _buildArchive(network, batchSeq, matches, wrapperSnapshotBlock, calls, rewards){
         calls   = calls   || [];
         rewards = rewards || [];
         let wants = matches.map(m => ({ block: Number(m.snapshot_block), capability: 'cross_chain' }))
             .concat(calls.map(c => ({ block: Number(c.snapshot_block), capability: 'cross_chain' })))
-            // oracle_publish set at each reward's earn block — verifiers (and
+            // oracle_publish set at each reward's earn block; verifiers (and
             // recovery) check the rewarded pubkey was an eligible publisher.
             .concat(rewards.map(({row}) => ({ block: Number(row.block_index), capability: 'oracle_publish' })));
         if(wrapperSnapshotBlock != null)
@@ -702,7 +719,7 @@ class StateAnchorPublisher {
 
     // Fixed-key-order anchor-publish reward record (shared with the follower
     // verifier + recovery). `source` is the earn-time staking address pinned by
-    // the archive builder — recovery restores rewards into the BTC indexer DB
+    // the archive builder. Recovery restores rewards into the BTC indexer DB
     // BEFORE the reindex, so it cannot resolve sources itself, and a later
     // re-stake of the pubkey from a different address must not move the credit.
     static serializeReward(r, source){
@@ -719,7 +736,7 @@ class StateAnchorPublisher {
     // v1 archive canonical = the RAW v0 checkpoint content + the batch extension, then
     // (at/above the EQUIV flag-day) wrapped ONCE in the uniform header. The v1 ROUND_ID
     // appends `batch_seq` to the v0 round id so the v0 (per-block) and v1 (archive)
-    // canonicals — which legitimately share checkpoint_seq — get DISTINCT equivocation
+    // canonicals (which legitimately share checkpoint_seq) get DISTINCT equivocation
     // keys; otherwise an honest validator that signs both is falsely slashable (R-4 fix).
     // Nests _rawCanonicalCheckpoint (not canonicalCheckpoint) so the header lands outside.
     _archiveCanonical(cp, batchSeq, count, crc, totalChunks){
@@ -737,7 +754,7 @@ class StateAnchorPublisher {
         return chunks.length ? chunks : [''];
     }
 
-    // ── P2P handlers ────────────────────────────────────────────────────────────
+    // P2P handlers
     _handleMessage(envelope){
         if(!envelope || !envelope.data) return;
         switch(envelope.type){
@@ -749,7 +766,7 @@ class StateAnchorPublisher {
     }
 
     // Peer back-fill for a published v0 anchor. Anti-spam only (membership +
-    // signature) — a fabricated txid can at worst suppress a re-anchor, and the
+    // signature); a fabricated txid can at worst suppress a re-anchor, and the
     // row's hashes were already quorum-signed. First writer wins (IS NULL guard).
     async _handleV0Done(envelope){
         let d = envelope.data;
@@ -764,8 +781,8 @@ class StateAnchorPublisher {
         // Mirror the publisher's anchor reward locally (sender is signature-
         // verified above) so every hub holds the same reward rows and any of
         // them can archive/verify the rewards section. The snapshot_block comes
-        // from OUR copy of the checkpoint row — quorum-agreed state, identical
-        // on every hub.
+        // from OUR copy of the checkpoint row (quorum-agreed state, identical
+        // on every hub).
         let cps = await this.db.doQuery(
             'SELECT snapshot_block FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? ORDER BY checkpoint_seq DESC LIMIT 1',
             [String(d.chain), String(d.network), Number(d.block_index)]);
@@ -790,15 +807,15 @@ class StateAnchorPublisher {
         // The publisher is elected by the CURRENT BTC block (not the checkpoint's
         // possibly hours-old snapshot_block). The REQ carries its election block;
         // we verify the SENDER's rank against it, bounded to our own view of the
-        // BTC tip (anti-spam — the security property is the DB byte-match below).
+        // BTC tip (anti-spam; the security property is the DB byte-match below).
         let electionBlock = Number(d.election_block);
         if(!Number.isFinite(electionBlock)) return;
         let myBtc = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
         if(Number.isFinite(myBtc) && Math.abs(myBtc - electionBlock) > this.electionToleranceBlocks) return;
         let electionPubkeys = await this._getActiveOraclePublishPubkeys(electionBlock);
         if(electionPubkeys.length > 1){
-            // Same content-anchored key + failover ladder the leader used —
-            // accept any sender whose rank has unlocked, not just rank 0, or a
+            // Same content-anchored key + failover ladder the leader used.
+            // Accept any sender whose rank has unlocked, not just rank 0, or a
             // signer-less rank-0 hub stalls archiving federation-wide.
             let order = StateAnchorPublisher.hashOrder(this._archiveElectionKey(cp, Number(d.batch_seq)), electionPubkeys);
             let since = electionBlock - Number(cp.snapshot_block);
@@ -808,7 +825,7 @@ class StateAnchorPublisher {
         // SIGNING set: the indexer + recovery only count a wrapper signature whose
         // signer holds oracle_publish AT snapshot_block, so a follower present only
         // in the current election set would contribute a signature that is dropped
-        // on-chain — and could drag an otherwise-valid archive below quorum.
+        // on-chain and could drag an otherwise-valid archive below quorum.
         let signingPubkeys = await this._getActiveOraclePublishPubkeys(Number(cp.snapshot_block));
         if(!signingPubkeys.includes(myPubkey)) return;
 
@@ -817,7 +834,7 @@ class StateAnchorPublisher {
         if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender)) return;
 
         // 1. The checkpoint wrapper must equal OUR state_checkpoints row (latest
-        // seq for the height — a reorg-superseded row never co-signs an archive).
+        // seq for the height; a reorg-superseded row never co-signs an archive).
         let local = await this.db.doQuery(
             'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? ORDER BY checkpoint_seq DESC LIMIT 1',
             [cp.chain, cp.network, Number(cp.block_index)]);
@@ -834,7 +851,7 @@ class StateAnchorPublisher {
         try { archive = JSON.parse(json); } catch(e){ return; }
         if(!archive || !Array.isArray(archive.matches) || archive.matches.length !== Number(d.match_count)) return;
         if(!(await this._verifyArchiveAgainstLocal(archive))){
-            console.warn('StateAnchorPublisher: proposed archive (batch ' + d.batch_seq + ') diverges from our DB — NOT signing');
+            console.warn('StateAnchorPublisher: proposed archive (batch ' + d.batch_seq + ') diverges from our DB; NOT signing');
             return;
         }
 
@@ -845,13 +862,13 @@ class StateAnchorPublisher {
 
     // Every archived match's TERMS must byte-equal our own cross_chain_matches
     // row (every hub writes finalized matches, so the local DB is authoritative).
-    // validator_signatures is EXCLUDED from the byte-comparison — each hub stores
-    // its own collected sig set (membership/order differ per node) — and instead
+    // validator_signatures is EXCLUDED from the byte-comparison (each hub stores
+    // its own collected sig set; membership/order differ per node) and instead
     // verified CRYPTOGRAPHICALLY: the archived sigs must reach 2f+1 of OUR OWN
     // resolved cross_chain set over the XMATCH canonical (strictly stronger than
     // comparing local copies). Capability sets must exactly equal our own
-    // resolution — set equality, not subset, so a leader can neither inject a
-    // fake validator nor omit a real one.
+    // resolution (set equality, not subset, so a leader can neither inject a
+    // fake validator nor omit a real one).
     async _verifyArchiveAgainstLocal(archive){
         for(let am of archive.matches){
             let rows = await this.db.doQuery('SELECT * FROM cross_chain_matches WHERE match_id = ? LIMIT 1', [am.match_id]);
@@ -859,7 +876,7 @@ class StateAnchorPublisher {
                 let localTerms    = StateAnchorPublisher.serializeMatch(rows[0]);
                 let archivedTerms = Object.assign({}, am);
                 // id is per-hub bookkeeping (each hub assigns its own AUTO_INCREMENT
-                // cursor) — the leader archives ITS id as provenance only (ordering
+                // cursor); the leader archives ITS id as provenance only (ordering
                 // is (snapshot_block, match_id)/(snapshot_block, call_id)), so
                 // followers must not byte-compare it, like validator_signatures.
                 delete localTerms.id;
@@ -868,19 +885,19 @@ class StateAnchorPublisher {
                 delete archivedTerms.validator_signatures;
                 if(JSON.stringify(localTerms) !== JSON.stringify(archivedTerms)){
                     console.warn("StateAnchorPublisher: archive match " + String(am.match_id).substring(0, 16) +
-                                 "... TERMS differ from our row — local " + JSON.stringify(localTerms).substring(0, 120) +
+                                 "... TERMS differ from our row; local " + JSON.stringify(localTerms).substring(0, 120) +
                                  " vs archived " + JSON.stringify(archivedTerms).substring(0, 120));
                     return false;
                 }
             } else {
                 // A row we never wrote: it predates this hub joining the
                 // federation (a late joiner has no copy of earlier history).
-                // The cryptographic bar below — archived sigs reaching 2f+1 of
-                // OUR OWN resolved cross_chain set at the row's snapshot_block —
+                // The cryptographic bar below (archived sigs reaching 2f+1 of
+                // OUR OWN resolved cross_chain set at the row's snapshot_block)
                 // is the same proof full-parse recovery accepts, so absence is
                 // not divergence. A forged row cannot carry those signatures.
                 console.log('StateAnchorPublisher: archive match ' + String(am.match_id).substring(0, 16) +
-                            '... predates our local history — accepting on signature quorum alone');
+                            '... predates our local history; accepting on signature quorum alone');
             }
 
             let set  = await this._resolveCapabilitySet('cross_chain', Number(am.snapshot_block));
@@ -897,19 +914,19 @@ class StateAnchorPublisher {
             if(rows && rows.length > 0){
                 let localTerms    = StateAnchorPublisher.serializeCall(rows[0]);
                 let archivedTerms = Object.assign({}, ac);
-                delete localTerms.id;                       // per-hub cursor — see the match loop
+                delete localTerms.id;                       // per-hub cursor; see the match loop
                 delete archivedTerms.id;
                 delete localTerms.validator_signatures;
                 delete archivedTerms.validator_signatures;
                 if(JSON.stringify(localTerms) !== JSON.stringify(archivedTerms)){
                     console.warn("StateAnchorPublisher: archive call " + String(ac.call_id).substring(0, 16) +
-                                 "... (" + ac.phase + ") TERMS differ from our row — local " + JSON.stringify(localTerms).substring(0, 160) +
+                                 "... (" + ac.phase + ") TERMS differ from our row; local " + JSON.stringify(localTerms).substring(0, 160) +
                                  " vs archived " + JSON.stringify(archivedTerms).substring(0, 160));
                     return false;
                 }
             } else {
                 console.log('StateAnchorPublisher: archive call ' + String(ac.call_id).substring(0, 16) +
-                            '... (' + ac.phase + ') predates our local history — accepting on signature quorum alone');
+                            '... (' + ac.phase + ') predates our local history; accepting on signature quorum alone');
             }
 
             let set  = await this._resolveCapabilitySet('cross_chain', Number(ac.snapshot_block));
@@ -921,35 +938,35 @@ class StateAnchorPublisher {
             }
         }
         // Reward rows carry no per-row signatures (they are unilateral local
-        // writes), so they verify by RE-DERIVATION — every field must equal what
+        // writes), so they verify by RE-DERIVATION: every field must equal what
         // this hub derives independently:
-        //   type      — anchor publish rails only; oracle_round/attest_fee are
-        //               indexer-derived and must never ride the archive
-        //   pubkey    — member of OUR oracle_publish set at the earn block
-        //   amount    — exactly OUR configured publish reward
-        //   source    — OUR own block-scoped indexer resolution
-        //   local row — if we hold (type, round), it must agree (a leader
-        //               crediting itself for another hub's publish diverges
-        //               here on every hub that saw the real announcement);
-        //               absence alone is tolerated (late joiner), the
-        //               re-derivation above still bounds what it can say.
+        //   type:      anchor publish rails only; oracle_round/attest_fee are
+        //              indexer-derived and must never ride the archive
+        //   pubkey:    member of OUR oracle_publish set at the earn block
+        //   amount:    exactly OUR configured publish reward
+        //   source:    OUR own block-scoped indexer resolution
+        //   local row: if we hold (type, round), it must agree (a leader
+        //              crediting itself for another hub's publish diverges
+        //              here on every hub that saw the real announcement);
+        //              absence alone is tolerated (late joiner), the
+        //              re-derivation above still bounds what it can say.
         for(let ar of (archive.rewards || [])){
             let tag = (ar && ar.reward_type) + '/#' + (ar && ar.round_number);
             if(!ar || !/^anchor_[A-Za-z_]+$/.test(String(ar.reward_type || ''))){
-                console.warn('StateAnchorPublisher: archive reward ' + tag + ' has a non-anchor reward_type — NOT signing');
+                console.warn('StateAnchorPublisher: archive reward ' + tag + ' has a non-anchor reward_type; NOT signing');
                 return false;
             }
             let pubkey = String(ar.validator_pubkey || '').toLowerCase();
             let set = await this._resolveCapabilitySet('oracle_publish', Number(ar.block_index));
             if(!set.some(v => v.pubkey === pubkey)){
                 console.warn('StateAnchorPublisher: archive reward ' + tag + ' pubkey ' + pubkey.substring(0, 12) +
-                             '… is not in the oracle_publish set at block ' + ar.block_index + ' — NOT signing');
+                             '... is not in the oracle_publish set at block ' + ar.block_index + '; NOT signing');
                 return false;
             }
             let expectedAmount = this.hub.rewardTracker ? parseFloat(this.hub.rewardTracker.anchorReward).toFixed(8) : null;
             if(expectedAmount !== null && String(ar.amount) !== expectedAmount){
                 console.warn('StateAnchorPublisher: archive reward ' + tag + ' amount ' + ar.amount +
-                             ' != configured ' + expectedAmount + ' — NOT signing');
+                             ' != configured ' + expectedAmount + '; NOT signing');
                 return false;
             }
             let mySource = this.hub.rewardTracker
@@ -957,27 +974,33 @@ class StateAnchorPublisher {
                 : null;
             if(!mySource || String(ar.source) !== mySource){
                 console.warn('StateAnchorPublisher: archive reward ' + tag + ' source ' + ar.source +
-                             ' does not match our resolution (' + mySource + ') — NOT signing');
+                             ' does not match our resolution (' + mySource + '); NOT signing');
                 return false;
             }
+            // Cross-check against our own local row. The query keys on the full
+            // triple (validator_pubkey, reward_type, round_number) which is the
+            // table's UNIQUE key. Without the pubkey column, LIMIT 1 returns an
+            // arbitrary row when two pubkeys share (reward_type, round_number)
+            // (possible under a failover double-publish), causing a false mismatch
+            // on validator_pubkey that stalls archival unnecessarily.
             let local = await this.db.doQuery(
-                'SELECT validator_pubkey, amount, block_index FROM validator_rewards WHERE reward_type = ? AND round_number = ? LIMIT 1',
-                [String(ar.reward_type), Number(ar.round_number)]);
+                'SELECT validator_pubkey, amount, block_index FROM validator_rewards WHERE reward_type = ? AND round_number = ? AND validator_pubkey = ? LIMIT 1',
+                [String(ar.reward_type), Number(ar.round_number), pubkey]);
             if(local && local.length > 0){
                 let mine = local[0];
                 if(String(mine.validator_pubkey).toLowerCase() !== pubkey ||
                    String(mine.amount) !== String(ar.amount) ||
                    (mine.block_index != null && Number(mine.block_index) !== Number(ar.block_index))){
                     console.warn('StateAnchorPublisher: archive reward ' + tag + ' diverges from our row (' +
-                                 String(mine.validator_pubkey).substring(0, 12) + '…/' + mine.amount + '/' + mine.block_index +
-                                 ' vs ' + pubkey.substring(0, 12) + '…/' + ar.amount + '/' + ar.block_index + ') — NOT signing');
+                                 String(mine.validator_pubkey).substring(0, 12) + '.../' + mine.amount + '/' + mine.block_index +
+                                 ' vs ' + pubkey.substring(0, 12) + '.../' + ar.amount + '/' + ar.block_index + '); NOT signing');
                     return false;
                 }
             } else {
-                console.log('StateAnchorPublisher: archive reward ' + tag + ' predates our local history — accepting on re-derivation alone');
+                console.log('StateAnchorPublisher: archive reward ' + tag + ' predates our local history; accepting on re-derivation alone');
             }
         }
-        let groups = new Map();              // block|capability → Map<pubkey, {amount, source}>
+        let groups = new Map();              // block|capability -> Map<pubkey, {amount, source}>
         for(let s of (archive.capability_snapshots || [])){
             let key = Number(s.snapshot_block) + '|' + String(s.capability);
             if(!groups.has(key)) groups.set(key, new Map());
@@ -1057,17 +1080,18 @@ class StateAnchorPublisher {
         let lostChunks = 0;
         for(let i = 1; i < round.chunks.length; i++){
             let v2Payload = ['ANCHOR', '2', String(round.batchSeq), String(i), String(round.chunks.length), round.chunks[i]].join('|');
-            // A lost chunk is a DURABILITY failure — recovery needs every chunk —
+            // A lost chunk is a durability failure (recovery needs every chunk),
             // so the shared anchor-broadcast retry matters most here.
             try { await this._broadcastWithRetry(broadcaster, v2Payload); }
             catch(e){
                 lostChunks++;
+                this._archiveChunkLosses++;
                 console.error('StateAnchorPublisher: v2 chunk ' + i + ' broadcast failed after retries: ' + (e && e.message));
             }
         }
 
         // On-chain VALIDITY gate: the source rows are only safe to DEQUEUE if the
-        // v1 we just broadcast will pass the indexer's own check — its wrapper
+        // v1 we just broadcast will pass the indexer's own check. Its wrapper
         // signatures must reach quorum over oracle_publish @ snapshot_block, the
         // SAME set + threshold the indexer (anchor.js) and full-parse recovery
         // verify against. If they don't (e.g. a validator-set drift the signing
@@ -1076,14 +1100,14 @@ class StateAnchorPublisher {
         // unrecoverable hole. Treat it exactly like a lost chunk: keep the rows
         // pending so a later round re-archives them under a fresh batch seq. The
         // single-node / unresolvable-set degenerate (validators.length <= 1) keeps
-        // today's behavior — the indexer stores those as recoverable 'unverified'.
+        // today's behavior (the indexer stores those as recoverable 'unverified').
         let onChainValid = (round.validators.length <= 1) ||
                            this._quorumVerified(round.canonical, sigs, round.validators, round.weighted);
 
         // A partially-published archive is unrecoverable (recovery refuses
         // incomplete batches), so the rows must NOT be marked archived. Back-fill
         // with a sentinel archived_status instead: batch_seq still advances (a
-        // re-archive must get a FRESH seq — two v1 anchors sharing one seq would
+        // re-archive must get a FRESH seq; two v1 anchors sharing one seq would
         // corrupt chunk reassembly) while `archived_status <> status` keeps every
         // row eligible, so the next flush re-archives the whole batch.
         let matchIds = round.matchIds, callIds = round.callIds || [], rewardIds = round.rewardIds || [];
@@ -1093,11 +1117,12 @@ class StateAnchorPublisher {
             rewardIds = [];                  // reward rows stay pending (batch_seq NULL) and re-archive
             if(lostChunks > 0)
                 console.error('StateAnchorPublisher: batch ' + round.batchSeq + ' lost ' + lostChunks +
-                              ' chunk(s) on-chain — rows stay pending; they re-archive under a new batch seq');
+                              ' chunk(s) on-chain; rows stay pending and re-archive under a new batch seq' +
+                              ' (cumulative chunk losses: ' + this._archiveChunkLosses + ')');
             if(!onChainValid)
                 console.error('StateAnchorPublisher: batch ' + round.batchSeq + ' archive will NOT reach quorum over ' +
-                              'oracle_publish @ snapshot_block ' + round.cp.snapshot_block + ' — on-chain v1 would be ' +
-                              'invalid; rows stay pending and re-archive under a new batch seq');
+                              'oracle_publish @ snapshot_block ' + round.cp.snapshot_block + '; on-chain v1 would be ' +
+                              'invalid, rows stay pending and re-archive under a new batch seq');
         }
         await this._backfillBatch(round.batchSeq, matchIds, txid, callIds, rewardIds);
         if(this.peerManager){
@@ -1134,8 +1159,8 @@ class StateAnchorPublisher {
                                   Array.isArray(d.calls) ? d.calls : [],
                                   Array.isArray(d.rewards) ? d.rewards : []);
         // Mirror the leader's archive-publish reward (sender is signature-
-        // verified) so all hubs hold the same reward rows — same rail as the
-        // V0_DONE mirror. Only a COMPLETE publish earns it (the leader skips
+        // verified) so all hubs hold the same reward rows (same rail as the
+        // V0_DONE mirror). Only a COMPLETE publish earns it (the leader skips
         // its own reward on lost chunks and marks rows __partial__).
         let partial = (d.matches || []).some(m => m && m.status === '__partial__') ||
                       (Array.isArray(d.calls) && d.calls.some(c => c && c.status === '__partial__'));
@@ -1147,7 +1172,7 @@ class StateAnchorPublisher {
         return 'XANCFIN|' + String(batchSeq) + '|' + String(txid || '') + '|' + String(count);
     }
 
-    // XMATCH canonical — byte-identical to CrossChainDexEngine._canonicalMatch /
+    // XMATCH canonical: byte-identical to CrossChainDexEngine._canonicalMatch /
     // the indexer's cross_settle._canonical (kept local so archive verification
     // never depends on the DEX engine being constructed).
     _matchCanonical(m){
@@ -1166,7 +1191,7 @@ class StateAnchorPublisher {
         return raw;
     }
 
-    // XCALL phase canonicals — byte-identical to CrossChainCallEngine._canonicalMatch
+    // XCALL phase canonicals: byte-identical to CrossChainCallEngine._canonicalMatch
     // / the indexer's verifiers (kept local for the same reason as _matchCanonical).
     _callCanonical(c){
         let sha = (s) => crypto.createHash('sha256').update(String(s == null ? '' : s), 'utf8').digest('hex');
@@ -1196,7 +1221,7 @@ class StateAnchorPublisher {
 
     // Signature quorum over a resolved validator set, byte-for-byte the same verdict
     // the indexer recovery (_quorumVerified) + anchor.js apply: stake-weighted
-    // (source-deduped, 3·Σ signer-source weight > 2·S) at/above STAKE_WEIGHTED_QUORUM,
+    // (source-deduped, 3*Sigma signer-source weight > 2*S) at/above STAKE_WEIGHTED_QUORUM,
     // else legacy 2f+1 count. `validatorSet` is the full [{pubkey, source, weight|amount}]
     // set (bare-pubkey callers must now pass objects). Used to gate the wrapper's own
     // on-chain validity and every archived match/call against its cross_chain set.
@@ -1212,7 +1237,7 @@ class StateAnchorPublisher {
         }
         if(weighted){
             // source carries the staking source; weight (or amount, from
-            // _resolveCapabilitySet) carries its stake — normalize for swq.
+            // _resolveCapabilitySet) carries its stake; normalize for swq.
             let weightedSet = (validatorSet || []).map(v => ({
                 pubkey: String(v.pubkey).toLowerCase(),
                 source: String(v.source != null ? v.source : ''),
@@ -1236,7 +1261,7 @@ class StateAnchorPublisher {
                 [batchSeq, c.status, txid, c.call_id, c.phase]);
         }
         for(let r of (rewardIds || [])){
-            // Rows are immutable — batch_seq is the only archive bookkeeping.
+            // Rows are immutable; batch_seq is the only archive bookkeeping.
             await this.db.doQuery(
                 'UPDATE validator_rewards SET batch_seq = ? WHERE reward_type = ? AND round_number = ? AND validator_pubkey = ?',
                 [batchSeq, String(r.reward_type), Number(r.round_number), String(r.validator_pubkey).toLowerCase()]);
@@ -1245,7 +1270,7 @@ class StateAnchorPublisher {
 
     async _getNextBatchSeq(){
         // Spans every batch_seq-bearing table so a fresh seq is unique across
-        // matches, calls AND rewards (consensus-uniform — all hubs compute the
+        // matches, calls AND rewards (consensus-uniform: all hubs compute the
         // same next seq from quorum-agreed rows).
         let r = await this.db.doQuery(
             'SELECT COALESCE(GREATEST(' +
@@ -1287,7 +1312,7 @@ class StateAnchorPublisher {
         return (crc ^ 0xFFFFFFFF) >>> 0;
     }
 
-    // ── Eligible set + DOGE pipeline (mirror OraclePublisher) ──────────────────
+    // Eligible set + DOGE pipeline (mirror OraclePublisher)
     async _getActiveOraclePublishPubkeys(blockIndex){
         if(!this.hub) return [];
         if(this.hub.capabilitySnapshot && blockIndex !== undefined && blockIndex !== null){

@@ -7,14 +7,14 @@
  *
  * This file is part of XChain Platform. Licensed under the GNU Affero
  * General Public License v3.0 or later; see LICENSE.md. A commercial
- * license (without AGPL source-disclosure terms) is available —
+ * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
  **********************************************************************
  *
  * XChain Hub - Full-Node Challenge Round (verified-validator tier)
  *
- * Liveness engine that proves which validators run a real coin full node —
+ * Liveness engine that proves which validators run a real coin full node,
  * not just a decoder/indexer DB mirror synced via xchain-sync. The verified set
  * earns the full-node tranche of the oracle-round reward (see the indexer's
  * price.js / NODEPROOF). A light mirror cannot run this engine to completion: it
@@ -27,16 +27,16 @@
  *     target       = E - CONFIRM_DEPTH           (buried/reorg-stable coin block)
  *     challenge_id = SHA256(NETWORK:E:seed:target)
  *     answer       = scriptPubKey(hex) of a seed-selected output in the target
- *                    block — provably absent from a synced mirror.
+ *                    block, provably absent from a synced mirror.
  *
  * Round protocol (request/sign, mirrors StateCheckpointEngine):
- *   1. XNODE_ANSWER    — every full_node claimant broadcasts its computed answer.
- *   2. XNODE_SIGN_REQ  — the elected leader proposes the PASS list (claimants
- *                        whose answer matches its own).
- *   3. XNODE_SIGN      — each eligible verifier recomputes the answer from ITS
- *                        OWN node, confirms every listed claimant, and signs.
+ *   1. XNODE_ANSWER:   every full_node claimant broadcasts its computed answer.
+ *   2. XNODE_SIGN_REQ: the elected leader proposes the PASS list (claimants
+ *                      whose answer matches its own).
+ *   3. XNODE_SIGN:     each eligible verifier recomputes the answer from ITS
+ *                      OWN node, confirms every listed claimant, and signs.
  *   4. On quorum, the leader broadcasts the on-chain NODEPROOF v0 verdict and
- *      XNODE_DONE so peers stop. Claimants that failed/skipped → SlashDetector.
+ *      XNODE_DONE so peers stop. Pass rate tracked for reward-tier eligibility.
  *
  ********************************************************************/
 
@@ -68,7 +68,7 @@ class FullNodeChallengeRound {
         this.acceptWindow  = parseInt(process.env.FULLNODE_VERDICT_ACCEPT_WINDOW_BLOCKS || fn.VERDICT_ACCEPT_WINDOW_BLOCKS || '24');
         this.pollMs        = parseInt(process.env.FULLNODE_POLL_MS    || fn.POLL_MS    || '30000');
         this.collectMs     = parseInt(process.env.FULLNODE_COLLECT_MS || fn.COLLECT_MS || '20000');
-        // Collection closes when the tip reaches epoch + closeDepth blocks — anchored
+        // Collection closes when the tip reaches epoch + closeDepth blocks, anchored
         // to chain height (shared by all hubs), NOT each hub's local detection time,
         // so the leader has every claimant's answer before it proposes the PASS list.
         this.closeDepth    = parseInt(process.env.FULLNODE_COLLECT_DEPTH_BLOCKS || fn.COLLECT_DEPTH_BLOCKS || '3');
@@ -77,7 +77,7 @@ class FullNodeChallengeRound {
                                 .map(p => String(p).toLowerCase()));
         this.network       = hub.network || cfg.HUB_NETWORK || '';
 
-        // BTC indexer JSON-RPC (ledger-hash seed + tip) — same env surface as
+        // BTC indexer JSON-RPC (ledger-hash seed + tip); same env surface as
         // StateCheckpointEngine / CrossChainDexEngine.
         this.indexerUrl = process.env.BTC_INDEXER_URL     || cfg.BTC_INDEXER_URL     || '';
         this.indexerKey = process.env.BTC_INDEXER_API_KEY || cfg.BTC_INDEXER_API_KEY || '';
@@ -88,16 +88,16 @@ class FullNodeChallengeRound {
         let cc = (cfg.cross_chain && cfg.cross_chain.chains && cfg.cross_chain.chains.BTC) || {};
         this.coinRpcUrl = process.env.FULLNODE_BTC_RPC || (cfg.FULLNODE && cfg.FULLNODE.BTC_RPC) || cc.rpc || '';
 
-        // On-chain verdict broadcast — operator hook (preferred) or BTC encoder
+        // On-chain verdict broadcast: operator hook (preferred) or BTC encoder
         // pipeline, mirroring AttestationPublisher / OraclePublisher.
         let encUrl  = process.env.BTC_ENCODER_URL || cfg.BTC_ENCODER_URL || '';
         let encKey  = process.env.BTC_ENCODER_API_KEY || cfg.BTC_ENCODER_API_KEY || '';
         this.encoder      = encUrl ? new EncoderClient(encUrl, encKey) : null;
-        this.broadcastFn  = null;   // fn(wirePayload) → Promise<{txid}>
-        this.walletSignFn = null;   // fn(psbtHex) → Promise<txHex>
+        this.broadcastFn  = null;   // fn(wirePayload) -> Promise<{txid}>
+        this.walletSignFn = null;   // fn(psbtHex) -> Promise<txHex>
         this.btcAddress   = process.env.BTC_ADDRESS || cfg.BTC_ADDRESS || '';
 
-        this.rounds   = new Map();  // epoch → round state
+        this.rounds   = new Map();  // epoch -> round state
         this._timer   = null;
         this._handler = (env) => this._handleMessage(env);
     }
@@ -116,7 +116,7 @@ class FullNodeChallengeRound {
         this._timer = setInterval(tick, this.pollMs);
         await tick();
         console.log('FullNodeChallengeRound started (interval=' + this.interval + ' blocks, depth=' + this.confirmDepth +
-                    ', verifier=' + (this.coinRpcUrl ? 'yes' : 'NO coin RPC — observe-only') + ')');
+                    ', verifier=' + (this.coinRpcUrl ? 'yes' : 'NO coin RPC (observe-only)') + ')');
     }
 
     async stop(){
@@ -125,10 +125,10 @@ class FullNodeChallengeRound {
         if(this.peerManager) this.peerManager.removeListener('message', this._handler);
     }
 
-    // ── Indexer / coin RPC ───────────────────────────────────────────────────
+    // Indexer / coin RPC
     async _indexerCall(method, params){
         // Resolve the BTC indexer URL the same way the rest of the hub does
-        // (BTC_INDEXER_API_URL → BTC_INDEXER_URL → config), so a standard hub
+        // (BTC_INDEXER_API_URL -> BTC_INDEXER_URL -> config), so a standard hub
         // deployment that only sets BTC_INDEXER_API_URL still reaches the indexer.
         // Fall back to the env/cfg value captured at construction.
         let url = this.indexerUrl;
@@ -151,7 +151,7 @@ class FullNodeChallengeRound {
         return resp.data ? resp.data.result : null;
     }
 
-    // ── Epoch detection ──────────────────────────────────────────────────────
+    // Epoch detection
     async _tick(){
         if(this.interval <= 0) return;
         let tip = await this._indexerCall('getblockhashes', {});
@@ -159,8 +159,8 @@ class FullNodeChallengeRound {
         if(tipBlock == null) return;
 
         // Close (and eventually prune) open rounds by CHAIN HEIGHT: every hub closes
-        // a round at the same chain point (tip ≥ epoch + closeDepth), regardless of
-        // when it locally detected the epoch — so the leader has collected every
+        // a round at the same chain point (tip >= epoch + closeDepth), regardless of
+        // when it locally detected the epoch, so the leader has collected every
         // claimant's answer (which were all broadcast within ~1 block of the epoch).
         for(let [e, st] of this.rounds){
             if(!st.finalized && tipBlock >= e + this.closeDepth){
@@ -193,19 +193,19 @@ class FullNodeChallengeRound {
         let challengeId = crypto.createHash('sha256')
             .update(String(this.network) + ':' + epoch + ':' + seed + ':' + target).digest('hex');
 
-        let eligible = await this._eligibleVerifiers(epoch);          // Set<pubkey> — who may SIGN
-        let claimants = await this._claimantSet(epoch);               // Set<pubkey> — who may be verified
+        // Set<pubkey>: who may SIGN / who may be verified
+        let eligible  = await this._eligibleVerifiers(epoch);
+        let claimants = await this._claimantSet(epoch);
         let myPubkey = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
 
         let state = {
             epoch, target, seed, challengeId,
             eligible, claimants,
-            answers: new Map(),     // pubkey → answer hex
-            sigs:    new Map(),     // pubkey → sig hex (over the canonical PASS list)
+            answers: new Map(),     // pubkey -> answer hex
+            sigs:    new Map(),     // pubkey -> sig hex (over the canonical PASS list)
             passList: null,
             myAnswer: null,
             finalized: false,
-            slashed: false,
             closed: false,
             leadRank: 0,
             startedAt: Date.now(),
@@ -213,7 +213,7 @@ class FullNodeChallengeRound {
         };
         this.rounds.set(epoch, state);
 
-        // Compute our own answer if we can — a CLAIMANT (proving itself) or an
+        // Compute our own answer if we can: a CLAIMANT (proving itself) or an
         // eligible VERIFIER (needs the answer to lead a round and to confirm peers).
         // Only a claimant BROADCASTS it as its own possession claim; a verifier that
         // isn't also a claimant computes silently so it can still lead/verify. A
@@ -240,8 +240,8 @@ class FullNodeChallengeRound {
                     ' leader=' + (this._isLeader(state, myPubkey) ? 'me' : 'peer'));
 
         // Collection closes from _tick once the tip reaches epoch + closeDepth
-        // (chain-anchored) — the leader then proposes the PASS list and every node
-        // evaluates window-based slashing. No wall-clock timer: a hub that detects
+        // (chain-anchored); the leader then proposes the PASS list and every node
+        // evaluates window-based pass-rate eligibility. No wall-clock timer: a hub that detects
         // the epoch earlier must not close before peers (on a slightly later poll)
         // have broadcast their answers.
     }
@@ -275,7 +275,7 @@ class FullNodeChallengeRound {
         }
     }
 
-    // ── P2P message handling ───────────────────────────────────────────────────
+    // P2P message handling
     _handleMessage(env){
         if(!env || !env.data) return;
         switch(env.type){
@@ -307,6 +307,14 @@ class FullNodeChallengeRound {
         let leader = String(d.sig_pubkey || '').toLowerCase();
         if(!state.eligible.has(leader)) return;
 
+        // Verify the sender is the currently-elected leader before locking the
+        // passList. An eligible non-leader that broadcasts XNODE_SIGN_REQ first
+        // could lock in a censoring pass list before the elected leader's proposal
+        // arrives. Buffer non-leader messages by ignoring them here; the true
+        // leader's SIGN_REQ will arrive and be accepted normally.
+        let electedLeader = this._electedLeader(state);
+        if(leader !== electedLeader) return;
+
         let pass = Array.isArray(d.passList) ? d.passList.map(p => String(p).toLowerCase()) : [];
         // We must INDEPENDENTLY confirm every listed claimant against our OWN node.
         if(!this.coinRpcUrl) return;
@@ -317,7 +325,7 @@ class FullNodeChallengeRound {
         for(let pk of pass){
             if(!state.claimants.has(pk)) return;                // outsider in the list
             let a = state.answers.get(pk);
-            if(a === undefined || a !== state.myAnswer) return; // can't confirm → refuse to sign
+            if(a === undefined || a !== state.myAnswer) return; // can't confirm: refuse to sign
         }
         let sorted = pass.slice().sort();
         let sig = this.identity.sign(this._verdictCanonical(state.challengeId, state.epoch, sorted));
@@ -368,7 +376,8 @@ class FullNodeChallengeRound {
         }
     }
 
-    // ── Helpers ────────────────────────────────────────────────────────────────
+    // Helpers
+
     // scriptPubKey (hex) of a seed-selected output in the buried target block.
     async _computeAnswer(target, seed){
         let blockHash = await this._coinCall('getblockhash', [Number(target)]);
@@ -409,7 +418,20 @@ class FullNodeChallengeRound {
         return parts.join('|');
     }
 
-    // Elected leader = lowest SHA256(challenge_id ‖ pubkey) among eligible
+    // Returns the pubkey of the currently elected leader for `state`: the
+    // verifier at the unlocked rank in the SHA256(challenge_id || pubkey) ordering.
+    // Used by _onSignReq to reject SIGN_REQ messages from non-leaders before
+    // locking the passList.
+    _electedLeader(state){
+        if(!state.eligible || state.eligible.size === 0) return null;
+        let ranked = Array.from(state.eligible).map(pk => ({
+            pk, h: crypto.createHash('sha256').update(state.challengeId).update(pk).digest('hex')
+        })).sort((a, b) => (a.h < b.h ? -1 : a.h > b.h ? 1 : 0));
+        let unlockedRank = Math.min(state.leadRank || 0, ranked.length - 1);
+        return ranked[unlockedRank] ? ranked[unlockedRank].pk : null;
+    }
+
+    // Elected leader = lowest SHA256(challenge_id || pubkey) among eligible
     // verifiers, with a simple elapsed-time failover ladder (the next-ranked
     // verifier takes over a collection window later if no verdict has landed).
     _isLeader(state, myPubkey){
@@ -421,13 +443,13 @@ class FullNodeChallengeRound {
         if(myRank < 0) return false;
         // Rank 0 leads at the chain-anchored close; if no verdict lands, each further
         // closeDepth of chain height promotes the next rank as a failover (chain-based
-        // so all hubs agree on who leads — escalated in _tick via state.leadRank).
+        // so all hubs agree on who leads, escalated in _tick via state.leadRank).
         let unlockedRank = Math.min(state.leadRank || 0, ranked.length - 1);
         return myRank === unlockedRank;
     }
 
     // Eligible verifiers at the epoch block: verified full nodes (from the
-    // indexer) ∪ configured genesis verifiers. Matches the indexer's acceptance
+    // indexer) union configured genesis verifiers. Matches the indexer's acceptance
     // rule in nodeproof.js so a quorum the hub assembles is one the chain accepts.
     async _eligibleVerifiers(epoch){
         let set = new Set(this.genesis);
@@ -438,7 +460,13 @@ class FullNodeChallengeRound {
                 let pk = String(v.pubkey || v).toLowerCase();
                 if(/^[0-9a-f]{64}$/.test(pk)) set.add(pk);
             }
-        } catch(_){ /* RPC absent/old — genesis-only (bootstrap) */ }
+        } catch(err){
+            let status = err && err.response && err.response.status;
+            if (status === 401)
+                console.warn('FullNodeChallengeRound: _eligibleVerifiers: 401 Unauthorized from indexer (misconfigured API key?); falling back to genesis-only set');
+            else
+                console.warn('FullNodeChallengeRound: _eligibleVerifiers: RPC error (absent/old indexer or transport failure: ' + (err && err.message) + '); falling back to genesis-only set');
+        }
         return set;
     }
 
@@ -453,7 +481,13 @@ class FullNodeChallengeRound {
                 let pk = String(v.pubkey || v).toLowerCase();
                 if(/^[0-9a-f]{64}$/.test(pk)) set.add(pk);
             }
-        } catch(_){}
+        } catch(err){
+            let status = err && err.response && err.response.status;
+            if (status === 401)
+                console.warn('FullNodeChallengeRound: _claimantSet: 401 Unauthorized from capability snapshot (misconfigured API key?); claimant set empty');
+            else
+                console.warn('FullNodeChallengeRound: _claimantSet: snapshot error (' + (err && err.message) + '); claimant set empty');
+        }
         return set;
     }
 

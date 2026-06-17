@@ -7,7 +7,7 @@
  *
  * This file is part of XChain Platform. Licensed under the GNU Affero
  * General Public License v3.0 or later; see LICENSE.md. A commercial
- * license (without AGPL source-disclosure terms) is available —
+ * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
  **********************************************************************
@@ -52,6 +52,15 @@ class PriceFetcher {
         this.coingeckoApiKey     = config.COINGECKO_API_KEY || '';
         this.coinmarketcapApiKey = config.COINMARKETCAP_API_KEY || '';
         this.timeout             = config.PRICE_FETCH_TIMEOUT || 10000;
+
+        // Count of consecutive rounds where CMC returned HTTP 400. Resets on
+        // any successful CMC fetch. A persistent 400 most likely means the
+        // operator's CMC plan does not support multi-currency convert; once
+        // CMC_400_ALERT_THRESHOLD consecutive failures accumulate the hub logs
+        // a high-visibility warning so the operator knows they have one source,
+        // not two, and can upgrade their plan or remove the key.
+        this._cmc400Count          = 0;
+        this._cmc400AlertThreshold = parseInt(config.CMC_400_ALERT_THRESHOLD) || 5;
     }
 
     // Fetch prices from all configured sources and return the local median per coin pair
@@ -111,6 +120,14 @@ class PriceFetcher {
             } catch (err) {
                 lastErr = err;
                 let status = err.response && err.response.status;
+                if (status === 400) {
+                    // 400 is non-retryable and typically indicates a plan-tier
+                    // incompatibility (e.g. multi-currency /convert requires a paid
+                    // CMC plan). Log a distinct warning so operators can distinguish
+                    // this from a transient network error and upgrade their plan.
+                    console.warn('CoinMarketCap returned 400 (possible plan-tier limit: multi-currency convert may require a paid plan). Skipping CMC this round.');
+                    break;
+                }
                 let retryable = status === 429 || status === 503;
                 if (retryable && attempt < maxAttempts) {
                     // Backoff with jitter: attempt 1 → 1-3s, attempt 2 → 2-6s
@@ -189,9 +206,23 @@ class PriceFetcher {
                 headers: { 'X-CMC_PRO_API_KEY': this.coinmarketcapApiKey }
             });
         } catch (err) {
-            console.warn('CoinMarketCap fetch failed after retries: ' + (err ? err.message : 'unknown error'));
+            let status = err && err.response && err.response.status;
+            if (status === 400) {
+                this._cmc400Count++;
+                if (this._cmc400Count >= this._cmc400AlertThreshold) {
+                    console.error(
+                        'CoinMarketCap has returned HTTP 400 for ' + this._cmc400Count + ' consecutive rounds. ' +
+                        'The configured COINMARKETCAP_API_KEY likely does not support multi-currency convert ' +
+                        '(a paid plan feature). Price oracle is running on CoinGecko only. ' +
+                        'Upgrade your CMC plan or remove COINMARKETCAP_API_KEY to silence this alert.'
+                    );
+                }
+            } else {
+                console.warn('CoinMarketCap fetch failed after retries: ' + (err ? err.message : 'unknown error'));
+            }
             return null;
         }
+        this._cmc400Count = 0;  // reset on success
 
         let data = response.data && response.data.data;
         if (!data) return null;
@@ -214,7 +245,7 @@ class PriceFetcher {
     }
 
     // Compute median of a numeric array, returned as an 8-decimal bignumber string
-    // (mathjs/bcmath per the platform mandate — the even-length midpoint average is
+    // (mathjs/bcmath per the platform mandate; the even-length midpoint average is
     // done in bignumber so the submitted local price carries no float/.toFixed artifact).
     // Ordering uses a float compare (no consensus arithmetic).
     _median(values) {

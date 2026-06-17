@@ -20,7 +20,7 @@
  *
  * Spec: claude/reports/specs/2026-05-24_external-attestation-framework.md (§7)
  *
- * Provider interface (mirrored by all providers — see providers/README):
+ * Provider interface (mirrored by all providers; see providers/README):
  *   fetch(payload, options)  -> Promise<{ body: Buffer, meta: string }>
  *   agree(proposals)         -> { body, meta } | null
  *   healthCheck()            -> Promise<{ ok, status?, error? }>
@@ -35,11 +35,11 @@ const { URL } = require('url');
 
 const USER_AGENT = 'XChain-Attestation/1.0';
 
-// ─── SSRF guard ──────────────────────────────────────────────────
+// SSRF guard
 //
 // The payload URL comes verbatim from an on-chain ATTEST v0 request that any
 // contract author can emit, and every responsible validator executes the GET
-// from inside its own network — co-resident with the hub DB, coin nodes and
+// from inside its own network, co-resident with the hub DB, coin nodes and
 // other services. Without a filter the attestation fleet doubles as an
 // internal port-scanner and data exfiltrator (cloud metadata endpoints over
 // TLS, internal HTTPS services), with the 32KB response gossiped and, on
@@ -50,14 +50,14 @@ const USER_AGENT = 'XChain-Attestation/1.0';
 // custom `lookup`, so a rebinding DNS answer cannot swap in a private target
 // between check and connect. IP-literal hosts are checked directly.
 //
-// ATTESTATION_HTTP_GET_ALLOW_PRIVATE=1 disables the guard — for regtest /
-// e2e environments that attest local endpoints. Never set it in production.
+// ATTESTATION_HTTP_GET_ALLOW_PRIVATE=1 disables the guard (for regtest /
+// e2e environments that attest local endpoints). Never set it in production.
 
 // True when `addr` (an IPv4/IPv6 string) is loopback, private, link-local,
 // CGNAT, multicast or otherwise non-public.
 function isForbiddenAddress(addr) {
     let ip = String(addr).toLowerCase();
-    // IPv4-mapped IPv6 (::ffff:a.b.c.d) — check the embedded IPv4. A mapped
+    // IPv4-mapped IPv6 (::ffff:a.b.c.d): check the embedded IPv4. A mapped
     // form whose remainder isn't parseable IPv4 is refused outright.
     if (ip.startsWith('::ffff:')) {
         const rest = ip.slice(7);
@@ -85,7 +85,7 @@ function isForbiddenAddress(addr) {
         if (/^ff/.test(ip))      return true;                     // multicast
         return false;
     }
-    return true; // unparseable — fail closed
+    return true; // unparseable: fail closed
 }
 
 // Resolves `hostname` (brackets already stripped) to the address the request
@@ -163,7 +163,7 @@ exports.fetch = async (payload, options) => {
             // is disabled via ATTESTATION_HTTP_GET_ALLOW_PRIVATE.
             lookup:   pinned ? pinnedLookup(pinned) : undefined
         }, (res) => {
-            // No automatic redirects — a 3xx terminates with the body as-is so callers
+            // No automatic redirects: a 3xx terminates with the body as-is so callers
             // can decide policy. byte_equality is stricter without redirect chaos.
             let chunks = [];
             let total  = 0;

@@ -18,7 +18,7 @@
  * changes, vote over a configurable voting period, and apply changes
  * at the next epoch boundary when 2/3+ approve.
  *
- * Proposal lifecycle: PROPOSE → VOTING (7 days) → TALLY → APPLY/REJECT
+ * Proposal lifecycle: PROPOSE -> VOTING (7 days) -> TALLY -> APPLY/REJECT
  *
  ********************************************************************/
 
@@ -33,12 +33,12 @@ const GOV_RESULT  = 'GOV_RESULT';
 
 // Block-anchored activation for capability MIN_STAKE changes (#3703). Capability snapshots are
 // BTC-anchored, so activation heights are reasoned in BTC blocks. A MIN_STAKE change must not
-// take effect until every hub has finalized it — i.e. comfortably after the voting period ends
-// plus a propagation/apply margin — so the activation block is computed as the proposer's latest
+// take effect until every hub has finalized it -- i.e. comfortably after the voting period ends
+// plus a propagation/apply margin -- so the activation block is computed as the proposer's latest
 // observed block + (voting period in blocks) + a safety buffer. The proposer's value rides in the
 // agreed, authenticated proposal, so every hub anchors the change to the identical block.
 const BTC_BLOCK_MS                    = 600000; // ~10 min/block
-const ACTIVATION_SAFETY_BUFFER_BLOCKS = 50;     // ≈8h past finalize for GOV_RESULT propagation
+const ACTIVATION_SAFETY_BUFFER_BLOCKS = 50;     // ~8h past finalize for GOV_RESULT propagation
 
 // Change bounds
 const MAX_INCREASE         = 0.50;  // 50% max increase
@@ -48,6 +48,17 @@ const MAX_SLASH_DECREASE   = 0.20;  // 20% max decrease for slashing params
 const COOLDOWN_DAYS        = 14;    // Days before re-proposing a rejected parameter
 
 const SLASHING_PARAMS = ['SLASH_DEVIATION_THRESHOLD', 'SLASH_MISSED_ROUNDS_THRESHOLD'];
+
+// Minimum activation block for parameters that are block-anchored. Used on the
+// follower path to re-validate the proposer-supplied activation_block so a
+// dishonest peer cannot install an already-past (or too-soon) anchor.
+// `latestBlock` is this hub's best observed BTC height at receive time.
+// `votingPeriodMs` is this hub's local governance.votingPeriod.
+// Returns the minimum valid activation_block.
+function _minActivationBlock(latestBlock, votingPeriodMs) {
+    let votingBlocks = Math.ceil(votingPeriodMs / BTC_BLOCK_MS);
+    return latestBlock + votingBlocks + ACTIVATION_SAFETY_BUFFER_BLOCKS;
+}
 
 // Parse a decimal string into { neg, int, frac } digit strings, or null if it is
 // not a finite decimal. Used for exact (non-float) bounds comparison so large
@@ -126,20 +137,19 @@ class Governance extends EventEmitter {
     // soon. The returned value is broadcast in the proposal so every hub anchors to the same block.
     _computeActivationBlock(explicit) {
         let raw = this.hub ? this.hub._latestBlockIndex : null;
-        if (raw === null || raw === undefined)   // Number(null) === 0 — must reject explicitly
+        if (raw === null || raw === undefined)   // Number(null) === 0 -- must reject explicitly
             throw new Error('cannot anchor a MIN_STAKE change: no observed block height yet');
         let latest = Number(raw);
         if (!Number.isInteger(latest))
             throw new Error('cannot anchor a MIN_STAKE change: no observed block height yet');
-        let votingBlocks = Math.ceil(this.votingPeriod / BTC_BLOCK_MS);
-        let minActivation = latest + votingBlocks + ACTIVATION_SAFETY_BUFFER_BLOCKS;
+        let minActivation = _minActivationBlock(latest, this.votingPeriod);
         if (explicit === undefined || explicit === null) return minActivation;
         let ab = Number(explicit);
         if (!Number.isInteger(ab) || ab < 0)
             throw new Error('invalid activation_block: ' + explicit);
         if (ab < minActivation)
-            throw new Error('activation_block ' + ab + ' is too soon — must be >= ' + minActivation +
-                ' (current block + voting period + safety buffer) so every hub finalizes before activation');
+            throw new Error('activation_block ' + ab + ' is too soon (must be >= ' + minActivation +
+                ': current block + voting period + safety buffer so every hub finalizes before activation)');
         return ab;
     }
 
@@ -221,7 +231,7 @@ class Governance extends EventEmitter {
             proposerPubkey, votingEnd: votingEnd.toISOString(), activationBlock: activation
         });
 
-        console.log('Governance: Proposal created — ' + proposalId + ' (' + parameter + ': ' + currentValue + ' → ' + proposedValue + ')' +
+        console.log('Governance: Proposal created: ' + proposalId + ' (' + parameter + ': ' + currentValue + ' -> ' + proposedValue + ')' +
             (activation !== null ? ' [activation block ' + activation + ']' : ''));
 
         return { proposalId, parameter, status: 'voting', votingEnd: votingEnd.toISOString(), activationBlock: activation };
@@ -254,7 +264,7 @@ class Governance extends EventEmitter {
         let votePayload = JSON.stringify({ proposalId, vote: voteChoice, voter: voterPubkey });
         let signature = this.identity ? this.identity.sign(votePayload) : '';
 
-        // Record the vote (upsert — allows changing vote during voting period)
+        // Record the vote (upsert -- allows changing vote during voting period)
         await this.db.doQuery(
             `INSERT INTO governance_votes (proposal_id, voter_pubkey, vote, signature)
              VALUES (?, ?, ?, ?)
@@ -267,7 +277,7 @@ class Governance extends EventEmitter {
             proposalId, vote: voteChoice, voterPubkey, signature
         });
 
-        console.log('Governance: Vote cast — ' + voteChoice + ' on ' + proposalId);
+        console.log('Governance: Vote cast: ' + voteChoice + ' on ' + proposalId);
         return { proposalId, vote: voteChoice, voter: voterPubkey };
     }
 
@@ -321,10 +331,42 @@ class Governance extends EventEmitter {
             return;
         }
 
-        // Persist the proposer-declared activation block verbatim so every hub anchors a capability
-        // MIN_STAKE change to the identical height (#3703). Coerce to integer or NULL.
-        let activation = (activationBlock === undefined || activationBlock === null || !Number.isInteger(Number(activationBlock)))
-            ? null : Number(activationBlock);
+        // Persist the proposer-declared activation block for block-anchored parameters
+        // (capability MIN_STAKE and ATTESTATION_PROVIDER). Every hub stores the proposer's
+        // value so the anchor is federation-uniform (#3703). However, a dishonest proposer
+        // could supply an already-past block or one that is far too soon, defeating the
+        // safety buffer designed to ensure every hub finalizes before the change activates.
+        // Re-validate the min-bound using this hub's local best-observed block height and
+        // the same formula as `_computeActivationBlock`. A block that passes the proposer's
+        // own validation will always pass here (followers lag the leader's block height by
+        // at most a few blocks, and the safety buffer is 50 blocks wide). A forged too-soon
+        // block is rejected; the proposal is silently dropped so the network never records it.
+        let isBlockAnchored = !!(parseCapabilityMinStakeParam(parameter) || parseAttestationProviderParam(parameter));
+        let activation = null;
+        if (isBlockAnchored) {
+            let raw = this.hub ? this.hub._latestBlockIndex : null;
+            let latest = (raw !== null && raw !== undefined) ? Number(raw) : null;
+            if (activationBlock === undefined || activationBlock === null || !Number.isInteger(Number(activationBlock))) {
+                // Block-anchored parameter arrived with no valid activation block; drop.
+                console.warn('Governance: dropping inbound block-anchored proposal ' + proposalId +
+                    ' (' + parameter + '): missing or non-integer activation_block');
+                return;
+            }
+            let ab = Number(activationBlock);
+            if (latest !== null && Number.isInteger(latest)) {
+                let minAb = _minActivationBlock(latest, this.votingPeriod);
+                if (ab < minAb) {
+                    console.warn('Governance: dropping inbound proposal ' + proposalId +
+                        ' (' + parameter + '): activation_block ' + ab + ' is below follower min ' + minAb);
+                    return;
+                }
+            }
+            activation = ab;
+        } else if (activationBlock !== undefined && activationBlock !== null && Number.isInteger(Number(activationBlock))) {
+            // Non-block-anchored parameter: persist a peer-supplied activation_block if it
+            // happens to be present (for forward compatibility), but do NOT enforce any min.
+            activation = Number(activationBlock);
+        }
 
         // Store the proposal locally if we don't have it
         this.db.doQuery(
@@ -366,10 +408,10 @@ class Governance extends EventEmitter {
         if (!proposalId || !status) return;
 
         // Authenticate the result. GOV_RESULT is the federation-final outcome, applied
-        // first-writer-wins under the status='voting' guard below — so it MUST come only from
+        // first-writer-wins under the status='voting' guard below -- so it MUST come only from
         // the proposal's deterministic tally leader (the single hub that runs _tallyProposal).
         // Without this, any one registered validator could broadcast a forged 'passed' that
-        // every follower records while the real leader tallies the true outcome locally —
+        // every follower records while the real leader tallies the true outcome locally --
         // a permanent governance split-brain. The tally side is already leader-pinned
         // (_isTallyLeader); this closes the result-ACCEPTANCE side. The leader's own loopback
         // of its broadcast still passes (sender == leader) and is absorbed by the 0-row guard.
@@ -381,7 +423,7 @@ class Governance extends EventEmitter {
         // only tallies after voting_end (_checkExpiredProposals), so an early result is
         // spurious. Compare the LOCALLY-stored voting_end (recorded from GOV_PROPOSE on every
         // hub); a proposal this hub never saw has no row and is dropped rather than applied
-        // blind. Safe against clock skew in practice — the timer-driven tally fires well after
+        // blind. Safe against clock skew in practice -- the timer-driven tally fires well after
         // voting_end, so a follower receiving the result is already past it too.
         let prows;
         try {
@@ -391,8 +433,8 @@ class Governance extends EventEmitter {
         if (!prows.length || new Date(prows[0].voting_end).getTime() > Date.now()) return;
 
         // Update proposal status locally. Guard side effects on the status-transition (was 'voting')
-        // so the tally leader's own loopback of this GOV_RESULT — which already applied + emitted in
-        // _tallyProposal — affects 0 rows here and does not double-emit.
+        // so the tally leader's own loopback of this GOV_RESULT -- which already applied + emitted in
+        // _tallyProposal -- affects 0 rows here and does not double-emit.
         let res;
         try {
             res = await this.db.doQuery(
@@ -403,9 +445,9 @@ class Governance extends EventEmitter {
 
         // A passed proposal's 'proposal:finalized' listeners (capability hot-reload, provider
         // registry) are registered on EVERY hub, but _tallyProposal only runs on the deterministic
-        // tally leader — so without emitting here followers update the row yet never APPLY the change,
-        // and capability thresholds (min_stake etc.) diverge federation-wide until restart. Emit on the
-        // same transition + payload shape the leader uses in _tallyProposal.
+        // tally leader -- so without emitting here followers update the row yet never APPLY the
+        // change, and capability thresholds (min_stake etc.) diverge federation-wide until restart.
+        // Emit on the same transition + payload shape the leader uses in _tallyProposal.
         if (status === 'passed' && res && res.affectedRows > 0) {
             try {
                 let rows = await this.db.doQuery(
@@ -454,7 +496,7 @@ class Governance extends EventEmitter {
                 "SELECT * FROM governance_proposals WHERE status = 'voting' AND voting_end <= NOW()"
             );
         } catch (e) {
-            // Tally check runs on a timer, so don't crash — but log the error.
+            // Tally check runs on a timer, so don't crash -- but log the error.
             // A systematic failure here (schema drift, column mismatch) would
             // otherwise freeze every proposal in 'voting' state with no signal.
             console.error('Governance tally error:', e.message, e);
@@ -508,7 +550,7 @@ class Governance extends EventEmitter {
             approvals, rejections, totalVotes, validatorCount
         });
 
-        console.log('Governance: Proposal ' + proposal.proposal_id + ' — ' + newStatus +
+        console.log('Governance: Proposal ' + proposal.proposal_id + ': ' + newStatus +
             ' (' + approvals + '/' + totalVotes + ' approve, ' + validatorCount + ' validators)');
 
         if (approved) {

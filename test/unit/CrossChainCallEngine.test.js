@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * CrossChainCallEngine — XCALL relay: discovery gating, canonical strings,
+ * CrossChainCallEngine: XCALL relay: discovery gating, canonical strings,
  * independent peer re-verification, persistence/mirroring, retraction.
  ********************************************************************/
 
@@ -42,17 +42,26 @@ function memDb() {
             if (sql.startsWith("SELECT * FROM cross_chain_calls WHERE call_id = ? AND phase = 'dispatch'")) {
                 return rows.filter(r => r.call_id === params[0] && r.phase === 'dispatch').slice(0, 1);
             }
-            if (sql.startsWith('INSERT IGNORE INTO cross_chain_calls')) {
+            if (sql.startsWith('INSERT INTO cross_chain_calls')) {
                 // Column order mirrors _writeFinalizedRow's cols array.
+                // Implementation uses ON DUPLICATE KEY UPDATE so reorg-retracted
+                // rows are overwritten with re-finalized content instead of
+                // being silently discarded (fix #4049).
                 let cols = ['call_id','phase','snapshot_block','network',
                             'source_chain','source_action_index','source_contract_index',
                             'target_chain','target_contract_index','method','params_json',
                             'gas_limit','cross_hops','effective_time','result_status','return_payload_b64',
                             'finalizing_view','validator_signatures'];
-                let row = { id: rows.length + 1, status: 'finalized' };
-                cols.forEach((c, i) => row[c] = params[i]);
-                if (!rows.some(r => r.call_id === row.call_id && r.phase === row.phase)) rows.push(row);
-                return { affectedRows: 1 };
+                let newRow = { id: rows.length + 1, status: 'finalized' };
+                cols.forEach((c, i) => newRow[c] = params[i]);
+                let existing = rows.findIndex(r => r.call_id === newRow.call_id && r.phase === newRow.phase);
+                if (existing === -1) {
+                    rows.push(newRow);
+                    return { affectedRows: 1, insertId: newRow.id };
+                }
+                // ON DUPLICATE KEY UPDATE: overwrite non-key columns and force status='finalized'
+                Object.assign(rows[existing], newRow, { status: 'finalized' });
+                return { affectedRows: 2, insertId: rows[existing].id };
             }
             if (sql.startsWith('SELECT d.* FROM cross_chain_calls d')) {
                 return rows.filter(r => r.phase === 'dispatch' && r.status === 'finalized' &&
@@ -161,7 +170,7 @@ describe('CrossChainCallEngine', function () {
             expect(engine._relayEffectiveTime('DOGE') - now).to.be.at.least(240);
             expect(engine._relayEffectiveTime('LTC')  - now).to.be.at.least(600);
             expect(engine._relayEffectiveTime('BTC')  - now).to.be.at.least(2400);
-            // Always strictly in the future of the finalization instant — the whole point.
+            // Always strictly in the future of the finalization instant (that is the whole point).
             expect(engine._relayEffectiveTime('DOGE')).to.be.greaterThan(now);
         });
 
@@ -297,7 +306,7 @@ describe('CrossChainCallEngine', function () {
             expect(await engine.validateProposedMatch(dispatchRow({ effective_time: 1700000000 }))).to.equal(false);
             expect(await engine.validateProposedMatch(dispatchRow({ effective_time: Math.floor(Date.now() / 1000) + 7200 }))).to.equal(false);
             // a snapshot_block pinned far from OUR tip view (150) selects a stale
-            // validator set for indexer-side sig verification — refused
+            // validator set for indexer-side sig verification; refused
             expect(await engine.validateProposedMatch(dispatchRow({ snapshot_block: 1 }))).to.equal(false);
             expect(await engine.validateProposedMatch(dispatchRow({ snapshot_block: 1000 }))).to.equal(false);
         });
@@ -327,7 +336,7 @@ describe('CrossChainCallEngine', function () {
 
     describe('persistence + retraction', function () {
 
-        it('_writeFinalizedRow inserts once (INSERT IGNORE) and mirrors the stored row', async function () {
+        it('_writeFinalizedRow upserts (ON DUPLICATE KEY UPDATE) and mirrors the stored row', async function () {
             const { engine, db, broadcaster } = makeEngine();
             const row = {
                 round_id: sha256('XCALLROUND|dispatch|' + CALL_ID),
@@ -341,7 +350,7 @@ describe('CrossChainCallEngine', function () {
             await engine._writeFinalizedRow({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
             expect(db.rows.length).to.equal(1);
             // EVERY hub (followers included) must persist the snapshot the
-            // indexers verify against — leader-only persistence left follower
+            // indexers verify against. Leader-only persistence left follower
             // DBs without it (live finding: DOGE XEXEC deferred forever when
             // hub2/3 led the round but the indexers mirror hub1's DB).
             expect(persist.calledWith('cross_chain', 150)).to.equal(true);

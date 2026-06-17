@@ -36,14 +36,14 @@ class PeerManager extends EventEmitter {
 
         // Validator identity (set via setIdentity, used for signing/verification)
         this.identity         = null;   // ValidatorIdentity instance
-        this.validatorPubkeys = null;   // Map<addr, pubkeyHex> — loaded from DB
+        this.validatorPubkeys = null;   // Map<addr, pubkeyHex>; loaded from DB
         this.requireSigs      = config.REQUIRE_SIGNATURES !== false;
 
         // Option A transport auth: chain-effective signer set (lowercased pubkey
         // hex), pushed in by XChainHub from the on-chain validator snapshot so
         // transport auth follows on-chain key rotation. ADDITIVE to the registry
         // (a pubkey in EITHER is admitted); null until the first refresh. Never
-        // cleared to empty on an upstream failure — the registry is the floor.
+        // cleared to empty on an upstream failure; the registry is the floor.
         this.effectiveSignerSet = null;   // Set<pubkeyHex> | null
         // Optional operator denylist of signing pubkeys (comma-separated hex).
         this.denyPubkeys = new Set(
@@ -88,7 +88,7 @@ class PeerManager extends EventEmitter {
     }
 
     // Set the chain-effective signer set (Option A). Pubkeys must be lowercase
-    // hex. Additive to the registry — a pubkey in EITHER set is admitted. The
+    // hex. Additive to the registry: a pubkey in EITHER set is admitted. The
     // caller (XChainHub._refreshTransportSignerSet) never clears this to empty
     // on an upstream failure, so the registry stays the authorization floor.
     setEffectiveSignerSet(set) {
@@ -117,7 +117,7 @@ class PeerManager extends EventEmitter {
             let remoteIp = req.socket.remoteAddress || 'unknown';
             let ipCount = this.ipConnectionCounts.get(remoteIp) || 0;
             if (ipCount >= this.maxConnectionsPerIp) {
-                console.warn('P2P: Connection limit per IP exceeded for ' + remoteIp + ' — rejecting');
+                console.warn('P2P: Connection limit per IP exceeded for ' + remoteIp + '; rejecting');
                 ws.close(1008, 'too many connections');
                 return;
             }
@@ -153,7 +153,7 @@ class PeerManager extends EventEmitter {
         for (let addr of seeds) {
             this._connectToPeer(addr);
             // Record seed in DB (fire and forget). validator_id is the peer's own addr,
-            // not ours — we are recording the peer, not ourselves.
+            // not ours; we are recording the peer, not ourselves.
             this._recordPeer(addr, addr, true);
         }
 
@@ -259,7 +259,7 @@ class PeerManager extends EventEmitter {
         };
         // Sign if identity is available. Option A: carry the signing pubkey so
         // verifiers can authenticate by chain-effective-set membership (not by a
-        // static addr→pubkey map). Set BEFORE signing so it is in the canonical.
+        // static addr->pubkey map). Set BEFORE signing so it is in the canonical.
         if (this.identity) {
             envelope.sig_pubkey = this.identity.getPubkeyHex();
             envelope.sig        = this.identity.signEnvelope(envelope);
@@ -274,9 +274,8 @@ class PeerManager extends EventEmitter {
     // then verify the Ed25519 signature against the carried key. This makes
     // transport auth follow on-chain key rotation without manual registry edits.
     //
-    // Backward-compat (no sig_pubkey): fall back to TODAY's path — the static
-    // addr→pubkey registry — so pre-A and A hubs interoperate during a rolling
-    // deploy.
+    // Backward-compat (no sig_pubkey): fall back to the static addr->pubkey
+    // registry so pre-A and A hubs interoperate during a rolling deploy.
     _verifySignature(envelope) {
         // If signatures not required, accept unsigned messages
         if (!this.requireSigs && !envelope.sig) return true;
@@ -293,8 +292,8 @@ class PeerManager extends EventEmitter {
             // effective set OR the registry's pubkey set (addr-independent).
             let inSet = (this.effectiveSignerSet && this.effectiveSignerSet.has(pk))
                      || this._registryHasPubkey(pk);
-            // Not a member: reject when sigs are required (fail closed), preserve
-            // the permissive mode otherwise — matching the unknown-sender path.
+            // Not a member: reject when sigs are required (fail closed); preserve
+            // the permissive mode otherwise, matching the unknown-sender path.
             if (!inSet) return !this.requireSigs;
             return ValidatorIdentity.verify(
                 ValidatorIdentity.getSignablePayload(envelope), envelope.sig, pk);
@@ -304,7 +303,7 @@ class PeerManager extends EventEmitter {
         // No validator registry loaded: fail closed. A null registry means we
         // cannot authenticate any sender, so a self-signed envelope from an
         // unknown peer must be rejected rather than trusted. (Defense in depth:
-        // the hub also refuses to open the P2P listener with a null registry —
+        // the hub also refuses to open the P2P listener with a null registry;
         // see XChainHub.startP2P.) When signatures are not required the hub is
         // not authenticating peers at all, so preserve that mode's permissive
         // behavior, matching the unknown-sender handling below.
@@ -312,7 +311,7 @@ class PeerManager extends EventEmitter {
         // Look up sender's pubkey
         let pubkeyHex = this.validatorPubkeys.get(envelope.sender);
         if (!pubkeyHex) {
-            // Unknown sender — accept if sigs not required, reject if required
+            // Unknown sender: accept if sigs not required, reject if required
             return !this.requireSigs;
         }
         // Verify the signature
@@ -359,11 +358,13 @@ class PeerManager extends EventEmitter {
         if (!envelope.sender || typeof envelope.sender !== 'string') return;
         if (typeof envelope.timestamp !== 'number') return;
 
-        // Timestamp freshness — drop envelopes too far from our clock in either
-        // direction. The dedup cache TTL is only ~60s, so without this a signed
-        // envelope replayed after its dedup entry expires would re-enter as new.
-        // (Anti-replay for the Option A signed-envelope surface.)
-        let maxSkew = parseInt(this.config.P2P_MSG_MAX_SKEW_MS) || 300000;
+        // Timestamp freshness: drop envelopes too far from our clock in either
+        // direction. maxSkew is capped at the dedup TTL so the [dedup-expiry,
+        // maxSkew] window cannot be used to replay a signed envelope after its
+        // dedup entry is pruned. (Anti-replay for the Option A signed-envelope
+        // surface.) Default dedup TTL is 60s; default skew is also 60s.
+        let dedupTTL = parseInt(this.config.P2P_MSG_DEDUP_TTL) || 60000;
+        let maxSkew  = Math.min(parseInt(this.config.P2P_MSG_MAX_SKEW_MS) || dedupTTL, dedupTTL);
         if (Math.abs(Date.now() - envelope.timestamp) > maxSkew) return;
 
         // Self-connection guard
@@ -381,13 +382,13 @@ class PeerManager extends EventEmitter {
         // Per-peer rate limiting
         let ratePeer = knownAddr || ws._peerAddr || envelope.sender;
         if (!this._checkMsgRate(ratePeer)) {
-            console.warn('P2P: Rate limit exceeded for peer ' + ratePeer + ' — dropping message');
+            console.warn('P2P: Rate limit exceeded for peer ' + ratePeer + '; dropping message');
             return;
         }
 
         // Signature verification
         if (!this._verifySignature(envelope)) {
-            console.warn('P2P: Invalid signature from ' + envelope.sender + ' — dropping message');
+            console.warn('P2P: Invalid signature from ' + envelope.sender + '; dropping message');
             return;
         }
 
@@ -405,7 +406,7 @@ class PeerManager extends EventEmitter {
         }
 
         // Update DB (fire and forget). validator_id is peerAddr (the immediate ws peer
-        // that delivered the message), NOT envelope.sender — the latter is the original
+        // that delivered the message), NOT envelope.sender. The latter is the original
         // publisher and will diverge from peerAddr on relayed messages.
         this._recordPeer(peerAddr, peerAddr, false);
 
@@ -414,7 +415,7 @@ class PeerManager extends EventEmitter {
         if (envelope.type === 'HEARTBEAT') {
             this.emit('heartbeat', envelope.sender, envelope.timestamp);
         }
-        // Capability gossip — see CapabilityRegistry / spec 2026-05-24_capability-staking-model.md
+        // Capability gossip; see CapabilityRegistry / spec 2026-05-24_capability-staking-model.md
         if (envelope.type === 'CAPABILITY_ACTIVATED' ||
             envelope.type === 'CAPABILITY_DEACTIVATED' ||
             envelope.type === 'CAPABILITY_SELF_TEST') {
@@ -603,13 +604,14 @@ class PeerManager extends EventEmitter {
     _startPingInterval() {
         this.pingTimer = setInterval(() => {
             // Ping outbound dialed peers only. Inbound peers also live in this.peers
-            // (after _registerInboundPeer) but are pinged via wss.clients below — pinging
-            // them here as well would race the two loops and terminate the inbound ws.
+            // (after _registerInboundPeer) but are pinged via wss.clients below.
+            // Pinging them here as well would race the two loops and terminate the
+            // inbound ws.
             for (let [addr, peer] of this.peers) {
                 if (peer.inbound) continue;
                 if (peer.ws && peer.ws.readyState === WebSocket.OPEN) {
                     if (peer.ws._isAlive === false) {
-                        console.log('Peer ' + addr + ' failed ping/pong — terminating');
+                        console.log('Peer ' + addr + ' failed ping/pong; terminating');
                         peer.ws.terminate();
                         return;
                     }

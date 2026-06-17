@@ -20,9 +20,9 @@
  * Durability + failover (mirrors OraclePublisher.js):
  *   - The finalized payload is written to a durable, fsync'd write-ahead log
  *     (`attestation-queue.jsonl`) BEFORE any broadcast attempt, by every node
- *     in the request's responsible set — not just the leader.
+ *     in the request's responsible set, not just the leader.
  *   - The leader broadcasts immediately and drops its queue entry on success.
- *   - A periodic sweep (_processQueue) — also run once on startup — re-broadcasts
+ *   - A periodic sweep (_processQueue, also run once on startup, re-broadcasts
  *     any entry whose request is still pending on the indexer:
  *       * the leader's own entry is retried if the live broadcast failed or the
  *         process crashed between the queue write and the send (crash recovery);
@@ -39,10 +39,10 @@
  *     SIG_COUNT|PUBKEY1|SIG1|PUBKEY2|SIG2|...
  *
  * Broadcast strategy (mirrors OraclePublisher.js):
- *   - setBroadcastHook(fn)  — operator-supplied broadcaster receives the wire
+ *   - setBroadcastHook(fn): operator-supplied broadcaster receives the wire
  *                             payload string, returns { txid }. Used directly
  *                             when present.
- *   - setEncoder + setWalletSignHook for the default pipeline — build PSBT via
+ *   - setEncoder + setWalletSignHook for the default pipeline; build PSBT via
  *     xchain-encoder, sign via wallet hook, broadcast via encoder. (Same
  *     hooks shape as OraclePublisher; phase-3+ wiring.)
  *
@@ -53,10 +53,11 @@
 const fs            = require('fs');
 const path          = require('path');
 const crypto        = require('crypto');
+const swq           = require('./stake_weighted_quorum.js');
 const axios         = require('axios');
 const EncoderClient = require('./EncoderClient.js');
 
-const APPROX_BTC_BLOCK_MS  = 600000;  // ~10 min — used to translate the failover
+const APPROX_BTC_BLOCK_MS  = 600000;  // ~10 min; used to translate the failover
                                       // window from blocks to a wall-clock silence
                                       // threshold that survives a restart.
 const DEFAULT_FAILOVER_WINDOW_BLOCKS = 2;       // leader silence before rank-1 steps in
@@ -136,7 +137,7 @@ class AttestationPublisher {
     }
 
     async stop(){
-        // The queue file is durable WAL state — it is intentionally NOT drained
+        // The queue file is durable WAL state; it is intentionally NOT drained
         // or truncated here. Surviving entries are replayed by _processQueue on
         // the next start(), which is what protects a finalized response across a
         // crash. We only stop the in-process sweep timer.
@@ -154,7 +155,7 @@ class AttestationPublisher {
         if (!event || !event.requestId) return;
         let myPubkey = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
         if (!event.signatures || event.signatures.length === 0){
-            console.warn('AttestationPublisher: no sigs in finalized event for ' + event.requestId.substring(0,16) + '... — skipping broadcast');
+            console.warn('AttestationPublisher: no sigs in finalized event for ' + event.requestId.substring(0,16) + '...; skipping broadcast');
             return;
         }
 
@@ -170,19 +171,19 @@ class AttestationPublisher {
 
         // Guard: the assembled wire string must fit the encoder's data-payload
         // ceiling, or createTx rejects it with a RangeError. Catching that downstream
-        // is too late — the entry would already be on the durable WAL and the failover
+        // is too late; the entry would already be on the durable WAL and the failover
         // sweep would retry the same oversized payload forever. Drop it loudly here so
         // the operator can shrink the provider's response body.
         let payloadBytes = Buffer.byteLength(payload, 'utf8');
         if (payloadBytes > ATTEST_WIRE_MAX_BYTES) {
             console.error('AttestationPublisher: ATTEST v1 wire for ' + rid.substring(0, 16) +
                 '... is ' + payloadBytes + ' bytes, exceeds encoder limit of ' + ATTEST_WIRE_MAX_BYTES +
-                ' — dropping broadcast. Reduce the attestation response body size for this provider.');
+                '; dropping broadcast. Reduce the attestation response body size for this provider.');
             return;
         }
 
-        // Recompute the responsible-set ordering so any node — not just the
-        // leader — knows its rank for failover step-in. Persisted on the queue
+        // Recompute the responsible-set ordering so any node (not just the
+        // leader) knows its rank for failover step-in. Persisted on the queue
         // entry so the ordering survives a restart without re-querying snapshots.
         let requestBlock = (event.request && event.request.block_index != null) ? Number(event.request.block_index) : null;
         let redundancy   = (event.request && Number(event.request.redundancy)) ? Number(event.request.redundancy) : event.signatures.length;
@@ -205,19 +206,19 @@ class AttestationPublisher {
             // Followers persist and wait. If the leader stays silent, the
             // failover sweep promotes the next responsible validator in turn.
             console.log('AttestationPublisher: [FOLLOWER] persisted finalized response for ' + rid.substring(0,16) +
-                        '... — will step in after ' + this.failoverWindowBlocks + ' silent block(s) if leader does not broadcast');
+                        '...; will step in after ' + this.failoverWindowBlocks + ' silent block(s) if leader does not broadcast');
             return;
         }
 
         let broadcaster = this._getBroadcaster();
         if (!broadcaster){
-            console.warn('AttestationPublisher: no broadcast hook configured for ' + rid.substring(0,16) + '... — entry queued for later replay');
+            console.warn('AttestationPublisher: no broadcast hook configured for ' + rid.substring(0,16) + '...; entry queued for later replay');
             return;
         }
         try {
             let result = await broadcaster(payload, event);
             console.log('AttestationPublisher: broadcast ' + rid.substring(0,16) + '... txid=' + (result && result.txid ? result.txid : '?'));
-            // Success — drop the entry so the sweep doesn't re-broadcast it.
+            // Success; drop the entry so the sweep doesn't re-broadcast it.
             this._removeFromQueue(new Set([rid]));
         } catch (e) {
             console.error('AttestationPublisher: broadcast failed for ' + rid.substring(0,16) + '... (will retry via sweep): ', e);
@@ -305,17 +306,34 @@ class AttestationPublisher {
     // the request's block boundary by SHA256(request_id || pubkey) ascending,
     // take the top `redundancy`. responsible[0] is the leader. Returns an array
     // of lowercase pubkeys, or null when the snapshot is unavailable.
+    //
+    // STAKE_WEIGHTED_QUORUM: when active at blockIndex, resolve the SOURCE-keyed
+    // weight snapshot and dedupe by staking source so a source's delegated keys
+    // cannot occupy multiple responsible slots (mirrors AttestationRound._computeResponsibleSet).
+    // CONSENSUS-CRITICAL: must stay in sync with AttestationRound and the indexer.
     async _computeResponsible(rid, blockIndex, redundancy){
         try {
             if (!this.hub.capabilitySnapshot) return null;
-            let snapshot = await this.hub.capabilitySnapshot.getSnapshot('attestation', blockIndex);
+            let weighted = swq.isStakeWeightedQuorumActive(blockIndex, this.hub.network);
+            let snapshot = weighted
+                ? await this.hub.capabilitySnapshot.getWeightSnapshot('attestation', blockIndex)
+                : await this.hub.capabilitySnapshot.getSnapshot('attestation', blockIndex);
             if (!snapshot || !Array.isArray(snapshot.validators) || snapshot.validators.length === 0) return null;
             let withHash = snapshot.validators.map(v => {
                 let pk = String(v.pubkey).toLowerCase();
                 let h  = crypto.createHash('sha256').update(rid, 'utf8').update(pk, 'utf8').digest('hex');
-                return { pubkey: pk, hash: h };
+                return { pubkey: pk, source: (v.source != null ? String(v.source) : null), hash: h };
             });
             withHash.sort((a, b) => (a.hash < b.hash) ? -1 : (a.hash > b.hash ? 1 : 0));
+            if (weighted) {
+                let seen = new Set();
+                withHash = withHash.filter(v => {
+                    if (v.source === null) return true;   // no source info: keep (defensive)
+                    if (seen.has(v.source)) return false; // source already represented
+                    seen.add(v.source);
+                    return true;
+                });
+            }
             return withHash.slice(0, Math.max(1, redundancy)).map(x => x.pubkey);
         } catch (e) {
             return null;
@@ -336,9 +354,9 @@ class AttestationPublisher {
         // deadline) and must not be re-broadcast.
         let pendingIds = await this._fetchPendingRequestIds();
         if (pendingIds === null){
-            // Indexer unreachable — we can't tell which entries already landed,
+            // Indexer unreachable; we can't tell which entries already landed,
             // so we defer rather than risk a double-broadcast. Retried next sweep.
-            console.warn('AttestationPublisher: indexer unreachable — deferring queue replay (' + entries.length + ' entr' + (entries.length === 1 ? 'y' : 'ies') + ' retained)');
+            console.warn('AttestationPublisher: indexer unreachable; deferring queue replay (' + entries.length + ' entr' + (entries.length === 1 ? 'y' : 'ies') + ' retained)');
             return;
         }
 
@@ -351,17 +369,17 @@ class AttestationPublisher {
             let rid = String(entry.requestId).toLowerCase();
 
             if (!pendingIds.has(rid)){
-                // Already resolved on-chain — clear it out.
+                // Already resolved on-chain; clear it out.
                 drop.add(rid);
                 continue;
             }
 
             let rank = this._myRank(entry);
-            if (rank === null) continue;  // not our responsibility — leave it
+            if (rank === null) continue;  // not our responsibility; leave it
 
             // Eligibility: the leader entry is only retried after a short grace
             // (so the live broadcast wins the happy path and a crash-surviving
-            // entry — whose ts is already old — replays at once). A follower at
+            // entry, whose ts is already old; replays at once). A follower at
             // rank r steps in only after r failover windows of leader silence.
             let age = now - (Number(entry.ts) || 0);
             let eligible = (rank === 0)
@@ -370,7 +388,7 @@ class AttestationPublisher {
             if (!eligible) continue;
 
             if (!broadcaster){
-                console.warn('AttestationPublisher: no broadcast pipeline configured — ' + rid.substring(0,16) + '... retained for later replay');
+                console.warn('AttestationPublisher: no broadcast pipeline configured; ' + rid.substring(0,16) + '... retained for later replay');
                 continue;
             }
 
@@ -382,7 +400,7 @@ class AttestationPublisher {
                             ' for ' + rid.substring(0,16) + '... txid=' + (result && result.txid ? result.txid : '?'));
             } catch (e) {
                 console.error('AttestationPublisher: replay broadcast failed for ' + rid.substring(0,16) + '... (will retry): ', e);
-                // keep — not added to drop
+                // keep; not added to drop
             }
         }
 
@@ -415,7 +433,7 @@ class AttestationPublisher {
                     params:  params
                 }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
             } catch (e) {
-                console.warn('AttestationPublisher: pending-request fetch failed —', (e && e.message ? e.message : e));
+                console.warn('AttestationPublisher: pending-request fetch failed:', (e && e.message ? e.message : e));
                 return null;
             }
             let result = res && res.data && res.data.result;
@@ -480,7 +498,7 @@ class AttestationPublisher {
         let psbtResult = await this.encoder.createTx({
             utxos:    utxos,
             // The encoder's P2SH path runs bitcoin.address.fromBase58Check() on this
-            // field, so it must be the base58check address — not the raw hex pubkey.
+            // field, so it must be the base58check address, not the raw hex pubkey.
             pubkey:   this.btcAddress,
             data:     payload,
             change:   this.btcAddress,

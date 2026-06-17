@@ -452,7 +452,7 @@ describe('CapabilityRegistry', function () {
             let hub = makeHub({ db, p2pConfig: { DISABLED_CAPABILITIES: ['cross_chain'] } });
             let reg = new CapabilityRegistry(hub);
             await reg.runAllSelfTests('pk');
-            // The second call to db._conn.query for each cap is setEnabled — capture all calls
+            // The second call to db._conn.query for each cap is setEnabled; capture all calls
             // and verify at least one call sets enabled=0 for cross_chain
             let queries = db._conn.query.args.map(a => JSON.stringify(a));
             let hasDisableCall = queries.some(q => q.includes('cross_chain') && q.includes('0'));
@@ -517,7 +517,11 @@ describe('CapabilityRegistry', function () {
                 expect(a.getMinStake('price', n)).to.equal(b.getMinStake('price', n));
         });
 
-        it('loadGovernanceHistory rebuilds appended history from finalized proposals', async function () {
+        it('loadGovernanceHistory skips all MIN_STAKE rows while governance pin is set', async function () {
+            // MIN_STAKE_GOVERNANCE_DISABLED is true (pre-launch pin): passed proposals
+            // must NOT be applied because the indexer acceptance path uses a frozen
+            // constant and applying hub-side would fork quorum N. All blocks resolve
+            // to the genesis value regardless of what the DB contains.
             loadModule();
             let db = makeDb();
             db.doQuery = sinon.stub().resolves([
@@ -528,8 +532,8 @@ describe('CapabilityRegistry', function () {
             let r = new CapabilityRegistry(makeHub({ db, p2pConfig: { CAPABILITIES: { price: { MIN_STAKE: '10000' } } } }));
             await r.loadGovernanceHistory();
             expect(r.getMinStake('price', 999)).to.equal('10000');
-            expect(r.getMinStake('price', 1000)).to.equal('25000');
-            expect(r.getMinStake('price', 2000)).to.equal('5000');
+            expect(r.getMinStake('price', 1000)).to.equal('10000');
+            expect(r.getMinStake('price', 2000)).to.equal('10000');
         });
 
         it('loadGovernanceHistory is best-effort when the table/doQuery is unavailable', async function () {

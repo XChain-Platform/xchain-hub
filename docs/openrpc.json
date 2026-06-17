@@ -3,7 +3,7 @@
   "info": {
     "title": "XChain Hub API",
     "version": "1.0.0",
-    "description": "JSON-RPC 2.0 API (POST /) of the XChain hub — config oracle, price oracle, cross-chain coordinator, and validator-federation surface. Public deployment is path-routed per chain: https://hub.xchain.io/{COIN}/. Read methods are open; methods marked with x-auth require an x-api-key header when the operator has configured HUB_API_KEY. Methods marked x-internal are service-to-service (indexers/validators) — general clients should not call them. Errors follow JSON-RPC 2.0 ({code, message}); registry: https://docs.xchain.io/protocol/Error_Codes.md. LLM-friendly docs: https://docs.xchain.io/llms.txt",
+    "description": "JSON-RPC 2.0 API (POST /) of the XChain hub: config oracle, price oracle, cross-chain coordinator, and validator-federation surface. Public deployment is path-routed per chain: https://hub.xchain.io/{COIN}/. Read methods are open; methods marked with x-auth require an x-api-key header when the operator has configured HUB_API_KEY. Methods marked x-internal are service-to-service (indexers/validators); general clients should not call them. Errors follow JSON-RPC 2.0 ({code, message}); registry: https://docs.xchain.io/protocol/Error_Codes.md. LLM-friendly docs: https://docs.xchain.io/llms.txt",
     "license": {
       "name": "AGPL-3.0-or-later",
       "url": "https://docs.xchain.io/legal/LICENSING.md"
@@ -55,7 +55,7 @@
     },
     {
       "name": "getallconfigs",
-      "summary": "Service discovery — connection parameters for every platform service on this chain.",
+      "summary": "Service discovery: connection parameters for every platform service on this chain.",
       "paramStructure": "by-name",
       "params": [],
       "result": {
@@ -312,6 +312,30 @@
     {
       "name": "getattestationstats",
       "summary": "Attestation throughput counters per validator.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "name": "getcrosschaincallstats",
+      "summary": "Cross-chain call relay backlog depth and lifetime failure counters.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "name": "getcheckpointstats",
+      "summary": "State-checkpoint health: last finalized block per chain and quorum-timeout counters.",
       "paramStructure": "by-name",
       "params": [],
       "result": {

@@ -16,7 +16,7 @@
  *
  * Per-request lifecycle on the validator side of the External Attestation
  * Framework. Unlike OracleRound (wall-clock cadence), AttestationRound is
- * event-driven — it polls the indexer for new ATTEST v0 (request) rows in
+ * event-driven: it polls the indexer for new ATTEST v0 (request) rows in
  * 'pending' status, decides whether this validator is in the request's
  * responsible set, fetches the payload via the provider module, and gossips
  * an ATTEST_PROPOSE for AttestationConsensus to drive to quorum.
@@ -25,7 +25,7 @@
  *   1. Filter to validators qualifying for `attestation` at the request's
  *      block_index (snapshot via CapabilitySnapshot).
  *   2. Sort by SHA-256(request_id || pubkey) ascending. (Spec calls for
- *      keccak256; SHA-256 has equivalent ordering properties — see plan §1.)
+ *      keccak256; SHA-256 has equivalent ordering properties; see plan §1.)
  *   3. Top REDUNDANCY are responsible; lowest-hash is leader.
  *
  * Spec: claude/reports/specs/2026-05-24_external-attestation-framework.md
@@ -41,7 +41,7 @@ const ATTEST_PROPOSE = 'ATTEST_PROPOSE';
 
 const DEFAULT_POLL_MS         = 15000;  // how often to poll the indexer for new pending requests
 const DEFAULT_CONFIRMATIONS   = 3;      // BTC blocks of confirmation before initiating fetch (spec §14)
-const DEFAULT_FETCH_TIMEOUT   = 10000;  // ms — provider fetch timeout
+const DEFAULT_FETCH_TIMEOUT   = 10000;  // ms: provider fetch timeout
 const POLL_LIMIT              = 100;    // max pending requests fetched per poll page (cursor advances across pages)
 
 class AttestationRound {
@@ -63,7 +63,7 @@ class AttestationRound {
         // after `retryAfterMs`: a request skipped for a transient reason
         // (provider not yet registered, empty capability snapshot) becomes
         // eligible for re-evaluation once the window lapses, instead of being
-        // suppressed for the whole process lifetime. Also bounds memory —
+        // suppressed for the whole process lifetime. Also bounds memory;
         // a plain Set grew monotonically with historical request volume.
         this.seen = new Map();
 
@@ -71,7 +71,7 @@ class AttestationRound {
         // null = start a fresh sweep from the oldest pending request.
         this.pollCursor = null;
 
-        // AttestationConsensus instance — set via setConsensus after creation
+        // AttestationConsensus instance; set via setConsensus after creation
         this.consensus = null;
 
         this._pollTimer      = null;
@@ -85,7 +85,7 @@ class AttestationRound {
         this.retryAfterMs   = parseInt(this.config.ATTESTATION_RETRY_AFTER_MS) || (5 * this.pollMs);
         // How long a `rounds` entry is retained before lazy eviction. A round's
         // active lifecycle is ~2 min (consensus round timeout), so the 1-hour
-        // default leaves a wide safety margin while bounding memory — without
+        // default leaves a wide safety margin while bounding memory. Without
         // this the Map grew monotonically with lifetime request volume (it was
         // only ever cleared on stop()).
         this.roundsTtlMs    = parseInt(this.config.ATTESTATION_ROUND_TTL_MS)   || (60 * 60 * 1000);
@@ -97,7 +97,7 @@ class AttestationRound {
 
     async start(){
         if(!this.peerManager){
-            console.log('AttestationRound: no peer manager — skipping start');
+            console.log('AttestationRound: no peer manager; skipping start');
             return;
         }
         this._pollTimer = setInterval(() => {
@@ -151,7 +151,7 @@ class AttestationRound {
                 params:  params
             }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
         } catch (e) {
-            console.warn('AttestationRound: poll failed —', e);
+            console.warn('AttestationRound: poll failed:', e);
             return;
         }
 
@@ -165,7 +165,7 @@ class AttestationRound {
             if(!rid || this.seen.has(rid)) continue;
 
             // Wait CONFIRMATIONS blocks past the request's tx before initiating
-            // any external API call (spec §14 — avoids paying for reorg'd work).
+            // any external API call (spec §14; avoids paying for reorg'd work).
             if(Number(req.block_index) + this.confirmations > latestBlock) continue;
 
             this.seen.set(rid, Date.now());
@@ -185,7 +185,7 @@ class AttestationRound {
             this.pollCursor = { block_index: Number(last.block_index), action_index: Number(last.action_index) };
         }
         if(requests.length < POLL_LIMIT){
-            if(this.pollCursor) console.log('AttestationRound: reached end of pending queue — restarting sweep next poll');
+            if(this.pollCursor) console.log('AttestationRound: reached end of pending queue; restarting sweep next poll');
             this.pollCursor = null;
         }
     }
@@ -214,7 +214,7 @@ class AttestationRound {
     }
 
     // Evaluate responsibility for this request, fetch if responsible, and
-    // propose. Idempotent — repeat calls for the same requestId are dropped.
+    // propose. Idempotent: repeat calls for the same requestId are dropped.
     async _startRound(request){
         let rid          = String(request.request_id).toLowerCase();
         let providerId   = String(request.provider_id);
@@ -225,12 +225,12 @@ class AttestationRound {
         // Provider known? (governance might have ATTEST v0 (request) whose
         // provider is governance-defined but not deployed locally.)
         if(!this.providerRegistry.isKnown(providerId)){
-            console.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... — provider ' + providerId + ' unknown');
+            console.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... provider ' + providerId + ' unknown');
             return;
         }
         let providerModule = this.providerRegistry.getModule(providerId);
         if(!providerModule || typeof providerModule.fetch !== 'function'){
-            console.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... — provider ' + providerId + ' module missing fetch()');
+            console.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... provider ' + providerId + ' module missing fetch()');
             return;
         }
 
@@ -238,7 +238,7 @@ class AttestationRound {
         // block boundary. Each hub computes the same set (deterministic).
         // STAKE_WEIGHTED_QUORUM: at/above activation, resolve the SOURCE-keyed
         // weight snapshot so the responsible-set selection can dedupe by staking
-        // source (one slot per source) — closing the delegation slot-inflation
+        // source (one slot per source), closing the delegation slot-inflation
         // hole. The within-subset quorum stays count-based (attestation is an
         // independent-replication check, not a stake vote). Gated on the request's
         // block + the hub's network so every hub flips on the same anchor.
@@ -250,8 +250,8 @@ class AttestationRound {
             : null;
         if(!snapshot || !Array.isArray(snapshot.validators) || snapshot.validators.length === 0){
             // Empty snapshot means no qualified validators exist at the request's
-            // block — request can't be served. Will eventually expire on deadline.
-            console.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... — empty capability snapshot at block ' + snapshotBlk);
+            // block; request can't be served. Will eventually expire on deadline.
+            console.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... empty capability snapshot at block ' + snapshotBlk);
             return;
         }
 
@@ -259,8 +259,8 @@ class AttestationRound {
         let leaderPubkey = responsible[0] ? responsible[0].pubkey : null;
         let amResponsible = responsible.some(v => v.pubkey === myPubkey);
         if(!amResponsible){
-            // Not in the responsible set — log so operators can distinguish "saw and skipped" from "never polled".
-            console.log('AttestationRound: skipping ' + rid.substring(0,16) + '... — not responsible at block ' + snapshotBlk +
+            // Not in the responsible set; log so operators can distinguish "saw and skipped" from "never polled".
+            console.log('AttestationRound: skipping ' + rid.substring(0,16) + '... not responsible at block ' + snapshotBlk +
                         ' (snapshot=' + snapshot.validators.length + ', leader=' + (leaderPubkey ? leaderPubkey.substring(0,16) + '...' : 'none') + ')');
             return;
         }
@@ -285,19 +285,19 @@ class AttestationRound {
         // Hub-local min_fee floor (E1, governance-synced via the provider
         // definition). Below-floor requests are skipped BEFORE any provider
         // fetch; with every hub applying the same floor the request simply
-        // expires on-chain and the fee refunds — economically clean
+        // expires on-chain and the fee refunds. This is economically clean
         // back-pressure with zero consensus involvement.
         let minFee    = (providerDef && !bc.isNull(providerDef.min_fee_xchain)) ? String(providerDef.min_fee_xchain) : '0';
         let reqFeeAmt = (request && !bc.isNull(request.fee_amount)) ? String(request.fee_amount) : '0';
         if(bc.bcgt(minFee, '0') && bc.bclt(reqFeeAmt, minFee)){
-            console.log('AttestationRound: skipping ' + rid.substring(0,16) + '... — fee ' + reqFeeAmt +
+            console.log('AttestationRound: skipping ' + rid.substring(0,16) + '... fee ' + reqFeeAmt +
                         ' below provider "' + providerId + '" min_fee ' + minFee + ' (request will expire + refund)');
             return;
         }
 
         // Fetch the payload via the provider module. Capped at provider's max
         // response bytes; timeout from config. Failure burns the round on this
-        // validator — slashing missed-validators is Phase 4.
+        // validator (slashing missed-validators is Phase 4).
         let fetched;
         try {
             fetched = await providerModule.fetch(request.payload, {
@@ -343,9 +343,15 @@ class AttestationRound {
     // SHA256(request_id || pubkey) ascending, take top REDUNDANCY.
     // Returns [{ pubkey, hash }] sorted by hash. responsible[0] is leader.
     // STAKE_WEIGHTED_QUORUM (weighted=true): first dedupe by staking source so a
-    // source's delegated keys can't occupy multiple responsible slots — keep each
-    // source's lowest-hash key (iterate in hash order). CONSENSUS-CRITICAL: the
-    // indexer (actions/attest.js) applies the identical rule or validation forks.
+    // source's delegated keys can't occupy multiple responsible slots; keep each
+    // source's lowest-hash key (iterate in hash order).
+    //
+    // CONSENSUS-CRITICAL: the indexer (actions/attest.js) must apply the
+    // identical rule or validation forks. The two implementations are currently
+    // behaviorally identical (hash-order sort, source===null keep branch,
+    // redundancy slice), but no cross-service test feeds the same validators +
+    // requestId through both and asserts identical output. Any silent change to
+    // either copy is a fork surface; always update both files together.
     _computeResponsibleSet(validators, requestId, redundancy, weighted){
         let withHash = validators.map(v => {
             let pk = String(v.pubkey).toLowerCase();
@@ -356,7 +362,7 @@ class AttestationRound {
         if(weighted){
             let seen = new Set();
             withHash = withHash.filter(v => {
-                if(v.source === null) return true;          // no source info → keep (defensive)
+                if(v.source === null) return true;          // no source info -> keep (defensive)
                 if(seen.has(v.source)) return false;        // source already represented
                 seen.add(v.source);
                 return true;

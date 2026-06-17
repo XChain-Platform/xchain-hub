@@ -61,8 +61,8 @@ class XChainHub {
         this.dbUser    = dbUser;
         this.dbPass    = dbPass;
         this.p2pConfig = p2pConfig || null;
-        // Deployment network (mainnet|testnet|regtest) for consensus activation gating
-        // — notably STAKE_WEIGHTED_QUORUM. Set in validator mode (validated in api.js);
+        // Deployment network (mainnet|testnet|regtest) for consensus activation gating,
+        // notably STAKE_WEIGHTED_QUORUM. Set in validator mode (validated in api.js);
         // '' in standalone (no consensus runs there).
         this.network   = (this.p2pConfig && this.p2pConfig.HUB_NETWORK) ? String(this.p2pConfig.HUB_NETWORK) : '';
         this.db               = null;
@@ -103,7 +103,7 @@ class XChainHub {
         await this.db.verifyTables();
         await this.db.runMigrations();
 
-        // PriceAggregator doesn't require P2P/PBFT — always available for receiving on-chain PRICE actions
+        // PriceAggregator doesn't require P2P/PBFT (always available for receiving on-chain PRICE actions
         this.priceAggregator = new PriceAggregator(this);
         // HubDbBroadcaster forwards row inserts from the aggregator to WebSocket subscribers
         // for the cross-chain hub DB sync channel (used by indexers running in distributed mode)
@@ -141,11 +141,11 @@ class XChainHub {
         await this._loadValidatorPubkeys();
 
         // Fail closed: refuse to open the P2P listener with a null validator
-        // registry. An empty (non-null) registry is fine — it rejects every
+        // registry. An empty (non-null) registry is fine; it rejects every
         // unknown sender, which is the correct pre-bootstrap state while
         // validators are still being registered via the registervalidator RPC.
         if(!this.peerManager.validatorPubkeys){
-            throw new Error('Validator registry not loaded — refusing to start the P2P listener (database unavailable?)');
+            throw new Error('Validator registry not loaded; refusing to start the P2P listener (database unavailable?)');
         }
 
         await this.peerManager.start();
@@ -162,7 +162,7 @@ class XChainHub {
         }, refreshMs);
     }
 
-    // Option A transport auth — refresh the chain-effective signer set from the
+    // Option A transport auth: refresh the chain-effective signer set from the
     // on-chain validator snapshot and push it into the PeerManager. The effective
     // set is ADDITIVE to the validator registry (a pubkey in either is admitted),
     // so transport auth follows on-chain key rotation. NEVER clears the set to
@@ -181,7 +181,7 @@ class XChainHub {
     }
 
     // Warn loudly (once the last good refresh ages past a threshold) when the
-    // transport signer set can't be refreshed. Does NOT clear the existing set —
+    // transport signer set can't be refreshed. Does NOT clear the existing set;
     // retaining last-known-good is the no-fail-open invariant; the registry
     // remains the floor. Silent before the first successful refresh (the inert
     // no-chain-validator-set state needs no alarm).
@@ -189,7 +189,7 @@ class XChainHub {
         let maxAgeMs = (this.p2pConfig && this.p2pConfig.P2P_SIGNER_SET_MAX_AGE_MS) || 600000;
         if(this._transportSignerSetAt && (Date.now() - this._transportSignerSetAt) > maxAgeMs){
             console.warn('XChainHub: transport signer set STALE (' + why + '); retaining last-known-good set of ' +
-                this._transportSignerSet.size + ' pubkey(s) — registry remains the auth floor');
+                this._transportSignerSet.size + ' pubkey(s); registry remains the auth floor');
         }
     }
 
@@ -307,7 +307,7 @@ class XChainHub {
         // Wire the operator-supplied signer (HUB_SIGNER_MODULE) into the
         // attestation publish pipeline, mirroring startOracle(). Without this
         // a validator with only HUB_SIGNER_MODULE configured finalizes ATTEST
-        // responses but never broadcasts them — the queue grows forever.
+        // responses but never broadcasts them; the queue grows forever.
         let attestationSignerHooks = loadSignerHooks();
         if(attestationSignerHooks){
             applySignerHooks(this.attestationPublisher, attestationSignerHooks);
@@ -332,7 +332,7 @@ class XChainHub {
             // A passed proposal that changes a capability's MIN_STAKE updates the
             // in-memory capConfig and re-evaluates this node's own qualification, so
             // long-running nodes converge on the new threshold with freshly-started
-            // peers — keeping the qualified validator set deterministic across the
+            // peers, keeping the qualified validator set deterministic across the
             // federation without a hub restart. No-op for non-capability params.
             this.governance.on('proposal:finalized', (ev) => {
                 this._applyCapabilityGovernanceChange(ev).catch(e =>
@@ -351,7 +351,7 @@ class XChainHub {
         console.log('Attestation framework started (providers: ' + this.providerRegistry.listProviderIds().join(', ') + ')');
 
         // Full-node challenge round (verified-validator tier). Shares the same
-        // operator signer wiring as the attestation/oracle publishers — without a
+        // operator signer wiring as the attestation/oracle publishers; without a
         // broadcast hook (or encoder + wallet-sign) the elected leader assembles
         // verdicts but can't post them, so the engine stays observe-only.
         // The slash detector is otherwise created by startOracle(); a hub that runs
@@ -392,27 +392,27 @@ class XChainHub {
 
         await this.crossChain.start();
 
-        // Cross-chain DEX engine — matches cross-chain ORDER/SWAP offers across chains
+        // Cross-chain DEX engine: matches cross-chain ORDER/SWAP offers across chains
         // and drives their settlement via the validator-broadcast XSETTLE rail. Only
         // active when at least one chain's indexer URL is configured (XDEX_*/per-coin
         // INDEXER_URL); otherwise it idles harmlessly.
         this.crossChainDex = new CrossChainDexEngine(this);
         await this.crossChainDex.start();
 
-        // Cross-chain contract call relay (XCALL) — confirmation-gates contract-
+        // Cross-chain contract call relay (XCALL): confirmation-gates contract-
         // emitted cross-chain call requests, PBFTs the dispatch + result rows, and
         // mirrors them to indexers (zero per-call chain writes; same transport as
         // cross_chain_matches). Idles harmlessly without indexer URLs.
         this.crossChainCalls = new CrossChainCallEngine(this);
         await this.crossChainCalls.start();
 
-        // State checkpoints — quorum-signed per-chain ledger/actions/contract hash
+        // State checkpoints: quorum-signed per-chain ledger/actions/contract hash
         // commitments, written off-chain to state_checkpoints and streamed over the
         // hub-DB mirror so explorers/wallets can verify indexer state.
         this.stateCheckpoints = new StateCheckpointEngine(this);
         await this.stateCheckpoints.start();
 
-        // ANCHOR publisher — commits the latest checkpoints (v0) and the
+        // ANCHOR publisher: commits the latest checkpoints (v0) and the
         // cross-chain match archive (v1/v2) on DOGE, making all federation state
         // recoverable from chain parse alone. A clean no-op when DOGE publishing
         // isn't configured (mirrors the oracle/anchor publishers).
@@ -509,7 +509,7 @@ class XChainHub {
         return await this.swapTracker.getSwaps(status, limit);
     }
 
-    // Update config — routes through consensus if active, otherwise writes directly
+    // Update config: routes through consensus if active, otherwise writes directly
     async addParametersFromJson(json){
         if(this.consensus){
             await this.consensus.propose(json);
@@ -538,14 +538,14 @@ class XChainHub {
                     let moduleLevel = networkLevel[nextModule];
                     if (!moduleLevel || typeof moduleLevel !== 'object') continue;
 
-                    // Service-location params (original 8-key allowlist — preserved unchanged)
+                    // Service-location params (original 8-key allowlist, preserved unchanged)
                     for(let nextParam of PARAMETER_LIST){
                         let nextValue = moduleLevel[nextParam];
                         if(nextValue === null || nextValue === undefined) continue;
 
                         // Enforce string type and length
                         if (typeof nextValue !== 'string') {
-                            console.warn('XChainHub.applyConfig: non-string value for ' + nextParam + ' — coercing');
+                            console.warn('XChainHub.applyConfig: non-string value for ' + nextParam + ': coercing');
                             nextValue = String(nextValue);
                         }
                         if (nextValue.length > 1024) {
@@ -567,7 +567,7 @@ class XChainHub {
                         if(nextValue === null || nextValue === undefined) continue;
 
                         if (typeof nextValue !== 'string') {
-                            console.warn('XChainHub.applyConfig: non-string value for ' + nextParam + ' — coercing');
+                            console.warn('XChainHub.applyConfig: non-string value for ' + nextParam + ': coercing');
                             nextValue = String(nextValue);
                         }
                         if (nextValue.length > 1024) {
@@ -583,7 +583,7 @@ class XChainHub {
                         });
                     }
 
-                    // JSON blob params (GAS_SCHEDULE, STAKING) — serialized to a JSON string
+                    // JSON blob params (GAS_SCHEDULE, STAKING), serialized to a JSON string
                     for(let nextParam of JSON_BLOB_PARAMS){
                         let nextValue = moduleLevel[nextParam];
                         if(nextValue === null || nextValue === undefined) continue;
@@ -643,7 +643,7 @@ class XChainHub {
         // so registering a new key for an existing addr replaces the old one
         // (the rotation path). Without this, _loadValidatorPubkeys' Map<addr,
         // pubkey> resolves a two-active-rows-per-addr collision non-
-        // deterministically by signing_pubkey sort order — the F8-drill bug.
+        // deterministically by signing_pubkey sort order (the F8-drill bug).
         await this.db.doQuery(
             "UPDATE validators SET status = 'removed', updated_at = NOW() " +
             "WHERE addr = ? AND signing_pubkey <> ? AND status = 'active'",
@@ -658,7 +658,7 @@ class XChainHub {
         );
 
         // Reload pubkey registry and propagate the new set to EVERY running
-        // consensus engine — a validator registered at runtime must enter
+        // consensus engine; a validator registered at runtime must enter
         // oracle leader rotation etc., not just config-PBFT. Previously only
         // this.consensus was updated; the resulting per-hub divergent leader
         // views made a hub silently miss every round whose expected leader
@@ -893,7 +893,7 @@ class XChainHub {
     // Calculate a fee quote: gas cost → XCHAIN → native coin
     // action: string (e.g., 'ISSUE'), chain: string (e.g., 'BTC'), params: object
     async getFeeQuote(action, chain) {
-        // Gas schedule — mirrors the canonical per-chain fee schedule. BTC
+        // Gas schedule: mirrors the canonical per-chain fee schedule. BTC
         // carries the full set; the VM_ATTEST_REQUEST entry is only metered on
         // chains where the attestation framework is active. Every other entry
         // shares identical gas values across chains.
@@ -927,7 +927,7 @@ class XChainHub {
                 let parsed = parseFloat(chainCfg.GAS_PRICE);
                 if (parsed > 0) gasPrice = parsed;
             }
-        } catch (_) { /* config store unavailable — keep protocol default */ }
+        } catch (_) { /* config store unavailable; keep protocol default */ }
 
         if (!Object.prototype.hasOwnProperty.call(gasSchedule, action)) return { error: 'unknown action: ' + action };
         let gasCost = gasSchedule[action];
@@ -939,11 +939,11 @@ class XChainHub {
         let coinPrice      = await this.getPrice(chain + '/USD');
 
         if (!xchainPriceRow || !xchainPriceRow.price) {
-            throw new Error('XCHAIN/USD oracle price unavailable — cannot compute fee quote');
+            throw new Error('XCHAIN/USD oracle price unavailable; cannot compute fee quote');
         }
         let xchainUsd = parseFloat(xchainPriceRow.price);
         if (xchainUsd <= 0) {
-            throw new Error('XCHAIN/USD oracle price is zero or negative — cannot compute fee quote');
+            throw new Error('XCHAIN/USD oracle price is zero or negative; cannot compute fee quote');
         }
 
         let result = {
@@ -980,7 +980,7 @@ class XChainHub {
      * a config file for hot-reload, and wires peer-capability gossip
      * into the local registry.
      *
-     * Safe to call without P2P or without an identity — those subsystems
+     * Safe to call without P2P or without an identity; those subsystems
      * just no-op accordingly.
      *
      * Spec: claude/reports/specs/2026-05-24_capability-staking-model.md
@@ -1060,7 +1060,7 @@ class XChainHub {
                         if(this._capabilityConfigDebounce) clearTimeout(this._capabilityConfigDebounce);
                         this._capabilityConfigDebounce = setTimeout(() => {
                             // Re-read the file contents into p2pConfig + the live
-                            // registry so an edit actually changes thresholds/config —
+                            // registry so an edit actually changes thresholds/config;
                             // previously the watcher only re-ran self-tests against the
                             // stale in-memory config, so file edits had no effect.
                             try { this._loadCapabilityConfigFile(configFilePath); }
@@ -1098,7 +1098,7 @@ class XChainHub {
             }
         }
 
-        console.log('Capability registry initialized' + (this.identity ? ' (identity: ' + this.identity.getPubkeyHex().substring(0,16) + '...)' : ' (no identity — peer-receive only)'));
+        console.log('Capability registry initialized' + (this.identity ? ' (identity: ' + this.identity.getPubkeyHex().substring(0,16) + '...)' : ' (no identity; peer-receive only)'));
 
         // Surface the genesis MIN_STAKE per capability so an operator can verify it matches
         // the indexer's frozen configs/<COIN>.js constants. Governance MIN_STAKE changes are
@@ -1114,7 +1114,7 @@ class XChainHub {
     }
 
     // Query the BTC indexer for own pubkey's current active stake amount + latest
-    // block index, then feed both into refreshOwnQualification. Best-effort —
+    // block index, then feed both into refreshOwnQualification. Best-effort:
     // network/indexer failures are logged but do not change state.
     async _pollOwnStake(pubkey){
         let url = await this._resolveBtcIndexerUrl();
@@ -1125,7 +1125,23 @@ class XChainHub {
             method:  'getownstake',
             params:  { pubkey: pubkey }
         };
-        let res = await axios.post(url, body, { headers: this._btcIndexerHeaders(), timeout: 5000 });
+        let res;
+        try {
+            res = await axios.post(url, body, { headers: this._btcIndexerHeaders(), timeout: 5000 });
+        } catch(err) {
+            let status = err && err.response && err.response.status;
+            if(status === 401 || status === 403){
+                // Auth failure is distinct from the indexer being down: the operator
+                // has a key mismatch between the indexer and this hub. Log clearly so
+                // they can identify the misconfiguration instead of seeing a generic
+                // "unreachable" message and chasing a network issue.
+                console.error('_pollOwnStake: HTTP ' + status + ' from BTC indexer at ' + url +
+                    ': check that BTC_INDEXER_API_KEY on this hub matches INDEXER_API_KEY on the indexer');
+            } else {
+                console.error('Stake poll failed:', err && err.message ? err.message : err);
+            }
+            return;
+        }
         let result = res && res.data && res.data.result;
         if(!result || result.error){
             // Indexer either not ready or returned a structured error. Don't change state.
@@ -1135,11 +1151,11 @@ class XChainHub {
     }
 
     // Resolve the latest BTC block index. Priority:
-    //   1. hub.db.getChainTip('BTC', <network>) — populated by indexer
+    //   1. hub.db.getChainTip('BTC', <network>): populated by indexer
     //      pushChainTip when the indexer is configured with HUB_API_URL.
     //      Network is the same one _resolveBtcIndexerUrl picks (so we
     //      consult the matching tip).
-    //   2. Direct getlatestblock JSON-RPC call to the BTC indexer — covers
+    //   2. Direct getlatestblock JSON-RPC call to the BTC indexer; covers
     //      stacks where the chain-tip-push isn't wired (e.g. local regtest
     //      development) so block-boundary snapshotting Just Works.
     // Returns null when both paths fail.
@@ -1201,7 +1217,7 @@ class XChainHub {
     // Build request headers for BTC indexer JSON-RPC calls. Attaches the
     // x-api-key header when BTC_INDEXER_API_KEY is configured so federation
     // read/write calls authenticate against the indexer's API-key gate. The
-    // same env var RewardTracker uses for reward pushes — one shared key for
+    // same env var RewardTracker uses for reward pushes; one shared key for
     // all hub→indexer traffic.
     _btcIndexerHeaders(){
         let headers = { 'Content-Type': 'application/json' };
@@ -1266,7 +1282,7 @@ class XChainHub {
                 if(!this._warnedMissingMinStake) this._warnedMissingMinStake = new Set();
                 if(!this._warnedMissingMinStake.has(cap)){
                     console.warn('Capability "' + cap + '": no MIN_STAKE configured ' +
-                        '(set CAPABILITIES.' + cap + '.MIN_STAKE in HUB_CAPABILITY_CONFIG) — ' +
+                        '(set CAPABILITIES.' + cap + '.MIN_STAKE in HUB_CAPABILITY_CONFIG); ' +
                         'treating as NOT qualified until a threshold is provided.');
                     this._warnedMissingMinStake.add(cap);
                 }
@@ -1282,15 +1298,15 @@ class XChainHub {
     // and re-evaluate this node's own qualification against the new threshold.
     // Recognizes parameters named CAPABILITY_<CAP>_MIN_STAKE (e.g.
     // CAPABILITY_PRICE_MIN_STAKE, CAPABILITY_CROSS_CHAIN_MIN_STAKE). Any other
-    // parameter is ignored here — it's owned by a different subsystem.
+    // parameter is ignored here; it's owned by a different subsystem.
     async _applyCapabilityGovernanceChange(ev){
         if(!ev || !ev.parameter || !this.capabilityRegistry) return;
         let parsed = this._parseCapabilityParameter(ev.parameter);
         if(!parsed) return;
         // Block-anchored apply (#3703): append the new threshold to the capability's history keyed
         // by the proposer-declared activation_block rather than overwriting a live scalar. The
-        // change does not take effect until the chain reaches activation_block — getMinStake(cap, N)
-        // resolves the value effective at N — so all hubs agree on the threshold for every block
+        // change does not take effect until the chain reaches activation_block; getMinStake(cap, N)
+        // resolves the value effective at N, so all hubs agree on the threshold for every block
         // even though they finalize at different wall-clock moments. A finalized MIN_STAKE proposal
         // with no activation_block (e.g. a legacy row) is ignored here rather than applied unanchored.
         if(parsed.parameterKey === 'MIN_STAKE'){
@@ -1307,7 +1323,7 @@ class XChainHub {
             }
             if(ev.activationBlock === undefined || ev.activationBlock === null || !Number.isInteger(Number(ev.activationBlock))){
                 console.warn('Governance MIN_STAKE change for ' + parsed.capability +
-                    ' has no activation_block — not applying (would be unanchored, risking cross-hub divergence)');
+                    ' has no activation_block; not applying (would be unanchored, risking cross-hub divergence)');
                 return;
             }
             this.capabilityRegistry.applyMinStakeActivation(parsed.capability, Number(ev.activationBlock), String(ev.newValue));
@@ -1405,7 +1421,7 @@ class XChainHub {
         let senderPubkey = this.peerManager && this.peerManager.validatorPubkeys
             ? this.peerManager.validatorPubkeys.get(envelope.sender) : null;
         if(senderPubkey && String(data.pubkey).toLowerCase() !== String(senderPubkey).toLowerCase()){
-            console.warn('Capability message from ' + envelope.sender + ' claims pubkey ' + data.pubkey + ' but sender is registered as ' + senderPubkey + ' — dropping');
+            console.warn('Capability message from ' + envelope.sender + ' claims pubkey ' + data.pubkey + ' but sender is registered as ' + senderPubkey + '; dropping');
             return;
         }
         if(envelope.type === 'CAPABILITY_SELF_TEST'){
@@ -1414,7 +1430,7 @@ class XChainHub {
             // Peer claims activation. The self-test is a local-readiness claim and only
             // matters alongside qualification, so we accept it as-is. The qualification
             // claim is stake-backed, so verify it against the indexer's authoritative
-            // stake snapshot at the claimed block before trusting it — a peer must not be
+            // stake snapshot at the claimed block before trusting it; a peer must not be
             // able to advertise a capability it isn't actually staked for. If the indexer
             // can't be consulted (no block in the message, or indexer unreachable) we fall
             // back to accepting the claim to preserve liveness; slashing-for-failure stays
@@ -1431,7 +1447,7 @@ class XChainHub {
                         data.block_at + ' (claimed qualification it is not staked for).');
                     qualified = false;
                 }
-            } catch(e){ /* indexer hiccup — fall back to accepting (liveness) */ }
+            } catch(e){ /* indexer hiccup; fall back to accepting (liveness) */ }
             await this.capabilityRegistry.setQualification(data.pubkey, data.capability, qualified, data.block_at || null);
             await this.capabilityRegistry.setEnabled(data.pubkey, data.capability, true);
         } else if(envelope.type === 'CAPABILITY_DEACTIVATED'){

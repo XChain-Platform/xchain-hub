@@ -62,12 +62,12 @@ class CapabilityRegistry {
         this.capConfig  = (hub.p2pConfig && hub.p2pConfig.CAPABILITIES) ? hub.p2pConfig.CAPABILITIES : {};
         // Block-anchored MIN_STAKE history per capability: an array of
         // { activation_block, value } ordered ascending by activation_block. Seeded from
-        // capConfig as a genesis entry (activation_block 0 — the operator-configured threshold
+        // capConfig as a genesis entry (activation_block 0, the operator-configured threshold
         // effective from block 0), then APPENDED (never overwritten) when a governance MIN_STAKE
         // change finalizes, each entry carrying the proposer-declared activation_block. Resolving
         // the threshold for a given block (getMinStake(cap, blockIndex)) is then a deterministic
-        // function of block height — identical on every hub regardless of when each wall-clock
-        // applied the change — which is what makes CapabilitySnapshot's qualifying validator set
+        // function of block height (identical on every hub regardless of when each wall-clock
+        // applied the change), which is what makes CapabilitySnapshot's qualifying validator set
         // (and therefore the quorum N it locks) federation-deterministic. See #3703.
         this.minStakeHistory = {};
         this._seedGenesisHistory();
@@ -124,14 +124,14 @@ class CapabilityRegistry {
     }
 
     // Min stake required to qualify for a capability (as decimal string), resolved at a block.
-    //   getMinStake(cap, blockIndex) → the threshold effective AT blockIndex = the value of the
+    //   getMinStake(cap, blockIndex) -> the threshold effective AT blockIndex = the value of the
     //     history entry with the greatest activation_block <= blockIndex. This is the
     //     CONSENSUS path: every hub resolves the same value for the same block, so the
     //     qualifying validator set (and quorum N) is federation-deterministic (#3703).
-    //   getMinStake(cap)           → the latest configured threshold (no block context). Used by
+    //   getMinStake(cap)           -> the latest configured threshold (no block context). Used by
     //     non-consensus callers (operator status display, self-test/qualification gossip).
     // Returns null when the capability has no configured threshold (preserve fail-closed
-    // semantics in refreshOwnQualification — never default to '0').
+    // semantics in refreshOwnQualification; never default to '0').
     getMinStake(capability, blockIndex) {
         let hist = this.minStakeHistory[capability];
         if (!hist || hist.length === 0) return null;
@@ -139,7 +139,7 @@ class CapabilityRegistry {
         let resolved = null;
         for (let e of hist) {
             if (e.activation_block <= blockIndex) resolved = e.value;
-            else break; // ascending — no later entry can be in effect at blockIndex
+            else break; // ascending; no later entry can be in effect at blockIndex
         }
         // blockIndex before the genesis entry (activation_block 0) cannot happen for a real
         // block, but fall back to genesis rather than null to stay fail-safe.
@@ -157,12 +157,12 @@ class CapabilityRegistry {
 
     // Append a block-anchored governance MIN_STAKE change to the history (idempotent by
     // activation_block; kept sorted ascending). Unlike an in-place scalar overwrite, the
-    // change does NOT take effect until the chain reaches activation_block —
-    // getMinStake(cap, N) resolves the value effective at N — so two hubs that append at
-    // different wall-clock moments still agree on the threshold for every block. The
-    // proposer-declared activation_block is the federation-wide deterministic anchor (it
-    // rides in the agreed, authenticated governance proposal). Re-evaluating this node's own
-    // qualification is the caller's responsibility (XChainHub.refreshOwnQualification).
+    // change does NOT take effect until the chain reaches activation_block (getMinStake(cap, N)
+    // resolves the value effective at N), so two hubs that append at different wall-clock
+    // moments still agree on the threshold for every block. The proposer-declared
+    // activation_block is the federation-wide deterministic anchor (it rides in the agreed,
+    // authenticated governance proposal). Re-evaluating this node's own qualification is the
+    // caller's responsibility (XChainHub.refreshOwnQualification).
     applyMinStakeActivation(capability, activationBlock, newValue) {
         if (KNOWN_CAPABILITIES.indexOf(capability) === -1)
             throw new Error('unknown capability: ' + capability);
@@ -189,10 +189,28 @@ class CapabilityRegistry {
                    FROM governance_proposals
                   WHERE status = 'passed' AND activation_block IS NOT NULL
                   ORDER BY activation_block ASC, id ASC`, []);
-        } catch (e) { return; }
+        } catch (e) {
+            // A transient read failure here silently falls back to genesis-only
+            // thresholds. Log the error so the operator can see it rather than
+            // having the hub start with an incomplete threshold history.
+            console.warn('CapabilityRegistry: loadGovernanceHistory DB read failed, using genesis-only thresholds: ' + (e && e.message));
+            return;
+        }
         for (let r of rows) {
             let parsed = parseCapabilityMinStakeParam(r.parameter);
             if (!parsed) continue;
+            // Pre-launch pin: MIN_STAKE governance is disabled because the indexer
+            // acceptance path uses a frozen constant (configs/<COIN>.js MIN_STAKE)
+            // with no per-block override. Applying a passed row here would move the
+            // hub threshold while the indexer stays frozen, forking quorum N. Skip
+            // and warn so any stale row in the DB is visible. When the indexer
+            // flag-day ships and this pin flips to false, the replay resumes.
+            if (MIN_STAKE_GOVERNANCE_DISABLED) {
+                console.warn('CapabilityRegistry: loadGovernanceHistory skipping passed MIN_STAKE row for ' +
+                             parsed.capability + ' (activation_block ' + r.activation_block +
+                             ') because MIN_STAKE_GOVERNANCE_DISABLED is set');
+                continue;
+            }
             this.applyMinStakeActivation(parsed.capability, r.activation_block, r.proposed_value);
         }
     }

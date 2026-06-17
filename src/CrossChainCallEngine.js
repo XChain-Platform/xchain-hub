@@ -16,36 +16,36 @@
  *
  * Relays contract-emitted cross-chain calls (XCALL v0 on the source chain)
  * to the target chain and the execution outcome back, with zero per-call
- * on-chain writes — both legs ride the hub-DB mirror as quorum-signed
+ * on-chain writes: both legs ride the hub-DB mirror as quorum-signed
  * `cross_chain_calls` rows, the same transport that carries
  * cross_chain_matches (see CrossChainDexEngine).
  *
  * Flow:
- *   1. Discover  — poll each chain's `getpendingcrosschaincalls` RPC for
- *                  XCALL v0 requests that have reached that chain's
- *                  confirmation depth (BTC 6 / LTC 12 / DOGE 60 — the same
- *                  thresholds as cross-chain swap attestation; a request
- *                  below depth is reorg-able and must never be relayed,
- *                  because the target-chain execution CANNOT be retracted).
- *   2. Dispatch  — PBFT round over the dispatch row (each peer re-verifies
- *                  the request against its OWN source-chain indexer before
- *                  signing); 2f+1 signatures → write + mirror the
- *                  phase='dispatch' row. Target-chain indexers verify the
- *                  signatures and inject the execution deterministically.
- *   3. Result    — poll the target chain's `getcrosschaincallresult` for
- *                  the injected execution's outcome at confirmation depth;
- *                  PBFT round over the result row (peers re-verify against
- *                  their own target-chain indexer); write + mirror the
- *                  phase='result' row. Source-chain indexers verify and
- *                  inject the requester's callback.
- *   4. Retract   — on a source-chain reorg below a request, mark its rows
- *                  retracted-by-deletion (broadcast) so indexers that have
- *                  not yet injected skip them. Past confirmation depth this
- *                  should never happen; it is the documented residual risk.
+ *   1. Discover: poll each chain's `getpendingcrosschaincalls` RPC for
+ *                XCALL v0 requests that have reached that chain's
+ *                confirmation depth (BTC 6 / LTC 12 / DOGE 60, the same
+ *                thresholds as cross-chain swap attestation; a request
+ *                below depth is reorg-able and must never be relayed,
+ *                because the target-chain execution CANNOT be retracted).
+ *   2. Dispatch: PBFT round over the dispatch row (each peer re-verifies
+ *                the request against its OWN source-chain indexer before
+ *                signing); 2f+1 signatures -> write + mirror the
+ *                phase='dispatch' row. Target-chain indexers verify the
+ *                signatures and inject the execution deterministically.
+ *   3. Result:   poll the target chain's `getcrosschaincallresult` for
+ *                the injected execution's outcome at confirmation depth;
+ *                PBFT round over the result row (peers re-verify against
+ *                their own target-chain indexer); write + mirror the
+ *                phase='result' row. Source-chain indexers verify and
+ *                inject the requester's callback.
+ *   4. Retract:  on a source-chain reorg below a request, mark its rows
+ *                retracted-by-deletion (broadcast) so indexers that have
+ *                not yet injected skip them. Past confirmation depth this
+ *                should never happen; it is the documented residual risk.
  *
  * Trust boundary: indexers verify the 2f+1 signatures against the mirrored
- * cross_chain capability snapshot — the mirror is a transport, not an
- * authority. Deadline expiry on the source chain bounds federation
+ * cross_chain capability snapshot (the mirror is a transport, not an
+ * authority). Deadline expiry on the source chain bounds federation
  * censorship: a request that never gets a result fires a deterministic
  * `expired` callback derived from block height alone.
  *
@@ -68,8 +68,8 @@ const DEFAULT_POLL_MS = 15000;
 
 // Per-chain confirmation depth a source request (and a target execution) must
 // reach before the federation will sign its relay row. Shares the cross-chain
-// swap thresholds (XCHAIN_CONFIRMATIONS_<COIN> env / p2pConfig overridable) —
-// see CrossChainEngine's DEFAULT_CONFIRMATIONS note for the rationale.
+// swap thresholds (XCHAIN_CONFIRMATIONS_<COIN> env / p2pConfig overridable).
+// See CrossChainEngine's DEFAULT_CONFIRMATIONS note for the rationale.
 const DEFAULT_CONFIRMATIONS = { BTC: 6, LTC: 12, DOGE: 60 };
 
 // Result statuses the federation will relay. Anything else from an indexer is
@@ -82,15 +82,15 @@ const RESULT_STATUSES = ['ok', 'reverted', 'out_of_gas', 'no_contract', 'not_cal
 // propagated everywhere BEFORE any chain reaches the block it applies at.
 // Without a margin, effective_time = the finalization instant, so a chain whose
 // tip already sits at that second can reach the eligible block before the row
-// has landed — injecting the execution/callback a block (or more) late and
+// has landed, injecting the execution/callback a block (or more) late and
 // permanently shifting its action-index counter relative to a node that sees
-// the row on time (EMITTER_ACTION_INDEX is in the call_id preimage → ledger
+// the row on time (EMITTER_ACTION_INDEX is in the call_id preimage -> ledger
 // fork). Tunable via XCALL_RELAY_MARGIN_BLOCKS (env / p2pConfig).
 const DEFAULT_RELAY_MARGIN_BLOCKS = 4;
 
 // Nominal block interval (seconds) per chain, used ONLY to size the relay
 // margin in wall-clock seconds. Not consensus-critical: the margin need only
-// comfortably exceed realistic hub→indexer row-arrival lag, so an approximate
+// comfortably exceed realistic hub->indexer row-arrival lag, so an approximate
 // interval is fine.
 const NOMINAL_BLOCK_INTERVAL_S = { BTC: 600, LTC: 150, DOGE: 60 };
 
@@ -114,7 +114,7 @@ class CrossChainCallEngine extends EventEmitter {
         let cfg = hub.p2pConfig || {};
         this.pollMs = parseInt(process.env.XCALL_POLL_MS || cfg.XCALL_POLL_MS || DEFAULT_POLL_MS);
 
-        // Confirmation thresholds (env → p2pConfig → default), shared with the
+        // Confirmation thresholds (env -> p2pConfig -> default), shared with the
         // swap-attestation engine so operators tune ONE depth per chain.
         this.confirmations = {};
         for(let coin of ALLOWED_CHAINS){
@@ -122,7 +122,7 @@ class CrossChainCallEngine extends EventEmitter {
             this.confirmations[coin] = parseInt(process.env[key], 10) || parseInt(cfg[key], 10) || DEFAULT_CONFIRMATIONS[coin];
         }
 
-        // Relay margin in blocks (env → p2pConfig → default). Stamped onto every
+        // Relay margin in blocks (env -> p2pConfig -> default). Stamped onto every
         // relayed row's effective_time, sized by the gating chain's nominal block
         // interval. See DEFAULT_RELAY_MARGIN_BLOCKS.
         let marginBlocks = parseInt(process.env.XCALL_RELAY_MARGIN_BLOCKS, 10);
@@ -130,7 +130,7 @@ class CrossChainCallEngine extends EventEmitter {
         if(!Number.isFinite(marginBlocks) || marginBlocks < 0) marginBlocks = DEFAULT_RELAY_MARGIN_BLOCKS;
         this.relayMarginBlocks = marginBlocks;
 
-        // Regtest seams — deliberately the SAME env names as the DEX engine so a
+        // Regtest seams: deliberately the SAME env names as the DEX engine so a
         // no-BTC regtest stack configures the anchor + seeded validator once.
         this._snapshotBlockOverride = parseInt(process.env.XDEX_SNAPSHOT_BLOCK || cfg.XDEX_SNAPSHOT_BLOCK);
         this._seedLocalValidator    = (process.env.XDEX_SEED_LOCAL_VALIDATOR === '1' ||
@@ -169,6 +169,10 @@ class CrossChainCallEngine extends EventEmitter {
 
         this._pollTimer = null;
         this._polling   = false;
+
+        // Process-lifetime counter for result-relay attempt failures (one per
+        // per-call catch in _pollTargetResults). Surfaced by getcrosschaincallstats.
+        this._resultAttemptFailures = 0;
     }
 
     async start(){
@@ -184,6 +188,31 @@ class CrossChainCallEngine extends EventEmitter {
     async stop(){
         if(this._pollTimer){ clearInterval(this._pollTimer); this._pollTimer = null; }
         await this.consensus.stop();
+    }
+
+    // Return operator-visible relay backlog depth and lifetime failure counter.
+    // Mirrors getattestationstats: pending_relay_count is the number of dispatch
+    // rows per target chain that do not yet have a result row; result_attempt_failures
+    // is a process-lifetime count of per-call errors in _pollTargetResults.
+    async getStats(){
+        let rows = [];
+        try {
+            rows = await this.db.doQuery(
+                "SELECT d.target_chain, COUNT(*) AS pending_relay_count " +
+                "FROM cross_chain_calls d " +
+                "LEFT JOIN cross_chain_calls r ON r.call_id = d.call_id AND r.phase = 'result' " +
+                "WHERE d.phase = 'dispatch' AND d.status = 'finalized' AND r.id IS NULL " +
+                "GROUP BY d.target_chain");
+        } catch(e){
+            console.warn('CrossChainCall: getStats query failed: ' + (e && e.message));
+        }
+        let pending_by_chain = {};
+        for(let r of rows) pending_by_chain[r.target_chain] = Number(r.pending_relay_count);
+        return {
+            pending_relay_count:      rows.reduce((s, r) => s + Number(r.pending_relay_count), 0),
+            pending_by_chain:         pending_by_chain,
+            result_attempt_failures:  this._resultAttemptFailures
+        };
     }
 
     // ─── Poll: discover confirmed requests + completed executions ──────────
@@ -224,12 +253,12 @@ class CrossChainCallEngine extends EventEmitter {
         if(!/^[0-9a-f]{64}$/.test(callId)) return;
         if(!ALLOWED_CHAINS.includes(call.target_chain) || call.target_chain === coin) return;
 
-        // Confirmation gate — the one defense against relaying a reorg-able
+        // Confirmation gate: the one defense against relaying a reorg-able
         // request (the target-side execution cannot be retracted).
         let depth = latestBlock - Number(call.block_index) + 1;
         if(!Number.isFinite(depth) || depth < this.confirmations[coin]) return;
 
-        // Deadline gate — the source chain will locally expire this request; a
+        // Deadline gate: the source chain will locally expire this request; a
         // late dispatch would be wasted work (the result callback loses the
         // exactly-once interlock race deterministically, but don't bother).
         if(call.deadline_block != null && Number(call.deadline_block) <= latestBlock) return;
@@ -281,8 +310,11 @@ class CrossChainCallEngine extends EventEmitter {
             "ORDER BY d.id ASC LIMIT 100", [coin]);
         for(let d of pending){
             try { await this._maybeRelayResult(coin, d); }
-            catch(e){ console.warn('CrossChainCall: result attempt failed for ' +
-                                   String(d.call_id).substring(0, 16) + '...: ' + (e && e.message)); }
+            catch(e){
+                this._resultAttemptFailures++;
+                console.warn('CrossChainCall: result attempt failed for ' +
+                             String(d.call_id).substring(0, 16) + '...: ' + (e && e.message));
+            }
         }
     }
 
@@ -345,8 +377,8 @@ class CrossChainCallEngine extends EventEmitter {
     // fields (params, return payload) enter as sha256 so the canonical stays
     // fixed-arity and '|'-safe.
     // `view` = the live pending.view (consensus) / persisted finalizing_view (twins). At/above
-    // the EQUIV flag-day the content is wrapped (TAG=XCALL, ROUND_ID = the sha256 round id —
-    // which folds in `phase`, so dispatch and result get DISTINCT keys, VIEW=view). The view
+    // the EQUIV flag-day the content is wrapped (TAG=XCALL, ROUND_ID = the sha256 round id,
+    // which folds in `phase` so dispatch and result get DISTINCT keys, VIEW=view). The view
     // lives in the header only (not a content field).
     _canonicalMatch(r, view){
         let raw;
@@ -463,10 +495,16 @@ class CrossChainCallEngine extends EventEmitter {
                     'gas_limit','cross_hops','effective_time','result_status','return_payload_b64',
                     'finalizing_view','validator_signatures'];
         let vals = cols.map(c => row[c]);
-        // INSERT IGNORE — (call_id, phase) is unique, so a re-finalize (another
-        // hub / restart racing the poll) is a harmless no-op.
+        // A retracted row for the same (call_id, phase) can exist after a reorg.
+        // INSERT IGNORE would silently discard the re-finalized content, leaving
+        // the call permanently stranded in 'retracted'. Use ON DUPLICATE KEY UPDATE
+        // to overwrite a retracted row with the current quorum's content so the
+        // re-mined call can proceed normally.
+        let updateCols = cols.filter(c => c !== 'call_id' && c !== 'phase');
         await this.db.doQuery(
-            'INSERT IGNORE INTO cross_chain_calls (' + cols.join(', ') + ') VALUES (' + cols.map(() => '?').join(', ') + ')',
+            'INSERT INTO cross_chain_calls (' + cols.join(', ') + ') VALUES (' + cols.map(() => '?').join(', ') + ')' +
+            ' ON DUPLICATE KEY UPDATE ' + updateCols.map(c => c + ' = VALUES(' + c + ')').join(', ') +
+            ", status = 'finalized'",
             vals);
         if(this.broadcaster){
             let read = await this.db.doQuery(
@@ -476,13 +514,13 @@ class CrossChainCallEngine extends EventEmitter {
         }
         this._inflight.delete(row.round_id);
         console.log('CrossChainCall: finalized ' + row.phase + ' ' + String(row.call_id).substring(0, 16) + '... ' +
-                    row.source_chain + ':' + row.source_action_index + ' → ' + row.target_chain + ':' + row.target_contract_index +
+                    row.source_chain + ':' + row.source_action_index + ' -> ' + row.target_chain + ':' + row.target_contract_index +
                     (row.phase === 'result' ? (' [' + row.result_status + ']') : '') +
                     ' (' + (ev.signatures ? ev.signatures.length : 0) + ' sigs)');
         this.emit('call:' + row.phase, { callId: row.call_id });
     }
 
-    // Persist + mirror the qualifying validator set (consensus leader path —
+    // Persist + mirror the qualifying validator set (consensus leader path,
     // same contract as CrossChainDexEngine._persistCapabilitySnapshot).
     async _persistCapabilitySnapshot(capability, block, network){
         let validators = await this._resolveCapabilityValidators(capability, block, network);
@@ -546,7 +584,7 @@ class CrossChainCallEngine extends EventEmitter {
         if(this.broadcaster)
             this.broadcaster.broadcastDeletion({ table: 'cross_chain_calls', source_chain: chain, from_action_index: fromActionIndex });
         console.warn('CrossChainCall: retracted ' + rows.length + ' relay row(s) for ' + chain +
-                     ' reorg below action ' + fromActionIndex + ' — this should not happen past confirmation depth');
+                     ' reorg below action ' + fromActionIndex + ' (should not happen past confirmation depth)');
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────────
@@ -584,10 +622,10 @@ class CrossChainCallEngine extends EventEmitter {
     _nowSeconds(){ return Math.floor(Date.now() / 1000); }
 
     // effective_time to stamp on a relayed row: now + a forward margin sized to
-    // the chain that GATES the row (dispatch → the TARGET chain injects the
-    // execution; result → the SOURCE chain delivers the callback). Putting it in
+    // the chain that GATES the row (dispatch -> the TARGET chain injects the
+    // execution; result -> the SOURCE chain delivers the callback). Putting it in
     // the future of every chain's tip guarantees the row is present everywhere
-    // before any chain reaches the block it applies at — so a live node and a
+    // before any chain reaches the block it applies at, so a live node and a
     // replaying node always inject at the same block. Capped under the follower
     // clock-skew bound (RELAY_MARGIN_MAX_S) so a large XCALL_RELAY_MARGIN_BLOCKS
     // can never produce a row a peer would reject.

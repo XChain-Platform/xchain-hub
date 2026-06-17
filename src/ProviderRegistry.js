@@ -95,7 +95,7 @@ class ProviderRegistry {
 
         // Block-anchored provider-config history: providerId -> array of
         // { activation_block, additional_config } ordered ascending by
-        // activation_block. Seeded from the loaded def as a genesis entry
+        // activation_block. Seeded from the static DEFAULTS as a genesis entry
         // (activation_block 0), then APPENDED (never overwritten) when a governance
         // ATTESTATION_PROVIDER change finalizes, each entry carrying the
         // proposer-declared activation_block. Resolving the model identity for a
@@ -122,7 +122,7 @@ class ProviderRegistry {
             this.providers.set(id, def);
         }
 
-        // Hub config — coin/network describe which chain's configs to read
+        // Hub config: coin/network describe which chain's configs to read
         let coin = this.hub.config && this.hub.config.COIN;
         let net  = this.hub.config && this.hub.config.NETWORK;
         if (!coin || !net || !this.db) return;
@@ -137,11 +137,11 @@ class ProviderRegistry {
                     if (!def.provider_id) def.provider_id = providerId;
                     this.providers.set(providerId, def);
                 } catch (e) {
-                    console.warn('ProviderRegistry: bad JSON for ATTESTATION_PROVIDER:' + providerId + ' —', e);
+                    console.warn('ProviderRegistry: bad JSON for ATTESTATION_PROVIDER:' + providerId, e);
                 }
             }
         } catch (e) {
-            console.warn('ProviderRegistry: failed to read configs table —', e);
+            console.warn('ProviderRegistry: failed to read configs table:', e);
         }
     }
 
@@ -153,7 +153,7 @@ class ProviderRegistry {
         for (let [providerId, mod] of this.modules){
             if (typeof mod._setConfig === 'function'){
                 try { mod._setConfig(this.providers.get(providerId)); }
-                catch (e) { console.warn('ProviderRegistry: _setConfig (reload) failed for ' + providerId + ' —', e); }
+                catch (e) { console.warn('ProviderRegistry: _setConfig (reload) failed for ' + providerId, e); }
             }
         }
     }
@@ -170,12 +170,18 @@ class ProviderRegistry {
 
     // ----- Block-anchored provider-config history (consensus model identity) -----
 
-    // (Re)seed the genesis (block-0) additional_config for every loaded provider from
-    // its current def. Called from loadGovernanceHistory before layering governance
-    // changes. Preserves any already-appended future activation entries (only the
-    // activation_block-0 entry is reset), so re-seeding does not wipe finalized history.
+    // (Re)seed the genesis (block-0) additional_config for every known provider from
+    // the static DEFAULTS constant (not the mutable this.providers loaded from configs).
+    // This keeps the genesis entry restart-stable: even if the configs table is updated
+    // between two hub restarts, block-0 always resolves to the original built-in value,
+    // matching how CapabilityRegistry._seedGenesisHistory seeds from p2pConfig.CAPABILITIES
+    // rather than from the mutable minStake table. Governance activation entries
+    // (activation_block > 0) are what carry the real change.
+    // Called from loadGovernanceHistory before layering governance changes. Preserves
+    // any already-appended future activation entries (only the block-0 entry is reset),
+    // so re-seeding does not wipe finalized history.
     _seedProviderConfigGenesis(){
-        for (let [providerId, def] of this.providers){
+        for (let [providerId, def] of Object.entries(DEFAULTS)){
             let ac = (def && def.additional_config) || {};
             let hist = this.providerConfigHistory.get(providerId) || [];
             let g = hist.find(e => e.activation_block === 0);
@@ -224,8 +230,8 @@ class ProviderRegistry {
 
     // Reconstruct block-anchored provider-config history from finalized governance
     // proposals after a restart so a long-running hub and a freshly-started one resolve
-    // identical model identities for every block. Genesis entries (from the loaded def) are
-    // seeded first; this layers passed ATTESTATION_PROVIDER proposals on top, ordered by
+    // identical model identities for every block. Genesis entries (from the static DEFAULTS)
+    // are seeded first; this layers passed ATTESTATION_PROVIDER proposals on top, ordered by
     // activation_block. Idempotent. Best-effort: a hub without governance_proposals just gets
     // the genesis seed. Mirror of CapabilityRegistry.loadGovernanceHistory.
     async loadGovernanceHistory(){
@@ -238,7 +244,14 @@ class ProviderRegistry {
                    FROM governance_proposals
                   WHERE status = 'passed' AND activation_block IS NOT NULL
                   ORDER BY activation_block ASC, id ASC`, []);
-        } catch (e) { return; }
+        } catch (e) {
+            // Distinguish transient read failure from the benign "table absent on a
+            // fresh hub" case: log so a startup-time DB error is visible in the log
+            // and the hub doesn't silently serve pre-governance model config for
+            // post-governance blocks.
+            console.warn('ProviderRegistry: loadGovernanceHistory failed, hub may use genesis-only provider config:', e && e.message);
+            return;
+        }
         for (let r of rows){
             let providerId = parseAttestationProviderParam(r.parameter);
             if (!providerId) continue;
@@ -254,7 +267,7 @@ class ProviderRegistry {
 
     // Lazy-load the provider module (fetch + agree + healthCheck). Returns null
     // if no module exists for the given id (e.g. governance registered a provider
-    // whose code isn't deployed on this hub yet — that's an operator config issue).
+    // whose code isn't deployed on this hub yet; that's an operator config issue).
     //
     // If the module exports a `_setConfig(def)` hook, the loaded def is injected
     // so governance-controlled `additional_config` reaches the module without a
@@ -266,12 +279,12 @@ class ProviderRegistry {
             let mod = require('./providers/' + providerId + '.js');
             if (typeof mod._setConfig === 'function'){
                 try { mod._setConfig(this.providers.get(providerId)); }
-                catch (e) { console.warn('ProviderRegistry: _setConfig failed for ' + providerId + ' —', e); }
+                catch (e) { console.warn('ProviderRegistry: _setConfig failed for ' + providerId, e); }
             }
             this.modules.set(providerId, mod);
             return mod;
         } catch (e) {
-            console.warn('ProviderRegistry: module load failed for ' + providerId + ' —', e);
+            console.warn('ProviderRegistry: module load failed for ' + providerId, e);
             return null;
         }
     }

@@ -7,7 +7,7 @@
  *
  * This file is part of XChain Platform. Licensed under the GNU Affero
  * General Public License v3.0 or later; see LICENSE.md. A commercial
- * license (without AGPL source-disclosure terms) is available —
+ * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
  **********************************************************************
@@ -53,11 +53,11 @@ const HUB_DB_KEEPALIVE_INTERVAL = parseInt(process.env.HUB_DB_KEEPALIVE_INTERVAL
 // write/WS-subscribe gate (single-host / regtest / managed deploys); when
 // configured, those paths fail closed (401) without a valid key. Hard-requiring
 // it at boot crash-loops every xchain-node-managed deployment (ConfigService
-// injects no such var and HubConnector sends no key) — the same over-tightening
-// that hit the indexer (771880c) and encoder (e2bf7c4) pre-launch.
+// injects no such var and HubConnector sends no key; the same over-tightening
+// that hit the indexer (771880c) and encoder (e2bf7c4) pre-launch).
 const HUB_API_KEY        = process.env.HUB_API_KEY || '';
 if(!HUB_API_KEY)
-    console.warn('WARNING: HUB_API_KEY is not set — write methods and WebSocket subscriptions are UNAUTHENTICATED. Set a strong key for any shared or public-facing deployment.');
+    console.warn('WARNING: HUB_API_KEY is not set. Write methods and WebSocket subscriptions are UNAUTHENTICATED. Set a strong key for any shared or public-facing deployment.');
 const HUB_RATE_LIMIT_RPM = parseInt(process.env.HUB_RATE_LIMIT_RPM) || 100;
 const CORS_ORIGIN        = process.env.CORS_ORIGIN || false;
 
@@ -66,7 +66,7 @@ const CORS_ORIGIN        = process.env.CORS_ORIGIN || false;
 // by setting TELEMETRY_ENABLED=false. Rows older than TELEMETRY_RETENTION_DAYS are pruned daily.
 const TELEMETRY_ENABLED        = (process.env.TELEMETRY_ENABLED || 'true').toLowerCase() !== 'false';
 const TELEMETRY_RETENTION_DAYS = parseInt(process.env.TELEMETRY_RETENTION_DAYS) || 90;
-// Secret salt for the one-way IP hash. The connecting IP is NEVER stored — at ingest we
+// Secret salt for the one-way IP hash. The connecting IP is NEVER stored; at ingest we
 // derive a coarse country/region and a keyed HMAC, then discard the IP. Without a salt set,
 // ip_hash is left null (we never store an unsalted hash, which would be trivially reversible).
 const TELEMETRY_IP_SALT        = process.env.TELEMETRY_IP_SALT || '';
@@ -98,6 +98,11 @@ function validateLimit(limit) {
     return null;
 }
 
+// Default oracle round interval (10 min). Declared here (before the p2pConfig
+// object literal that references it) so the const is in scope at evaluation time.
+// OracleRound.js keeps its own copy with a cross-ref comment; both must stay in sync.
+const DEFAULT_ORACLE_ROUND_INTERVAL_MS = 600000;
+
 // Parse optional P2P config (P2P is enabled when P2P_VALIDATOR_ADDR is set)
 const P2P_VALIDATOR_ADDR = process.env.P2P_VALIDATOR_ADDR || '';
 if (P2P_VALIDATOR_ADDR && !process.env.ORACLE_EPOCH_START) {
@@ -105,13 +110,13 @@ if (P2P_VALIDATOR_ADDR && !process.env.ORACLE_EPOCH_START) {
     process.exit(1);
 }
 // HUB_NETWORK names the deployment network (mainnet|testnet|regtest) for the hub's
-// consensus gates — notably STAKE_WEIGHTED_QUORUM, whose activation height is per
+// consensus gates, notably STAKE_WEIGHTED_QUORUM, whose activation height is per
 // network. Consensus-critical, so it is REQUIRED in validator mode and validated
 // (no silent default: a wrong/blank value would mis-gate the quorum rule). Must
 // match the INDEXER_NETWORK of the chains this hub federates.
 const HUB_NETWORK = (process.env.HUB_NETWORK || '').toLowerCase();
 if (P2P_VALIDATOR_ADDR && !['mainnet', 'testnet', 'regtest'].includes(HUB_NETWORK)) {
-    console.error('Missing/invalid required environment variable: HUB_NETWORK (must be one of mainnet|testnet|regtest; names the deployment network for consensus activation gating — must match the indexers this hub federates)');
+    console.error('Missing/invalid required environment variable: HUB_NETWORK (must be one of mainnet|testnet|regtest; names the deployment network for consensus activation gating; must match the indexers this hub federates)');
     process.exit(1);
 }
 const p2pConfig = P2P_VALIDATOR_ADDR ? {
@@ -134,7 +139,7 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     P2P_MSG_DEDUP_TTL:      parseInt(process.env.P2P_MSG_DEDUP_TTL) || 60000,
     P2P_MAX_PAYLOAD:        parseInt(process.env.P2P_MAX_PAYLOAD) || 1048576,
     ORACLE_EPOCH_START:     parseInt(process.env.ORACLE_EPOCH_START),
-    ORACLE_ROUND_INTERVAL:  parseInt(process.env.ORACLE_ROUND_INTERVAL) || 600000,
+    ORACLE_ROUND_INTERVAL:  parseInt(process.env.ORACLE_ROUND_INTERVAL) || DEFAULT_ORACLE_ROUND_INTERVAL_MS,
     ORACLE_SUBMISSION_WINDOW: parseInt(process.env.ORACLE_SUBMISSION_WINDOW) || 180000,
     ORACLE_REWARD_PER_ROUND: process.env.ORACLE_REWARD_PER_ROUND || '10.00000000',
     SLASH_DEVIATION_THRESHOLD: process.env.SLASH_DEVIATION_THRESHOLD || '0.05',
@@ -143,6 +148,10 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     COINMARKETCAP_API_KEY:  process.env.COINMARKETCAP_API_KEY || '',
     PRICE_FETCH_TIMEOUT:    parseInt(process.env.PRICE_FETCH_TIMEOUT) || 10000
 } : null;
+
+// Timeout for DB / oracle-freshness probe Promises inside ping, health, and the
+// oracle-staleness check. A single constant prevents silent per-probe drift.
+const DB_PROBE_TIMEOUT_MS = 2000;
 
 async function startApi(){
     // Start the hub
@@ -189,15 +198,15 @@ async function startApi(){
     const app = express();
 
     // The hub sits behind Apache on the same host (Cloudflare proxy is OFF for
-    // it), so honour X-Forwarded-For to recover the real client IP — but only
+    // it), so honour X-Forwarded-For to recover the real client IP, but only
     // from a trusted proxy. `true` would trust ANY client-supplied XFF, letting
     // callers spoof their IP past the per-IP rate limiter (express-rate-limit's
     // ERR_ERL_PERMISSIVE_TRUST_PROXY warning). The default trusts loopback plus
     // private-range peers: a containerized hub sees the host reverse proxy as
-    // the docker bridge IP (uniquelocal), a native hub sees it as loopback —
+    // the docker bridge IP (uniquelocal), a native hub sees it as loopback;
     // both recover the real client IP. Exposed directly to the internet, a
     // forged XFF is ignored (public socket address) and req.ip is the socket
-    // address. HUB_TRUST_PROXY overrides for other topologies — `false`, a hop
+    // address. HUB_TRUST_PROXY overrides for other topologies: `false`, a hop
     // count (e.g. `1`), or an address/CIDR list per the express docs. For
     // telemetry the IP is only used transiently to derive a coarse
     // country/region + keyed hash and is never stored.
@@ -218,14 +227,15 @@ async function startApi(){
         legacyHeaders: false
     }));
 
-    // API key enforcement for write methods (only when a key is configured —
+    // API key enforcement for write methods (only when a key is configured;
     // see the HUB_API_KEY note above)
     app.use((req, res, next) => {
         if (!HUB_API_KEY) return next();
         let method = req.body && req.body.method;
         if (method && WRITE_METHODS.has(method.toLowerCase())) {
             let provided = req.headers['x-api-key'] || '';
-            if (provided !== HUB_API_KEY) {
+            let a = Buffer.from(provided), b = Buffer.from(HUB_API_KEY);
+            if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
                 return res.status(401).json({
                     jsonrpc: '2.0', id: req.body.id || null,
                     error: { code: -32001, message: 'Unauthorized' }
@@ -238,12 +248,12 @@ async function startApi(){
     // JSON-RPC methods
     const jsonRpcController = {
 
-        // Health check — probes the DB pool so a broken connection is surfaced here
+        // Health check: probes the DB pool so a broken connection is surfaced here
         async ping(params, {res}) {
             try {
                 await Promise.race([
                     hub.db.doQuery('SELECT 1', []),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), DB_PROBE_TIMEOUT_MS))
                 ]);
                 return {status: "success", db: true};
             } catch (err) {
@@ -261,7 +271,7 @@ async function startApi(){
             try {
                 await Promise.race([
                     hub.db.doQuery('SELECT 1', []),
-                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), DB_PROBE_TIMEOUT_MS))
                 ]);
                 dbOk = true;
             } catch (err) {
@@ -272,7 +282,7 @@ async function startApi(){
 
             // Oracle freshness. DB liveness alone can't reveal an oracle that has
             // stopped finalizing rounds (e.g. a price-feed outage), and a restart
-            // wipes the in-memory skip counters — so without this a probe hitting
+            // wipes the in-memory skip counters; without this a probe hitting
             // /health would see a clean bill of health during a stale-feed window.
             // Surface the age of the most recent finalized round so probes can
             // detect staleness without the heavier diagnostics RPC. Only evaluated
@@ -282,7 +292,7 @@ async function startApi(){
             let oracleThresholdS = null;
             if (dbOk && p2pConfig) {
                 try {
-                    let roundIntervalMs = p2pConfig.ORACLE_ROUND_INTERVAL || 600000;
+                    let roundIntervalMs = p2pConfig.ORACLE_ROUND_INTERVAL || DEFAULT_ORACLE_ROUND_INTERVAL_MS;
                     // Default to 2x the round interval; an operator can override for
                     // slow-start environments via ORACLE_STALENESS_THRESHOLD_S.
                     oracleThresholdS = parseInt(process.env.ORACLE_STALENESS_THRESHOLD_S)
@@ -291,16 +301,16 @@ async function startApi(){
                         hub.db.doQuery(
                             "SELECT UNIX_TIMESTAMP() - UNIX_TIMESTAMP(MAX(created_at)) AS age_s " +
                             "FROM price_snapshots WHERE status = 'finalized'", []),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), DB_PROBE_TIMEOUT_MS))
                     ]);
-                    // age_s is null when no round has ever finalized (fresh node) —
+                    // age_s is null when no round has ever finalized (fresh node);
                     // treat that as not-stale so a slow first round doesn't 503.
                     if (rows && rows.length && rows[0].age_s != null) {
                         oracleAgeS  = Number(rows[0].age_s);
                         oracleStale = oracleAgeS > oracleThresholdS;
                     }
                 } catch (err) {
-                    // Non-fatal — DB health is still reported if the oracle probe fails
+                    // Non-fatal: DB health is still reported if the oracle probe fails
                 }
             }
             if (oracleStale) healthy = false;
@@ -333,9 +343,9 @@ async function startApi(){
         async getallconfigs(params) {
             try {
                 let since     = params && params.since_updated_at;
+                let seq       = await hub.getLastSeq();
                 let watermark = await hub.getConfigWatermark();
                 let configs   = await hub.getAllConfigs(since);
-                let seq       = await hub.getLastSeq();
                 return {configs, seq, watermark};
             } catch (err) {
                 return {error: "there was an error trying to get all configs"};
@@ -575,9 +585,34 @@ async function startApi(){
             return hub.attestationRound.getStats();
         },
 
+        // Get cross-chain call relay backlog depth and lifetime failure counter.
+        // pending_relay_count is the number of dispatch rows without a result row
+        // (per target chain and total); result_attempt_failures is a process-lifetime
+        // count of per-call errors in the relay result poll. Mirrors getattestationstats.
+        async getcrosschaincallstats(){
+            if(!hub.crossChainCalls) return {error: "cross-chain call engine not active"};
+            try {
+                return await hub.crossChainCalls.getStats();
+            } catch (err) {
+                return {error: "error fetching cross-chain call stats"};
+            }
+        },
+
+        // Get state-checkpoint health: last finalized block per chain and a
+        // process-lifetime count of rounds that timed out below quorum.
+        // Mirrors getattestationstats / getcrosschaincallstats.
+        async getcheckpointstats(){
+            if(!hub.stateCheckpoints) return {error: "checkpoint engine not active"};
+            try {
+                return await hub.stateCheckpoints.getStats();
+            } catch (err) {
+                return {error: "error fetching checkpoint stats"};
+            }
+        },
+
         // Manually trigger an ANCHOR flush (write-auth): publish any pending
         // checkpoint anchors + the pending archive batch now instead of waiting
-        // for the interval timer. Election still applies — a hub that isn't the
+        // for the interval timer. Election still applies: a hub that isn't the
         // elected publisher for a pending anchor skips it (reflected in the
         // returned summary) rather than publishing out of turn.
         async anchorflush(){
@@ -589,7 +624,7 @@ async function startApi(){
             }
         },
 
-        // Get fee quote (gas → XCHAIN → native coin)
+        // Get fee quote (gas -> XCHAIN -> native coin)
         async getfeequote({action, chain}){
             if(!action) return {error: "action is required"};
             if(!chain) return {error: "chain is required"};
@@ -776,11 +811,11 @@ async function startApi(){
         }
     };
 
-    // Hub DB sync channel — REST snapshot endpoints (read-only, public read)
+    // Hub DB sync channel: REST snapshot endpoints (read-only, public read)
     // Indexers running in distributed mode bootstrap their local hub DB by fetching these snapshots
     // before subscribing to the WebSocket channel for live updates.
 
-    // GET /hub-db/snapshot/price_snapshots — full snapshot of price_snapshots table
+    // GET /hub-db/snapshot/price_snapshots: full snapshot of price_snapshots table
     app.get('/hub-db/snapshot/price_snapshots', async (req, res) => {
         try {
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
@@ -795,7 +830,7 @@ async function startApi(){
         }
     });
 
-    // GET /hub-db/snapshot/oracle_prices — full snapshot of oracle_prices table
+    // GET /hub-db/snapshot/oracle_prices: full snapshot of oracle_prices table
     app.get('/hub-db/snapshot/oracle_prices', async (req, res) => {
         try {
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
@@ -810,7 +845,7 @@ async function startApi(){
         }
     });
 
-    // GET /hub-db/snapshot/cross_chain_matches — full snapshot of cross_chain_matches table
+    // GET /hub-db/snapshot/cross_chain_matches: full snapshot of cross_chain_matches table
     app.get('/hub-db/snapshot/cross_chain_matches', async (req, res) => {
         try {
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
@@ -831,7 +866,7 @@ async function startApi(){
         }
     });
 
-    // GET /hub-db/snapshot/capability_snapshots — full snapshot of capability_snapshots table
+    // GET /hub-db/snapshot/capability_snapshots: full snapshot of capability_snapshots table
     app.get('/hub-db/snapshot/capability_snapshots', async (req, res) => {
         try {
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
@@ -846,14 +881,14 @@ async function startApi(){
         }
     });
 
-    // GET /hub-db/snapshot/cross_chain_calls — full snapshot of cross_chain_calls table.
+    // GET /hub-db/snapshot/cross_chain_calls: full snapshot of cross_chain_calls table.
     // Explicit column list: batch_seq/archived_status/anchor_txid are hub-side ANCHOR
     // audit metadata and are NOT mirrored (the indexer mirror schema has no such columns).
     app.get('/hub-db/snapshot/cross_chain_calls', async (req, res) => {
         try {
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
-            // Exclude retracted rows — see the cross_chain_matches snapshot above: the
+            // Exclude retracted rows (see the cross_chain_matches snapshot above): the
             // streaming path DELETEs them on reorg (retractCallsForReorg), so a bootstrapping
             // mirror must skip them to stay byte-identical with streamed mirrors.
             let rows = await hub.db.doQuery(
@@ -869,7 +904,7 @@ async function startApi(){
         }
     });
 
-    // GET /hub-db/snapshot/state_checkpoints — full snapshot of state_checkpoints table.
+    // GET /hub-db/snapshot/state_checkpoints: full snapshot of state_checkpoints table.
     // Explicit column list: anchor_txid is hub-side audit metadata and is NOT mirrored
     // (the indexer mirror schema has no such column).
     app.get('/hub-db/snapshot/state_checkpoints', async (req, res) => {
@@ -888,7 +923,7 @@ async function startApi(){
         }
     });
 
-    // POST /telemetry — anonymous usage ping receiver for xchain-node operators.
+    // POST /telemetry: anonymous usage ping receiver for xchain-node operators.
     // The connecting IP is NEVER stored. At ingest we derive a coarse country/region and a
     // keyed one-way hash from it, then discard the IP. The body is never trusted for IP.
     // Fire-and-forget: always returns quickly; a bad body or DB hiccup never errors the client.
@@ -896,7 +931,7 @@ async function startApi(){
     const clampStr = (v, max) => (typeof v === 'string' ? v.slice(0, max) : null);
 
     if (TELEMETRY_ENABLED && !TELEMETRY_IP_SALT)
-        console.log('Telemetry: TELEMETRY_IP_SALT not set — ip_hash will be null (country/region still recorded)');
+        console.log('Telemetry: TELEMETRY_IP_SALT not set; ip_hash will be null (country/region still recorded)');
 
     // Normalize, then derive only non-identifying values from the connecting IP. The raw IP
     // is used here and never returned or stored.
@@ -957,15 +992,15 @@ async function startApi(){
         }
     });
 
-    // GET /telemetry/summary — anonymous, aggregate-only census of node operators.
+    // GET /telemetry/summary: anonymous, aggregate-only census of node operators.
     // Returns DISTRIBUTION COUNTS ONLY (by version / OS / country / arch / running
-    // module). Never returns install_id, ip_hash, region, or any per-install row —
+    // module). Never returns install_id, ip_hash, region, or any per-install row;
     // only group tallies derived from the latest ping per install in the window.
     // Read-only; safe to expose to the operator dashboard.
     app.get('/telemetry/summary', async (req, res) => {
         if (!TELEMETRY_ENABLED) return res.json({ enabled: false });
         try {
-            // Bounded integer window (sanitised → safe to inline; not a bound param
+            // Bounded integer window (sanitised -> safe to inline; not a bound param
             // because MariaDB won't bind inside an INTERVAL literal cleanly).
             let days = req.query.days ? parseInt(req.query.days, 10) : 30;
             if (!Number.isFinite(days) || days < 1) days = 30;
@@ -998,9 +1033,9 @@ async function startApi(){
             // Running-module distribution: count installs running each module.
             // Chain distribution: count installs running at least one module on each
             // coin/network (e.g. "bitcoin/mainnet"). Shared services (hub/db) carry an
-            // empty coin/network and are skipped — they aren't chain-specific.
+            // empty coin/network and are skipped; they aren't chain-specific.
             // Component-per-chain distribution: count installs running each
-            // (module, coin, network) combo — e.g. how many run xchain-indexer on
+            // (module, coin, network) combo, e.g. how many run xchain-indexer on
             // litecoin/testnet. Keyed "coin/network/module" (none contain a slash).
             const moduleCounts = new Map();
             const chainCounts  = new Map();
@@ -1062,21 +1097,22 @@ async function startApi(){
         }
     });
 
-    // GET /telemetry/operators — per-install (per-server) detail. UNLIKE the aggregate
+    // GET /telemetry/operators: per-install (per-server) detail. UNLIKE the aggregate
     // summary this returns identifying-ish data (ip_hash, region, exactly what each
     // server runs), so it is fail-closed behind TELEMETRY_ADMIN_KEY (x-api-key header).
     // Intended for the operator's own auth-gated dashboard, never public consumption.
     app.get('/telemetry/operators', async (req, res) => {
         if (!TELEMETRY_ENABLED) return res.json({ enabled: false });
-        if (!TELEMETRY_ADMIN_KEY || (req.headers['x-api-key'] || '') !== TELEMETRY_ADMIN_KEY) {
-            return res.status(401).json({ error: 'Unauthorized' });
-        }
+        if (!TELEMETRY_ADMIN_KEY) { return res.status(401).json({ error: 'Unauthorized' }); }
+        { let a = Buffer.from(req.headers['x-api-key'] || ''), b = Buffer.from(TELEMETRY_ADMIN_KEY);
+          if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+            return res.status(401).json({ error: 'Unauthorized' }); } }
         try {
             let days = req.query.days ? parseInt(req.query.days, 10) : 30;
             if (!Number.isFinite(days) || days < 1) days = 30;
             if (days > 365) days = 365;
 
-            // Latest ping per install in the window — the current state of each server.
+            // Latest ping per install in the window: the current state of each server.
             let rows = await hub.db.doQuery(
                 `SELECT t.install_id, t.country, t.region, t.ip_hash, t.node_version,
                         t.os_platform, t.os_release, t.arch, t.docker_version, t.modules,
@@ -1149,19 +1185,21 @@ async function startApi(){
     // Start the server using an explicit http.Server so we can attach a WebSocket upgrade handler
     const server = http.createServer(app);
 
-    // Hub DB sync channel — WebSocket server for live row updates
+    // Hub DB sync channel: WebSocket server for live row updates
     // Subscribers receive { type: 'row:inserted', table, row } events whenever the hub
     // inserts a new price_snapshots or oracle_prices row.
     const wss = new WebSocket.Server({ noServer: true });
 
     server.on('upgrade', (request, socket, head) => {
         // Authenticate using the same hub API key used for write methods
-        // (enforced only when a key is configured — an unconditional fail-closed
+        // (enforced only when a key is configured; an unconditional fail-closed
         // here 401s every indexer's hub_db_sync subscription on managed deploys,
         // severing the price-sync barrier and the state_checkpoints mirror).
         if (HUB_API_KEY) {
             let authHeader = request.headers['authorization'];
-            if (!authHeader || authHeader !== 'Bearer ' + HUB_API_KEY) {
+            let _bearer = 'Bearer ' + HUB_API_KEY;
+            let _ah = Buffer.from(authHeader || ''), _bh = Buffer.from(_bearer);
+            if (!authHeader || _ah.length !== _bh.length || !crypto.timingSafeEqual(_ah, _bh)) {
                 socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
                 socket.destroy();
                 return;
@@ -1181,7 +1219,7 @@ async function startApi(){
         });
     });
 
-    // Daily telemetry retention sweep — prune pings older than the retention window.
+    // Daily telemetry retention sweep: prune pings older than the retention window.
     // Runs once shortly after startup, then every 24h. No-op when telemetry is disabled.
     let telemetryCleanupInterval = null;
     if (TELEMETRY_ENABLED) {
@@ -1214,14 +1252,14 @@ async function startApi(){
         console.log('Hub DB sync WebSocket available at ws://' + HUB_HOST + ':' + HUB_PORT + '/hub-db/subscribe');
     });
 
-    // Graceful shutdown — release every timer, socket, and the DB pool, then exit.
+    // Graceful shutdown: release every timer, socket, and the DB pool, then exit.
     // Previously this only called server.close(), which leaves the MariaDB pool (and
     // hub timers) keeping the event loop alive, so the process never actually exited.
     let shuttingDown = false;
     async function shutdown(signal) {
         if (shuttingDown) return;          // ignore a second signal
         shuttingDown = true;
-        console.log('Received ' + signal + ' — shutting down hub...');
+        console.log('Received ' + signal + '; shutting down hub...');
 
         // Stop the periodic work owned by this file.
         clearInterval(pingInterval);
@@ -1229,7 +1267,7 @@ async function startApi(){
 
         // Backstop: if any close hangs, exit anyway rather than linger forever.
         const forceTimer = setTimeout(() => {
-            console.error('Shutdown timed out after 10s — forcing exit');
+            console.error('Shutdown timed out after 10s; forcing exit');
             process.exit(1);
         }, 10000);
         forceTimer.unref();
