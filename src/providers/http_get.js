@@ -176,6 +176,16 @@ exports.fetch = async (payload, options) => {
                 }
                 chunks.push(chunk);
             });
+            // meta = the HTTP status code, and it is INTENTIONALLY part of the
+            // agreement key (agree() groups on SHA256(body || meta)): a contract
+            // attesting a URL agrees on what the server actually said, status
+            // included, so a 200 body and a 500/404 body never collide. The
+            // tradeoff is that an endpoint returning different statuses to
+            // different validators (caching 200/304, rate-limit 429/503,
+            // load-balanced backends) fails to reach quorum and the request
+            // expires rather than surfacing a retryable error. This is by design;
+            // callers must point http_get at a byte-and-status-stable endpoint
+            // (see xchain-documentation protocol/providers/README.md).
             res.on('end',   () => safeResolve({ body: Buffer.concat(chunks), meta: String(res.statusCode) }));
             res.on('error', (e) => safeReject(new Error('http_get: response error: ' + e.message)));
         });
