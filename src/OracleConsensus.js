@@ -20,6 +20,9 @@
  *
  * Flow: ORACLE_PROPOSE -> ORACLE_PREPARE (2f+1) -> ORACLE_COMMIT (2f+1) -> store snapshot
  *
+ * Single-node fast path: when quorum === 0 (only one oracle_publish validator),
+ * the snapshot is stored immediately without any PROPOSE/PREPARE/COMMIT exchange.
+ *
  ********************************************************************/
 
 const crypto            = require('crypto');

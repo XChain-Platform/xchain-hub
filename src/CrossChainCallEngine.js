@@ -75,6 +75,10 @@ const DEFAULT_CONFIRMATIONS = { BTC: 6, LTC: 12, DOGE: 60 };
 // Result statuses the federation will relay. Anything else from an indexer is
 // treated as 'error' (deterministic normalization happens indexer-side; this
 // is belt-and-suspenders against a confused indexer response).
+// Note: the indexer's vmFailureStatus collapses resource exhaustion to
+// 'out_of_resource', but xexec.js:_mapFailureStatus then re-normalizes
+// 'out_of_resource' back to 'out_of_gas' for XCALL result rows, so
+// 'out_of_gas' (not 'out_of_resource') is what the federation relays here.
 const RESULT_STATUSES = ['ok', 'reverted', 'out_of_gas', 'no_contract', 'not_callable', 'payload_too_large', 'error'];
 
 // Relay margin: a relayed row's effective_time is stamped this many blocks (of

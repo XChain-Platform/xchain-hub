@@ -17,7 +17,8 @@
  * Periodically produces quorum-signed checkpoints of each chain's indexer
  * state (the per-block ledger/actions/contract hash triple the indexer
  * already computes into its `blocks` table) so light clients can verify any
- * indexer/explorer response against `2f+1` `oracle_publish` signatures
+ * indexer/explorer response against a quorum of `oracle_publish` signatures
+ * (max(2f+1, ceil((N+1)/2)); for small N this can require unanimity)
  * instead of trusting a single operator. Checkpoints are OFF-CHAIN: written
  * to `state_checkpoints` and streamed over the hub-DB mirror (zero chain
  * writes); the StateAnchorPublisher separately commits the latest checkpoint

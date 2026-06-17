@@ -24,8 +24,9 @@
  *        provider.agree(proposals) -> winner. Sign canonical bytes for the
  *        winner. Broadcast ATTEST_PREPARE.
  *   ATTEST_PREPARE handler
- *     -> collect prepares; on PBFT quorum (2f+1 over responsible set, size=REDUNDANCY),
- *        broadcast ATTEST_COMMIT.
+ *     -> collect prepares; on PBFT quorum (max(2f+1, ceil((N+1)/2)) over responsible
+ *        set, size=REDUNDANCY; for small N this can require unanimity), broadcast
+ *        ATTEST_COMMIT.
  *   ATTEST_COMMIT handler
  *     -> collect commits; on quorum, emit 'request:finalized' for the
  *        publisher to ship the on-chain ATTEST v1 (response).
