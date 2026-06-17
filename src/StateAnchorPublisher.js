@@ -977,19 +977,36 @@ class StateAnchorPublisher {
                              ' does not match our resolution (' + mySource + '); NOT signing');
                 return false;
             }
-            // Cross-check against our own local row. The query keys on the full
-            // triple (validator_pubkey, reward_type, round_number) which is the
-            // table's UNIQUE key. Without the pubkey column, LIMIT 1 returns an
-            // arbitrary row when two pubkeys share (reward_type, round_number)
-            // (possible under a failover double-publish), causing a false mismatch
-            // on validator_pubkey that stalls archival unnecessarily.
+            // Cross-check against ALL our own local rows for this (reward_type,
+            // round_number). Reward rows are written independently by every hub
+            // from the same on-chain anchor-publish events, so an honest hub that
+            // saw this round derives the SAME winner set. The table's UNIQUE key
+            // is (validator_pubkey, round_number, reward_type), so two pubkeys can
+            // legitimately co-exist for one (reward_type, round_number) under a
+            // transient failover double-publish: querying ALL rows tolerates that
+            // window (the archived pubkey's own row is matched and verified) while
+            // still rejecting a leader that credits a pubkey we never derived.
+            //   - a row for the archived pubkey  -> amount/block must agree
+            //   - rows exist but none is ours     -> divergence: this hub saw the
+            //                                        round and credited a DIFFERENT
+            //                                        winner, so the archived pubkey
+            //                                        is a misattributed/inflated
+            //                                        credit -> NOT signing
+            //   - no rows at all                  -> late joiner; re-derivation
+            //                                        above already bounds it
             let local = await this.db.doQuery(
-                'SELECT validator_pubkey, amount, block_index FROM validator_rewards WHERE reward_type = ? AND round_number = ? AND validator_pubkey = ? LIMIT 1',
-                [String(ar.reward_type), Number(ar.round_number), pubkey]);
+                'SELECT validator_pubkey, amount, block_index FROM validator_rewards WHERE reward_type = ? AND round_number = ?',
+                [String(ar.reward_type), Number(ar.round_number)]);
             if(local && local.length > 0){
-                let mine = local[0];
-                if(String(mine.validator_pubkey).toLowerCase() !== pubkey ||
-                   String(mine.amount) !== String(ar.amount) ||
+                let mine = local.find(r => String(r.validator_pubkey).toLowerCase() === pubkey);
+                if(!mine){
+                    console.warn('StateAnchorPublisher: archive reward ' + tag + ' credits ' + pubkey.substring(0, 12) +
+                                 '... but our local rows for this round credit ' +
+                                 local.map(r => String(r.validator_pubkey).substring(0, 12) + '...').join(',') +
+                                 '; NOT signing');
+                    return false;
+                }
+                if(String(mine.amount) !== String(ar.amount) ||
                    (mine.block_index != null && Number(mine.block_index) !== Number(ar.block_index))){
                     console.warn('StateAnchorPublisher: archive reward ' + tag + ' diverges from our row (' +
                                  String(mine.validator_pubkey).substring(0, 12) + '.../' + mine.amount + '/' + mine.block_index +
