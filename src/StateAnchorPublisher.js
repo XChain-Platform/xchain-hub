@@ -390,7 +390,7 @@ class StateAnchorPublisher {
     // every hub, and stable while the batch is stalled), and each further rank
     // unlocks after another ANCHOR_ELECTION_TOLERANCE_BLOCKS past the wrapper
     // checkpoint's snapshot_block. Without the ladder a signer-less elected
-    // leader stalled archiving (live on devhost: only 1-of-3 elections could
+    // leader stalled archiving (live on a 3-hub test cluster: only 1-of-3 elections could
     // publish; on a static regtest tip the same leader won forever). Returns
     // the flush summary's archive status.
     async _startArchiveRound(signer, electionBlock){

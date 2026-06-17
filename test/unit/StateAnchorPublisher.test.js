@@ -641,7 +641,7 @@ describe('StateAnchorPublisher', function () {
     });
 
     it('archive failover ladder: a non-leader publishes once its rank unlocks, with full co-sign quorum', async function () {
-        // Live finding (devhost 3-hub): the archive election had NO rank
+        // Live finding (3-hub test cluster): the archive election had NO rank
         // tolerance — a signer-less elected leader stalled archiving (only
         // 1-of-3 elections could publish), and on a static regtest tip the
         // same leader won forever. The election key is now content-anchored
