@@ -54,6 +54,7 @@ const axios             = require('axios');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const swq               = require('./stake_weighted_quorum.js');
 const eq                = require('./equivocation_header.js');
+const ckpt              = require('./checkpoint_commitment_activation.js');
 
 const XCHK_SIGN_REQ  = 'XCHK_SIGN_REQ';
 const XCHK_SIGN      = 'XCHK_SIGN';
@@ -256,8 +257,20 @@ class StateCheckpointEngine extends EventEmitter {
             actions_hash:   String(bh.actions_hash   || '').toLowerCase(),
             contract_hash:  String(bh.contract_hash  || '').toLowerCase(),
             checkpoint_seq: seq,
-            snapshot_block: Number(snapshotBlock)
+            snapshot_block: Number(snapshotBlock),
+            // SPV Phase 2: the additive light-client roots the post-flag-day canonical signs.
+            state_root:           bh.state_root           != null ? String(bh.state_root).toLowerCase()        : null,
+            state_root_version:   bh.state_root_version   != null ? Number(bh.state_root_version)   : null,
+            block_merkle_root:    bh.block_merkle_root    != null ? String(bh.block_merkle_root).toLowerCase() : null,
+            block_merkle_version: bh.block_merkle_version != null ? Number(bh.block_merkle_version) : null
         };
+        // Post-flag-day the signed shape REQUIRES the roots; refuse to sign a malformed
+        // (empty-root) canonical if the indexer hasn't produced them yet (operator must
+        // pick a snapshot_block at/after every chain's STATE_COMMITMENT flag-day).
+        if(ckpt.isCheckpointCommitmentActive(cp.snapshot_block, cp.network) &&
+           (!cp.state_root || !cp.block_merkle_root || cp.state_root_version == null || cp.block_merkle_version == null))
+            throw new Error('checkpoint-commitment active for ' + chain + '@' + cp.block_index +
+                            ' but indexer returned no light-client roots (state-commitment flag-day not yet reached on ' + chain + ')');
         let canonical = StateCheckpointEngine.canonicalCheckpoint(cp);
         let id        = this._roundId(cp);
         if(this.pending.has(id)) return;
@@ -342,7 +355,14 @@ class StateCheckpointEngine extends EventEmitter {
             ledger_hash:   String(bh.ledger_hash   || '').toLowerCase(),
             actions_hash:  String(bh.actions_hash  || '').toLowerCase(),
             contract_hash: String(bh.contract_hash || '').toLowerCase(),
-            checkpoint_seq: cp.checkpoint_seq, snapshot_block: cp.snapshot_block
+            checkpoint_seq: cp.checkpoint_seq, snapshot_block: cp.snapshot_block,
+            // SPV Phase 2: re-derive the roots from OUR OWN indexer so we co-sign only
+            // when our state_root + block_merkle_root match the proposer's (same self-
+            // verification guarantee the three flat hashes already get).
+            state_root:           bh.state_root           != null ? String(bh.state_root).toLowerCase()        : null,
+            state_root_version:   bh.state_root_version   != null ? Number(bh.state_root_version)   : null,
+            block_merkle_root:    bh.block_merkle_root    != null ? String(bh.block_merkle_root).toLowerCase() : null,
+            block_merkle_version: bh.block_merkle_version != null ? Number(bh.block_merkle_version) : null
         });
         if(mine !== canonical){
             console.warn('StateCheckpointEngine: ' + cp.chain + '@' + cp.block_index + ' diverges from our indexer, NOT signing');
@@ -428,10 +448,13 @@ class StateCheckpointEngine extends EventEmitter {
         try { await this._persistCapabilitySnapshot('oracle_publish', Number(cp.snapshot_block)); }
         catch(e){ console.warn('StateCheckpointEngine: snapshot persist on finalize failed: ' + (e && e.message)); }
         await this.db.doQuery(
-            'INSERT IGNORE INTO state_checkpoints (chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, validator_signatures) ' +
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'INSERT IGNORE INTO state_checkpoints (chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures) ' +
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [cp.chain, cp.network, cp.block_index, cp.block_hash, cp.ledger_hash, cp.actions_hash,
-             cp.contract_hash, cp.checkpoint_seq, cp.snapshot_block, JSON.stringify(sigs)]);
+             cp.contract_hash, cp.checkpoint_seq, cp.snapshot_block,
+             cp.state_root || null, cp.state_root_version != null ? cp.state_root_version : null,
+             cp.block_merkle_root || null, cp.block_merkle_version != null ? cp.block_merkle_version : null,
+             JSON.stringify(sigs)]);
 
         if(this.broadcaster){
             let r = await this.db.doQuery(
@@ -451,9 +474,29 @@ class StateCheckpointEngine extends EventEmitter {
     // (StateAnchorPublisher._archiveCanonical) nests THIS, not the gated form, so the
     // EQUIV header is applied exactly once around the whole archive content.
     static _rawCanonicalCheckpoint(cp){
+        // The bare v0 checkpoint canonical, WITHOUT the SPV roots: the v1 archive
+        // (_archiveCanonical) nests THIS and must stay byte-identical to its pre-SPV
+        // shape, so the root-append lives in canonicalCheckpoint (checkpoint family
+        // only), never here.
         return ['XCHECKPOINT', cp.chain, cp.network, String(cp.block_index), cp.block_hash,
                 cp.ledger_hash, cp.actions_hash, cp.contract_hash,
                 String(cp.checkpoint_seq), String(cp.snapshot_block)].join('|');
+    }
+
+    // The SPV Phase 2 (spec §6.1) root suffix appended to the checkpoint-family
+    // canonical at/above the CHECKPOINT_COMMITMENT flag-day. Kept as one helper so
+    // the hub / SDK / indexer-anchor / explorer all build byte-identical bytes.
+    static _checkpointRootSuffix(cp){
+        if(!ckpt.isCheckpointCommitmentActive(cp.snapshot_block, cp.network)) return '';
+        // Append only when the roots are actually present. Post-flag-day the engine
+        // refuses to sign a checkpoint that lacks them (_runRound throws), so for every
+        // REAL post-flag-day checkpoint this is always true and the suffix is byte-
+        // deterministic; the guard only keeps legacy/pre-Phase-1 rows (null roots) on
+        // their original rootless canonical, so old signatures still verify.
+        if(cp.state_root == null || cp.block_merkle_root == null ||
+           cp.state_root_version == null || cp.block_merkle_version == null) return '';
+        return '|' + [String(cp.state_root).toLowerCase(), String(cp.state_root_version),
+                      String(cp.block_merkle_root).toLowerCase(), String(cp.block_merkle_version)].join('|');
     }
 
     // Byte-identical to the indexer ANCHOR verifier + SDK CheckpointVerifier. At/above
@@ -461,7 +504,10 @@ class StateCheckpointEngine extends EventEmitter {
     // wrapped in the uniform signed header (TAG=XCHECKPOINT, ROUND_ID=v0 round id,
     // VIEW=0: checkpoints have no view change); below it, the bare raw bytes (regression-safe).
     static canonicalCheckpoint(cp){
-        let raw = StateCheckpointEngine._rawCanonicalCheckpoint(cp);
+        // Checkpoint family (v0/v3): the bare canonical PLUS the SPV root suffix
+        // (post-flag-day), appended to the RAW string BEFORE the EQUIV wrap. The v1
+        // archive uses _archiveCanonical (rootless) instead, so archives are untouched.
+        let raw = StateCheckpointEngine._rawCanonicalCheckpoint(cp) + StateCheckpointEngine._checkpointRootSuffix(cp);
         if(eq.isEquivHeaderActive(cp.snapshot_block, cp.network))
             return eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
                 cp.chain + '|' + cp.network + '|' + cp.block_index + '|' + cp.checkpoint_seq, 0, raw);
@@ -483,7 +529,13 @@ class StateCheckpointEngine extends EventEmitter {
             actions_hash:   String(raw.actions_hash  || '').toLowerCase(),
             contract_hash:  String(raw.contract_hash || '').toLowerCase(),
             checkpoint_seq: Number(raw.checkpoint_seq),
-            snapshot_block: Number(raw.snapshot_block)
+            snapshot_block: Number(raw.snapshot_block),
+            // SPV Phase 2: carried so a peer-received checkpoint reconstructs the SAME
+            // post-flag-day canonical the proposer signed. null below the flag-day.
+            state_root:           raw.state_root           != null ? String(raw.state_root).toLowerCase()        : null,
+            state_root_version:   raw.state_root_version   != null ? Number(raw.state_root_version)   : null,
+            block_merkle_root:    raw.block_merkle_root    != null ? String(raw.block_merkle_root).toLowerCase() : null,
+            block_merkle_version: raw.block_merkle_version != null ? Number(raw.block_merkle_version) : null
         };
     }
 

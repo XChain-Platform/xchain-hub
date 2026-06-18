@@ -26,7 +26,11 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 const TIP = {
     block_index: 500, block_hash: 'c0'.repeat(32), network: 'regtest',
-    ledger_hash: 'a1'.repeat(32), actions_hash: 'b2'.repeat(32), contract_hash: 'c3'.repeat(32)
+    ledger_hash: 'a1'.repeat(32), actions_hash: 'b2'.repeat(32), contract_hash: 'c3'.repeat(32),
+    // SPV Phase 2: regtest CHECKPOINT_COMMITMENT flag-day is 0, so getblockhashes returns the
+    // light-client roots and the engine signs + persists them (it refuses to sign without them).
+    state_root: 'd4'.repeat(32), state_root_version: 1,
+    block_merkle_root: 'e5'.repeat(32), block_merkle_version: 1
 };
 
 describe('StateCheckpointEngine', function () {
@@ -61,10 +65,10 @@ describe('StateCheckpointEngine', function () {
                     return [{ last_block: max }];
                 }
                 if (sql.startsWith('INSERT IGNORE INTO state_checkpoints')) {
-                    let [chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, validator_signatures] = params;
+                    let [chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures] = params;
                     // Append-only INSERT IGNORE keyed by (chain, network, block_index, checkpoint_seq)
                     if (!checkpoints.some(r => r.chain === chain && r.network === network && r.block_index === block_index && r.checkpoint_seq === checkpoint_seq))
-                        checkpoints.push({ id: checkpoints.length + 1, chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, validator_signatures });
+                        checkpoints.push({ id: checkpoints.length + 1, chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures });
                     return [];
                 }
                 if (sql.startsWith('SELECT * FROM state_checkpoints')) {

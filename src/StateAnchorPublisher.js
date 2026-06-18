@@ -79,6 +79,7 @@ const ValidatorIdentity = require('./ValidatorIdentity.js');
 const StateCheckpointEngine = require('./StateCheckpointEngine.js');
 const swq                   = require('./stake_weighted_quorum.js');
 const eq                    = require('./equivocation_header.js');
+const ckpt                  = require('./checkpoint_commitment_activation.js');
 
 const XANC_SIGN_REQ  = 'XANC_SIGN_REQ';
 const XANC_SIGN      = 'XANC_SIGN';
@@ -323,7 +324,15 @@ class StateAnchorPublisher {
                 let order = StateAnchorPublisher.hashOrder(this._v0ElectionKey(row), eligible);
                 let since = Number.isFinite(btcBlock) ? btcBlock - Number(row.snapshot_block) : null;
                 if(!this._mayPublish(order, since)) continue;            // someone else's anchor (or not unlocked yet)
-                let payload = this._buildV0Payload(row);
+                // SPV Phase 2: emit ANCHOR v3 (carries + signs the light-client roots) when the
+                // checkpoint was signed post-flag-day AND actually carries the roots; otherwise the
+                // legacy v0. The roots-present check keeps a legacy/null-root row (signed over the
+                // rootless canonical) on v0 so its sigs still verify, mirroring the canonical suffix
+                // gating in StateCheckpointEngine._checkpointRootSuffix.
+                let useV3 = ckpt.isCheckpointCommitmentActive(Number(row.snapshot_block), row.network) &&
+                            row.state_root != null && row.block_merkle_root != null &&
+                            row.state_root_version != null && row.block_merkle_version != null;
+                let payload = useV3 ? this._buildV3Payload(row) : this._buildV0Payload(row);
                 let broadcaster = signer.broadcastFn || ((p) => this._defaultBroadcast(p, signer));
                 // Multiple chains' v0 anchors go out back-to-back from the same
                 // wallet; without the retry, every cycle lands only the first
@@ -379,6 +388,22 @@ class StateAnchorPublisher {
         let parts = ['ANCHOR', '0', row.chain, row.network, String(row.block_index), row.block_hash,
                      row.ledger_hash, row.actions_hash, row.contract_hash,
                      String(row.checkpoint_seq), String(row.snapshot_block), String(sigs.length)];
+        for(let s of sigs) parts.push(s.pubkey, s.sig);
+        return parts.join('|');
+    }
+
+    // SPV Phase 2 (spec §6.3): v0 checkpoint PLUS the two light-client roots + version
+    // bytes appended before SIG_COUNT (positional). The roots come straight from the
+    // signed state_checkpoints row; the row's sigs already cover them (the post-flag-day
+    // checkpoint canonical includes the same roots), so this transports signed data.
+    _buildV3Payload(row){
+        let sigs = this._parseSigs(row.validator_signatures);
+        let parts = ['ANCHOR', '3', row.chain, row.network, String(row.block_index), row.block_hash,
+                     row.ledger_hash, row.actions_hash, row.contract_hash,
+                     String(row.checkpoint_seq), String(row.snapshot_block),
+                     String(row.state_root || '').toLowerCase(), String(row.state_root_version),
+                     String(row.block_merkle_root || '').toLowerCase(), String(row.block_merkle_version),
+                     String(sigs.length)];
         for(let s of sigs) parts.push(s.pubkey, s.sig);
         return parts.join('|');
     }
