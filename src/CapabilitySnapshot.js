@@ -292,7 +292,7 @@ class CapabilitySnapshot {
                     '(capability=' + snapshot.capability + ' block=' + snapshot.blockIndex + ' count=' + snapshot.count +
                     '): the indexer hit VALIDATOR_QUERY_LIMIT, so N is CAPPED below the true federation size. ' +
                     'Quorum stays cross-hub deterministic (all indexers truncate identically) but is computed over a ' +
-                    'partial set; raise VALIDATOR_QUERY_LIMIT on the indexers so the full validator set is returned.');
+                    'partial set; raise the frozen VALIDATOR_QUERY_LIMIT consensus constant (coordinated fleet upgrade) on the indexers so the full validator set is returned.');
             }
         }
         let N = snapshot.count;
