@@ -33,7 +33,7 @@ const DEFAULT_CMC_RESPONSE = {
 // The DEFAULT_* fixtures above are deliberately USD-only (most tests assert a
 // 3-pair result); these FULL_* fixtures exercise the complete multi-fiat parse
 // path. Every value is kept strictly below the oracle's price cap (10,000,000)
-// so it survives the production validity filter — note this means BTC/KRW and
+// so it survives the production validity filter. Note this means BTC/KRW and
 // BTC/JPY use high-magnitude values near the cap rather than their real-world
 // rates (~137M / ~15.7M per BTC), which the cap would otherwise reject. The
 // .25 / .5 fractions on the KRW/JPY entries are exactly representable in IEEE-754
@@ -57,7 +57,7 @@ const FULL_COINGECKO_RESPONSE = {
 };
 
 // Build a matching CMC fixture from the CoinGecko one so both sources report
-// identical values — the local median then equals the input and `sources` is 2
+// identical values. The local median then equals the input and `sources` is 2
 // for every pair, keeping multi-fiat assertions deterministic.
 const FIATS_UPPER = ['USD', 'CAD', 'AUD', 'MXN', 'GBP', 'JPY', 'CNY', 'CHF', 'BRL', 'INR', 'EUR', 'KRW'];
 const COINGECKO_TO_CMC = { bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' };

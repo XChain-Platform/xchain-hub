@@ -15,7 +15,7 @@
 // The attestation-queue.jsonl is a durable write-ahead log: a finalized response
 // must survive a leader crash between the queue write and the on-chain broadcast,
 // and a follower must step in if the leader goes silent. The indexer's pending-
-// request set is the authoritative double-broadcast guard — an entry whose request
+// request set is the authoritative double-broadcast guard. An entry whose request
 // is no longer pending has already landed (or expired) and must NOT be re-broadcast.
 
 const fs    = require('fs');
@@ -51,7 +51,7 @@ function readQueue(file) {
     return fs.readFileSync(file, 'utf8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
 }
 
-describe('AttestationPublisher — crash replay + follower failover', function () {
+describe('AttestationPublisher: crash replay and follower failover', function () {
 
     let queueFile;
 
@@ -78,7 +78,7 @@ describe('AttestationPublisher — crash replay + follower failover', function (
 
         const rid = 'cc' + 'cc'.repeat(31);
         writeQueue(queueFile, [{
-            ts: Date.now() - 10 * 60000,          // old — survived a crash
+            ts: Date.now() - 10 * 60000,          // old, survived a crash
             requestId: rid,
             wire: 'ATTEST|1|' + rid + '|http_get|Zm9v|ok||1|' + MY_PUB + '|' + 'ee'.repeat(64),
             responsible: [MY_PUB, LEADER_PUB],     // we are leader (rank 0)
@@ -95,7 +95,7 @@ describe('AttestationPublisher — crash replay + follower failover', function (
         const pub = makePublisher();
         const bcast = sinon.stub().resolves({ txid: 'should-not-fire' });
         pub.setBroadcastHook(bcast);
-        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set());  // nothing pending — already landed
+        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set());  // nothing pending, already landed
 
         const rid = 'dd' + 'dd'.repeat(31);
         writeQueue(queueFile, [{
@@ -128,13 +128,13 @@ describe('AttestationPublisher — crash replay + follower failover', function (
             leaderPubkey: LEADER_PUB
         };
 
-        // Fresh entry — within the window, follower must NOT broadcast yet.
+        // Fresh entry: within the window, follower must NOT broadcast yet.
         writeQueue(queueFile, [Object.assign({ ts: Date.now() }, baseEntry)]);
         await pub._processQueue();
         expect(bcast.called).to.equal(false, 'follower must wait out the leader-silence window');
         expect(readQueue(queueFile)).to.have.length(1, 'entry retained while waiting');
 
-        // Aged past the window — follower steps in.
+        // Aged past the window: follower steps in.
         writeQueue(queueFile, [Object.assign({ ts: Date.now() - 5000 }, baseEntry)]);
         await pub._processQueue();
         expect(bcast.calledOnce).to.equal(true, 'follower steps in after leader silence');

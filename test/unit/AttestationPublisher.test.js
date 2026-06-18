@@ -69,7 +69,7 @@ function readQueue(file) {
 
 // ---------- constructor --------------------------------------------------
 
-describe('AttestationPublisher — constructor', function () {
+describe('AttestationPublisher: constructor', function () {
 
     afterEach(function () { sinon.restore(); });
 
@@ -159,7 +159,7 @@ describe('AttestationPublisher — constructor', function () {
 
 // ---------- setBroadcastHook / setWalletSignHook / setEncoder ---------------
 
-describe('AttestationPublisher — hook setters', function () {
+describe('AttestationPublisher: hook setters', function () {
 
     it('setBroadcastHook stores the function', function () {
         const pub = makePublisher();
@@ -185,7 +185,7 @@ describe('AttestationPublisher — hook setters', function () {
 
 // ---------- start / stop ----------------------------------------------------
 
-describe('AttestationPublisher — start / stop', function () {
+describe('AttestationPublisher: start / stop', function () {
 
     afterEach(function () { sinon.restore(); });
 
@@ -307,7 +307,7 @@ describe('AttestationPublisher — start / stop', function () {
     });
 
     it('start() catches and logs non-Error from onRequestFinalized (err.message falsy → err branch)', async function () {
-        // Line 117: `err && err.message ? err.message : err` — the `: err` path
+        // Line 117: `err && err.message ? err.message : err` (the `: err` path)
         const EventEmitter = require('events');
         const emitter = new EventEmitter();
         const hub = makeHub(MY_PUB, { attestationConsensus: emitter });
@@ -355,7 +355,7 @@ describe('AttestationPublisher — start / stop', function () {
     });
 
     it('start() sweep logs non-Error (err.message falsy → err branch) when _processQueue rejects with non-Error', async function () {
-        // Line 131: `err && err.message ? err.message : err` — the `: err` path
+        // Line 131: `err && err.message ? err.message : err` (the `: err` path)
         const pub = makePublisher();
         pub.failoverPollMs = 20;
         let firstCall = true;
@@ -380,7 +380,7 @@ describe('AttestationPublisher — start / stop', function () {
 
 // ---------- buildAttestationResponseWire ------------------------------------
 
-describe('AttestationPublisher — buildAttestationResponseWire', function () {
+describe('AttestationPublisher: buildAttestationResponseWire', function () {
 
     let pub;
     before(function () { pub = makePublisher(); });
@@ -468,7 +468,7 @@ describe('AttestationPublisher — buildAttestationResponseWire', function () {
 
 // ---------- _enqueue / _readQueue / _rewriteQueue / _removeFromQueue --------
 
-describe('AttestationPublisher — queue I/O', function () {
+describe('AttestationPublisher: queue I/O', function () {
 
     let pub;
 
@@ -509,7 +509,7 @@ describe('AttestationPublisher — queue I/O', function () {
 
     it('_readQueue skips malformed JSON lines', function () {
         fs.writeFileSync(pub.queuePath, 'not json\n{"requestId":"aa".repeat(32),"wire":"W"}\n');
-        // The second line is also not valid JSON as written — let's write proper content
+        // The second line is also not valid JSON as written; let's write proper content
         fs.writeFileSync(pub.queuePath,
             'not json\n' +
             JSON.stringify({ requestId: 'aa'.repeat(32), wire: 'W' }) + '\n'
@@ -549,7 +549,7 @@ describe('AttestationPublisher — queue I/O', function () {
 
     it('_removeFromQueue removes matching IDs and keeps others', function () {
         pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
-        pub._enqueue({ ts: 2, requestId: 'BB'.repeat(32), wire: 'W2' });  // uppercase — tests lowercasing
+        pub._enqueue({ ts: 2, requestId: 'BB'.repeat(32), wire: 'W2' });  // uppercase, tests lowercasing
         pub._enqueue({ ts: 3, requestId: 'cc'.repeat(32), wire: 'W3' });
         pub._removeFromQueue(new Set(['aa'.repeat(32), 'bb'.repeat(32)]));  // lowercase drop set
         const entries = pub._readQueue();
@@ -588,7 +588,7 @@ describe('AttestationPublisher — queue I/O', function () {
 
 // ---------- _getBroadcaster -------------------------------------------------
 
-describe('AttestationPublisher — _getBroadcaster', function () {
+describe('AttestationPublisher: _getBroadcaster', function () {
 
     it('returns a function wrapping broadcastFn when set', function () {
         const pub = makePublisher();
@@ -633,7 +633,7 @@ describe('AttestationPublisher — _getBroadcaster', function () {
 
 // ---------- _myRank ---------------------------------------------------------
 
-describe('AttestationPublisher — _myRank', function () {
+describe('AttestationPublisher: _myRank', function () {
 
     it('returns null when identity is not set', function () {
         const hub = makeHub(MY_PUB, { p2pConfig: {} });
@@ -658,12 +658,12 @@ describe('AttestationPublisher — _myRank', function () {
         expect(pub._myRank({ responsible: [LEADER_PUB, OTHER_PUB] })).to.be.null;
     });
 
-    it('uses leaderPubkey fallback when responsible array is empty/absent — we are leader', function () {
+    it('uses leaderPubkey fallback when responsible array is empty/absent (we are leader)', function () {
         const pub = makePublisher(MY_PUB);
         expect(pub._myRank({ leaderPubkey: MY_PUB })).to.equal(0);
     });
 
-    it('uses leaderPubkey fallback when responsible array is empty/absent — we are follower', function () {
+    it('uses leaderPubkey fallback when responsible array is empty/absent (we are follower)', function () {
         const pub = makePublisher(MY_PUB);
         expect(pub._myRank({ leaderPubkey: LEADER_PUB })).to.equal(1);
     });
@@ -682,7 +682,7 @@ describe('AttestationPublisher — _myRank', function () {
 
 // ---------- _computeResponsible ---------------------------------------------
 
-describe('AttestationPublisher — _computeResponsible', function () {
+describe('AttestationPublisher: _computeResponsible', function () {
 
     afterEach(function () { sinon.restore(); });
 
@@ -754,7 +754,7 @@ describe('AttestationPublisher — _computeResponsible', function () {
 
 // ---------- _resolveBtcIndexerUrl -------------------------------------------
 
-describe('AttestationPublisher — _resolveBtcIndexerUrl', function () {
+describe('AttestationPublisher: _resolveBtcIndexerUrl', function () {
 
     it('delegates to hub._resolveBtcIndexerUrl when present', async function () {
         const pub = makePublisher(MY_PUB);
@@ -774,7 +774,7 @@ describe('AttestationPublisher — _resolveBtcIndexerUrl', function () {
 
 // ---------- _fetchPendingRequestIds -----------------------------------------
 
-describe('AttestationPublisher — _fetchPendingRequestIds', function () {
+describe('AttestationPublisher: _fetchPendingRequestIds', function () {
 
     afterEach(function () {
         nock.cleanAll();
@@ -848,7 +848,7 @@ describe('AttestationPublisher — _fetchPendingRequestIds', function () {
     });
 
     it('returns null when the indexer call throws a non-Error value (e.message falsy branch)', async function () {
-        // Line 418: `e && e.message ? e.message : e` — the `e` branch when message is absent
+        // Line 418: `e && e.message ? e.message : e` (the `e` branch when message is absent)
         const pub = makePublisher(MY_PUB);
         const axios = require('axios');
         sinon.stub(axios, 'post').rejects({ code: 'ECONNREFUSED' });  // plain object, no .message
@@ -859,7 +859,7 @@ describe('AttestationPublisher — _fetchPendingRequestIds', function () {
 
     it('handles result without requests field (result.requests || [] fallback)', async function () {
         const pub = makePublisher(MY_PUB);
-        // Return a result that has no `requests` field — should fall back to []
+        // Return a result that has no `requests` field; should fall back to []
         nock('http://indexer.local')
             .post('/rpc')
             .reply(200, {
@@ -893,7 +893,7 @@ describe('AttestationPublisher — _fetchPendingRequestIds', function () {
 
     it('handles pagination: stops when result count < PENDING_PAGE_LIMIT (100)', async function () {
         const pub = makePublisher(MY_PUB);
-        // Return 50 entries (< 100) — should stop after 1 page
+        // Return 50 entries (< 100); should stop after 1 page
         const requests = Array.from({ length: 50 }, (_, i) => ({
             request_id: String(i).padStart(64, '0'),
             block_index: i,
@@ -937,7 +937,7 @@ describe('AttestationPublisher — _fetchPendingRequestIds', function () {
 
 // ---------- onRequestFinalized edge cases -----------------------------------
 
-describe('AttestationPublisher — onRequestFinalized edge cases', function () {
+describe('AttestationPublisher: onRequestFinalized edge cases', function () {
 
     afterEach(function () {
         sinon.restore();
@@ -954,7 +954,7 @@ describe('AttestationPublisher — onRequestFinalized edge cases', function () {
     });
 
     it('proceeds (as follower) when identity is null in onRequestFinalized', async function () {
-        // Line 155: `this.identity ? getPubkeyHex() : null` — null branch
+        // Line 155: `this.identity ? getPubkeyHex() : null` (null branch)
         const hub = makeHub(MY_PUB);
         hub.getIdentity = () => null;
         const pub = new AttestationPublisher(hub);
@@ -1123,7 +1123,7 @@ describe('AttestationPublisher — onRequestFinalized edge cases', function () {
             meta:         '',
             signatures:   [{ pubkey: MY_PUB, sig: 'ee'.repeat(64) }],
             leaderPubkey: MY_PUB
-            // no request field — redundancy falls back to signatures.length
+            // no request field, redundancy falls back to signatures.length
         });
 
         expect(bcast.calledOnce).to.equal(true);
@@ -1141,7 +1141,7 @@ describe('AttestationPublisher — onRequestFinalized edge cases', function () {
             requestId:    '88'.repeat(32),
             providerId:   'http_get',
             responseBody: Buffer.from('ok'),
-            // no status — should fall back to 'ok'
+            // no status, should fall back to 'ok'
             meta:         '',
             signatures:   [{ pubkey: MY_PUB, sig: 'ee'.repeat(64) }],
             leaderPubkey: MY_PUB
@@ -1196,7 +1196,7 @@ describe('AttestationPublisher — onRequestFinalized edge cases', function () {
             meta:         '',
             signatures:   [{ pubkey: MY_PUB, sig: 'ee'.repeat(64) }],
             request:      { block_index: 42, redundancy: 2 }
-            // no leaderPubkey — uses responsible[0]
+            // no leaderPubkey, uses responsible[0]
         });
 
         expect(computeStub.calledOnce).to.equal(true);
@@ -1206,7 +1206,7 @@ describe('AttestationPublisher — onRequestFinalized edge cases', function () {
 
 // ---------- _processQueue extra paths not covered by replay suite -----------
 
-describe('AttestationPublisher — _processQueue (no broadcaster + replay error)', function () {
+describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', function () {
 
     let queueFile;
 
@@ -1227,7 +1227,7 @@ describe('AttestationPublisher — _processQueue (no broadcaster + replay error)
         const warnStub = sinon.stub(console, 'warn');
 
         writeQueue(queueFile, [{
-            ts:           Date.now() - 10 * 60000,  // old — eligible
+            ts:           Date.now() - 10 * 60000,  // old, eligible
             requestId:    'aa'.repeat(32),
             wire:         'ATTEST|1|' + 'aa'.repeat(32) + '|http_get|Zm9v|ok||1|' + MY_PUB + '|' + 'ee'.repeat(64),
             responsible:  [MY_PUB],
@@ -1250,7 +1250,7 @@ describe('AttestationPublisher — _processQueue (no broadcaster + replay error)
         // Write an empty queue
         fs.writeFileSync(queueFile, '');
         sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set());
-        await pub._processQueue();  // should return immediately — no throw
+        await pub._processQueue();  // should return immediately, no throw
         // Verify _fetchPendingRequestIds was NOT called (early return)
         // (We can check by seeing the stub was not called)
         // Actually the stub is set up; the early return happens before _fetchPendingRequestIds
@@ -1302,12 +1302,12 @@ describe('AttestationPublisher — _processQueue (no broadcaster + replay error)
     it('handles queue entry with no ts field (ts || 0 branch) as not-yet-eligible', async function () {
         const pub = makePublisher(MY_PUB);
         pub.queuePath = queueFile;
-        pub.leaderRetryMs = 999999;  // very long — entry without ts treated as ts=0 so age=now >= very-long is false
+        pub.leaderRetryMs = 999999;  // very long; entry without ts treated as ts=0 so age=now >= very-long is false
         const bcast = sinon.stub().resolves({ txid: 'should-not-fire' });
         pub.setBroadcastHook(bcast);
         sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set(['dd'.repeat(32)]));
 
-        // Entry with no ts field — ts falls back to 0, age = Date.now() which is large
+        // Entry with no ts field; ts falls back to 0, age = Date.now() which is large
         // but with leaderRetryMs = 999999 the entry is ONLY eligible if age >= leaderRetryMs
         // Since now - 0 = current epoch ms (~1.7e12) which is >> 999999, it's eligible.
         // So we need an extremely large leaderRetryMs to make it NOT eligible.
@@ -1318,12 +1318,12 @@ describe('AttestationPublisher — _processQueue (no broadcaster + replay error)
             wire:         'ATTEST|1|' + 'dd'.repeat(32) + '|http_get|Zm9v|ok||1|' + MY_PUB + '|' + 'ee'.repeat(64),
             responsible:  [MY_PUB],
             leaderPubkey: MY_PUB
-            // no ts — falls back to 0 in the eligibility formula
+            // no ts, falls back to 0 in the eligibility formula
         }]);
 
         await pub._processQueue();
         // With MAX_SAFE_INTEGER retryMs, age (now - 0 = ~1.7e12ms) is less than MAX_SAFE_INTEGER
-        // so the entry is NOT eligible — broadcast should not be called
+        // so the entry is NOT eligible; broadcast should not be called
         expect(bcast.called).to.equal(false);
     });
 
@@ -1382,7 +1382,7 @@ describe('AttestationPublisher — _processQueue (no broadcaster + replay error)
 
 // ---------- _defaultBroadcast -----------------------------------------------
 
-describe('AttestationPublisher — _defaultBroadcast', function () {
+describe('AttestationPublisher: _defaultBroadcast', function () {
 
     afterEach(function () { sinon.restore(); });
 
@@ -1477,7 +1477,7 @@ describe('AttestationPublisher — _defaultBroadcast', function () {
             createTx: sinon.stub().resolves({ psbt: 'psbt-hex' })
         };
         pub.setEncoder(encoder);
-        pub.setWalletSignHook(sinon.stub().resolves(null));  // returns null — invalid
+        pub.setWalletSignHook(sinon.stub().resolves(null));  // returns null, invalid
         pub.btcAddress   = '1Test';
         pub.btcPubkeyHex = 'ab'.repeat(33);
         let err;

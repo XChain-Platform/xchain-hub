@@ -61,7 +61,7 @@ describe('Integration: JSON-RPC API (SC-8.x)', function () {
 
     before(async function () {
         try { await testDb.setup(); } catch (e) {
-            console.warn('MariaDB unavailable — skipping API tests');
+            console.warn('MariaDB unavailable, skipping API tests');
             return;
         }
 

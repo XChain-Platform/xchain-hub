@@ -22,8 +22,8 @@ const { createMockHub }    = require('../helpers/mockHub');
 // Peer-supplied body_b64 on ATTEST_PROPOSE / ATTEST_PREPARE must be
 // rejected before Buffer allocation when it exceeds the provider's
 // configured max_response_bytes (×1.4 base64 expansion). The only
-// transport gate is the ~1 MB WebSocket frame limit — far larger than
-// any legitimate provider response — so without this application-level
+// transport gate is the ~1 MB WebSocket frame limit, far larger than
+// any legitimate provider response; so without this application-level
 // check a responsible peer could force multi-hundred-KB allocations per
 // message and sustain memory-amplification pressure on the hub.
 // -----------------------------------------------------------------

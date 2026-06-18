@@ -12,18 +12,18 @@
  *
  **********************************************************************
  *
- * hub-credentials.js — Resolves Claude auth for the LLM attestation provider.
+ * hub-credentials.js: Resolves Claude auth for the LLM attestation provider.
  *
  * Two transports are supported:
  *
- *   1. `claude_spawn` — shell out to the `claude` CLI binary with auth
+ *   1. `claude_spawn`: shell out to the `claude` CLI binary with auth
  *      inherited from a CLAUDE_CONFIG_DIR populated by `claude login`,
  *      or from a CLAUDE_CODE_OAUTH_TOKEN env var. The CONFIG_DIR path is
  *      preferred because its `.credentials.json` carries a refresh token
- *      that the CLI auto-renews on every spawn — never needs rotation
+ *      that the CLI auto-renews on every spawn, so it never needs rotation
  *      unless the operator logs out.
  *
- *   2. `anthropic_api` — direct HTTPS to api.anthropic.com using
+ *   2. `anthropic_api`: direct HTTPS to api.anthropic.com using
  *      ANTHROPIC_API_KEY. The original path; kept for operators who
  *      prefer pay-per-token API billing over a Claude Code subscription.
  *
@@ -64,7 +64,7 @@ function _checkConfigDir(dirPath) {
 
 function _ensureIsolatedDir(dirPath) {
     try { fs.mkdirSync(dirPath, { recursive: true, mode: 0o700 }); }
-    catch { /* non-fatal — CLI creates it if absent or fails cleanly */ }
+    catch { /* non-fatal: CLI creates it if absent or fails cleanly */ }
 }
 
 // Resolve credentials for the LLM provider. Returns one of:
@@ -73,8 +73,8 @@ function _ensureIsolatedDir(dirPath) {
 //   { ok: false, reason, detail }
 //
 // `ctx` (optional) seams in test overrides:
-//   ctx.env              — env source (defaults to process.env)
-//   ctx.defaultConfigDir — pin the "default isolated dir" (hermetic tests)
+//   ctx.env              : env source (defaults to process.env)
+//   ctx.defaultConfigDir : pin the "default isolated dir" (hermetic tests)
 function resolveHubLlmAuth(ctx) {
     const envSource = (ctx && ctx.env) || process.env;
     const defaultDir = _trim(ctx && ctx.defaultConfigDir) || DEFAULT_HUB_CLAUDE_CONFIG_DIR;
@@ -117,7 +117,7 @@ function resolveHubLlmAuth(ctx) {
         transport: null,
         source: null,
         reason: 'no_credential_configured',
-        detail: 'Set HUB_CLAUDE_CONFIG_DIR (preferred — run `CLAUDE_CONFIG_DIR=<dir> claude login` first; ' +
+        detail: 'Set HUB_CLAUDE_CONFIG_DIR (preferred: run `CLAUDE_CONFIG_DIR=<dir> claude login` first; ' +
                 'the resulting credentials.json carries a refresh token and self-renews) ' +
                 'or HUB_CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`, ~2-week TTL) ' +
                 'or ANTHROPIC_API_KEY (direct API).'

@@ -8,7 +8,7 @@
 // This file is part of XChain Platform. Licensed under the GNU Affero
 // General Public License v3.0 or later; see LICENSE.md.
 
-// EQUIV header (WI-2 bump 2) — attestation (XATTEST) round-trip.
+// EQUIV header (WI-2 bump 2): attestation (XATTEST) round-trip.
 // CONSENSUS-CRITICAL: the attestation canonical is a UTF-8 Buffer
 // (request_id || provider_id || sha256(body) || status || meta). The hub
 // (AttestationConsensus._buildCanonical) and the on-chain verifier
@@ -49,7 +49,7 @@ describe('EQUIV attestation canonical (WI-2 bump 2)', function () {
         expect(c._buildCanonical(RID, PROVIDER, BODY, STATUS, META, undefined).toString('utf8')).to.equal(rawStr());
     });
 
-    it('matches buildEquivCanonical(XATTEST, request_id, 0, raw) — indexer twin parity', function () {
+    it('matches buildEquivCanonical(XATTEST, request_id, 0, raw): indexer twin parity', function () {
         const c = new AttestationConsensus(mockHub('regtest'));
         const expected = eq.buildEquivCanonical(eq.ENGINE_TAGS.ATTEST, RID, 0, rawStr());
         expect(c._buildCanonical(RID, PROVIDER, BODY, STATUS, META, 480).toString('utf8')).to.equal(expected);

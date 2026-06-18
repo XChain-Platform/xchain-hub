@@ -46,7 +46,7 @@ describe('Chaos: DB Connection Loss (DB-1)', function () {
 
     it('circuit breaker opens after threshold consecutive failures', async function () {
         await runExperiment({
-            name: 'DB connection loss — circuit breaker opens',
+            name: 'DB connection loss: circuit breaker opens',
 
             baseline: () => {
                 expectCircuitState(db, 'closed');
@@ -115,7 +115,7 @@ describe('Chaos: DB Connection Loss (DB-1)', function () {
         let mockConn = { release: sinon.stub() };
 
         await runExperiment({
-            name: 'DB connection loss — full lifecycle',
+            name: 'DB connection loss: full lifecycle',
 
             baseline: () => {
                 expectCircuitState(db, 'closed');

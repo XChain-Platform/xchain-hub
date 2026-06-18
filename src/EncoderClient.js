@@ -16,7 +16,7 @@
  *
  * Minimal JSON-RPC 2.0 client for talking to the xchain-encoder REST API.
  * Used by OraclePublisher to construct, broadcast, and look up UTXOs for
- * PRICE v0 transactions on the DOGE chain. Pure axios — no SDK dependency.
+ * PRICE v0 transactions on the DOGE chain. Pure axios, no SDK dependency.
  *
  ********************************************************************/
 

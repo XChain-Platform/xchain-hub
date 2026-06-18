@@ -14,7 +14,7 @@
 //
 // Both publishers call the encoder's createTx with encoding 'P2SH'. The encoder's
 // P2SH path runs bitcoin.address.fromBase58Check() on the `pubkey` field, so that
-// field MUST carry the base58check address — not the raw hex public key. The e2e
+// field MUST carry the base58check address, not the raw hex public key. The e2e
 // harness installs a custom broadcast hook that bypasses _defaultBroadcast, so this
 // path is otherwise untested; these tests exercise it directly with a mock encoder.
 
@@ -34,7 +34,7 @@ function makeMockEncoder() {
     };
 }
 
-describe('Publisher _defaultBroadcast — pubkey field carries the base58check address', function () {
+describe('Publisher _defaultBroadcast: pubkey field carries base58check address', function () {
 
     afterEach(function () {
         sinon.restore();

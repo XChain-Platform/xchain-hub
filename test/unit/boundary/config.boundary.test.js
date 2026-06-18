@@ -66,7 +66,7 @@ describe('Boundary: Config Management', function () {
     });
 
     // -----------------------------------------------------------------------
-    // applyConfig — boundary tests
+    // applyConfig: boundary tests
     // -----------------------------------------------------------------------
 
     describe('applyConfig()', function () {
@@ -221,7 +221,7 @@ describe('Boundary: Config Management', function () {
     });
 
     // -----------------------------------------------------------------------
-    // addParametersFromJson — boundary tests
+    // addParametersFromJson: boundary tests
     // -----------------------------------------------------------------------
 
     describe('addParametersFromJson()', function () {

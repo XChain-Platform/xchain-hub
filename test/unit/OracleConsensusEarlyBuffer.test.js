@@ -11,8 +11,8 @@
 // contact legal@dankest.llc.
 //
 // Finding F7 (standing-federation Phase 1, 2026-06-11): PREPARE/COMMIT
-// arriving before this hub's pendingRounds entry exists were silently
-// dropped — _handlePropose awaits the block-boundary snapshot fetch, and
+// arrives before this hub's pendingRounds entry exists, and gets silently
+// dropped. _handlePropose awaits the block-boundary snapshot fetch, and
 // the whole PBFT burst completes inside that window. The hub then never
 // reached commit quorum locally and the round vanished from its
 // price_snapshots even though the federation finalized. These tests pin
@@ -23,7 +23,7 @@ const { expect }       = require('chai');
 const OracleConsensus  = require('../../src/OracleConsensus');
 const { createMockHub } = require('../helpers/mockHub');
 
-describe('OracleConsensus — early-message buffer (F7)', function () {
+describe('OracleConsensus: early-message buffer for F7', function () {
 
     let hub, pm, oc, oracleRound;
     const VALSET = [
@@ -116,7 +116,7 @@ describe('OracleConsensus — early-message buffer (F7)', function () {
         // _checkCommitQuorum stores via async db call; let it settle.
         await new Promise(r => setImmediate(r));
 
-        // quorum for N=3 is 2 — replayed commits must finalize the round.
+        // quorum for N=3 is 2. replayed commits must finalize the round.
         expect(oc.finalized.has(ROUND)).to.be.true;
         expect(hub.db.doQuery.getCalls().some(c => String(c.args[0]).includes('INSERT INTO price_snapshots'))).to.be.true;
     });

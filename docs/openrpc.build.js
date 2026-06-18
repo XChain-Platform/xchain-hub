@@ -21,7 +21,7 @@ const path = require('path');
 const METHODS = [
     ['ping', 'Health check.', []],
     ['health', 'Detailed health: DB, oracle staleness, P2P state (503 when degraded).', []],
-    ['getallconfigs', 'Service discovery — connection parameters for every platform service on this chain.', []],
+    ['getallconfigs', 'Service discovery: connection parameters for every platform service on this chain.', []],
     ['updateconfig', 'Update a service config entry (PBFT-replicated in validator mode).', ['config'], { auth: true }],
     ['getoraclesubmissions', 'Raw per-validator oracle price submissions for recent rounds.', []],
     ['getpricesnapshots', 'PBFT-finalized price snapshots (trimmed-median rounds).', ['limit']],
@@ -61,11 +61,11 @@ const spec = {
     info: {
         title: 'XChain Hub API',
         version: '1.0.0',
-        description: 'JSON-RPC 2.0 API (POST /) of the XChain hub — config oracle, price oracle, '
+        description: 'JSON-RPC 2.0 API (POST /) of the XChain hub: config oracle, price oracle, '
             + 'cross-chain coordinator, and validator-federation surface. Public deployment is '
             + 'path-routed per chain: https://hub.xchain.io/{COIN}/. Read methods are open; methods '
             + 'marked with x-auth require an x-api-key header when the operator has configured '
-            + 'HUB_API_KEY. Methods marked x-internal are service-to-service (indexers/validators) — '
+            + 'HUB_API_KEY. Methods marked x-internal are service-to-service (indexers/validators); '
             + 'general clients should not call them. Errors follow JSON-RPC 2.0 ({code, message}); '
             + 'registry: https://docs.xchain.io/protocol/Error_Codes.md. '
             + 'LLM-friendly docs: https://docs.xchain.io/llms.txt',

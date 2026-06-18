@@ -99,7 +99,7 @@ describe('Regression: slashing safety + reward split', function () {
 
             await sd._checkParticipation(4, [PK('a'), PK('b')], all);  // a returns → counter reset
             await sd._checkParticipation(5, [PK('b')], all);           // a misses (back to 1)
-            assert.strictEqual(slashed.length, 1, 'counter did not reset — validator re-slashed too soon');
+            assert.strictEqual(slashed.length, 1, 'counter did not reset: validator re-slashed too soon');
         });
     });
 

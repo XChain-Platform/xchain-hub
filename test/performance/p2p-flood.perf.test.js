@@ -13,7 +13,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Scenario 3 — P2P Message Flood
+ * Scenario 3: P2P Message Flood
  *
  * Stress-tests the WebSocket peer mesh under high message volume.
  * Measures message processing latency, dedup cache behavior,
@@ -36,7 +36,7 @@ describe('Performance: P2P Message Flood', function () {
             await testDb.setup();
             db = testDb.getDb();
         } catch (e) {
-            console.log('    MariaDB unavailable — skipping P2P flood tests');
+            console.log('    MariaDB unavailable, skipping P2P flood tests');
             this.skip();
         }
     });

@@ -18,7 +18,7 @@ const gen               = require('./generators');
 describe('Fuzz: ValidatorIdentity', function () {
 
     // -----------------------------------------------------------------
-    // Constructor — input validation
+    // Constructor: input validation
     // -----------------------------------------------------------------
 
     describe('constructor', function () {

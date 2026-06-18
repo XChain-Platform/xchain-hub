@@ -35,10 +35,10 @@ describe('Boundary: RewardTracker', function () {
     });
 
     // -----------------------------------------------------------------
-    // Division precision — equal-split with toFixed(8)
+    // Division precision: equal-split with toFixed(8)
     // -----------------------------------------------------------------
 
-    describe('distributeRewards() — per-validator precision', function () {
+    describe('distributeRewards(): per-validator precision', function () {
 
         function insertAmounts() {
             return hub.db.doQuery.getCalls()
@@ -54,7 +54,7 @@ describe('Boundary: RewardTracker', function () {
             expect(amounts[0]).to.equal('10.00000000');
         });
 
-        it('10 / 3 = 3.33333333 (truncated — total 9.99999999, 1 satoshi lost)', async function () {
+        it('10 / 3 = 3.33333333 (truncated, total 9.99999999, 1 satoshi lost)', async function () {
             await rt.distributeRewards(1, [hexPubkey(1), hexPubkey(2), hexPubkey(3)]);
 
             let amounts = insertAmounts();
@@ -96,10 +96,10 @@ describe('Boundary: RewardTracker', function () {
     });
 
     // -----------------------------------------------------------------
-    // Zero participants — early-return guard
+    // Zero participants: early-return guard
     // -----------------------------------------------------------------
 
-    describe('distributeRewards() — zero participants', function () {
+    describe('distributeRewards(): zero participants', function () {
 
         it('empty array → returns early, zero DB calls', async function () {
             await rt.distributeRewards(1, []);
@@ -118,7 +118,7 @@ describe('Boundary: RewardTracker', function () {
     // Minimum satoshi reward amounts
     // -----------------------------------------------------------------
 
-    describe('distributeRewards() — minimum rewardPerRound precision', function () {
+    describe('distributeRewards(): minimum rewardPerRound precision', function () {
 
         it('rewardPerRound = 0.00000001 / 1 → 0.00000001 (1 satoshi, exact)', async function () {
             hub = createMockHub({ p2pConfig: { ORACLE_REWARD_PER_ROUND: '0.00000001' } });

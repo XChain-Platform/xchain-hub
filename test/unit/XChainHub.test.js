@@ -568,7 +568,7 @@ describe('XChainHub', function () {
             try { await hub._loadValidatorPubkeys(); } catch (e) { threw = true; }
             // Must propagate so startP2P never opens the listener with a null
             // registry (a null registry makes _verifySignature accept any
-            // signed envelope — see PeerManager).
+            // signed envelope; see PeerManager).
             expect(threw).to.be.true;
             expect(hub.peerManager.setValidatorPubkeys.called).to.be.false;
         });
@@ -674,7 +674,7 @@ describe('XChainHub', function () {
     });
 
     // -----------------------------------------------------------------
-    // startAttestation() — operator signer wiring
+    // startAttestation(): operator signer wiring
     // -----------------------------------------------------------------
 
     describe('startAttestation() signer wiring', function () {

@@ -50,7 +50,7 @@ describe('ValidatorIdentity', function () {
             expect(id.getPubkeyHex()).to.equal(keypair.pubkeyHex);
         });
 
-        it('is deterministic — same seed yields same pubkey', function () {
+        it('is deterministic: same seed yields same pubkey', function () {
             let a = new ValidatorIdentity(keypair.privkeyHex);
             let b = new ValidatorIdentity(keypair.privkeyHex);
             expect(a.getPubkeyHex()).to.equal(b.getPubkeyHex());

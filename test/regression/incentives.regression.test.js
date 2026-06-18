@@ -56,18 +56,18 @@ describe('Regression: Incentives & Slashing', function () {
                 expect(args[1][2]).to.equal('10.00000000');
             });
 
-            it('odd division — 10 / 3 = 3.33333333 @regression-p1', async function () {
+            it('odd division: 10 / 3 = 3.33333333 @regression-p1', async function () {
                 await rt.distributeRewards(1, [hexPk(1), hexPk(2), hexPk(3)]);
                 let args = hub.db.doQuery.getCall(0).args;
                 expect(args[1][2]).to.equal('3.33333333');
             });
 
-            it('zero participants — no DB calls @regression-p1', async function () {
+            it('zero participants: no DB calls @regression-p1', async function () {
                 await rt.distributeRewards(1, []);
                 expect(hub.db.doQuery.called).to.be.false;
             });
 
-            it('null participants — no DB calls @regression-p1', async function () {
+            it('null participants: no DB calls @regression-p1', async function () {
                 await rt.distributeRewards(1, null);
                 expect(hub.db.doQuery.called).to.be.false;
             });

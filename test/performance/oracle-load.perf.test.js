@@ -13,7 +13,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Scenario 2 — Oracle Round Under Load
+ * Scenario 2: Oracle Round Under Load
  *
  * Measures oracle round execution time, submission processing, aggregation,
  * and the impact of oracle activity on concurrent API queries.
@@ -38,7 +38,7 @@ describe('Performance: Oracle Round Under Load', function () {
         try {
             await testDb.setup();
         } catch (e) {
-            console.log('    MariaDB unavailable — skipping oracle load tests');
+            console.log('    MariaDB unavailable: skipping oracle load tests');
             this.skip();
         }
         mockApi.setup();

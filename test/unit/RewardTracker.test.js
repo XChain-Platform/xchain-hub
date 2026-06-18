@@ -55,7 +55,7 @@ describe('RewardTracker', function () {
 
     describe('distributeRewards()', function () {
 
-        it('equal split — 10 / 5 = 2.00000000 each', async function () {
+        it('equal split: 10 / 5 = 2.00000000 each', async function () {
             let participants = [hexPk(1), hexPk(2), hexPk(3), hexPk(4), hexPk(5)];
             await rt.distributeRewards(1, participants);
 
@@ -74,18 +74,18 @@ describe('RewardTracker', function () {
             expect(args[1][2]).to.equal('10.00000000');
         });
 
-        it('odd division — 10 / 3 = 3.33333333 each', async function () {
+        it('odd division: 10 / 3 = 3.33333333 each', async function () {
             await rt.distributeRewards(1, [hexPk(1), hexPk(2), hexPk(3)]);
             let args = hub.db.doQuery.getCall(0).args;
             expect(args[1][2]).to.equal('3.33333333');
         });
 
-        it('zero participants — no DB calls', async function () {
+        it('zero participants: no DB calls', async function () {
             await rt.distributeRewards(1, []);
             expect(hub.db.doQuery.called).to.be.false;
         });
 
-        it('null participants — no DB calls', async function () {
+        it('null participants: no DB calls', async function () {
             await rt.distributeRewards(1, null);
             expect(hub.db.doQuery.called).to.be.false;
         });
@@ -113,7 +113,7 @@ describe('RewardTracker', function () {
             expect(hub.db.doQuery.called).to.be.false;
         });
 
-        it('is hub-local only — never pushes to the BTC indexer', async function () {
+        it('is hub-local only (never pushes to the BTC indexer)', async function () {
             // The consensus oracle_round rows are derived by the indexer from the
             // PRICE v0 signer set; a hub push would credit the (unverifiable) PBFT
             // prepare set and could race the indexer's own derivation.
@@ -158,7 +158,7 @@ describe('RewardTracker', function () {
             // anchor under a smaller pubkey. Our (larger) pubkey is the duplicate.
             hub.db.doQuery.onFirstCall().resolves([{ validator_pubkey: hexPk(1), batch_seq: null }]);
             await rt.recordAnchorReward('anchor_BTC', 5, hexPk(2), 100);
-            // Only the SELECT ran — no INSERT, no DELETE.
+            // Only the SELECT ran: no INSERT, no DELETE.
             expect(hub.db.doQuery.callCount).to.equal(1);
         });
 
@@ -190,10 +190,10 @@ describe('RewardTracker', function () {
 
         it('never displaces a row that has already ridden an on-chain archive', async function () {
             // An archived incumbent (batch_seq set) is immutable, even if ours sorts
-            // lower — leave it untouched and drop ours.
+            // lower: leave it untouched and drop ours.
             hub.db.doQuery.onFirstCall().resolves([{ validator_pubkey: hexPk(9), batch_seq: 42 }]);
             await rt.recordAnchorReward('anchor_BTC', 5, hexPk(1), 100);
-            expect(hub.db.doQuery.callCount).to.equal(1);   // SELECT only — no DELETE, no INSERT
+            expect(hub.db.doQuery.callCount).to.equal(1);   // SELECT only: no DELETE, no INSERT
         });
 
         it('pushes the reward to the BTC indexer with its own reward_type', async function () {

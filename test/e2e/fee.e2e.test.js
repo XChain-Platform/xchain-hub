@@ -23,7 +23,7 @@ describe('E2E: Fee Quote Pipeline', function () {
     before(async function () {
         this.timeout(15000);
         try { await testDb.setup(); } catch (e) {
-            console.warn('MariaDB unavailable — skipping E2E fee tests');
+            console.warn('MariaDB unavailable: skipping E2E fee tests');
             return;
         }
         priceMocks.setup();
@@ -107,7 +107,7 @@ describe('E2E: Fee Quote Pipeline', function () {
         });
     });
 
-    // E2E-FEE-002: No oracle data — partial response
+    // E2E-FEE-002: No oracle data (partial response)
     describe('E2E-FEE-002: Fee quote without oracle data', function () {
 
         it('returns gas info without native coin conversion when no price data', async function () {
@@ -117,7 +117,7 @@ describe('E2E: Fee Quote Pipeline', function () {
             await cluster.start();
             let port = cluster.getPort(0);
 
-            // No oracle round run — no price data
+            // No oracle round run, no price data
             let fee = await callRpc(port, 'getfeequote', { action: 'ISSUE', chain: 'BTC' });
             expect(fee.result.gasCost).to.equal(100000);
             expect(fee.result.xchainAmount).to.equal('1.00000000');

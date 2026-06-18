@@ -14,8 +14,8 @@
 // bus (broadcast fans out to every other instance's _handleMessage), each with a
 // real ValidatorIdentity. Exercises the full round (PROPOSE/PREPARE/COMMIT),
 // single-node fallback, Byzantine-value tolerance, leader-failover via
-// view-change, and the tamper / NEW_VIEW guards — the same properties validated
-// for AttestationConsensus/Consensus, which can only be checked in a mesh.
+// view-change, and the tamper / NEW_VIEW guards. The same properties validated
+// for AttestationConsensus/Consensus can only be checked in a mesh.
 
 const { expect }             = require('chai');
 const CrossChainDexConsensus = require('../../src/CrossChainDexConsensus');
@@ -135,7 +135,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         expect([0, 1, 3].every(i => bus.nodes[i].finalized.length === 1)).to.be.true;
     });
 
-    it('does NOT finalize when 2 of 4 refuse (quorum unreachable — safety)', async function () {
+    it('does NOT finalize when 2 of 4 refuse (quorum unreachable, safety)', async function () {
         let bus = buildMesh(4, { validate: (self) => !(self.i === 2 || self.i === 3) });
         await startAll(bus);
         let mid = 'dd'.repeat(32), row = sampleRow(mid);
@@ -158,7 +158,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
 
     it('guard: a tampered-row PROPOSE (fails independent validation) is not signed', async function () {
         // Followers no longer require byte-equality with their locally pre-built
-        // canonical (leader-choice fields legitimately differ) — independent
+        // canonical (leader-choice fields legitimately differ); independent
         // validation is the gate. Model an engine that, like the real ones,
         // verifies business fields against its own data.
         let bus = buildMesh(4, { validate: () => true });
@@ -200,7 +200,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
 
         expect(bus.nodes.every(nd => nd.finalized.length === 1),
                'every node finalizes').to.be.true;
-        // All nodes converged on ONE canonical — the leader's — and every
+        // All nodes converged on ONE canonical (the leader's), and every
         // emitted signature verifies against it (no empty-signature rows).
         let leaderPk = leaderPubkey(bus, mid, 0);
         let leaderIdx = bus.nodes.findIndex(nd => nd.pubkey === leaderPk);
@@ -268,7 +268,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
     it('guard: COMMIT votes without a verifying signature never count toward quorum', async function () {
         // Counting unverified commits let a node whose canonical diverged
         // "finalize" with zero collected signatures (live finding: hub1 wrote a
-        // 0-sig mirror row). Feed a victim commits with garbage sigs — the round
+        // 0-sig mirror row). Feed a victim commits with garbage sigs; the round
         // must NOT finalize.
         let bus = buildMesh(4, { drop: () => true });   // isolate: no real gossip
         await startAll(bus);

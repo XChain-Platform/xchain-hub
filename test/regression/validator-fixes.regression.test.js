@@ -14,8 +14,8 @@
  *
  **********************************************************************
  * Regression guards for the validator setup/run findings (2026-05-30 audit).
- * Each of these bugs was SILENT — the node came up and looked healthy while
- * being subtly broken — which is exactly what a permanent regression gate is
+ * Each of these bugs was SILENT: the node came up and looked healthy while
+ * being subtly broken, which is exactly what a permanent regression gate is
  * for. Spec: claude/reports/specs/2026-05-30_validator-test-spec.md (Pillar B);
  * handover: claude/reports/2026-05-30_validator-testing-handover.md §3.2.
  *
@@ -50,7 +50,7 @@ describe('Regression: validator setup/run fixes', function () {
             const v = require('mariadb/package.json').version;
             const [maj, min] = v.split('.').map((n) => parseInt(n, 10));
             expect(maj, `mariadb ${v}`).to.equal(3);
-            expect(min, `mariadb ${v} is ESM-only — re-pin to ~3.4.x`).to.be.below(5);
+            expect(min, `mariadb ${v} is ESM-only; re-pin to ~3.4.x`).to.be.below(5);
         });
 
         it('src/db.js (which require()s mariadb) loads under CommonJS @regression-p0', function () {
@@ -71,14 +71,14 @@ describe('Regression: validator setup/run fixes', function () {
             // strip line comments so a commented-out call does not pass the guard
             const live = src.replace(/^[ \t]*\/\/.*$/gm, '');
             expect(live).to.match(/\.startCapabilities\s*\(/,
-                'api.js no longer calls startCapabilities — capability self-tests will not run');
+                'api.js no longer calls startCapabilities; capability self-tests will not run');
         });
     });
 
     // -----------------------------------------------------------------
     // REG-VAL-003 (F4): qualification is FAIL-CLOSED. A capability with no
     // configured MIN_STAKE must leave the node NOT qualified, regardless of
-    // stake — never default the threshold to 0. The old behavior qualified an
+    // stake; never default the threshold to 0. The old behavior qualified an
     // unstaked (or any) node for every capability and diverged from the
     // indexer's authoritative governance threshold used to lock quorum N.
     // Drives the REAL XChainHub.refreshOwnQualification + CapabilityRegistry.

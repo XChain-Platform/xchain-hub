@@ -35,7 +35,7 @@ describe('CapabilitySnapshot', function () {
             _resolveBtcIndexerUrl: async () => 'http://indexer.local/rpc',
             // getSnapshot attaches indexer auth headers to the RPC call; the real
             // hub builds these from BTC_INDEXER_API_KEY. Tests don't care about the
-            // header value, only that the call is made — return an empty object.
+            // header value, only that the call is made; return an empty object.
             _btcIndexerHeaders: () => ({})
         };
     }
@@ -110,7 +110,7 @@ describe('CapabilitySnapshot', function () {
         }
 
         it('does NOT serve a snapshot cached under a different min_stake', async function () {
-            // Mutable threshold — simulates a governance change between the two reads.
+            // Mutable threshold: simulates a governance change between the two reads.
             let threshold = '25000';
             let registry = { getMinStake: () => threshold };
             let snap = new CapabilitySnapshot(makeHub(registry));
@@ -176,7 +176,7 @@ describe('CapabilitySnapshot', function () {
     });
 
     // Finding #4136/#4220: a 401 (hub BTC_INDEXER_API_KEY != indexer
-    // INDEXER_API_KEY) must NOT be swallowed as an anonymous null snapshot — that
+    // INDEXER_API_KEY) must NOT be swallowed as an anonymous null snapshot; that
     // makes an auth misconfig indistinguishable from a dead indexer and silently
     // collapses every attestation + config-change quorum.
     describe('indexer auth failure (401/403)', function () {

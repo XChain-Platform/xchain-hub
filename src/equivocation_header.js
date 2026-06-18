@@ -10,7 +10,7 @@
  *
  **********************************************************************
  *
- * XChain Hub — Equivocation Header (EQUIV_HEADER / WI-2 bump 2)
+ * XChain Hub: Equivocation Header (EQUIV_HEADER / WI-2 bump 2)
  *
  * The single, CONSENSUS-CRITICAL implementation of the uniform signed header that
  * every PBFT/consensus canonical is prefixed with at/above the activation flag-day:
@@ -25,12 +25,12 @@
  * Both `EQUIV_KEY` (= ENGINE_TAG|ROUND_ID|VIEW) and the canonical may contain `|`
  * (e.g. the checkpoint round id is `chain|network|block_index|checkpoint_seq`, and
  * every settlement canonical is pipe-joined). So consumers MUST NOT field-split the
- * canonical to recover the key — they match on the literal prefix
+ * canonical to recover the key; they match on the literal prefix
  * `EQUIV|<EQUIV_KEY>||` via startsWith (the `||` is the unambiguous key/content
  * boundary; `buildEquivCanonical` is the only producer).
  *
  * This is consensus-breaking (it changes the signed bytes), so it is gated on the
- * BTC-anchored snapshot_block + network — the hub and every indexer flip on the same
+ * BTC-anchored snapshot_block + network. The hub and every indexer flip on the same
  * anchor. The indexer keeps a byte-equivalent copy in
  * xchain-indexer/src/equivocation_header.js; the cross-service regression suite
  * asserts the activation map matches the canonical in
@@ -39,11 +39,11 @@
  ********************************************************************/
 
 // Per-network activation height (LOCAL COPY of the canonical map in
-// xchain-documentation/protocol/constants.js — kept equal by the cross-service
+// xchain-documentation/protocol/constants.js, kept equal by the cross-service
 // regression suite). Keyed on the BTC-anchored snapshot_block, NOT each chain's
 // local height, so the hub and all indexers flip on the same anchor.
 const EQUIV_HEADER_ACTIVATION = {
-    mainnet: 999999999,   // PLACEHOLDER — set the real BTC flag-day height before mainnet enable
+    mainnet: 999999999,   // PLACEHOLDER: set the real BTC flag-day height before mainnet enable
     testnet: 0,
     regtest: 0,
 };

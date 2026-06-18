@@ -238,8 +238,8 @@ describe('Regression: Consensus (PBFT)', function () {
             let digest = consensus._digest(config);
 
             // Attempt with seq 5 (below lastAppliedSeq)
-            // (sender is the legit (seq 5, view 0) leader, so the stale-seq guard
-            // — not the identity guard — is what rejects it)
+            // (sender is the legit (seq 5, view 0) leader, so the stale-seq guard,
+            // not the identity guard, is what rejects it)
             consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
                 data: { seq: 5, view: 0, configDigest: digest, config }
@@ -296,7 +296,7 @@ describe('Regression: Consensus (PBFT)', function () {
             let digest = consensus._digest(config);
 
             // (seq 5, view 0) → leader is VALIDATORS_4[1]; a PRE_PREPARE from any
-            // other validator must not create a proposal — the identity guard stops
+            // other validator must not create a proposal; the identity guard stops
             // an authenticated non-leader from driving an uncontested seq to commit.
             consensus._handlePrePrepare({
                 sender: VALIDATORS_4[3].addr,

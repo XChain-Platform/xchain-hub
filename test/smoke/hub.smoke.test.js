@@ -76,8 +76,8 @@ describe('Smoke: xchain-hub', function () {
     describe('SMOKE-HUB-001: Environment variable validation', function () {
         const REQUIRED = ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT'];
 
-        // Build a complete valid env set (values don't matter — the process exits before connecting)
-        // All values must be truthy — api.js checks !process.env[key] which treats '' as missing
+        // Build a complete valid env set (values don't matter; the process exits before connecting)
+        // All values must be truthy: api.js checks !process.env[key] which treats '' as missing
         let validEnv = {
             HUB_DB_HOST: '127.0.0.1',
             HUB_DB_PORT: '3306',
@@ -114,7 +114,7 @@ describe('Smoke: xchain-hub', function () {
 
         before(async function () {
             try { await testDb.setup(); } catch (e) {
-                console.warn('MariaDB unavailable — skipping DB smoke tests');
+                console.warn('MariaDB unavailable: skipping DB smoke tests');
             }
         });
 
@@ -147,7 +147,7 @@ describe('Smoke: xchain-hub', function () {
         before(async function () {
             if (!testDb.isAvailable()) {
                 try { await testDb.setup(); } catch (e) {
-                    console.warn('MariaDB unavailable — skipping API smoke tests');
+                    console.warn('MariaDB unavailable: skipping API smoke tests');
                     return;
                 }
             }

@@ -85,8 +85,8 @@ describe('StateCheckpointEngine', function () {
     }
 
     // Build n engines over a shared in-memory gossip bus.
-    // opts.btcBlock — resolved BTC tip (drives cadence-leader election);
-    // opts.hashesFor(self) — per-node getblockhashes result (default TIP).
+    // opts.btcBlock  : resolved BTC tip (drives cadence-leader election);
+    // opts.hashesFor(self) : per-node getblockhashes result (default TIP).
     function buildMesh(n, opts) {
         opts = opts || {};
         let bus = { nodes: [] };
@@ -229,7 +229,7 @@ describe('StateCheckpointEngine', function () {
     it('every node (followers included) persists the oracle_publish snapshot at finalize', async function () {
         // Bug-C analog: only the cadence leader persisted capability_snapshots
         // (in _tick), but ANCHOR verifiers check checkpoint signatures against
-        // whichever hub DB they mirror — a follower's DB may be the only one
+        // whichever hub DB they mirror; a follower's DB may be the only one
         // they read.
         let bus = buildMesh(4, { btcBlock: 101 });
         await startAll(bus);
@@ -287,7 +287,7 @@ describe('StateCheckpointEngine', function () {
     it('followers never co-sign a stale checkpoint_seq (replay guard)', async function () {
         let bus = buildMesh(4, { btcBlock: 101 });
         await startAll(bus);
-        // Pre-record seq 5 on every follower — the leader (fresh DB) proposes seq 0.
+        // Pre-record seq 5 on every follower; the leader (fresh DB) proposes seq 0.
         let leader = leaderNode(bus, 101);
         for (let nd of bus.nodes) {
             if (nd === leader) continue;
@@ -311,7 +311,7 @@ describe('StateCheckpointEngine', function () {
             checkpoint_seq: 0, snapshot_block: 101
         };
         let canon = StateCheckpointEngine.canonicalCheckpoint(cp);
-        // Impostor broadcasts a well-formed, correctly signed REQ — but isn't the cadence leader.
+        // Impostor broadcasts a well-formed, correctly signed REQ, but isn't the cadence leader.
         impostor.engine.peerManager.broadcast(StateCheckpointEngine.XCHK_SIGN_REQ, {
             checkpoint: cp, sig_pubkey: impostor.pubkey, sig: impostor.identity.sign(canon)
         });

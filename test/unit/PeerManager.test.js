@@ -170,7 +170,7 @@ describe('PeerManager', function () {
 
         it('rejects a signed message when the validator registry is null (fail closed)', function () {
             // A null registry means no sender can be authenticated, so a signed
-            // envelope must be rejected, not trusted — accepting here would let
+            // envelope must be rejected, not trusted; accepting here would let
             // any self-signed message through while the registry is unloaded.
             pm.requireSigs = true;
             pm.validatorPubkeys = null;
@@ -193,10 +193,10 @@ describe('PeerManager', function () {
     });
 
     // -----------------------------------------------------------------
-    // _verifySignature() — Option A (sig_pubkey union membership)
+    // _verifySignature(): Option A (sig_pubkey union membership)
     // -----------------------------------------------------------------
 
-    describe('_verifySignature() — Option A', function () {
+    describe('_verifySignature(): Option A', function () {
 
         let identity;
         beforeEach(function () {
@@ -216,13 +216,13 @@ describe('PeerManager', function () {
 
         it('accepts when sig_pubkey is in the chain-effective signer set', function () {
             pm.setEffectiveSignerSet(new Set([keypair.pubkeyHex.toLowerCase()]));
-            // Registry is empty — admission must come purely from the effective set.
+            // Registry is empty; admission must come purely from the effective set.
             pm.setValidatorPubkeys(new Map());
             expect(pm._verifySignature(signedEnv())).to.be.true;
         });
 
         it('accepts when sig_pubkey is in the registry pubkey set (addr-independent)', function () {
-            // Registry maps a DIFFERENT addr to this pubkey — membership is by
+            // Registry maps a DIFFERENT addr to this pubkey; membership is by
             // pubkey value, not by envelope.sender.
             pm.setValidatorPubkeys(new Map([['ws://other-addr:9', keypair.pubkeyHex]]));
             pm.setEffectiveSignerSet(null);
@@ -360,7 +360,7 @@ describe('PeerManager', function () {
     });
 
     // -----------------------------------------------------------------
-    // _handleInbound — guards, events, self-connection, rate limit, sig
+    // _handleInbound: guards, events, self-connection, rate limit, sig
     // -----------------------------------------------------------------
 
     describe('_handleInbound() branches', function () {
@@ -455,8 +455,8 @@ describe('PeerManager', function () {
             let sourceWs = { readyState: 1, send: sinon.stub() };
             let otherWs  = { readyState: 1, send: sinon.stub() };
             let senderWs = { readyState: 1, send: sinon.stub() };
-            pm.peers.set('ws://sender:1', { ws: senderWs });  // original sender — skipped
-            pm.peers.set('ws://src:1',    { ws: sourceWs });  // source ws — skipped
+            pm.peers.set('ws://sender:1', { ws: senderWs });  // original sender, skipped
+            pm.peers.set('ws://src:1',    { ws: sourceWs });  // source ws, skipped
             pm.peers.set('ws://other:1',  { ws: otherWs });
             pm._relay({ id: 'm', type: 'T', sender: 'ws://sender:1', timestamp: 1, data: {} }, sourceWs);
             expect(otherWs.send.calledOnce).to.be.true;

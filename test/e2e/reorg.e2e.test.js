@@ -24,7 +24,7 @@ describe('E2E: Reorg Handling Pipeline', function () {
     before(async function () {
         this.timeout(15000);
         try { await testDb.setup(); } catch (e) {
-            console.warn('MariaDB unavailable — skipping E2E reorg tests');
+            console.warn('MariaDB unavailable, skipping E2E reorg tests');
             return;
         }
         priceMocks.setup();
@@ -78,7 +78,7 @@ describe('E2E: Reorg Handling Pipeline', function () {
             });
             expect(reorgRes.result.status).to.equal('success');
 
-            // Wait for rollback — the reorgHandler in single-node mode (quorum=0)
+            // Wait for rollback; the reorgHandler in single-node mode (quorum=0)
             // executes _executeRollback synchronously within the reportReorg call,
             // but the JSON-RPC response arrives after the await completes.
             await new Promise(r => setTimeout(r, 2000));

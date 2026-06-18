@@ -59,7 +59,7 @@ describe('Integration: Oracle Round Lifecycle (SC-2.x)', function () {
         try {
             await testDb.setup();
         } catch (e) {
-            console.warn('MariaDB unavailable — skipping oracle round tests');
+            console.warn('MariaDB unavailable; skipping oracle round tests');
         }
         mockApi.setup();
     });
@@ -155,7 +155,7 @@ describe('Integration: Oracle Round Lifecycle (SC-2.x)', function () {
             // Finalize the round
             await oracleConsensus.finalizeRound(round);
 
-            // Leader should have proposed — get the digest
+            // Leader should have proposed; get the digest
             let pending = oracleConsensus.pendingRounds.get(round);
             if (pending) {
                 // Inject PREPARE from other validators

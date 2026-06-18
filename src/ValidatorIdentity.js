@@ -70,7 +70,7 @@ class ValidatorIdentity {
             // Option A: bind the signing key into the signature. Appended last
             // and via JSON.stringify (which omits undefined keys), so a pre-A
             // envelope without sig_pubkey produces the identical canonical it
-            // was signed with — backward compatible across a rolling deploy.
+            // was signed with, keeping backward compatibility across a rolling deploy.
             sig_pubkey: envelope.sig_pubkey
         });
     }

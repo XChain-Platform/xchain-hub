@@ -38,15 +38,15 @@ describe('ReorgHandler', function () {
     // -----------------------------------------------------------------
 
     describe('_getAffectedChains()', function () {
-        it('returns all chains except source — BTC', function () {
+        it('returns all chains except source: BTC', function () {
             expect(rh._getAffectedChains('BTC')).to.deep.equal(['LTC', 'DOGE']);
         });
 
-        it('returns all chains except source — LTC', function () {
+        it('returns all chains except source: LTC', function () {
             expect(rh._getAffectedChains('LTC')).to.deep.equal(['BTC', 'DOGE']);
         });
 
-        it('returns all chains except source — DOGE', function () {
+        it('returns all chains except source: DOGE', function () {
             expect(rh._getAffectedChains('DOGE')).to.deep.equal(['BTC', 'LTC']);
         });
     });
@@ -86,7 +86,7 @@ describe('ReorgHandler', function () {
     });
 
     // -----------------------------------------------------------------
-    // reportReorg() — single-node fallback
+    // reportReorg(): single-node fallback
     // -----------------------------------------------------------------
 
     describe('reportReorg()', function () {
@@ -254,7 +254,7 @@ describe('ReorgHandler', function () {
     });
 
     // -----------------------------------------------------------------
-    // Consensus timeout — surfaced event (not silent discard)
+    // Consensus timeout: surfaced event (not silent discard)
     //
     // When a reorg round can't reach quorum within the window, the pending
     // rollback used to be dropped with only a console.warn, leaving cross-chain

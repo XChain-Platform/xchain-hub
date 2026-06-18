@@ -124,7 +124,7 @@ describe('Boundary: Quorum Calculation', function () {
     });
 
     // -----------------------------------------------------------------
-    // CrossChainEngine — supports chain-pair-specific validator sets
+    // CrossChainEngine: supports chain-pair-specific validator sets
     // -----------------------------------------------------------------
 
     describe('CrossChainEngine._getQuorum()', function () {

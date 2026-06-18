@@ -122,7 +122,7 @@ describe('Fuzz: XChainHub.getFeeQuote()', function () {
                     // Use callsFake to handle both getPrice calls correctly
                     dbStub.doQuery = sinon.stub().callsFake(function (query) {
                         if (query.includes('coin_pair = ?')) {
-                            // getPrice call — return fuzzed price for BTC/USD, nothing for XCHAIN
+                            // getPrice call: return fuzzed price for BTC/USD, nothing for XCHAIN
                             let args = Array.from(arguments);
                             let params = args[1] || [];
                             if (params[0] === 'XCHAIN/BTC') return Promise.resolve([]);
@@ -140,8 +140,8 @@ describe('Fuzz: XChainHub.getFeeQuote()', function () {
                         // toFixed(8) truncates to 8 decimal places. When dividing feeUsd
                         // (~1.0) by a large coinUsd (e.g. 60000), nativeCoinAmount is ~1.6e-5.
                         // toFixed(8) on this loses relative precision. Multiplying back
-                        // amplifies the error. Use 1e-3 relative tolerance — still catches
-                        // NaN, Infinity, sign errors, and order-of-magnitude bugs.
+                        // amplifies the error. Use 1e-3 relative tolerance (still catches
+                        // NaN, Infinity, sign errors, and order-of-magnitude bugs).
                         let tolerance = Math.max(Math.abs(feeUsd) * 1e-3, 1e-7);
                         expect(reconstructed).to.be.closeTo(feeUsd, tolerance);
                     }

@@ -37,13 +37,13 @@ class RewardTracker {
         this.btcIndexerApiKey = process.env.BTC_INDEXER_API_KEY || '';
     }
 
-    // Distribute rewards for a finalized oracle round — HUB-LOCAL ONLY (ops
+    // Distribute rewards for a finalized oracle round. HUB-LOCAL ONLY (ops
     // visibility: getRewardHistory / dashboards). The consensus oracle_round
     // rewards are derived by the BTC indexer from the published PRICE v0
     // action's verified signer set (a deterministic function of the chain, so
-    // reindex/recovery replays them); the old push to the indexer is retired —
-    // it credited the in-memory PBFT prepare set, which no offline verifier
-    // could ever re-derive, and could race the indexer's own derivation.
+    // reindex/recovery replays them); the old push to the indexer is retired
+    // because it credited the in-memory PBFT prepare set, which no offline
+    // verifier could ever re-derive, and could race the indexer's own derivation.
     // participants: array of validator pubkeys that submitted valid prices
     // btcBlockHeight: the BTC chain tip when this round was triggered
     async distributeRewards(round, participants, btcBlockHeight) {
@@ -72,7 +72,7 @@ class RewardTracker {
                 .catch(e => console.error('Error recording reward for ' + pubkey + ':', e));
         }
 
-        console.log('Rewards: Round ' + round + ' — ' + perValidator + ' XCHAIN each to ' + validParticipants.length + ' validators (hub-local; indexer derives the consensus rows from PRICE v0)');
+        console.log('Rewards: Round ' + round + ': ' + perValidator + ' XCHAIN each to ' + validParticipants.length + ' validators (hub-local; indexer derives the consensus rows from PRICE v0)');
     }
 
     // Record a single anchor-publish reward (ANCHOR v0 per-chain or v1 archive).
@@ -80,7 +80,7 @@ class RewardTracker {
     // batch_seq. The publisher that paid the DOGE earns it. Called on EVERY hub
     // (the publisher at publish time; peers from the signature-verified
     // V0_DONE/FINALIZED announcements), and blockIndex MUST be the quorum-agreed
-    // snapshot_block of the rewarded checkpoint — so all hubs record identical
+    // snapshot_block of the rewarded checkpoint, so all hubs record identical
     // row bytes and the ANCHOR archive's rewards section verifies by
     // re-derivation.
     //
@@ -88,7 +88,7 @@ class RewardTracker {
     // pubkeys. The table's UNIQUE KEY includes validator_pubkey, so a bare INSERT
     // IGNORE cannot collapse a failover race: when a late rank-0 and an early
     // rank-1 both publish the same checkpoint, each records its own pubkey for the
-    // same (round_number, reward_type) and BOTH rows would land — minting the
+    // same (round_number, reward_type) and BOTH rows would land, minting the
     // reward twice and inflating the COLLECT rail. We collapse them
     // deterministically: the lexicographically smallest pubkey keeps the credit.
     // Every hub computes the identical winner from the same set of rows, so the
@@ -112,16 +112,16 @@ class RewardTracker {
             .catch(e => { console.error('Error reading anchor reward for ' + lcPubkey + ':', e); return null; });
         existing = existing || [];
 
-        if (existing.some(r => String(r.validator_pubkey).toLowerCase() === lcPubkey)) return;   // already ours — idempotent
+        if (existing.some(r => String(r.validator_pubkey).toLowerCase() === lcPubkey)) return;   // already ours (idempotent)
         if (existing.length > 0) {
             // A row already rode an on-chain archive → immutable, the canonical
             // winner fleet-wide. Never insert a competing pubkey behind it.
             if (existing.some(r => r.batch_seq != null)) return;
             // Otherwise the deterministic winner is the smallest pubkey. If an
-            // incumbent sorts at or below ours, ours is the duplicate — drop it.
+            // incumbent sorts at or below ours, ours is the duplicate; drop it.
             let minIncumbent = existing.map(r => String(r.validator_pubkey).toLowerCase()).sort()[0];
             if (minIncumbent <= lcPubkey) return;
-            // Our pubkey sorts strictly lower and nothing is archived yet — it
+            // Our pubkey sorts strictly lower and nothing is archived yet, so it
             // supersedes the local-only incumbent(s); every hub makes the same call.
             await this.db.doQuery(
                 'DELETE FROM validator_rewards WHERE round_number = ? AND reward_type = ? AND batch_seq IS NULL',
@@ -134,14 +134,14 @@ class RewardTracker {
         await this.db.doQuery(query, [lcPubkey, roundNumber, rewardType, amountStr, blockIndex || 0])
             .catch(e => console.error('Error recording anchor reward for ' + lcPubkey + ':', e));
 
-        console.log('Rewards: ' + rewardType + ' #' + roundNumber + ' — ' + amountStr + ' XCHAIN to ' + lcPubkey.substring(0, 16) + '…');
+        console.log('Rewards: ' + rewardType + ' #' + roundNumber + ': ' + amountStr + ' XCHAIN to ' + lcPubkey.substring(0, 16) + '…');
 
         this._pushRewardsToBtcIndexer(roundNumber, [lcPubkey], amountStr, blockIndex || roundNumber, rewardType)
             .catch(e => console.warn('Rewards: failed to push anchor reward to BTC indexer:', e));
     }
 
     // Resolve the staking source address that owns a signing pubkey at a block,
-    // via the BTC indexer (stakes first, then DELEGATE v0 delegations) — the
+    // via the BTC indexer (stakes first, then DELEGATE v0 delegations); the
     // archive builder pins this earn-time source into the ANCHOR archive and
     // followers re-resolve it before co-signing. Block-scoped, so every hub gets
     // the same answer regardless of when it asks. Returns the address string or
@@ -167,7 +167,7 @@ class RewardTracker {
     }
 
     // Push validator rewards to the BTC indexer's local DB via JSON-RPC
-    // Called fire-and-forget — failures are logged but never block the consensus path
+    // Called fire-and-forget; failures are logged but never block the consensus path
     async _pushRewardsToBtcIndexer(round, pubkeys, amount, blockIndex, rewardType) {
         if (!this.btcIndexerApiUrl) return;
         let rewards = pubkeys.map(pk => ({ pubkey: pk, amount: amount }));

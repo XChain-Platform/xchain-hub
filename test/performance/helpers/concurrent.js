@@ -16,9 +16,9 @@
  * Concurrency driver for performance tests.
  *
  * Provides:
- *   - blast(fn, n)         — fire n calls in parallel, collect per-call timings
- *   - ramp(fn, levels, ms) — step through concurrency levels, collecting histograms
- *   - weightedPick(table)  — pick a random item using weighted distribution
+ *   - blast(fn, n): fire n calls in parallel, collect per-call timings
+ *   - ramp(fn, levels, ms): step through concurrency levels, collecting histograms
+ *   - weightedPick(table): pick a random item using weighted distribution
  */
 
 const { Histogram } = require('./metrics');

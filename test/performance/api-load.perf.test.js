@@ -13,7 +13,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Scenario 1 — API Query Saturation
+ * Scenario 1: API Query Saturation
  *
  * Measures JSON-RPC API throughput and latency under concurrent load.
  * Uses a real Express server via cluster.createCluster(1) and pre-seeded DB.
@@ -47,7 +47,7 @@ describe('Performance: API Query Saturation', function () {
         try {
             await testDb.setup();
         } catch (e) {
-            console.log('    MariaDB unavailable — skipping API load tests');
+            console.log('    MariaDB unavailable, skipping API load tests');
             this.skip();
         }
         mockApi.setup();

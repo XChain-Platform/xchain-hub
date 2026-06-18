@@ -13,7 +13,7 @@
 // Finding F1 (standing-federation Phase 1, 2026-06-11): registerValidator
 // reloaded the validator set into the config-PBFT engine only. Engines that
 // were running with a different (e.g. boot-time-empty) set developed
-// divergent leader views — a hub restarted into such a federation rejected
+// divergent leader views. A hub restarted into such a federation rejected
 // legitimate proposals ("PROPOSE from non-leader") and silently missed
 // every round whose expected leader never proposes. These tests pin the
 // propagate-to-every-engine behavior for both registerValidator and
@@ -23,7 +23,7 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const XChainHub  = require('../../src/XChainHub');
 
-describe('XChainHub — validator-set propagation (F1)', function () {
+describe('XChainHub: validator-set propagation (F1)', function () {
 
     const PUBKEY = 'ab'.repeat(32);
     const SET    = [{ addr: 'ws://v1:10001', signing_pubkey: 'aa'.repeat(32) }];

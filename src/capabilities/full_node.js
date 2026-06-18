@@ -17,7 +17,7 @@
  * Determines whether this hub can participate in the verified full-node tier:
  * it needs a reachable BTC coin full-node RPC to compute (and verify) the
  * derived possession-challenge answer. A light validator (hub + xchain-sync,
- * no coin node) has none — its self-test fails, so it never claims the
+ * no coin node) has none. Its self-test fails, so it never claims the
  * full_node capability and never earns the full-node reward tranche. Live
  * connectivity beyond config presence is exercised by FullNodeChallengeRound.
  *
@@ -34,7 +34,7 @@ exports.selfTest = async (config) => {
         || process.env.FULLNODE_BTC_RPC
         || '';
     if (!rpc) {
-        return { ok: false, reason: 'no BTC coin full-node RPC configured (FULLNODE.BTC_RPC or cross_chain.chains.BTC.rpc) — light validators cannot claim full_node' };
+        return { ok: false, reason: 'no BTC coin full-node RPC configured (FULLNODE.BTC_RPC or cross_chain.chains.BTC.rpc); light validators cannot claim full_node' };
     }
     return { ok: true };
 };

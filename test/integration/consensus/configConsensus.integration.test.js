@@ -64,7 +64,7 @@ describe('Integration: Config Consensus (SC-6.x)', function () {
 
     before(async function () {
         try { await testDb.setup(); } catch (e) {
-            console.warn('MariaDB unavailable — skipping config consensus tests');
+            console.warn('MariaDB unavailable; skipping config consensus tests');
         }
     });
 
@@ -87,7 +87,7 @@ describe('Integration: Config Consensus (SC-6.x)', function () {
 
             let config = { BTC: { mainnet: { decoder: { port: '8333' } } } };
 
-            // Leader proposes — returns a promise
+            // Leader proposes (returns a promise)
             let proposePromise = consensus.propose(config);
 
             await new Promise(r => setTimeout(r, 50));

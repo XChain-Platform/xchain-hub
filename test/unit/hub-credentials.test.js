@@ -33,11 +33,11 @@ function _tmpDir(){
 }
 function _populate(dir){ fs.writeFileSync(path.join(dir, '.credentials.json'), '{}'); return dir; }
 
-describe('resolveHubLlmAuth — credential resolution chain', function () {
+describe('resolveHubLlmAuth: credential resolution chain', function () {
 
     let hermeticDefaultDir;
     beforeEach(function () {
-        // Empty dir as the "default isolated dir" — won't satisfy the
+        // Empty dir as the "default isolated dir": won't satisfy the
         // pre-populated fallback (rule 6) unless a test populates it.
         hermeticDefaultDir = _tmpDir();
     });
@@ -61,7 +61,7 @@ describe('resolveHubLlmAuth — credential resolution chain', function () {
     });
 
     it('skips an empty HUB_CLAUDE_CONFIG_DIR and falls through to CLAUDE_CONFIG_DIR', function () {
-        const empty    = _tmpDir();              // empty dir — _checkConfigDir returns false
+        const empty    = _tmpDir();              // empty dir: _checkConfigDir returns false
         const populated = _populate(_tmpDir());
         const r = resolveHubLlmAuth({
             env: { HUB_CLAUDE_CONFIG_DIR: empty, CLAUDE_CONFIG_DIR: populated },
@@ -131,7 +131,7 @@ describe('resolveHubLlmAuth — credential resolution chain', function () {
             env: { ANTHROPIC_API_KEY: 'sk-yyy' },
             defaultConfigDir: hermeticDefaultDir
         });
-        // API_KEY (rule 5) outranks default_config_dir (rule 6) — deliberate
+        // API_KEY (rule 5) outranks default_config_dir (rule 6): deliberate
         // env-var wins over opportunistic default discovery.
         expect(r.transport).to.equal('anthropic_api');
         expect(r.source).to.equal('api_key');

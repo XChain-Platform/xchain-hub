@@ -23,7 +23,7 @@ describe('E2E: Config Pipeline', function () {
     before(async function () {
         this.timeout(15000);
         try { await testDb.setup(); } catch (e) {
-            console.warn('MariaDB unavailable — skipping E2E config tests');
+            console.warn('MariaDB unavailable, skipping E2E config tests');
             return;
         }
         priceMocks.setup();
@@ -60,7 +60,7 @@ describe('E2E: Config Pipeline', function () {
             await cluster.start();
             let port = cluster.getPort(0);
 
-            // Write config — bypass consensus by writing directly to the hub's DB
+            // Write config: bypass consensus by writing directly to the hub's DB
             let db = cluster.getDb();
             let hub = cluster.getHub(0);
             await hub.applyConfig({

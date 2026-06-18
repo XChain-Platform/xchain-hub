@@ -18,7 +18,7 @@ const OracleConsensus  = require('../../src/OracleConsensus');
 const { createMockHub }       = require('../helpers/mockHub');
 const { VALIDATORS_3, buildSubmissions } = require('../helpers/fixtures');
 
-describe('OracleConsensus — follower price validation / minSubmissions / broadcast', function () {
+describe('OracleConsensus: follower price validation / minSubmissions / broadcast', function () {
     let hub, pm, oc, oracleRound, leader;
     const ROUND = 1;                               // must be truthy (_handlePropose: `if (!round) return`)
 
@@ -30,7 +30,7 @@ describe('OracleConsensus — follower price validation / minSubmissions / broad
         oc = new OracleConsensus(hub, oracleRound);
         oc.setValidatorSet(VALIDATORS_3);
         leader = oc._getLeader(ROUND);             // this round's deterministic leader
-        // This hub is a follower — pick a validator that is NOT the round leader.
+        // This hub is a follower; pick a validator that is NOT the round leader.
         pm.validatorAddr = VALIDATORS_3.find(v => v.addr !== leader.addr).addr;
         // This follower's own locally-observed price for BTC/USD is 100000.
         oracleRound.getSubmissions.returns(buildSubmissions([
@@ -88,7 +88,7 @@ describe('OracleConsensus — follower price validation / minSubmissions / broad
         expect(hub.hubDbBroadcaster.broadcastRow.firstCall.args[0].table).to.equal('price_snapshots');
     });
 
-    // #3707 — a finalized round must be written atomically (one statement) so a
+    // #3707: a finalized round must be written atomically (one statement) so a
     // getfeequote / getpricesnapshots reader can never observe a torn round.
     it('_storeSnapshot writes the whole round in a single multi-row INSERT (atomic)', async function () {
         let insertCalls = [];
@@ -105,7 +105,7 @@ describe('OracleConsensus — follower price validation / minSubmissions / broad
         expect(insertCalls[0].sql).to.match(/ON DUPLICATE KEY UPDATE/);
     });
 
-    // #3955 — a withheld co-sign emits an observability signal so a feed-disagreement
+    // #3955: a withheld co-sign emits an observability signal so a feed-disagreement
     // timeout is distinguishable from a leader crash.
     it('emits oracle:propose-rejected when a proposed price is withheld', async function () {
         let events = [];

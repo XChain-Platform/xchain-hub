@@ -24,7 +24,7 @@ describe('E2E: Multi-Node Cluster', function () {
     before(async function () {
         this.timeout(15000);
         try { await testDb.setup(); } catch (e) {
-            console.warn('MariaDB unavailable — skipping E2E multi-node tests');
+            console.warn('MariaDB unavailable: skipping E2E multi-node tests');
             return;
         }
         priceMocks.setup();
@@ -155,7 +155,7 @@ describe('E2E: Multi-Node Cluster', function () {
 
             // Request attestation from the leader node
             // The CrossChainEngine uses seq-based leader rotation
-            // Try from each node — only the leader will succeed
+            // Try from each node; only the leader will succeed
             let attestation = null;
             for (let i = 0; i < 3; i++) {
                 let res = await callRpc(cluster.getPort(i), 'requestattestation', {

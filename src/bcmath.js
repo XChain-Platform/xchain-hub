@@ -20,8 +20,8 @@
  * uses for its local order book (order_match.js bottleneck-clamp + getPrice /
  * bcmul precision 18 / bcsub precision 64) so a fill the hub finalizes lands the
  * legs and reduces each order's `getOrderAmountsRemaining` consistently. Pin the
- * same mathjs major as the indexer (15.x, default BigNumber precision 64) — these
- * MUST stay byte-equivalent.
+ * same mathjs major as the indexer (15.x, default BigNumber precision 64).
+ * These MUST stay byte-equivalent.
  *
  ********************************************************************/
 
@@ -78,7 +78,7 @@ function getPrice(numerator, denominator, precision = 64){
     return bcdiv(numerator, denominator, precision);
 }
 
-// Exact decimal comparisons (decimal.js native — no mathjs epsilon).
+// Exact decimal comparisons (decimal.js native, no mathjs epsilon).
 function bcgt(numA, numB){ return bcnum(numA).gt(bcnum(numB)); }
 function bclt(numA, numB){ return bcnum(numA).lt(bcnum(numB)); }
 function bcgte(numA, numB){ return bcnum(numA).gte(bcnum(numB)); }

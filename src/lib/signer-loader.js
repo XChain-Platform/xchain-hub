@@ -17,7 +17,7 @@
  * The on-chain publishers (OraclePublisher → PRICE v0, StateAnchorPublisher →
  * ANCHOR) build and broadcast DOGE
  * transactions through the encoder, but SIGNING is the operator's
- * responsibility — the hub holds no coin keys, only its Ed25519 validator
+ * responsibility. The hub holds no coin keys, only its Ed25519 validator
  * identity. Each publisher exposes setWalletSignHook / setBroadcastHook /
  * setBalanceHook; this loader is the production boot path that wires them
  * (previously only test drivers ever called the setters, so on-chain
@@ -26,14 +26,14 @@
  * HUB_SIGNER_MODULE names an operator-supplied CommonJS module (mounted into
  * the container together with its own node_modules) exporting:
  *
- *   walletSign(psbtHex) → Promise<txHex>     REQUIRED — sign a PSBT with the
+ *   walletSign(psbtHex) → Promise<txHex>     REQUIRED: sign a PSBT with the
  *                                            DOGE_ADDRESS private key
- *   broadcast(payload)  → Promise<{txid}>    optional — replaces the default
+ *   broadcast(payload)  → Promise<{txid}>    optional: replaces the default
  *                                            encoder build/sign/broadcast pipeline
- *   getBalance()        → Promise<number>    optional — publisher low-balance checks
+ *   getBalance()        → Promise<number>    optional: publisher low-balance checks
  *
  * A thin wrapper over xchain-sdk's wallet.signPsbt(psbtHex, wif) satisfies
- * the contract — see examples/doge-signer.example.js.
+ * the contract. See examples/doge-signer.example.js.
  *
  * Failure policy: HUB_SIGNER_MODULE unset returns null and the publishers
  * stay idle (their own "no broadcast pipeline configured" warnings fire).
@@ -70,8 +70,8 @@ function loadSignerHooks(env){
 }
 
 // Apply loaded hooks to a publisher (anything exposing the standard setters).
-// Wiring OraclePublisher alone covers StateAnchorPublisher too — it borrows
-// the hooks via _resolveSigner().
+// Wiring OraclePublisher alone covers StateAnchorPublisher too, because it
+// borrows the hooks via _resolveSigner().
 function applySignerHooks(publisher, hooks){
     if(!publisher || !hooks) return false;
     if(typeof publisher.setWalletSignHook === 'function')

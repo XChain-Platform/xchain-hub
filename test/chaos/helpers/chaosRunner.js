@@ -16,11 +16,11 @@
  * Chaos Experiment Runner
  *
  * Provides the experiment lifecycle loop:
- *   1. BASELINE  — verify steady state
- *   2. INJECT    — introduce fault condition
- *   3. OBSERVE   — collect metrics during fault window
- *   4. RECOVER   — remove fault condition
- *   5. VERIFY    — confirm system returns to steady state
+ *   1. BASELINE: verify steady state
+ *   2. INJECT: introduce fault condition
+ *   3. OBSERVE: collect metrics during fault window
+ *   4. RECOVER: remove fault condition
+ *   5. VERIFY: confirm system returns to steady state
  *
  * Each experiment supplies inject/recover callbacks and observation config.
  */
@@ -30,11 +30,11 @@
  *
  * @param {object} opts
  * @param {string}   opts.name           - Human-readable experiment name
- * @param {function} opts.baseline       - async () => metrics — verify steady state, return baseline
- * @param {function} opts.inject         - async () => void — introduce the fault
- * @param {function} opts.observe        - async (baseline) => metrics — collect metrics during fault
- * @param {function} opts.recover        - async () => void — remove the fault
- * @param {function} opts.verify         - async (baseline) => void — confirm recovery
+ * @param {function} opts.baseline       - async () => metrics (verify steady state, return baseline)
+ * @param {function} opts.inject         - async () => void (introduce the fault)
+ * @param {function} opts.observe        - async (baseline) => metrics (collect metrics during fault)
+ * @param {function} opts.recover        - async () => void (remove the fault)
+ * @param {function} opts.verify         - async (baseline) => void (confirm recovery)
  * @param {number}   [opts.faultDuration] - ms to wait between inject and observe (default 0)
  * @returns {object} { baseline, observed }
  */
@@ -78,7 +78,7 @@ async function runExperiment(opts) {
  * Retry a function until it succeeds or times out.
  * Useful for verifying eventual recovery.
  *
- * @param {function} fn        - async () => void — assertion function
+ * @param {function} fn        - async () => void (assertion function)
  * @param {number}   timeoutMs - max time to wait (default 5000)
  * @param {number}   intervalMs - polling interval (default 50)
  */

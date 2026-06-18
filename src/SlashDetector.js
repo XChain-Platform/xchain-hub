@@ -19,7 +19,7 @@
  * - Repeated deviation (3+ rounds in 24 hours)
  * - Non-participation (consecutive missed rounds)
  *
- * Detection only — actual stake slashing happens in the indexer.
+ * Detection only; actual stake slashing happens in the indexer.
  *
  ********************************************************************/
 
@@ -71,7 +71,7 @@ class SlashDetector {
         }
 
         // Check each validator's submission against the finalized prices.
-        // The unique offense signal is (validator, round) — one proposal per
+        // The unique offense signal is (validator, round): one proposal per
         // deviating validator per round, with the deviating pairs aggregated
         // into the evidence (one row per pair flooded the table: 34 pairs ×
         // rounds × hubs, unbounded).
@@ -127,7 +127,7 @@ class SlashDetector {
 
         for (let v of allValidators) {
             if (participantSet.has(v.pubkey)) {
-                // Validator participated — reset missed counter
+                // Validator participated: reset missed counter
                 this.missedRounds.set(v.pubkey, 0);
             } else {
                 // Validator missed this round
@@ -168,7 +168,7 @@ class SlashDetector {
 
         // 3+ deviations in 24h → repeated deviation. Fire once per crossing
         // of the threshold (latched), not on every deviation while the window
-        // stays ≥3 — the latch re-arms when pruning drops the window below 3.
+        // stays ≥3. The latch re-arms when pruning drops the window below 3.
         if (deviations.length >= 3) {
             if (!this.repeatedDeviationFired.get(pubkey)) {
                 this.repeatedDeviationFired.set(pubkey, true);
@@ -191,7 +191,7 @@ class SlashDetector {
     // Record a slash proposal in the database
     async _recordSlashProposal(validatorPubkey, offenseType, round, evidence) {
         if (typeof validatorPubkey !== 'string' || !/^[0-9a-fA-F]{64}$/.test(validatorPubkey)) {
-            console.warn('SlashDetector: Invalid pubkey format — skipping slash proposal');
+            console.warn('SlashDetector: Invalid pubkey format; skipping slash proposal');
             return;
         }
         let query = `INSERT INTO slash_proposals (validator_pubkey, offense_type, round_number, evidence)
@@ -221,7 +221,7 @@ class SlashDetector {
 
     // Record an attestation-divergence offense: a validator's PROPOSE body
     // didn't match the quorum-agreed winner. Only meaningful for providers
-    // using byte_equality consensus — for judge_model providers, the winner
+    // using byte_equality consensus. For judge_model providers, the winner
     // is one of many semantically-equivalent candidates and "not the winner"
     // doesn't imply "wrong". The caller filters by provider strategy.
     //
@@ -233,7 +233,7 @@ class SlashDetector {
         if(!validatorPubkey || !requestId) return;
         let pk = String(validatorPubkey).toLowerCase();
         if(!/^[0-9a-fA-F]{64}$/.test(pk)){
-            console.warn('SlashDetector: Invalid pubkey for attestation divergence — skipping');
+            console.warn('SlashDetector: Invalid pubkey for attestation divergence; skipping');
             return;
         }
         let evidence = JSON.stringify({
@@ -244,7 +244,7 @@ class SlashDetector {
         });
         // requestId is hex; lift the first 8 chars as a round-equivalent
         // pseudo-counter so existing slash_proposals.round_number column is
-        // populated with something monotonic-ish per offense (cosmetic — the
+        // populated with something monotonic-ish per offense (cosmetic: the
         // unique signal is validator_pubkey + offense_type + evidence).
         let pseudoRound = parseInt(String(requestId).substring(0, 8), 16) || 0;
         await this._recordSlashProposal(pk, 'attestation_divergence', pseudoRound, evidence);

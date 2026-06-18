@@ -30,7 +30,7 @@ function stubMetrics(stub) {
     for (let i = 0; i < stub.callCount; i++) {
         let retVal = stub.returnValues[i];
         if (retVal && typeof retVal.then === 'function') {
-            // Can't synchronously check promise rejection — count is best-effort
+            // Can't synchronously check promise rejection; count is best-effort
         }
     }
     return {

@@ -118,10 +118,10 @@ describe('Regression: Oracle Pipeline', function () {
     });
 
     // =================================================================
-    // OracleConsensus — trimmed median
+    // OracleConsensus: trimmed median
     // =================================================================
 
-    describe('OracleConsensus — Trimmed Median', function () {
+    describe('OracleConsensus: Trimmed Median', function () {
 
         let hub, pm, oc, oracleRound;
 
@@ -156,7 +156,7 @@ describe('Regression: Oracle Pipeline', function () {
                 expect(oc._aggregate(subs, 'BTC/USD')).to.equal('103.50000000');
             });
 
-            it('outlier resistance — extreme value trimmed @regression-p0', function () {
+            it('outlier resistance: extreme value trimmed @regression-p0', function () {
                 let prices = [100000, 100001, 100002, 100003, 100004, 100005, 999999];
                 let subs = submissionsForPair(prices);
                 expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100003.00000000');

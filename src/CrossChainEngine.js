@@ -136,7 +136,7 @@ class CrossChainEngine extends EventEmitter {
         this.pendingAttestations.clear();
     }
 
-    // Request an attestation — returns a Promise that resolves when consensus is reached
+    // Request an attestation; returns a Promise that resolves when consensus is reached
     async requestAttestation(sourceChain, sourceActionIndex, destChain) {
         if (!ALLOWED_CHAINS.includes(sourceChain))
             throw new Error('Invalid sourceChain: ' + sourceChain + ' (allowed: ' + ALLOWED_CHAINS.join(', ') + ')');
@@ -252,7 +252,7 @@ class CrossChainEngine extends EventEmitter {
     // match a registered pubkey, but counting raw envelope.sender values means a
     // forged sender that slipped past that layer (e.g. during a null-registry
     // window) could otherwise inflate quorum from a single connection. The
-    // registry is keyed by addr — the same value used as the sender. A null
+    // registry is keyed by addr (the same value used as the sender). A null
     // registry fails closed (the vulnerability scenario); an empty registry
     // stays lenient (genuine pre-bootstrap, where the sig layer already rejects
     // unknown senders and no peer votes should be arriving).
@@ -268,7 +268,7 @@ class CrossChainEngine extends EventEmitter {
             case XCHAIN_ATTEST_PROPOSE:
                 // _handlePropose is async because it locks the cross_chain
                 // validator-set snapshot at the round's block boundary via an
-                // indexer call. Errors are caught and logged — never bubble up
+                // indexer call. Errors are caught and logged; they never bubble up
                 // to the gossip layer (mirrors OracleConsensus).
                 this._handlePropose(envelope).catch(err =>
                     console.error('CrossChain: PROPOSE handler error for ' +
@@ -295,19 +295,19 @@ class CrossChainEngine extends EventEmitter {
         if (computedDigest !== digest) return;
 
         // The discrete fields are what get stored when the round finalizes, so
-        // bind them to the attestationId the digest covers — a proposer must
+        // bind them to the attestationId the digest covers; a proposer must
         // not be able to verify one action while attesting another.
         let [idSource, idIndex, idDest] = attestationId.split(':');
         if (idSource !== sourceChain || idDest !== destChain ||
             parseInt(idIndex, 10) !== parseInt(sourceActionIndex, 10)) return;
 
         // Never trust the proposer's claim: confirm the source action exists on
-        // the source chain — at sufficient depth — against this hub's OWN
+        // the source chain, at sufficient depth, against this hub's OWN
         // indexer before co-signing. Fails closed (drop, don't sign) when the
         // action is missing, under-confirmed, or unverifiable.
         if (!(await this._verifySourceAction(sourceChain, sourceActionIndex))) {
             console.warn('CrossChain: refusing to PREPARE ' + attestationId +
-                ' — source action not verified against local indexer');
+                ': source action not verified against local indexer');
             return;
         }
 
@@ -378,7 +378,7 @@ class CrossChainEngine extends EventEmitter {
     // Confirm the proposed source action exists in this hub's own indexer for
     // the source chain and has reached that chain's confirmation threshold.
     // Fails closed: no endpoint configured, indexer unreachable, action not
-    // found, or depth below threshold all return false — the caller must then
+    // found, or depth below threshold all return false; the caller must then
     // refuse to co-sign. Availability is deliberately traded away here: a hub
     // that cannot see the source chain has no business attesting actions on it.
     async _verifySourceAction(sourceChain, sourceActionIndex) {
@@ -388,7 +388,7 @@ class CrossChainEngine extends EventEmitter {
         let ix = this.indexers[sourceChain];
         if (!ix || !ix.url) {
             console.warn('CrossChain: no indexer endpoint for ' + sourceChain +
-                ' (set ' + sourceChain + '_INDEXER_URL) — cannot verify source action');
+                ' (set ' + sourceChain + '_INDEXER_URL): cannot verify source action');
             return false;
         }
 
@@ -400,7 +400,7 @@ class CrossChainEngine extends EventEmitter {
             res = await this._indexerCall(sourceChain, 'getactionconfirmations', { action_index: idx });
         } catch (err) {
             console.warn('CrossChain: source action lookup failed for ' + sourceChain + ':' + idx +
-                ' — ' + (err && err.message));
+                ': ' + (err && err.message));
             return false;
         }
         if (!res || res.error || res.exists !== true) return false;
@@ -426,7 +426,7 @@ class CrossChainEngine extends EventEmitter {
         if (!pending || pending.finalized) return;
 
         // Use the round's locked quorum (captured at attestation creation),
-        // not a live recompute — keeps every hub in lockstep across the round.
+        // not a live recompute; this keeps every hub in lockstep across the round.
         let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
         if (pending.prepares.size >= quorum && !pending._commitSent) {
             pending._commitSent = true;
@@ -445,7 +445,7 @@ class CrossChainEngine extends EventEmitter {
         let pending = this.pendingAttestations.get(attestationId);
         if (!pending || pending.finalized) return;
 
-        // Same locked quorum as _checkPrepareQuorum — see comment there.
+        // Same locked quorum as _checkPrepareQuorum (see comment there).
         let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
         if (pending.commits.size >= quorum) {
             pending.finalized = true;
@@ -467,7 +467,7 @@ class CrossChainEngine extends EventEmitter {
                     this.finalized.add(attestationId);
                     this.pendingAttestations.delete(attestationId);
 
-                    console.log('CrossChain: Attestation finalized — ' + attestationId +
+                    console.log('CrossChain: Attestation finalized: ' + attestationId +
                         ' (' + pending.prepares.size + ' prepares, ' + pending.commits.size + ' commits)');
 
                     // Emit for downstream processing
@@ -535,8 +535,8 @@ class CrossChainEngine extends EventEmitter {
     // on the BTC indexer and arrives at the same N, so two hubs processing the
     // same attestation at different wall-clock times lock the same quorum).
     // Falls back to the live validator set when the indexer can't be reached or
-    // the envelope carries no block height (e.g. an old peer mid rolling deploy)
-    // — graceful degradation to the pre-snapshot behavior. Mirrors the
+    // the envelope carries no block height (e.g. an old peer mid rolling deploy).
+    // Graceful degradation to the pre-snapshot behavior. Mirrors the
     // getSnapshot/getQuorum pattern in OracleConsensus and Consensus.
     async _resolveQuorum(sourceChain, destChain, btcBlockHeight) {
         let snapshot = (this.hub.capabilitySnapshot && btcBlockHeight)

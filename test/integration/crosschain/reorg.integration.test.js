@@ -43,7 +43,7 @@ describe('Integration: Reorg Handling (SC-5.x)', function () {
 
     before(async function () {
         try { await testDb.setup(); } catch (e) {
-            console.warn('MariaDB unavailable — skipping reorg tests');
+            console.warn('MariaDB unavailable, skipping reorg tests');
         }
     });
 
@@ -159,7 +159,7 @@ describe('Integration: Reorg Handling (SC-5.x)', function () {
             let reorgEvent = null;
             reorgHandler.on('reorg:confirmed', (e) => { reorgEvent = e; });
 
-            // Report reorg — initiates consensus
+            // Report reorg: initiates consensus
             await reorgHandler.reportReorg('BTC', 800000, reorgTimestamp);
 
             await new Promise(r => setTimeout(r, 50));

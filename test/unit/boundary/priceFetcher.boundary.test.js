@@ -223,7 +223,7 @@ describe('Boundary: PriceFetcher', function () {
         });
 
         it('CoinGecko returns null (fetch returns null, not rejected) → treated as no contribution', async function () {
-            // axios.get resolves but with a shape that triggers the catch — simulate by
+            // axios.get resolves but with a shape that triggers the catch; simulate by
             // making response.data null so property access throws
             axiosStub.get.resolves({ data: null });
             let fetcher = makeFetcher();

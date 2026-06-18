@@ -21,7 +21,7 @@
  *
  * Spec: claude/reports/specs/2026-05-24_llm-attestation-provider.md
  *
- * Provider interface (mirrored by all providers — see providers/README):
+ * Provider interface (mirrored by all providers; see providers/README):
  *   fetch(payload, options)  -> Promise<{ body: Buffer, meta: string }>
  *   agree(proposals)         -> Promise<{ body, meta } | null>
  *   healthCheck()            -> Promise<{ ok, error? }>
@@ -29,7 +29,7 @@
  * Two transports are supported and resolved at call time per the operator's
  * configured credentials (see lib/hub-credentials.js):
  *
- *   `claude_spawn`  — shells out to the `claude` CLI. Preferred. Auth
+ *   `claude_spawn`: shells out to the `claude` CLI. Preferred. Auth
  *                     inherits from CLAUDE_CONFIG_DIR (auto-refreshing
  *                     refresh token written by `claude login`) or
  *                     CLAUDE_CODE_OAUTH_TOKEN. Cost model: Claude Code
@@ -37,7 +37,7 @@
  *                     temperature; redundancy>=3 still converges via the
  *                     judge_model agreement check.
  *
- *   `anthropic_api` — direct HTTPS to api.anthropic.com using
+ *   `anthropic_api`: direct HTTPS to api.anthropic.com using
  *                     ANTHROPIC_API_KEY. Pay-per-token API billing.
  *                     Supports temperature=0 explicitly.
  *
@@ -121,7 +121,7 @@ exports.fetch = async (payload, options) => {
 
 // Consensus strategy: judge_model (spec §6).
 //
-// Single-proposal case (redundancy=1): trivial — return the only proposal.
+// Single-proposal case (redundancy=1): trivial. Return the only proposal.
 // Multi-proposal case (redundancy>=3): build a judge prompt enumerating
 // candidate responses, run JUDGE_MODEL at temperature=0, parse JSON
 // verdict { equivalent, canonical_index } and return the canonical
@@ -152,7 +152,7 @@ exports.agree = async (proposals, options) => {
             temperature: 0
         });
     } catch (_) {
-        // Judge unreachable — defer to no_quorum. Validators will retry on
+        // Judge unreachable: defer to no_quorum. Validators will retry on
         // the next request. (Spec §6.4 ack residual risk.)
         return null;
     }
@@ -179,7 +179,7 @@ exports.agree = async (proposals, options) => {
 };
 
 // Capability self-test probe. Confirms at least one credential path is
-// configured. Avoids burning quota on a real completion at startup — a
+// configured. Avoids burning quota on a real completion at startup. A
 // missing/misconfigured credential is the only fixed failure mode this
 // probe needs to catch.
 exports.healthCheck = async (ctx) => {

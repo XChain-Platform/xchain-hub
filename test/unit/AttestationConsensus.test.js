@@ -17,7 +17,7 @@ const AttestationConsensus = require('../../src/AttestationConsensus');
 const ValidatorIdentity    = require('../../src/ValidatorIdentity');
 const { createMockHub }    = require('../helpers/mockHub');
 
-// Minimal provider registry — the COMMIT/buffer paths exercised here never
+// Minimal provider registry: the COMMIT/buffer paths exercised here never
 // call into a provider (no agree() / no def lookups for unsigned commits).
 function makeProviderRegistry() {
     return {
@@ -124,7 +124,7 @@ describe('AttestationConsensus', function () {
         return pending;
     }
 
-    // Unsigned COMMIT envelope — omitting `sig` skips signature verification in
+    // Unsigned COMMIT envelope: omitting `sig` skips signature verification in
     // _handleCommit, so the test asserts vote-counting (commits.add) without
     // needing real validator crypto. The buffering decision under test happens
     // before any signature check regardless.
@@ -132,7 +132,7 @@ describe('AttestationConsensus', function () {
         return { type: 'ATTEST_COMMIT', data: { requestId: rid, sig_pubkey: peerPubkey } };
     }
 
-    describe('_handleCommit — early COMMIT (before winner is set)', function () {
+    describe('_handleCommit: early COMMIT (before winner is set)', function () {
 
         const RID  = 'deadbeefdeadbeefdeadbeefdeadbeef';
         const PEER = '11'.repeat(32);
@@ -143,8 +143,8 @@ describe('AttestationConsensus', function () {
             // Route through the public dispatch path, mirroring the drain.
             consensus._handleMessage(commitEnvelope(RID, PEER));
 
-            // The vote is held, NOT applied yet (winner not known) and — the
-            // regression this guards — NOT discarded.
+            // The vote is held, NOT applied yet (winner not known) and, the
+            // regression this guards, NOT discarded.
             expect(consensus.earlyCommits.get(RID)).to.have.lengthOf(1);
             expect(pending.commits.size).to.equal(0);
         });
@@ -173,7 +173,7 @@ describe('AttestationConsensus', function () {
         });
     });
 
-    describe('_handleCommit — COMMIT after winner is set', function () {
+    describe('_handleCommit: COMMIT after winner is set', function () {
 
         const RID  = 'cafecafecafecafecafecafecafecafe';
         const PEER = '22'.repeat(32);
@@ -189,13 +189,13 @@ describe('AttestationConsensus', function () {
         });
     });
 
-    describe('_handleCommit — COMMIT before the round exists', function () {
+    describe('_handleCommit: COMMIT before the round exists', function () {
 
         const RID  = 'f00df00df00df00df00df00df00df00d';
         const PEER = '33'.repeat(32);
 
         it('still buffers in earlyMessages (unchanged !pending behavior)', function () {
-            // No pending for RID — the pre-existing early-arrival path must
+            // No pending for RID; the pre-existing early-arrival path must
             // still capture the COMMIT for replay in propose().
             consensus._handleCommit(commitEnvelope(RID, PEER));
 
@@ -205,7 +205,7 @@ describe('AttestationConsensus', function () {
     });
 });
 
-describe('AttestationConsensus — lifecycle', function () {
+describe('AttestationConsensus: lifecycle', function () {
 
     afterEach(() => sinon.restore());
 
@@ -243,7 +243,7 @@ describe('AttestationConsensus — lifecycle', function () {
     });
 });
 
-describe('AttestationConsensus — _buildCanonical / _signCanonical', function () {
+describe('AttestationConsensus: _buildCanonical / _signCanonical', function () {
 
     afterEach(() => sinon.restore());
 
@@ -283,7 +283,7 @@ describe('AttestationConsensus — _buildCanonical / _signCanonical', function (
     });
 });
 
-describe('AttestationConsensus — _markFinalized ring buffer', function () {
+describe('AttestationConsensus: _markFinalized ring buffer', function () {
 
     it('evicts the oldest request id once finalizedMax is exceeded', function () {
         let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
@@ -299,7 +299,7 @@ describe('AttestationConsensus — _markFinalized ring buffer', function () {
     });
 });
 
-describe('AttestationConsensus — early-message buffer', function () {
+describe('AttestationConsensus: early-message buffer', function () {
 
     let c;
     beforeEach(() => { c = new AttestationConsensus(createMockHub(), makeProviderRegistry()); });
@@ -328,7 +328,7 @@ describe('AttestationConsensus — early-message buffer', function () {
     });
 });
 
-describe('AttestationConsensus — propose() guards', function () {
+describe('AttestationConsensus: propose() guards', function () {
 
     let me, hub, c;
     beforeEach(() => {
@@ -352,7 +352,7 @@ describe('AttestationConsensus — propose() guards', function () {
     it('returns immediately if a round for the request is already pending', async function () {
         c.pending.set(RID, { timer: null });
         await c.propose(RID, roundState(me, [me], Buffer.from('b'), 'http_get', 1));
-        // Untouched sentinel — propose bailed before overwriting it.
+        // Untouched sentinel: propose bailed before overwriting it.
         expect(c.pending.get(RID)).to.deep.equal({ timer: null });
     });
 
@@ -383,7 +383,7 @@ describe('AttestationConsensus — propose() guards', function () {
     });
 });
 
-describe('AttestationConsensus — single-validator round finalizes end-to-end', function () {
+describe('AttestationConsensus: single-validator round finalizes end-to-end', function () {
 
     let me, hub, c, finalized;
     beforeEach(() => {
@@ -422,7 +422,7 @@ describe('AttestationConsensus — single-validator round finalizes end-to-end',
     });
 });
 
-describe('AttestationConsensus — three-validator round finalizes via peer votes', function () {
+describe('AttestationConsensus: three-validator round finalizes via peer votes', function () {
 
     let me, p1, p2, hub, c, finalized;
     beforeEach(() => {
@@ -510,7 +510,7 @@ describe('AttestationConsensus — three-validator round finalizes via peer vote
     });
 
     it('buffers a PROPOSE that arrives before the round starts and drains it in propose()', async function () {
-        // Early PROPOSE from p1 — no pending yet → buffered.
+        // Early PROPOSE from p1: no pending yet, buffered.
         c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
         expect(c.earlyMessages.get(RID)).to.have.lengthOf(1);
         // Now start our round → drain replays p1's vote.
@@ -521,7 +521,7 @@ describe('AttestationConsensus — three-validator round finalizes via peer vote
     });
 });
 
-describe('AttestationConsensus — PREPARE signatures verified against the winner (#3949)', function () {
+describe('AttestationConsensus: PREPARE signatures verified against the winner (#3949)', function () {
 
     let me, p1, p2, hub, c;
     beforeEach(() => {
@@ -566,7 +566,7 @@ describe('AttestationConsensus — PREPARE signatures verified against the winne
     it('does NOT count a PREPARE signature taken over a divergent body', function () {
         let WINNER  = Buffer.from('winner-body');
         let pending = seedWithWinner([p1, p2], WINNER);
-        // p1's signature is valid — but over ITS OWN divergent body, not the winner.
+        // p1's signature is valid, but over ITS OWN divergent body, not the winner.
         c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, Buffer.from('divergent-body')));
         expect(pending.signatures.has(pub(p1))).to.equal(false);
         expect(pending.signatures.size).to.equal(0);
@@ -613,7 +613,7 @@ describe('AttestationConsensus — PREPARE signatures verified against the winne
     });
 });
 
-describe('AttestationConsensus — judge_model winner-selection is leader-gated (#3949)', function () {
+describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3949)', function () {
 
     let me, p1, p2, hub, c;
     beforeEach(() => {
@@ -724,7 +724,7 @@ describe('AttestationConsensus — judge_model winner-selection is leader-gated 
     });
 });
 
-describe('AttestationConsensus — _maybeAdvanceFromProposals consensus outcomes', function () {
+describe('AttestationConsensus: _maybeAdvanceFromProposals consensus outcomes', function () {
 
     let me, p1, p2, hub, c;
     beforeEach(() => {
@@ -795,7 +795,7 @@ describe('AttestationConsensus — _maybeAdvanceFromProposals consensus outcomes
     });
 });
 
-describe('AttestationConsensus — _handlePrepare adoption + guards', function () {
+describe('AttestationConsensus: _handlePrepare adoption + guards', function () {
 
     let me, p1, p2, hub, c;
     beforeEach(() => {
@@ -871,7 +871,7 @@ describe('AttestationConsensus — _handlePrepare adoption + guards', function (
     });
 });
 
-describe('AttestationConsensus — _handleCommit signed verification', function () {
+describe('AttestationConsensus: _handleCommit signed verification', function () {
 
     let me, p1, p2, hub, c;
     beforeEach(() => {
@@ -925,7 +925,7 @@ describe('AttestationConsensus — _handleCommit signed verification', function 
     });
 });
 
-describe('AttestationConsensus — message guards & internal early-returns', function () {
+describe('AttestationConsensus: message guards & internal early-returns', function () {
 
     let me, p1, hub, c;
     const BODY = Buffer.from('b');
@@ -1022,7 +1022,7 @@ describe('AttestationConsensus — message guards & internal early-returns', fun
         const RID = '5e'.repeat(16);
         await c.propose(RID, roundState(me, [me, p1], BODY, 'http_get', 2));
         await flush();
-        // signEnv signs with status 'ok' + meta '' — deleting them lets the
+        // signEnv signs with status 'ok' + meta '' ; deleting them lets the
         // handler's `|| 'ok'` / `|| ''` defaults reproduce the signed canonical.
         let env = signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY);
         delete env.data.meta;
@@ -1106,7 +1106,7 @@ describe('AttestationConsensus — message guards & internal early-returns', fun
 
         // Peer's PREPARE + COMMIT over the winner give exactly ONE valid sig.
         // needed = max(quorum=2, redundancy=2) = 2, so the round must NOT
-        // finalize on participation alone — emitting a 1-sig payload here is the
+        // finalize on participation alone; emitting a 1-sig payload here is the
         // F-2 defect. The round falls through to deadline expiry instead.
         c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, OTHER));
         c._handleMessage(signEnv('ATTEST_COMMIT', RID, 'http_get', p1, OTHER));
@@ -1116,7 +1116,7 @@ describe('AttestationConsensus — message guards & internal early-returns', fun
     });
 });
 
-describe('AttestationConsensus — judge_model re-signs the canonical winner', function () {
+describe('AttestationConsensus: judge_model re-signs the canonical winner', function () {
 
     let me, p1, p2, hub, c, finalized;
     beforeEach(() => {
@@ -1132,7 +1132,7 @@ describe('AttestationConsensus — judge_model re-signs the canonical winner', f
     });
 
     // judge_model registry whose agree() picks the proposal whose body matches
-    // `winnerText` — modelling the judge selecting one of N byte-divergent but
+    // `winnerText`: modelling the judge selecting one of N byte-divergent but
     // semantically-equivalent proposals as canonical.
     function judgeRegistry(winnerText) {
         return makeRealProviderRegistry(
@@ -1166,7 +1166,7 @@ describe('AttestationConsensus — judge_model re-signs the canonical winner', f
         expect(pending.winner.body.toString()).to.equal('answer-beta');
 
         // THE FIX: even though my body diverged from the winner, I re-signed the
-        // canonical winning body — so I hold a verifying signature for it.
+        // canonical winning body; so I hold a verifying signature for it.
         expect(pending.signatures.has(pub(me))).to.equal(true);
         let myCanonical = buildCanonical(RID, 'llm', WINNER, 'ok', '').toString('utf8');
         expect(ValidatorIdentity.verify(myCanonical, pending.signatures.get(pub(me)), pub(me))).to.equal(true);

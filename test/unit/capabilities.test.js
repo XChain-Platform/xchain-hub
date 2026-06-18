@@ -158,7 +158,7 @@ describe('capabilities/price selfTest()', function () {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// capabilities/attestation.js — uses proxyquire to stub healthCheck
+// capabilities/attestation.js: uses proxyquire to stub healthCheck
 // ────────────────────────────────────────────────────────────────────────────
 
 describe('capabilities/attestation selfTest()', function () {

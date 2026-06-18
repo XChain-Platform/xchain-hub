@@ -91,7 +91,7 @@ class SwapTracker {
         await this.db.doQuery(query, args);
     }
 
-    // Called when an attestation is finalized — progress matching swap to 'attested'
+    // Called when an attestation is finalized; progresses matching swap to 'attested'
     async _onAttestationFinalized(attestation) {
         if (!attestation || !attestation.sourceChain || !attestation.sourceActionIndex) return;
 

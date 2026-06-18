@@ -15,7 +15,7 @@
  * XChain Hub - Database Class
  *
  * This file handles connecting to MariaDB and running SQL queries.
- * Adapted from xchain-sync/src/db.js — connection pool,
+ * Adapted from xchain-sync/src/db.js: connection pool,
  * circuit breaker, and hub-specific config storage methods.
  *
  ********************************************************************/
@@ -74,7 +74,7 @@ class Database {
 
     // Throw immediately on errors that retrying will never fix (bad credentials,
     // missing privilege). Transient errors (DB still booting, connection refused)
-    // are NOT fatal — callers keep waiting on those. Without this, a misconfigured
+    // are NOT fatal; callers keep waiting on those. Without this, a misconfigured
     // DB user (e.g. one lacking CREATE DATABASE) makes startup hang forever on a
     // 5s retry loop instead of surfacing the real problem.
     _failFastIfFatal(e, action){
@@ -156,7 +156,7 @@ class Database {
                     if(results.length === 0)
                         await this._createTableFromFile(file);
                     else
-                        // Existing table — reconcile column drift against the SQL
+                        // Existing table: reconcile column drift against the SQL
                         // source so columns added upstream are auto-applied on
                         // stacks created from an older release, instead of failing
                         // later queries with "Unknown column".
@@ -171,7 +171,7 @@ class Database {
         return true;
     }
 
-    // Apply schema migrations against existing tables (idempotent — safe to run every startup)
+    // Apply schema migrations against existing tables. Idempotent: safe to run every startup.
     async runMigrations(){
         await this._migrateUniqueKey(
             'oracle_submissions',
@@ -191,12 +191,12 @@ class Database {
         // later never reaches a table that already exists on a deployed node.
         // idx_batch_seq is the case in point: the batch_seq column was
         // drift-reconciled onto prod validator_rewards during the ANCHOR rollout,
-        // but its index had to be added by hand on every box — this folds that
+        // but its index had to be added by hand on every box. This folds that
         // hand-step into the code-side self-heal.
         await this._migrateIndex('validator_rewards', 'idx_batch_seq', '(batch_seq)');
         // The capability ENUM gains values as new capability tiers ship (e.g.
         // 'full_node' added for WI-2). alterTableForDrift only adds missing
-        // columns / relaxes NULL — it never MODIFYs a column's type — so an
+        // columns and relaxes NULL; it never MODIFYs a column's type. So an
         // already-deployed validator_capabilities keeps the narrower ENUM and
         // rejects the new value (WARN_DATA_TRUNCATED) on the capability self-test
         // INSERT. Widen it in place to match CapabilityRegistry.KNOWN_CAPABILITIES.
@@ -212,7 +212,7 @@ class Database {
     async _migrateUniqueKey(table, indexName, indexColumns, columnList){
         let db = await this.getConnection();
         try {
-            // Check if the unique key already exists — skip everything if so
+            // Check if the unique key already exists; skip everything if so
             let existing = await db.query(
                 "SELECT COUNT(*) AS c FROM information_schema.statistics " +
                 "WHERE table_schema = ? AND table_name = ? AND index_name = ?",
@@ -241,13 +241,13 @@ class Database {
     }
 
     // Add a plain (non-unique) INDEX to a table if it is missing. Mirrors
-    // _migrateUniqueKey without the duplicate-removal step — a non-unique index
+    // _migrateUniqueKey without the duplicate-removal step: a non-unique index
     // enforces nothing, so there is nothing to dedup before the ALTER. The
     // existence check makes it an idempotent no-op once the index is present.
     async _migrateIndex(table, indexName, indexColumns){
         let db = await this.getConnection();
         try {
-            // Check if the index already exists — skip the ALTER if so
+            // Check if the index already exists; skip the ALTER if so
             let existing = await db.query(
                 "SELECT COUNT(*) AS c FROM information_schema.statistics " +
                 "WHERE table_schema = ? AND table_name = ? AND index_name = ?",
@@ -277,7 +277,7 @@ class Database {
                 "WHERE table_schema = ? AND table_name = ? AND column_name = ?",
                 [this.dbName, table, column]
             );
-            if(!rows[0]) return; // table/column not present yet — CREATE TABLE covers it
+            if(!rows[0]) return; // table/column not present yet; CREATE TABLE covers it
             let liveType = String(rows[0].COLUMN_TYPE || '').toLowerCase();
             let missing = enumValues.filter(v => liveType.indexOf("'" + v.toLowerCase() + "'") === -1);
             if(missing.length === 0) return; // already covers every target value
@@ -296,7 +296,7 @@ class Database {
         let dir     = path.join(__dirname, 'sql');
         let data    = fs.readFileSync(dir + '/' + file, "utf8");
         let table   = file.substring(0, file.indexOf('.sql'));
-        // Strip `--` line comments BEFORE splitting on ';' — a comment may contain a
+        // Strip `--` line comments BEFORE splitting on ';'. A comment may contain a
         // ';' (e.g. "regtest; signed into the canonical"), which would otherwise split
         // the CREATE TABLE mid-statement and fail to parse. stripSqlLineComments
         // preserves quoted strings, so real SQL structure is untouched.
@@ -338,12 +338,12 @@ class Database {
         return out;
     }
 
-    // Parse a CREATE TABLE statement to extract expected columns. Conservative —
-    // only used for drift detection, not full schema management. Returns array of
+    // Parse a CREATE TABLE statement to extract expected columns. Conservative
+    // (only used for drift detection, not full schema management). Returns array of
     // {name, nullable, definition, notNull, hasDefault} or null when the file has
     // no recognizable CREATE TABLE block.
     parseExpectedColumns(sqlData){
-        // Strip `--` line comments BEFORE any structural parsing — inline comments
+        // Strip `--` line comments BEFORE any structural parsing. Inline comments
         // routinely carry commas/parens that would otherwise fool the comma split.
         sqlData = this.stripSqlLineComments(sqlData);
         // Match the column block up to the table's closing paren, tolerating the
@@ -357,7 +357,7 @@ class Database {
         for(let raw of parts){
             let line = raw.replace(/--[^\n\r]*/g, '').trim();
             if(!line) continue;
-            // Skip constraint/index/key lines — column definitions only
+            // Skip constraint/index/key lines; column definitions only
             if(/^(PRIMARY|UNIQUE|INDEX|KEY|CHECK|CONSTRAINT|FOREIGN)\b/i.test(line)) continue;
             const tokens = line.split(/\s+/);
             if(tokens.length < 2) continue;
@@ -369,8 +369,8 @@ class Database {
             const notNull    = !nullable;
             const hasDefault = /\bDEFAULT\b/i.test(line);
             // Keep the full (comment-stripped) definition so a missing column can
-            // be re-added verbatim — preserving its DEFAULT clause, which is what
-            // backfills existing rows when the column is NOT NULL.
+            // be re-added verbatim, preserving its DEFAULT clause (which backfills
+            // existing rows when the column is NOT NULL).
             cols.push({ name, nullable, definition: line, notNull, hasDefault });
         }
         return cols.length > 0 ? cols : null;
@@ -378,12 +378,12 @@ class Database {
 
     // Detect schema drift between the live table and its SQL source, and fix it
     // by ALTER. Two kinds of drift are handled:
-    //   1. Missing columns — a column declared in the SQL source but absent from
+    //   1. Missing columns: a column declared in the SQL source but absent from
     //      the live table is added with ADD COLUMN, reusing the source definition
     //      verbatim so its DEFAULT clause backfills existing rows. (A NOT NULL
     //      column with no DEFAULT can't be backfilled safely, so it's skipped
     //      with a loud warning rather than aborting startup.)
-    //   2. Nullability — only relaxes NOT NULL -> NULL (the safe direction; never
+    //   2. Nullability: only relaxes NOT NULL -> NULL (the safe direction; never
     //      strengthens to NOT NULL since live rows might hold NULLs that would
     //      block the ALTER).
     // Doesn't touch types, defaults of existing columns, or indexes. Each applied
@@ -403,7 +403,7 @@ class Database {
             const cur = liveByName.get(exp.name.toLowerCase());
             if(!cur){
                 if(exp.notNull && !exp.hasDefault){
-                    console.log('Schema drift on ' + table + '.' + exp.name + ': column missing live, source is NOT NULL with no DEFAULT — cannot backfill existing rows safely. Skipping; add manually.');
+                    console.log('Schema drift on ' + table + '.' + exp.name + ': column missing live, source is NOT NULL with no DEFAULT (cannot backfill existing rows safely). Skipping; add manually.');
                     continue;
                 }
                 console.log('Schema drift on ' + table + '.' + exp.name + ': column missing live. Adding column from SQL source.');
@@ -426,9 +426,9 @@ class Database {
         // Circuit breaker: reject immediately if open
         if(this.circuitState === 'open'){
             if(Date.now() < this.circuitOpenUntil)
-                throw new Error('Circuit breaker open — database connections rejected until cooldown expires');
+                throw new Error('Circuit breaker open: database connections rejected until cooldown expires');
             this.circuitState = 'half-open';
-            console.log('Circuit breaker half-open — attempting reconnection');
+            console.log('Circuit breaker half-open: attempting reconnection');
         }
 
         let connection  = null;
@@ -443,7 +443,7 @@ class Database {
                 if(this.circuitState === 'half-open'){
                     this.circuitState = 'closed';
                     this.circuitFailures = 0;
-                    console.log('Circuit breaker closed — database connection restored');
+                    console.log('Circuit breaker closed: database connection restored');
                 }
                 this.circuitFailures = 0;
             } catch (e){
@@ -500,8 +500,8 @@ class Database {
     }
 
     // Batched upsert. rows: [{coin, network, module, paramName, paramValue}, ...]
-    // Single round-trip — keeps xchain-node's precheck push (3 coins × 3 networks
-    // × ~6 modules × ~7 params ≈ 378 rows) under one second instead of one
+    // Single round-trip: keeps xchain-node's precheck push (3 coins x 3 networks
+    // x ~6 modules x ~7 params ~= 378 rows) under one second instead of one
     // INSERT per row.
     async setParams(rows){
         if(!rows || rows.length === 0) return 0;
@@ -557,8 +557,8 @@ class Database {
     //
     // Optional `sinceUpdatedAt` is an epoch-seconds cursor (see getConfigWatermark).
     // When supplied, only rows changed strictly after that instant are returned,
-    // so a consumer that threads the prior watermark back gets a delta — typically
-    // empty on a quiet poll — instead of the full table on every refresh. Omitting
+    // so a consumer that threads the prior watermark back gets a delta (typically
+    // empty on a quiet poll) instead of the full table on every refresh. Omitting
     // it (or passing 0) returns the complete config tree exactly as before, so
     // existing callers are unaffected.
     //
@@ -567,7 +567,7 @@ class Database {
     // re-binds into the query with no client/server timezone ambiguity. The
     // comparison is strict `>`; updated_at has second granularity, so two distinct
     // writes in the same wall-clock second straddling a poll could theoretically
-    // miss the later one until a subsequent change re-bumps it — config writes are
+    // miss the later one until a subsequent change re-bumps it. Config writes are
     // rare (governance-driven) and a consumer restart re-fetches in full, so this
     // boundary is acceptable in exchange for avoiding a separate sequence column.
     async getAllConfigs(sinceUpdatedAt){
@@ -593,8 +593,8 @@ class Database {
         return configs;
     }
 
-    // Current high-water mark of the configs table as epoch seconds — the newest
-    // updated_at across all rows, or 0 when the table is empty. Consumers thread
+    // Current high-water mark of the configs table as epoch seconds (the newest
+    // updated_at across all rows, or 0 when the table is empty). Consumers thread
     // this value back into getAllConfigs(sinceUpdatedAt) on their next poll to
     // fetch only what changed since. Returned as an integer so it carries through
     // JSON and re-binds into the cursor query without timezone conversion.

@@ -36,10 +36,10 @@ describe('Boundary: SlashDetector', function () {
     });
 
     // -----------------------------------------------------------------
-    // Deviation threshold — boundary is STRICT greater-than 0.05
+    // Deviation threshold: boundary is STRICT greater-than 0.05
     // -----------------------------------------------------------------
 
-    describe('_checkDeviations() — deviation threshold boundary', function () {
+    describe('_checkDeviations(): deviation threshold boundary', function () {
 
         let finalizedPrices;
 
@@ -148,10 +148,10 @@ describe('Boundary: SlashDetector', function () {
     });
 
     // -----------------------------------------------------------------
-    // Missed rounds — fires exactly once at count === 30 (EXACT equality)
+    // Missed rounds: fires exactly once at count === 30 (EXACT equality)
     // -----------------------------------------------------------------
 
-    describe('_checkParticipation() — missed rounds threshold boundary', function () {
+    describe('_checkParticipation(): missed rounds threshold boundary', function () {
 
         function slashCalls() {
             return hub.db.doQuery.getCalls().filter(c => c.args[0].includes('slash_proposals'));
@@ -185,7 +185,7 @@ describe('Boundary: SlashDetector', function () {
             await simulateMisses(30);
             expect(slashCalls()).to.have.length(1);
 
-            // Validator participates — resets counter to 0
+            // Validator participates, resets counter to 0
             await sd._checkParticipation(31, [VALIDATORS_3[0].pubkey], [VALIDATORS_3[0]]);
             expect(slashCalls()).to.have.length(1); // no new slash
 
@@ -197,7 +197,7 @@ describe('Boundary: SlashDetector', function () {
             expect(slashCalls()).to.have.length(2); // fired again at the 30th consecutive miss
         });
 
-        it('multiple validators: one participates, one misses — per-validator tracking', async function () {
+        it('multiple validators: one participates, one misses (per-validator tracking)', async function () {
             let v0 = VALIDATORS_3[0];
             let v1 = VALIDATORS_3[1];
             let allValidators = [v0, v1];
@@ -214,10 +214,10 @@ describe('Boundary: SlashDetector', function () {
     });
 
     // -----------------------------------------------------------------
-    // Repeated deviation — 24h window, fires at length >= 3
+    // Repeated deviation: 24h window, fires at length >= 3
     // -----------------------------------------------------------------
 
-    describe('_trackDeviation() — repeated deviation 24h window boundary', function () {
+    describe('_trackDeviation(): repeated deviation 24h window boundary', function () {
 
         function repeatedCalls() {
             return hub.db.doQuery.getCalls().filter(
@@ -251,7 +251,7 @@ describe('Boundary: SlashDetector', function () {
                 { round: 2, timestamp: old }
             ]);
 
-            // 3rd deviation fires now — the two old entries are pruned, leaving only 1
+            // 3rd deviation fires now; the two old entries are pruned, leaving only 1
             sd._trackDeviation(pubkey, 3);
 
             expect(repeatedCalls()).to.have.length(0);

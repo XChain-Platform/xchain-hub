@@ -28,7 +28,7 @@ const VALIDATORS_7  = Array.from({ length: 7 }, (_, i) => makeValidator(i + 1));
 const VALIDATORS_10 = Array.from({ length: 10 }, (_, i) => makeValidator(i + 1));
 const VALIDATORS_13 = Array.from({ length: 13 }, (_, i) => makeValidator(i + 1));
 
-// STAKE_WEIGHTED_QUORUM fixtures — validators carry a staking source + weight.
+// STAKE_WEIGHTED_QUORUM fixtures: validators carry a staking source + weight.
 function makeWeightedValidator(i, source, weight) {
     let v = makeValidator(i);
     return { pubkey: v.pubkey, addr: v.addr, source: source, weight: String(weight) };

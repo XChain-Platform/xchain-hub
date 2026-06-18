@@ -49,7 +49,7 @@ describe('Chaos: Single Price Source Failure (API-1)', function () {
         });
 
         await runExperiment({
-            name: 'Single source failure — CoinGecko 500',
+            name: 'Single source failure: CoinGecko 500',
 
             inject: () => {
                 mockApi.mockCoinGeckoError(500);
@@ -83,7 +83,7 @@ describe('Chaos: Single Price Source Failure (API-1)', function () {
         });
 
         await runExperiment({
-            name: 'Single source failure — CMC 503',
+            name: 'Single source failure: CMC 503',
 
             inject: () => {
                 mockApi.mockCoinGeckoSuccess();

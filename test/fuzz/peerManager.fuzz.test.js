@@ -16,7 +16,7 @@ const fc           = require('fast-check');
 const EventEmitter = require('events');
 const gen          = require('./generators');
 
-// PeerManager is constructed directly — we need to mock its dependencies
+// PeerManager is constructed directly, so we need to mock its dependencies
 // but call _handleInbound, _buildEnvelope, _makeId directly.
 const PeerManager = require('../../src/PeerManager');
 
@@ -57,7 +57,7 @@ describe('Fuzz: PeerManager', function () {
     }
 
     // -----------------------------------------------------------------
-    // _handleInbound() — structural robustness
+    // _handleInbound(): structural robustness
     // -----------------------------------------------------------------
 
     describe('_handleInbound() robustness', function () {

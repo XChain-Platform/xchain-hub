@@ -29,7 +29,7 @@
  * Phase status:
  *   - Queue + comparator: shipped here (data plumbing for §8.1).
  *   - Synthetic-request *injection* (hub-driven creation of platform
- *     ATTEST v0 (request) rows with a known prompt): NOT YET — requires a
+ *     ATTEST v0 (request) rows with a known prompt): NOT YET. Requires a
  *     platform-owned contract + scheduler design that's out of scope
  *     for this module. Operators / tests can populate the queue
  *     manually via `register()` until that lands.
@@ -55,10 +55,10 @@ class AttestationSpotChecker {
         this.failureWindowMs  = parseInt(cfg.SPOT_CHECK_FAILURE_WINDOW_MS) || DEFAULT_FAILURE_WINDOW_MS;
         this.failureThreshold = parseInt(cfg.SPOT_CHECK_FAILURE_THRESHOLD) || DEFAULT_FAILURE_THRESHOLD;
 
-        // Active spot-check entries — Map<requestIdLower, { providerId, expectedPattern, registeredAt }>
+        // Active spot-check entries: Map<requestIdLower, { providerId, expectedPattern, registeredAt }>
         this._queue = new Map();
 
-        // Per-validator failure history — Map<pubkeyLower, [{ requestId, timestamp }]>
+        // Per-validator failure history: Map<pubkeyLower, [{ requestId, timestamp }]>
         this._failures = new Map();
 
         this._messageHandler = null;
@@ -69,7 +69,7 @@ class AttestationSpotChecker {
     async start(){
         let consensus = this.hub.attestationConsensus;
         if (!consensus) {
-            console.log('AttestationSpotChecker: no AttestationConsensus — skipping start');
+            console.log('AttestationSpotChecker: no AttestationConsensus, skipping start');
             return;
         }
         this._messageHandler = (event) => {
@@ -93,7 +93,7 @@ class AttestationSpotChecker {
     // Register a synthetic request as a spot-check. Called by the
     // (future) injection scheduler immediately after the synthetic
     // ATTEST v0 (request) is broadcast. `expectedPattern` is the rubric
-    // passed to the provider's judge step — string for now.
+    // passed to the provider's judge step (string for now).
     register(requestId, providerId, expectedPattern){
         let rid = String(requestId || '').toLowerCase();
         if (!rid || !providerId) return;
@@ -130,7 +130,7 @@ class AttestationSpotChecker {
         this._queue.delete(rid);
 
         if (entry.providerId !== event.providerId) {
-            // Provider mismatch — almost certainly a bug at registration.
+            // Provider mismatch (almost certainly a bug at registration).
             // Treat as inconclusive rather than slash.
             console.warn('AttestationSpotChecker: provider mismatch on ' + rid.substring(0, 16) +
                          '... (registered=' + entry.providerId + ', finalized=' + event.providerId + ')');
@@ -139,7 +139,7 @@ class AttestationSpotChecker {
 
         let provider = this.providerRegistry && this.providerRegistry.getModule(entry.providerId);
         if (!provider || typeof provider.agree !== 'function') {
-            console.warn('AttestationSpotChecker: no agree() on provider ' + entry.providerId + ' — cannot judge spot-check');
+            console.warn('AttestationSpotChecker: no agree() on provider ' + entry.providerId + ': cannot judge spot-check');
             return;
         }
 
@@ -165,8 +165,8 @@ class AttestationSpotChecker {
 
         let passed = !!verdict;
         if (passed) {
-            // Match — clear nothing; failures accumulate over the window
-            // regardless of intervening passes (per spec — 3 failures in
+            // Match: clear nothing; failures accumulate over the window
+            // regardless of intervening passes (per spec: 3 failures in
             // 24h is the trigger, not a streak).
             return;
         }

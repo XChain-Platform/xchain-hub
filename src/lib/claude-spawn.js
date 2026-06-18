@@ -12,11 +12,11 @@
  *
  **********************************************************************
  *
- * claude-spawn.js — Single-shot non-interactive `claude` CLI invocation
+ * claude-spawn.js: Single-shot non-interactive `claude` CLI invocation
  * for the LLM attestation provider.
  *
  * The provider's fetch() needs a stateless "send prompt, get text back"
- * primitive — no session resume, no tool use, no on-disk side effects.
+ * primitive (no session resume, no tool use, no on-disk side effects).
  * `runClaudePrint` wraps `spawn` with the flags that achieve that:
  *
  *   claude --print --output-format json --model <m> \
@@ -43,13 +43,13 @@ const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 
 // Run claude --print, pipe prompt via stdin, capture parsed JSON result.
 //
-//   opts.prompt        (string, required) — user prompt body.
-//   opts.model         (string, required) — model identifier (e.g. claude-sonnet-4-6).
-//   opts.systemPrompt  (string, optional) — appended to the default system prompt.
-//   opts.timeoutMs     (number, optional) — kill after N ms. Default 60_000.
-//   opts.maxBudgetUsd  (number, optional) — pass --max-budget-usd. Default unset.
-//   opts.cwd           (string, optional) — working dir. Default os.tmpdir().
-//   opts.authCtx       (object, optional) — seam for resolveHubLlmAuth (tests).
+//   opts.prompt        (string, required)  user prompt body.
+//   opts.model         (string, required)  model identifier (e.g. claude-sonnet-4-6).
+//   opts.systemPrompt  (string, optional)  appended to the default system prompt.
+//   opts.timeoutMs     (number, optional)  kill after N ms. Default 60_000.
+//   opts.maxBudgetUsd  (number, optional)  pass --max-budget-usd. Default unset.
+//   opts.cwd           (string, optional)  working dir. Default os.tmpdir().
+//   opts.authCtx       (object, optional)  seam for resolveHubLlmAuth (tests).
 //
 // Returns Promise<{ result: string, json: object, stderr: string }> on success.
 // Rejects if the CLI exits non-zero, times out, or emits unparseable JSON.
@@ -68,18 +68,18 @@ async function runClaudePrint(opts) {
     const auth = resolveHubLlmAuth(authCtx);
     if (!auth.ok) throw new Error('claude-spawn: ' + (auth.detail || auth.reason || 'no credentials'));
     if (auth.transport !== 'claude_spawn') {
-        throw new Error('claude-spawn: transport is ' + auth.transport + ' — direct-API path should not call spawn');
+        throw new Error('claude-spawn: transport is ' + auth.transport + '; direct-API path should not call spawn');
     }
 
     const args = [
         '--print',
         '--output-format', 'json',
         '--model', model,
-        // Empty string disables ALL built-in tools — attestation must not
+        // Empty string disables ALL built-in tools. Attestation must not
         // execute side effects (Bash/Edit/Read/etc.) on the validator box.
         '--tools', '',
         '--no-session-persistence',
-        // Don't load user/project/local settings — keeps responses
+        // Don't load user/project/local settings; this keeps responses
         // independent of the operator's Claude Code configuration.
         '--setting-sources', ''
     ];

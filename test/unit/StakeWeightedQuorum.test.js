@@ -13,11 +13,11 @@ const swq = require('../../src/stake_weighted_quorum.js');
 
 // CONSENSUS-CRITICAL: this predicate decides every cross-chain settlement under
 // STAKE_WEIGHTED_QUORUM. The indexer keeps a byte-equivalent copy
-// (xchain-indexer/src/stake_weighted_quorum.js) — the cross-service regression
+// (xchain-indexer/src/stake_weighted_quorum.js): the cross-service regression
 // suite asserts they agree.
 describe('stake_weighted_quorum', function () {
 
-    // S1 = 6000 across TWO keys (a, b) — one staking source, additive DELEGATE.
+    // S1 = 6000 across TWO keys (a, b): one staking source, additive DELEGATE.
     // S2 = 3000 (c), S3 = 3000 (d). Total S = 12000.
     const V = [
         { pubkey: 'a', source: 'S1', weight: '6000' },
@@ -60,7 +60,7 @@ describe('stake_weighted_quorum', function () {
         });
 
         it('exactly 2/3 of stake is NOT enough (strictly greater required)', function () {
-            // Two equal sources of 3750 each, S = 7500; one source = exactly 2/3? No —
+            // Two equal sources of 3750 each, S = 7500; one source = exactly 2/3? No.
             // use P=5000 of S=7500 = 2/3 exactly → false.
             const D = [
                 { pubkey: 'p', source: 'P', weight: '5000.00000000' },
@@ -87,12 +87,12 @@ describe('stake_weighted_quorum', function () {
             expect(swq.meetsStakeThreshold(V, ['zzz'])).to.equal(false);
         });
 
-        it('a single source IS the whole snapshot — finalizes on its own signature', function () {
+        it('a single source IS the whole snapshot: finalizes on its own signature', function () {
             const one = [{ pubkey: 'x', source: 'X', weight: '5000' }];
             expect(swq.meetsStakeThreshold(one, ['x'])).to.equal(true);     // 3·5000 > 2·5000
         });
 
-        it('S = 0 (empty snapshot) is disabled — never finalizes', function () {
+        it('S = 0 (empty snapshot) is disabled: never finalizes', function () {
             expect(swq.meetsStakeThreshold([], ['x'])).to.equal(false);
         });
 
@@ -133,7 +133,7 @@ describe('stake_weighted_quorum', function () {
         it('hub activation map == canonical constants.js', function () {
             // Monorepo-relative; the canonical doc is always present alongside the
             // services. A missing/unreadable canonical is a hard failure (NOT a
-            // skip) — a silent skip would be a false green on a fork-class invariant.
+            // skip): a silent skip would be a false green on a fork-class invariant.
             const canonical = require('../../../xchain-documentation/protocol/constants.js')
                 .STAKE_WEIGHTED_QUORUM_ACTIVATION;
             expect(swq.STAKE_WEIGHTED_QUORUM_ACTIVATION).to.deep.equal(canonical);

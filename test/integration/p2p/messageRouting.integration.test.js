@@ -23,7 +23,7 @@ describe('Integration: P2P Message Routing (SC-9.x)', function () {
 
     before(async function () {
         try { await testDb.setup(); } catch (e) {
-            console.warn('MariaDB unavailable — skipping P2P tests');
+            console.warn('MariaDB unavailable; skipping P2P tests');
         }
     });
 

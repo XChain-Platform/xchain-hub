@@ -23,7 +23,7 @@ describe('E2E: API Contract Verification', function () {
     before(async function () {
         this.timeout(15000);
         try { await testDb.setup(); } catch (e) {
-            console.warn('MariaDB unavailable — skipping E2E API contract tests');
+            console.warn('MariaDB unavailable: skipping E2E API contract tests');
             return;
         }
         priceMocks.setup();
@@ -62,7 +62,7 @@ describe('E2E: API Contract Verification', function () {
             expect(res.result).to.deep.equal({ status: 'success' });
         });
 
-        it('getallconfigs — empty', async function () {
+        it('getallconfigs (empty)', async function () {
             let res = await callRpc(cluster.getPort(0), 'getallconfigs');
             expect(res.result).to.be.an('object');
             expect(res.result.configs).to.be.an('object');
@@ -119,12 +119,12 @@ describe('E2E: API Contract Verification', function () {
             expect(res.result.submissions).to.be.an('object');
         });
 
-        it('getpricesnapshots — empty', async function () {
+        it('getpricesnapshots (empty)', async function () {
             let res = await callRpc(cluster.getPort(0), 'getpricesnapshots', { limit: 10 });
             expect(res.result).to.be.an('array');
         });
 
-        it('getprice — no data', async function () {
+        it('getprice (no data)', async function () {
             let res = await callRpc(cluster.getPort(0), 'getprice', { coin_pair: 'BTC/USD' });
             expect(res.result.error).to.include('no price data');
         });
@@ -224,106 +224,106 @@ describe('E2E: API Contract Verification', function () {
     // E2E-API-002: Invalid input handling
     describe('E2E-API-002: Invalid input handling', function () {
 
-        it('getprice — missing coin_pair', async function () {
+        it('getprice (missing coin_pair)', async function () {
             let res = await callRpc(cluster.getPort(0), 'getprice', {});
             expect(res.result.error).to.include('coin_pair is required');
         });
 
-        it('registervalidator — invalid pubkey', async function () {
+        it('registervalidator (invalid pubkey)', async function () {
             let res = await callRpc(cluster.getPort(0), 'registervalidator', {
                 signing_pubkey: 'too-short', addr: 'ws://bad:10001'
             });
             expect(res.result.error).to.include('Invalid signing pubkey');
         });
 
-        it('registervalidator — missing addr', async function () {
+        it('registervalidator (missing addr)', async function () {
             let res = await callRpc(cluster.getPort(0), 'registervalidator', {
                 signing_pubkey: 'ff'.repeat(32)
             });
             expect(res.result.error).to.include('required');
         });
 
-        it('getvalidatorstatus — missing pubkey', async function () {
+        it('getvalidatorstatus (missing pubkey)', async function () {
             let res = await callRpc(cluster.getPort(0), 'getvalidatorstatus', {});
             expect(res.result.error).to.include('signing_pubkey is required');
         });
 
-        it('getfeequote — missing action', async function () {
+        it('getfeequote (missing action)', async function () {
             let res = await callRpc(cluster.getPort(0), 'getfeequote', { chain: 'BTC' });
             expect(res.result.error).to.include('action is required');
         });
 
-        it('getfeequote — missing chain', async function () {
+        it('getfeequote (missing chain)', async function () {
             let res = await callRpc(cluster.getPort(0), 'getfeequote', { action: 'ISSUE' });
             expect(res.result.error).to.include('chain is required');
         });
 
-        it('requestattestation — missing params', async function () {
+        it('requestattestation (missing params)', async function () {
             let res = await callRpc(cluster.getPort(0), 'requestattestation', { source_chain: 'BTC' });
             expect(res.result.error).to.include('required');
         });
 
-        it('vote — missing params', async function () {
+        it('vote (missing params)', async function () {
             let res = await callRpc(cluster.getPort(0), 'vote', {});
             expect(res.result.error).to.include('required');
         });
 
-        it('propose — missing params', async function () {
+        it('propose (missing params)', async function () {
             let res = await callRpc(cluster.getPort(0), 'propose', {});
             expect(res.result.error).to.include('required');
         });
 
-        it('reportreorg — missing params', async function () {
+        it('reportreorg (missing params)', async function () {
             let res = await callRpc(cluster.getPort(0), 'reportreorg', { chain: 'BTC' });
             expect(res.result.error).to.include('required');
         });
 
-        it('pushxcallreorg — missing source_chain', async function () {
+        it('pushxcallreorg (missing source_chain)', async function () {
             let res = await callRpc(cluster.getPort(0), 'pushxcallreorg', { from_action_index: 100 });
             expect(res.result.error).to.include('source_chain is required');
         });
 
-        it('pushxcallreorg — invalid chain', async function () {
+        it('pushxcallreorg (invalid chain)', async function () {
             let res = await callRpc(cluster.getPort(0), 'pushxcallreorg', { source_chain: 'INVALID', from_action_index: 100 });
             expect(res.result.error).to.match(/chain|BTC/i);
         });
 
-        it('pushxcallreorg — missing from_action_index', async function () {
+        it('pushxcallreorg (missing from_action_index)', async function () {
             let res = await callRpc(cluster.getPort(0), 'pushxcallreorg', { source_chain: 'BTC' });
             expect(res.result.error).to.include('from_action_index is required');
         });
 
-        it('pushdexreorg — missing source_chain', async function () {
+        it('pushdexreorg (missing source_chain)', async function () {
             let res = await callRpc(cluster.getPort(0), 'pushdexreorg', { from_action_index: 100 });
             expect(res.result.error).to.include('source_chain is required');
         });
 
-        it('pushdexreorg — invalid chain', async function () {
+        it('pushdexreorg (invalid chain)', async function () {
             let res = await callRpc(cluster.getPort(0), 'pushdexreorg', { source_chain: 'INVALID', from_action_index: 100 });
             expect(res.result.error).to.match(/chain|BTC/i);
         });
 
-        it('pushdexreorg — missing from_action_index', async function () {
+        it('pushdexreorg (missing from_action_index)', async function () {
             let res = await callRpc(cluster.getPort(0), 'pushdexreorg', { source_chain: 'BTC' });
             expect(res.result.error).to.include('from_action_index is required');
         });
 
-        it('getattestation — missing params', async function () {
+        it('getattestation (missing params)', async function () {
             let res = await callRpc(cluster.getPort(0), 'getattestation', {});
             expect(res.result.error).to.include('required');
         });
 
-        it('getswap — missing params', async function () {
+        it('getswap (missing params)', async function () {
             let res = await callRpc(cluster.getPort(0), 'getswap', {});
             expect(res.result.error).to.include('required');
         });
 
-        it('initiateswap — missing params', async function () {
+        it('initiateswap (missing params)', async function () {
             let res = await callRpc(cluster.getPort(0), 'initiateswap', { source_chain: 'BTC' });
             expect(res.result.error).to.include('required');
         });
 
-        it('getproposal — missing proposal_id', async function () {
+        it('getproposal (missing proposal_id)', async function () {
             let res = await callRpc(cluster.getPort(0), 'getproposal', {});
             expect(res.result.error).to.include('proposal_id is required');
         });

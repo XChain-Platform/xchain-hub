@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * C3 — Fiat oracle round lifecycle, end-to-end into FIAT-dispenser consumption.
+ * C3: Fiat oracle round lifecycle, end-to-end into FIAT-dispenser consumption.
  *
  * The "fiat oracle" is the validator PBFT price oracle producing a fiat pair
  * (e.g. BTC/USD) finalized into `price_snapshots`. A FIAT-pegged dispenser
@@ -47,7 +47,7 @@ const OracleConsensus = require('../../../src/OracleConsensus');
 // The REAL dispenser-side consumption logic lives in the indexer's Utility.
 // reversePriceMatch + the bignumber helpers it calls are pure (mathjs + sibling
 // methods; they never touch this.config), so Object.create(prototype) gives a
-// constructor-free instance — avoiding the indexer config/env the constructor
+// constructor-free instance, avoiding the indexer config/env the constructor
 // would otherwise load. Resolved by monorepo-relative path (same convention as
 // xchain-e2e-test loads xchain-hub internals).
 const IndexerUtility = require(path.resolve(__dirname, '../../../../xchain-indexer/src/utility.js'));
@@ -136,7 +136,7 @@ describe('Integration: Fiat oracle round -> FIAT dispenser consumption (C3)', fu
 
     before(async function () {
         try { await testDb.setup(); }
-        catch (e) { console.warn('MariaDB unavailable — skipping C3 fiat-oracle tests'); }
+        catch (e) { console.warn('MariaDB unavailable, skipping C3 fiat-oracle tests'); }
         mockApi.setup();
     });
 

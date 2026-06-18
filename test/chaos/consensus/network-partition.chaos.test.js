@@ -81,7 +81,7 @@ describe('Chaos: Network Partition (NET-3)', function () {
         let config = { coin: 'BTC', param: 'test' };
         let digest = makeDigest(config);
 
-        // Leader (validators[0]) sends PRE_PREPARE for seq 4 — at view 0,
+        // Leader (validators[0]) sends PRE_PREPARE for seq 4. At view 0,
         // (4+0)%4 = 0, so validators[0] is the legitimate rotation leader.
         hub2._peerManager.emit('message', buildEnvelope('PBFT_PRE_PREPARE', {
             seq: 4, view: 0, configDigest: digest, config: config
@@ -139,11 +139,11 @@ describe('Chaos: Network Partition (NET-3)', function () {
         let done = false;
         let promise = consensus.propose(config).then(() => { done = true; });
 
-        // seq is now 4; initially only 1 PREPARE (self) — not enough
+        // seq is now 4; initially only 1 PREPARE (self), not enough
         await new Promise(r => setTimeout(r, 50));
         expect(done).to.be.false;
 
-        // "Partition heals" — delayed PREPAREs arrive
+        // "Partition heals": delayed PREPAREs arrive
         pm.emit('message', buildEnvelope('PBFT_PREPARE', {
             seq: 4, configDigest: digest
         }, VALIDATORS_4[1].addr));
@@ -173,13 +173,13 @@ describe('Chaos: Network Partition (NET-3)', function () {
         let config = { key: 'stale' };
         let digest = makeDigest(config);
 
-        // sender is the legit (seq 5, view 0) leader, so the stale-seq guard
-        // — not the identity guard — is what rejects it.
+        // sender is the legit (seq 5, view 0) leader. The stale-seq guard
+        // (not the identity guard) is what rejects it.
         pm.emit('message', buildEnvelope('PBFT_PRE_PREPARE', {
             seq: 5, view: 0, configDigest: digest, config: config
         }, VALIDATORS_4[1].addr));
 
-        // Should be rejected — no proposal created
+        // Should be rejected; no proposal created
         expect(consensus.pendingProposals.has(5)).to.be.false;
     });
 });

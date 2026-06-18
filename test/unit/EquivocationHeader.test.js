@@ -16,7 +16,7 @@ const eq = require('../../src/equivocation_header.js');
 // copy (xchain-indexer/src/equivocation_header.js); the client verifiers (xchain-sdk,
 // xchain-explorer) will keep gated copies too. The cross-service regression suite
 // asserts every copy's activation map equals the canonical in
-// xchain-documentation/protocol/constants.js — a drift flips the header on different
+// xchain-documentation/protocol/constants.js (a drift flips the header on different
 // blocks → guaranteed ledger fork.
 describe('equivocation_header', function () {
 
@@ -45,8 +45,8 @@ describe('equivocation_header', function () {
             const canon = eq.buildEquivCanonical(tag, roundId, 0, content);
             const prefix = eq.equivPrefix(eq.equivKey(tag, roundId, 0));
             expect(canon.startsWith(prefix)).to.equal(true);
-            // CONTENT is recovered by slicing the (opaque) prefix off — never by
-            // field-splitting, since both key and content carry "|".
+            // CONTENT is recovered by slicing the (opaque) prefix off (never by
+            // field-splitting, since both key and content carry "|").
             expect(canon.slice(prefix.length)).to.equal(content);
         });
         it('different VIEW ⇒ different prefix (the equivocation/honest-view boundary)', function () {
@@ -59,7 +59,7 @@ describe('equivocation_header', function () {
 
     // Cross-service activation parity: the hub's LOCAL activation map must equal the
     // canonical map in constants.js AND the indexer's copy, byte-for-byte. A missing
-    // canonical is a hard failure (NOT a skip) — a silent skip would be a false green
+    // canonical is a hard failure (NOT a skip): a silent skip would be a false green
     // on a fork-class invariant.
     describe('cross-service activation parity', function () {
         it('hub activation map == canonical constants.js', function () {

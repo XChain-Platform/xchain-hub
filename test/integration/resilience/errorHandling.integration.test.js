@@ -54,7 +54,7 @@ describe('Integration: Error Handling (SC-10.x)', function () {
 
     before(async function () {
         try { await testDb.setup(); } catch (e) {
-            console.warn('MariaDB unavailable — skipping error handling tests');
+            console.warn('MariaDB unavailable: skipping error handling tests');
         }
     });
 

@@ -18,7 +18,7 @@
 //   - a fetch with the current watermark returns nothing.
 //
 // updated_at has one-second granularity, so the test deliberately crosses a
-// second boundary between seeding and mutating — otherwise the mutated row would
+// second boundary between seeding and mutating; otherwise the mutated row would
 // share the seed's timestamp and the strict `>` cursor could not separate them.
 
 const { expect } = require('chai');
@@ -45,7 +45,7 @@ describe('Integration: getallconfigs cursor (since_updated_at)', function () {
             await testDb.setup();
             db = testDb.getDb();
         } catch (e) {
-            console.warn('MariaDB unavailable — skipping config cursor tests');
+            console.warn('MariaDB unavailable; skipping config cursor tests');
         }
     });
 
@@ -61,7 +61,7 @@ describe('Integration: getallconfigs cursor (since_updated_at)', function () {
     it('returns a delta against a prior watermark, then nothing once caught up', async function () {
         this.timeout(20000);
 
-        // Seed 120 rows in a single batch — all share one updated_at second.
+        // Seed 120 rows in a single batch (all share one updated_at second).
         let rows = [];
         for (let i = 0; i < 120; i++) {
             rows.push({

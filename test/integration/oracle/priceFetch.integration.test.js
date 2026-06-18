@@ -174,7 +174,7 @@ describe('Integration: Price Fetching (SC-1.x)', function () {
         });
     });
 
-    // SC-1.7: Full multi-fiat fetch — all 3 coins × 12 fiats = 36 pairs.
+    // SC-1.7: Full multi-fiat fetch: all 3 coins × 12 fiats = 36 pairs.
     // The other scenarios use USD-only fixtures; this one exercises the complete
     // multi-fiat parse + median path and guards precision at high magnitudes
     // (KRW/JPY values near the price cap), where parseFloat + toFixed(8) is most
@@ -216,7 +216,7 @@ describe('Integration: Price Fetching (SC-1.x)', function () {
             let byPair = {};
             for (let p of prices) { byPair[p.coinPair] = p; }
 
-            // KRW ~9.87M and JPY ~8.2M per BTC — both sources agree, so the median
+            // KRW ~9.87M and JPY ~8.2M per BTC: both sources agree, so the median
             // equals the input and toFixed(8) must reproduce it exactly.
             expect(byPair['BTC/KRW'].price).to.equal('9876543.25000000');
             expect(byPair['BTC/JPY'].price).to.equal('8200000.50000000');

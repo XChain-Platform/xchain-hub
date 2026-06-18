@@ -272,7 +272,7 @@ describe('OracleRound', function () {
         }
 
         beforeEach(function () {
-            // We only exercise hydration here, not the scheduler — stub the timer
+            // We only exercise hydration here, not the scheduler: stub the timer
             // setup so start() leaves no real timers running after the test.
             sinon.stub(or, '_startRoundTimer');
         });

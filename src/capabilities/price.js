@@ -15,8 +15,8 @@
  * XChain Hub - Capability Self-Test: price
  *
  * Determines whether this hub is operationally ready to sign PRICE v0
- * snapshots. Pragmatic configuration check — live source probing happens
- * in PriceFetcher during normal operation.
+ * snapshots. Pragmatic configuration check (live source probing happens
+ * in PriceFetcher during normal operation).
  *
  * Config shape:
  *   { price: { sources: ['coingecko', 'coinmarketcap'], fiats: ['USD', ...] } }

@@ -16,9 +16,9 @@
  * Performance measurement utilities.
  *
  * Provides:
- *   - measure(fn)     — time an async function, return { result, durationMs }
- *   - Histogram       — collect numeric samples; query min/max/mean/p50/p95/p99
- *   - MemoryTracker   — snapshot process.memoryUsage at intervals; report trend
+ *   - measure(fn)     : time an async function, return { result, durationMs }
+ *   - Histogram       : collect numeric samples; query min/max/mean/p50/p95/p99
+ *   - MemoryTracker   : snapshot process.memoryUsage at intervals; report trend
  */
 
 // ─── measure ────────────────────────────────────────────────────────

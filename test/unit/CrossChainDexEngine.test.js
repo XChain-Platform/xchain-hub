@@ -193,7 +193,7 @@ describe('CrossChainDexEngine', function () {
 
     // ── _findMatches (SWAP path, Phase A behaviour preserved) ─────────────────
 
-    describe('_findMatches() — SWAP', function () {
+    describe('_findMatches(): SWAP', function () {
         let eng;
         before(function () { loadModule(); eng = new CrossChainDexEngine(makeDexHub()); });
 
@@ -231,7 +231,7 @@ describe('CrossChainDexEngine', function () {
 
     // ── _findMatches / _tryOrderMatch (ORDER path, partial fills) ─────────────
 
-    describe('_tryOrderMatch() — partial fills', function () {
+    describe('_tryOrderMatch(): partial fills', function () {
         let eng;
         beforeEach(function () { eng = new CrossChainDexEngine(makeDexHub()); });
 
@@ -281,12 +281,12 @@ describe('CrossChainDexEngine', function () {
             expect(eng._tryMatch(a, b)).to.be.null;
         });
 
-        it('does not cross-match a SWAP against an ORDER (carry-forward) — kind, not terms, is the bar', function () {
+        it('does not cross-match a SWAP against an ORDER (carry-forward): kind, not terms, is the bar', function () {
             // ORDER on LTC: give 100 LTCT, get 50 DOGT (makeOrderPair's A, home_network 'regtest').
             let { a: order } = makeOrderPair();
             // A DOGE counterparty with terms that DO cross the order (identical to makeOrderPair's B,
             // which test 237 proves matches as order×order). CRITICAL: it must share the order's
-            // network — otherwise _tryMatch short-circuits on the network guard (line 245) and a null
+            // network (otherwise _tryMatch short-circuits on the network guard (line 245) and a null
             // would be a FALSE proof (the carry-forward branch at line 258 never runs).
             let terms = { home_coin: 'DOGE', home_network: 'regtest', block_index: 20, action_index: 7,
                 give_coin: 'DOGE', give_tick: 'DOGT', give_amount: '20',
@@ -362,7 +362,7 @@ describe('CrossChainDexEngine', function () {
             };
         }
 
-        // The indexer's cross_settle._canonical — kept here byte-for-byte so a drift breaks CI.
+        // The indexer's cross_settle._canonical is kept here byte-for-byte so a drift breaks CI.
         // EQUIV active in regtest (WI-2 bump 2): TAG=XDEX, ROUND_ID=match_id, VIEW=finalizing_view (default 0).
         function indexerCanonical(m) {
             let raw = [
@@ -595,7 +595,7 @@ describe('CrossChainDexEngine', function () {
         it('_writeFinalizedMatch persists the snapshot on EVERY hub, not just the leader', async function () {
             // Bug-C analog: indexers verify match signatures against
             // capability_snapshots in whichever hub DB they mirror, and a
-            // follower's DB may be the only one they read — leader-only
+            // follower's DB may be the only one they read (leader-only
             // persistence (quorum-0 inline + _broadcastPropose) left follower
             // DBs without it.
             let hub = makeDexHub();
@@ -662,14 +662,14 @@ describe('CrossChainDexEngine', function () {
         });
     });
 
-    // ── L4 determinism — match canonicalization (spec §6) ─────────────────────
+    // ── L4 determinism: match canonicalization (spec §6) ──────────────────────
     // Two hubs must derive a byte-identical canonical (→ match_id / settlement
     // digest) for the same cross-chain match, or settlement forks. _canonicalMatch
     // reads fields by name and String()-coerces, so its output must be invariant
     // to object key order and field value TYPE, and stable for absent optional
     // fields. "Same input → same output" holds regardless of the equiv-header
     // branch, so these are independent of the concurrently-evolving equiv path.
-    describe('L4 determinism — match canonicalization', function () {
+    describe('L4 determinism: match canonicalization', function () {
         const baseMatch = () => ({
             match_id: 'm1', snapshot_block: 800000, network: 'mainnet',
             a_chain: 'BTC', a_action_index: 5, a_tick: 'XCH', a_amount: '100', a_ownership: 0, a_payout_addr: 'bc1a', a_kind: 'swap', a_filled_before: '0',

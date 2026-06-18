@@ -318,7 +318,7 @@ describe('AttestationSpotChecker', function () {
             // Wait for window to expire
             await new Promise(r => setTimeout(r, 150));
 
-            // Second failure after the window — pruning should remove the first
+            // Second failure after the window; pruning should remove the first
             sc.register('rid2', 'http_get', 'e');
             await sc.onRequestFinalized(makeFinalizedEvent({ requestId: 'rid2', signatures: [{ pubkey: 'pk' }] }));
 

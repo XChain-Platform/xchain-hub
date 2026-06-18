@@ -143,7 +143,7 @@ class ReorgHandler extends EventEmitter {
     // window) could otherwise inflate quorum from a single connection. That risk
     // is most acute here: reorg quorum triggers destructive cross-chain rollback
     // (attestation deletes, price-snapshot disputes). The registry is keyed by
-    // addr — the same value used as the sender. A null registry fails closed (the
+    // addr (the same value used as the sender). A null registry fails closed (the
     // vulnerability scenario); an empty registry stays lenient (genuine
     // pre-bootstrap, where the sig layer already rejects unknown senders and no
     // peer votes should be arriving).
@@ -185,7 +185,7 @@ class ReorgHandler extends EventEmitter {
             reorgId, chain, reorgHeight, timestamp, affectedChains, digest,
             // Lock quorum at round start so the threshold can't shift between
             // PREPARE and COMMIT (validator set / peer count may change during
-            // the 60s window) — keeps every hub in lockstep across the round.
+            // the 60s window), keeping every hub in lockstep across the round.
             quorum:   this._getQuorum(),
             prepares: new Set(),
             commits:  new Set(),
@@ -202,7 +202,7 @@ class ReorgHandler extends EventEmitter {
                 // Surface the discarded rollback before dropping it, so operators
                 // (and downstream consumers) can alert or retry. Without this, a
                 // stalled round silently leaves attestations un-deleted and price
-                // snapshots un-disputed after a reorg — dirty cross-chain state
+                // snapshots un-disputed after a reorg, leaving dirty cross-chain state
                 // with no signal beyond a log line.
                 this.emit('reorg:timeout', {
                     reorgId,
@@ -247,7 +247,7 @@ class ReorgHandler extends EventEmitter {
             };
             pending.timer = setTimeout(() => {
                 if (!pending.finalized) {
-                    // Same silent-discard fix as _initiateReorgConsensus — emit the
+                    // Same silent-discard fix as _initiateReorgConsensus: emit the
                     // dropped rollback so it isn't lost without a signal.
                     console.warn('Reorg: Consensus timeout for ' + reorgId);
                     this.emit('reorg:timeout', {
@@ -358,7 +358,7 @@ class ReorgHandler extends EventEmitter {
         this.processed.add(reorgId);
 
         console.log('Reorg: Rollback complete for ' + reorgId +
-            ' — attestations and snapshots after timestamp ' + timestamp + ' invalidated');
+            ': attestations and snapshots after timestamp ' + timestamp + ' invalidated');
 
         // Emit event for indexers/consumers
         this.emit('reorg:confirmed', {

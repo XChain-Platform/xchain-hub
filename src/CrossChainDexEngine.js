@@ -16,7 +16,7 @@
  *
  * Matches cross-chain ORDER/SWAP offers that NO single indexer can see (each
  * chain's order book lives in its own DB) and delivers the validated match to
- * every indexer through the existing hub-DB mirror — the same channel that
+ * every indexer through the existing hub-DB mirror (the same channel that
  * carries price_snapshots/oracle_prices. There is NO per-swap on-chain
  * settlement transaction: each indexer reads the finalized, validator-signed
  * match from its local mirror, verifies the 2f+1 `cross_chain` signatures, and
@@ -24,14 +24,14 @@
  * settlement pass).
  *
  * Flow:
- *   1. Discover — poll each chain's `getopencrosschainorders` RPC.
- *   2. Match    — pair compatible offers (Phase A: exact-match SWAP; FCFS).
- *   3. Finalize — federation reaches consensus (single-node bypasses P2P; multi-
+ *   1. Discover: poll each chain's `getopencrosschainorders` RPC.
+ *   2. Match: pair compatible offers (Phase A: exact-match SWAP; FCFS).
+ *   3. Finalize: federation reaches consensus (single-node bypasses P2P; multi-
  *                 node PBFT scaffolded), signs the canonical match (2f+1), writes
  *                 a `cross_chain_matches` row, and persists the `cross_chain`
  *                 capability snapshot at the round's BTC block so every indexer
  *                 can verify. The hub-DB broadcaster streams both rows to indexers.
- *   4. Retract  — on a source-order reorg, mark the match `retracted` and
+ *   4. Retract: on a source-order reorg, mark the match `retracted` and
  *                 broadcast a deletion so indexers roll back / skip it.
  *
  * Trust boundary: indexers verify the signatures, so a bad mirror can delay but
@@ -94,7 +94,7 @@ class CrossChainDexEngine extends EventEmitter {
         // Per-offer committed-fill ledger, keyed `<chain>:<action_index>` →
         // { give, get } cumulative amounts already locked into finalized (non-retracted)
         // matches. The authoritative reservation source (Phase B): the hub derives an
-        // offer's remaining capacity from this ledger — NOT from the indexer-reported
+        // offer's remaining capacity from this ledger, not from the indexer-reported
         // remaining, which lags until the indexer's settlement pass runs:
         //   effective_remaining(give) = full_give − committed.give
         // A SWAP commits its full amount in one fill (→ remaining 0, drops out, exactly
@@ -173,7 +173,7 @@ class CrossChainDexEngine extends EventEmitter {
 
     // Remaining { give, get } capacity = full offer amount − committed (never below 0).
     // For a SWAP the "full" amount is the offer amount; once matched (committed == full)
-    // both sides read 0 and it drops out of matching — the Phase-A single-fill behavior.
+    // both sides read 0 and it drops out of matching (the Phase-A single-fill behavior).
     _effectiveRemaining(offer){
         let c       = this._committedFor(offer);
         let fullGive = String(offer.give_amount != null ? offer.give_amount : '0');
@@ -250,7 +250,7 @@ class CrossChainDexEngine extends EventEmitter {
         if(aKind === 'swap' && bKind === 'swap'){
             if(!this._isExactMatch(a, b)) return null;
             // Skip a swap already committed to a finalized match (it stays in the open book
-            // until the indexer settles it) — the committed ledger, not matchedOffers, is now
+            // until the indexer settles it). The committed ledger (not matchedOffers) is now
             // the reservation gate. Ownership offers expose amount '1' (see getOpenCrossChain*).
             if(bc.bclte(this._effectiveRemaining(a).give, 0) || bc.bclte(this._effectiveRemaining(b).give, 0)) return null;
             // Single full fill (committed is 0 pre-match → filled_before 0).
@@ -349,7 +349,7 @@ class CrossChainDexEngine extends EventEmitter {
 
     // True iff a and b are a clean cross-chain swap: each gives what the other wants.
     // Amounts compare by normalized decimal value (the two compared amounts are always the
-    // SAME token, so same decimals), not raw string — give_amount/get_amount are stored
+    // SAME token, so same decimals). Not raw string: give_amount/get_amount are stored
     // VARCHAR as the user wrote them, so "100" and "100.00000000" are the same offer.
     _isExactMatch(a, b){
         if(a.home_coin === b.home_coin) return false;
@@ -366,8 +366,8 @@ class CrossChainDexEngine extends EventEmitter {
     }
 
     // Canonicalize a validated, non-negative decimal numeral string for exact value compare:
-    // strip insignificant leading (int) and trailing (fraction) zeros. Pure string math — no
-    // float, no bignumber dep — so it's exact at any precision and deterministic. null/empty
+    // strip insignificant leading (int) and trailing (fraction) zeros. Pure string math,
+    // no float, no bignumber dep. It's exact at any precision and deterministic. null/empty
     // (ownership offers carry no amount) normalize to '' and compare equal to each other.
     _normalizeAmount(v){
         if(v === null || v === undefined) return '';
@@ -437,7 +437,7 @@ class CrossChainDexEngine extends EventEmitter {
             // and _writeFinalizedMatch writes + mirrors the row.
             await this.consensus.propose(matchId, { row: row, snapshot: { validators: validators, count: validators.length } });
         } catch(e){
-            this._inflight.delete(matchId);            // round failed to start — allow a retry
+            this._inflight.delete(matchId);            // round failed to start; allow a retry
             throw e;
         }
     }
@@ -470,7 +470,7 @@ class CrossChainDexEngine extends EventEmitter {
     // re-fetch both chains' open cross-chain orders, confirm each leg is still open +
     // escrowed + at least minConfirmations deep, and that the pair re-derives to the
     // SAME match_id and canonical. Returns true only when our own view confirms the
-    // match — a Byzantine leader cannot get us to sign a match we can't independently see.
+    // match. A Byzantine leader cannot get us to sign a match we can't independently see.
     async validateProposedMatch(row){
         if(!row || row.a_chain === row.b_chain) return false;
         let a = await this._findOpenOffer(row.a_chain, Number(row.a_action_index));
@@ -479,7 +479,7 @@ class CrossChainDexEngine extends EventEmitter {
         if((a.home_network || '') !== String(row.network || '')) return false;
         if((b.home_network || '') !== String(row.network || '')) return false;
         // Re-derive the WHOLE match (kind, fill amounts, filled-before offsets, match_id)
-        // independently from our own view — offers + our committed ledger. The proposer's
+        // independently from our own view: offers + our committed ledger. The proposer's
         // a/b are canonical (a_chain <= b_chain), so _tryMatch(a, b) keeps lo=a, hi=b.
         let desc = this._tryMatch(a, b);
         if(!desc) return false;
@@ -517,7 +517,7 @@ class CrossChainDexEngine extends EventEmitter {
     // `view` = the PBFT view this signature is taken at (the consensus passes the live
     // pending.view; the indexer/archive twins pass the persisted finalizing_view). At/above
     // the EQUIV flag-day the XMATCH content is wrapped in the uniform header (TAG=XDEX,
-    // ROUND_ID=match_id, VIEW=view) — putting <view> in the signed bytes is what lets a
+    // ROUND_ID=match_id, VIEW=view). Putting <view> in the signed bytes is what lets a
     // legitimate view change (re-sign at a higher view) be told apart from equivocation.
     // The view is NOT a content field; it lives only in the header.
     _canonicalMatch(r, view){
@@ -542,7 +542,7 @@ class CrossChainDexEngine extends EventEmitter {
                     'b_chain','b_action_index','b_kind','b_tick','b_amount','b_filled_before','b_ownership','b_payout_addr',
                     'effective_time','finalizing_view','validator_signatures'];
         let vals = cols.map(c => row[c]);
-        // INSERT IGNORE — match_id is unique, so a re-finalize (e.g. another hub or a
+        // INSERT IGNORE: match_id is unique, so a re-finalize (e.g. another hub or a
         // restart racing the poll) is a harmless no-op.
         let res = await this.db.doQuery(
             'INSERT IGNORE INTO cross_chain_matches (' + cols.join(', ') + ') VALUES (' + cols.map(() => '?').join(', ') + ')',
@@ -563,7 +563,7 @@ class CrossChainDexEngine extends EventEmitter {
     // Resolve the qualifying validator set, normalized to { pubkey, source, weight, amount }.
     // At/above STAKE_WEIGHTED_QUORUM activation (keyed on the BTC snapshot_block +
     // network) this fetches the SOURCE-KEYED weights; below it, the legacy count set
-    // (source='' , weight=amount) — byte-for-byte the old membership/values, so the
+    // (source='' , weight=amount): byte-for-byte the old membership/values, so the
     // pre-activation path and mirror rows are unchanged.
     async _resolveCapabilityValidators(capability, block, network){
         let validators = [];

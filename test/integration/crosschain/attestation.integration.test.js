@@ -45,7 +45,7 @@ describe('Integration: Cross-Chain Attestation (SC-4.x)', function () {
 
     before(async function () {
         try { await testDb.setup(); } catch (e) {
-            console.warn('MariaDB unavailable — skipping attestation tests');
+            console.warn('MariaDB unavailable: skipping attestation tests');
         }
     });
 
@@ -177,7 +177,7 @@ describe('Integration: Cross-Chain Attestation (SC-4.x)', function () {
             let finalizedAtt = null;
             engine.on('attestation:finalized', (a) => { finalizedAtt = a; });
 
-            // Request attestation — leader broadcasts PROPOSE
+            // Request attestation: leader broadcasts PROPOSE
             let attestPromise = engine.requestAttestation('BTC', 42, 'LTC');
 
             await new Promise(r => setTimeout(r, 50));

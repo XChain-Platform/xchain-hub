@@ -127,8 +127,8 @@ function fc_invalidPrivkeyHex() {
         fc.constant(''),
         fc.constant(null),
         fc.constant(undefined),
-        fc_hexString(31),                        // 62 chars — too short
-        fc_hexString(33),                        // 66 chars — too long
+        fc_hexString(31),                        // 62 chars: too short
+        fc_hexString(33),                        // 66 chars: too long
         fc.string({ minLength: 64, maxLength: 64 })
             .filter(s => !/^[0-9a-fA-F]{64}$/.test(s))
     );

@@ -16,7 +16,7 @@
  * Seed the test database with realistic hub data.
  *
  * Requires a Database instance (from testDb.getDb()).
- * All functions are idempotent — safe to call multiple times.
+ * All functions are idempotent; safe to call multiple times.
  */
 
 const { makeValidator, SAMPLE_PRICES } = require('../../helpers/fixtures');

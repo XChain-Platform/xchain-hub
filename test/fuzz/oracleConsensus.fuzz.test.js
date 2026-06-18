@@ -94,7 +94,7 @@ describe('Fuzz: OracleConsensus', function () {
         it('output is always positive when not null (with finite inputs)', function () {
             // Note: The generator only produces finite positive prices, so this
             // tests the property under well-formed input. Infinity can leak through
-            // _aggregate because parseFloat("Infinity") > 0 is true — this is a
+            // _aggregate because parseFloat("Infinity") > 0 is true. This is a
             // known gap documented in the "never contains Infinity" test below.
             fc.assert(fc.property(
                 fc.array(

@@ -32,7 +32,7 @@ function stubPublicDns() {
 
 function p(body, meta){ return { body: Buffer.from(body, 'utf8'), meta: String(meta || '200') }; }
 
-describe('http_get.agree — byte_equality', function () {
+describe('http_get.agree: byte_equality', function () {
 
     it('returns null on empty input', function () {
         expect(httpGet.agree([])).to.be.null;
@@ -186,7 +186,7 @@ describe('http_get.fetch', function () {
     });
 
     it('uses default maxResponseBytes (32768) and rejects when exceeded', async function () {
-        // Build a response that is 32769 bytes — one byte over the default cap.
+        // Build a response that is 32769 bytes, one byte over the default cap.
         const big = Buffer.alloc(32769, 'x');
         nock('https://example.com').get('/big').reply(200, big);
         let err;
@@ -198,7 +198,7 @@ describe('http_get.fetch', function () {
     it('honours a custom maxResponseBytes option', async function () {
         const body = Buffer.alloc(11, 'A');
         nock('https://example.com').get('/small').reply(200, body);
-        // 10 byte cap — 11 bytes should trigger overflow
+        // 10 byte cap: 11 bytes should trigger overflow
         let err;
         try { await httpGet.fetch('https://example.com/small', { maxResponseBytes: 10 }); } catch (e) { err = e; }
         expect(err).to.exist;
@@ -243,7 +243,7 @@ describe('http_get.fetch', function () {
 
 // ---- fetch() SSRF guard ----------------------------------------------------
 
-describe('http_get.fetch — SSRF guard', function () {
+describe('http_get.fetch: SSRF guard', function () {
 
     afterEach(function () {
         nock.cleanAll();

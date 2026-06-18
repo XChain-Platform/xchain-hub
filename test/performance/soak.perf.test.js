@@ -13,7 +13,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Scenario 5 — Sustained Operation (Soak Test)
+ * Scenario 5: Sustained Operation (Soak Test)
  *
  * Runs the hub under moderate load for an extended period to detect
  * memory leaks, performance degradation, and resource exhaustion.
@@ -51,7 +51,7 @@ describe('Performance: Soak Test', function () {
         try {
             await testDb.setup();
         } catch (e) {
-            console.log('    MariaDB unavailable — skipping soak tests');
+            console.log('    MariaDB unavailable: skipping soak tests');
             this.skip();
         }
         mockApi.setup();

@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// Extended coverage for src/db.js — exercises the schema/migration/drift
+// Extended coverage for src/db.js: exercises the schema/migration/drift
 // machinery and config helpers not covered by db.test.js (verifyDatabase,
 // createDatabase, verifyTables, runMigrations, _createTableFromFile,
 // stripSqlLineComments, parseExpectedColumns, alterTableForDrift, the
@@ -54,7 +54,7 @@ function makeDb(fsOverrides) {
 
 function fatalErr(code) { const e = new Error(code); e.code = code; return e; }
 
-describe('Database — extended coverage', function () {
+describe('Database: extended coverage', function () {
 
     beforeEach(function () {
         // Keep negative-path logs out of the test output; some are asserted on.
@@ -226,7 +226,7 @@ describe('Database — extended coverage', function () {
             const { db, mockConn } = makeDb();
             mockConn.query.resolves([{ c: 1 }]); // index already present
             await db._migrateUniqueKey('t', 'uq', '(a)', ['a']);
-            // only the existence SELECT runs — no DELETE / ALTER
+            // only the existence SELECT runs; no DELETE / ALTER
             expect(mockConn.query.callCount).to.equal(1);
             expect(mockConn.release.called).to.be.true;
         });
@@ -292,7 +292,7 @@ describe('Database — extended coverage', function () {
             const { db, mockConn } = makeDb();
             mockConn.query.resolves([{ COLUMN_TYPE: "enum('price','cross_chain','oracle_publish','attestation','full_node')" }]);
             await db._migrateEnumColumn('validator_capabilities', 'capability', TARGET, 'NOT NULL');
-            // only the COLUMN_TYPE SELECT runs — no ALTER
+            // only the COLUMN_TYPE SELECT runs; no ALTER
             expect(mockConn.query.callCount).to.equal(1);
             expect(mockConn.release.called).to.be.true;
         });
@@ -337,7 +337,7 @@ describe('Database — extended coverage', function () {
             const { db, mockConn } = makeDb();
             mockConn.query.resolves([{ c: 1 }]); // index already present
             await db._migrateIndex('validator_rewards', 'idx_batch_seq', '(batch_seq)');
-            // only the existence SELECT runs — no ALTER
+            // only the existence SELECT runs; no ALTER
             expect(mockConn.query.callCount).to.equal(1);
             expect(mockConn.release.called).to.be.true;
         });
@@ -513,7 +513,7 @@ describe('Database — extended coverage', function () {
     });
 
     // -----------------------------------------------------------------
-    // getConnection() — transaction + retry/backoff tail
+    // getConnection(): transaction + retry/backoff tail
     // -----------------------------------------------------------------
 
     describe('getConnection()', function () {

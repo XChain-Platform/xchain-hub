@@ -25,7 +25,7 @@ describe('E2E: Cross-Chain Attestation Pipeline', function () {
     before(async function () {
         this.timeout(15000);
         try { await testDb.setup(); } catch (e) {
-            console.warn('MariaDB unavailable — skipping E2E attestation tests');
+            console.warn('MariaDB unavailable: skipping E2E attestation tests');
             return;
         }
         priceMocks.setup();
@@ -104,7 +104,7 @@ describe('E2E: Cross-Chain Attestation Pipeline', function () {
         });
     });
 
-    // E2E-ATTEST-003: SWAP lifecycle — initiation through attestation
+    // E2E-ATTEST-003: SWAP lifecycle (initiation through attestation phase)
     describe('E2E-ATTEST-003: SWAP lifecycle', function () {
 
         it('swap initiates and attestation creates matching records', async function () {
@@ -138,8 +138,8 @@ describe('E2E: Cross-Chain Attestation Pipeline', function () {
             expect(attRes.result.status).to.equal('attested');
             expect(attRes.result.attestationId).to.equal('BTC:5000:LTC');
 
-            // Step 3: Manually progress the swap (single-node mode doesn't emit
-            // attestation:finalized in the fallback path — this is a known limitation)
+            // Step 3: Manually progress the swap. Single-node mode doesn't emit
+            // attestation:finalized in the fallback path (this is a known limitation)
             let hub = cluster.getHub(0);
             await hub.swapTracker.updateSwapStatus('BTC', 5000, 'attested', 'BTC:5000:LTC');
 

@@ -18,7 +18,7 @@
  * row insertion events from PriceAggregator (and other future row sources)
  * to all connected indexers' local hub DB sync clients.
  *
- * This is the cross-chain infrastructure sync channel — separate from the
+ * This is the cross-chain infrastructure sync channel, separate from the
  * per-chain indexer DB sync channel in xchain-sync. Indexers
  * subscribe to receive new price_snapshots / oracle_prices rows in real
  * time and apply them to their local hub DB copy.
@@ -34,12 +34,12 @@ class HubDbBroadcaster {
 
     constructor(config, db) {
         this.config = config || {};
-        this.db     = db || null;      // Optional hub DB — used to stamp max IDs in the ready message
+        this.db     = db || null;      // Optional hub DB (used to stamp max IDs in the ready message)
         this.subscribers = new Set();  // Set<ws>
         this.maxBufferedMessages = parseInt(this.config.WS_BACKPRESSURE_LIMIT || 50);
 
         // Stream-position watermark heartbeat. Every interval, tell subscribers
-        // "you have received every row event produced up to ts" — row events are
+        // "you have received every row event produced up to ts". Row events are
         // emitted synchronously at insert time in this same process, so a quiet
         // stream genuinely means no new rows exist, and the indexer's sync
         // barriers can distinguish "mirror is behind" from "the world is quiet"

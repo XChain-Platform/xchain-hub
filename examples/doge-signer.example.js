@@ -7,13 +7,13 @@
  *
  **********************************************************************
  *
- * Reference HUB_SIGNER_MODULE — DOGE publisher pipeline via xchain-sdk.
+ * Reference HUB_SIGNER_MODULE: DOGE publisher pipeline via xchain-sdk.
  *
  * The hub's on-chain publishers (PRICE v0 / ANCHOR) hand this module a raw
  * wire payload via the `broadcast` hook. XChain payloads exceed OP_RETURN
  * size, so they ride the TWO-PHASE P2SH encoding: a phase-1 transaction
  * funds P2SH outputs whose redeem scripts embed the data, and a phase-2
- * transaction spends them, revealing the data on-chain — only phase 2 is
+ * transaction spends them, revealing the data on-chain. Only phase 2 is
  * decodable. The hub's built-in walletSign-only pipeline covers just
  * phase 1, so a production signer module should export `broadcast` (this
  * full pipeline, mirroring sdk lifecycleManager.submitAction) rather than
@@ -30,7 +30,7 @@
  *        DOGE_ADDRESS=<publisher p2pkh address>
  *        DOGE_ENCODER_URL=<encoder JSON-RPC endpoint for this network>
  *        DOGE_FEE_PER_KB=0.01            # optional, coin/kB; omit → node estimate
- *      The key never leaves this directory — it is NOT part of the hub's
+ *      The key never leaves this directory; it is NOT part of the hub's
  *      container env or xchain-node config.
  *   3. Set on the host (xchain-node's .env):
  *        XCHAIN_NODE_HUB_SIGNER_DIR=/home/<user>/hub-signer
@@ -38,7 +38,7 @@
  *      directory read-only at /XChainHub/operator-signer and sets
  *        HUB_SIGNER_MODULE=/XChainHub/operator-signer/signer.js
  *   4. Also set DOGE_ADDRESS / DOGE_PUBKEY_HEX / DOGE_ENCODER_URL in the
- *      hub's own env (host .env passthrough) — the publishers use them for
+ *      hub's own env (host .env passthrough). The publishers use them for
  *      election, balance checks, and low-balance warnings.
  *
  ********************************************************************/
@@ -67,7 +67,7 @@ module.exports = {
     // Mirrors sdk lifecycleManager.submitAction's encode/sign/broadcast +
     // P2SH phase-2 reveal, minus the action-composition step (the hub hands
     // a ready payload). The returned txid is the PHASE-2 (reveal) txid when
-    // two-phase encoding is used — that is the transaction indexers decode.
+    // two-phase encoding is used. That is the transaction indexers decode.
     async broadcast(payload) {
         const encoder = sdk._requireEncoder();
 

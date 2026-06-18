@@ -24,10 +24,10 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
-    // PeerManager — Signature enforcement
+    // PeerManager: Signature enforcement
     // =================================================================
 
-    describe('PeerManager — Signature enforcement', function () {
+    describe('PeerManager: Signature enforcement', function () {
         const PeerManager = require('../../src/PeerManager');
 
         it('REQUIRE_SIGNATURES defaults to true when not specified', function () {
@@ -66,10 +66,10 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
-    // XChainHub — Fail-closed validator registry on startup
+    // XChainHub: Fail-closed validator registry on startup
     // =================================================================
 
-    describe('XChainHub — Fail-closed validator registry', function () {
+    describe('XChainHub: Fail-closed validator registry', function () {
         const XChainHub   = require('../../src/XChainHub');
         const PeerManager = require('../../src/PeerManager');
 
@@ -93,10 +93,10 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
-    // PeerManager — Dedup cache bounds
+    // PeerManager: Dedup cache bounds
     // =================================================================
 
-    describe('PeerManager — Dedup cache bounds', function () {
+    describe('PeerManager: Dedup cache bounds', function () {
         const PeerManager = require('../../src/PeerManager');
 
         it('evicts oldest entry when dedup cache reaches max', function () {
@@ -113,10 +113,10 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
-    // PeerManager — Peer address validation
+    // PeerManager: Peer address validation
     // =================================================================
 
-    describe('PeerManager — Peer address validation', function () {
+    describe('PeerManager: Peer address validation', function () {
         const PeerManager = require('../../src/PeerManager');
 
         it('rejects peer addresses without port', function () {
@@ -143,10 +143,10 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
-    // PeerManager — Per-peer rate limiting
+    // PeerManager: Per-peer rate limiting
     // =================================================================
 
-    describe('PeerManager — Per-peer rate limiting', function () {
+    describe('PeerManager: Per-peer rate limiting', function () {
         const PeerManager = require('../../src/PeerManager');
 
         it('allows messages within rate limit', function () {
@@ -175,10 +175,10 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
-    // PeerManager — Invalid JSON logging
+    // PeerManager: Invalid JSON logging
     // =================================================================
 
-    describe('PeerManager — Invalid JSON logging', function () {
+    describe('PeerManager: Invalid JSON logging', function () {
         const PeerManager = require('../../src/PeerManager');
 
         it('logs warning for invalid JSON instead of silent discard', function () {
@@ -191,10 +191,10 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
-    // Consensus — Sequence monotonicity
+    // Consensus: Sequence monotonicity
     // =================================================================
 
-    describe('Consensus — Sequence monotonicity', function () {
+    describe('Consensus: Sequence monotonicity', function () {
         const Consensus = require('../../src/Consensus');
 
         let hub, pm, consensus;
@@ -244,10 +244,10 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
-    // Consensus — Minimum quorum warning
+    // Consensus: Minimum quorum warning
     // =================================================================
 
-    describe('Consensus — Minimum quorum warning', function () {
+    describe('Consensus: Minimum quorum warning', function () {
         const Consensus = require('../../src/Consensus');
 
         it('logs warning when quorum=0 and minValidators > 1', async function () {
@@ -274,10 +274,10 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
-    // OracleConsensus — Minimum submissions
+    // OracleConsensus: Minimum submissions
     // =================================================================
 
-    describe('OracleConsensus — Minimum submissions', function () {
+    describe('OracleConsensus: Minimum submissions', function () {
         const OracleConsensus = require('../../src/OracleConsensus');
 
         let hub, pm, oracleRound, oc;
@@ -325,10 +325,10 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
-    // OracleConsensus — Price sanity bounds
+    // OracleConsensus: Price sanity bounds
     // =================================================================
 
-    describe('OracleConsensus — Price sanity bounds', function () {
+    describe('OracleConsensus: Price sanity bounds', function () {
         const OracleConsensus = require('../../src/OracleConsensus');
 
         let oc;
@@ -367,10 +367,10 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
-    // OracleRound — Price validation
+    // OracleRound: Price validation
     // =================================================================
 
-    describe('OracleRound — Submission validation', function () {
+    describe('OracleRound: Submission validation', function () {
         const OracleRound = require('../../src/OracleRound');
 
         let hub, oracleRound;
@@ -445,10 +445,10 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
-    // CrossChainEngine — Chain validation
+    // CrossChainEngine: Chain validation
     // =================================================================
 
-    describe('CrossChainEngine — Chain validation', function () {
+    describe('CrossChainEngine: Chain validation', function () {
         const CrossChainEngine = require('../../src/CrossChainEngine');
 
         let hub, pm, engine;
@@ -526,10 +526,10 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
-    // Consensus engines — sender-membership guard (anti quorum-inflation)
+    // Consensus engines: sender-membership guard (anti quorum-inflation)
     // =================================================================
 
-    describe('Consensus engines — sender-membership guard', function () {
+    describe('Consensus engines: sender-membership guard', function () {
         const Consensus       = require('../../src/Consensus');
         const OracleConsensus = require('../../src/OracleConsensus');
         const CrossChainEngine = require('../../src/CrossChainEngine');
@@ -605,10 +605,10 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
-    // ReorgHandler — Parameter validation and rate limiting
+    // ReorgHandler: Parameter validation and rate limiting
     // =================================================================
 
-    describe('ReorgHandler — Parameter validation', function () {
+    describe('ReorgHandler: Parameter validation', function () {
         const ReorgHandler = require('../../src/ReorgHandler');
 
         let hub, handler;
@@ -680,10 +680,10 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
-    // Governance — Voter authorization
+    // Governance: Voter authorization
     // =================================================================
 
-    describe('Governance — Voter authorization', function () {
+    describe('Governance: Voter authorization', function () {
         const Governance = require('../../src/Governance');
 
         let hub, gov;
@@ -726,10 +726,10 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
-    // Governance — Length limits
+    // Governance: Length limits
     // =================================================================
 
-    describe('Governance — Length limits', function () {
+    describe('Governance: Length limits', function () {
         const Governance = require('../../src/Governance');
 
         let hub, gov;
@@ -772,10 +772,10 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
-    // RewardTracker — Participant validation
+    // RewardTracker: Participant validation
     // =================================================================
 
-    describe('RewardTracker — Participant validation', function () {
+    describe('RewardTracker: Participant validation', function () {
         const RewardTracker = require('../../src/RewardTracker');
 
         let hub, rt;
@@ -821,10 +821,10 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
-    // SlashDetector — Input validation
+    // SlashDetector: Input validation
     // =================================================================
 
-    describe('SlashDetector — Input validation', function () {
+    describe('SlashDetector: Input validation', function () {
         const SlashDetector = require('../../src/SlashDetector');
 
         let hub, sd;
@@ -859,10 +859,10 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
-    // XChainHub — Config structure validation
+    // XChainHub: Config structure validation
     // =================================================================
 
-    describe('XChainHub — Config structure validation', function () {
+    describe('XChainHub: Config structure validation', function () {
         // Use proxyquire to get XChainHub without real DB
         let XChainHub;
 
@@ -960,10 +960,10 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
-    // PriceFetcher — Response validation
+    // PriceFetcher: Response validation
     // =================================================================
 
-    describe('PriceFetcher — Response validation', function () {
+    describe('PriceFetcher: Response validation', function () {
         const PriceFetcher = require('../../src/PriceFetcher');
 
         it('rejects prices >= 1e12 (upper bound) from CoinGecko', async function () {
@@ -1011,10 +1011,10 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
-    // db — Query timeout configuration
+    // db: Query timeout configuration
     // =================================================================
 
-    describe('db — Query timeout configuration', function () {
+    describe('db: Query timeout configuration', function () {
 
         it('connectionPoolParams includes queryTimeout', function () {
             let mockPool = { getConnection: sinon.stub(), end: sinon.stub() };
@@ -1045,10 +1045,10 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
-    // db — Object serialization warning
+    // db: Object serialization warning
     // =================================================================
 
-    describe('db — Object serialization in doQuery', function () {
+    describe('db: Object serialization in doQuery', function () {
 
         it('serializes objects with JSON.stringify instead of toString', async function () {
             let mockPool = {
@@ -1075,10 +1075,10 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
-    // API — Input validation helpers
+    // API: Input validation helpers
     // =================================================================
 
-    describe('API — Input validation helpers', function () {
+    describe('API: Input validation helpers', function () {
         // We test the validation functions by capturing the controller via proxyquire
         let controller;
 

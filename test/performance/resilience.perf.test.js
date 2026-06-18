@@ -13,7 +13,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Scenario 6 — Dependency Degradation
+ * Scenario 6: Dependency Degradation
  *
  * Tests hub behavior when external dependencies (price APIs, database) are
  * slow or failing. Measures impact on response times and verifies graceful
@@ -40,7 +40,7 @@ describe('Performance: Dependency Degradation', function () {
         try {
             await testDb.setup();
         } catch (e) {
-            console.log('    MariaDB unavailable — skipping resilience tests');
+            console.log('    MariaDB unavailable; skipping resilience tests');
             this.skip();
         }
         mockApi.setup();
@@ -142,11 +142,11 @@ describe('Performance: Dependency Degradation', function () {
             mockApi.mockCmcError(500);
 
             let { durationMs } = await measure(async () => {
-                // Should not throw — graceful degradation
+                // Should not throw (graceful degradation)
                 try {
                     await cluster.triggerOracleRound(0);
                 } catch (e) {
-                    // Expected — no data to submit
+                    // Expected: no data to submit
                 }
             });
 

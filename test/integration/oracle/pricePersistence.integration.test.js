@@ -18,7 +18,7 @@ describe('Integration: Price Persistence (SC-3.x)', function () {
 
     before(async function () {
         try { await testDb.setup(); } catch (e) {
-            console.warn('MariaDB unavailable — skipping price persistence tests');
+            console.warn('MariaDB unavailable, skipping price persistence tests');
         }
     });
 

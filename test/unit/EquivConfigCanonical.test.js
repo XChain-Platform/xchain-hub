@@ -8,10 +8,10 @@
 // This file is part of XChain Platform. Licensed under the GNU Affero
 // General Public License v3.0 or later; see LICENSE.md.
 
-// EQUIV header (WI-2 bump 2) — config-change PBFT (XCONFIG, the 6th engine).
+// EQUIV header (WI-2 bump 2): config-change PBFT (XCONFIG, the 6th engine).
 // Config PBFT signs only the ephemeral envelope today; A3 adds a durable per-validator
 // signature over buildEquivCanonical('XCONFIG', seq, view, `${snapshot_block}|${digest}`),
-// carried as {equiv_sig, equiv_pubkey} in every vote message — parallel/additive to the
+// carried as {equiv_sig, equiv_pubkey} in every vote message, parallel/additive to the
 // count + weighted tally, gated on the round's BTC tip + network. The Phase-A amendment
 // (WI-2 bump 2) carries the round's locked snapshot_block IN the signed content so config
 // equivocation is SLASHABLE: a BTC indexer recovers the whole-federation membership block

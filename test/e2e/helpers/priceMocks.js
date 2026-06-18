@@ -44,7 +44,7 @@ function reset() {
 }
 
 /**
- * Mock CoinGecko to return prices (repeatable — persists across multiple fetches).
+ * Mock CoinGecko to return prices (repeatable, persists across multiple fetches).
  */
 function mockCoinGeckoSuccess(prices, times) {
     return nock(COINGECKO_BASE)

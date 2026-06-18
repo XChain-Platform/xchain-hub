@@ -13,7 +13,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Scenario 4 — Database Stress
+ * Scenario 4: Database Stress
  *
  * Tests MariaDB connection pool behavior, query latency under concurrency,
  * and circuit breaker activation/recovery.
@@ -35,7 +35,7 @@ describe('Performance: Database Stress', function () {
             await testDb.setup();
             db = testDb.getDb();
         } catch (e) {
-            console.log('    MariaDB unavailable — skipping DB stress tests');
+            console.log('    MariaDB unavailable: skipping DB stress tests');
             this.skip();
         }
     });
@@ -242,7 +242,7 @@ describe('Performance: Database Stress', function () {
                 50
             );
 
-            // Recovery — should be fast again
+            // Recovery: should be fast again
             let { histogram, errors } = await blast(
                 () => db.doQuery('SELECT 1'),
                 10

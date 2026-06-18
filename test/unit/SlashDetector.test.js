@@ -115,7 +115,7 @@ describe('SlashDetector', function () {
         });
 
         it('skips validators without resolved pubkey', async function () {
-            pm.validatorPubkeys = new Map(); // Empty — no pubkeys can resolve
+            pm.validatorPubkeys = new Map(); // Empty: no pubkeys can resolve
             let finalizedPrices = [{ coinPair: 'BTC/USD', price: '100000' }];
             let subs = buildSubmissions([{
                 sender: 'unknown-addr',
@@ -254,7 +254,7 @@ describe('SlashDetector', function () {
             sd._trackDeviation(VALIDATORS_3[0].pubkey, 3); // fires, latch set
             expect(hub.db.doQuery.callCount).to.equal(1);
 
-            // Window ages out — replace with stale entries, next track prunes to 1
+            // Window ages out; replace with stale entries, next track prunes to 1
             let over24h = Date.now() - (25 * 60 * 60 * 1000);
             sd.recentDeviations.set(VALIDATORS_3[0].pubkey, [
                 { round: 3, timestamp: over24h },

@@ -8,13 +8,13 @@
 // This file is part of XChain Platform. Licensed under the GNU Affero
 // General Public License v3.0 or later; see LICENSE.md.
 
-// EQUIV header (WI-2 bump 2) — checkpoint engine round-trip + collision-fix.
+// EQUIV header (WI-2 bump 2): checkpoint engine round-trip and collision-fix.
 // CONSENSUS-CRITICAL: the XCHECKPOINT canonical is rebuilt by the hub
 // (StateCheckpointEngine / StateAnchorPublisher), the indexer (anchor.js /
 // recovery.js), the SDK (checkpoint.js) and the explorer. They MUST produce
 // byte-identical bytes at every gate state, and the v0 (per-block) and v1
-// (archive) canonicals — which legitimately share checkpoint_seq — MUST carry
-// DISTINCT equivocation keys, or an honest validator that signs both is falsely
+// (archive) canonicals (which legitimately share checkpoint_seq) MUST carry
+// DISTINCT equivocation keys. Otherwise an honest validator that signs both is falsely
 // slashable (R-4). A mismatch here forks the chain.
 const { expect } = require('chai');
 const eq  = require('../../src/equivocation_header.js');
