@@ -26,6 +26,20 @@ const path    = require('path');
 
 const DB_NAME_REGEX = /^[A-Za-z0-9_]+$/;
 
+// Canonical coin names. The hub config tree keys coins by full name
+// (bitcoin/litecoin/dogecoin); indexers, however, push chain tips using the
+// coin abbreviation (config['COIN'] = 'BTC'/'LTC'/'DOGE'). Storing chain_tips
+// under the abbreviation creates a phantom top-level coin key (e.g. 'BTC')
+// alongside the real 'bitcoin' entry, which the explorer's config loader
+// cannot map to a coin and used to crash on (configs/undefined.js). Normalize
+// the coin to its full name so chain_tips co-locate under the canonical key.
+const COIN_FULL_NAME = { BTC: 'bitcoin', LTC: 'litecoin', DOGE: 'dogecoin' };
+
+function normalizeCoin(coin) {
+    if (typeof coin !== 'string') return coin;
+    return COIN_FULL_NAME[coin.toUpperCase()] || coin;
+}
+
 class Database {
 
     constructor(host, port, dbName, user, pass) {
@@ -534,8 +548,11 @@ class Database {
     // don't pass it (single-network hubs continue to work unchanged).
     async setChainTip(coin, network, blockHeight, blockTime){
         let net = network || 'mainnet';
-        await this.setParam(coin, net, 'chain_tips', 'block_height', String(blockHeight));
-        await this.setParam(coin, net, 'chain_tips', 'block_time',   String(blockTime));
+        // Store under the full coin name (see COIN_FULL_NAME) so chain_tips never
+        // appears as an abbreviation-keyed phantom coin in the served config tree.
+        let key = normalizeCoin(coin);
+        await this.setParam(key, net, 'chain_tips', 'block_height', String(blockHeight));
+        await this.setParam(key, net, 'chain_tips', 'block_time',   String(blockTime));
     }
 
     // Get the latest chain tip for a given coin + network.
@@ -544,7 +561,12 @@ class Database {
     // Returns: { blockHeight, blockTime } or null if not set.
     async getChainTip(coin, network){
         let net = network || 'mainnet';
-        let cfg = await this.getConfig(coin, net, 'chain_tips');
+        // Prefer the canonical full-name key (setChainTip writes there now). Fall
+        // back to the raw abbreviation for tips written before the normalization,
+        // so a deploy never opens a read gap on the oracle's BTC anchor.
+        let cfg = await this.getConfig(normalizeCoin(coin), net, 'chain_tips');
+        if(!cfg.block_height && normalizeCoin(coin) !== coin)
+            cfg = await this.getConfig(coin, net, 'chain_tips');
         if(!cfg.block_height) return null;
         return {
             blockHeight: parseInt(cfg.block_height),

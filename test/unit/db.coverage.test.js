@@ -569,12 +569,14 @@ describe('Database: extended coverage', function () {
     // -----------------------------------------------------------------
 
     describe('chain tip helpers', function () {
-        it('setChainTip writes block_height and block_time, defaulting network to mainnet', async function () {
+        it('setChainTip normalizes the coin abbreviation to its full name, defaulting network to mainnet', async function () {
             const { db } = makeDb();
             const setParam = sinon.stub(db, 'setParam').resolves();
             await db.setChainTip('BTC', null, 840000, 1718000000);
-            expect(setParam.calledWith('BTC', 'mainnet', 'chain_tips', 'block_height', '840000')).to.be.true;
-            expect(setParam.calledWith('BTC', 'mainnet', 'chain_tips', 'block_time', '1718000000')).to.be.true;
+            // 'BTC' normalizes to 'bitcoin' so chain_tips co-locate under the
+            // canonical coin key (not a phantom abbreviation-keyed coin).
+            expect(setParam.calledWith('bitcoin', 'mainnet', 'chain_tips', 'block_height', '840000')).to.be.true;
+            expect(setParam.calledWith('bitcoin', 'mainnet', 'chain_tips', 'block_time', '1718000000')).to.be.true;
         });
 
         it('getChainTip returns null when no tip has been set', async function () {
@@ -583,13 +585,25 @@ describe('Database: extended coverage', function () {
             expect(await db.getChainTip('BTC')).to.be.null;
         });
 
-        it('getChainTip parses stored values and honours an explicit network', async function () {
+        it('getChainTip reads the canonical full-name key for a coin abbreviation', async function () {
             const { db } = makeDb();
             const getConfig = sinon.stub(db, 'getConfig')
                 .resolves({ block_height: '840000', block_time: '1718000000' });
             const tip = await db.getChainTip('LTC', 'testnet');
             expect(tip).to.deep.equal({ blockHeight: 840000, blockTime: 1718000000 });
-            expect(getConfig.calledWith('LTC', 'testnet', 'chain_tips')).to.be.true;
+            expect(getConfig.calledWith('litecoin', 'testnet', 'chain_tips')).to.be.true;
+        });
+
+        it('getChainTip falls back to the abbreviation key for pre-normalization tips', async function () {
+            const { db } = makeDb();
+            const getConfig = sinon.stub(db, 'getConfig');
+            // Canonical key empty (no tip written since the normalization landed)...
+            getConfig.withArgs('bitcoin', 'mainnet', 'chain_tips').resolves({});
+            // ...but an older tip still lives under the raw abbreviation.
+            getConfig.withArgs('BTC', 'mainnet', 'chain_tips')
+                .resolves({ block_height: '820000', block_time: '1717000000' });
+            const tip = await db.getChainTip('BTC');
+            expect(tip).to.deep.equal({ blockHeight: 820000, blockTime: 1717000000 });
         });
 
         it('getChainTip defaults block_time to 0 when unparseable', async function () {
