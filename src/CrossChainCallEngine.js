@@ -62,6 +62,7 @@ const axios        = require('axios');
 const swq                    = require('./stake_weighted_quorum.js');
 const eq                     = require('./equivocation_header.js');
 const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
+const { XCALL_MAX_HOPS }     = require('./constants.js');
 
 const ALLOWED_CHAINS  = ['BTC', 'LTC', 'DOGE'];
 const DEFAULT_POLL_MS = 15000;
@@ -201,10 +202,13 @@ class CrossChainCallEngine extends EventEmitter {
     async getStats(){
         let rows = [];
         try {
+            // Mirror _pollTargetResults' retracted-result filter so the backlog
+            // count matches what the engine will actually re-relay (#4478): a
+            // dispatch whose only result row is 'retracted' is pending again.
             rows = await this.db.doQuery(
                 "SELECT d.target_chain, COUNT(*) AS pending_relay_count " +
                 "FROM cross_chain_calls d " +
-                "LEFT JOIN cross_chain_calls r ON r.call_id = d.call_id AND r.phase = 'result' " +
+                "LEFT JOIN cross_chain_calls r ON r.call_id = d.call_id AND r.phase = 'result' AND r.status <> 'retracted' " +
                 "WHERE d.phase = 'dispatch' AND d.status = 'finalized' AND r.id IS NULL " +
                 "GROUP BY d.target_chain");
         } catch(e){
@@ -267,6 +271,12 @@ class CrossChainCallEngine extends EventEmitter {
         // exactly-once interlock race deterministically, but don't bother).
         if(call.deadline_block != null && Number(call.deadline_block) <= latestBlock) return;
 
+        // Hop-cap gate (defense-in-depth): the indexer caps cross_hops at
+        // XCALL_MAX_HOPS during execution, so a relay row that exceeds the cap
+        // would be rejected at injection anyway. Drop it here to avoid a wasted
+        // PBFT round and a stale dispatch row.
+        if((Number(call.cross_hops) || 0) > XCALL_MAX_HOPS) return;
+
         let roundId = this._roundId('dispatch', callId);
         if(this._inflight.has(roundId)) return;
         if(await this._rowExists(callId, 'dispatch')) return;
@@ -307,9 +317,16 @@ class CrossChainCallEngine extends EventEmitter {
     // Discover dispatch rows targeting `coin` whose injected execution has
     // completed at confirmation depth, and run a result round for each.
     async _pollTargetResults(coin){
+        // The result-leg join carries `AND r.status <> 'retracted'` for the same
+        // reason _rowExists does (#4478): after a deep reorg leaves a 'retracted'
+        // result row, an unfiltered join would see r.id IS NOT NULL, exclude the
+        // dispatch, and never re-relay the result (the call could then only deliver
+        // the deterministic 'expired' callback). Filtering retracted result rows
+        // back out re-opens re-discovery; _maybeRelayResult re-relay is idempotent
+        // (synthetic TX_HASH dedup) so re-relay after re-discovery is safe.
         let pending = await this.db.doQuery(
             "SELECT d.* FROM cross_chain_calls d " +
-            "LEFT JOIN cross_chain_calls r ON r.call_id = d.call_id AND r.phase = 'result' " +
+            "LEFT JOIN cross_chain_calls r ON r.call_id = d.call_id AND r.phase = 'result' AND r.status <> 'retracted' " +
             "WHERE d.phase = 'dispatch' AND d.status = 'finalized' AND d.target_chain = ? AND r.id IS NULL " +
             "ORDER BY d.id ASC LIMIT 100", [coin]);
         for(let d of pending){
@@ -595,7 +612,7 @@ class CrossChainCallEngine extends EventEmitter {
 
     async _rowExists(callId, phase){
         let rows = await this.db.doQuery(
-            'SELECT 1 FROM cross_chain_calls WHERE call_id = ? AND phase = ? LIMIT 1', [callId, phase]);
+            "SELECT 1 FROM cross_chain_calls WHERE call_id = ? AND phase = ? AND status <> 'retracted' LIMIT 1", [callId, phase]);
         return rows.length > 0;
     }
 

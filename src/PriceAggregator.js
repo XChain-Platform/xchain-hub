@@ -21,11 +21,11 @@
  *
  * Indexers push to the hub via JSON-RPC after validating PBFT signatures
  * locally, but the hub does NOT take that on trust: every PRICE v0 round
- * is re-verified here — each Ed25519 signature is checked against the
+ * is re-verified here: each Ed25519 signature is checked against the
  * canonical round payload, signers must belong to the price-capability
  * validator snapshot at the round's block, and the verified count must
- * meet PBFT quorum — before anything is written as 'finalized'. The hub
- * is the cross-chain aggregation point — first valid submission for a
+ * meet PBFT quorum before anything is written as 'finalized'. The hub
+ * is the cross-chain aggregation point; first valid submission for a
  * given round wins, duplicates are silently ignored.
  *
  ********************************************************************/
@@ -44,9 +44,9 @@ class PriceAggregator extends EventEmitter {
 
     // Build the canonical signable payload for a PRICE v0 round.
     // MUST match xchain-indexer/src/ed25519.js buildPriceV0Payload (and
-    // OracleConsensus._buildPriceV0Payload) exactly — validators signed these
+    // OracleConsensus._buildPriceV0Payload) exactly; validators signed these
     // bytes, so any divergence here rejects every legitimate round.
-    _buildPriceV0Payload(round, timestamp, pairs) {
+    _buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight) {
         let sortedPairs = pairs
             .map(p => ({ pair: p.pair, price: String(p.price) }))
             .sort((a, b) => {
@@ -55,14 +55,17 @@ class PriceAggregator extends EventEmitter {
                 return 0;
             });
         let raw = JSON.stringify({
-            round:     parseInt(round),
-            timestamp: parseInt(timestamp),
-            pairs:     sortedPairs
+            round:            parseInt(round),
+            timestamp:        parseInt(timestamp),
+            btc_block_height: parseInt(btcBlockHeight),
+            pairs:            sortedPairs
         });
-        // EQUIV header (WI-2 bump 2): gated on the round (a BTC block height) + the hub's
-        // network, byte-matching ed25519.buildPriceV0Payload. XORACLE has no view → VIEW=0.
-        if (eq.isEquivHeaderActive(round, this.hub && this.hub.network))
-            return eq.buildEquivCanonical(eq.ENGINE_TAGS.ORACLE, parseInt(round), 0, raw);
+        // EQUIV header (WI-2 bump 2): gated on the round's BTC block HEIGHT + the hub's
+        // network, byte-matching ed25519.buildPriceV0Payload. The height is in the signed
+        // content and on-chain wire so every service flips on the same anchor (#4232).
+        // XORACLE has no view change → VIEW=0; ROUND_ID is the BTC height.
+        if (eq.isEquivHeaderActive(btcBlockHeight, this.hub && this.hub.network))
+            return eq.buildEquivCanonical(eq.ENGINE_TAGS.ORACLE, parseInt(btcBlockHeight), 0, raw);
         return raw;
     }
 
@@ -85,7 +88,7 @@ class PriceAggregator extends EventEmitter {
             return { accepted: false, reason: 'invalid round' };
         }
 
-        // timestamp is part of the signed payload — it must be present and sane
+        // timestamp is part of the signed payload; it must be present and sane
         let timestamp = parseInt(roundData.timestamp);
         if (!Number.isFinite(timestamp) || timestamp < 0) {
             return { accepted: false, reason: 'invalid timestamp' };
@@ -96,6 +99,15 @@ class PriceAggregator extends EventEmitter {
         let referenceBlock = parseInt(roundData.block_index);
         if (!Number.isFinite(referenceBlock) || referenceBlock < 0) {
             return { accepted: false, reason: 'invalid block_index' };
+        }
+
+        // btc_block_height is the round's BTC anchor, part of the signed payload and
+        // the on-chain PRICE v0 wire. It is what the EQUIV header gate keys on, so the
+        // hub reconstructs identical bytes to what the validators signed (#4232). It is
+        // distinct from block_index (the block the PRICE tx itself was mined in).
+        let btcBlockHeight = parseInt(roundData.btc_block_height);
+        if (!Number.isFinite(btcBlockHeight) || btcBlockHeight < 0) {
+            return { accepted: false, reason: 'invalid btc_block_height' };
         }
 
         // Every pair must satisfy the on-chain wire-format rules (mirrors the
@@ -124,7 +136,7 @@ class PriceAggregator extends EventEmitter {
         // Dedupe: if a NON-SKIPPED row exists for this round_number, this is a
         // duplicate of an already-finalized round. 'skipped' placeholder rows
         // (written by OracleConsensus._storeSkippedRound when this hub had no
-        // local submissions) must NOT count as a duplicate — a real validated
+        // local submissions) must NOT count as a duplicate. A real validated
         // round for the same round_number can still arrive from a peer chain that
         // did reach quorum, and it must be allowed to overwrite the placeholders
         // (see the ON DUPLICATE KEY UPDATE on the insert below).
@@ -149,10 +161,10 @@ class PriceAggregator extends EventEmitter {
 
         // Verify each sig over the canonical payload, counting at most one per
         // qualified pubkey. Unknown or invalid sigs are skipped rather than
-        // fatal — same semantics as the indexer's PRICE v0 parser — so any
+        // fatal (same semantics as the indexer's PRICE v0 parser), so any
         // round the indexer accepted on-chain also verifies here, but only
         // cryptographically-valid sigs from snapshot members count for quorum.
-        let payload    = this._buildPriceV0Payload(round, timestamp, roundData.pairs);
+        let payload    = this._buildPriceV0Payload(round, timestamp, roundData.pairs, btcBlockHeight);
         let qualified  = new Set(snapshot.validators.map(v => String(v.pubkey).toLowerCase()));
         let seenPubkey = new Set();
         let verifiedSigs = [];
@@ -165,8 +177,8 @@ class PriceAggregator extends EventEmitter {
         }
 
         // PBFT quorum over the snapshot size, floored at a simple majority:
-        // max(2 * floor((N - 1) / 3) + 1, ceil((N + 1) / 2)) —
-        // the same threshold the indexer enforces when validating the action
+        // max(2 * floor((N - 1) / 3) + 1, ceil((N + 1) / 2)).
+        // This is the same threshold the indexer enforces when validating the action.
         let setSize = Number.isFinite(parseInt(snapshot.count)) ? parseInt(snapshot.count) : snapshot.validators.length;
         let quorum  = (setSize <= 1) ? 1 : Math.max(2 * Math.floor((setSize - 1) / 3) + 1, Math.ceil((setSize + 1) / 2));
         if (verifiedSigs.length < quorum) {
@@ -190,7 +202,7 @@ class PriceAggregator extends EventEmitter {
         // double-publish safe). created_at is intentionally NOT overwritten so it
         // preserves when the hub first recorded the round.
         //
-        // ONE multi-row INSERT so the whole round lands atomically — a getfeequote /
+        // ONE multi-row INSERT lands the whole round atomically; a getfeequote /
         // getpricesnapshots reader (or the id-ordered mirror bootstrap) can never observe
         // a torn round (some pairs from this round, others from the prior round). The hub
         // Database has no transaction API, so a single statement is the atomicity tool.
@@ -253,7 +265,7 @@ class PriceAggregator extends EventEmitter {
             return { accepted: false, reason: 'invalid priceData' };
         }
 
-        // PRICE v1 carries no PBFT signatures on the wire — it is a single
+        // PRICE v1 carries no PBFT signatures on the wire. It is a single
         // user's oracle price whose authenticity is the on-chain transaction
         // itself, which only the indexer that observed the chain can validate.
         // Unlike PRICE v0 rounds (re-verified in receiveValidatedRound), the
@@ -277,13 +289,13 @@ class PriceAggregator extends EventEmitter {
             return { accepted: false, reason: 'duplicate' };
         }
 
-        // Determine effective_at: EVERY publish — first or update — is delayed by 24h
+        // Determine effective_at: every publish (first or update) is delayed by 24h
         // from its action's block_time. The delay on updates prevents front-running
-        // attacks on dispensers. The delay on FIRST publishes exists for consensus:
+        // attacks on dispensers. The delay on first publishes exists for consensus:
         // an immediate first publish was retroactively effective (effective_at =
         // block_time, which precedes the row's arrival in any hub/mirror by the
         // source chain's indexing lag), so a FIAT dispense settled live could replay
-        // differently once the row existed — a ledger fork. A uniform +24h makes
+        // differently once the row existed (a ledger fork). A uniform +24h makes
         // every row land in every mirror long before any block can read it, which
         // is also what makes the hub-db sync stream watermark a sound barrier.
         let blockTime = parseInt(priceData.block_time) || 0;

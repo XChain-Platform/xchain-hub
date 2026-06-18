@@ -16,13 +16,20 @@ const { expect }       = require('chai');
 const PriceAggregator  = require('../../src/PriceAggregator');
 const { createMockHub } = require('../helpers/mockHub');
 
-// Mirror of the canonical PRICE v0 payload — xchain-indexer/src/ed25519.js
-// buildPriceV0Payload. Tests sign these exact bytes.
-function buildPriceV0Payload(round, timestamp, pairs) {
+// Mirror of the canonical PRICE v0 payload (xchain-indexer/src/ed25519.js)
+// buildPriceV0Payload. Tests sign these exact bytes. The mockHub has no `network`,
+// so the EQUIV header is OFF (unknown network) and this is the bare-JSON branch;
+// btc_block_height still rides in the signed content (#4232).
+function buildPriceV0Payload(round, timestamp, pairs, btcBlockHeight) {
     let sortedPairs = pairs
         .map(p => ({ pair: p.pair, price: String(p.price) }))
         .sort((a, b) => (a.pair < b.pair ? -1 : a.pair > b.pair ? 1 : 0));
-    return JSON.stringify({ round: parseInt(round), timestamp: parseInt(timestamp), pairs: sortedPairs });
+    return JSON.stringify({
+        round:            parseInt(round),
+        timestamp:        parseInt(timestamp),
+        btc_block_height: parseInt(btcBlockHeight),
+        pairs:            sortedPairs
+    });
 }
 
 // Generate a real Ed25519 validator keypair: { pubkey (64-hex), sign(payload) → 128-hex }
@@ -101,7 +108,7 @@ describe('PriceAggregator.retractFromActionIndex()', function () {
     });
 
     it('treats a DELETE result with no affectedRows as zero deletions (and emits nothing)', async function () {
-        // Some drivers return an array (not a result object) — guard against undefined.
+        // Some drivers return an array (not a result object): guard against undefined.
         hub.db.doQuery.resolves([]);
         let events = [];
         agg.on('row:deleted', e => events.push(e));
@@ -149,7 +156,7 @@ describe('PriceAggregator.receiveOraclePrice() uniform 24h effective_at delay', 
         });
 
         expect(result).to.deep.equal({ accepted: true });
-        // EVERY publish — first included — is delayed 24h so the row lands in
+        // EVERY publish (first included) is delayed 24h so the row lands in
         // every mirror before any block can read it (no retroactive effect).
         expect(getInsert()[EFFECTIVE_AT]).to.equal(1700000000 + 86400);
     });
@@ -202,7 +209,7 @@ describe('PriceAggregator.receiveOraclePrice() validation + persistence', functi
     });
 
     it('rejects a duplicate (source_address + source_chain + action_index already present)', async function () {
-        // First doQuery is the dedup check — return an existing row.
+        // First doQuery is the dedup check: return an existing row.
         hub.db.doQuery.onFirstCall().resolves([{ id: 1 }]);
         let result = await agg.receiveOraclePrice('BTC', VALID);
         expect(result).to.deep.equal({ accepted: false, reason: 'duplicate' });
@@ -292,13 +299,15 @@ describe('PriceAggregator.receiveValidatedRound()', function () {
     // Four price-qualified validators → PBFT quorum 2*floor(3/3)+1 = 3
     const V = [makeValidator(), makeValidator(), makeValidator(), makeValidator()];
     const PAIRS   = [{ pair: 'BTC/USD', price: '50000' }, { pair: 'LTC/USD', price: '80' }];
-    const PAYLOAD = buildPriceV0Payload(5, 1700000000, PAIRS);
+    const BTC_HEIGHT = 799000;  // the round's BTC anchor (distinct from block_index, the PRICE tx block)
+    const PAYLOAD = buildPriceV0Payload(5, 1700000000, PAIRS, BTC_HEIGHT);
 
     // A legitimately signed round: 3 of the 4 qualified validators signed
     function makeRound(overrides = {}) {
         return {
             round: 5,
             timestamp: 1700000000,
+            btc_block_height: BTC_HEIGHT,
             block_index: 800000,
             action_index: 42,
             pairs: PAIRS,
@@ -356,11 +365,13 @@ describe('PriceAggregator.receiveValidatedRound()', function () {
         expect(hub.db.doQuery.called).to.equal(false);
     });
 
-    it('rejects a round missing timestamp or block_index — both are signed/anchoring fields', async function () {
+    it('rejects a round missing timestamp or block_index (both are signed/anchoring fields)', async function () {
         let r1 = await agg.receiveValidatedRound('BTC', makeRound({ timestamp: undefined }));
         expect(r1).to.deep.equal({ accepted: false, reason: 'invalid timestamp' });
         let r2 = await agg.receiveValidatedRound('BTC', makeRound({ block_index: undefined }));
         expect(r2).to.deep.equal({ accepted: false, reason: 'invalid block_index' });
+        let r3 = await agg.receiveValidatedRound('BTC', makeRound({ btc_block_height: undefined }));
+        expect(r3).to.deep.equal({ accepted: false, reason: 'invalid btc_block_height' });
         expect(hub.db.doQuery.called).to.equal(false);
     });
 
@@ -378,7 +389,7 @@ describe('PriceAggregator.receiveValidatedRound()', function () {
         expect(hub.db.doQuery.called).to.equal(false);
     });
 
-    it('rejects opaque/unstructured sigs — the historical blind-storage shape', async function () {
+    it('rejects opaque/unstructured sigs (the historical blind-storage shape)', async function () {
         // Before hub-side verification existed, exactly this shape was stored
         // verbatim as a 'finalized' consensus proof with validator_count 2.
         for (let sigs of [undefined, [], ['sigA', 'sigB'], [{ pubkey: 'xx', sig: 'yy' }]]) {

@@ -138,33 +138,35 @@ describe('OraclePublisher', function () {
                 { coinPair: 'LTC/USD', price: '80' }
             ];
             let sigs = [{ pubkey: 'pk1', sig: 'sig1' }];
-            let wire = pub.buildPriceV0Wire(42, 1700000000, prices, sigs);
+            // PRICE|0|ROUND|TIMESTAMP|BTC_BLOCK_HEIGHT|PAIR_COUNT|... (#4232: height on the wire)
+            let wire = pub.buildPriceV0Wire(42, 1700000000, prices, sigs, 850010);
             let parts = wire.split('|');
             expect(parts[0]).to.equal('PRICE');
             expect(parts[1]).to.equal('0');
             expect(parts[2]).to.equal('42');
             expect(parts[3]).to.equal('1700000000');
-            expect(parts[4]).to.equal('2');  // price count
-            expect(parts[5]).to.equal('BTC/USD');
-            expect(parts[6]).to.equal('100000');
-            expect(parts[7]).to.equal('LTC/USD');
-            expect(parts[8]).to.equal('80');
-            expect(parts[9]).to.equal('1');  // sig count
-            expect(parts[10]).to.equal('pk1');
-            expect(parts[11]).to.equal('sig1');
+            expect(parts[4]).to.equal('850010');  // BTC block height (round anchor)
+            expect(parts[5]).to.equal('2');  // price count
+            expect(parts[6]).to.equal('BTC/USD');
+            expect(parts[7]).to.equal('100000');
+            expect(parts[8]).to.equal('LTC/USD');
+            expect(parts[9]).to.equal('80');
+            expect(parts[10]).to.equal('1');  // sig count
+            expect(parts[11]).to.equal('pk1');
+            expect(parts[12]).to.equal('sig1');
         });
 
         it('handles no signatures gracefully', function () {
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
-            let wire = pub.buildPriceV0Wire(1, 0, [{ coinPair: 'BTC/USD', price: '100' }], []);
-            expect(wire).to.match(/^PRICE\|0\|1\|0\|1\|BTC\/USD\|100\|0$/);
+            let wire = pub.buildPriceV0Wire(1, 0, [{ coinPair: 'BTC/USD', price: '100' }], [], 850010);
+            expect(wire).to.match(/^PRICE\|0\|1\|0\|850010\|1\|BTC\/USD\|100\|0$/);
         });
 
         it('uses `pair` property as fallback when `coinPair` is absent', function () {
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
-            let wire = pub.buildPriceV0Wire(1, 0, [{ pair: 'BTC/USD', price: '100' }], []);
+            let wire = pub.buildPriceV0Wire(1, 0, [{ pair: 'BTC/USD', price: '100' }], [], 850010);
             expect(wire).to.include('BTC/USD');
         });
     });
@@ -179,9 +181,10 @@ describe('OraclePublisher', function () {
                 { coinPair: 'LTC/USD', price: '80' },
                 { coinPair: 'BTC/USD', price: '100000' }
             ];
-            let payload = JSON.parse(pub._buildSignablePayload(42, 1700000000, prices));
+            let payload = JSON.parse(pub._buildSignablePayload(42, 1700000000, prices, 850010));
             expect(payload.round).to.equal(42);
             expect(payload.timestamp).to.equal(1700000000);
+            expect(payload.btc_block_height).to.equal(850010);  // #4232: round BTC anchor in signed payload
             // Pairs must be sorted alphabetically
             expect(payload.pairs[0].pair).to.equal('BTC/USD');
             expect(payload.pairs[1].pair).to.equal('LTC/USD');
@@ -661,7 +664,7 @@ describe('OraclePublisher', function () {
             fsMock.mkdirSync = sinon.stub().throws(new Error('eperm'));
             fsMock.existsSync.returns(false);
             fsMock.writeFileSync = sinon.stub().throws(new Error('eacces'));
-            await pub.start(); // best-effort — must not throw
+            await pub.start(); // best-effort, must not throw
         });
     });
 

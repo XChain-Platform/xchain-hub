@@ -233,14 +233,28 @@ describe('PriceFetcher', function () {
             expect(prices).to.deep.equal([]);
         });
 
-        it('only calls CoinGecko when no CMC key', async function () {
+        it('fetches CoinGecko + Kraken when no CMC key', async function () {
             pf = new PriceFetcher({});
-            axiosStub.get.resolves({
-                data: { bitcoin: { usd: 50000 }, litecoin: { usd: 40 }, dogecoin: { usd: 0.1 } }
+            axiosStub.get.callsFake(function (url) {
+                if (url.includes('api.coingecko.com')) {
+                    return Promise.resolve({
+                        data: { bitcoin: { usd: 50000 }, litecoin: { usd: 40 }, dogecoin: { usd: 0.1 } }
+                    });
+                }
+                if (url.includes('kraken.com')) {
+                    // Kraken response shape: { error: [], result: { ALTNAME: { c: [price, lot] } } }
+                    return Promise.resolve({
+                        data: { error: [], result: { XBTUSD: { c: ['50000', '1'] } } }
+                    });
+                }
+                return Promise.reject(new Error('unexpected URL: ' + url));
             });
 
             let prices = await pf.fetchPrices();
-            expect(axiosStub.get.calledOnce).to.be.true;
+            expect(axiosStub.get.calledTwice).to.be.true;
+            let urls = [axiosStub.get.firstCall.args[0], axiosStub.get.secondCall.args[0]];
+            expect(urls.some(u => u.includes('coingecko.com'))).to.be.true;
+            expect(urls.some(u => u.includes('kraken.com'))).to.be.true;
             expect(prices).to.have.lengthOf(3);
         });
 

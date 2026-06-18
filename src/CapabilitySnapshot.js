@@ -22,8 +22,8 @@
  * the same blockIndex and arrives at the same validator set (because
  * stake state at block N is on-chain-deterministic).
  *
- * Self-test / enabled flags are NOT part of the snapshot — those are
- * local-per-hub. A validator whose self-test fails simply doesn't
+ * Self-test / enabled flags are NOT part of the snapshot (those are
+ * local-per-hub). A validator whose self-test fails simply doesn't
  * participate in the round and gets slashed for non-participation; N
  * still includes it. This is what makes the snapshot cross-hub
  * deterministic.
@@ -40,11 +40,15 @@ class CapabilitySnapshot {
         this.hub = hub;
         // (capability:blockIndex) → { validators: [{pubkey, amount}], count, blockIndex, capability, expiresAt }
         this.cache = new Map();
-        // How long to keep a snapshot. 60s default — enough to span a PBFT round.
+        // How long to keep a snapshot. 60s default, enough to span a PBFT round.
         this.cacheTtlMs = 60 * 1000;
-        // Last time we logged an indexer auth (401/403) failure — throttles the
-        // warning so a persistent key mismatch doesn't spam the poll loop.
+        // Last time we logged an indexer auth (401/403) failure (throttles the
+        // warning so a persistent key mismatch doesn't spam the poll loop).
         this._authWarnAt = 0;
+        // Last time we alarmed on a truncated validator-set snapshot (#4479).
+        // Same throttle idiom as _authWarnAt so a sustained over-limit validator
+        // set raises one warning per cacheTtlMs instead of one per quorum call.
+        this._truncWarnAt = 0;
     }
 
     // Classify a federation-read failure and return null (the fetch helpers'
@@ -61,7 +65,7 @@ class CapabilitySnapshot {
             if (now - this._authWarnAt > this.cacheTtlMs) {
                 this._authWarnAt = now;
                 console.error('CapabilitySnapshot: ' + method + ' got HTTP ' + status +
-                    ' from the BTC indexer — the hub\'s x-api-key (BTC_INDEXER_API_KEY) does not match the ' +
+                    ' from the BTC indexer: the hub\'s x-api-key (BTC_INDEXER_API_KEY) does not match the ' +
                     'indexer\'s INDEXER_API_KEY. Federation snapshots are NULL (attestation + config-change ' +
                     'quorum collapse) until the two keys match.');
             }
@@ -114,6 +118,7 @@ class CapabilitySnapshot {
                 capability:  result.capability,
                 blockIndex:  result.block_index,
                 count:       result.count,
+                truncated:   result.truncated === true,
                 validators:  result.validators || [],
                 expiresAt:   now + this.cacheTtlMs
             };
@@ -121,7 +126,7 @@ class CapabilitySnapshot {
             this._prune(now);
             return snapshot;
         } catch (err) {
-            // Indexer unreachable / down (or 401/403 auth mismatch) — caller falls
+            // Indexer unreachable / down (or 401/403 auth mismatch): caller falls
             // back to local validator set; _onFetchError surfaces an auth misconfig.
             return this._onFetchError('getcapabilityvalidators', err);
         }
@@ -162,6 +167,7 @@ class CapabilitySnapshot {
                 capability:  result.capability,
                 blockIndex:  result.block_index,
                 count:       result.count,
+                truncated:   result.truncated === true,
                 sourceCount: result.source_count,
                 validators:  result.validators || [],     // [{pubkey, source, weight}]
                 expiresAt:   now + this.cacheTtlMs
@@ -174,7 +180,7 @@ class CapabilitySnapshot {
         }
     }
 
-    // Whole-federation snapshot — every pubkey with ANY active stake at the
+    // Whole-federation snapshot: every pubkey with ANY active stake at the
     // block, regardless of capability. Used by Consensus (config-change PBFT)
     // where quorum is over all stakers, not a capability subset. Cache key is
     // disjoint from capability snapshots (capability='*').
@@ -201,6 +207,7 @@ class CapabilitySnapshot {
                 capability:  '*',
                 blockIndex:  result.block_index,
                 count:       result.count,
+                truncated:   result.truncated === true,
                 validators:  result.validators || [],
                 expiresAt:   now + this.cacheTtlMs
             };
@@ -212,7 +219,7 @@ class CapabilitySnapshot {
         }
     }
 
-    // Source-keyed whole-federation weight snapshot — every staker with ANY active
+    // Source-keyed whole-federation weight snapshot: every staker with ANY active
     // stake at the block (no capability filter), each row carrying { pubkey, source,
     // weight }. The STAKE_WEIGHTED_QUORUM counterpart of getActiveValidatorSnapshot,
     // used by Consensus (config-change PBFT) to weight quorum by stake. Cache key is
@@ -240,6 +247,7 @@ class CapabilitySnapshot {
                 capability:  '*',
                 blockIndex:  result.block_index,
                 count:       result.count,
+                truncated:   result.truncated === true,
                 sourceCount: result.source_count,
                 validators:  result.validators || [],     // [{pubkey, source, weight}]
                 expiresAt:   now + this.cacheTtlMs
@@ -256,15 +264,37 @@ class CapabilitySnapshot {
     // majority: max(2 * floor((N - 1) / 3) + 1, ceil((N + 1) / 2)). The bare
     // 2f+1 form degenerates to quorum=1 at N=3 (f=0), which would let a single
     // validator finalize alone.
-    // Returns 0 when N <= 1 (single-node mode — caller bypasses consensus).
+    // Returns 0 when N <= 1 (single-node mode; caller bypasses consensus).
     //
     // NOTE: this is the federation-wide quorum (e.g. config-change Consensus
     // PBFT, where every staker participates). It is NOT used for attestation
-    // PBFT — those rounds only exchange messages within the REDUNDANCY-sized
+    // PBFT. Those rounds only exchange messages within the REDUNDANCY-sized
     // responsible set, so AttestationConsensus.propose() computes its own
     // quorum over responsible.length instead of over the full count N here.
     getQuorum(snapshot) {
         if (!snapshot) return 0;
+        // Alarm-and-proceed when the quorum is computed over a TRUNCATED snapshot
+        // (#4479): the indexer hit VALIDATOR_QUERY_LIMIT, so `count` (and the
+        // validator set) is capped below the true federation size and N here is a
+        // floor, not the real N. We still finalize: every indexer truncates the
+        // same way at the same block, so the capped set is cross-hub deterministic
+        // and quorum stays consistent fleet-wide. Refusing would instead halt all
+        // consensus the moment the validator set outgrows the limit, a worse
+        // failure than a quorum over a deterministic cap. So raise a loud,
+        // throttled operator warning (same idiom as _onFetchError) telling the
+        // operator to raise VALIDATOR_QUERY_LIMIT, and proceed. The warning is the
+        // only safe lever here because the cap is invisible in N alone.
+        if (snapshot.truncated === true) {
+            let now = Date.now();
+            if (now - this._truncWarnAt > this.cacheTtlMs) {
+                this._truncWarnAt = now;
+                console.error('CapabilitySnapshot: quorum computed over a TRUNCATED validator-set snapshot ' +
+                    '(capability=' + snapshot.capability + ' block=' + snapshot.blockIndex + ' count=' + snapshot.count +
+                    '): the indexer hit VALIDATOR_QUERY_LIMIT, so N is CAPPED below the true federation size. ' +
+                    'Quorum stays cross-hub deterministic (all indexers truncate identically) but is computed over a ' +
+                    'partial set; raise VALIDATOR_QUERY_LIMIT on the indexers so the full validator set is returned.');
+            }
+        }
         let N = snapshot.count;
         if (N <= 1) return 0;
         return Math.max(2 * Math.floor((N - 1) / 3) + 1, Math.ceil((N + 1) / 2));
@@ -284,7 +314,7 @@ class CapabilitySnapshot {
     // Resolve this hub's authoritative MIN_STAKE threshold for a capability as a
     // string (the form the indexer RPC and the cache key expect), or null when
     // the registry isn't wired yet (pre-startCapabilities) or has no threshold
-    // for the capability — in which case the indexer falls back to its own config.
+    // for the capability (in which case the indexer falls back to its own config).
     // Resolve the MIN_STAKE threshold for this capability AT the snapshot's block. Threading
     // blockIndex is what makes the snapshot federation-deterministic: every hub resolves the same
     // threshold for the same block from the block-anchored governance history, so they fold the
@@ -296,7 +326,7 @@ class CapabilitySnapshot {
         return (v === null || v === undefined) ? null : String(v);
     }
 
-    // Drop every cached snapshot for a capability — both the count-keyed
+    // Drop every cached snapshot for a capability: both the count-keyed
     // (capability:...) and the weight-keyed (w:capability:...) entries. Called
     // when a governance MIN_STAKE change lands so the next consensus read
     // re-queries the indexer under the new threshold. With min_stake folded into

@@ -360,6 +360,16 @@ class Governance extends EventEmitter {
                         ' (' + parameter + '): activation_block ' + ab + ' is below follower min ' + minAb);
                     return;
                 }
+            } else {
+                // Tipless follower: we have no observed block height to validate the
+                // proposer-declared activation_block against. Persisting an unvalidated
+                // activation_block could let a dishonest proposer inject a too-soon
+                // activation. Drop and wait until the hub has a tip so the min-bound
+                // check can run properly.
+                console.warn('Governance: dropping inbound block-anchored proposal ' + proposalId +
+                    ' (' + parameter + '): cannot validate activation_block ' + ab +
+                    ' without a local tip (tipless follower); will re-evaluate when tip is available');
+                return;
             }
             activation = ab;
         } else if (activationBlock !== undefined && activationBlock !== null && Number.isInteger(Number(activationBlock))) {

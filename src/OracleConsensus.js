@@ -112,9 +112,51 @@ class OracleConsensus extends EventEmitter {
 
     // Start listening for oracle consensus messages
     async start() {
+        // Seed the in-memory last-finalized-price cache from price_snapshots so a
+        // cold-started hub applies the same historical-deviation co-sign band a
+        // warm hub does (seq 4382). Without this, _getLastFinalizedPrice returns
+        // null on every pair until the hub itself stores a round, so a freshly
+        // restarted hub would co-sign a Byzantine price for any pair it does not
+        // locally submit that a long-running hub would withhold on. Local accept-
+        // gate only: no signed bytes change, no reindex.
+        await this._seedLastFinalizedPrices();
         this._messageHandler = (envelope) => this._handleMessage(envelope);
         this.peerManager.on('message', this._messageHandler);
         console.log('Oracle consensus engine started');
+    }
+
+    // Populate _lastFinalizedPrices with the most-recently-finalized price per
+    // coin_pair from price_snapshots. Mirrors the cache keying in
+    // _updateLastFinalizedPrices (key = coin_pair, value = price string) and the
+    // "latest finalized = highest round_number" ordering used by hub.getPrice().
+    // Fail-soft: an empty table or a query error leaves the cache empty (the prior
+    // cold-start behavior), so this can never block hub startup.
+    async _seedLastFinalizedPrices() {
+        if (!this._lastFinalizedPrices) this._lastFinalizedPrices = new Map();
+        try {
+            // One row per coin_pair: the price from that pair's highest finalized
+            // round. The subquery picks the max finalized round per pair, then the
+            // join reads that round's price for the pair.
+            let rows = await this.db.doQuery(
+                "SELECT p.coin_pair AS coin_pair, p.price AS price " +
+                "FROM price_snapshots p " +
+                "JOIN (SELECT coin_pair, MAX(round_number) AS mx FROM price_snapshots " +
+                "      WHERE status = 'finalized' AND price IS NOT NULL GROUP BY coin_pair) m " +
+                "  ON p.coin_pair = m.coin_pair AND p.round_number = m.mx " +
+                "WHERE p.status = 'finalized' AND p.price IS NOT NULL", []);
+            let seeded = 0;
+            for (let r of (rows || [])) {
+                if (r.coin_pair && r.price !== null && r.price !== undefined) {
+                    this._lastFinalizedPrices.set(r.coin_pair, String(r.price));
+                    seeded++;
+                }
+            }
+            if (seeded > 0)
+                console.log('Oracle: seeded last-finalized-price cache with ' + seeded + ' pair(s) from price_snapshots');
+        } catch (e) {
+            console.warn('Oracle: could not seed last-finalized-price cache (continuing with empty cache):',
+                e && e.message ? e.message : e);
+        }
     }
 
     // Stop the oracle consensus engine
@@ -244,7 +286,7 @@ class OracleConsensus extends EventEmitter {
         if (quorum === 0) {
             let aggregated = this._aggregateAll(submissions);
             // Sign locally and embed in the proof so the publisher can include the sig in PRICE v0
-            let mySig = this._signPriceV0(round, btcBlockTime, aggregated);
+            let mySig = this._signPriceV0(round, btcBlockTime, aggregated, btcBlockHeight);
             let sigsArray = mySig ? [{ pubkey: mySig.pubkey, sig: mySig.sig }] : [];
             await this._storeSnapshot(round, aggregated, 1, JSON.stringify(sigsArray), btcBlockHeight, btcBlockTime);
             // Mark the round finalized so the guard at the top of finalizeRound()
@@ -344,7 +386,7 @@ class OracleConsensus extends EventEmitter {
         // Sign the canonical PRICE v0 payload locally (this validator's contribution
         // to the on-chain anchor). Embedded in the published PRICE v0 transaction along
         // with sigs from other validators.
-        let mySig = this._signPriceV0(round, btcBlockTime, aggregated);
+        let mySig = this._signPriceV0(round, btcBlockTime, aggregated, btcBlockHeight);
 
         let pending = {
             round:          round,
@@ -663,7 +705,7 @@ class OracleConsensus extends EventEmitter {
         }
 
         // Sign the canonical PRICE v0 payload locally with this validator's identity
-        let mySig = this._signPriceV0(round, pending.btcBlockTime, prices);
+        let mySig = this._signPriceV0(round, pending.btcBlockTime, prices, pending.btcBlockHeight);
         if (mySig && !pending.signatures.has(mySig.pubkey)) {
             pending.signatures.set(mySig.pubkey, mySig.sig);
         }
@@ -750,7 +792,7 @@ class OracleConsensus extends EventEmitter {
 
             // Include this validator's signature in the COMMIT message so late-joining nodes
             // can collect signatures from any of the three phases (PROPOSE, PREPARE, COMMIT)
-            let mySig = this._signPriceV0(round, pending.btcBlockTime, pending.prices);
+            let mySig = this._signPriceV0(round, pending.btcBlockTime, pending.prices, pending.btcBlockHeight);
             if (mySig && !pending.signatures.has(mySig.pubkey)) {
                 pending.signatures.set(mySig.pubkey, mySig.sig);
             }
@@ -969,7 +1011,7 @@ class OracleConsensus extends EventEmitter {
     // Build the canonical signable payload for a PRICE v0 round.
     // MUST match xchain-indexer/src/ed25519.js buildPriceV0Payload exactly so signatures
     // produced here verify against the same canonical bytes when indexers parse on-chain PRICE v0 actions.
-    _buildPriceV0Payload(round, btcBlockTime, prices) {
+    _buildPriceV0Payload(round, btcBlockTime, prices, btcBlockHeight) {
         let pairs = prices.map(p => ({ pair: p.coinPair || p.pair, price: String(p.price) }));
         let sortedPairs = [...pairs].sort((a, b) => {
             if (a.pair < b.pair) return -1;
@@ -977,24 +1019,28 @@ class OracleConsensus extends EventEmitter {
             return 0;
         });
         let raw = JSON.stringify({
-            round:     parseInt(round),
-            timestamp: parseInt(btcBlockTime),
-            pairs:     sortedPairs
+            round:            parseInt(round),
+            timestamp:        parseInt(btcBlockTime),
+            btc_block_height: parseInt(btcBlockHeight),
+            pairs:            sortedPairs
         });
-        // EQUIV header (WI-2 bump 2): gated on the round (a BTC block height) + the hub's
-        // network, byte-matching ed25519.buildPriceV0Payload. XORACLE has no view -> VIEW=0.
-        if (eq.isEquivHeaderActive(round, this.hub && this.hub.network))
-            return eq.buildEquivCanonical(eq.ENGINE_TAGS.ORACLE, parseInt(round), 0, raw);
+        // EQUIV header (WI-2 bump 2): gated on the round's BTC block HEIGHT + the hub's
+        // network, byte-matching ed25519.buildPriceV0Payload. The height is in the signed
+        // content and the on-chain wire so every indexer reconstructs identical bytes and
+        // flips on the same anchor every other engine uses (#4232). XORACLE has no view ->
+        // VIEW=0; ROUND_ID is the BTC height (the real activation anchor).
+        if (eq.isEquivHeaderActive(btcBlockHeight, this.hub && this.hub.network))
+            return eq.buildEquivCanonical(eq.ENGINE_TAGS.ORACLE, parseInt(btcBlockHeight), 0, raw);
         return raw;
     }
 
     // Sign the canonical PRICE v0 payload with the local validator identity
     // Returns { pubkey, sig } or null if no identity is configured
-    _signPriceV0(round, btcBlockTime, prices) {
+    _signPriceV0(round, btcBlockTime, prices, btcBlockHeight) {
         let identity = this.hub && this.hub.getIdentity ? this.hub.getIdentity() : null;
         if (!identity) return null;
         try {
-            let payload = this._buildPriceV0Payload(round, btcBlockTime, prices);
+            let payload = this._buildPriceV0Payload(round, btcBlockTime, prices, btcBlockHeight);
             let sigHex  = identity.sign(payload);
             return { pubkey: identity.getPubkeyHex(), sig: sigHex };
         } catch (e) {
@@ -1014,7 +1060,7 @@ class OracleConsensus extends EventEmitter {
             return false;
         }
         try {
-            let payload = this._buildPriceV0Payload(pending.round, pending.btcBlockTime, pending.prices);
+            let payload = this._buildPriceV0Payload(pending.round, pending.btcBlockTime, pending.prices, pending.btcBlockHeight);
             let ok = ValidatorIdentity.verify(payload, sigHex, pubkeyHex);
             if (ok) {
                 pending.signatures.set(pubkeyHex, sigHex);

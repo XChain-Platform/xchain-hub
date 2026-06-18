@@ -40,10 +40,10 @@ describe('OracleConsensus', function () {
     });
 
     // -----------------------------------------------------------------
-    // _aggregate() — trimmed median
+    // _aggregate(): trimmed median
     // -----------------------------------------------------------------
 
-    describe('_aggregate() — trimmed median', function () {
+    describe('_aggregate(): trimmed median', function () {
 
         function submissionsForPair(prices) {
             let entries = prices.map((p, i) => ({
@@ -53,27 +53,27 @@ describe('OracleConsensus', function () {
             return buildSubmissions(entries);
         }
 
-        it('single submission — returns that value', function () {
+        it('single submission: returns that value', function () {
             let subs = submissionsForPair([100000]);
             expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100000.00000000');
         });
 
-        it('two submissions — returns average (median of 2)', function () {
+        it('two submissions: returns average (median of 2)', function () {
             let subs = submissionsForPair([100000, 100002]);
             expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100001.00000000');
         });
 
-        it('three submissions — returns middle value', function () {
+        it('three submissions: returns middle value', function () {
             let subs = submissionsForPair([100000, 100010, 100005]);
             expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100005.00000000');
         });
 
-        it('all identical values — returns that value', function () {
+        it('all identical values: returns that value', function () {
             let subs = submissionsForPair([50000, 50000, 50000, 50000, 50000]);
             expect(oc._aggregate(subs, 'BTC/USD')).to.equal('50000.00000000');
         });
 
-        it('7 submissions — trims top and bottom 15% (1 each)', function () {
+        it('7 submissions: trims top and bottom 15% (1 each)', function () {
             // 7 * 0.15 = 1.05, floor = 1 → trim 1 from each end
             let prices = [90000, 99000, 100000, 100100, 100200, 101000, 110000];
             let subs = submissionsForPair(prices);
@@ -81,7 +81,7 @@ describe('OracleConsensus', function () {
             expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100100.00000000');
         });
 
-        it('10 submissions — trims 1 from each end', function () {
+        it('10 submissions: trims 1 from each end', function () {
             // 10 * 0.15 = 1.5, floor = 1
             let prices = [1, 100, 101, 102, 103, 104, 105, 106, 107, 999];
             let subs = submissionsForPair(prices);
@@ -89,7 +89,7 @@ describe('OracleConsensus', function () {
             expect(oc._aggregate(subs, 'BTC/USD')).to.equal('103.50000000');
         });
 
-        it('outlier resistance — extreme outlier in 7 submissions is trimmed', function () {
+        it('outlier resistance: extreme outlier in 7 submissions is trimmed', function () {
             let prices = [100000, 100001, 100002, 100003, 100004, 100005, 999999];
             let subs = submissionsForPair(prices);
             // After trim: [100001, 100002, 100003, 100004, 100005] → median = 100003
@@ -201,14 +201,14 @@ describe('OracleConsensus', function () {
     });
 
     // -----------------------------------------------------------------
-    // L4 determinism — trimmed-median aggregation (spec §6 / validator-test-spec)
+    // L4 determinism: trimmed-median aggregation (spec §6 / validator-test-spec)
     //
     // spec §6 "Determinism (L4)" item 3: same oracle round inputs → the same
     // trimmed-median on every finalizing hub. The median VALUE must not depend on
     // submission/iteration order, and two independently-constructed hubs must
     // agree on the per-pair result for the same submission multiset.
     // -----------------------------------------------------------------
-    describe('L4 determinism — trimmed-median aggregation', function () {
+    describe('L4 determinism: trimmed-median aggregation', function () {
         // Same multiset of {sender → price} submissions, two insertion orders.
         const fwd = [
             { sender: 'v1', prices: [{ coinPair: 'BTC/USD', price: '100000' }, { coinPair: 'LTC/USD', price: '80' }] },
@@ -237,12 +237,12 @@ describe('OracleConsensus', function () {
         // FLAG (pinned invariant boundary): _aggregateAll builds its results array
         // in coinPairs Set insertion order (first-seen across submissions), and
         // _digest hashes the array IN ORDER (JSON.stringify). The per-pair VALUES
-        // are deterministic (above), but the array ORDER is not canonicalized — so
+        // are deterministic (above), but the array ORDER is not canonicalized, so
         // a digest computed from a hub's OWN aggregation depends on submission
         // iteration order. Today this is masked because followers hash the LEADER's
         // propagated array; if any path re-derives a digest/signature from local
         // aggregation, the pair order must be canonicalized first.
-        it('the {pair → median} mapping is order-insensitive (raw array order is NOT canonical — see flag)', function () {
+        it('the {pair → median} mapping is order-insensitive (raw array order is NOT canonical: see flag)', function () {
             expect(norm(oc._aggregateAll(buildSubmissions(fwd))))
                 .to.deep.equal(norm(oc._aggregateAll(buildSubmissions(rev))));
         });
@@ -332,7 +332,7 @@ describe('OracleConsensus', function () {
     });
 
     // -----------------------------------------------------------------
-    // _quorumMet() — count vs STAKE_WEIGHTED_QUORUM
+    // _quorumMet(): count vs STAKE_WEIGHTED_QUORUM
     // -----------------------------------------------------------------
 
     describe('_quorumMet()', function () {
@@ -353,13 +353,13 @@ describe('OracleConsensus', function () {
                 sybils.push(pk);
             }
 
-            // All nine Sybils signed — a COUNT landslide — but hold minority stake.
+            // All nine Sybils signed (a COUNT landslide) but hold minority stake.
             // Even a full address vote set cannot finalize.
             let sybilPending = { weighted: true, validators, quorum: 0,
                 signatures: new Map(sybils.map(pk => [pk, 'sig'])) };
             expect(oc._quorumMet(sybilPending, new Set(sybils))).to.equal(false);
 
-            // The whale alone clears it — despite an EMPTY address vote set, proving
+            // The whale alone clears it, despite an EMPTY address vote set, proving
             // the tally is over signer stake, not the prepares/commits sets.
             let whalePending = { weighted: true, validators, quorum: 0,
                 signatures: new Map([['a'.repeat(64), 'sig']]) };
@@ -586,7 +586,7 @@ describe('OracleConsensus', function () {
     // (e.g. its price fetch failed). In that case the lowest-addr submitter
     // takes over as fallback proposer. A receiver decides whether an incoming
     // PROPOSE is a legitimate fallback by electing the lowest-addr submitter
-    // from ITS OWN locally-observed submission map — never from the
+    // from ITS OWN locally-observed submission map, never from the
     // submissionKeys list piggybacked on the PROPOSE, which is
     // attacker-controlled. A Byzantine proposer could otherwise claim a subset
     // whose lowest entry is its own address and elect itself fallback even when
@@ -680,8 +680,8 @@ describe('OracleConsensus', function () {
 
         it('SECURITY: rejects a crafted PROPOSE whose submissionKeys claim the sender is the lone (lowest) submitter', async function () {
             // Attack path: a Byzantine validator (v4) sends a PROPOSE claiming
-            // submissionKeys=[v4] — a single-element set whose lowest entry is
-            // itself — to fraudulently elect itself fallback. Our local map
+            // submissionKeys=[v4], a single-element set whose lowest entry is
+            // itself, to fraudulently elect itself fallback. Our local map
             // actually holds {v2, v4}, whose lowest is v2, so v4 is NOT a
             // legitimate fallback. Trusting the claimed list (the prior bug)
             // would accept the attacker's arbitrary prices; election from the
@@ -704,7 +704,7 @@ describe('OracleConsensus', function () {
                     round:          4,
                     prices,
                     digest,
-                    submissionKeys: [VALIDATORS_4[3].addr]   // self-serving claim — must be ignored
+                    submissionKeys: [VALIDATORS_4[3].addr]   // self-serving claim: must be ignored
                 }
             });
 
@@ -930,7 +930,7 @@ describe('OracleConsensus', function () {
             clock.tick(oc.leaderTimeout);
 
             await oc._handlePropose({
-                sender: VALIDATORS_4[3].addr,   // v4 — not the lowest non-leader
+                sender: VALIDATORS_4[3].addr,   // v4: not the lowest non-leader
                 data: { round: 4, prices, digest }
             });
             expect(oc.pendingRounds.has(4)).to.be.false;
@@ -962,10 +962,10 @@ describe('OracleConsensus', function () {
     });
 
     // -----------------------------------------------------------------
-    // finalizeRound() — below-minimum + dispatch + empty aggregation
+    // finalizeRound(): below-minimum + dispatch + empty aggregation
     // -----------------------------------------------------------------
 
-    describe('finalizeRound() / dispatch — additional paths', function () {
+    describe('finalizeRound() / dispatch: additional paths', function () {
         it('skips a round below the minimum submission threshold', async function () {
             oc.minSubmissions = 3;
             oracleRound.getSubmissions.returns(buildSubmissions([
@@ -1059,14 +1059,16 @@ describe('OracleConsensus', function () {
         it('_verifyAndStoreSig stores a valid signature and rejects an invalid one', function () {
             let id = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
             let prices = [{ coinPair: 'BTC/USD', price: '100000' }];
-            let payload = oc._buildPriceV0Payload(5, 1700000000, prices);
+            // #4232: the height is part of the signed payload and the verify reconstruction
+            // reads it from pending.btcBlockHeight, so both must carry the same value.
+            let payload = oc._buildPriceV0Payload(5, 1700000000, prices, 799000);
             let sig = id.sign(payload);
 
-            let pending = { round: 5, btcBlockTime: 1700000000, prices, signatures: new Map() };
+            let pending = { round: 5, btcBlockTime: 1700000000, btcBlockHeight: 799000, prices, signatures: new Map() };
             expect(oc._verifyAndStoreSig(pending, id.getPubkeyHex(), sig)).to.be.true;
             expect(pending.signatures.has(id.getPubkeyHex())).to.be.true;
 
-            let pending2 = { round: 5, btcBlockTime: 1700000000, prices, signatures: new Map() };
+            let pending2 = { round: 5, btcBlockTime: 1700000000, btcBlockHeight: 799000, prices, signatures: new Map() };
             expect(oc._verifyAndStoreSig(pending2, id.getPubkeyHex(), 'ff'.repeat(64))).to.be.false;
         });
     });

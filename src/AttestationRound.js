@@ -151,7 +151,17 @@ class AttestationRound {
                 params:  params
             }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
         } catch (e) {
-            console.warn('AttestationRound: poll failed:', e);
+            let status = e && e.response && e.response.status;
+            if(status === 401 || status === 403){
+                // Auth failure is distinct from the indexer being down: the operator
+                // has a key mismatch between the indexer and this hub. Log clearly so
+                // they can identify the misconfiguration instead of seeing a generic
+                // "unreachable" message and chasing a network issue.
+                console.warn('AttestationRound: HTTP ' + status + ' from BTC indexer at ' + url +
+                    ': auth mismatch - check that BTC_INDEXER_API_KEY on this hub matches INDEXER_API_KEY on the indexer');
+            } else {
+                console.warn('AttestationRound: poll failed:', e && e.message ? e.message : e);
+            }
             return;
         }
 

@@ -34,6 +34,37 @@ const COINGECKO_IDS = { 'BTC': 'bitcoin', 'LTC': 'litecoin', 'DOGE': 'dogecoin' 
 // CoinMarketCap symbols for the 3 supported coins
 const CMC_SYMBOLS = { 'BTC': 'BTC', 'LTC': 'LTC', 'DOGE': 'DOGE' };
 
+// Kraken public-ticker pairs (keyless). Mapping COIN/FIAT -> Kraken request
+// "altname". Kraken errors the WHOLE batch if ANY requested pair is unknown, so
+// this set is restricted to the pairs Kraken actually lists for these three coins
+// (verified live): Kraken has no MXN/CNY/BRL/INR/KRW markets, and a handful of
+// per-coin gaps (LTC/CHF, LTC/CAD, DOGE/CHF, DOGE/JPY). The hub still gets a
+// second uncorrelated source on the most-traded fiats; pairs Kraken does not list
+// simply fall back to CoinGecko-only for that pair (unchanged from before).
+const KRAKEN_PAIRS = {
+    'BTC/USD': 'XBTUSD', 'BTC/EUR': 'XBTEUR', 'BTC/GBP': 'XBTGBP', 'BTC/CHF': 'XBTCHF',
+    'BTC/AUD': 'XBTAUD', 'BTC/JPY': 'XBTJPY', 'BTC/CAD': 'XBTCAD',
+    'LTC/USD': 'LTCUSD', 'LTC/EUR': 'LTCEUR', 'LTC/GBP': 'LTCGBP', 'LTC/AUD': 'LTCAUD', 'LTC/JPY': 'LTCJPY',
+    'DOGE/USD': 'XDGUSD', 'DOGE/EUR': 'XDGEUR', 'DOGE/GBP': 'XDGGBP', 'DOGE/AUD': 'XDGAUD', 'DOGE/CAD': 'XDGCAD'
+};
+
+// Kraken returns result keys inconsistently: some as the request altname
+// (e.g. XBTAUD, LTCGBP, XDGUSD), others in the canonical X/Z-prefixed form
+// (e.g. XXBTZUSD, XLTCZEUR). Map a request altname to its canonical asset prefix
+// so we can probe both candidate key shapes when reading the response.
+const KRAKEN_ALT_TO_CANON = { 'XBT': 'XXBT', 'LTC': 'XLTC', 'XDG': 'XXDG' };
+
+// Given a Kraken request altname (ASSET + 3-char FIAT, e.g. "XBTUSD"), return the
+// set of candidate result keys Kraken may use for it (altname, canonical X/Z form,
+// and the two intermediate shapes), so the parser is robust to Kraken's mixed
+// key naming without a per-pair hardcoded canonical key.
+function krakenResultCandidates(altname) {
+    let asset      = altname.slice(0, altname.length - 3);
+    let fiat       = altname.slice(-3);
+    let canonAsset = KRAKEN_ALT_TO_CANON[asset] || asset;
+    return [altname, canonAsset + 'Z' + fiat, canonAsset + fiat, asset + 'Z' + fiat];
+}
+
 // Supported coins (3) and fiat currencies (12)
 const COINS = ['BTC', 'LTC', 'DOGE'];
 const FIATS = ['USD', 'CAD', 'AUD', 'MXN', 'GBP', 'JPY', 'CNY', 'CHF', 'BRL', 'INR', 'EUR', 'KRW'];
@@ -71,22 +102,40 @@ class PriceFetcher {
             results[pair] = [];
         }
 
-        // Fetch from all sources in parallel
-        let fetches = [this.fetchFromCoinGecko()];
+        // Fetch from all sources in parallel. CoinGecko and Kraken are both keyless,
+        // so every hub has two uncorrelated upstreams out of the box (seq 3898);
+        // CoinMarketCap is added as a third only when an API key is configured.
+        // Each fetcher fails soft (returns null on error), so one source erroring
+        // never drops the others.
+        let fetches = [this.fetchFromCoinGecko(), this.fetchFromKraken()];
         if (this.coinmarketcapApiKey) {
             fetches.push(this.fetchFromCoinMarketCap());
         }
 
         let sourceResults = await Promise.allSettled(fetches);
 
+        // Count sources that returned at least one usable price this round, so we
+        // can warn when fewer than two live sources are active (a single correlated
+        // upstream is exactly the failure mode the second keyless provider closes).
+        let liveSources = 0;
         for (let result of sourceResults) {
             if (result.status === 'fulfilled' && result.value) {
+                let contributed = false;
                 for (let pair of COIN_PAIRS) {
                     if (result.value[pair] !== undefined && result.value[pair] !== null) {
                         results[pair].push(result.value[pair]);
+                        contributed = true;
                     }
                 }
+                if (contributed) liveSources++;
             }
+        }
+
+        if (liveSources < 2) {
+            console.warn('PriceFetcher: only ' + liveSources + ' live price source(s) this round ' +
+                '(need at least 2 uncorrelated sources for a healthy oracle). ' +
+                'Check CoinGecko / Kraken reachability' +
+                (this.coinmarketcapApiKey ? ' / CoinMarketCap API key.' : '.'));
         }
 
         // Compute median for each pair
@@ -182,6 +231,60 @@ class PriceFetcher {
                 if (Number.isFinite(val) && val > 0 && val < PRICE_MAX) {
                     prices[coin + '/' + fiat] = val;
                 }
+            }
+        }
+        return prices;
+    }
+
+    // Fetch coin/fiat pairs from Kraken's keyless public ticker in a single request,
+    // retrying on 429/503 with the same backoff+jitter as CoinGecko. Kraken is a
+    // second uncorrelated keyless upstream so every hub has 2 sources by default
+    // (seq 3898). Only the pairs Kraken lists are requested (KRAKEN_PAIRS); the
+    // others stay CoinGecko-only. Mirrors fetchFromCoinGecko's fetch+parse+normalize
+    // shape: jitter, _fetchWithRetry, then a { 'COIN/FIAT': number } map (or null).
+    // Returns: { 'BTC/USD': number, ... } for the listed pairs, or null on failure.
+    async fetchFromKraken() {
+        let pairCodes = Object.values(KRAKEN_PAIRS).join(',');
+        let url       = 'https://api.kraken.com/0/public/Ticker?pair=' + pairCodes;
+
+        // Initial jitter (0-3000ms) so multiple hubs behind the same NAT don't
+        // collide on Kraken's per-IP rate limit at the start of each round
+        // (mirrors fetchFromCoinGecko).
+        await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 3000)));
+
+        let response;
+        try {
+            response = await this._fetchWithRetry(url, { timeout: this.timeout });
+        } catch (err) {
+            console.warn('Kraken fetch failed after retries: ' + (err ? err.message : 'unknown error'));
+            return null;
+        }
+
+        // Kraken wraps everything in { error: [...], result: {...} }. A non-empty
+        // error array means the whole batch was rejected (e.g. an unknown pair);
+        // treat it as a failed round for this source rather than a partial parse.
+        let body = response.data;
+        if (!body || (Array.isArray(body.error) && body.error.length > 0)) {
+            console.warn('Kraken returned error: ' + (body && body.error ? JSON.stringify(body.error) : 'no body'));
+            return null;
+        }
+        let result = body.result;
+        if (!result) return null;
+
+        let prices = {};
+        for (let pair of Object.keys(KRAKEN_PAIRS)) {
+            let altname = KRAKEN_PAIRS[pair];
+            // Kraken's result key may be the request altname or a canonical X/Z form;
+            // probe each candidate and take the first present.
+            let entry = null;
+            for (let key of krakenResultCandidates(altname)) {
+                if (result[key]) { entry = result[key]; break; }
+            }
+            // 'c' is last-trade-closed [price, lotVolume]; index 0 is the price.
+            if (!entry || !Array.isArray(entry.c) || entry.c[0] === undefined) continue;
+            let val = parseFloat(entry.c[0]);
+            if (Number.isFinite(val) && val > 0 && val < PRICE_MAX) {
+                prices[pair] = val;
             }
         }
         return prices;

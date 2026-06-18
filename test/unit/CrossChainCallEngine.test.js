@@ -64,9 +64,13 @@ function memDb() {
                 return { affectedRows: 2, insertId: rows[existing].id };
             }
             if (sql.startsWith('SELECT d.* FROM cross_chain_calls d')) {
+                // Mirrors the LEFT JOIN ... AND r.status <> 'retracted' predicate
+                // (#4478): a 'retracted' result row no longer suppresses the
+                // dispatch, so the result can be re-relayed after a deep reorg.
                 return rows.filter(r => r.phase === 'dispatch' && r.status === 'finalized' &&
                                         r.target_chain === params[0] &&
-                                        !rows.some(x => x.call_id === r.call_id && x.phase === 'result'));
+                                        !rows.some(x => x.call_id === r.call_id && x.phase === 'result' &&
+                                                        x.status !== 'retracted'));
             }
             if (sql.startsWith("SELECT id, call_id, phase FROM cross_chain_calls WHERE status = 'finalized' AND source_chain")) {
                 return rows.filter(r => r.status === 'finalized' && r.source_chain === params[0] && r.source_action_index >= params[1]);
@@ -357,6 +361,29 @@ describe('CrossChainCallEngine', function () {
             expect(db.rows[0].validator_signatures).to.contain('a'.repeat(64));
             expect(broadcaster.broadcastRow.calledOnce).to.equal(true);
             expect(broadcaster.broadcastRow.firstCall.args[0].table).to.equal('cross_chain_calls');
+        });
+
+        it('re-discovers a dispatch whose only result row is retracted (#4478)', async function () {
+            const { engine, db } = makeEngine();
+            // A finalized dispatch targeting DOGE plus a 'retracted' result row left
+            // by a deep reorg. The unfiltered join treated r.id IS NOT NULL and never
+            // re-relayed; the AND r.status <> 'retracted' predicate re-opens it.
+            db.rows.push(
+                { id: 1, call_id: CALL_ID, phase: 'dispatch', status: 'finalized', target_chain: 'DOGE',
+                  source_chain: 'BTC', source_action_index: 41 },
+                { id: 2, call_id: CALL_ID, phase: 'result', status: 'retracted', target_chain: 'DOGE',
+                  source_chain: 'BTC', source_action_index: 41 }
+            );
+            const seen = [];
+            sinon.stub(engine, '_maybeRelayResult').callsFake(async (coin, d) => { seen.push(d.call_id); });
+            await engine._pollTargetResults('DOGE');
+            expect(seen).to.deep.equal([CALL_ID]);
+
+            // A live (non-retracted) result row still suppresses re-discovery.
+            db.rows[1].status = 'finalized';
+            seen.length = 0;
+            await engine._pollTargetResults('DOGE');
+            expect(seen).to.deep.equal([]);
         });
 
         it('retractCallsForReorg flips BOTH phases to retracted (match model) and broadcasts a deletion', async function () {

@@ -68,9 +68,9 @@ class OraclePublisher {
         this.encoder   = encoderUrl ? new EncoderClient(encoderUrl, encoderKey) : null;
 
         // Pluggable hooks (wired by the operator at startup)
-        // broadcastFn(payload) → Promise<{txid}>      — full custom broadcast pipeline (overrides default)
-        // walletSignFn(psbtHex) → Promise<txHex>      — sign a PSBT with the DOGE_ADDRESS private key
-        // getBalanceFn() → Promise<number>            — return DOGE balance for the configured address
+        // broadcastFn(payload) → Promise<{txid}>: full custom broadcast pipeline (overrides default)
+        // walletSignFn(psbtHex) → Promise<txHex>: sign a PSBT with the DOGE_ADDRESS private key
+        // getBalanceFn() → Promise<number>: return DOGE balance for the configured address
         this.broadcastFn  = null;
         this.walletSignFn = null;
         this.getBalanceFn = null;
@@ -82,7 +82,7 @@ class OraclePublisher {
         this.broadcastFn = fn;
     }
 
-    // Set the wallet signing hook — required for the default broadcast pipeline
+    // Set the wallet signing hook (required for the default broadcast pipeline)
     // The function receives a PSBT hex string and should return a signed transaction hex string
     // Operators wire this to xchain-sdk's wallet.signPsbt() or any equivalent signer
     setWalletSignHook(fn) {
@@ -115,7 +115,7 @@ class OraclePublisher {
         let psbtResult = await this.encoder.createTx({
             utxos:    utxos,
             // The encoder's P2SH path runs bitcoin.address.fromBase58Check() on this
-            // field, so it must be the base58check address — not the raw hex pubkey.
+            // field, so it must be the base58check address (not the raw hex pubkey).
             pubkey:   this.dogeAddress,
             data:     payload,
             change:   this.dogeAddress,
@@ -165,7 +165,7 @@ class OraclePublisher {
         console.log('OraclePublisher started (queue: ' + this.queuePath + ', address: ' + (this.dogeAddress || '<unset>') + ')');
     }
 
-    // Called when a round is finalized — enqueue if this node is the leader
+    // Called when a round is finalized. Enqueue if this node is the leader.
     async onRoundFinalized(event) {
         let round = event.round;
         let myRank = await this._getMyRank(event.btcBlockHeight);
@@ -176,11 +176,11 @@ class OraclePublisher {
 
         let leaderRank = round % publisherCount;
         if (leaderRank !== myRank) {
-            // Not our turn (yet) — but we may need to take over later if leader fails
+            // Not our turn yet, but we may need to take over later if leader fails
             return;
         }
 
-        // We are the leader for this round — enqueue and try to publish
+        // We are the leader for this round. Enqueue and try to publish.
         // Signatures are collected by OracleConsensus during PBFT prepare/commit and passed in event.signatures
         let sigs = (event.signatures && Array.isArray(event.signatures) && event.signatures.length > 0)
             ? event.signatures
@@ -216,7 +216,7 @@ class OraclePublisher {
     // Get the sorted list of active oracle_publish validator signing pubkeys at
     // the given block boundary. Uses the on-chain snapshot (via CapabilitySnapshot)
     // so every hub that has processed identical on-chain data through blockIndex
-    // returns the same array — regardless of when gossip messages arrived.
+    // returns the same array regardless of when gossip messages arrived.
     // Falls back to the live local registry when the indexer is unreachable.
     // Returns: array of 64-hex pubkey strings, sorted ascending.
     async _getActiveOraclePublishPubkeys(blockIndex) {
@@ -247,12 +247,12 @@ class OraclePublisher {
         }
     }
 
-    // Fallback: build a single-validator signature locally if the round event didn't carry any
-    // (only used in degenerate cases — normal operation collects sigs from consensus prepare/commit)
+    // Fallback: build a single-validator signature locally if the round event didn't carry any.
+    // Only used in degenerate cases; normal operation collects sigs from consensus prepare/commit.
     _buildLocalSigOnly(event) {
         if (!this.identity) return [];
         try {
-            let payload = this._buildSignablePayload(event.round, event.btcBlockTime, event.prices);
+            let payload = this._buildSignablePayload(event.round, event.btcBlockTime, event.prices, event.btcBlockHeight);
             let sigHex  = this.identity.sign(payload);
             return [{ pubkey: this.identity.getPubkeyHex(), sig: sigHex }];
         } catch (e) {
@@ -261,8 +261,12 @@ class OraclePublisher {
         }
     }
 
-    // Build the canonical signable payload — must match indexer's ed25519.buildPriceV0Payload
-    _buildSignablePayload(round, timestamp, prices) {
+    // Build the canonical signable payload. Must match indexer's ed25519.buildPriceV0Payload
+    // (including the EQUIV header gate on the round's BTC block height, #4232). The height
+    // is part of the signed content; only the bare-JSON branch is built here because this
+    // local-sig fallback is degenerate (no EQUIV-era round reaches it on a real federation),
+    // and the canonical-byte equality with the indexer is enforced by the consensus path.
+    _buildSignablePayload(round, timestamp, prices, btcBlockHeight) {
         let pairs = prices.map(p => ({ pair: p.coinPair, price: String(p.price) }));
         let sortedPairs = pairs.sort((a, b) => {
             if (a.pair < b.pair) return -1;
@@ -270,16 +274,18 @@ class OraclePublisher {
             return 0;
         });
         return JSON.stringify({
-            round:     parseInt(round),
-            timestamp: parseInt(timestamp),
-            pairs:     sortedPairs
+            round:            parseInt(round),
+            timestamp:        parseInt(timestamp),
+            btc_block_height: parseInt(btcBlockHeight),
+            pairs:            sortedPairs
         });
     }
 
     // Build the on-wire PRICE v0 payload as a pipe-delimited string
-    // Format: PRICE|0|ROUND|TIMESTAMP|PAIR_COUNT|PAIR_ID|PAIR_PRICE|...|SIG_COUNT|PUBKEY|SIG|...
-    buildPriceV0Wire(round, timestamp, prices, sigs) {
-        let parts = ['PRICE', '0', String(round), String(timestamp), String(prices.length)];
+    // Format: PRICE|0|ROUND|TIMESTAMP|BTC_BLOCK_HEIGHT|PAIR_COUNT|PAIR_ID|PAIR_PRICE|...|SIG_COUNT|PUBKEY|SIG|...
+    // BTC_BLOCK_HEIGHT is the round's BTC anchor (the EQUIV gate input, in the signed payload).
+    buildPriceV0Wire(round, timestamp, prices, sigs, btcBlockHeight) {
+        let parts = ['PRICE', '0', String(round), String(timestamp), String(parseInt(btcBlockHeight)), String(prices.length)];
         for (let p of prices) {
             parts.push(p.coinPair || p.pair);
             parts.push(String(p.price));
@@ -303,7 +309,7 @@ class OraclePublisher {
             fs.closeSync(fd);
         } catch (e) {
             console.error('OraclePublisher: failed to enqueue round ' + round.round + ':', e);
-            // Fail loud — refuse to ack if queue is unwritable
+            // Fail loud: refuse to ack if queue is unwritable
             throw e;
         }
     }
@@ -349,7 +355,7 @@ class OraclePublisher {
                 continue;
             }
 
-            let payload = this.buildPriceV0Wire(entry.round, entry.btcBlockTime, entry.prices, entry.sigs);
+            let payload = this.buildPriceV0Wire(entry.round, entry.btcBlockTime, entry.prices, entry.sigs, entry.btcBlockHeight);
 
             // Choose broadcast strategy: custom hook overrides, otherwise use the default encoder pipeline
             let broadcaster = this.broadcastFn || ((p) => this._defaultBroadcast(p));
@@ -364,7 +370,7 @@ class OraclePublisher {
                 }
                 let result = await broadcaster(payload);
                 console.log('OraclePublisher: published round ' + entry.round + ' (txid: ' + (result && result.txid) + ')');
-                // Successfully published — drop from queue (do not add to remaining)
+                // Successfully published. Drop from queue (do not add to remaining).
             } catch (err) {
                 entry.attempts++;
                 console.error('OraclePublisher: publish failed for round ' + entry.round + ' (attempt ' + entry.attempts + '/' + this.maxAttempts + '): ', err);

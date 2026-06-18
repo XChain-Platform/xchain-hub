@@ -92,9 +92,9 @@ describe('CapabilitySnapshot (extra coverage)', function () {
             let snap = new CapabilitySnapshot(makeHub());
             snap.cacheTtlMs = 60000;
 
-            // First fetch — populates cache
+            // First fetch: populates cache
             await snap.getSnapshot('attestation', 100);
-            // Second fetch — should use cache
+            // Second fetch: should use cache
             await snap.getSnapshot('attestation', 100);
 
             expect(axiosStub.post.callCount).to.equal(1);
@@ -233,6 +233,32 @@ describe('CapabilitySnapshot (extra coverage)', function () {
         it('returns correct quorum for N=10', function () {
             // N=10: 2*floor(9/3)+1 = 2*3+1 = 7
             expect(snap.getQuorum({ count: 10 })).to.equal(7);
+        });
+
+        // #4479: a truncated snapshot (indexer hit VALIDATOR_QUERY_LIMIT) still
+        // finalizes (alarm-and-proceed: the cap is cross-hub deterministic) but
+        // raises a loud, throttled operator warning so the cap is not invisible.
+        it('still computes quorum over a TRUNCATED snapshot (alarm-and-proceed)', function () {
+            const err = sinon.stub(console, 'error');
+            // Same N=7 set, but flagged truncated: quorum is unchanged.
+            expect(snap.getQuorum({ count: 7, truncated: true, capability: '*', blockIndex: 100 })).to.equal(5);
+            expect(err.calledOnce).to.equal(true);
+            expect(err.firstCall.args[0]).to.contain('TRUNCATED');
+        });
+
+        it('throttles the truncated-snapshot warning to one per TTL', function () {
+            const err = sinon.stub(console, 'error');
+            const trunc = { count: 7, truncated: true, capability: '*', blockIndex: 100 };
+            snap.getQuorum(trunc);
+            snap.getQuorum(trunc);
+            snap.getQuorum(trunc);
+            expect(err.callCount).to.equal(1);
+        });
+
+        it('does NOT warn for a non-truncated snapshot', function () {
+            const err = sinon.stub(console, 'error');
+            snap.getQuorum({ count: 7, truncated: false, capability: '*', blockIndex: 100 });
+            expect(err.called).to.equal(false);
         });
     });
 

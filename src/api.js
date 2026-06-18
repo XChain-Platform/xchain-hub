@@ -811,9 +811,27 @@ async function startApi(){
         }
     };
 
-    // Hub DB sync channel: REST snapshot endpoints (read-only, public read)
+    // Hub DB sync channel: REST snapshot endpoints
     // Indexers running in distributed mode bootstrap their local hub DB by fetching these snapshots
     // before subscribing to the WebSocket channel for live updates.
+    //
+    // Auth (seq 3517): gate every /hub-db/snapshot/* GET behind HUB_API_KEY WHEN
+    // IT IS SET, mirroring the JSON-RPC write-method guard above and the WebSocket
+    // upgrade guard below. Unset key => unauthenticated (unchanged behavior for a
+    // public bootstrap hub / regtest / xchain-node-managed deploys that inject no
+    // key); set key => these endpoints fail closed (401) so a production federation
+    // can lock its hub-DB mirror to authenticated indexers. The indexer's hub_db_sync
+    // bootstrap sends the key as `x-api-key` (matching the write-method header), so
+    // we check the same header with the same constant-time compare.
+    app.use('/hub-db/snapshot', (req, res, next) => {
+        if (!HUB_API_KEY) return next();
+        let provided = req.headers['x-api-key'] || '';
+        let a = Buffer.from(provided), b = Buffer.from(HUB_API_KEY);
+        if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+        next();
+    });
 
     // GET /hub-db/snapshot/price_snapshots: full snapshot of price_snapshots table
     app.get('/hub-db/snapshot/price_snapshots', async (req, res) => {
