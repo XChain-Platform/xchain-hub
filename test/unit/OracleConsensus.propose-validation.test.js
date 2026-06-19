@@ -54,8 +54,20 @@ describe('OracleConsensus: follower price validation / minSubmissions / broadcas
     });
 
     it('rejects a proposed price at/above PRICE_MAX', async function () {
-        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '20000000' }])); // > 10_000_000
+        oracleRound.getSubmissions.returns(new Map()); // no local aggregate → only the PRICE_MAX bound applies
+        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/KRW', price: '20000000000' }])); // 2e10 > PRICE_MAX (1e10)
         expect(oc.pendingRounds.has(ROUND)).to.be.false;
+    });
+
+    it('PRICE_MAX clears a realistic high-fiat pair (BTC/KRW) that the old 1e7 cap dropped', async function () {
+        // Regression guard for the silent-drop bug: BTC/KRW at ~$100k BTC and ~1,350 KRW/USD
+        // is ~1.35e8 KRW and scales with the BTC price. The bound must clear that with headroom,
+        // so a future lowering of PRICE_MAX cannot silently start dropping the pair again.
+        const { PRICE_MAX } = require('../../src/constants');
+        expect(PRICE_MAX).to.be.greaterThan(1.35e8);
+        oracleRound.getSubmissions.returns(new Map()); // bound-only (no local aggregate to deviate against)
+        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/KRW', price: '135000000' }])); // 1.35e8, realistic
+        expect(oc.pendingRounds.has(ROUND)).to.be.true;
     });
 
     it('accepts a proposed price within the deviation band', async function () {

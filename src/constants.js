@@ -26,9 +26,16 @@
 // when the round is aggregated. Keeping a single constant guarantees the
 // ingestion bound and the aggregation bound can never drift apart.
 //
-// No BTC/LTC/DOGE fiat price approaches 10M today; raise this here (one place)
-// before adding any high-nominal-value pair that could exceed it.
-const PRICE_MAX = 10_000_000;
+// Sized for the highest-nominal configured pair, BTC/KRW: at ~$100k BTC and
+// ~1,350 KRW/USD that is ~1.35e8 KRW, and it scales with the BTC price, so the
+// old 1e7 cap dropped BTC/KRW always (and BTC/JPY above ~$66.7k BTC) silently at
+// ingestion, leaving those pairs absent from price_snapshots with no skipped row
+// or warning. 1e10 covers BTC/KRW past ~$7M BTC with headroom while still
+// rejecting parse-overflow / misplaced-decimal garbage. This is a coarse global
+// sanity ceiling only; per-pair outliers are caught by the co-sign deviation gate
+// and multi-submitter aggregation, not here. Raise (or move to a per-pair bound)
+// here in one place before adding any pair that could exceed it.
+const PRICE_MAX = 10_000_000_000;
 
 // Hard ceiling on cross-chain hop depth for XCALL relays. user->Y is hop 1,
 // Y->back is hop 2; further hops require a fresh user-initiated transaction.
