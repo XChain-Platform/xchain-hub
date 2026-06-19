@@ -14,7 +14,7 @@
  *
  * XChain Hub - llm attestation provider tests
  *
- * Network/spawn paths are not exercised here — fetch() requires a live
+ * Network/spawn paths are not exercised here. fetch() requires a live
  * transport, so those are e2e-tested in xchain-e2e-test. This file
  * focuses on the parts that work without external dependencies:
  *   - healthCheck() picks up resolveHubLlmAuth's verdict
@@ -65,7 +65,7 @@ function _reloadProvider(){
     return require('../../src/providers/llm.js');
 }
 
-describe('llm provider — healthCheck', function () {
+describe('llm provider, healthCheck', function () {
 
     it('reports ok:false when no credentials are configured', async function () {
         const result = await _withEnv({}, async () => {
@@ -87,7 +87,7 @@ describe('llm provider — healthCheck', function () {
     });
 });
 
-describe('llm provider — agree (judge_model)', function () {
+describe('llm provider, agree (judge_model)', function () {
 
     let llm;
     before(function () { llm = require('../../src/providers/llm.js'); });
@@ -120,7 +120,7 @@ describe('llm provider — agree (judge_model)', function () {
     });
 });
 
-describe('llm provider — _setConfig', function () {
+describe('llm provider, _setConfig', function () {
 
     it('applies approved_models / judge_model / token caps from the registry def', function () {
         const llm = _reloadProvider();
@@ -133,7 +133,7 @@ describe('llm provider — _setConfig', function () {
                 prompt_envelope_version: 2
             }
         });
-        // No public getter — verified indirectly via fetch() validating envelope_version.
+        // No public getter; verified indirectly via fetch() validating envelope_version.
         // An envelope_version of 3 should now exceed the configured 2 and throw.
         return llm.fetch(JSON.stringify({ prompt: 'hi', envelope_version: 3 }), {})
             .then(() => { throw new Error('expected envelope_version reject'); })
@@ -152,7 +152,7 @@ describe('llm provider — _setConfig', function () {
     });
 });
 
-describe('llm provider — fetch input validation', function () {
+describe('llm provider, fetch input validation', function () {
 
     it('rejects non-JSON payloads with a JSON-envelope message', async function () {
         const llm = _reloadProvider();
@@ -172,11 +172,11 @@ describe('llm provider — fetch input validation', function () {
         expect(err.message).to.match(/envelope\.prompt/);
     });
 
-    it('accepts omitted options argument (options || {} branch)', async function () {
-        // Line 83: `options = options || {}` — the `{}` fallback when options is not passed
+    it('accepts omitted options argument: options || {} branch', async function () {
+        // Line 83: `options = options || {}`, the `{}` fallback when options is not passed
         const llm = _reloadProvider();
         let err;
-        // Pass no second argument — options is undefined → falls back to {}
+        // Pass no second argument; options is undefined, falls back to {}
         try { await llm.fetch('not json'); }
         catch (e) { err = e; }
         expect(err).to.exist;
@@ -185,12 +185,12 @@ describe('llm provider — fetch input validation', function () {
 });
 
 // ---- fetch() via claude_spawn transport -----------------------------------
-// llm.js destructures runClaudePrint at require-time, so we cannot stub it
+// llm.js destructures runClaudePrint at require-time. We cannot stub it
 // via sinon after the fact. Instead we inject a pre-patched claude-spawn
 // module into the require cache BEFORE _reloadProvider() loads the llm module,
 // so the destructured binding lands on our stub function.
 
-describe('llm provider — fetch via claude_spawn', function () {
+describe('llm provider, fetch via claude_spawn', function () {
 
     let emptyDir;
     let savedCacheEntry;
@@ -226,7 +226,7 @@ describe('llm provider — fetch via claude_spawn', function () {
             exports: { runClaudePrint: fakeRunClaudePrint, CLAUDE_BIN: 'claude' }
         };
 
-        // Now reload llm.js — its `const { runClaudePrint }` will pick up our stub
+        // Now reload llm.js; its `const { runClaudePrint }` will pick up our stub
         delete require.cache[require.resolve('../../src/providers/llm.js')];
         delete require.cache[require.resolve('../../src/lib/hub-credentials.js')];
         const llm = require('../../src/providers/llm.js');
@@ -278,7 +278,7 @@ describe('llm provider — fetch via claude_spawn', function () {
 
 // ---- fetch() via anthropic_api transport (nock) ---------------------------
 
-describe('llm provider — fetch via anthropic_api', function () {
+describe('llm provider, fetch via anthropic_api', function () {
 
     afterEach(function () {
         nock.cleanAll();
@@ -486,7 +486,12 @@ describe('llm provider — fetch via anthropic_api', function () {
         expect(capturedBody.model).to.equal('claude-opus-4-7');
     });
 
-    it('fetch() falls back to APPROVED_MODELS[0] when pinnedModel is not approved', async function () {
+    it('fetch() honors a block-anchored pinnedModel even when it is not in the live APPROVED_MODELS', async function () {
+        // Consensus determinism (item 4560): the pinnedModel is resolved from
+        // block-anchored governance config, so it must be used as-is. Clamping it
+        // against the live, governance-mutable APPROVED_MODELS would fork an updated
+        // validator (swaps to APPROVED_MODELS[0]) from a laggard (keeps the pin) the
+        // instant a hotReload changes the approved list.
         const llm = _reloadProvider();
         let capturedBody;
         nock('https://api.anthropic.com')
@@ -494,7 +499,20 @@ describe('llm provider — fetch via anthropic_api', function () {
             .reply(200, { content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 1, output_tokens: 1 } });
 
         await withApiKey(() =>
-            llm.fetch(JSON.stringify({ prompt: 'Q?' }), { pinnedModel: 'gpt-4-not-approved' })
+            llm.fetch(JSON.stringify({ prompt: 'Q?' }), { pinnedModel: 'claude-future-not-yet-listed' })
+        );
+        expect(capturedBody.model).to.equal('claude-future-not-yet-listed');
+    });
+
+    it('fetch() falls back to APPROVED_MODELS[0] when no pinnedModel is supplied', async function () {
+        const llm = _reloadProvider();
+        let capturedBody;
+        nock('https://api.anthropic.com')
+            .post('/v1/messages', (body) => { capturedBody = body; return true; })
+            .reply(200, { content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 1, output_tokens: 1 } });
+
+        await withApiKey(() =>
+            llm.fetch(JSON.stringify({ prompt: 'Q?' }), {})
         );
         expect(capturedBody.model).to.equal('claude-sonnet-4-6');  // default APPROVED_MODELS[0]
     });
@@ -550,7 +568,7 @@ describe('llm provider — fetch via anthropic_api', function () {
 
 // ---- agree() multi-proposal judge paths via anthropic_api -----------------
 
-describe('llm provider — agree judge_model paths', function () {
+describe('llm provider, agree judge_model paths', function () {
 
     afterEach(function () {
         nock.cleanAll();
@@ -618,7 +636,7 @@ describe('llm provider — agree judge_model paths', function () {
         expect(result).to.be.null;
     });
 
-    it('returns null when judge returns JSON wrapped in markdown prose', async function () {
+    it('returns null when judge returns JSON wrapped in markdown prose (extraction fails)', async function () {
         const llm = _reloadProvider();
         nock('https://api.anthropic.com')
             .post('/v1/messages')
@@ -761,7 +779,7 @@ describe('llm provider — agree judge_model paths', function () {
         ];
 
         const result = await withApiKey(() => llm.agree(proposals));
-        // canonical_index=1 → proposals[0], which has null body — returned as-is
+        // canonical_index=1 → proposals[0], which has null body, returned as-is
         expect(result).to.not.be.null;
     });
 });
@@ -770,7 +788,7 @@ describe('llm provider — agree judge_model paths', function () {
 // These tests use the cache-injection pattern to stub hub-credentials.js
 // BEFORE llm.js loads it (same technique as the claude_spawn tests above).
 
-describe('llm provider — auth credential fallback chain', function () {
+describe('llm provider, auth credential fallback chain', function () {
 
     let savedCredsCacheEntry;
 
@@ -849,7 +867,7 @@ describe('llm provider — auth credential fallback chain', function () {
 
 // ---- _callAnthropic error format edge cases --------------------------------
 
-describe('llm provider — _callAnthropic error format edge cases', function () {
+describe('llm provider, _callAnthropic error format edge cases', function () {
 
     afterEach(function () {
         nock.cleanAll();
@@ -879,7 +897,7 @@ describe('llm provider — _callAnthropic error format edge cases', function () 
     }
 
     it('rejects with JSON.stringify of error payload when json.error has no message field', async function () {
-        // Line 264: `json.error.message ? json.error.message : JSON.stringify(json)` — the stringify branch
+        // Line 264: `json.error.message ? json.error.message : JSON.stringify(json)`. The stringify branch
         const llm = _reloadProvider();
         nock('https://api.anthropic.com')
             .post('/v1/messages')

@@ -40,7 +40,7 @@ describe('Consensus (PBFT)', function () {
     // -----------------------------------------------------------------
 
     describe('_getQuorum()', function () {
-        // Quorum = max(2f+1, ceil((N+1)/2)) where f = floor((N-1)/3) — the
+        // Quorum = max(2f+1, ceil((N+1)/2)) where f = floor((N-1)/3). The
         // majority floor stops 2f+1 degenerating to 1 at N=3. N<=1 returns 0.
         let cases = [
             { N: 1,  expected: 0, label: 'N=1 → 0 (single node)' },
@@ -108,7 +108,7 @@ describe('Consensus (PBFT)', function () {
     });
 
     // -----------------------------------------------------------------
-    // L4 determinism — leader/quorum derivation (spec §6 / validator-test-spec)
+    // L4 determinism: leader/quorum derivation (spec §6 / validator-test-spec)
     //
     // The validator-specific risk is *quiet divergence*: two hubs at the same
     // block_index must derive the SAME quorum N and elect the SAME leader for
@@ -116,14 +116,14 @@ describe('Consensus (PBFT)', function () {
     // the config-PBFT path across two independently-constructed Consensus
     // instances (the L1-level half of spec §6 "Determinism (L4)" item 1).
     // -----------------------------------------------------------------
-    describe('L4 determinism — leader/quorum derivation', function () {
+    describe('L4 determinism: leader/quorum derivation', function () {
         const buildSet = (n) => Array.from({ length: n }, (_, i) => makeValidator(i + 1));
         const freshConsensus = () => new Consensus(createMockHub());
 
-        it('identical validator set → identical leader for every (seq, view) on two independent hubs', function () {
+        it('identical validator set: identical leader for every (seq, view) on two independent hubs', function () {
             const set = buildSet(7);
             const a = freshConsensus(); a.setValidatorSet(set);
-            // b gets a deep copy — different object identities, same content — so
+            // b gets a deep copy (different object identities, same content), so
             // matching leaders prove content-level determinism, not shared refs.
             const b = freshConsensus(); b.setValidatorSet(set.map(v => ({ ...v })));
             for (let view = 0; view < 3; view++) {
@@ -141,13 +141,13 @@ describe('Consensus (PBFT)', function () {
             expect(a._getQuorum()).to.equal(b._getQuorum());
         });
 
-        // Leader election is (seq + view) % N over the set AS GIVEN — setValidatorSet
+        // Leader election is (seq + view) % N over the set AS GIVEN. setValidatorSet
         // does NOT canonicalize order. So cross-hub determinism REQUIRES every hub to
         // receive the set in identical order (today the indexer's getcapabilityvalidators
         // response is that source of truth). This pins the dependency: if a future change
         // sorts the set inside setValidatorSet, that is a deliberate consensus-breaking
         // change (atomic fleet deploy + re-baseline) and must update this test.
-        it('leader election is order-sensitive — divergent ordering elects divergent leaders', function () {
+        it('leader election is order-sensitive: divergent ordering elects divergent leaders', function () {
             const set = buildSet(7);
             const a = freshConsensus(); a.setValidatorSet(set.slice());
             const b = freshConsensus(); b.setValidatorSet(set.slice().reverse());
@@ -191,7 +191,7 @@ describe('Consensus (PBFT)', function () {
     });
 
     // -----------------------------------------------------------------
-    // propose() — single-node fallback
+    // propose(): single-node fallback
     // -----------------------------------------------------------------
 
     describe('propose()', function () {
@@ -238,7 +238,7 @@ describe('Consensus (PBFT)', function () {
             expect(data.config).to.deep.equal({ cfg: 1 });
             expect(data.configDigest).to.be.a('string');
 
-            // Clean up — reject the pending promise
+            // Clean up: reject the pending promise
             let pending = consensus.pendingProposals.get(1);
             if (pending) {
                 if (pending.timer) clearTimeout(pending.timer);
@@ -265,7 +265,7 @@ describe('Consensus (PBFT)', function () {
             let config = { x: 1 };
             let digest = consensus._digest(config);
 
-            // seq 5, view 0 → (5+0)%4 = 1 → VALIDATORS_4[1] is the rotation leader.
+            // seq 5, view 0: (5+0)%4 = 1, VALIDATORS_4[1] is the rotation leader.
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
                 data: { seq: 5, view: 0, configDigest: digest, config }
@@ -283,9 +283,9 @@ describe('Consensus (PBFT)', function () {
         });
 
         it('PRE_PREPARE from a non-leader for the claimed view is rejected (no proposal, no PREPARE)', async function () {
-            // seq 5, view 0 → (5+0)%4 = 1, so VALIDATORS_4[1] is the only legitimate
+            // seq 5, view 0: (5+0)%4 = 1, so VALIDATORS_4[1] is the only legitimate
             // proposer. A PRE_PREPARE from any other registered validator must NOT
-            // create a pending proposal or broadcast a PREPARE — otherwise any
+            // create a pending proposal or broadcast a PREPARE. Otherwise any
             // authenticated validator could drive an uncontested seq to commit its
             // own config. (Without the identity guard this would have been accepted.)
             let config = { x: 1 };
@@ -340,14 +340,14 @@ describe('Consensus (PBFT)', function () {
             expect(pm.broadcast.callCount).to.equal(1); // PREPARE for digest A
 
             // A second PRE_PREPARE arrives for the SAME seq with a different,
-            // internally-valid config (digest B) — as can happen when two
+            // internally-valid config (digest B). This can happen when two
             // leaders both propose for seq 5 during a view transition.
             let configB = { x: 2 };
             let digestB = consensus._digest(configB);
             expect(digestB).to.not.equal(digestA);
 
-            // A competing leader from view 1: (5+1)%4 = 2 → VALIDATORS_4[2] is the
-            // legitimate proposer at view 1, so this passes the identity guard and
+            // A competing leader from view 1: (5+1)%4 = 2, so VALIDATORS_4[2] is the
+            // legitimate proposer at view 1. This passes the identity guard and
             // is dropped only by the digest-conflict rule (two leaders, one seq).
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[2].addr,
@@ -467,7 +467,7 @@ describe('Consensus (PBFT)', function () {
 
         it('NEW_VIEW from a non-leader peer does not advance the view', function () {
             consensus.view = 0;
-            // Leader for (seq=5, view=1) = validators[(5+1) % 4] = validators[2].
+            // Leader for (seq=5, view=1): validators[(5+1) % 4] = validators[2].
             // A NEW_VIEW from any other validator must be ignored.
             consensus._handleNewView({
                 sender: VALIDATORS_4[1].addr,
@@ -478,7 +478,7 @@ describe('Consensus (PBFT)', function () {
 
         it('NEW_VIEW from the designated leader advances the view', function () {
             consensus.view = 0;
-            // validators[(5+1) % 4] = validators[2] is the leader for (5, 1).
+            // validators[(5+1) % 4] = validators[2], the leader for (5, 1).
             consensus._handleNewView({
                 sender: VALIDATORS_4[2].addr,
                 data: { view: 1, seq: 5 }
@@ -489,7 +489,7 @@ describe('Consensus (PBFT)', function () {
         it('NEW_VIEW cannot rewind the view to a lower number', function () {
             consensus.view = 5;
             // Even from the correct leader for the lower view, a regression
-            // is rejected — NEW_VIEW only moves the view forward.
+            // is rejected. NEW_VIEW only moves the view forward.
             let idx = (5 + 2) % VALIDATORS_4.length;
             consensus._handleNewView({
                 sender: VALIDATORS_4[idx].addr,
@@ -502,14 +502,14 @@ describe('Consensus (PBFT)', function () {
         // Validator churn between proposal creation and view-change.
         // View-change acceptance must use the round-locked quorum
         // (proposal-creation snapshot), exactly like _checkPrepareQuorum
-        // and _checkCommitQuorum — never a live recompute. Otherwise a set
+        // and _checkCommitQuorum (never a live recompute). Otherwise a set
         // that grew can stall the election (liveness) and a set that shrank
-        // can let too few votes — even a single node — promote a new leader
+        // can let too few votes (even a single node) to promote a new leader
         // (safety).
         // -------------------------------------------------------------
 
-        it('follower view-change uses locked quorum from the in-flight proposal, not a live recompute (grow → liveness)', function () {
-            // Proposal locked at N=4 → quorum 3.
+        it('follower view-change uses locked quorum from the in-flight proposal, not a live recompute (grow; liveness)', function () {
+            // Proposal locked at N=4: quorum 3.
             consensus.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[0].addr;
             consensus.view = 0;
@@ -521,11 +521,11 @@ describe('Consensus (PBFT)', function () {
                 quorum: 3
             });
 
-            // Churn: set grows to N=7 → live quorum would be 5.
+            // Churn: set grows to N=7. Live quorum would be 5.
             consensus.setValidatorSet(VALIDATORS_7);
             expect(consensus._getQuorum()).to.equal(5);
 
-            // Three distinct view-change votes — meets the locked quorum (3),
+            // Three distinct view-change votes, meets the locked quorum (3),
             // below the live one (5). Must accept on the locked value.
             consensus._handleViewChange({ sender: VALIDATORS_7[1].addr, data: { view: 1, seq: 5 } });
             consensus._handleViewChange({ sender: VALIDATORS_7[2].addr, data: { view: 1, seq: 5 } });
@@ -534,8 +534,8 @@ describe('Consensus (PBFT)', function () {
             expect(consensus.view).to.equal(1); // 3 votes == locked quorum → accepted
         });
 
-        it('follower view-change holds at the locked quorum even when the set shrank (shrink → safety)', function () {
-            // Proposal locked at N=7 → quorum 5.
+        it('follower view-change holds at the locked quorum even when the set shrank (shrink; safety)', function () {
+            // Proposal locked at N=7: quorum 5.
             consensus.setValidatorSet(VALIDATORS_7);
             pm.validatorAddr = VALIDATORS_7[0].addr;
             consensus.view = 0;
@@ -547,12 +547,12 @@ describe('Consensus (PBFT)', function () {
                 quorum: 5
             });
 
-            // Churn: set shrinks to N=3 → live quorum would be 2 (majority
+            // Churn: set shrinks to N=3. Live quorum would be 2 (majority
             // floor). The locked quorum is still 5.
             consensus.setValidatorSet(VALIDATORS_3);
             expect(consensus._getQuorum()).to.equal(2);
 
-            // Two distinct votes — would clear the live quorum (2), but must
+            // Two distinct votes would clear the live quorum (2), but must
             // NOT clear the locked quorum (5).
             consensus._handleViewChange({ sender: VALIDATORS_3[1].addr, data: { view: 1, seq: 5 } });
             consensus._handleViewChange({ sender: VALIDATORS_3[2].addr, data: { view: 1, seq: 5 } });
@@ -563,13 +563,13 @@ describe('Consensus (PBFT)', function () {
         it('the initiating node recovers the locked quorum from viewChangeQuorums after its proposal is gone', function () {
             // Initiator path: the timeout deletes the proposal before
             // _initiateViewChange runs, so the initiator can't read
-            // proposal.quorum — it relies on the stashed value.
+            // proposal.quorum. It relies on the stashed value.
             consensus.setValidatorSet(VALIDATORS_7);
             pm.validatorAddr = VALIDATORS_7[0].addr;
             consensus.view = 0;
             consensus.lastAppliedSeq = 0;
 
-            // Initiate with the round-locked quorum (N=7 → 5). No proposal
+            // Initiate with the round-locked quorum (N=7: 5). No proposal
             // remains in pendingProposals, mirroring the real timeout flow.
             consensus._initiateViewChange(5, 5);
             expect(consensus.view).to.equal(1);
@@ -578,20 +578,20 @@ describe('Consensus (PBFT)', function () {
             expect(consensus.viewChangeQuorums.get(5).weighted).to.equal(false);
             expect(pm.broadcast.callCount).to.equal(1);         // VIEW_CHANGE only
 
-            // Churn: set shrinks to N=3 → live quorum 1.
+            // Churn: set shrinks to N=3. Live quorum is 1.
             consensus.setValidatorSet(VALIDATORS_3);
 
             // Own vote was added by _initiateViewChange; add one more (size 2).
             consensus._handleViewChange({ sender: VALIDATORS_3[1].addr, data: { view: 1, seq: 5 } });
             expect(consensus.pendingViewChanges.get(1).size).to.equal(2);
-            expect(pm.broadcast.callCount).to.equal(1);         // still no NEW_VIEW — 2 < locked 5
+            expect(pm.broadcast.callCount).to.equal(1);         // still no NEW_VIEW: 2 < locked 5
         });
 
         it('_initiateViewChange stashes the locked quorum and prunes already-applied rounds', function () {
             consensus.setValidatorSet(VALIDATORS_7);
             pm.validatorAddr = VALIDATORS_7[0].addr;
             consensus.lastAppliedSeq = 10;
-            consensus.viewChangeQuorums.set(3, 5);  // stale (seq 3 ≤ lastApplied 10)
+            consensus.viewChangeQuorums.set(3, 5);  // stale (seq 3 <= lastApplied 10)
 
             consensus._initiateViewChange(12, 7);
             expect(consensus.viewChangeQuorums.has(3)).to.be.false; // pruned
@@ -624,9 +624,12 @@ describe('Consensus (PBFT)', function () {
             expect(args[1]).to.include('10');
         });
 
-        it('_saveSeq swallows DB errors', async function () {
+        it('_saveSeq surfaces DB errors (item 4579: must not silently lose the seq write)', async function () {
             hub.db.doQuery.rejects(new Error('db down'));
-            await consensus._saveSeq(5); // must not throw
+            let threw = false;
+            try { await consensus._saveSeq(5); }
+            catch (e) { threw = true; expect(e.message).to.equal('db down'); }
+            expect(threw, '_saveSeq must reject so _checkCommitQuorum does not mark the proposal applied while the seq write was lost').to.be.true;
         });
 
         it('_loadSeq swallows DB errors and leaves seq at 0', async function () {
@@ -816,7 +819,7 @@ describe('Consensus (PBFT)', function () {
     });
 
     // -----------------------------------------------------------------
-    // PRE_PREPARE stale seq + follower expiry
+    // PRE_PREPARE stale seq and follower expiry
     // -----------------------------------------------------------------
 
     describe('PRE_PREPARE replay + follower expiry', function () {
@@ -846,14 +849,14 @@ describe('Consensus (PBFT)', function () {
                 data: { seq: 5, view: 0, configDigest: digest, config }
             });
             expect(consensus.pendingProposals.has(5)).to.be.true;
-            await clock.tickAsync(2001); // followers wait timeout * 2
+            await clock.tickAsync(2001); // followers wait timeout times 2
             expect(consensus.pendingProposals.has(5)).to.be.false;
             clock.restore();
         });
     });
 
     // -----------------------------------------------------------------
-    // COMMIT apply-error path
+    // COMMIT apply-error path (error handling)
     // -----------------------------------------------------------------
 
     describe('COMMIT apply failure', function () {
@@ -882,10 +885,10 @@ describe('Consensus (PBFT)', function () {
     });
 
     // -----------------------------------------------------------------
-    // VIEW_CHANGE / NEW_VIEW remaining branches
+    // VIEW_CHANGE and NEW_VIEW: remaining branches
     // -----------------------------------------------------------------
 
-    describe('view change — remaining branches', function () {
+    describe('view change: remaining branches', function () {
         beforeEach(function () {
             consensus.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[0].addr;
@@ -1039,12 +1042,12 @@ describe('Consensus (PBFT)', function () {
     });
 
     // -----------------------------------------------------------------
-    // STAKE_WEIGHTED_QUORUM (WI-1) — weighted config consensus
+    // STAKE_WEIGHTED_QUORUM (WI-1): weighted config consensus
     // -----------------------------------------------------------------
 
     describe('STAKE_WEIGHTED_QUORUM (WI-1)', function () {
 
-        const WHALE = WEIGHTED_VALIDATORS_4[0];        // weight 1000, >2/3 of S=1300
+        const WHALE = WEIGHTED_VALIDATORS_4[0];        // weight 1000, more than 2/3 of S=1300
         const SMALL = WEIGHTED_VALIDATORS_4.slice(1);  // three sources of 100 each
 
         // Validators as the engine stores them (lowercased pubkeys).
@@ -1104,9 +1107,9 @@ describe('Consensus (PBFT)', function () {
 
             it('weighted mode: whale clears alone; a small-stake count-majority does not', function () {
                 let ctx = { weighted: true, validators: normValidators() };
-                // Whale alone (a COUNT minority of one) — 3·1000 > 2·1300.
+                // Whale alone (a COUNT minority of one): 3·1000 > 2·1300.
                 expect(consensus._quorumMet(ctx, new Set(), new Set([WHALE.pubkey.toLowerCase()]))).to.equal(true);
-                // All three small sources (a COUNT majority) — 3·300 = 900 !> 2600.
+                // All three small sources (a COUNT majority): 3·300 = 900, not > 2600.
                 expect(consensus._quorumMet(ctx, new Set(), new Set(SMALL.map(v => v.pubkey.toLowerCase())))).to.equal(false);
             });
         });
@@ -1127,7 +1130,7 @@ describe('Consensus (PBFT)', function () {
 
         it('propose() weighted: proposal carries weighted + source-keyed validators + self pubkey', async function () {
             // Equal-weight snapshot so the proposer's lone self-vote stays sub-quorum
-            // (3·100 !> 2·400) and the proposal remains pending to inspect — with the
+            // (3·100 not > 2·400) and the proposal remains pending to inspect. With the
             // real whale snapshot it would clear 3S>2S on its own vote and self-delete.
             const EQUAL = WEIGHTED_VALIDATORS_4.map(v => ({ pubkey: v.pubkey, addr: v.addr, source: v.source, weight: '100' }));
             hub.network = 'testnet';
@@ -1154,7 +1157,7 @@ describe('Consensus (PBFT)', function () {
             await promise.catch(() => {});
         });
 
-        describe('PREPARE / COMMIT weighted', function () {
+        describe('PREPARE and COMMIT weighted', function () {
             // Hand-built weighted proposal (mirrors the count-path PBFT-flow tests).
             function weightedProposal(quorum) {
                 return {
@@ -1209,8 +1212,8 @@ describe('Consensus (PBFT)', function () {
                 expect(consensus.pendingViewChangePubkeys.get(consensus.view).has(WHALE.pubkey.toLowerCase())).to.be.true;
             });
 
-            it('whale view-change vote alone promotes the view (proposal-gone initiator path)', function () {
-                // No proposal in pendingProposals — context recovered from the stash.
+            it('whale view-change vote alone promotes the view (proposal gone, initiator path)', function () {
+                // No proposal in pendingProposals. Context recovered from the stash.
                 consensus.viewChangeQuorums.set(5, { quorum: 3, weighted: true, validators: normValidators() });
                 consensus._handleViewChange({ sender: WHALE.addr, sig_pubkey: WHALE.pubkey, data: { view: 1, seq: 5 } });
                 expect(consensus.view).to.equal(1);

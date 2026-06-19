@@ -605,9 +605,13 @@ class Consensus {
             proposal.applied = true;
 
             // Apply the config
-            this._applyConfig(proposal.config).then(() => {
-                // Update sequence in DB
-                this._saveSeq(seq);
+            this._applyConfig(proposal.config).then(async () => {
+                // Persist the sequence with the apply, not fire-and-forget: await it
+                // so a failure propagates to the catch below and the proposal is NOT
+                // marked applied. Otherwise the config rows and last_seq could diverge
+                // (seq write lost) and a seq-only invalidation consumer would serve
+                // stale config; the proposal is reprocessed until the seq persists.
+                await this._saveSeq(seq);
                 if (seq > this.lastAppliedSeq) this.lastAppliedSeq = seq;
 
                 // Resolve the proposer's promise (if we initiated)
@@ -868,6 +872,7 @@ class Consensus {
             );
         } catch (e) {
             console.error('Error saving consensus sequence:', e);
+            throw e;   // surface so _checkCommitQuorum rejects rather than diverging
         }
     }
 }

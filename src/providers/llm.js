@@ -98,7 +98,12 @@ exports.fetch = async (payload, options) => {
     // models produce more divergent bodies, making the leader's judge return
     // equivalent=false and the round fail to no_quorum).
     let model = options.pinnedModel || APPROVED_MODELS[0];
-    if (APPROVED_MODELS.indexOf(model) === -1) model = APPROVED_MODELS[0];
+    // A block-anchored pinnedModel is the consensus-agreed model for this request's
+    // block and must be honored as-is. Clamping it against the live, governance-mutable
+    // APPROVED_MODELS forks updated vs laggard validators across a hotReload: the updated
+    // node swaps to APPROVED_MODELS[0] while the laggard keeps the pinned value. Only the
+    // no-pin fallback needs the approved-list guard (APPROVED_MODELS[0] is always in it).
+    if (!options.pinnedModel && APPROVED_MODELS.indexOf(model) === -1) model = APPROVED_MODELS[0];
 
     let maxTokens   = Math.min(Number(envelope.max_tokens) || MAX_TOKENS_DEFAULT, MAX_TOKENS_DEFAULT);
     let temperature = (typeof envelope.temperature === 'number') ? envelope.temperature : DEFAULT_TEMPERATURE;
