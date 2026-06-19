@@ -528,17 +528,22 @@ class AttestationConsensus extends EventEmitter {
                 this._bufferEarlyMessage(rid, envelope);
                 return;
             }
-            // First PREPARE we accept establishes the winner. Verify the sender's
-            // signature over THEIR proposed body before adopting it. An
-            // unverified PREPARE must not be allowed to set the winner.
-            if(d.sig && d.sig_pubkey){
-                let canonical = this._buildCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index));
-                if(!ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
-                    console.warn('AttestationConsensus: bad PREPARE sig from ' + senderPubkey.substring(0,16) + '...');
-                    return;
-                }
-                pending.signatures.set(senderPubkey, String(d.sig));
+            // First PREPARE we accept establishes the winner. It MUST carry a valid
+            // signature from its sender over the proposed body. An unsigned (or badly
+            // signed) PREPARE must never set the winner: otherwise a peer that spoofs
+            // the sender pubkey can inject an arbitrary body honest followers then
+            // co-sign (item 4559). For judge_model the sender is already constrained to
+            // the elected leader above; a node that cannot sign cannot lead a round.
+            if(!d.sig || !d.sig_pubkey){
+                console.warn('AttestationConsensus: unsigned PREPARE rejected from ' + senderPubkey.substring(0,16) + '...');
+                return;
             }
+            let canonical = this._buildCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index));
+            if(!ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
+                console.warn('AttestationConsensus: bad PREPARE sig from ' + senderPubkey.substring(0,16) + '...');
+                return;
+            }
+            pending.signatures.set(senderPubkey, String(d.sig));
             pending.winner = { body: body, meta: meta };
             pending.status = status;
             // Sign our own copy if we agreed (we might have proposed the same body)

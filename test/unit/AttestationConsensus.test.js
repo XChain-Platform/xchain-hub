@@ -850,15 +850,16 @@ describe('AttestationConsensus: _handlePrepare adoption + guards', function () {
         expect(c.pending.get(RID).prepares.has(pub(p1))).to.equal(false);
     });
 
-    it('accepts an unsigned PREPARE as a vote without recording a signature', async function () {
+    it('rejects an unsigned PREPARE in the no-winner path (item 4559: must not set the winner)', async function () {
         await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
         await flush();
         let env = signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY);
-        delete env.data.sig; // no signature → vote counts, sig not stored
+        delete env.data.sig; // unsigned: must not establish the winner or count as a vote
         c._handleMessage(env);
         let pending = c.pending.get(RID);
-        expect(pending.prepares.has(pub(p1))).to.equal(true);
+        expect(pending.prepares.has(pub(p1))).to.equal(false);
         expect(pending.signatures.has(pub(p1))).to.equal(false);
+        expect(!!pending.winner).to.equal(false);
     });
 
     it('rejects an oversized PREPARE body before decoding', async function () {
