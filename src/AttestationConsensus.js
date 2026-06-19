@@ -553,6 +553,27 @@ class AttestationConsensus extends EventEmitter {
                     // signature over the agreed bytes (see _maybeAdvanceFromProposals).
                     let reSig = this._signCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index));
                     if(reSig) pending.signatures.set(pending.myPubkey, reSig);
+                    // judge_model elects ONE leader to run agree() + PREPARE; followers
+                    // only adopt that winner here and never run agree(), so without
+                    // echoing our own endorsing PREPARE no node ever sees more than the
+                    // leader's single PREPARE and prepare-quorum (max(quorum, REDUNDANCY))
+                    // is never reached, deadlocking the round despite the leader holding
+                    // enough matching-proposal sigs. Re-broadcast our PREPARE over the
+                    // adopted canonical winner exactly once (this !winner block runs only
+                    // on first adoption). byte_equality is unaffected: there every
+                    // validator runs its own agree() and broadcasts its own PREPARE.
+                    if(reSig && this.peerManager){
+                        this.peerManager.broadcast(ATTEST_PREPARE, {
+                            requestId:  rid,
+                            providerId: pending.providerId,
+                            body_b64:   pending.winner.body.toString('base64'),
+                            meta:       String(pending.winner.meta || ''),
+                            status:     pending.status,
+                            sig_pubkey: pending.myPubkey,
+                            sig:        reSig
+                        });
+                        pending.prepares.add(pending.myPubkey);
+                    }
                 } else {
                     // byte_equality: only sign if our independently-fetched body
                     // is byte-identical to the winner. A divergence is a genuine
