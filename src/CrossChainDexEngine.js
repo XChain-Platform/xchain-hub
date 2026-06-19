@@ -116,6 +116,12 @@ class CrossChainDexEngine extends EventEmitter {
             this._writeFinalizedMatch(ev).catch(err =>
                 console.error('CrossChainDex: write finalized match error:', err && err.message));
         });
+        // Release the inflight slot for a round the consensus abandons (stale under
+        // sustained message loss) so the next poll re-proposes it instead of the
+        // match wedging permanently. Mirrors CrossChainCallEngine.
+        this.consensus.on('match:abandoned', (ev) => {
+            this._inflight.delete(String(ev.matchId));
+        });
 
         this._pollTimer = null;
     }

@@ -171,6 +171,13 @@ class CrossChainCallEngine extends EventEmitter {
             this._writeFinalizedRow(ev).catch(err =>
                 console.error('CrossChainCall: write finalized row error:', err && err.message));
         });
+        // A round the consensus abandons (churned past its max lifetime under
+        // sustained message loss) must release its inflight slot, or the next poll
+        // skips it (line: `if(this._inflight.has(roundId)) return;`) and the call
+        // wedges permanently. Releasing it lets the poll re-propose a fresh round.
+        this.consensus.on('match:abandoned', (ev) => {
+            this._inflight.delete(String(ev.matchId));
+        });
 
         this._pollTimer = null;
         this._polling   = false;

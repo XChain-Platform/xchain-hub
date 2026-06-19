@@ -117,6 +117,12 @@ class CrossChainDexConsensus extends EventEmitter {
 
         this._messageHandler = null;
         this.roundTimeoutMs  = parseInt(this.config.XDEX_ROUND_TIMEOUT_MS) || DEFAULT_ROUND_TIMEOUT_MS;
+        // A round that keeps view-changing without ever finalizing (sustained
+        // message loss, e.g. P2P rate-limit drops during a burst of concurrent
+        // rounds) must not leak in `pending` forever: past this lifetime it is
+        // abandoned so the engine can re-propose a fresh round once the storm
+        // clears. Default = several view-change cycles.
+        this.roundMaxLifetimeMs = parseInt(this.config.XDEX_ROUND_MAX_LIFETIME_MS) || (this.roundTimeoutMs * 4);
     }
 
     async start(){
@@ -206,6 +212,7 @@ class CrossChainDexConsensus extends EventEmitter {
 
         let pending = {
             matchId:      rid,
+            startedAt:    Date.now(),    // round birth; abandon if unfinalized past roundMaxLifetimeMs
             row:          row,
             canonical:    canonical,
             // Carry source + weight so the weighted tally can dedupe by staking
@@ -253,12 +260,32 @@ class CrossChainDexConsensus extends EventEmitter {
     }
 
     _armTimer(rid){
-        let t = setTimeout(() => {
-            let p = this.pending.get(rid);
-            if(p && !p.finalized) this._initiateViewChange(rid);
-        }, this.roundTimeoutMs);
+        let t = setTimeout(() => this._onRoundTimeout(rid), this.roundTimeoutMs);
         if(t.unref) t.unref();                          // housekeeping timer; never pin process liveness
         return t;
+    }
+
+    // Round timeout: rotate the leader (view-change) UNLESS the round has churned
+    // past its max lifetime without finalizing, in which case abandon it so the
+    // engine re-proposes a fresh round. View-change only helps a faulty leader; it
+    // cannot recover a round whose PREPARE/COMMIT traffic is being dropped (e.g. a
+    // peer over the P2P rate limit during a burst). Re-propose IS idempotent
+    // (synthetic TX_HASH dedup) and by abandon time the burst that starved the
+    // round has passed, so the retry finalizes cleanly. Without this, such a round
+    // leaks in `pending` forever (propose() no-ops on a still-pending id) and the
+    // call/match wedges permanently until a process restart.
+    _onRoundTimeout(rid){
+        let p = this.pending.get(rid);
+        if(!p || p.finalized) return;
+        if((Date.now() - p.startedAt) > this.roundMaxLifetimeMs){
+            if(p.timer) clearTimeout(p.timer);
+            this.pending.delete(rid);
+            console.warn('CrossChainDexConsensus: abandoned stale round ' + rid.substring(0, 16) +
+                         '... after ' + Math.round((Date.now() - p.startedAt) / 1000) + 's unfinalized; engine will re-propose');
+            this.emit('match:abandoned', { matchId: rid });
+            return;
+        }
+        this._initiateViewChange(rid);
     }
 
     // Leader action: persist snapshot, sign canonical, seed own vote, broadcast PROPOSE.

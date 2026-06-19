@@ -156,6 +156,43 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         expect(bus.nodes.filter(nd => !nd.crashed && nd.finalized.length === 1).length).to.equal(3);
     });
 
+    it('abandons a stale round past its max lifetime and emits match:abandoned (so the engine re-proposes)', async function () {
+        // Sustained message loss (e.g. P2P rate-limit drops during a burst) keeps a
+        // round view-changing without ever reaching quorum. Model it by dropping ALL
+        // gossip: the proposer never collects PREPAREs/COMMITs, so the round can only
+        // time out. Past roundMaxLifetimeMs it must be ABANDONED (pending released +
+        // event) rather than leaking forever, which is what previously wedged calls
+        // until a process restart.
+        this.timeout(5000);
+        let bus = buildMesh(4, { roundTimeoutMs: 40, drop: () => true });   // drop every gossip message
+        let victim = bus.nodes[0];
+        victim.consensus.roundMaxLifetimeMs = 150;                          // abandon after ~150ms of churn
+        let abandoned = [];
+        victim.consensus.on('match:abandoned', (ev) => abandoned.push(ev.matchId));
+        await startAll(bus);
+        let mid = 'ab'.repeat(32);
+        await victim.consensus.propose(mid, { row: sampleRow(mid), snapshot: { validators: validatorsOf(bus), count: 4 } });
+        expect(victim.consensus.pending.has(mid), 'round is live before abandon').to.be.true;
+        await sleep(450);                                                   // several 40ms timeouts, past the 150ms lifetime
+        expect(abandoned, 'emitted match:abandoned for exactly this round').to.deep.equal([mid]);
+        expect(victim.consensus.pending.has(mid), 'pending released so propose() can re-run').to.be.false;
+        expect(victim.finalized.length, 'never finalized').to.equal(0);
+    });
+
+    it('does not abandon a round that finalizes within its max lifetime', async function () {
+        // Healthy mesh: the round finalizes normally and must NOT emit match:abandoned
+        // even though the lifetime budget is short.
+        this.timeout(5000);
+        let bus = buildMesh(4, { roundTimeoutMs: 40 });
+        bus.nodes.forEach(nd => { nd.consensus.roundMaxLifetimeMs = 150; nd._abandoned = []; nd.consensus.on('match:abandoned', (ev) => nd._abandoned.push(ev.matchId)); });
+        await startAll(bus);
+        let mid = 'cd'.repeat(32);
+        await proposeAll(bus, mid, sampleRow(mid));
+        await sleep(300);
+        expect(bus.nodes.filter(nd => nd.finalized.length === 1).length, 'all finalized').to.equal(4);
+        expect(bus.nodes.every(nd => nd._abandoned.length === 0), 'none abandoned').to.be.true;
+    });
+
     it('guard: a tampered-row PROPOSE (fails independent validation) is not signed', async function () {
         // Followers no longer require byte-equality with their locally pre-built
         // canonical (leader-choice fields legitimately differ); independent

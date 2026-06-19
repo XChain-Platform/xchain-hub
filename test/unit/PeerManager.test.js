@@ -407,6 +407,22 @@ describe('PeerManager', function () {
             expect(emitted).to.equal(1);
         });
 
+        it('an established federation peer gets the higher known-peer ceiling (consensus burst not dropped)', function () {
+            // The tight anti-spam limit would drop all but the first message; an
+            // established peer carrying a PBFT burst must use the higher ceiling so
+            // consensus liveness is not throttled.
+            pm.msgRateLimit = 1;
+            pm.knownMsgRateLimit = 5;
+            pm.peers.set('ws://peer:10001', { lastSeen: Date.now() });   // established
+            let emitted = 0;
+            pm.on('message', () => emitted++);
+            let ws = { _peerAddr: 'ws://peer:10001' };
+            for (let i = 0; i < 5; i++) pm._handleInbound(ws, mk('T', 'k' + i), 'ws://peer:10001');
+            expect(emitted, 'all 5 within the known ceiling (would be 1 at the spam limit)').to.equal(5);
+            pm._handleInbound(ws, mk('T', 'k5'), 'ws://peer:10001');
+            expect(emitted, '6th exceeds even the known ceiling').to.equal(5);
+        });
+
         it('drops messages with an invalid signature when signatures are required', function () {
             pm.requireSigs = true;
             pm.setValidatorPubkeys(new Map([['ws://peer:10001', keypair.pubkeyHex]]));
@@ -637,6 +653,16 @@ describe('PeerManager', function () {
             expect(pm._checkMsgRate('a')).to.be.false; // 3 > 2
             clock.tick(60001);
             expect(pm._checkMsgRate('a')).to.be.true;  // window reset
+            clock.restore();
+        });
+
+        it('_checkMsgRate honors an explicit per-call limit (the known-peer ceiling)', function () {
+            let clock = sinon.useFakeTimers();
+            pm.msgRateLimit = 1;                              // default would block at 2
+            expect(pm._checkMsgRate('kp', 3)).to.be.true;    // 1
+            expect(pm._checkMsgRate('kp', 3)).to.be.true;    // 2
+            expect(pm._checkMsgRate('kp', 3)).to.be.true;    // 3
+            expect(pm._checkMsgRate('kp', 3)).to.be.false;   // 4 > 3
             clock.restore();
         });
 

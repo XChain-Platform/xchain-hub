@@ -57,6 +57,14 @@ class PeerManager extends EventEmitter {
 
         // Per-peer message rate limiting: Map<addr, { count, windowStart }>
         this.msgRateLimit   = parseInt(config.P2P_MSG_RATE_LIMIT) || 100;
+        // Established federation peers carry legitimate high-volume consensus
+        // traffic: concurrent PBFT rounds across every engine (oracle, xcall, dex,
+        // attestation, anchor, checkpoint, ...) can burst well past the anti-spam
+        // limit, which is meant for UNKNOWN peers. Dropping a known peer's PBFT
+        // message stalls consensus liveness (a round can miss quorum and, absent
+        // re-propose, wedge), so known peers get a much higher ceiling while
+        // unknown/unestablished peers keep the tight spam limit.
+        this.knownMsgRateLimit = parseInt(config.P2P_MSG_RATE_LIMIT_KNOWN) || Math.max(this.msgRateLimit * 20, 2000);
         this.peerMsgCounts  = new Map();
 
         // Dedup cache size bound
@@ -379,9 +387,13 @@ class PeerManager extends EventEmitter {
         if (this.seenIds.has(envelope.id)) return;
         this._addToDedup(envelope.id);
 
-        // Per-peer rate limiting
+        // Per-peer rate limiting: established federation peers get the higher
+        // known-peer ceiling so a consensus burst is never dropped (a dropped PBFT
+        // message is a liveness hazard); unknown/unestablished peers keep the tight
+        // anti-spam limit.
         let ratePeer = knownAddr || ws._peerAddr || envelope.sender;
-        if (!this._checkMsgRate(ratePeer)) {
+        let rateCeil = this.peers.has(ratePeer) ? this.knownMsgRateLimit : this.msgRateLimit;
+        if (!this._checkMsgRate(ratePeer, rateCeil)) {
             console.warn('P2P: Rate limit exceeded for peer ' + ratePeer + '; dropping message');
             return;
         }
@@ -644,7 +656,8 @@ class PeerManager extends EventEmitter {
     }
 
     // Check per-peer message rate (returns true if within limit)
-    _checkMsgRate(addr) {
+    _checkMsgRate(addr, limit) {
+        let max = (limit != null) ? limit : this.msgRateLimit;
         let now = Date.now();
         let entry = this.peerMsgCounts.get(addr);
         if (!entry || (now - entry.windowStart) > 60000) {
@@ -652,7 +665,7 @@ class PeerManager extends EventEmitter {
             return true;
         }
         entry.count++;
-        return entry.count <= this.msgRateLimit;
+        return entry.count <= max;
     }
 
     // Record/update a peer in the database (fire and forget)
