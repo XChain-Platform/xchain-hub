@@ -347,6 +347,33 @@ describe('StateAnchorPublisher', function () {
         expect(nd.db.matches[0].archived_status).to.equal('finalized');
     });
 
+    it('archive v1 broadcast returning a null txid keeps rows pending and records no reward', async function () {
+        // Mirrors the v0 null-txid guard for the archive path: a false/incomplete
+        // broadcast success ({ txid: null }) must NOT dequeue the rows with their final
+        // status (which would strand them in an unrecoverable hole) and must NOT credit
+        // the anchor_archive reward for an anchor that never landed on-chain.
+        let bus = buildMesh(1);
+        let nd = bus.nodes[0];
+        // v0 checkpoint still gets a txid; only the v1 archive broadcast returns none.
+        nd.pub.setBroadcastHook(async (payload) => {
+            nd.published.push(payload);
+            let isArchiveV1 = payload.split('|')[1] === '1';
+            return { txid: isArchiveV1 ? null : ('txid' + nd.published.length) };
+        });
+        await startAll(bus);
+        await nd.pub.flush();
+        await sleep(30);
+
+        expect(nd.published.length).to.equal(2);                       // v0 + v1 both attempted
+        expect(nd.published[1].split('|')[1]).to.equal('1');           // the archive v1
+        // Row stays eligible: archived_status is the __partial__ sentinel (!= status),
+        // so the next flush re-archives it under a fresh batch seq instead of leaving a hole.
+        expect(nd.db.matches[0].archived_status).to.equal('__partial__');
+        expect(nd.db.matches[0].archived_status).to.not.equal(nd.db.matches[0].status);
+        // No phantom reward for an archive that never reached the chain.
+        expect(nd.rewards.filter(r => r.type === 'anchor_archive').length).to.equal(0);
+    });
+
     it('ANCHOR_CHECKPOINT_EVERY_N anchors only the latest divisible seq; off-multiples stay off-chain', async function () {
         // Decouple on-chain anchoring from checkpoint production. With N=2 only
         // even seqs are eligible; the odd one is never anchored (it lives only in

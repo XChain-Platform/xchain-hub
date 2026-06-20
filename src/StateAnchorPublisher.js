@@ -1167,8 +1167,15 @@ class StateAnchorPublisher {
         // re-archive must get a FRESH seq; two v1 anchors sharing one seq would
         // corrupt chunk reassembly) while `archived_status <> status` keeps every
         // row eligible, so the next flush re-archives the whole batch.
+        // A null txid is a false/incomplete broadcast success (_defaultBroadcast falls
+        // back to { txid: null }); the v1 never landed on-chain, so dequeuing the rows
+        // with their final status would strand them in an unrecoverable hole and the
+        // archive reward would be credited for an anchor that was never published. Treat
+        // it exactly like a lost chunk: keep the rows pending under a fresh batch seq.
+        // (Mirrors the v0 null-txid guard in _publishPendingCheckpoints.)
+        let noTxid = !txid;
         let matchIds = round.matchIds, callIds = round.callIds || [], rewardIds = round.rewardIds || [];
-        if(lostChunks > 0 || !onChainValid){
+        if(lostChunks > 0 || !onChainValid || noTxid){
             matchIds  = matchIds.map(m => Object.assign({}, m, { status: '__partial__' }));
             callIds   = callIds.map(c => Object.assign({}, c, { status: '__partial__' }));
             rewardIds = [];                  // reward rows stay pending (batch_seq NULL) and re-archive
@@ -1180,6 +1187,9 @@ class StateAnchorPublisher {
                 console.error('StateAnchorPublisher: batch ' + round.batchSeq + ' archive will NOT reach quorum over ' +
                               'oracle_publish @ snapshot_block ' + round.cp.snapshot_block + '; on-chain v1 would be ' +
                               'invalid, rows stay pending and re-archive under a new batch seq');
+            if(noTxid)
+                console.error('StateAnchorPublisher: batch ' + round.batchSeq + ' archive v1 broadcast returned no ' +
+                              'txid; rows stay pending and re-archive under a new batch seq');
         }
         await this._backfillBatch(round.batchSeq, matchIds, txid, callIds, rewardIds);
         if(this.peerManager){
@@ -1192,7 +1202,7 @@ class StateAnchorPublisher {
                 sig: this.identity.sign(this._finalizedCanonical(round.batchSeq, txid, matchIds.length))
             });
         }
-        if(lostChunks === 0 && onChainValid){
+        if(lostChunks === 0 && onChainValid && !noTxid){
             console.log('StateAnchorPublisher: archived ' + round.count + ' matches + ' +
                         ((round.callIds && round.callIds.length) || 0) + ' calls + ' +
                         ((round.rewardIds && round.rewardIds.length) || 0) + ' rewards (batch ' + round.batchSeq +
