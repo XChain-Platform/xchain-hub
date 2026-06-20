@@ -340,6 +340,21 @@ class StateAnchorPublisher {
                 // finding, first post-deploy cycle).
                 let result = await this._broadcastWithRetry(broadcaster, payload);
                 let txid = result && result.txid ? result.txid : null;
+                if(!txid){
+                    // A confirmed DOGE broadcast always returns a txid; a null txid
+                    // is a false/incomplete success (broadcastTx returned empty
+                    // instead of throwing). Treat it as a failed publish: leave the
+                    // row pending (anchor_txid stays NULL) and do NOT stamp the row,
+                    // record a reward, or announce XANC_V0_DONE. Stamping NULL keeps
+                    // the row matching the `WHERE sc.anchor_txid IS NULL` selector so
+                    // it re-anchors and re-burns DOGE every flush, and peers ignore a
+                    // null-txid announcement anyway (_handleV0Done early-returns on
+                    // !d.txid). A later flush retries the publish cleanly.
+                    console.error('StateAnchorPublisher: v0 broadcast returned no txid for ' +
+                                  row.chain + '/' + row.network + ' @ ' + row.block_index +
+                                  '; treating as failed publish (row stays pending)');
+                    continue;
+                }
                 await this.db.doQuery(
                     'UPDATE state_checkpoints SET anchor_txid = ? WHERE chain = ? AND network = ? AND block_index = ?',
                     [txid, row.chain, row.network, row.block_index]);
