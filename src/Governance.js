@@ -386,7 +386,10 @@ class Governance extends EventEmitter {
              VALUES (?, ?, ?, ?, ?, ?, 'voting', NOW(), ?, ?)`,
             [proposalId, proposerPubkey || '', parameter, currentValue, proposedValue,
              rationale || '', votingEnd, activation]
-        ).catch(e => {}); // Ignore duplicate
+        ).catch(e => console.error('Governance: failed to persist inbound proposal ' + proposalId + ':', e));
+        // INSERT IGNORE already absorbs a duplicate proposal_id without raising, so the only
+        // failures reaching here are real (dropped DB connection, deadlock, value-too-long,
+        // schema drift). Logging them ties "why didn't node X vote on proposal P?" to its cause.
     }
 
     _handleVote(envelope) {
@@ -399,7 +402,11 @@ class Governance extends EventEmitter {
              VALUES (?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE vote = ?, signature = ?, created_at = NOW()`,
             [proposalId, voterPubkey, vote, signature || '', vote, signature || '']
-        ).catch(e => {}); // Ignore errors
+        ).catch(e => console.error('Governance: failed to persist inbound vote for proposal ' + proposalId +
+            ' from ' + voterPubkey + ':', e));
+        // A vote is consensus-tally-affecting state: a silently-dropped write here makes this
+        // node's tally diverge from peers that succeeded, with no symptom until operators
+        // compare counts. Log it so a tally mismatch is traceable to the specific dropped write.
     }
 
     // True if `sender` is a registered validator. Mirrors OracleConsensus._isKnownSender:
