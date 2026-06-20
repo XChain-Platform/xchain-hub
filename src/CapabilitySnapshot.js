@@ -300,8 +300,7 @@ class CapabilitySnapshot {
         return Math.max(2 * Math.floor((N - 1) / 3) + 1, Math.ceil((N + 1) / 2));
     }
 
-    // Whether a pubkey appears in the snapshot's validator set.
-    // PBFT participants use this to decide whether to count incoming votes.
+    // Whether a pubkey appears in the snapshot's validator set (used to gate PBFT vote counting).
     isInSnapshot(snapshot, pubkey) {
         if (!snapshot || !pubkey) return false;
         let target = String(pubkey).toLowerCase();
@@ -315,10 +314,10 @@ class CapabilitySnapshot {
     // string (the form the indexer RPC and the cache key expect), or null when
     // the registry isn't wired yet (pre-startCapabilities) or has no threshold
     // for the capability (in which case the indexer falls back to its own config).
-    // Resolve the MIN_STAKE threshold for this capability AT the snapshot's block. Threading
-    // blockIndex is what makes the snapshot federation-deterministic: every hub resolves the same
-    // threshold for the same block from the block-anchored governance history, so they fold the
-    // identical min_stake into the cache key and request the identical qualifying set (#3703).
+    // Threading blockIndex makes the snapshot federation-deterministic: every hub
+    // resolves the same threshold for the same block from block-anchored governance
+    // history, so they fold the identical min_stake into the cache key and request
+    // the identical qualifying set (#3703).
     _resolveMinStake(capability, blockIndex) {
         let reg = this.hub.capabilityRegistry;
         if (!reg || typeof reg.getMinStake !== 'function') return null;

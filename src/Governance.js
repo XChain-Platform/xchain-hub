@@ -90,16 +90,10 @@ class Governance extends EventEmitter {
         this.identity    = hub.getIdentity();
         this.db          = hub.db;
 
-        // Validator set
         this.validatorSet = [];
-
-        // Message handler
         this._messageHandler = null;
-
-        // Tally check timer
         this._tallyTimer = null;
 
-        // Config
         this.votingPeriod  = parseInt(process.env.GOV_VOTING_PERIOD)       || (7 * 24 * 60 * 60 * 1000); // 7 days
         this.tallyInterval = parseInt(process.env.GOVERNANCE_TALLY_INTERVAL) || 60000;
     }
@@ -112,7 +106,6 @@ class Governance extends EventEmitter {
         this._messageHandler = (envelope) => this._handleMessage(envelope);
         this.peerManager.on('message', this._messageHandler);
 
-        // Periodically check for proposals that need tallying
         this._tallyTimer = setInterval(() => this._checkExpiredProposals(), this.tallyInterval);
 
         console.log('Governance engine started (voting period: ' + (this.votingPeriod / 86400000).toFixed(1) + ' days)');
@@ -158,27 +151,23 @@ class Governance extends EventEmitter {
     // proposal so the threshold change is block-anchored federation-wide (#3703); activationBlock
     // is ignored for other parameters (their consumers are not block-anchored).
     async propose(parameter, currentValue, proposedValue, rationale, activationBlock) {
-        // Validate proposer is an active validator
         let proposerPubkey = this.identity ? this.identity.getPubkeyHex() : null;
         if (!proposerPubkey) throw new Error('No validator identity configured');
 
         let isValidator = this.validatorSet.some(v => v.pubkey === proposerPubkey);
         if (!isValidator) throw new Error('Proposer is not an active validator');
 
-        // Validate parameter name and rationale length
         if (parameter.length > 255)
             throw new Error('parameter name exceeds maximum length of 255 characters');
         if (rationale && rationale.length > 2000)
             throw new Error('rationale exceeds maximum length of 2000 characters');
 
-        // Check for active proposal on the same parameter
         let active = await this.db.doQuery(
             "SELECT id FROM governance_proposals WHERE parameter = ? AND status = 'voting'",
             [parameter]
         );
         if (active.length > 0) throw new Error('Active proposal already exists for ' + parameter);
 
-        // Check cooldown from recent rejection
         let rejected = await this.db.doQuery(
             "SELECT voting_end FROM governance_proposals WHERE parameter = ? AND status = 'failed' ORDER BY voting_end DESC LIMIT 1",
             [parameter]
@@ -191,7 +180,6 @@ class Governance extends EventEmitter {
             }
         }
 
-        // Validate change bounds
         this._validateChangeBounds(parameter, currentValue, proposedValue);
 
         // Pre-launch pin (#4352): refuse to create a CAPABILITY_*_MIN_STAKE proposal. The
@@ -211,7 +199,6 @@ class Governance extends EventEmitter {
             ? this._computeActivationBlock(activationBlock)
             : null;
 
-        // Create the proposal
         let proposalId = 'gov:' + parameter + ':' + Date.now();
         let now = new Date();
         let votingEnd = new Date(now.getTime() + this.votingPeriod);
@@ -225,7 +212,6 @@ class Governance extends EventEmitter {
              rationale || '', now, votingEnd, activation]
         );
 
-        // Broadcast the proposal
         this.peerManager.broadcast(GOV_PROPOSE, {
             proposalId, parameter, currentValue, proposedValue, rationale,
             proposerPubkey, votingEnd: votingEnd.toISOString(), activationBlock: activation
@@ -237,7 +223,6 @@ class Governance extends EventEmitter {
         return { proposalId, parameter, status: 'voting', votingEnd: votingEnd.toISOString(), activationBlock: activation };
     }
 
-    // Cast a vote on a proposal
     async vote(proposalId, voteChoice) {
         if (!['approve', 'reject'].includes(voteChoice))
             throw new Error('Vote must be "approve" or "reject"');
@@ -248,19 +233,16 @@ class Governance extends EventEmitter {
         let isValidatorVoter = this.validatorSet.some(v => v.pubkey === voterPubkey);
         if (!isValidatorVoter) throw new Error('Voter is not an active validator');
 
-        // Verify proposal exists and is in voting state
         let proposals = await this.db.doQuery(
             "SELECT * FROM governance_proposals WHERE proposal_id = ? AND status = 'voting'",
             [proposalId]
         );
         if (proposals.length === 0) throw new Error('Proposal not found or not in voting state');
 
-        // Check voting period hasn't ended
         let proposal = proposals[0];
         if (new Date(proposal.voting_end).getTime() < Date.now())
             throw new Error('Voting period has ended');
 
-        // Sign the vote
         let votePayload = JSON.stringify({ proposalId, vote: voteChoice, voter: voterPubkey });
         let signature = this.identity ? this.identity.sign(votePayload) : '';
 
@@ -272,7 +254,6 @@ class Governance extends EventEmitter {
             [proposalId, voterPubkey, voteChoice, signature, voteChoice, signature]
         );
 
-        // Broadcast the vote
         this.peerManager.broadcast(GOV_VOTE, {
             proposalId, vote: voteChoice, voterPubkey, signature
         });
@@ -281,7 +262,6 @@ class Governance extends EventEmitter {
         return { proposalId, vote: voteChoice, voter: voterPubkey };
     }
 
-    // Get proposals by status
     async getProposals(status) {
         let query = "SELECT * FROM governance_proposals";
         let args = [];
@@ -293,7 +273,6 @@ class Governance extends EventEmitter {
         return await this.db.doQuery(query, args);
     }
 
-    // Get a specific proposal with its votes
     async getProposal(proposalId) {
         let proposals = await this.db.doQuery(
             "SELECT * FROM governance_proposals WHERE proposal_id = ?", [proposalId]
@@ -307,8 +286,6 @@ class Governance extends EventEmitter {
 
         return { proposal: proposals[0], votes: votes };
     }
-
-    // --- Message handlers ---
 
     _handleMessage(envelope) {
         switch (envelope.type) {
@@ -378,7 +355,6 @@ class Governance extends EventEmitter {
             activation = Number(activationBlock);
         }
 
-        // Store the proposal locally if we don't have it
         this.db.doQuery(
             `INSERT IGNORE INTO governance_proposals
                 (proposal_id, proposer_pubkey, parameter, current_value, proposed_value,
@@ -396,7 +372,6 @@ class Governance extends EventEmitter {
         let { proposalId, vote, voterPubkey, signature } = envelope.data;
         if (!proposalId || !vote || !voterPubkey) return;
 
-        // Store the vote locally
         this.db.doQuery(
             `INSERT INTO governance_votes (proposal_id, voter_pubkey, vote, signature)
              VALUES (?, ?, ?, ?)
@@ -484,8 +459,6 @@ class Governance extends EventEmitter {
         }
     }
 
-    // --- Tally logic ---
-
     // Deterministic leader for a proposal. Mirrors OracleConsensus._getLeader
     // (modular index into the validator set) but, since governance has no
     // sequential round counter, derives the round from a hash of the immutable
@@ -536,7 +509,6 @@ class Governance extends EventEmitter {
     }
 
     async _tallyProposal(proposal) {
-        // Get all votes for this proposal
         let votes = await this.db.doQuery(
             "SELECT voter_pubkey, vote FROM governance_votes WHERE proposal_id = ?",
             [proposal.proposal_id]
@@ -560,7 +532,6 @@ class Governance extends EventEmitter {
             [newStatus, proposal.proposal_id]
         );
 
-        // Broadcast the result
         this.peerManager.broadcast(GOV_RESULT, {
             proposalId: proposal.proposal_id,
             status: newStatus,
@@ -580,8 +551,6 @@ class Governance extends EventEmitter {
             });
         }
     }
-
-    // --- Validation ---
 
     _validateChangeBounds(parameter, currentValue, proposedValue) {
         // Only validate numeric parameters

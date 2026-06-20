@@ -186,7 +186,6 @@ class AttestationSpotChecker {
         let now = Date.now();
         let arr = this._failures.get(pk) || [];
         arr.push({ requestId: requestId, timestamp: now });
-        // Prune by window
         let cutoff = now - this.failureWindowMs;
         arr = arr.filter(f => f.timestamp > cutoff);
         if (arr.length > MAX_HISTORY_PER_VALIDATOR) {

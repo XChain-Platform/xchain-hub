@@ -111,7 +111,6 @@ class AttestationPublisher {
             console.warn('AttestationPublisher: queue file unwritable at ' + this.queuePath + ':', e);
         }
 
-        // Subscribe to consensus finalization
         if (this.hub.attestationConsensus){
             this.hub.attestationConsensus.on('request:finalized', (event) => {
                 this.onRequestFinalized(event).catch(err => {
@@ -218,18 +217,16 @@ class AttestationPublisher {
         try {
             let result = await broadcaster(payload, event);
             console.log('AttestationPublisher: broadcast ' + rid.substring(0,16) + '... txid=' + (result && result.txid ? result.txid : '?'));
-            // Success; drop the entry so the sweep doesn't re-broadcast it.
             this._removeFromQueue(new Set([rid]));
         } catch (e) {
             console.error('AttestationPublisher: broadcast failed for ' + rid.substring(0,16) + '... (will retry via sweep): ', e);
         }
     }
 
-    // ----- Durable queue (JSONL with fsync), mirroring OraclePublisher -----
+    // ----- Durable queue (JSONL with fsync) -----
 
-    // Append a finalized-response entry to the durable write-ahead log.
-    // Best-effort: an unwritable queue must not block the live broadcast, but it
-    // does forfeit crash protection for that entry (logged so operators notice).
+    // Best-effort append: an unwritable queue must not block the live broadcast,
+    // but it forfeit crash protection for that entry (logged so operators notice).
     _enqueue(entry){
         try {
             let fd = fs.openSync(this.queuePath, 'a');
@@ -241,7 +238,6 @@ class AttestationPublisher {
         }
     }
 
-    // Read all queue entries (used by _processQueue and on restart).
     _readQueue(){
         try {
             let raw = fs.readFileSync(this.queuePath, 'utf8');
@@ -253,7 +249,6 @@ class AttestationPublisher {
         }
     }
 
-    // Rewrite the queue with the given entries.
     _rewriteQueue(entries){
         let lines = entries.map(e => JSON.stringify(e)).join('\n') + (entries.length > 0 ? '\n' : '');
         try {
@@ -342,9 +337,8 @@ class AttestationPublisher {
 
     // ----- Failover / replay sweep -----
 
-    // Re-broadcast any queued finalized response whose request is still pending
-    // on the indexer. Run once at startup (crash replay) and on an interval
-    // (failover step-in + leader retry).
+    // Re-broadcast any queued finalized response whose request is still pending.
+    // Run once at startup (crash replay) and on an interval (failover + leader retry).
     async _processQueue(){
         let entries = this._readQueue();
         if (entries.length === 0) return;

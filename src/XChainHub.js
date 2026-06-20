@@ -117,11 +117,9 @@ class XChainHub {
         console.log('XChain Hub started (MariaDB: ' + this.dbName + ')');
     }
 
-    // Start the P2P gossip layer (no-op if p2pConfig is null)
     async startP2P(){
         if(!this.p2pConfig) return;
 
-        // Load validator identity if private key is configured
         if(this.p2pConfig.SIGNING_PRIVKEY_HEX){
             this.identity = new ValidatorIdentity(this.p2pConfig.SIGNING_PRIVKEY_HEX);
             console.log('Validator identity loaded (pubkey: ' + this.identity.getPubkeyHex().substring(0, 16) + '...)');
@@ -129,7 +127,6 @@ class XChainHub {
 
         this.peerManager = new PeerManager(this.p2pConfig, this.db);
 
-        // Attach identity for signing
         if(this.identity){
             this.peerManager.setIdentity(this.identity);
         }
@@ -193,48 +190,38 @@ class XChainHub {
         }
     }
 
-    // Start the PBFT consensus engine (no-op if P2P is not active)
     async startConsensus(){
         if(!this.peerManager) return;
         this.consensus = new Consensus(this);
 
-        // Load validator set for leader rotation
         let validators = await this._loadValidatorSet();
         this.consensus.setValidatorSet(validators);
 
         await this.consensus.start();
     }
 
-    // Get the PeerManager instance
     getPeerManager(){
         return this.peerManager;
     }
 
-    // Get the Consensus instance
     getConsensus(){
         return this.consensus;
     }
 
-    // Start the oracle round system (no-op if P2P is not active)
     async startOracle(){
         if(!this.peerManager) return;
 
-        // Create oracle round manager
         this.oracle = new OracleRound(this);
 
-        // Create oracle consensus engine
         this.oracleConsensus = new OracleConsensus(this, this.oracle);
         let validators = await this._loadValidatorSet();
         this.oracleConsensus.setValidatorSet(validators);
 
-        // Wire them together
         this.oracle.setConsensus(this.oracleConsensus);
 
-        // Create reward tracker and slash detector
         this.rewardTracker = new RewardTracker(this);
         this.slashDetector = new SlashDetector(this);
 
-        // Subscribe to oracle finalization events
         this.oracleConsensus.on('round:finalized', async (event) => {
             // Resolve participant addrs to pubkeys for rewards
             let participantPubkeys = [];
@@ -245,17 +232,14 @@ class XChainHub {
                 }
             }
 
-            // Distribute rewards (passes BTC block height for indexer-side block_index)
             await this.rewardTracker.distributeRewards(event.round, participantPubkeys, event.btcBlockHeight);
 
-            // Check for slashable offenses
             await this.slashDetector.checkRound(
                 event.round, event.submissions, event.prices,
                 participantPubkeys, validators
             );
         });
 
-        // Start all oracle subsystems
         await this.oracleConsensus.start();
         await this.oracle.start();
 
@@ -276,12 +260,10 @@ class XChainHub {
         await this.oraclePublisher.start();
     }
 
-    // Get the ValidatorIdentity instance
     getIdentity(){
         return this.identity;
     }
 
-    // Get the OracleRound instance
     getOracle(){
         return this.oracle;
     }
@@ -367,7 +349,6 @@ class XChainHub {
         await this.fullNodeChallenge.start();
     }
 
-    // Accessors
     getFullNodeChallenge(){      return this.fullNodeChallenge; }
     getAttestationRound(){       return this.attestationRound; }
     getAttestationConsensus(){   return this.attestationConsensus; }
@@ -375,7 +356,6 @@ class XChainHub {
     getAttestationSpotChecker(){ return this.attestationSpotChecker; }
     getProviderRegistry(){       return this.providerRegistry; }
 
-    // Start the cross-chain attestation engine (no-op if P2P is not active)
     async startCrossChain(){
         if(!this.peerManager) return;
         this.crossChain = new CrossChainEngine(this);
@@ -386,7 +366,6 @@ class XChainHub {
         let chainPairMap = await this._loadChainPairValidators();
         this.crossChain.setChainPairValidators(chainPairMap);
 
-        // Create and wire SWAP tracker
         this.swapTracker = new SwapTracker(this);
         this.swapTracker.start(this.crossChain);
 
@@ -420,17 +399,14 @@ class XChainHub {
         await this.stateAnchorPublisher.start();
     }
 
-    // Get the CrossChainEngine instance
     getCrossChain(){
         return this.crossChain;
     }
 
-    // Get the CrossChainDexEngine instance
     getCrossChainDex(){
         return this.crossChainDex;
     }
 
-    // Start the reorg handler (no-op if P2P is not active)
     async startReorgHandler(){
         if(!this.peerManager) return;
         this.reorgHandler = new ReorgHandler(this);
@@ -439,19 +415,16 @@ class XChainHub {
         await this.reorgHandler.start();
     }
 
-    // Report a blockchain reorg
     async reportReorg(chain, reorgHeight, timestamp){
         if(!this.reorgHandler) throw new Error('Reorg handler not active');
         return await this.reorgHandler.reportReorg(chain, reorgHeight, timestamp);
     }
 
-    // Get reorg history
     async getReorgHistory(limit){
         if(!this.reorgHandler) return [];
         return await this.reorgHandler.getReorgHistory(limit);
     }
 
-    // Start the governance engine (no-op if P2P is not active)
     async startGovernance(){
         if(!this.peerManager) return;
         this.governance = new Governance(this);
@@ -460,50 +433,42 @@ class XChainHub {
         await this.governance.start();
     }
 
-    // Submit a governance proposal
     async propose(parameter, currentValue, proposedValue, rationale){
         if(!this.governance) throw new Error('Governance not active');
         return await this.governance.propose(parameter, currentValue, proposedValue, rationale);
     }
 
-    // Cast a governance vote
     async vote(proposalId, voteChoice){
         if(!this.governance) throw new Error('Governance not active');
         return await this.governance.vote(proposalId, voteChoice);
     }
 
-    // Get governance proposals
     async getProposals(status){
         if(!this.governance) return [];
         return await this.governance.getProposals(status);
     }
 
-    // Get a specific proposal with votes
     async getProposal(proposalId){
         if(!this.governance) return null;
         return await this.governance.getProposal(proposalId);
     }
 
-    // Request a cross-chain attestation
     async requestAttestation(sourceChain, sourceActionIndex, destChain){
         if(!this.crossChain) throw new Error('Cross-chain engine not active');
         return await this.crossChain.requestAttestation(sourceChain, sourceActionIndex, destChain);
     }
 
-    // Initiate a cross-chain SWAP
     async initiateSwap(sourceChain, sourceActionIndex, destChain, destActionIndex){
         if(!this.swapTracker) throw new Error('SWAP tracker not active');
         await this.swapTracker.initiateSwap(sourceChain, sourceActionIndex, destChain, destActionIndex);
         return true;
     }
 
-    // Get a specific swap
     async getSwap(sourceChain, sourceActionIndex){
         if(!this.swapTracker) return null;
         return await this.swapTracker.getSwap(sourceChain, sourceActionIndex);
     }
 
-    // Query swaps
     async getSwaps(status, limit){
         if(!this.swapTracker) return [];
         return await this.swapTracker.getSwaps(status, limit);
@@ -519,7 +484,6 @@ class XChainHub {
         return true;
     }
 
-    // Apply config directly to the database
     async applyConfig(json){
         if (!json || typeof json !== 'object' || Array.isArray(json))
             throw new Error('Config must be a non-null object');
@@ -772,7 +736,6 @@ class XChainHub {
         }
     }
 
-    // Load sorted validator set for consensus leader rotation
     async _loadValidatorSet(){
         try {
             let rows = await this.db.doQuery(
@@ -820,13 +783,11 @@ class XChainHub {
         return chainPairMap;
     }
 
-    // Get price snapshots from DB
     async getPriceSnapshots(limit) {
         let query = "SELECT * FROM price_snapshots WHERE status = 'finalized' ORDER BY round_number DESC, coin_pair ASC LIMIT ?";
         return await this.db.doQuery(query, [limit || 50]);
     }
 
-    // Get latest price for a coin pair
     async getPrice(coinPair) {
         let query = "SELECT * FROM price_snapshots WHERE coin_pair = ? AND status = 'finalized' ORDER BY round_number DESC LIMIT 1";
         let rows = await this.db.doQuery(query, [coinPair]);
@@ -859,27 +820,19 @@ class XChainHub {
         return true;
     }
 
-    // Get the active validator list
     async getValidators() {
         let query = "SELECT signing_pubkey, addr, status, created_at, updated_at FROM validators WHERE status = 'active' ORDER BY signing_pubkey";
         return await this.db.doQuery(query);
     }
 
-    // Get detailed status for a validator
     async getValidatorStatus(signingPubkey) {
-        // Get validator info
         let vRows = await this.db.doQuery(
             "SELECT * FROM validators WHERE signing_pubkey = ?", [signingPubkey]
         );
         if (vRows.length === 0) return null;
 
-        // Get unclaimed rewards
         let unclaimed = this.rewardTracker ? await this.rewardTracker.getUnclaimedRewards(signingPubkey) : '0';
-
-        // Get recent rewards
         let rewards = this.rewardTracker ? await this.rewardTracker.getRewardHistory(signingPubkey, 20) : [];
-
-        // Get slash proposals
         let slashes = this.slashDetector ? await this.slashDetector.getProposalsForValidator(signingPubkey) : [];
 
         return {
@@ -890,8 +843,6 @@ class XChainHub {
         };
     }
 
-    // Calculate a fee quote: gas cost → XCHAIN → native coin
-    // action: string (e.g., 'ISSUE'), chain: string (e.g., 'BTC'), params: object
     async getFeeQuote(action, chain) {
         // Gas schedule: mirrors the canonical per-chain fee schedule. BTC
         // carries the full set; the VM_ATTEST_REQUEST entry is only metered on
@@ -934,7 +885,6 @@ class XChainHub {
 
         let xchainAmount = gasCost * gasPrice;
 
-        // Get XCHAIN/USD and chain/USD prices from latest snapshots
         let xchainPriceRow = await this.getPrice('XCHAIN/USD');
         let coinPrice      = await this.getPrice(chain + '/USD');
 
@@ -955,7 +905,6 @@ class XChainHub {
             xchainUsd:    xchainUsd.toFixed(8)
         };
 
-        // If we have the coin/USD price, compute the native coin amount
         if (coinPrice && coinPrice.price) {
             let coinUsd = parseFloat(coinPrice.price);
             if (coinUsd > 0) {
@@ -972,19 +921,6 @@ class XChainHub {
         return result;
     }
 
-    /*****************************************************************
-     * Capability tracking
-     *
-     * Initializes CapabilityRegistry, runs initial self-tests for this
-     * hub's identity, schedules periodic re-checks, optionally watches
-     * a config file for hot-reload, and wires peer-capability gossip
-     * into the local registry.
-     *
-     * Safe to call without P2P or without an identity; those subsystems
-     * just no-op accordingly.
-     *
-     * Spec: claude/reports/specs/2026-05-24_capability-staking-model.md
-     ****************************************************************/
     // Read + merge the capability config JSON into p2pConfig so the self-test
     // modules and CapabilityRegistry see operator-supplied MIN_STAKE thresholds
     // (CAPABILITIES) and per-capability config blocks (price.sources,
@@ -1030,7 +966,6 @@ class XChainHub {
         // restarted hub resolves the same per-block thresholds as long-running peers (#3703).
         await this.capabilityRegistry.loadGovernanceHistory();
 
-        // Subscribe to peer capability messages (only meaningful if P2P is active)
         if(this.peerManager){
             this.peerManager.on('capability', (envelope) => {
                 this._handleCapabilityMessage(envelope).catch(e => {
@@ -1039,12 +974,10 @@ class XChainHub {
             });
         }
 
-        // Run initial self-tests for this hub's identity
         if(this.identity){
             let pubkey = this.identity.getPubkeyHex();
             await this._runOwnCapabilityCheck(pubkey);
 
-            // Periodic re-check
             let intervalMs = (this.p2pConfig && this.p2pConfig.CAPABILITY_RECHECK_MS) ? this.p2pConfig.CAPABILITY_RECHECK_MS : 60000;
             this._capabilityRecheckTimer = setInterval(() => {
                 this._runOwnCapabilityCheck(pubkey).catch(e => {
@@ -1052,11 +985,9 @@ class XChainHub {
                 });
             }, intervalMs);
 
-            // Watch config file for hot-reload (optional)
             if(configFilePath && fs.existsSync(configFilePath)){
                 try {
                     this._capabilityConfigWatcher = fs.watch(configFilePath, { persistent: false }, () => {
-                        // Debounce: fs.watch fires multiple times per change
                         if(this._capabilityConfigDebounce) clearTimeout(this._capabilityConfigDebounce);
                         this._capabilityConfigDebounce = setTimeout(() => {
                             // Re-read the file contents into p2pConfig + the live

@@ -50,14 +50,10 @@ class Consensus {
         // View number (incremented on leader failover, reset on successful consensus)
         this.view = 0;
 
-        // Validator set: sorted array of { pubkey, addr }
-        // Loaded from DB on start; used for leader rotation and quorum
         this.validatorSet = [];
 
-        // Pending proposals: Map<seq, proposal>
         this.pendingProposals = new Map();
 
-        // Pending view changes: Map<view, Set<sender>>
         this.pendingViewChanges = new Map();
 
         // STAKE_WEIGHTED_QUORUM: parallel pubkey vote tally for view changes,
@@ -77,38 +73,27 @@ class Consensus {
         // Digests already applied (prevents double-apply from late COMMIT messages)
         this.applied = new Set();
 
-        // Pending client request (when this node is not the leader)
         this.pendingClientConfig = null;
-
-        // Message handler reference (for cleanup)
         this._messageHandler = null;
-
-        // Sequence tracking for replay prevention
         this.lastAppliedSeq = 0;
 
-        // Config
         this.timeout       = parseInt(process.env.PBFT_TIMEOUT) || DEFAULT_TIMEOUT;
         this.minValidators = parseInt(process.env.MIN_VALIDATORS) || 1;
     }
 
-    // Set the validator set (sorted array of { pubkey, addr })
     setValidatorSet(validators) {
         this.validatorSet = validators;
     }
 
-    // Start the consensus engine
     async start() {
-        // Load last sequence number from DB
         await this._loadSeq();
 
-        // Subscribe to P2P messages
         this._messageHandler = (envelope) => this._handleMessage(envelope);
         this.peerManager.on('message', this._messageHandler);
 
         console.log('Consensus engine started (seq: ' + this.seq + ')');
     }
 
-    // Stop the consensus engine
     async stop() {
         if (this._messageHandler) {
             this.peerManager.removeListener('message', this._messageHandler);
@@ -162,20 +147,17 @@ class Consensus {
             return true;
         }
 
-        // Leader check: only the leader for the next seq can propose
         let nextSeq = this.seq + 1;
         let leader = this._getLeader(nextSeq);
         if (leader && leader.addr !== this.peerManager.validatorAddr) {
             throw new Error('Not the leader for seq ' + nextSeq + ' (leader: ' + leader.addr + ')');
         }
 
-        // Increment sequence
         this.seq++;
         let seq = this.seq;
         this.view = 0; // Reset view on new proposal
         let digest = this._digest(config);
 
-        // Create proposal
         return new Promise((resolve, reject) => {
             let proposal = {
                 config:   config,
@@ -205,7 +187,6 @@ class Consensus {
                 commitPubkeys:  weighted ? new Set() : null
             };
 
-            // Add own PREPARE vote
             proposal.prepares.add(this.peerManager.validatorAddr);
             if (proposal.weighted) this._addSelfPubkey(proposal.preparePubkeys);
 
@@ -274,8 +255,6 @@ class Consensus {
         return { snapshot: snapshot, weighted: weighted };
     }
 
-    // --- Private methods ---
-
     // Defense-in-depth: only tally votes from senders that are registered
     // validators. PeerManager already drops any message whose signature doesn't
     // match a registered pubkey, so in normal operation an unregistered sender
@@ -294,7 +273,6 @@ class Consensus {
         return registry.has(sender);
     }
 
-    // Handle incoming P2P messages
     _handleMessage(envelope) {
         switch (envelope.type) {
             case PBFT_PRE_PREPARE:
@@ -314,11 +292,9 @@ class Consensus {
         }
     }
 
-    // Handle PRE_PREPARE: validate and respond with PREPARE
     async _handlePrePrepare(envelope) {
         let { seq, view, configDigest, config, btcBlockHeight } = envelope.data;
 
-        // Validate
         if (!seq || !configDigest || !config) return;
         if (typeof seq !== 'number' || seq <= 0) return;
 
@@ -354,14 +330,12 @@ class Consensus {
             return;
         }
 
-        // Verify digest matches the config
         let computedDigest = this._digest(config);
         if (computedDigest !== configDigest) {
             console.warn('PBFT: PRE_PREPARE digest mismatch from ' + envelope.sender + ' (seq ' + seq + ')');
             return;
         }
 
-        // If we already have this proposal, don't create a duplicate
         if (!this.pendingProposals.has(seq)) {
             // Lock the federation validator-set snapshot at the SAME block
             // the leader snapshotted at (stamped into the PRE_PREPARE
@@ -426,9 +400,7 @@ class Consensus {
             return;
         }
 
-        // Add proposer's implicit PREPARE
         proposal.prepares.add(envelope.sender);
-        // Add our own PREPARE
         proposal.prepares.add(this.peerManager.validatorAddr);
         if (proposal.weighted) {
             let proposerPk = this._resolveSenderPubkey(envelope);
@@ -436,17 +408,14 @@ class Consensus {
             this._addSelfPubkey(proposal.preparePubkeys);
         }
 
-        // Broadcast PREPARE
         this.peerManager.broadcast(PBFT_PREPARE, Object.assign({
             seq:          seq,
             configDigest: configDigest
         }, this._equivVote(seq, proposal.view, proposal.digest, proposal.btcBlockHeight)));
 
-        // Check quorum
         this._checkPrepareQuorum(seq);
     }
 
-    // Handle PREPARE: collect votes and check quorum
     _handlePrepare(envelope) {
         let { seq, configDigest } = envelope.data;
         if (!seq || !configDigest) return;
@@ -457,17 +426,14 @@ class Consensus {
         let proposal = this.pendingProposals.get(seq);
         if (!proposal) return;
 
-        // Verify digest matches
         if (configDigest !== proposal.digest) return;
 
-        // Record the PREPARE vote
         proposal.prepares.add(envelope.sender);
         if (proposal.weighted && proposal.preparePubkeys) {
             let pk = this._resolveSenderPubkey(envelope);
             if (pk) proposal.preparePubkeys.add(pk);
         }
 
-        // Check if we have enough PREPAREs to move to COMMIT
         this._checkPrepareQuorum(seq);
     }
 
@@ -542,7 +508,6 @@ class Consensus {
         return addrSet.size >= quorum;
     }
 
-    // Check if PREPARE quorum is reached -> broadcast COMMIT
     _checkPrepareQuorum(seq) {
         let proposal = this.pendingProposals.get(seq);
         if (!proposal || proposal.resolved) return;
@@ -551,11 +516,9 @@ class Consensus {
         // block boundary), not a live recompute. This keeps every hub in
         // lockstep across the round. Weighted rounds tally signer stake.
         if (this._quorumMet(proposal, proposal.prepares, proposal.preparePubkeys)) {
-            // Only broadcast COMMIT once
             if (!proposal._commitSent) {
                 proposal._commitSent = true;
 
-                // Add own COMMIT vote
                 proposal.commits.add(this.peerManager.validatorAddr);
                 if (proposal.weighted) this._addSelfPubkey(proposal.commitPubkeys);
 
@@ -564,13 +527,11 @@ class Consensus {
                     configDigest: proposal.digest
                 }, this._equivVote(seq, proposal.view, proposal.digest, proposal.btcBlockHeight)));
 
-                // Check if commit quorum is already met
                 this._checkCommitQuorum(seq);
             }
         }
     }
 
-    // Handle COMMIT: collect votes and check quorum
     _handleCommit(envelope) {
         let { seq, configDigest } = envelope.data;
         if (!seq || !configDigest) return;
@@ -581,21 +542,17 @@ class Consensus {
         let proposal = this.pendingProposals.get(seq);
         if (!proposal) return;
 
-        // Verify digest matches
         if (configDigest !== proposal.digest) return;
 
-        // Record the COMMIT vote
         proposal.commits.add(envelope.sender);
         if (proposal.weighted && proposal.commitPubkeys) {
             let pk = this._resolveSenderPubkey(envelope);
             if (pk) proposal.commitPubkeys.add(pk);
         }
 
-        // Check if we have enough COMMITs to apply
         this._checkCommitQuorum(seq);
     }
 
-    // Check if COMMIT quorum is reached -> apply the config
     _checkCommitQuorum(seq) {
         let proposal = this.pendingProposals.get(seq);
         if (!proposal || proposal.applied) return;
@@ -604,7 +561,6 @@ class Consensus {
         if (this._quorumMet(proposal, proposal.commits, proposal.commitPubkeys)) {
             proposal.applied = true;
 
-            // Apply the config
             this._applyConfig(proposal.config).then(async () => {
                 // Persist the sequence with the apply, not fire-and-forget: await it
                 // so a failure propagates to the catch below and the proposal is NOT
@@ -621,7 +577,6 @@ class Consensus {
                     proposal.resolve(true);
                 }
 
-                // Track applied digest
                 this.applied.add(proposal.digest);
                 this.pendingProposals.delete(seq);
 
@@ -641,12 +596,10 @@ class Consensus {
         }
     }
 
-    // Apply a config blob to the database
     async _applyConfig(config) {
         await this.hub.applyConfig(config);
     }
 
-    // Handle VIEW_CHANGE: collect votes and promote new leader
     _handleViewChange(envelope) {
         let { view, seq } = envelope.data;
         if (typeof view !== 'number' || typeof seq !== 'number') return;
@@ -789,7 +742,6 @@ class Consensus {
             seq:  seq
         });
 
-        // Add own vote
         if (!this.pendingViewChanges.has(this.view)) {
             this.pendingViewChanges.set(this.view, new Set());
         }
@@ -801,14 +753,12 @@ class Consensus {
         }
     }
 
-    // Get the leader for a given sequence number
     _getLeader(seq) {
         if (this.validatorSet.length === 0) return null;
         let idx = (seq + this.view) % this.validatorSet.length;
         return this.validatorSet[idx];
     }
 
-    // Check if this node is the current leader for a given sequence
     _isLeader(seq) {
         let leader = this._getLeader(seq);
         return leader && leader.addr === this.peerManager.validatorAddr;
@@ -841,13 +791,11 @@ class Consensus {
         return Math.max(2 * f + 1, Math.ceil((N + 1) / 2));
     }
 
-    // Compute SHA-256 digest of a config object
     _digest(config) {
         let json = JSON.stringify(config);
         return crypto.createHash('sha256').update(json).digest('hex');
     }
 
-    // Load sequence number from DB
     async _loadSeq() {
         try {
             let rows = await this.db.doQuery(
@@ -863,7 +811,6 @@ class Consensus {
         }
     }
 
-    // Save sequence number to DB
     async _saveSeq(seq) {
         try {
             await this.db.doQuery(

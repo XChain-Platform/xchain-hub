@@ -31,7 +31,6 @@ class SlashDetector {
         this.hub = hub;
         this.db  = hub.db;
 
-        // Config
         this.deviationThreshold    = parseFloat(hub.p2pConfig.SLASH_DEVIATION_THRESHOLD || '0.05');    // 5%
         this.missedRoundsThreshold = parseInt(hub.p2pConfig.SLASH_MISSED_ROUNDS_THRESHOLD || '30');     // 30 rounds
 
@@ -53,18 +52,13 @@ class SlashDetector {
     // participants: array of validator pubkeys that submitted
     // allValidators: array of { pubkey, addr } (full validator set)
     async checkRound(round, submissions, finalizedPrices, participants, allValidators) {
-        // Check price deviations
         await this._checkDeviations(round, submissions, finalizedPrices);
-
-        // Check participation (update missed round counters)
         await this._checkParticipation(round, participants, allValidators);
     }
 
-    // Check for price deviations exceeding the threshold
     async _checkDeviations(round, submissions, finalizedPrices) {
         if (!submissions || !finalizedPrices) return;
 
-        // Build a map of finalized prices for quick lookup
         let finalizedMap = {};
         for (let fp of finalizedPrices) {
             finalizedMap[fp.coinPair] = parseFloat(fp.price);
@@ -78,7 +72,6 @@ class SlashDetector {
         for (let [sender, sub] of submissions) {
             if (!sub.prices || !Array.isArray(sub.prices)) continue;
 
-            // Resolve the validator's pubkey
             let pubkey = this._resolveValidatorPubkey(sender);
             if (!pubkey) continue;
 
@@ -119,7 +112,6 @@ class SlashDetector {
         }
     }
 
-    // Check for non-participation (validators who didn't submit)
     async _checkParticipation(round, participants, allValidators) {
         if (!allValidators || allValidators.length === 0) return;
 
@@ -127,10 +119,8 @@ class SlashDetector {
 
         for (let v of allValidators) {
             if (participantSet.has(v.pubkey)) {
-                // Validator participated: reset missed counter
                 this.missedRounds.set(v.pubkey, 0);
             } else {
-                // Validator missed this round
                 let missed = (this.missedRounds.get(v.pubkey) || 0) + 1;
                 this.missedRounds.set(v.pubkey, missed);
 
@@ -146,7 +136,6 @@ class SlashDetector {
         }
     }
 
-    // Track a deviation for repeated-deviation detection
     _trackDeviation(pubkey, round) {
         if (!this.recentDeviations.has(pubkey)) {
             this.recentDeviations.set(pubkey, []);
@@ -188,7 +177,6 @@ class SlashDetector {
         }
     }
 
-    // Record a slash proposal in the database
     async _recordSlashProposal(validatorPubkey, offenseType, round, evidence) {
         if (typeof validatorPubkey !== 'string' || !/^[0-9a-fA-F]{64}$/.test(validatorPubkey)) {
             console.warn('SlashDetector: Invalid pubkey format; skipping slash proposal');
@@ -200,20 +188,17 @@ class SlashDetector {
             .catch(e => console.error('Error recording slash proposal:', e));
     }
 
-    // Resolve a validator addr to their pubkey
     _resolveValidatorPubkey(addr) {
         let pm = this.hub.getPeerManager();
         if (!pm || !pm.validatorPubkeys) return null;
         return pm.validatorPubkeys.get(addr) || null;
     }
 
-    // Get all pending slash proposals
     async getPendingProposals() {
         let query = "SELECT * FROM slash_proposals WHERE status = 'pending' ORDER BY created_at DESC";
         return await this.db.doQuery(query);
     }
 
-    // Get slash proposals for a specific validator
     async getProposalsForValidator(validatorPubkey) {
         let query = "SELECT * FROM slash_proposals WHERE validator_pubkey = ? ORDER BY created_at DESC LIMIT 50";
         return await this.db.doQuery(query, [validatorPubkey]);

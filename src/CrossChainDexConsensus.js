@@ -90,7 +90,6 @@ class CrossChainDexConsensus extends EventEmitter {
         this.controlTags  = opts.controlTags || { vc: 'XDEXVC', nv: 'XDEXNV' };
         this.idField      = opts.idField || 'match_id';
 
-        // Per-match round state: Map<match_id, pending>
         this.pending = new Map();
 
         // Finalized match ids (ring-buffer bounded, FIFO eviction; mirrors
@@ -146,7 +145,6 @@ class CrossChainDexConsensus extends EventEmitter {
         this.earlyMessageTtl.clear();
     }
 
-    // ── Early-message buffer (mirror AttestationConsensus) ─────────────────────
     _pruneEarlyMessages(now){
         for(let [id, expiresAt] of this.earlyMessageTtl){
             if(expiresAt <= now){ this.earlyMessages.delete(id); this.earlyMessageTtl.delete(id); }
@@ -179,7 +177,6 @@ class CrossChainDexConsensus extends EventEmitter {
         return ValidatorIdentity.verify(this._controlPayload(tag, rid, view), String(sig || ''), String(pubkey || '').toLowerCase());
     }
 
-    // ── Leader selection (deterministic; rotated by view) ──────────────────────
     // Sort the snapshot validators by pubkey so every node agrees on ordering,
     // then index by (matchIdInt + view) % N. Mirrors Consensus._getLeader.
     _leaderFor(matchId, validators, view){
@@ -189,7 +186,6 @@ class CrossChainDexConsensus extends EventEmitter {
         return sorted[(mInt + (view || 0)) % sorted.length];
     }
 
-    // ── Round entry (called by the engine for every discovered match) ──────────
     // Every node runs this on discovery: the leader broadcasts PROPOSE; followers
     // create the round (so they hold the failover timer + can validate the
     // leader's PROPOSE). quorum 0 -> single-node immediate self-sign + finalize.
@@ -315,7 +311,6 @@ class CrossChainDexConsensus extends EventEmitter {
         }
     }
 
-    // ── PROPOSE: validate the leader's match against our own view, then sign ───
     async _handlePropose(envelope){
         let d = envelope.data;
         let rid = String(d.matchId || '').toLowerCase();
@@ -465,7 +460,6 @@ class CrossChainDexConsensus extends EventEmitter {
         this._finalize(rid);
     }
 
-    // ── Finalize: emit the match + collected signatures for the engine to write ─
     _finalize(rid){
         let pending = this.pending.get(rid);
         if(!pending || pending.finalized) return;
@@ -502,7 +496,6 @@ class CrossChainDexConsensus extends EventEmitter {
         }
     }
 
-    // ── Leader-failover / view-change (port of Consensus.js, keyed by match_id) ─
     _initiateViewChange(rid){
         let pending = this.pending.get(rid);
         if(!pending || pending.finalized) return;

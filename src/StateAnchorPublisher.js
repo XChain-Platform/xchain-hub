@@ -794,7 +794,6 @@ class StateAnchorPublisher {
         return chunks.length ? chunks : [''];
     }
 
-    // P2P handlers
     _handleMessage(envelope){
         if(!envelope || !envelope.data) return;
         switch(envelope.type){
@@ -1089,7 +1088,6 @@ class StateAnchorPublisher {
         return true;
     }
 
-    // Leader: collect archive co-signatures.
     async _handleSign(envelope){
         let d = envelope.data;
         let round = this._archiveRound;
@@ -1119,7 +1117,6 @@ class StateAnchorPublisher {
         this._pendingMatches = 0;
     }
 
-    // Build + broadcast the v1 (+v2 continuations), then back-fill and tell peers.
     async _publishArchive(round){
         let sigs = [];
         for(let [pk, sg] of round.signatures) sigs.push({ pubkey: pk, sig: sg });
@@ -1206,7 +1203,7 @@ class StateAnchorPublisher {
         }
     }
 
-    // Peers back-fill batch metadata so a rotated leader doesn't re-archive.
+    // Back-fills batch metadata from the archive leader so a rotated leader doesn't re-archive.
     async _handleFinalized(envelope){
         let d = envelope.data;
         if(!d || !Array.isArray(d.matches)) return;
@@ -1372,7 +1369,6 @@ class StateAnchorPublisher {
         return (crc ^ 0xFFFFFFFF) >>> 0;
     }
 
-    // Eligible set + DOGE pipeline (mirror OraclePublisher)
     async _getActiveOraclePublishPubkeys(blockIndex){
         if(!this.hub) return [];
         if(this.hub.capabilitySnapshot && blockIndex !== undefined && blockIndex !== null){

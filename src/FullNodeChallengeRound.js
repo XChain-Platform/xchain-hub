@@ -125,7 +125,6 @@ class FullNodeChallengeRound {
         if(this.peerManager) this.peerManager.removeListener('message', this._handler);
     }
 
-    // Indexer / coin RPC
     async _indexerCall(method, params){
         // Resolve the BTC indexer URL the same way the rest of the hub does
         // (BTC_INDEXER_API_URL -> BTC_INDEXER_URL -> config), so a standard hub
@@ -151,7 +150,6 @@ class FullNodeChallengeRound {
         return resp.data ? resp.data.result : null;
     }
 
-    // Epoch detection
     async _tick(){
         if(this.interval <= 0) return;
         let tip = await this._indexerCall('getblockhashes', {});
@@ -275,7 +273,6 @@ class FullNodeChallengeRound {
         }
     }
 
-    // P2P message handling
     _handleMessage(env){
         if(!env || !env.data) return;
         switch(env.type){
@@ -375,8 +372,6 @@ class FullNodeChallengeRound {
             console.warn('FullNodeChallengeRound: verdict broadcast failed (epoch ' + epoch + '):', e && e.message ? e.message : e);
         }
     }
-
-    // Helpers
 
     // scriptPubKey (hex) of a seed-selected output in the buried target block.
     async _computeAnswer(target, seed){

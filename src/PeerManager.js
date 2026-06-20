@@ -85,12 +85,10 @@ class PeerManager extends EventEmitter {
         this.running        = false;
     }
 
-    // Set the validator identity for signing outgoing messages
     setIdentity(identity) {
         this.identity = identity;
     }
 
-    // Set the validator pubkey registry for verifying incoming messages
     setValidatorPubkeys(pubkeyMap) {
         this.validatorPubkeys = pubkeyMap;  // Map<addr, pubkeyHex>
     }
@@ -103,23 +101,19 @@ class PeerManager extends EventEmitter {
         this.effectiveSignerSet = set;  // Set<pubkeyHex> | null
     }
 
-    // Start the P2P layer
     async start() {
         let port = this.config.P2P_PORT || 10001;
         let host = this.config.P2P_HOST || '0.0.0.0';
 
-        // Create HTTP server and WebSocket server
         this.httpServer = http.createServer();
         this.wss = new WebSocket.Server({ noServer: true, maxPayload: this.config.P2P_MAX_PAYLOAD || 1048576 });
 
-        // Handle WebSocket upgrades
         this.httpServer.on('upgrade', (req, socket, head) => {
             this.wss.handleUpgrade(req, socket, head, (ws) => {
                 this.wss.emit('connection', ws, req);
             });
         });
 
-        // Handle inbound connections
         this.wss.on('connection', (ws, req) => {
             // Per-IP connection limit
             let remoteIp = req.socket.remoteAddress || 'unknown';
@@ -145,7 +139,6 @@ class PeerManager extends EventEmitter {
             ws.on('error', (e) => console.error('Inbound peer error:', e));
         });
 
-        // Bind server
         await new Promise((resolve, reject) => {
             this.httpServer.listen(port, host, () => {
                 console.log('P2P listening on ' + host + ':' + port);
@@ -156,7 +149,6 @@ class PeerManager extends EventEmitter {
 
         this.running = true;
 
-        // Connect to seed nodes
         let seeds = this.config.SEED_NODES || [];
         for (let addr of seeds) {
             this._connectToPeer(addr);
@@ -165,17 +157,11 @@ class PeerManager extends EventEmitter {
             this._recordPeer(addr, addr, true);
         }
 
-        // Start heartbeat
         this._startHeartbeat();
-
-        // Start dedup cache pruner
         this._startDedupPruner();
-
-        // Start WS ping/pong for dead connection detection
         this._startPingInterval();
     }
 
-    // Stop the P2P layer gracefully
     async stop() {
         this.running = false;
 
@@ -183,7 +169,6 @@ class PeerManager extends EventEmitter {
         if (this.dedupTimer)     { clearInterval(this.dedupTimer);     this.dedupTimer = null; }
         if (this.pingTimer)      { clearInterval(this.pingTimer);      this.pingTimer = null; }
 
-        // Clear reconnect timers and close connections
         for (let [addr, peer] of this.peers) {
             if (peer.reconnectTimer) clearTimeout(peer.reconnectTimer);
             if (peer.ws && peer.ws.readyState <= WebSocket.OPEN) {
@@ -192,20 +177,16 @@ class PeerManager extends EventEmitter {
         }
         this.peers.clear();
 
-        // Close WebSocket server
         if (this.wss) {
             this.wss.close();
             this.wss = null;
         }
-
-        // Close HTTP server
         if (this.httpServer) {
             await new Promise((resolve) => this.httpServer.close(resolve));
             this.httpServer = null;
         }
     }
 
-    // Broadcast a message to all connected peers
     broadcast(type, data) {
         let envelope = this._buildEnvelope(type, data);
 
@@ -223,7 +204,6 @@ class PeerManager extends EventEmitter {
         return envelope;
     }
 
-    // Send a message to a specific peer
     sendToPeer(addr, type, data) {
         let peer = this.peers.get(addr);
         if (!peer || !peer.ws || peer.ws.readyState !== WebSocket.OPEN) return false;
@@ -235,7 +215,6 @@ class PeerManager extends EventEmitter {
         return true;
     }
 
-    // Get current peer status for diagnostics
     getPeerStatus() {
         let status = [];
         for (let [addr, peer] of this.peers) {
@@ -249,14 +228,10 @@ class PeerManager extends EventEmitter {
         return status;
     }
 
-    // --- Private methods ---
-
-    // Generate a unique message ID
     _makeId() {
         return 'v1:' + this.validatorAddr + ':' + Date.now() + ':' + crypto.randomUUID();
     }
 
-    // Build an envelope with optional Ed25519 signature
     _buildEnvelope(type, data) {
         let envelope = {
             type:      type,
@@ -338,7 +313,6 @@ class PeerManager extends EventEmitter {
         return false;
     }
 
-    // Send a serialized message on a WebSocket
     _send(ws, serialized) {
         if (ws.readyState === WebSocket.OPEN) {
             ws.send(serialized, (err) => {
@@ -347,7 +321,6 @@ class PeerManager extends EventEmitter {
         }
     }
 
-    // Handle an inbound message (from any peer)
     _handleInbound(ws, rawData, knownAddr) {
         let envelope;
         try {
@@ -360,7 +333,6 @@ class PeerManager extends EventEmitter {
         // Guard against non-object JSON values (null, number, string, boolean)
         if (envelope === null || typeof envelope !== 'object' || Array.isArray(envelope)) return;
 
-        // Validate envelope fields
         if (!envelope.type || typeof envelope.type !== 'string') return;
         if (!envelope.id   || typeof envelope.id !== 'string')   return;
         if (!envelope.sender || typeof envelope.sender !== 'string') return;
@@ -383,7 +355,6 @@ class PeerManager extends EventEmitter {
             return;
         }
 
-        // Deduplication
         if (this.seenIds.has(envelope.id)) return;
         this._addToDedup(envelope.id);
 
@@ -398,19 +369,16 @@ class PeerManager extends EventEmitter {
             return;
         }
 
-        // Signature verification
         if (!this._verifySignature(envelope)) {
             console.warn('P2P: Invalid signature from ' + envelope.sender + '; dropping message');
             return;
         }
 
-        // Register inbound peer if unknown
         if (knownAddr === null && ws._peerAddr === null) {
             ws._peerAddr = envelope.sender;
             this._registerInboundPeer(ws, envelope.sender);
         }
 
-        // Update last-seen timestamp
         let peerAddr = knownAddr || ws._peerAddr || envelope.sender;
         let peer = this.peers.get(peerAddr);
         if (peer) {
@@ -422,7 +390,6 @@ class PeerManager extends EventEmitter {
         // publisher and will diverge from peerAddr on relayed messages.
         this._recordPeer(peerAddr, peerAddr, false);
 
-        // Emit events
         this.emit('message', envelope);
         if (envelope.type === 'HEARTBEAT') {
             this.emit('heartbeat', envelope.sender, envelope.timestamp);
@@ -434,7 +401,6 @@ class PeerManager extends EventEmitter {
             this.emit('capability', envelope);
         }
 
-        // Relay to other peers
         this._relay(envelope, ws);
     }
 
@@ -453,7 +419,6 @@ class PeerManager extends EventEmitter {
         }
     }
 
-    // Register an inbound peer
     _registerInboundPeer(ws, addr) {
         let existing = this.peers.get(addr);
 
@@ -478,7 +443,6 @@ class PeerManager extends EventEmitter {
         console.log('Inbound peer connected: ' + addr);
     }
 
-    // Remove an inbound peer on disconnect
     _removeInboundPeer(ws) {
         let addr = ws._peerAddr;
         if (!addr) return;
@@ -504,7 +468,6 @@ class PeerManager extends EventEmitter {
         }
     }
 
-    // Connect to an outbound peer
     _connectToPeer(addr) {
         // Validate peer address format: optional ws:// or wss:// prefix, then host:port
         if (!/^(wss?:\/\/)?[\w.\-]+:\d+$/.test(addr)) {
@@ -571,7 +534,6 @@ class PeerManager extends EventEmitter {
         peer.ws = ws;
     }
 
-    // Schedule a reconnection attempt with exponential backoff
     _scheduleReconnect(addr) {
         if (!this.running) return;
 
@@ -587,12 +549,10 @@ class PeerManager extends EventEmitter {
             this._connectToPeer(addr);
         }, totalDelay);
 
-        // Exponential backoff
         let maxDelay = this.config.P2P_RECONNECT_MAX || 60000;
         peer.reconnectDelay = Math.min(delay * 2, maxDelay);
     }
 
-    // Start heartbeat broadcasts
     _startHeartbeat() {
         let interval = this.config.P2P_HEARTBEAT_INTERVAL || 15000;
         let version = '0.0.0';
@@ -602,7 +562,6 @@ class PeerManager extends EventEmitter {
         }, interval);
     }
 
-    // Start dedup cache pruner
     _startDedupPruner() {
         this.dedupTimer = setInterval(() => {
             let now = Date.now();
@@ -612,7 +571,6 @@ class PeerManager extends EventEmitter {
         }, this.config.P2P_DEDUP_PRUNE_INTERVAL || 30000);
     }
 
-    // Start WS ping/pong interval for dead connection detection
     _startPingInterval() {
         this.pingTimer = setInterval(() => {
             // Ping outbound dialed peers only. Inbound peers also live in this.peers
@@ -632,7 +590,6 @@ class PeerManager extends EventEmitter {
                 }
             }
 
-            // Ping inbound connections
             if (this.wss) {
                 this.wss.clients.forEach((ws) => {
                     if (ws._isAlive === false) {
@@ -655,7 +612,6 @@ class PeerManager extends EventEmitter {
         this.seenIds.set(id, Date.now() + (this.config.P2P_MSG_DEDUP_TTL || 60000));
     }
 
-    // Check per-peer message rate (returns true if within limit)
     _checkMsgRate(addr, limit) {
         let max = (limit != null) ? limit : this.msgRateLimit;
         let now = Date.now();

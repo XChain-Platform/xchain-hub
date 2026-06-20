@@ -153,7 +153,6 @@ class CrossChainDexEngine extends EventEmitter {
         } catch(e){ /* table may not exist yet */ }
     }
 
-    // Offer ledger key.
     _offerKey(chain, actionIndex){ return chain + ':' + Number(actionIndex); }
 
     // Apply (sign=+1) or reverse (sign=-1) a match row's fills against both legs' ledgers.
@@ -172,7 +171,6 @@ class CrossChainDexEngine extends EventEmitter {
         this.committed.set(kB, b);
     }
 
-    // Committed { give, get } for an offer (default zero).
     _committedFor(offer){
         return this.committed.get(this._offerKey(offer.home_coin, offer.action_index)) || { give: '0', get: '0' };
     }
@@ -192,8 +190,6 @@ class CrossChainDexEngine extends EventEmitter {
             committedGive: c.give
         };
     }
-
-    // ─── Discovery + matching ──────────────────────────────────────────────
 
     async _discoverAndMatch(){
         let offersByCoin = {};
@@ -392,8 +388,6 @@ class CrossChainDexEngine extends EventEmitter {
         return this._normalizeAmount(x) === this._normalizeAmount(y);
     }
 
-    // ─── Finalize: sign + write the match row + persist the capability snapshot ──
-
     async _finalizeMatch(desc){
         let snapshotBlock = await this._resolveSnapshotBlock();
         if(snapshotBlock == null) throw new Error('cannot resolve snapshot block');
@@ -514,8 +508,6 @@ class CrossChainDexEngine extends EventEmitter {
         return Object.assign({ home_coin: coin, home_network: String(res.network) }, o);
     }
 
-    // Canonical signing string. MUST byte-match the indexer's verifier (the
-    // cross-chain settlement pass rebuilds this from the mirrored row).
     // Canonical signing string. MUST byte-match the indexer's verifier (the cross-chain
     // settlement pass rebuilds this from the mirrored row). Phase B appends the fill fields
     // after `network` so the Phase-A field order is preserved. a_amount/b_amount carry the
@@ -562,10 +554,6 @@ class CrossChainDexEngine extends EventEmitter {
         return inserted;
     }
 
-    // Resolve the qualifying validator set for `capability` at `block` from the
-    // BTC indexer via CapabilitySnapshot (on-chain-deterministic), with the regtest
-    // seam fallback (XDEX_SEED_LOCAL_VALIDATOR → this hub's own pubkey). Used for both
-    // quorum (in _finalizeMatch) and the mirror persist (_persistCapabilitySnapshot).
     // Resolve the qualifying validator set, normalized to { pubkey, source, weight, amount }.
     // At/above STAKE_WEIGHTED_QUORUM activation (keyed on the BTC snapshot_block +
     // network) this fetches the SOURCE-KEYED weights; below it, the legacy count set
@@ -615,8 +603,6 @@ class CrossChainDexEngine extends EventEmitter {
         }
     }
 
-    // ─── Retraction (reorg) ────────────────────────────────────────────────
-
     // Mark matches referencing a rolled-back source order as retracted and broadcast a
     // deletion so indexers skip / roll back. Called by reorg handling.
     async retractMatchesForReorg(chain, fromActionIndex){
@@ -632,8 +618,6 @@ class CrossChainDexEngine extends EventEmitter {
                 this.broadcaster.broadcastDeletion({ table: 'cross_chain_matches', source_chain: chain, from_action_index: fromActionIndex });
         }
     }
-
-    // ─── Helpers ───────────────────────────────────────────────────────────
 
     async _indexerCall(coin, method, params){
         let ix = this.indexers[coin];

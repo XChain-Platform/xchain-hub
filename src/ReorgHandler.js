@@ -39,7 +39,6 @@ class ReorgHandler extends EventEmitter {
         this.peerManager = hub.getPeerManager();
         this.db          = hub.db;
 
-        // Validator set
         this.validatorSet = [];
 
         // Pending reorg consensus: Map<reorgId, pending>
@@ -48,13 +47,11 @@ class ReorgHandler extends EventEmitter {
         // Processed reorg IDs (prevent duplicate processing)
         this.processed = new Set();
 
-        // Message handler
         this._messageHandler = null;
 
         // Rate limit: max 1 reorg report per chain per 60 seconds
         this.reorgRateTracker = new Map();
 
-        // Config
         this.timeout = parseInt(process.env.REORG_TIMEOUT) || DEFAULT_REORG_TIMEOUT;
     }
 
@@ -128,13 +125,10 @@ class ReorgHandler extends EventEmitter {
         this._initiateReorgConsensus(reorgId, chain, reorgHeight, timestamp, affectedChains);
     }
 
-    // Get reorg history
     async getReorgHistory(limit) {
         let query = "SELECT * FROM reorg_attestations ORDER BY created_at DESC LIMIT ?";
         return await this.db.doQuery(query, [limit || 50]);
     }
-
-    // --- Message handlers ---
 
     // Defense-in-depth: only tally votes from senders that are registered
     // validators. PeerManager already drops any message whose signature doesn't
@@ -218,7 +212,6 @@ class ReorgHandler extends EventEmitter {
             }
         }, this.timeout);
 
-        // Broadcast PREPARE
         this.peerManager.broadcast(XCHAIN_REORG_PREPARE, {
             reorgId, chain, reorgHeight, timestamp,
             affectedChains, digest
@@ -326,24 +319,19 @@ class ReorgHandler extends EventEmitter {
         }
     }
 
-    // --- Rollback execution ---
-
     async _executeRollback(chain, reorgHeight, timestamp, reorgId, validatorCount, proof) {
         console.log('Reorg: Rolling back cross-chain state for ' + chain + ' at height ' + reorgHeight);
 
-        // 1. Delete attestations created after the reorg timestamp for the affected chain
         await this.db.doQuery(
             "DELETE FROM attestations WHERE source_chain = ? AND created_at > FROM_UNIXTIME(? / 1000)",
             [chain, timestamp]
         );
 
-        // 2. Invalidate price snapshots finalized after the reorg timestamp
         await this.db.doQuery(
             "UPDATE price_snapshots SET status = 'disputed' WHERE block_timestamp > ? AND status = 'finalized'",
             [timestamp]
         );
 
-        // 3. Store the reorg attestation
         let affectedChains = this._getAffectedChains(chain);
         await this.db.doQuery(
             `INSERT INTO reorg_attestations
@@ -360,7 +348,6 @@ class ReorgHandler extends EventEmitter {
         console.log('Reorg: Rollback complete for ' + reorgId +
             ': attestations and snapshots after timestamp ' + timestamp + ' invalidated');
 
-        // Emit event for indexers/consumers
         this.emit('reorg:confirmed', {
             reorgId, sourceChain: chain, reorgHeight, timestamp, affectedChains
         });
@@ -372,8 +359,6 @@ class ReorgHandler extends EventEmitter {
         let allChains = ['BTC', 'LTC', 'DOGE'];
         return allChains.filter(c => c !== sourceChain);
     }
-
-    // --- Utilities ---
 
     _getQuorum() {
         let N = this.validatorSet.length;

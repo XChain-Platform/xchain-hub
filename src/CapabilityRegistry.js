@@ -225,13 +225,11 @@ class CapabilityRegistry {
         return null;
     }
 
-    // Upsert qualified flag for (pubkey, capability)
     async setQualification(pubkey, capability, qualified, blockIndex) {
         if (KNOWN_CAPABILITIES.indexOf(capability) === -1)
             throw new Error('unknown capability: ' + capability);
         let conn = await this.db.getConnection();
         try {
-            // Upsert via ON DUPLICATE KEY UPDATE
             await conn.query(
                 `INSERT INTO validator_capabilities
                     (signing_pubkey, capability, qualified, qualified_at_block)
@@ -246,7 +244,6 @@ class CapabilityRegistry {
         }
     }
 
-    // Record the result of a self-test probe
     async setSelfTestResult(pubkey, capability, ok, reason) {
         if (KNOWN_CAPABILITIES.indexOf(capability) === -1)
             throw new Error('unknown capability: ' + capability);
@@ -267,7 +264,6 @@ class CapabilityRegistry {
         }
     }
 
-    // Toggle operator opt-out for (pubkey, capability)
     async setEnabled(pubkey, capability, enabled) {
         if (KNOWN_CAPABILITIES.indexOf(capability) === -1)
             throw new Error('unknown capability: ' + capability);
@@ -309,7 +305,6 @@ class CapabilityRegistry {
         }
     }
 
-    // List of pubkeys with capability fully active
     async getActiveValidators(capability) {
         let conn = await this.db.getConnection();
         try {
@@ -341,7 +336,6 @@ class CapabilityRegistry {
         }
     }
 
-    // Get full state for a specific (pubkey, capability)
     async getState(pubkey, capability) {
         let conn = await this.db.getConnection();
         try {

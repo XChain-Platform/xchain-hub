@@ -52,7 +52,6 @@ class Database {
         this.user   = user;
         this.pass   = pass;
 
-        // Connection pool parameters
         this.connectionPoolParams = {
             host:               this.host,
             user:               this.user,
@@ -69,7 +68,6 @@ class Database {
             queryTimeout:       parseInt(process.env.DB_QUERY_TIMEOUT) || 30000
         };
 
-        // Setup pool of connections
         this.pool = mariadb.createPool(this.connectionPoolParams);
         this.transactionConnection = null;
 
@@ -81,7 +79,6 @@ class Database {
         this.circuitOpenUntil = 0;
     }
 
-    // Sleep for a given number of milliseconds
     _sleep(ms) {
         return new Promise((resolve) => setTimeout(resolve, ms));
     }
@@ -109,7 +106,6 @@ class Database {
         }
     }
 
-    // Verify a database exists
     async verifyDatabase(){
         let connectionParams = {
             host:     this.host,
@@ -132,7 +128,6 @@ class Database {
         }
     }
 
-    // Create a database if it doesn't exist
     async createDatabase(){
         let connectionParams = {
             host:     this.host,
@@ -156,7 +151,6 @@ class Database {
         }
     }
 
-    // Verify all tables exist (reads SQL files from src/sql/)
     async verifyTables(){
         let dir   = path.join(__dirname, 'sql');
         let files = fs.readdirSync(dir);
@@ -185,7 +179,7 @@ class Database {
         return true;
     }
 
-    // Apply schema migrations against existing tables. Idempotent: safe to run every startup.
+    // Idempotent: safe to run every startup.
     async runMigrations(){
         await this._migrateUniqueKey(
             'oracle_submissions',
@@ -222,11 +216,9 @@ class Database {
         );
     }
 
-    // Add a UNIQUE KEY to a table, removing duplicate rows first
     async _migrateUniqueKey(table, indexName, indexColumns, columnList){
         let db = await this.getConnection();
         try {
-            // Check if the unique key already exists; skip everything if so
             let existing = await db.query(
                 "SELECT COUNT(*) AS c FROM information_schema.statistics " +
                 "WHERE table_schema = ? AND table_name = ? AND index_name = ?",
@@ -234,7 +226,6 @@ class Database {
             );
             if(existing[0] && Number(existing[0].c) > 0) return;
 
-            // Delete duplicates, keeping the row with the smallest id per group
             let joinClause = columnList.map(c => 't1.' + c + ' = t2.' + c).join(' AND ');
             let deleteSql = 'DELETE t1 FROM ' + table + ' t1 ' +
                             'INNER JOIN ' + table + ' t2 ' +
@@ -244,7 +235,6 @@ class Database {
             if(deleted > 0)
                 console.log('Migration: removed ' + deleted + ' duplicate rows from ' + table);
 
-            // Add the unique key
             await db.query('ALTER TABLE ' + table + ' ADD UNIQUE KEY ' + indexName + ' ' + indexColumns);
             console.log('Migration: added UNIQUE KEY ' + indexName + ' on ' + table);
         } catch(e){
@@ -254,14 +244,10 @@ class Database {
         }
     }
 
-    // Add a plain (non-unique) INDEX to a table if it is missing. Mirrors
-    // _migrateUniqueKey without the duplicate-removal step: a non-unique index
-    // enforces nothing, so there is nothing to dedup before the ALTER. The
-    // existence check makes it an idempotent no-op once the index is present.
+    // Mirrors _migrateUniqueKey without the dedup step; idempotent once the index exists.
     async _migrateIndex(table, indexName, indexColumns){
         let db = await this.getConnection();
         try {
-            // Check if the index already exists; skip the ALTER if so
             let existing = await db.query(
                 "SELECT COUNT(*) AS c FROM information_schema.statistics " +
                 "WHERE table_schema = ? AND table_name = ? AND index_name = ?",
@@ -305,7 +291,6 @@ class Database {
         }
     }
 
-    // Create a table from a local SQL file
     async _createTableFromFile(file){
         let dir     = path.join(__dirname, 'sql');
         let data    = fs.readFileSync(dir + '/' + file, "utf8");
@@ -432,12 +417,10 @@ class Database {
         }
     }
 
-    // Get a connection from the pool with circuit breaker and exponential backoff
     async getConnection(){
         if(this.transactionConnection)
             return this.transactionConnection;
 
-        // Circuit breaker: reject immediately if open
         if(this.circuitState === 'open'){
             if(Date.now() < this.circuitOpenUntil)
                 throw new Error('Circuit breaker open: database connections rejected until cooldown expires');
@@ -480,7 +463,6 @@ class Database {
         return connection;
     }
 
-    // Run a SQL query with parameterized arguments
     async doQuery(query, args){
         let results = [];
         if(query){
@@ -505,7 +487,6 @@ class Database {
         return results;
     }
 
-    // Set a single config parameter (upsert)
     async setParam(coin, network, module, paramName, paramValue){
         let query = `INSERT INTO configs (coin, network, module, param_name, param_value)
                      VALUES (?, ?, ?, ?, ?)
@@ -531,7 +512,6 @@ class Database {
         return rows.length;
     }
 
-    // Get config for a specific coin/network/module
     async getConfig(coin, network, module){
         let query = "SELECT param_name, param_value FROM configs WHERE coin = ? AND network = ? AND module = ?";
         let rows  = await this.doQuery(query, [coin, network, module]);
@@ -542,10 +522,7 @@ class Database {
         return config;
     }
 
-    // Set the latest chain tip for a given coin + network (block height + time)
-    // Used by indexers to push their chain tip to the hub for cross-chain reference.
-    // Network defaults to 'mainnet' for back-compat with older indexers that
-    // don't pass it (single-network hubs continue to work unchanged).
+    // Network defaults to 'mainnet' for back-compat with older indexers.
     async setChainTip(coin, network, blockHeight, blockTime){
         let net = network || 'mainnet';
         // Store under the full coin name (see COIN_FULL_NAME) so chain_tips never
@@ -555,9 +532,7 @@ class Database {
         await this.setParam(key, net, 'chain_tips', 'block_time',   String(blockTime));
     }
 
-    // Get the latest chain tip for a given coin + network.
-    // Network defaults to 'mainnet' for back-compat (single-network hubs work
-    // unchanged). Multi-network hubs must pass the network explicitly.
+    // Network defaults to 'mainnet' for back-compat; multi-network hubs must pass it explicitly.
     // Returns: { blockHeight, blockTime } or null if not set.
     async getChainTip(coin, network){
         let net = network || 'mainnet';
@@ -574,24 +549,13 @@ class Database {
         };
     }
 
-    // Get all configs, reconstructed as nested object
     // Returns: { coin: { network: { module: { param: value } } } }
     //
-    // Optional `sinceUpdatedAt` is an epoch-seconds cursor (see getConfigWatermark).
-    // When supplied, only rows changed strictly after that instant are returned,
-    // so a consumer that threads the prior watermark back gets a delta (typically
-    // empty on a quiet poll) instead of the full table on every refresh. Omitting
-    // it (or passing 0) returns the complete config tree exactly as before, so
-    // existing callers are unaffected.
-    //
-    // The cursor is anchored on UNIX_TIMESTAMP(updated_at) rather than the raw
-    // TIMESTAMP so the value is a plain integer: it survives JSON round-trips and
-    // re-binds into the query with no client/server timezone ambiguity. The
-    // comparison is strict `>`; updated_at has second granularity, so two distinct
-    // writes in the same wall-clock second straddling a poll could theoretically
-    // miss the later one until a subsequent change re-bumps it. Config writes are
-    // rare (governance-driven) and a consumer restart re-fetches in full, so this
-    // boundary is acceptable in exchange for avoiding a separate sequence column.
+    // Optional `sinceUpdatedAt` (epoch-seconds cursor from getConfigWatermark) returns only rows
+    // changed after that instant. The cursor is anchored on UNIX_TIMESTAMP(updated_at): a plain
+    // integer that survives JSON round-trips with no timezone ambiguity. Comparison is strict `>`;
+    // config writes are rare (governance-driven) and a consumer restart re-fetches in full, so the
+    // one-second granularity boundary is acceptable without a separate sequence column.
     async getAllConfigs(sinceUpdatedAt){
         let query = "SELECT coin, network, module, param_name, param_value FROM configs";
         let args  = [];
@@ -615,26 +579,16 @@ class Database {
         return configs;
     }
 
-    // Current high-water mark of the configs table as epoch seconds (the newest
-    // updated_at across all rows, or 0 when the table is empty). Consumers thread
-    // this value back into getAllConfigs(sinceUpdatedAt) on their next poll to
-    // fetch only what changed since. Returned as an integer so it carries through
-    // JSON and re-binds into the cursor query without timezone conversion.
-    //
-    // Callers should read this BEFORE reading the rows: a write landing between
-    // the two reads is then excluded from the watermark but included in the rows,
-    // so it is re-delivered next poll (an idempotent merge) rather than skipped.
+    // High-water mark of the configs table as epoch seconds (newest updated_at, or 0 when empty).
+    // Read BEFORE reading the rows: a racing write is excluded from the watermark but included in
+    // the rows, so it is re-delivered next poll (idempotent merge) rather than skipped.
     async getConfigWatermark(){
         let rows = await this.doQuery("SELECT UNIX_TIMESTAMP(MAX(updated_at)) AS watermark FROM configs");
         let w = rows && rows[0] ? rows[0].watermark : null;
         return w == null ? 0 : Number(w);
     }
 
-    // Get the last committed consensus sequence number. The PBFT engine persists
-    // this to consensus_state on every applied config change; exposing it lets
-    // config consumers detect that a change was committed between polls and
-    // invalidate their cached config. Returns 0 on a fresh node (no row yet) or
-    // if the value is unparseable, so callers can treat 0 as "no commits seen".
+    // Returns 0 on a fresh node or unparseable value.
     async getLastSeq(){
         let rows = await this.doQuery(
             "SELECT value FROM consensus_state WHERE key_name = ?",
@@ -645,7 +599,6 @@ class Database {
         return Number.isNaN(seq) ? 0 : seq;
     }
 
-    // Close the connection pool
     async close(){
         await this.pool.end();
     }

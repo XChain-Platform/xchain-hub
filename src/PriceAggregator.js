@@ -69,10 +69,6 @@ class PriceAggregator extends EventEmitter {
         return raw;
     }
 
-    // Receive a validated PRICE v0 round from an indexer
-    // sourceChain: chain on which the PRICE tx was published
-    // roundData:   { round, timestamp, pairs, sigs, action_index, block_index }
-    //
     // The pusher's local validation is NOT trusted: before any row is stored
     // as 'finalized', every signature is re-verified here against the
     // canonical payload, signers must be in the price-capability validator
@@ -190,7 +186,6 @@ class PriceAggregator extends EventEmitter {
         let validatorCount = verifiedSigs.length;
         let sourceActionIndex = roundData.action_index || null;
 
-        // Insert one row per pair
         // Capture a single hub-side timestamp before the loop so all pairs in this round
         // share the same created_at and it propagates to operators via the WS broadcast row.
         let createdAt = new Date();
@@ -256,10 +251,6 @@ class PriceAggregator extends EventEmitter {
         return { accepted: true };
     }
 
-    // Receive a validated PRICE v1 user oracle price from an indexer
-    // sourceChain: chain on which the PRICE tx was published
-    // priceData:   { source_address, coin, tick, fiat, value, fee, memo, block_time, action_index }
-    // Returns: { accepted, reason }
     async receiveOraclePrice(sourceChain, priceData) {
         if (!priceData || !priceData.source_address || !priceData.coin || !priceData.tick || !priceData.fiat || !priceData.value) {
             return { accepted: false, reason: 'invalid priceData' };
@@ -280,7 +271,6 @@ class PriceAggregator extends EventEmitter {
             return { accepted: false, reason: 'invalid fee' };
         }
 
-        // Dedupe by (source_address, source_chain, action_index)
         let existing = await this.db.doQuery(
             'SELECT id FROM oracle_prices WHERE source_address = ? AND source_chain = ? AND action_index = ? LIMIT 1',
             [priceData.source_address, sourceChain || '', priceData.action_index || 0]

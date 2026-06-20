@@ -193,8 +193,6 @@ exports.healthCheck = async (ctx) => {
     return { ok: true, transport: auth.transport, source: auth.source, tokenUsage: { ..._tokenUsage } };
 };
 
-// ---------- internals ----------
-
 // Pick the configured transport and execute the LLM call.
 // Returns the response text (string). Throws on transport-level failure.
 async function _runLlm({ prompt, system, model, maxTokens, temperature, timeoutMs }) {

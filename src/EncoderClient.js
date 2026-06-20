@@ -31,7 +31,6 @@ class EncoderClient {
         this._rpcId     = 0;
     }
 
-    // Make a JSON-RPC 2.0 call to the encoder
     async _call(method, params) {
         if (!this.encoderUrl) throw new Error('EncoderClient: encoderUrl not configured');
         let body = {
@@ -66,7 +65,6 @@ class EncoderClient {
         return this._call('create_tx', params);
     }
 
-    // Broadcast a signed transaction hex to the coin network
     async broadcastTx(txHex) {
         return this._call('broadcast_tx', { tx_hex: txHex });
     }

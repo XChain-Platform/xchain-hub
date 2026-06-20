@@ -28,7 +28,6 @@ class RewardTracker {
         this.hub = hub;
         this.db  = hub.db;
 
-        // Config
         this.rewardPerRound = hub.p2pConfig.ORACLE_REWARD_PER_ROUND || '10.00000000';
         this.anchorReward   = process.env.ANCHOR_REWARD_PER_PUBLISH || hub.p2pConfig.ANCHOR_REWARD_PER_PUBLISH || '10.00000000';
 
@@ -49,18 +48,15 @@ class RewardTracker {
     async distributeRewards(round, participants, btcBlockHeight) {
         if (!participants || participants.length === 0) return;
 
-        // Validate reward amount
         let totalReward = parseFloat(this.rewardPerRound);
         if (!Number.isFinite(totalReward) || totalReward <= 0)
             throw new Error('Invalid reward amount: ' + this.rewardPerRound);
 
-        // Filter to valid pubkeys (64 hex chars)
         let validParticipants = participants.filter(pk =>
             typeof pk === 'string' && /^[0-9a-fA-F]{64}$/.test(pk)
         );
         if (validParticipants.length === 0) return;
 
-        // Calculate per-validator reward (equal split)
         let perValidator = (totalReward / validParticipants.length).toFixed(8);
 
         for (let pubkey of validParticipants) {
@@ -191,7 +187,6 @@ class RewardTracker {
         }
     }
 
-    // Get total unclaimed rewards for a validator
     async getUnclaimedRewards(validatorPubkey) {
         let query = `SELECT COALESCE(SUM(CAST(amount AS DECIMAL(40,8))), 0) AS total
                      FROM validator_rewards
@@ -200,7 +195,6 @@ class RewardTracker {
         return rows.length > 0 ? rows[0].total.toString() : '0';
     }
 
-    // Get reward history for a validator
     async getRewardHistory(validatorPubkey, limit) {
         let query = `SELECT round_number, reward_type, amount, claimed, created_at
                      FROM validator_rewards
@@ -210,7 +204,6 @@ class RewardTracker {
         return await this.db.doQuery(query, [validatorPubkey, limit || 50]);
     }
 
-    // Get total rewards distributed across all validators
     async getTotalDistributed() {
         let query = `SELECT COALESCE(SUM(CAST(amount AS DECIMAL(40,8))), 0) AS total FROM validator_rewards`;
         let rows = await this.db.doQuery(query);

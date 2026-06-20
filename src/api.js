@@ -18,11 +18,9 @@
  *
  ********************************************************************/
 
-// Load environment variables
 const dotenv = require('dotenv');
 dotenv.config();
 
-// Validate required environment variables
 const REQUIRED_ENV = ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT'];
 for(const key of REQUIRED_ENV){
     if(!process.env[key]){
@@ -48,7 +46,6 @@ const HUB_PORT = process.env.HUB_PORT;
 const HUB_HOST = process.env.HUB_HOST || '0.0.0.0';
 const HUB_DB_KEEPALIVE_INTERVAL = parseInt(process.env.HUB_DB_KEEPALIVE_INTERVAL) || 30000;
 
-// Security constants
 // HUB_API_KEY is optional, matching the other services: unset disables the
 // write/WS-subscribe gate (single-host / regtest / managed deploys); when
 // configured, those paths fail closed (401) without a valid key. Hard-requiring
@@ -154,7 +151,6 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
 const DB_PROBE_TIMEOUT_MS = 2000;
 
 async function startApi(){
-    // Start the hub
     const hub = new XChainHub(
         process.env.HUB_DB_HOST,
         process.env.HUB_DB_PORT,
@@ -165,25 +161,13 @@ async function startApi(){
     );
     await hub.start();
 
-    // Start P2P layer (no-op if p2pConfig is null)
     await hub.startP2P();
-
-    // Start PBFT consensus (no-op if P2P is not active)
     await hub.startConsensus();
-
-    // Start oracle round system (no-op if P2P is not active)
     await hub.startOracle();
-
-    // Start cross-chain attestation engine (no-op if P2P is not active)
     await hub.startCrossChain();
-
-    // Start reorg handler (no-op if P2P is not active)
     await hub.startReorgHandler();
-
-    // Start governance engine (no-op if P2P is not active)
     await hub.startGovernance();
 
-    // Start the External Attestation Framework subsystems (no-op if P2P is not active).
     // Sits after governance so ProviderRegistry's hot-reload hook can attach.
     await hub.startAttestation();
 
@@ -194,7 +178,6 @@ async function startApi(){
     // supplies MIN_STAKE thresholds and the per-capability self-test config blocks.
     await hub.startCapabilities(process.env.HUB_CAPABILITY_CONFIG || null);
 
-    // Create the app
     const app = express();
 
     // The hub sits behind Apache on the same host (Cloudflare proxy is OFF for
@@ -216,7 +199,6 @@ async function startApi(){
     else if (/^\d+$/.test(trustProxy)) trustProxy = parseInt(trustProxy);
     app.set('trust proxy', trustProxy);
 
-    // Security and parsing middleware
     app.use(helmet());
     app.use(express.json());
     app.use(cors({ origin: CORS_ORIGIN }));
@@ -245,10 +227,8 @@ async function startApi(){
         next();
     });
 
-    // JSON-RPC methods
     const jsonRpcController = {
 
-        // Health check: probes the DB pool so a broken connection is surfaced here
         async ping(params, {res}) {
             try {
                 await Promise.race([
@@ -352,7 +332,6 @@ async function startApi(){
             }
         },
 
-        // Update service configs
         async updateconfig({config}){
             try {
                 await hub.addParametersFromJson(config);
@@ -362,14 +341,12 @@ async function startApi(){
             }
         },
 
-        // Get oracle submission status (diagnostics)
         async getoraclesubmissions(){
             let oracle = hub.getOracle();
             if(!oracle) return {error: "oracle not active"};
             return await oracle.getSubmissionsInfo();
         },
 
-        // Get recent finalized price snapshots
         async getpricesnapshots({limit}){
             let limErr = validateLimit(limit);
             if (limErr) return limErr;
@@ -381,7 +358,6 @@ async function startApi(){
             }
         },
 
-        // Get latest finalized price for a coin pair
         async getprice({coin_pair}){
             if(!coin_pair) return {error: "coin_pair is required"};
             try {
@@ -392,7 +368,6 @@ async function startApi(){
             }
         },
 
-        // Push a chain tip update from an indexer (used to anchor oracle rounds to BTC block height)
         // Network is optional for back-compat with older indexers; defaults to 'mainnet'.
         async pushchaintip({coin, network, block_height, block_time}){
             if(!coin) return {error: "coin is required"};
@@ -410,7 +385,6 @@ async function startApi(){
             }
         },
 
-        // Push a validated PRICE v0 round from an indexer (cross-chain aggregation)
         // Indexer has already verified PBFT signatures locally; hub deduplicates by round_number.
         async pushpriceround({source_chain, round, timestamp, pairs, sigs, action_index, block_index}){
             if(!source_chain) return {error: "source_chain is required"};
@@ -434,7 +408,6 @@ async function startApi(){
             }
         },
 
-        // Push a validated PRICE v1 user oracle price from an indexer
         async pushoracleprice({source_chain, source_address, coin, tick, fiat, value, fee, memo, block_time, action_index}){
             if(!source_chain) return {error: "source_chain is required"};
             let chainErr = validateChain(source_chain);
@@ -519,7 +492,6 @@ async function startApi(){
             }
         },
 
-        // Register a validator (Phase 2C bootstrap)
         async registervalidator({signing_pubkey, addr}){
             try {
                 await hub.registerValidator(signing_pubkey, addr);
@@ -529,7 +501,6 @@ async function startApi(){
             }
         },
 
-        // Rotate the signing key of the validator at `addr` to a new pubkey
         async rotatevalidator({addr, new_signing_pubkey}){
             try {
                 await hub.rotateValidator(addr, new_signing_pubkey);
@@ -539,7 +510,6 @@ async function startApi(){
             }
         },
 
-        // Deregister a validator by signing_pubkey OR addr (mark removed)
         async deregistervalidator({signing_pubkey, addr}){
             try {
                 await hub.deregisterValidator({signingPubkey: signing_pubkey, addr});
@@ -549,7 +519,6 @@ async function startApi(){
             }
         },
 
-        // Sync validators from external staking data
         async syncvalidators({validators}){
             try {
                 await hub.syncValidators(validators);
@@ -559,7 +528,6 @@ async function startApi(){
             }
         },
 
-        // Get active validator list
         async getvalidators(){
             try {
                 return await hub.getValidators();
@@ -568,7 +536,6 @@ async function startApi(){
             }
         },
 
-        // Get detailed validator status
         async getvalidatorstatus({signing_pubkey}){
             if(!signing_pubkey) return {error: "signing_pubkey is required"};
             try {
@@ -579,7 +546,6 @@ async function startApi(){
             }
         },
 
-        // Get attestation round throughput counters for this validator
         async getattestationstats(){
             if(!hub.attestationRound) return {error: "attestation subsystem not active"};
             return hub.attestationRound.getStats();
@@ -624,7 +590,6 @@ async function startApi(){
             }
         },
 
-        // Get fee quote (gas -> XCHAIN -> native coin)
         async getfeequote({action, chain}){
             if(!action) return {error: "action is required"};
             if(!chain) return {error: "chain is required"};
@@ -658,7 +623,6 @@ async function startApi(){
             }
         },
 
-        // Submit a governance proposal
         async propose({parameter, current_value, proposed_value, rationale}){
             if(!parameter || !proposed_value)
                 return {error: "parameter and proposed_value are required"};
@@ -669,7 +633,6 @@ async function startApi(){
             }
         },
 
-        // Cast a governance vote
         async vote({proposal_id, vote}){
             if(!proposal_id || !vote)
                 return {error: "proposal_id and vote (approve/reject) are required"};
@@ -680,7 +643,6 @@ async function startApi(){
             }
         },
 
-        // Get governance proposals
         async getproposals({status}){
             try {
                 return await hub.getProposals(status);
@@ -689,7 +651,6 @@ async function startApi(){
             }
         },
 
-        // Get a specific proposal with votes
         async getproposal({proposal_id}){
             if(!proposal_id) return {error: "proposal_id is required"};
             try {
@@ -700,7 +661,6 @@ async function startApi(){
             }
         },
 
-        // Request a cross-chain attestation
         async requestattestation({source_chain, source_action_index, dest_chain}){
             if(!source_chain || !source_action_index || !dest_chain)
                 return {error: "source_chain, source_action_index, and dest_chain are required"};
@@ -716,7 +676,6 @@ async function startApi(){
             }
         },
 
-        // Get cross-chain attestations
         async getattestations({status, limit}){
             let limErr = validateLimit(limit);
             if (limErr) return limErr;
@@ -729,7 +688,6 @@ async function startApi(){
             }
         },
 
-        // Report a blockchain reorg for cross-chain propagation
         async reportreorg({chain, reorg_height, timestamp}){
             if(!chain || !reorg_height || !timestamp)
                 return {error: "chain, reorg_height, and timestamp are required"};
@@ -746,7 +704,6 @@ async function startApi(){
             }
         },
 
-        // Get reorg history
         async getreorghistory({limit}){
             let limErr = validateLimit(limit);
             if (limErr) return limErr;
@@ -757,7 +714,6 @@ async function startApi(){
             }
         },
 
-        // Initiate a cross-chain SWAP
         async initiateswap({source_chain, source_action_index, dest_chain, dest_action_index}){
             if(!source_chain || !source_action_index || !dest_chain)
                 return {error: "source_chain, source_action_index, and dest_chain are required"};
@@ -773,7 +729,6 @@ async function startApi(){
             }
         },
 
-        // Get a specific swap
         async getswap({source_chain, source_action_index}){
             if(!source_chain || !source_action_index)
                 return {error: "source_chain and source_action_index are required"};
@@ -785,7 +740,6 @@ async function startApi(){
             }
         },
 
-        // Get swaps by status
         async getswaps({status, limit}){
             let limErr = validateLimit(limit);
             if (limErr) return limErr;
@@ -796,7 +750,6 @@ async function startApi(){
             }
         },
 
-        // Get a specific attestation
         async getattestation({source_chain, source_action_index}){
             if(!source_chain || !source_action_index)
                 return {error: "source_chain and source_action_index are required"};
@@ -833,7 +786,6 @@ async function startApi(){
         next();
     });
 
-    // GET /hub-db/snapshot/price_snapshots: full snapshot of price_snapshots table
     app.get('/hub-db/snapshot/price_snapshots', async (req, res) => {
         try {
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
@@ -848,7 +800,6 @@ async function startApi(){
         }
     });
 
-    // GET /hub-db/snapshot/oracle_prices: full snapshot of oracle_prices table
     app.get('/hub-db/snapshot/oracle_prices', async (req, res) => {
         try {
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
@@ -863,7 +814,6 @@ async function startApi(){
         }
     });
 
-    // GET /hub-db/snapshot/cross_chain_matches: full snapshot of cross_chain_matches table
     app.get('/hub-db/snapshot/cross_chain_matches', async (req, res) => {
         try {
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
@@ -884,7 +834,6 @@ async function startApi(){
         }
     });
 
-    // GET /hub-db/snapshot/capability_snapshots: full snapshot of capability_snapshots table
     app.get('/hub-db/snapshot/capability_snapshots', async (req, res) => {
         try {
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
@@ -1197,10 +1146,8 @@ async function startApi(){
         res.type('application/json').send(openrpcSpec);
     });
 
-    // Allow JSON-RPC requests
     app.use(jsonRouter({methods: jsonRpcController}));
 
-    // Start the server using an explicit http.Server so we can attach a WebSocket upgrade handler
     const server = http.createServer(app);
 
     // Hub DB sync channel: WebSocket server for live row updates
@@ -1223,7 +1170,6 @@ async function startApi(){
                 return;
             }
         }
-        // Only accept upgrades to the /hub-db/subscribe path
         if (!request.url || !request.url.startsWith('/hub-db/subscribe')) {
             socket.destroy();
             return;
@@ -1237,8 +1183,6 @@ async function startApi(){
         });
     });
 
-    // Daily telemetry retention sweep: prune pings older than the retention window.
-    // Runs once shortly after startup, then every 24h. No-op when telemetry is disabled.
     let telemetryCleanupInterval = null;
     if (TELEMETRY_ENABLED) {
         const pruneTelemetry = async () => {
@@ -1255,7 +1199,6 @@ async function startApi(){
         telemetryCleanupInterval = setInterval(pruneTelemetry, 24 * 60 * 60 * 1000);
     }
 
-    // Periodic ping to detect dead WebSocket connections
     const pingInterval = setInterval(() => {
         if (!hub.hubDbBroadcaster) return;
         for (let ws of hub.hubDbBroadcaster.subscribers) {
@@ -1291,7 +1234,6 @@ async function startApi(){
         forceTimer.unref();
 
         try {
-            // Close hub-db WebSocket subscribers + the WS server.
             if (hub.hubDbBroadcaster) {
                 for (let ws of hub.hubDbBroadcaster.subscribers) {
                     try { ws.close(1001, 'shutting down'); } catch (e) { /* ignore */ }

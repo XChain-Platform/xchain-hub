@@ -230,8 +230,6 @@ class CrossChainCallEngine extends EventEmitter {
         };
     }
 
-    // ─── Poll: discover confirmed requests + completed executions ──────────
-
     async _poll(){
         if(this._polling) return;                       // never overlap slow polls
         this._polling = true;
@@ -398,8 +396,6 @@ class CrossChainCallEngine extends EventEmitter {
         }
     }
 
-    // ─── Consensus duck-type: canonical + independent re-verification ──────
-
     // Canonical signing strings. MUST byte-match the indexer's verifiers
     // (xexec.js for dispatch, the callback pass for result). Variable-length
     // fields (params, return payload) enter as sha256 so the canonical stays
@@ -504,8 +500,6 @@ class CrossChainCallEngine extends EventEmitter {
                this._sha256(payload) === this._sha256(String(row.return_payload_b64 == null ? '' : row.return_payload_b64));
     }
 
-    // ─── Persistence + mirror ───────────────────────────────────────────────
-
     async _writeFinalizedRow(ev){
         let row = ev.row;
         row.validator_signatures = JSON.stringify(ev.signatures || []);
@@ -591,8 +585,6 @@ class CrossChainCallEngine extends EventEmitter {
         return validators;
     }
 
-    // ─── Retraction (source-chain reorg below a request) ────────────────────
-
     // Should be unreachable past the confirmation gate; kept as the same
     // defense-in-depth the DEX has. Marks BOTH phases retracted (a dispatch
     // whose request vanished must not produce a callback) and broadcasts a
@@ -614,8 +606,6 @@ class CrossChainCallEngine extends EventEmitter {
         console.warn('CrossChainCall: retracted ' + rows.length + ' relay row(s) for ' + chain +
                      ' reorg below action ' + fromActionIndex + ' (should not happen past confirmation depth)');
     }
-
-    // ─── Helpers ────────────────────────────────────────────────────────────
 
     async _rowExists(callId, phase){
         let rows = await this.db.doQuery(

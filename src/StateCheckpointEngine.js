@@ -195,7 +195,7 @@ class StateCheckpointEngine extends EventEmitter {
         }
     }
 
-    // ── Cadence (leader-only initiation; followers only react to SIGN_REQs) ────
+    // Cadence: leader-only initiation; followers only react to SIGN_REQs.
     async _tick(){
         if(this._ticking) return;
         this._ticking = true;
@@ -233,7 +233,6 @@ class StateCheckpointEngine extends EventEmitter {
         }
     }
 
-    // ── Leader round for one chain ──────────────────────────────────────────────
     async _runRound(chain, snapshotBlock, validators){
         // Checkpoint the chain's tip minus a confirmation margin, so every peer's
         // indexer/replica has indexed the block and a shallow reorg can't race the round.
@@ -312,7 +311,6 @@ class StateCheckpointEngine extends EventEmitter {
         this._checkQuorum(id);
     }
 
-    // ── P2P handlers ────────────────────────────────────────────────────────────
     _handleMessage(envelope){
         if(!envelope || !envelope.data) return;
         switch(envelope.type){
@@ -467,8 +465,6 @@ class StateCheckpointEngine extends EventEmitter {
                     ' seq ' + cp.checkpoint_seq + ' (' + sigs.length + '/' + quorum + ' sigs' + (isLeader ? ', leader' : '') + ')');
         this.emit('checkpoint:finalized', { checkpoint: cp, signatures: sigs });
     }
-
-    // ── Canonical / helpers ─────────────────────────────────────────────────────
 
     // RAW (ungated) v0 checkpoint canonical: the bare pipe-join. The v1 archive
     // (StateAnchorPublisher._archiveCanonical) nests THIS, not the gated form, so the

@@ -42,12 +42,10 @@ class ValidatorIdentity {
         this.privateKey = crypto.createPrivateKey({ key: pkcs8Der, format: 'der', type: 'pkcs8' });
         this.publicKey  = crypto.createPublicKey(this.privateKey);
 
-        // Extract raw 32-byte pubkey for hex representation
         let spkiDer = this.publicKey.export({ format: 'der', type: 'spki' });
         this.pubkeyHex = spkiDer.subarray(SPKI_ED25519_PREFIX.length).toString('hex');
     }
 
-    // Get the public key as 64 hex chars
     getPubkeyHex() {
         return this.pubkeyHex;
     }
@@ -75,13 +73,11 @@ class ValidatorIdentity {
         });
     }
 
-    // Sign an envelope, returning the signature hex
     signEnvelope(envelope) {
         let payload = ValidatorIdentity.getSignablePayload(envelope);
         return this.sign(payload);
     }
 
-    // Verify a signature against a raw 64-hex-char pubkey
     static verify(payload, sigHex, pubkeyHex) {
         if (!sigHex || !pubkeyHex) return false;
         try {
@@ -93,7 +89,6 @@ class ValidatorIdentity {
         }
     }
 
-    // Verify an envelope's signature against a pubkey hex
     static verifyEnvelope(envelope, pubkeyHex) {
         let payload = ValidatorIdentity.getSignablePayload(envelope);
         return ValidatorIdentity.verify(payload, envelope.sig, pubkeyHex);
@@ -107,7 +102,6 @@ class ValidatorIdentity {
         return crypto.createPublicKey({ key: spkiDer, format: 'der', type: 'spki' });
     }
 
-    // Generate a new Ed25519 keypair (utility for key generation)
     static generate() {
         let { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
         let spkiDer  = publicKey.export({ format: 'der', type: 'spki' });

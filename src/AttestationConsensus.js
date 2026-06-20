@@ -259,7 +259,6 @@ class AttestationConsensus extends EventEmitter {
 
         this.pending.set(rid, pending);
 
-        // Broadcast our PROPOSE
         if(this.peerManager){
             this.peerManager.broadcast(ATTEST_PROPOSE, {
                 requestId:  rid,
@@ -699,13 +698,11 @@ class AttestationConsensus extends EventEmitter {
         this._markFinalized(rid);
         if(pending.timer) clearTimeout(pending.timer);
 
-        // Convert signatures Map to [{pubkey, sig}] array for publisher
+        // We need at least max(REDUNDANCY, quorum) sigs on the on-chain response.
         let sigsArray = [];
         for(let [pk, sg] of pending.signatures){
             sigsArray.push({ pubkey: pk, sig: sg });
         }
-        // Pare back if we somehow over-collected (rarely matters)
-        // We need at least max(REDUNDANCY, quorum) sigs on the on-chain response.
 
         console.log('AttestationConsensus: finalized ' + rid.substring(0,16) + '... (' +
                     pending.prepares.size + ' prepares, ' + pending.commits.size + ' commits, ' +
@@ -726,7 +723,6 @@ class AttestationConsensus extends EventEmitter {
             role:         pending.role
         });
 
-        // Free memory shortly after finalization
         this.earlyCommits.delete(rid);
         let evictTimer = setTimeout(() => this.pending.delete(rid), PENDING_EVICT_MS);
         if (evictTimer.unref) evictTimer.unref();  // housekeeping timer; never pin process liveness

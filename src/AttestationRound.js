@@ -118,9 +118,6 @@ class AttestationRound {
         this.pollCursor = null;
     }
 
-    // Poll the BTC indexer for pending attestation_requests. For each new row
-    // not already in `seen`, evaluate responsibility and (if responsible)
-    // start a round.
     async _pollPending(){
         if(!this.identity) return;  // observer-only hub; nothing to propose
         let url = await this._resolveBtcIndexerUrl();
@@ -200,9 +197,6 @@ class AttestationRound {
         }
     }
 
-    // Remove `seen` entries whose last-evaluated timestamp is older than the
-    // retry window, so a request previously skipped for a transient reason is
-    // treated as new again on the next poll.
     _evictStaleSeen(){
         let cutoff = Date.now() - this.retryAfterMs;
         for(let [rid, ts] of this.seen){
@@ -210,10 +204,6 @@ class AttestationRound {
         }
     }
 
-    // Remove `rounds` entries whose proposedAt is older than the round TTL.
-    // Round state is only needed while a request's PBFT round is in flight
-    // (getRoundState lookups by consensus); long-completed rounds are dead
-    // weight, so evicting them bounds memory.
     _evictStaleRounds(){
         let cutoff = Date.now() - this.roundsTtlMs;
         for(let [rid, st] of this.rounds){
@@ -223,8 +213,7 @@ class AttestationRound {
         }
     }
 
-    // Evaluate responsibility for this request, fetch if responsible, and
-    // propose. Idempotent: repeat calls for the same requestId are dropped.
+    // Idempotent: repeat calls for the same requestId are dropped.
     async _startRound(request){
         let rid          = String(request.request_id).toLowerCase();
         let providerId   = String(request.provider_id);
@@ -400,8 +389,6 @@ class AttestationRound {
             failed_count:    failed
         };
     }
-
-    // ----- BTC indexer URL resolution (mirrors XChainHub helpers) -----
 
     async _resolveBtcIndexerUrl(){
         if(typeof this.hub._resolveBtcIndexerUrl === 'function'){

@@ -158,12 +158,10 @@ class ProviderRegistry {
         }
     }
 
-    // Whether a provider id is known and active
     isKnown(providerId){
         return this.providers.has(providerId);
     }
 
-    // Full provider definition object, or null
     getDef(providerId){
         return this.providers.get(providerId) || null;
     }
@@ -292,8 +290,6 @@ class ProviderRegistry {
     listProviderIds(){
         return [...this.providers.keys()];
     }
-
-    // ----- Validation helpers (parity with indexer-side stub) -----
 
     isRedundancyAllowed(providerId, redundancy){
         let p = this.providers.get(providerId);

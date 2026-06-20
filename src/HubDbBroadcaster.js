@@ -56,7 +56,6 @@ class HubDbBroadcaster {
         if (this._watermarkTimer.unref) this._watermarkTimer.unref();
     }
 
-    // Broadcast the current stream position to all subscribers.
     broadcastWatermark() {
         if (this.subscribers.size === 0) return;
         let message = JSON.stringify({ type: 'watermark', ts: Math.floor(Date.now() / 1000) });
@@ -76,8 +75,6 @@ class HubDbBroadcaster {
     // so the client can detect and fill any narrow gap between the subscription point
     // and its subsequent REST bootstrap response.
     async addSubscriber(ws, req) {
-        // Enforce caps before registering: total fan-out, then per-IP. Without a cap an
-        // unauthenticated subscribe is an unbounded connection + query amplifier.
         if (this.subscribers.size >= this.maxSubscribers) {
             try { ws.close(1013, 'Too many subscribers'); } catch (e) { /* ignore */ }
             return;
@@ -136,7 +133,6 @@ class HubDbBroadcaster {
         } catch (e) { /* ignore */ }
     }
 
-    // Remove a subscriber
     removeSubscriber(ws) {
         if (this.subscribers.has(ws)) {
             this.subscribers.delete(ws);
@@ -150,7 +146,6 @@ class HubDbBroadcaster {
         }
     }
 
-    // Broadcast a row insertion event to all subscribers
     // event: { table, row }
     broadcastRow(event) {
         if (this.subscribers.size === 0) return;
@@ -187,7 +182,6 @@ class HubDbBroadcaster {
         }
     }
 
-    // Send a message with backpressure handling
     _send(ws, message) {
         if (ws.readyState !== WebSocket.OPEN) return;
         if (ws.bufferedAmount > 0) {
@@ -209,7 +203,6 @@ class HubDbBroadcaster {
         }
     }
 
-    // Get current subscriber count
     getSubscriberCount() {
         return this.subscribers.size;
     }

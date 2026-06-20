@@ -30,7 +30,6 @@ class SwapTracker {
         this._attestationHandler = null;
     }
 
-    // Subscribe to attestation events from CrossChainEngine
     start(crossChainEngine) {
         if (!crossChainEngine) return;
         this._attestationHandler = (attestation) => this._onAttestationFinalized(attestation);
@@ -45,7 +44,6 @@ class SwapTracker {
         }
     }
 
-    // Record a new SWAP initiation
     async initiateSwap(sourceChain, sourceActionIndex, destChain, destActionIndex) {
         let query = `INSERT INTO swap_records
             (source_chain, source_action_index, dest_chain, dest_action_index, status)
@@ -58,14 +56,12 @@ class SwapTracker {
         console.log('SWAP: Initiated ' + sourceChain + ':' + sourceActionIndex + ' → ' + destChain);
     }
 
-    // Get a specific swap by source
     async getSwap(sourceChain, sourceActionIndex) {
         let query = "SELECT * FROM swap_records WHERE source_chain = ? AND source_action_index = ? LIMIT 1";
         let rows = await this.db.doQuery(query, [sourceChain, sourceActionIndex]);
         return rows.length > 0 ? rows[0] : null;
     }
 
-    // Query swaps by status
     async getSwaps(status, limit) {
         let query = "SELECT * FROM swap_records";
         let args = [];
@@ -78,7 +74,6 @@ class SwapTracker {
         return await this.db.doQuery(query, args);
     }
 
-    // Update swap status
     async updateSwapStatus(sourceChain, sourceActionIndex, status, attestationId) {
         let query = "UPDATE swap_records SET status = ?";
         let args = [status];
@@ -95,7 +90,6 @@ class SwapTracker {
     async _onAttestationFinalized(attestation) {
         if (!attestation || !attestation.sourceChain || !attestation.sourceActionIndex) return;
 
-        // Check if there's a swap record matching this attestation
         let swap = await this.getSwap(attestation.sourceChain, attestation.sourceActionIndex);
         if (swap && swap.status === 'initiated') {
             await this.updateSwapStatus(
