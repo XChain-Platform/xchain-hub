@@ -43,17 +43,17 @@ Decentralized config oracle, price oracle, and cross-chain coordinator for the X
 
 ## Documentation
 
-Full hub documentation is available in the [xchain-documentation](https://github.com/XChain-platform/xchain-documentation/tree/master/components/hub) repository:
+Full hub documentation is available in the [xchain-documentation](https://github.com/XChain-Platform/xchain-documentation/tree/master/components/hub) repository:
 
 | Document | Description |
 |---|---|
-| [README](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/README.md) | Overview, installation, quick start, service discovery, multi-instance deployment |
-| [Architecture](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/ARCHITECTURE.md) | Subsystem design, P2P gossip, PBFT consensus, oracle pipeline, cross-chain engine |
-| [Configuration](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/CONFIGURATION.md) | All environment variables, database schema, connection pool, validator identity |
-| [API](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/API.md) | JSON-RPC method reference: config, validators, oracle, attestations, swaps, reorgs, governance |
-| [Database](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/DATABASE.md) | Full schema reference: 13 tables for config, validators, oracle, attestations, governance |
-| [Operations](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/OPERATIONS.md) | Running, Docker, resilience, troubleshooting |
-| [Decentralization](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/DECENTRALIZATION.md) | Evolution from centralized oracle to decentralized validator network (all phases complete) |
+| [README](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/README.md) | Overview, installation, quick start, service discovery, multi-instance deployment |
+| [Architecture](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/ARCHITECTURE.md) | Subsystem design, P2P gossip, PBFT consensus, oracle pipeline, cross-chain engine |
+| [Configuration](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/CONFIGURATION.md) | All environment variables, database schema, connection pool, validator identity |
+| [API](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/API.md) | JSON-RPC method reference: config, validators, oracle, attestations, swaps, reorgs, governance |
+| [Database](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/DATABASE.md) | Full schema reference: 13 tables for config, validators, oracle, attestations, governance |
+| [Operations](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/OPERATIONS.md) | Running, Docker, resilience, troubleshooting |
+| [Decentralization](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/DECENTRALIZATION.md) | Evolution from centralized oracle to decentralized validator network (all phases complete) |
 
 ## Quick Start
 
@@ -167,7 +167,7 @@ The `full_node` capability requires a reachable BTC RPC endpoint (`FULLNODE.BTC_
 | `ANTHROPIC_API_KEY` | (none) | Required to serve the `llm` provider. Without it, the LLM probe in `selfTest('attestation')` is skipped and the validator silently opts out of LLM requests. |
 | `LLM_DEFAULT_MODEL` | first of `approved_models` | LLM model this validator chooses when serving requests. Falls back to registry default if not in `approved_models`. |
 
-See [Configuration](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/CONFIGURATION.md) for the full list of 30+ environment variables.
+See [Configuration](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/CONFIGURATION.md) for the full list of 30+ environment variables.
 
 ## Scripts
 
@@ -206,7 +206,7 @@ See [Configuration](https://github.com/XChain-platform/xchain-documentation/blob
 
 ## JSON-RPC API
 
-All methods are called via HTTP POST with JSON-RPC 2.0 format. See [API Reference](https://github.com/XChain-platform/xchain-documentation/blob/master/components/hub/API.md) for full details.
+All methods are called via HTTP POST with JSON-RPC 2.0 format. See [API Reference](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/API.md) for full details.
 
 | Category | Methods |
 |---|---|
