@@ -12,7 +12,6 @@ If you're reporting a security issue, **stop here** and read [`SECURITY.md`](./S
 - Environment variables and database schema: [`CONFIGURATION.md`](./CONFIGURATION.md)
 - Full component docs: the [`xchain-documentation`](https://github.com/XChain-platform/xchain-documentation/tree/master/components/hub) repository (architecture, configuration, API reference, operations)
 - Disclosure policy: [`SECURITY.md`](./SECURITY.md)
-- Code of Conduct: [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md)
 - License: [`LICENSE.md`](./LICENSE.md) + [`NOTICE.md`](./NOTICE.md) (GNU Affero General Public License v3.0, dual-licensed)
 
 ---
@@ -114,12 +113,6 @@ CI is the smoke + unit gate. Before opening a PR:
 4. Open the PR with a clear title and a description of what changed and why.
 
 For non-security bugs, open an issue at <https://github.com/XChain-platform/xchain-hub/issues/new>. For security bugs, see [`SECURITY.md`](./SECURITY.md).
-
----
-
-## Code of Conduct
-
-We follow our [Code of Conduct](./CODE_OF_CONDUCT.md), adapted from the Contributor Covenant 2.1. Be kind, assume good faith, and disagree without being a jerk.
 
 ---
 
