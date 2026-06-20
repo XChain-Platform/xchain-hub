@@ -4,14 +4,14 @@
 # XChain Platform Hub
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.0.12-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.2.16-blue" alt="Version">
   <img src="https://img.shields.io/badge/tests-1222%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node">
-  <img src="https://img.shields.io/badge/license-Dankest%20Community-orange" alt="License">
+  <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License">
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/coverage-unit%20%7C%20integration%20%7C%20e2e%20%7C%20fuzz%20%7C%20chaos%20%7C%20boundary%20%7C%20smoke%20%7C%20regression%20%7C%20performance-brightgreen" alt="Coverage">
+  <img src="https://img.shields.io/badge/coverage-unit%20%7C%20integration%20%7C%20e2e%20%7C%20security%20%7C%20fuzz%20%7C%20chaos%20%7C%20smoke%20%7C%20regression%20%7C%20performance-brightgreen" alt="Coverage">
 </p>
 
 Decentralized config oracle, price oracle, and cross-chain coordinator for the XChain Platform. Validators form a P2P gossip network with PBFT consensus, Ed25519 identity, trimmed-median price aggregation, cross-chain attestation, and off-chain governance.
@@ -28,7 +28,7 @@ Decentralized config oracle, price oracle, and cross-chain coordinator for the X
 - **External attestation framework**: contracts emit `ATTEST` v0 (request, via `xchain.attestation` VM namespace); validators in the responsible-set fetch from the named provider, reach PBFT consensus, and publish `ATTEST` v1 (response) on-chain. Built-in providers: `http_get` (byte-equality) and `llm` (Claude judge-model)
 - **Capability-based staking**: five independent capabilities (`price`, `cross_chain`, `oracle_publish`, `attestation`, `full_node`) auto-qualify per validator based on aggregate stake amount vs governance-configurable `min_stake[capability]`; per-capability self-tests gate local participation
 - **Block-boundary quorum snapshot**: every PBFT round locks N at a specific `block_index` via the indexer, so the qualified validator set is deterministic federation-wide even as stake drifts. The locked quorum governs the whole round (PREPARE, COMMIT, and view-change acceptance) so leader-failover elections can't diverge from the proposal phases when validators join or unstake mid-round
-- **SWAP lifecycle tracking**: tracks cross-chain swaps through initiated -> attested -> executed -> settled
+- **SWAP lifecycle tracking**: tracks cross-chain swaps through initiated -> attested -> executed -> settled -> failed
 - **Reorg propagation**: cross-chain reorg detection, hub rollback, and coordinated chain rollback via PBFT consensus
 - **Governance**: off-chain PBFT voting for parameter changes (7-day voting period, 2/3+ approval, 50% quorum)
 - **Reward tracking**: per-round XCHAIN rewards for oracle participants; cross-hub `pushvalidatorrewards` to indexer for persistence
@@ -37,7 +37,8 @@ Decentralized config oracle, price oracle, and cross-chain coordinator for the X
 - **Multi-instance**: multiple hub instances against shared MariaDB with consumer fallback
 - **Single-node fallback**: all consensus operations apply directly when no peers are connected
 - **Network-aware chain tips**: `pushchaintip` carries `network` (mainnet/testnet/regtest); consensus anchors against the matching tip with fallback to indexer's `getlatestblock`
-- **MariaDB storage**: 15 relational tables with circuit breaker and exponential backoff
+- **State checkpoints and ANCHOR publishing**: `StateCheckpointEngine` quorum-signs per-chain ledger/actions/contract hash checkpoints; `StateAnchorPublisher` elects a leader from the `oracle_publish` snapshot and writes ANCHOR v0/v1/v2 transactions to DOGE with a failover ladder; archive batches carry both DEX matches and XCALL relay rows
+- **MariaDB storage**: 20 relational tables with circuit breaker and exponential backoff
 - **Docker-ready**: Dockerfile for containerized deployment via xchain-node
 
 ## Documentation
@@ -283,14 +284,3 @@ with a commercial license available for proprietary use.
 You may use, modify, and distribute this material under the terms of the License.
 See [LICENSE](./LICENSE.md) and [NOTICE](./NOTICE.md) for full terms.
 See the [licensing overview](https://docs.xchain.io/legal/licensing).
-
-## License
-
-XChain Platform is **open source**, dual-licensed under:
-
-- the **[GNU Affero General Public License v3.0](./LICENSE.md)** (`AGPL-3.0-or-later`), free for everyone, and
-- a **[commercial license](https://docs.xchain.io/legal/commercial-license)** for companies that need to keep modifications private.
-
-See the **[licensing overview](https://docs.xchain.io/legal/licensing)** for which one applies to you. "XChain" is a trademark of Dankest, LLC. See the **[Trademark Policy](https://docs.xchain.io/legal/trademark)**.
-
-Copyright © 2025-2026 Dankest, LLC.
