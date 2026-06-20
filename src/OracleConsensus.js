@@ -216,6 +216,24 @@ class OracleConsensus extends EventEmitter {
         }
     }
 
+    // Minimum per-pair provider count observed across all of a round's submissions
+    // (Infinity when no submission carries a per-pair `sources` count). A result of
+    // <= 1 means at least one pair finalized this round with single-source (and thus
+    // correlated, outlier-rejection-defeating) corroboration somewhere in the set.
+    _minRoundSources(submissions) {
+        let min = Infinity;
+        if (!submissions) return min;
+        for (let sub of submissions.values()) {
+            if (sub && Array.isArray(sub.prices)) {
+                for (let p of sub.prices) {
+                    let n = Number(p && p.sources);
+                    if (Number.isFinite(n)) min = Math.min(min, n);
+                }
+            }
+        }
+        return min;
+    }
+
     // Finalize a round. Called by OracleRound after the submission window closes.
     // btcBlockHeight and btcBlockTime are the BTC chain tip at the time the round was
     // triggered (used for the on-chain PRICE v0 anchor).
@@ -245,6 +263,24 @@ class OracleConsensus extends EventEmitter {
                 ' submission(s); minimum is ' + this.minSubmissions + ', skipping');
             await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'below minimum submissions threshold');
             return;
+        }
+
+        // Source-diversity health signal (non-blocking). finalizeRound gates on hub
+        // COUNT, never on per-submission source diversity, so a federation-wide
+        // degradation to a single upstream (e.g. Kraken down everywhere, only
+        // CoinGecko answering) finalizes and is PBFT-signed exactly as if it had the
+        // "2 uncorrelated sources" corroboration the oracle is designed around. The
+        // only prior signal was a per-hub PriceFetcher console.warn; this one is
+        // federation-scoped (it sees every collected submission's per-pair count),
+        // so it actually reflects whether the ROUND, not just this hub, lost its
+        // second source. Surface it rather than letting the round pass silently; the
+        // round still finalizes (no liveness change).
+        let minRoundSources = this._minRoundSources(submissions);
+        if (Number.isFinite(minRoundSources) && minRoundSources <= 1) {
+            console.warn('Oracle: Round ' + round + ' finalizing with single-source corroboration ' +
+                '(minimum per-pair source count across all ' + submissions.size + ' submissions = ' +
+                minRoundSources + '); the federation lost its second uncorrelated price source this ' +
+                'round. PRICE v0 is still quorum-signed but its outlier-rejection resilience is gone.');
         }
 
         // Lock the validator-set snapshot at the round's block boundary so

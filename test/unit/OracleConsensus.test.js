@@ -171,6 +171,40 @@ describe('OracleConsensus', function () {
     });
 
     // -----------------------------------------------------------------
+    // _minRoundSources(): source-diversity health signal
+    // -----------------------------------------------------------------
+
+    describe('_minRoundSources()', function () {
+        it('returns the minimum per-pair source count across all submissions', function () {
+            let subs = buildSubmissions([
+                { sender: 'v1', prices: [{ coinPair: 'BTC/USD', price: '100000', sources: 2 }, { coinPair: 'LTC/USD', price: '80', sources: 2 }] },
+                { sender: 'v2', prices: [{ coinPair: 'BTC/USD', price: '100010', sources: 2 }, { coinPair: 'LTC/USD', price: '82', sources: 2 }] }
+            ]);
+            expect(oc._minRoundSources(subs)).to.equal(2);
+        });
+
+        it('drops to 1 when any submission reached a single upstream for a pair', function () {
+            let subs = buildSubmissions([
+                { sender: 'v1', prices: [{ coinPair: 'BTC/USD', price: '100000', sources: 2 }] },
+                { sender: 'v2', prices: [{ coinPair: 'BTC/USD', price: '100010', sources: 1 }] }
+            ]);
+            expect(oc._minRoundSources(subs)).to.equal(1);
+        });
+
+        it('returns Infinity when no per-pair source count is present (cannot assess)', function () {
+            let subs = buildSubmissions([
+                { sender: 'v1', prices: [{ coinPair: 'BTC/USD', price: '100000' }] }
+            ]);
+            expect(oc._minRoundSources(subs)).to.equal(Infinity);
+        });
+
+        it('tolerates an empty / missing submission set', function () {
+            expect(oc._minRoundSources(new Map())).to.equal(Infinity);
+            expect(oc._minRoundSources(null)).to.equal(Infinity);
+        });
+    });
+
+    // -----------------------------------------------------------------
     // _aggregateAll()
     // -----------------------------------------------------------------
 
