@@ -43,6 +43,12 @@ const fs            = require('fs');
 const path          = require('path');
 const EncoderClient = require('./EncoderClient.js');
 
+// PRICE v0 wire ceiling. Must equal MAX_DATA_BYTES in xchain-encoder/src/validator.js
+// (mirrors ATTEST_WIRE_MAX_BYTES in AttestationPublisher.js): an oversized wire is
+// rejected by createTx with a RangeError, so we drop it before it lands on the durable
+// queue rather than letting the failover sweep retry it forever.
+const PRICE_WIRE_MAX_BYTES = 8189;
+
 class OraclePublisher {
 
     constructor(hub) {
@@ -185,6 +191,20 @@ class OraclePublisher {
         let sigs = (event.signatures && Array.isArray(event.signatures) && event.signatures.length > 0)
             ? event.signatures
             : this._buildLocalSigOnly(event);
+
+        // Guard: the assembled PRICE v0 wire must fit the encoder's data-payload
+        // ceiling, or createTx rejects it with a RangeError downstream. Catching that
+        // after enqueue is too late, the entry would already be on the durable queue
+        // and the failover sweep would retry the same oversized payload forever. Drop
+        // it loudly here (symmetric to AttestationPublisher's pre-WAL guard).
+        let wire      = this.buildPriceV0Wire(round, event.btcBlockTime, event.prices, sigs, event.btcBlockHeight);
+        let wireBytes = Buffer.byteLength(wire, 'utf8');
+        if (wireBytes > PRICE_WIRE_MAX_BYTES) {
+            console.error('OraclePublisher: PRICE v0 wire for round ' + round +
+                ' is ' + wireBytes + ' bytes, exceeds encoder limit of ' + PRICE_WIRE_MAX_BYTES +
+                '; dropping broadcast. Too many pairs or signatures for a single round.');
+            return;
+        }
 
         await this._enqueue({
             round:          round,

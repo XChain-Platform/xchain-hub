@@ -869,7 +869,10 @@ class StateAnchorPublisher {
 
         // 2. The archive must decompress, CRC-match, and byte-match our own rows.
         let json;
-        try { json = zlib.gunzipSync(Buffer.from(String(d.archive_b64), 'base64url')).toString('utf8'); }
+        // Bounded decompress: the archive is attacker-supplied bytes decompressed
+        // BEFORE any CRC/quorum check, so an unbounded gunzip is a gzip-bomb DoS.
+        // Mirror the committed indexer cap (anchor.js / recovery.js, 16 MiB).
+        try { json = zlib.gunzipSync(Buffer.from(String(d.archive_b64), 'base64url'), { maxOutputLength: 16 * 1024 * 1024 }).toString('utf8'); }
         catch(e){ return; }
         if(this._crc32Hex(json) !== String(d.batch_crc32)) return;
         let archive;
