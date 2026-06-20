@@ -1033,8 +1033,10 @@ class OracleConsensus extends EventEmitter {
                 (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
                  validator_count, consensus_round, consensus_proof, status)
                 VALUES ${placeholders}
-                ON DUPLICATE KEY UPDATE reference_block = VALUES(reference_block),
-                 block_timestamp = VALUES(block_timestamp), status = 'skipped'`;
+                ON DUPLICATE KEY UPDATE
+                 reference_block = IF(status = 'skipped', VALUES(reference_block), reference_block),
+                 block_timestamp = IF(status = 'skipped', VALUES(block_timestamp), block_timestamp),
+                 status = IF(status = 'skipped', 'skipped', status)`;
             await this.db.doQuery(query, params);
         }
         this.finalized.add(round);

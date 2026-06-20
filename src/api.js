@@ -1230,7 +1230,7 @@ async function startApi(){
         }
         wss.handleUpgrade(request, socket, head, (ws) => {
             if (hub.hubDbBroadcaster) {
-                hub.hubDbBroadcaster.addSubscriber(ws);
+                hub.hubDbBroadcaster.addSubscriber(ws, request);
             } else {
                 try { ws.close(1011, 'Hub DB broadcaster not ready'); } catch (e) { /* ignore */ }
             }

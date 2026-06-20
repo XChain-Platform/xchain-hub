@@ -36,6 +36,13 @@ class HubDbBroadcaster {
         this.config = config || {};
         this.db     = db || null;      // Optional hub DB (used to stamp max IDs in the ready message)
         this.subscribers = new Set();  // Set<ws>
+        this.ipConnections = new Map(); // ip -> Set<ws>, for the per-IP cap
+        // Per-IP and total subscriber caps. Legitimate clients are the federation's
+        // indexer/sync instances (a bounded handful), so the default is generous but
+        // finite: an unauthenticated /hub-db/subscribe (HUB_API_KEY unset) is otherwise
+        // an unbounded fan-out where every connect runs several SELECT MAX(id) queries.
+        this.maxPerIp = parseInt(this.config.WS_MAX_PER_IP || 100);
+        this.maxSubscribers = parseInt(this.config.WS_MAX_SUBSCRIBERS || 1000);
         this.maxBufferedMessages = parseInt(this.config.WS_BACKPRESSURE_LIMIT || 50);
 
         // Stream-position watermark heartbeat. Every interval, tell subscribers
@@ -68,8 +75,24 @@ class HubDbBroadcaster {
     // Includes the current per-table max row IDs (when a DB connection is available)
     // so the client can detect and fill any narrow gap between the subscription point
     // and its subsequent REST bootstrap response.
-    async addSubscriber(ws) {
+    async addSubscriber(ws, req) {
+        // Enforce caps before registering: total fan-out, then per-IP. Without a cap an
+        // unauthenticated subscribe is an unbounded connection + query amplifier.
+        if (this.subscribers.size >= this.maxSubscribers) {
+            try { ws.close(1013, 'Too many subscribers'); } catch (e) { /* ignore */ }
+            return;
+        }
+        let ip = req ? (req.socket && req.socket.remoteAddress) || 'unknown' : 'unknown';
+        if (!this.ipConnections.has(ip)) this.ipConnections.set(ip, new Set());
+        let ipSet = this.ipConnections.get(ip);
+        if (ipSet.size >= this.maxPerIp) {
+            try { ws.close(1008, 'Too many connections from this IP'); } catch (e) { /* ignore */ }
+            return;
+        }
+
         this.subscribers.add(ws);
+        ipSet.add(ws);
+        ws._hubIp = ip;
         ws._hubBuffered = 0;
 
         ws.on('close', () => this.removeSubscriber(ws));
@@ -117,6 +140,12 @@ class HubDbBroadcaster {
     removeSubscriber(ws) {
         if (this.subscribers.has(ws)) {
             this.subscribers.delete(ws);
+            let ip = ws._hubIp;
+            if (ip && this.ipConnections.has(ip)) {
+                let ipSet = this.ipConnections.get(ip);
+                ipSet.delete(ws);
+                if (ipSet.size === 0) this.ipConnections.delete(ip);
+            }
             console.log('HubDbBroadcaster: subscriber removed (' + this.subscribers.size + ' remaining)');
         }
     }
