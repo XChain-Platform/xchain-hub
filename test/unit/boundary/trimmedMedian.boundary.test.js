@@ -58,7 +58,10 @@ describe('Boundary: Trimmed Median Aggregation', function () {
         });
 
         it('N=2: no trim, returns average of two', function () {
-            let subs = submissionsForPair([100, 200]);
+            // Within the 2-source deviation gate (spread 2/300 ~ 0.67% < 5%) so the
+            // gate passes and the no-trim mean is returned; the gate itself is
+            // covered separately in OracleConsensus.test.js.
+            let subs = submissionsForPair([149, 151]);
             expect(oc._aggregate(subs, 'BTC/USD')).to.equal('150.00000000');
         });
 
@@ -168,9 +171,11 @@ describe('Boundary: Trimmed Median Aggregation', function () {
         });
 
         it('average of two close floats preserves precision', function () {
-            let subs = submissionsForPair([0.00000001, 0.00000003]);
-            // (0.00000001 + 0.00000003) / 2 = 0.00000002
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('0.00000002');
+            // Relatively-close pair so the 2-source deviation gate passes (spread
+            // ~1e-8 << 5%), while the mean still lands exactly on an 8-dp boundary
+            // to exercise bignumber precision: (1.00000001 + 1.00000003)/2.
+            let subs = submissionsForPair([1.00000001, 1.00000003]);
+            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('1.00000002');
         });
 
         it('large price value within bounds', function () {
