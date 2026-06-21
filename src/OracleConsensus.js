@@ -925,6 +925,28 @@ class OracleConsensus extends EventEmitter {
         // Sort ascending (ordering only; float compare is fine here)
         values.sort((a, b) => a.f - b.f);
 
+        // Exactly-2-source deviation gate (item 4496). With only two submissions the trim
+        // below is a no-op, so the even-length median is a plain mean: one divergent source
+        // drags the federation-signed price ~halfway toward it, with no outlier protection.
+        // Refuse to publish this pair when the two disagree enough that the mean would put
+        // BOTH submitters outside the deviation threshold, i.e. each is more than
+        // ORACLE_DEVIATION_THRESHOLD from the mean, which for sorted values reduces to
+        // (hi - lo) / (hi + lo) > threshold. That is the exact condition under which
+        // SlashDetector would slash both, so we never federation-sign a price we would then
+        // slash; the pair is simply omitted this round and consumers hold the last snapshot.
+        // Uses the hardcoded constant (not an env value) and bignumber math so every hub
+        // gates identically. CONSENSUS-CRITICAL: deploy fleet-wide atomically.
+        if (values.length === 2) {
+            let lo = values[0].s, hi = values[1].s; // sorted ascending, both > 0
+            let spread = bcmath.bcdiv(bcmath.bcsub(hi, lo, 8), bcmath.bcadd(lo, hi, 8), 8);
+            if (bcmath.bcgt(spread, String(ORACLE_DEVIATION_THRESHOLD))) {
+                console.warn('Oracle: dropping ' + coinPair + ' this round: only 2 sources and they '
+                    + 'disagree beyond the ' + (ORACLE_DEVIATION_THRESHOLD * 100) + '% mean-deviation gate ('
+                    + lo + ' vs ' + hi + ')');
+                return null;
+            }
+        }
+
         // Trim top and bottom 15%. Use Math.ceil so at least one value is trimmed
         // once N >= 4 (Math.floor yields 0 for all N <= 6, making the trim a no-op
         // in small federations and leaving a single in-bounds outlier able to shift

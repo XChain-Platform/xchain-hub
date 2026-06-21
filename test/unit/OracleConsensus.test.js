@@ -63,6 +63,27 @@ describe('OracleConsensus', function () {
             expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100001.00000000');
         });
 
+        it('two submissions just within the deviation gate: returns the mean', function () {
+            // (105-95)/(105+95) = 0.05 = threshold; the 2-source gate is strictly
+            // greater-than, so a spread exactly at the threshold still finalizes (item 4496).
+            let subs = submissionsForPair([95, 105]);
+            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100.00000000');
+        });
+
+        it('two submissions beyond the deviation gate: drops the pair (returns null)', function () {
+            // (110-90)/(110+90) = 0.10 > 0.05 threshold; the mean would put both sources
+            // outside the slash threshold, so the pair is omitted this round (item 4496).
+            let subs = submissionsForPair([90, 110]);
+            expect(oc._aggregate(subs, 'BTC/USD')).to.be.null;
+        });
+
+        it('deviation gate is 2-source only: three divergent submissions still finalize', function () {
+            // The gate never applies for N >= 3 (the trim provides outlier protection); a
+            // 3-source round with a wide spread still returns the trimmed median.
+            let subs = submissionsForPair([100, 200, 300]);
+            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('200.00000000');
+        });
+
         it('three submissions: returns middle value', function () {
             let subs = submissionsForPair([100000, 100010, 100005]);
             expect(oc._aggregate(subs, 'BTC/USD')).to.equal('100005.00000000');
