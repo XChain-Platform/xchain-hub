@@ -152,8 +152,12 @@ const DB_PROBE_TIMEOUT_MS = 2000;
 
 // Lightweight in-process counters for the config-fetch path. These reset on
 // restart (no persistence needed: operators watch them as a live signal, not a
-// historical log). Surfaced on /health so a config oracle that starts returning
-// errors still shows "degraded" even when the DB SELECT 1 probe stays green.
+// historical log). Surfaced on /health as body-only telemetry (config_fetch:
+// {served, errors}). They are deliberately NOT wired into the healthy/503 status:
+// a config-fetch error must not flip the hub out of federation rotation (the DB
+// probe and oracle staleness drive degraded). An alerting probe that cares about
+// config-serve failures compares config_fetch.errors across two scrapes (a delta;
+// the counts are cumulative-since-restart), rather than keying off the HTTP status.
 const configFetchCounters = { served: 0, errors: 0 };
 
 async function startApi(){
