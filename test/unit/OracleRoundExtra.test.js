@@ -149,6 +149,45 @@ describe('OracleRound (extra coverage)', function () {
         });
     });
 
+    // ── getSubmissionsInfo: anchor-tip block age (#4544) ──────────────────────
+    // A present-but-frozen pushed tip (indexer suppressing pushes during catch-up)
+    // resets every fetch-freshness counter, so chainTipStalenessMs (read time) stays
+    // small and usingFallback stays false. The tip's OWN block age must surface the
+    // freeze. Threshold = 2x round interval = 120s here (ORACLE_ROUND_INTERVAL 60000).
+    describe('getSubmissionsInfo(): anchor tip block age (#4544)', function () {
+        it('flags a frozen-but-present pushed tip as block-stale while fetch counters stay clean', async function () {
+            let staleBlockTime = Math.floor(Date.now() / 1000) - 100000; // ~28h old
+            hub.db.getChainTip = sinon.stub().resolves({ blockHeight: 800000, blockTime: staleBlockTime });
+            await or._executeRound();
+            // The bug: fetch counters all read healthy on a frozen tip.
+            expect(or.chainTipFallbackActive).to.be.false;
+            expect(or.chainTipFetchFailures).to.equal(0);
+            let info = await or.getSubmissionsInfo();
+            expect(info.usingFallback).to.be.false;
+            // The fix: the tip's own age is surfaced and flagged stale.
+            expect(info.chainTipBlockAgeMs).to.be.greaterThan(120000);
+            expect(info.chainTipBlockStale).to.be.true;
+        });
+
+        it('reports a fresh pushed tip as not block-stale', async function () {
+            let freshBlockTime = Math.floor(Date.now() / 1000);
+            hub.db.getChainTip = sinon.stub().resolves({ blockHeight: 800001, blockTime: freshBlockTime });
+            await or._executeRound();
+            let info = await or.getSubmissionsInfo();
+            expect(info.chainTipBlockStale).to.be.false;
+            expect(info.chainTipBlockAgeMs).to.be.lessThan(120000);
+        });
+
+        it('returns null block age when anchored on the round-number fallback', async function () {
+            hub.db.getChainTip = sinon.stub().resolves(null);
+            await or._executeRound();
+            let info = await or.getSubmissionsInfo();
+            // Wall-clock-stamped fallback anchor has no real block time to age.
+            expect(info.chainTipBlockAgeMs).to.equal(null);
+            expect(info.chainTipBlockStale).to.equal(null);
+        });
+    });
+
     // ── _handleMessage: edge cases ───────────────────────────────────────────
 
     describe('_handleMessage() — edge cases', function () {

@@ -73,6 +73,21 @@ class OracleRound {
         this.chainTipFallbackActive        = false;
         this._startTime                    = Date.now();
 
+        // Block-age of the anchor tip itself (seconds, Unix), set ONLY when the anchor
+        // came from a real pushed chain tip. The indexer suppresses chain-tip pushes
+        // during a long catch-up, so getChainTip can keep returning a frozen row that
+        // resets every fetch-freshness counter while the tip's own block time ages out.
+        // chainTipStalenessMs measures read time, not the tip's age, so it stays small
+        // and hides the freeze. null when the anchor is the wall-clock-stamped direct
+        // height or round-number fallback (block-age monitoring does not apply there).
+        this.anchorTipBlockTime = null;
+        // Tip is flagged stale once its block time is older than this (seconds). Default
+        // 2x the round interval; a genuine BTC tip advances roughly every 10 min, so this
+        // only trips on a multi-block freeze, and it is a monitoring flag (it never
+        // suppresses finalization, which the chainTipFallbackActive ladder still governs).
+        this.chainTipStalenessThresholdS = parseInt(this.config.CHAIN_TIP_STALENESS_THRESHOLD_S)
+            || Math.floor((2 * this.roundInterval) / 1000);
+
         // Skipped-round tracking
         this.consecutiveSkippedRounds = 0;
         this.lastSuccessfulRoundTime  = null;
@@ -227,6 +242,18 @@ class OracleRound {
             // against their own clock (which would fold in client skew).
             chainTipStalenessMs:      this.lastSuccessfulChainTipFetchAt
                 ? (Date.now() - this.lastSuccessfulChainTipFetchAt)
+                : null,
+            // Age of the ANCHOR TIP ITSELF (now - its block time), the signal
+            // chainTipStalenessMs misses: a frozen-but-present pushed tip resets the
+            // fetch counters every round yet its block time keeps aging. null when the
+            // anchor is a wall-clock-stamped direct height or round-number fallback,
+            // where block age is meaningless. chainTipBlockStale flags it past the
+            // threshold so a frozen tip during indexer catch-up is visible to monitors.
+            chainTipBlockAgeMs:       this.anchorTipBlockTime != null
+                ? (Date.now() - this.anchorTipBlockTime * 1000)
+                : null,
+            chainTipBlockStale:       this.anchorTipBlockTime != null
+                ? ((Date.now() - this.anchorTipBlockTime * 1000) > this.chainTipStalenessThresholdS * 1000)
                 : null
         };
     }
@@ -282,6 +309,11 @@ class OracleRound {
                 this.lastSuccessfulChainTipFetchAt = Date.now();
                 this.chainTipFetchFailures         = 0;
                 this.chainTipFallbackActive        = false;
+                // Record the pushed tip's own block time so diagnostics can age it. A
+                // present-but-frozen row (indexer catch-up suppressing pushes) clears
+                // every fetch counter above but leaves this block time stale.
+                this.anchorTipBlockTime = (typeof btcTip.blockTime === 'number' && btcTip.blockTime > 0)
+                    ? btcTip.blockTime : null;
             } else {
                 // No pushed chain tip in the hub DB. The indexer→hub `pushchaintip`
                 // path only populates getChainTip when an indexer is co-located with
@@ -302,6 +334,9 @@ class OracleRound {
                     this.lastSuccessfulChainTipFetchAt = Date.now();
                     this.chainTipFetchFailures         = 0;
                     this.chainTipFallbackActive        = false;
+                    // Direct-resolver height carries no block time; the anchor is wall
+                    // clock, so block-age monitoring does not apply.
+                    this.anchorTipBlockTime = null;
                 } else {
                     // No BTC tip available at all — fall back to round number
                     this.chainTipFetchFailures++;
@@ -313,6 +348,7 @@ class OracleRound {
                     }
                     this.currentBtcBlockHeight = this.currentRound;
                     this.currentBtcBlockTime   = Math.floor(Date.now() / 1000);
+                    this.anchorTipBlockTime    = null;
                 }
             }
         } catch (err) {
@@ -325,6 +361,7 @@ class OracleRound {
             }
             this.currentBtcBlockHeight = this.currentRound;
             this.currentBtcBlockTime   = Math.floor(Date.now() / 1000);
+            this.anchorTipBlockTime    = null;
         }
 
         // Prune old submissions (keep current and previous round only)
