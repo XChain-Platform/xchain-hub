@@ -724,6 +724,116 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
     });
 });
 
+// Regression for commit 128e849: in a judge_model round with N>=3 responsible
+// workers the LEADER broadcasts its PREPARE but followers never ran agree() and
+// never re-broadcast their own PREPARE, so prepares.size stalled at 1 (leader
+// only) and PREPARE-quorum (max(quorum, REDUNDANCY)) was never reached, deadlocking
+// the round. The fix: when a follower adopts the leader's PREPARE it immediately
+// re-broadcasts its own endorsing PREPARE over the canonical winner body.
+describe('AttestationConsensus: judge_model multi-hub PREPARE-quorum (#128e849)', function () {
+
+    let me, p1, p2, hub, c, finalized;
+    beforeEach(() => {
+        me  = mkIdentity();
+        p1  = mkIdentity();
+        p2  = mkIdentity();
+        hub = createMockHub({ identity: me });
+        c   = new AttestationConsensus(hub, makeRealProviderRegistry(proposals => proposals[0], 'judge_model'));
+        finalized = [];
+        c.on('request:finalized', e => finalized.push(e));
+    });
+    afterEach(() => {
+        for (let [, p] of (c ? c.pending : [])) if (p.timer) clearTimeout(p.timer);
+        sinon.restore();
+    });
+
+    const RID       = 'aa'.repeat(16);
+    const MY_BODY   = Buffer.from('my-body');
+    const P1_BODY   = Buffer.from('p1-body');  // leader body (byte-divergent per judge_model)
+    const REDUNDANCY = 3;
+
+    // Seed a follower round: me + p2 are workers; p1 is the elected leader.
+    async function seedFollowerRound() {
+        let rs = roundState(me, [me, p1, p2], MY_BODY, 'llm', REDUNDANCY);
+        rs.leaderPubkey = pub(p1);
+        rs.role         = 'follower';
+        await c.propose(RID, rs);
+        await flush();
+        // p2 also proposes (byte-divergent per judge_model convention)
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.from('p2-body')));
+        await flush();
+        return c.pending.get(RID);
+    }
+
+    it('a follower re-broadcasts ATTEST_PREPARE exactly once on leader adoption (128e849 fix)', async function () {
+        await seedFollowerRound();
+
+        let beforeCount = hub._peerManager.broadcast.getCalls()
+            .filter(call => call.args[0] === 'ATTEST_PREPARE').length;
+
+        // Leader's PREPARE arrives and is adopted as winner.
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, P1_BODY));
+        await flush();
+
+        let prepBroadcasts = hub._peerManager.broadcast.getCalls()
+            .filter(call => call.args[0] === 'ATTEST_PREPARE');
+        // Exactly one new PREPARE broadcast (ours, endorsing the canonical winner).
+        expect(prepBroadcasts.length - beforeCount).to.equal(1);
+        let sent = prepBroadcasts[prepBroadcasts.length - 1].args[1];
+        expect(sent.sig_pubkey).to.equal(pub(me));
+        expect(Buffer.from(sent.body_b64, 'base64').toString()).to.equal(P1_BODY.toString());
+    });
+
+    it('prepares.size reaches max(quorum, REDUNDANCY) after leader + follower re-broadcasts', async function () {
+        let pending = await seedFollowerRound();
+
+        // Leader PREPARE (p1) arrives.
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, P1_BODY));
+        // Follower p2 adopts the leader PREPARE and re-broadcasts its own.
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p2, P1_BODY));
+        await flush();
+
+        // Our own re-broadcast is counted locally (pending.prepares.add(myPubkey)
+        // runs in _handlePrepare), so all three workers' PREPAREs are now counted.
+        let needed = Math.max(pending.quorum, REDUNDANCY);
+        expect(pending.prepares.size).to.be.at.least(needed);
+    });
+
+    it('a follower PREPARE arriving BEFORE the leader is buffered, not adopted as winner', async function () {
+        let pending = await seedFollowerRound();
+
+        // p2 (follower, not leader) races a PREPARE first.
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p2, Buffer.from('p2-early-body')));
+        expect(pending.winner, 'follower PREPARE must not set winner before leader').to.equal(null);
+        // Leader arrives; winner must be the leader body, not p2's.
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, P1_BODY));
+        await flush();
+        expect(pending.winner).to.not.equal(null);
+        expect(pending.winner.body.toString()).to.equal(P1_BODY.toString());
+    });
+
+    it('byte_equality round is unaffected: no extra re-broadcast', async function () {
+        // Replace the provider registry with a byte_equality one.
+        c = new AttestationConsensus(hub, makeRealProviderRegistry(proposals => proposals[0], 'byte_equality'));
+        c.on('request:finalized', e => finalized.push(e));
+        const BODY = Buffer.from('shared-body');
+        await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', REDUNDANCY));
+        await flush();
+        let prepBefore = hub._peerManager.broadcast.getCalls()
+            .filter(call => call.args[0] === 'ATTEST_PREPARE').length;
+
+        // Simulate leader PREPARE (p1) arriving at our byte_equality follower.
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY));
+        await flush();
+
+        let prepAfter = hub._peerManager.broadcast.getCalls()
+            .filter(call => call.args[0] === 'ATTEST_PREPARE').length;
+        // byte_equality: we already broadcast our own PREPARE from _maybeAdvanceFromProposals;
+        // handling a peer PREPARE must NOT trigger a second re-broadcast.
+        expect(prepAfter - prepBefore).to.equal(0);
+    });
+});
+
 describe('AttestationConsensus: _maybeAdvanceFromProposals consensus outcomes', function () {
 
     let me, p1, p2, hub, c;

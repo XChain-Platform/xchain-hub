@@ -193,8 +193,14 @@ class CrossChainDexEngine extends EventEmitter {
 
     async _discoverAndMatch(){
         let offersByCoin = {};
-        for(let coin of ALLOWED_CHAINS){
-            if(!this.indexers[coin].url) continue;
+        // Fetch each coin's order book in parallel: the three RPC calls are fully
+        // independent (each populates its own offersByCoin slot) and matching runs
+        // only after all books are collected, so parallelising cuts ~2x per-coin
+        // latency from every poll tick without changing which offers are matched or
+        // in what order. Per-coin try/catch is preserved so one slow/failed indexer
+        // still yields an empty book for that coin rather than aborting the whole round.
+        await Promise.all(ALLOWED_CHAINS.map(async (coin) => {
+            if(!this.indexers[coin].url){ offersByCoin[coin] = []; return; }
             try {
                 let res = await this._indexerCall(coin, 'getopencrosschainorders', { limit: 500 });
                 // Tag every offer with its home indexer's network (authoritative). An offer
@@ -207,7 +213,7 @@ class CrossChainDexEngine extends EventEmitter {
             } catch(e){
                 offersByCoin[coin] = [];
             }
-        }
+        }));
         for(let desc of this._findMatches(offersByCoin)){
             try {
                 await this._finalizeMatch(desc);

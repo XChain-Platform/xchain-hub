@@ -150,6 +150,12 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
 // oracle-staleness check. A single constant prevents silent per-probe drift.
 const DB_PROBE_TIMEOUT_MS = 2000;
 
+// Lightweight in-process counters for the config-fetch path. These reset on
+// restart (no persistence needed: operators watch them as a live signal, not a
+// historical log). Surfaced on /health so a config oracle that starts returning
+// errors still shows "degraded" even when the DB SELECT 1 probe stays green.
+const configFetchCounters = { served: 0, errors: 0 };
+
 async function startApi(){
     const hub = new XChainHub(
         process.env.HUB_DB_HOST,
@@ -302,7 +308,11 @@ async function startApi(){
                 dbCircuit: dbCircuit,
                 oracle_last_finalized_age_s:  oracleAgeS,
                 oracle_stale:                 oracleStale,
-                oracle_staleness_threshold_s: oracleThresholdS
+                oracle_staleness_threshold_s: oracleThresholdS,
+                config_fetch: {
+                    served: configFetchCounters.served,
+                    errors: configFetchCounters.errors
+                }
             };
         },
 
@@ -326,8 +336,10 @@ async function startApi(){
                 let seq       = await hub.getLastSeq();
                 let watermark = await hub.getConfigWatermark();
                 let configs   = await hub.getAllConfigs(since);
+                configFetchCounters.served++;
                 return {configs, seq, watermark};
             } catch (err) {
+                configFetchCounters.errors++;
                 return {error: "there was an error trying to get all configs"};
             }
         },
