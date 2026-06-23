@@ -882,6 +882,43 @@ describe('Consensus (PBFT)', function () {
             expect(rejected).to.be.an('error');
             expect(consensus.pendingProposals.has(5)).to.be.false;
         });
+
+        it('_saveSeq failure: proposal.applied stays false and lastAppliedSeq is not advanced', async function () {
+            // applyConfig succeeds but _saveSeq rejects (transient DB error). The
+            // proposal must NOT be marked applied and lastAppliedSeq must not advance,
+            // so a subsequent retry can persist the seq row and complete the apply.
+            // This is the case described in item 5293 (comment vs. code mismatch).
+            consensus.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+
+            // applyConfig resolves; _saveSeq rejects on the first call, then resolves.
+            hub.applyConfig.resolves();
+            let saveCallCount = 0;
+            sinon.stub(consensus, '_saveSeq').callsFake(async () => {
+                saveCallCount++;
+                if (saveCallCount === 1) throw new Error('seq write failed');
+            });
+
+            let config = { x: 1 };
+            let digest = consensus._digest(config);
+            let rejected = null;
+            consensus.lastAppliedSeq = 0;
+            consensus.pendingProposals.set(5, {
+                config, digest,
+                prepares: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr, VALIDATORS_4[2].addr]),
+                commits:  new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr]),
+                resolved: false, applied: false, timer: null, _commitSent: true,
+                resolve: () => {}, reject: (e) => { rejected = e; }, quorum: 3
+            });
+
+            consensus._handleCommit({ sender: VALIDATORS_4[2].addr, data: { seq: 5, configDigest: digest } });
+            await new Promise(r => setTimeout(r, 20));
+
+            expect(rejected).to.be.an('error');
+            expect(rejected.message).to.equal('seq write failed');
+            // applied must remain false; lastAppliedSeq must not advance.
+            expect(consensus.lastAppliedSeq).to.equal(0);
+        });
     });
 
     // -----------------------------------------------------------------
@@ -1014,7 +1051,12 @@ describe('Consensus (PBFT)', function () {
             expect(consensus.applied.has(digest)).to.be.true;
         });
 
-        it('swallows a follower apply error when there is no reject handler', async function () {
+        it('follower apply error (no reject handler): swallows, keeps proposal pending for retry, applied stays false', async function () {
+            // A follower has no resolve/reject handlers. On _applyConfig failure the
+            // proposal must remain in pendingProposals with applied=false so that an
+            // external retry or a subsequent COMMIT message can re-trigger the apply
+            // once the DB recovers. Dropping the proposal on error here would leave
+            // the seq unapplied with no recovery path.
             hub.applyConfig.rejects(new Error('db down'));
             let config = { x: 1 };
             let digest = consensus._digest(config);
@@ -1025,7 +1067,9 @@ describe('Consensus (PBFT)', function () {
             });
             consensus._handleCommit({ sender: VALIDATORS_4[2].addr, data: { seq: 5, configDigest: digest } });
             await new Promise(r => setTimeout(r, 20));
-            expect(consensus.pendingProposals.has(5)).to.be.false;
+            // Proposal stays pending (retry path) and applied is still false.
+            expect(consensus.pendingProposals.has(5)).to.be.true;
+            expect(consensus.pendingProposals.get(5).applied).to.be.false;
         });
 
         it('_getQuorum returns 0 with neither validators nor a peer manager', function () {

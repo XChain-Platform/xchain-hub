@@ -362,8 +362,17 @@ class PeerManager extends EventEmitter {
         // known-peer ceiling so a consensus burst is never dropped (a dropped PBFT
         // message is a liveness hazard); unknown/unestablished peers keep the tight
         // anti-spam limit.
+        //
+        // The CEILING is derived from transport-verified identifiers only (knownAddr
+        // set by the WS handshake, ws._peerAddr set after the first successfully
+        // verified message). envelope.sender is intentionally excluded here because
+        // the signature has not been checked yet: using it would let an attacker name
+        // a known peer's address in the envelope to claim the higher ceiling for
+        // otherwise-unverified traffic (~20x headroom amplification). The bucket key
+        // (ratePeer) still includes envelope.sender so the dedup + tracking work
+        // correctly after verification.
         let ratePeer = knownAddr || ws._peerAddr || envelope.sender;
-        let rateCeil = this.peers.has(ratePeer) ? this.knownMsgRateLimit : this.msgRateLimit;
+        let rateCeil = this.peers.has(knownAddr || ws._peerAddr) ? this.knownMsgRateLimit : this.msgRateLimit;
         if (!this._checkMsgRate(ratePeer, rateCeil)) {
             console.warn('P2P: Rate limit exceeded for peer ' + ratePeer + '; dropping message');
             return;

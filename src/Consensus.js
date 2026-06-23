@@ -559,15 +559,23 @@ class Consensus {
 
         // Same quorum rule as _checkPrepareQuorum; see _quorumMet.
         if (this._quorumMet(proposal, proposal.commits, proposal.commitPubkeys)) {
-            proposal.applied = true;
-
+            // proposal.applied is set AFTER both _applyConfig and _saveSeq succeed.
+            // Setting it early (before the awaits) would silence the stale-seq gate
+            // on re-entry but leave applied=true after a _saveSeq failure, so the
+            // config is durable but lastAppliedSeq is not advanced and the seq row
+            // is never persisted. The comment at ~565 ("the proposal is NOT marked
+            // applied") was the intent; this matches the code to that intent.
             this._applyConfig(proposal.config).then(async () => {
-                // Persist the sequence with the apply, not fire-and-forget: await it
-                // so a failure propagates to the catch below and the proposal is NOT
-                // marked applied. Otherwise the config rows and last_seq could diverge
-                // (seq write lost) and a seq-only invalidation consumer would serve
-                // stale config; the proposal is reprocessed until the seq persists.
+                // Persist the sequence together with the apply: await so that a
+                // failure propagates to the catch below and leaves proposal.applied
+                // false. If the seq write is lost, the config rows and last_seq
+                // diverge and a seq-invalidation consumer would serve stale config;
+                // leaving applied=false lets the proposal be re-queued until the
+                // seq persists.
                 await this._saveSeq(seq);
+
+                // Mark applied only after both steps succeed.
+                proposal.applied = true;
                 if (seq > this.lastAppliedSeq) this.lastAppliedSeq = seq;
 
                 // Resolve the proposer's promise (if we initiated)
@@ -585,13 +593,19 @@ class Consensus {
                     proposal.commits.size + ' commits)');
 
             }).catch((err) => {
+                // proposal.applied remains false; leave the proposal in
+                // pendingProposals so incoming COMMIT messages trigger a retry
+                // when the DB recovers. Reject the proposer's promise if present
+                // so the caller can surface the error.
                 console.error('PBFT: Error applying config (seq ' + seq + '):', err.message);
                 if (!proposal.resolved && proposal.reject) {
                     proposal.resolved = true;
                     if (proposal.timer) clearTimeout(proposal.timer);
                     proposal.reject(err);
+                    this.pendingProposals.delete(seq);
                 }
-                this.pendingProposals.delete(seq);
+                // No delete when there is no reject handler (follower path): the
+                // proposal stays pending so a retry can be triggered externally.
             });
         }
     }

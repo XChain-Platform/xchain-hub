@@ -460,6 +460,40 @@ describe('PeerManager', function () {
             pm._handleInbound(ws, mk('T', 'ls1'), 'ws://peer:10001');
             expect(pm.peers.get('ws://peer:10001').lastSeen).to.be.greaterThan(0);
         });
+
+        it('unknown-sig inbound naming a known peer in envelope.sender is bounded by msgRateLimit, not knownMsgRateLimit', function () {
+            // An attacker with no established transport identity (knownAddr=null,
+            // ws._peerAddr=null) sets envelope.sender to a known peer's address.
+            // The CEILING decision must use only transport-verified identifiers; the
+            // spoofed envelope.sender must be excluded. We verify this by checking
+            // the ceiling argument _checkMsgRate is called with: it must be
+            // msgRateLimit (tight), never knownMsgRateLimit (wide).
+            pm.msgRateLimit      = 5;
+            pm.knownMsgRateLimit = 100;
+
+            // Register a known peer by address so peers.has() returns true for it.
+            pm.peers.set('ws://known-peer:10001', { lastSeen: Date.now() });
+
+            let ceilingSeen = null;
+            let origCheck = pm._checkMsgRate.bind(pm);
+            sinon.stub(pm, '_checkMsgRate').callsFake(function (peer, ceil) {
+                ceilingSeen = ceil;
+                return origCheck(peer, ceil);
+            });
+
+            // Fresh WS connection with no established transport identity.
+            let ws = { _peerAddr: null };
+            let env = JSON.stringify({
+                id: 'sp1', type: 'T',
+                sender: 'ws://known-peer:10001',   // spoofed
+                timestamp: Date.now(), data: {}
+            });
+            pm._handleInbound(ws, env, null);
+
+            // The ceiling must be the tight msgRateLimit, not the known-peer ceiling.
+            expect(ceilingSeen).to.equal(pm.msgRateLimit);
+            expect(ceilingSeen).to.not.equal(pm.knownMsgRateLimit);
+        });
     });
 
     // -----------------------------------------------------------------

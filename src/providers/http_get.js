@@ -201,6 +201,16 @@ exports.fetch = async (payload, options) => {
 // quorum. A plain majority is used rather than the BFT 2f+1 form because the
 // latter degenerates to quorum=1 at N=3, which would let a single divergent
 // (stale or adversarial) body become canonical with no agreement at all.
+//
+// NOTE: agree() returns a winner body when the simple-majority quorum is met,
+// but finalization of a byte_equality round also requires max(quorum, redundancy)
+// winner-matching signatures (see AttestationConsensus._checkCommitQuorum). A
+// follower only re-signs on byte-identical body match (AttestationConsensus ~582).
+// So when redundancy=3, effective finalization requires 3-of-3 byte-identical
+// signatures, not the 2-of-3 majority this function's quorum check alone suggests.
+// Rounds that cannot collect enough matching signatures expire rather than
+// finalize incorrectly. Do NOT relax the AttestationConsensus signature floor
+// without a coordinated consensus-breaking fleet deploy.
 exports.agree = (proposals) => {
     if (!Array.isArray(proposals) || proposals.length === 0) return null;
 
