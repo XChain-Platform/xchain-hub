@@ -127,6 +127,10 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     P2P_HEARTBEAT_INTERVAL:    parseInt(process.env.P2P_HEARTBEAT_INTERVAL) || 15000,
     P2P_DEDUP_PRUNE_INTERVAL:  parseInt(process.env.P2P_DEDUP_PRUNE_INTERVAL) || 30000,
     P2P_WS_PING_INTERVAL:      parseInt(process.env.P2P_WS_PING_INTERVAL) || 30000,
+    // Transport signer-set refresh poll (Option A auth follows on-chain validator
+    // key rotation). Read at XChainHub.js:155; without it wired here the env knob
+    // never reached p2pConfig and the interval was permanently pinned to 30000.
+    P2P_SIGNER_SET_REFRESH_MS: parseInt(process.env.P2P_SIGNER_SET_REFRESH_MS) || 30000,
     P2P_RECONNECT_BASE:        parseInt(process.env.P2P_RECONNECT_BASE) || 2000,
     P2P_RECONNECT_MAX:      parseInt(process.env.P2P_RECONNECT_MAX) || 60000,
     // Per-IP inbound cap (anti-DoS, PeerManager). The default of 3 is too low
