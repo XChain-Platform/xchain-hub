@@ -223,6 +223,29 @@ describe('OracleConsensus', function () {
             expect(oc._minRoundSources(new Map())).to.equal(Infinity);
             expect(oc._minRoundSources(null)).to.equal(Infinity);
         });
+
+        it('ignores CoinGecko-only-by-design pairs when a capable-pair set is supplied', function () {
+            // BTC/MXN is CoinGecko-only (Kraken lists no MXN), so it reports sources=1
+            // every healthy round; BTC/USD is multi-source-capable and healthy at 2.
+            // Scoped to the capable set, the round reads as 2 (healthy), not 1.
+            let subs = buildSubmissions([
+                { sender: 'v1', prices: [{ coinPair: 'BTC/USD', price: '100000', sources: 2 }, { coinPair: 'BTC/MXN', price: '1700000', sources: 1 }] },
+                { sender: 'v2', prices: [{ coinPair: 'BTC/USD', price: '100010', sources: 2 }, { coinPair: 'BTC/MXN', price: '1700100', sources: 1 }] }
+            ]);
+            let capable = new Set(['BTC/USD']);
+            expect(oc._minRoundSources(subs, capable)).to.equal(2);
+            // Without the filter the by-design single-source pair pins the minimum to 1.
+            expect(oc._minRoundSources(subs)).to.equal(1);
+        });
+
+        it('still flags a genuine degradation on a multi-source-capable pair', function () {
+            // BTC/USD is capable of 2 but only reached 1 this round -> real degradation.
+            let subs = buildSubmissions([
+                { sender: 'v1', prices: [{ coinPair: 'BTC/USD', price: '100000', sources: 1 }] },
+                { sender: 'v2', prices: [{ coinPair: 'BTC/USD', price: '100010', sources: 1 }] }
+            ]);
+            expect(oc._minRoundSources(subs, new Set(['BTC/USD']))).to.equal(1);
+        });
     });
 
     // -----------------------------------------------------------------

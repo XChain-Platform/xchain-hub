@@ -214,12 +214,18 @@ class OracleConsensus extends EventEmitter {
     // (Infinity when no submission carries a per-pair `sources` count). A result of
     // <= 1 means at least one pair finalized this round with single-source (and thus
     // correlated, outlier-rejection-defeating) corroboration somewhere in the set.
-    _minRoundSources(submissions) {
+    //
+    // `capablePairs` (optional Set of coinPairs) restricts the scan to pairs that can
+    // normally reach >=2 sources, so CoinGecko-only-by-design pairs (BTC/MXN, etc.,
+    // which Kraken does not list) do not pin the minimum to 1 every healthy round.
+    // Omitted -> no filtering (legacy behavior; relied on by unit tests).
+    _minRoundSources(submissions, capablePairs) {
         let min = Infinity;
         if (!submissions) return min;
         for (let sub of submissions.values()) {
             if (sub && Array.isArray(sub.prices)) {
                 for (let p of sub.prices) {
+                    if (capablePairs && p && !capablePairs.has(p.coinPair)) continue;
                     let n = Number(p && p.sources);
                     if (Number.isFinite(n)) min = Math.min(min, n);
                 }
@@ -267,12 +273,21 @@ class OracleConsensus extends EventEmitter {
         // so it actually reflects whether the ROUND, not just this hub, lost its
         // second source. Surface it rather than letting the round pass silently; the
         // round still finalizes (no liveness change).
-        let minRoundSources = this._minRoundSources(submissions);
+        //
+        // Scope the scan to pairs that can normally reach >=2 sources. Pairs that are
+        // CoinGecko-only by design (Kraken lists no MXN/CNY/BRL/INR/KRW, etc.) report
+        // sources=1 in every healthy round, so without this filter the global minimum
+        // is ~always 1 and the warn cries wolf on every finalization, training
+        // operators to ignore the very signal that should flag a real degradation.
+        let capablePairs   = this.oracleRound && this.oracleRound.priceFetcher
+            ? this.oracleRound.priceFetcher.multiSourceCapablePairs() : null;
+        let minRoundSources = this._minRoundSources(submissions, capablePairs);
         if (Number.isFinite(minRoundSources) && minRoundSources <= 1) {
             console.warn('Oracle: Round ' + round + ' finalizing with single-source corroboration ' +
-                '(minimum per-pair source count across all ' + submissions.size + ' submissions = ' +
-                minRoundSources + '); the federation lost its second uncorrelated price source this ' +
-                'round. PRICE v0 is still quorum-signed but its outlier-rejection resilience is gone.');
+                'on a normally-multi-source pair (minimum source count across the ' + submissions.size +
+                ' submissions, restricted to multi-source-capable pairs = ' + minRoundSources +
+                '); the federation lost its second uncorrelated price source this round. PRICE v0 is ' +
+                'still quorum-signed but its outlier-rejection resilience is gone.');
         }
 
         // Lock the validator-set snapshot at the round's block boundary so

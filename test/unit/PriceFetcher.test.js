@@ -286,4 +286,27 @@ describe('PriceFetcher', function () {
             expect(pf.timeout).to.equal(5000);
         });
     });
+
+    // -----------------------------------------------------------------
+    // multiSourceCapablePairs()
+    // -----------------------------------------------------------------
+
+    describe('multiSourceCapablePairs()', function () {
+        it('keyless: only Kraken-listed pairs can reach two sources', function () {
+            pf = new PriceFetcher({});
+            let capable = pf.multiSourceCapablePairs();
+            // CoinGecko (all 36) + Kraken (its listed subset) are the two keyless sources.
+            expect(capable.has('BTC/USD')).to.be.true;   // Kraken lists XBTUSD
+            expect(capable.has('BTC/MXN')).to.be.false;  // CoinGecko-only by design
+            expect(capable.has('LTC/CAD')).to.be.false;  // Kraken lists no LTC/CAD
+            expect(capable.size).to.equal(17);           // current KRAKEN_PAIRS count
+        });
+
+        it('with a CoinMarketCap key: all 36 pairs become multi-source-capable', function () {
+            pf = new PriceFetcher({ COINMARKETCAP_API_KEY: 'k' });
+            let capable = pf.multiSourceCapablePairs();
+            expect(capable.has('BTC/MXN')).to.be.true;   // CoinGecko + CMC both cover it
+            expect(capable.size).to.equal(36);
+        });
+    });
 });

@@ -94,6 +94,22 @@ class PriceFetcher {
         this._cmc400AlertThreshold = parseInt(config.CMC_400_ALERT_THRESHOLD) || 5;
     }
 
+    // The coin pairs at least two configured providers can supply this round. Used by
+    // the federation single-source health signal so it does not cry wolf on pairs that
+    // are CoinGecko-only by design: Kraken lists no MXN/CNY/BRL/INR/KRW markets (plus
+    // per-coin gaps like LTC/CAD, DOGE/JPY), so those pairs always report sources=1 in
+    // a healthy keyless round. CoinGecko is the always-on baseline for all 36 pairs;
+    // the second source is Kraken (keyless, KRAKEN_PAIRS only) or CoinMarketCap (all 36,
+    // only when a key is configured). A pair absent from this set can never reach two
+    // sources, so a sources=1 reading for it is expected, not a degradation.
+    multiSourceCapablePairs() {
+        let capable = new Set(Object.keys(KRAKEN_PAIRS));
+        if (this.coinmarketcapApiKey) {
+            for (let pair of COIN_PAIRS) capable.add(pair);
+        }
+        return capable;
+    }
+
     // Fetch prices from all configured sources and return the local median per coin pair
     // Returns: [{ coinPair: 'BTC/USD', price: '100000.00000000', sources: 2 }, ...] for all 36 pairs
     async fetchPrices() {
