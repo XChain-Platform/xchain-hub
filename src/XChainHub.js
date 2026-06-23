@@ -47,6 +47,8 @@ const AttestationConsensus   = require('./AttestationConsensus.js');
 const AttestationPublisher   = require('./AttestationPublisher.js');
 const FullNodeChallengeRound = require('./FullNodeChallengeRound.js');
 const AttestationSpotChecker = require('./AttestationSpotChecker.js');
+const { bcmul, bcdiv }   = require('./bcmath.js');
+const mathjs             = require('mathjs');
 const fs                 = require('fs');
 const axios              = require('axios');
 const PARAMETER_LIST     = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass"];
@@ -844,10 +846,11 @@ class XChainHub {
     }
 
     async getFeeQuote(action, chain) {
-        // Gas schedule: mirrors the canonical per-chain fee schedule. BTC
+        // Default gas schedule: mirrors the canonical per-chain fee schedule. BTC
         // carries the full set; the VM_ATTEST_REQUEST entry is only metered on
         // chains where the attestation framework is active. Every other entry
-        // shares identical gas values across chains.
+        // shares identical gas values across chains. Overridden by the GAS_SCHEDULE
+        // config blob when present, so the schedule stays in sync with the indexer.
         let gasSchedule = {
             ISSUE:                  100000,
             ISSUE_SUBTOKEN:         50000,
@@ -868,22 +871,33 @@ class XChainHub {
             VM_COMPUTATION:         1
         };
 
-        // Gas price (XCHAIN per gas unit). Sourced from the config store so it
-        // can be tuned per-chain without a code change; falls back to the
-        // protocol default when no override is present (or the store is down).
-        let gasPrice = 0.00001;
+        // Use the hub's deployment network (mainnet|testnet|regtest) so a testnet
+        // or regtest hub reads the right config rows instead of always reading mainnet.
+        let network = this.network || 'mainnet';
+
+        // Gas price (XCHAIN per gas unit). Read from the hub's own network config
+        // so testnet/regtest hubs pick up their own overrides, not mainnet values.
+        // GAS_SCHEDULE blob, when present, overrides the hardcoded schedule above.
+        let gasPrice = '0.00001';
         try {
-            let chainCfg = await this.db.getConfig(chain, 'mainnet', 'chain');
+            let chainCfg = await this.db.getConfig(chain, network, 'chain');
             if (chainCfg && chainCfg.GAS_PRICE) {
                 let parsed = parseFloat(chainCfg.GAS_PRICE);
-                if (parsed > 0) gasPrice = parsed;
+                if (parsed > 0) gasPrice = chainCfg.GAS_PRICE;
             }
-        } catch (_) { /* config store unavailable; keep protocol default */ }
+            if (chainCfg && chainCfg.GAS_SCHEDULE) {
+                try {
+                    let sched = JSON.parse(chainCfg.GAS_SCHEDULE);
+                    if (sched && typeof sched === 'object') gasSchedule = Object.assign(gasSchedule, sched);
+                } catch (_) { /* malformed blob; keep defaults */ }
+            }
+        } catch (_) { /* config store unavailable; keep protocol defaults */ }
 
         if (!Object.prototype.hasOwnProperty.call(gasSchedule, action)) return { error: 'unknown action: ' + action };
         let gasCost = gasSchedule[action];
 
-        let xchainAmount = gasCost * gasPrice;
+        // Use bignumber multiply (8 decimal places) to match indexer fee charging.
+        let xchainAmount = bcmul(gasCost, gasPrice, 8);
 
         let xchainPriceRow = await this.getPrice('XCHAIN/USD');
         let coinPrice      = await this.getPrice(chain + '/USD');
@@ -891,29 +905,33 @@ class XChainHub {
         if (!xchainPriceRow || !xchainPriceRow.price) {
             throw new Error('XCHAIN/USD oracle price unavailable; cannot compute fee quote');
         }
-        let xchainUsd = parseFloat(xchainPriceRow.price);
-        if (xchainUsd <= 0) {
+        let xchainUsdStr = xchainPriceRow.price;
+        if (parseFloat(xchainUsdStr) <= 0) {
             throw new Error('XCHAIN/USD oracle price is zero or negative; cannot compute fee quote');
         }
+
+        // Formats a bignumber to exactly 8 decimal places (trailing zeros preserved),
+        // matching the .toFixed(8) format the consumer tests and indexer charging expect.
+        const fmt8 = (v) => mathjs.format(mathjs.bignumber(String(v)), {notation: 'fixed', precision: 8});
 
         let result = {
             action:       action,
             chain:        chain,
             gasCost:      gasCost,
-            gasPrice:     gasPrice.toFixed(8),
-            xchainAmount: xchainAmount.toFixed(8),
-            xchainUsd:    xchainUsd.toFixed(8)
+            gasPrice:     fmt8(gasPrice),
+            xchainAmount: fmt8(xchainAmount),
+            xchainUsd:    fmt8(xchainUsdStr)
         };
 
         if (coinPrice && coinPrice.price) {
-            let coinUsd = parseFloat(coinPrice.price);
-            if (coinUsd > 0) {
-                let feeUsd = xchainAmount * xchainUsd;
-                let nativeCoinAmount = feeUsd / coinUsd;
+            let coinUsdStr = coinPrice.price;
+            if (parseFloat(coinUsdStr) > 0) {
+                let feeUsd           = bcmul(xchainAmount, xchainUsdStr, 8);
+                let nativeCoinAmount = bcdiv(feeUsd, coinUsdStr, 8);
 
-                result.feeUsd           = feeUsd.toFixed(8);
-                result.coinUsd          = coinUsd.toFixed(8);
-                result.nativeCoinAmount = nativeCoinAmount.toFixed(8);
+                result.feeUsd           = fmt8(feeUsd);
+                result.coinUsd          = fmt8(coinUsdStr);
+                result.nativeCoinAmount = fmt8(nativeCoinAmount);
                 result.nativeCoin       = chain;
             }
         }

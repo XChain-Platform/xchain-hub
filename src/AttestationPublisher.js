@@ -94,6 +94,19 @@ class AttestationPublisher {
         this.walletSignFn = null;  // fn(psbtHex)     → Promise<txHex>
 
         this._sweepTimer = null;
+
+        // Cumulative on-chain broadcast outcomes. Surfaced via getPublisherStats()
+        // so operators can detect persistent broadcast failures without log-grepping.
+        this._broadcastSucceeded = 0;
+        this._broadcastFailed    = 0;
+    }
+
+    // Operator-facing stats for the /health response and status tooling.
+    getPublisherStats(){
+        return {
+            broadcastSucceeded: this._broadcastSucceeded,
+            broadcastFailed:    this._broadcastFailed
+        };
     }
 
     setBroadcastHook(fn){ this.broadcastFn  = fn; }
@@ -217,8 +230,10 @@ class AttestationPublisher {
         try {
             let result = await broadcaster(payload, event);
             console.log('AttestationPublisher: broadcast ' + rid.substring(0,16) + '... txid=' + (result && result.txid ? result.txid : '?'));
+            this._broadcastSucceeded++;
             this._removeFromQueue(new Set([rid]));
         } catch (e) {
+            this._broadcastFailed++;
             console.error('AttestationPublisher: broadcast failed for ' + rid.substring(0,16) + '... (will retry via sweep): ', e);
         }
     }

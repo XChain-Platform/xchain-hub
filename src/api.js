@@ -309,8 +309,11 @@ async function startApi(){
             }
             if (oracleStale) healthy = false;
 
+            let anchorStats = hub.stateAnchorPublisher ? hub.stateAnchorPublisher.getAnchorStats() : null;
+            let attestStats = hub.attestationPublisher ? hub.attestationPublisher.getPublisherStats() : null;
+
             if(!healthy) res.status(503);
-            return {
+            let healthResult = {
                 status:    healthy ? "healthy" : "degraded",
                 db:        dbOk,
                 dbCircuit: dbCircuit,
@@ -322,6 +325,9 @@ async function startApi(){
                     errors: configFetchCounters.errors
                 }
             };
+            if (anchorStats) healthResult.anchor = anchorStats;
+            if (attestStats) healthResult.attest = attestStats;
+            return healthResult;
         },
 
         // Get all service configs, tagged with the last committed PBFT sequence
@@ -809,6 +815,7 @@ async function startApi(){
 
     app.get('/hub-db/snapshot/price_snapshots', async (req, res) => {
         try {
+            if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
             let rows = await hub.db.doQuery(
@@ -823,6 +830,7 @@ async function startApi(){
 
     app.get('/hub-db/snapshot/oracle_prices', async (req, res) => {
         try {
+            if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
             let rows = await hub.db.doQuery(
@@ -837,6 +845,7 @@ async function startApi(){
 
     app.get('/hub-db/snapshot/cross_chain_matches', async (req, res) => {
         try {
+            if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
             // Exclude retracted rows: the streaming path DELETEs them on reorg
@@ -857,6 +866,7 @@ async function startApi(){
 
     app.get('/hub-db/snapshot/capability_snapshots', async (req, res) => {
         try {
+            if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
             let rows = await hub.db.doQuery(
@@ -874,6 +884,7 @@ async function startApi(){
     // audit metadata and are NOT mirrored (the indexer mirror schema has no such columns).
     app.get('/hub-db/snapshot/cross_chain_calls', async (req, res) => {
         try {
+            if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
             // Exclude retracted rows (see the cross_chain_matches snapshot above): the
@@ -897,6 +908,7 @@ async function startApi(){
     // (the indexer mirror schema has no such column).
     app.get('/hub-db/snapshot/state_checkpoints', async (req, res) => {
         try {
+            if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
             let rows = await hub.db.doQuery(

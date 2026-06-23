@@ -103,10 +103,10 @@ const MATCH_KEYS = ['id', 'match_id', 'snapshot_block', 'network',
 // dispatch/result phases); same crc32/byte-comparison rules as MATCH_KEYS.
 // Without these in the archive, a full-chain-parse recovery could not rebuild
 // the injected executions/callbacks and would diverge from live nodes.
-// `id` (the hub-assigned mirror cursor) IS archived: it is the indexers'
-// deterministic injection-order key, so recovery must rebuild rows under
-// their original ids or a reindexing node would inject calls in a different
-// order than live nodes did (action_index divergence).
+// `id` (the hub-assigned AUTO_INCREMENT primary key) IS archived for per-hub
+// provenance only; injection order is determined by (snapshot_block, call_id),
+// not by `id`. Recovery must preserve the original id so the indexer mirror
+// cursor stays consistent, but consensus ordering never uses it.
 const CALL_KEYS = ['id', 'call_id', 'phase', 'snapshot_block', 'network',
     'source_chain', 'source_action_index', 'source_contract_index',
     'target_chain', 'target_contract_index', 'method', 'params_json',
@@ -167,6 +167,8 @@ class StateAnchorPublisher {
         // a pattern of losses is surfaced here for operator visibility rather
         // than requiring a log-grep.
         this._archiveChunkLosses = 0;
+        // Cumulative count of v0/v3 anchors successfully published on-chain.
+        this._anchorsPublished = 0;
     }
 
     setBroadcastHook(fn){ this.broadcastFn = fn; }
@@ -177,6 +179,7 @@ class StateAnchorPublisher {
     // can surface cumulative archive health without grepping logs.
     getAnchorStats(){
         return {
+            anchorsPublished:   this._anchorsPublished,
             archiveChunkLosses: this._archiveChunkLosses
         };
     }
@@ -356,11 +359,12 @@ class StateAnchorPublisher {
                     continue;
                 }
                 await this.db.doQuery(
-                    'UPDATE state_checkpoints SET anchor_txid = ? WHERE chain = ? AND network = ? AND block_index = ?',
-                    [txid, row.chain, row.network, row.block_index]);
+                    'UPDATE state_checkpoints SET anchor_txid = ? WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ?',
+                    [txid, row.chain, row.network, row.block_index, row.checkpoint_seq]);
                 console.log('StateAnchorPublisher: anchored checkpoint ' + row.chain + '/' + row.network +
                             ' @ ' + row.block_index + ' (txid ' + txid + ')');
                 anchored.push({ chain: row.chain, network: row.network, block_index: Number(row.block_index), txid: txid });
+                this._anchorsPublished++;
                 this._recordReward('anchor_' + row.chain, Number(row.checkpoint_seq),
                                    this.identity ? this.identity.getPubkeyHex() : null,
                                    Number(row.snapshot_block));

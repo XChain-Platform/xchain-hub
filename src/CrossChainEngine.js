@@ -416,7 +416,7 @@ class CrossChainEngine extends EventEmitter {
         if (ix.key) headers['x-api-key'] = ix.key;
         let resp = await axios.post(ix.url,
             { jsonrpc: '2.0', method, params: params || {}, id: 1 },
-            { headers, timeout: 15000 });
+            { headers, timeout: parseInt(process.env.CROSS_CHAIN_INDEXER_TIMEOUT) || 15000 });
         if (resp.data && resp.data.error) throw new Error('indexer RPC error: ' + JSON.stringify(resp.data.error));
         return resp.data ? resp.data.result : null;
     }

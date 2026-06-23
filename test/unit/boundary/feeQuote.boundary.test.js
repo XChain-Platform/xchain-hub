@@ -38,6 +38,7 @@ describe('Boundary: Fee Quote Calculation', function () {
     beforeEach(function () {
         mockDb = {
             doQuery:        sinon.stub(),
+            getConfig:      sinon.stub().resolves({}),
             setParam:       sinon.stub().resolves(),
             createDatabase: sinon.stub().resolves(),
             verifyTables:   sinon.stub().resolves(),

@@ -223,7 +223,7 @@ The hub also calls **indexer** RPCs (`getownstake`, `getactivevalidators`, `getc
 
 ## Database Schema
 
-The hub uses 15 MariaDB tables (auto-created on startup):
+The hub uses 20 MariaDB tables (auto-created on startup):
 
 | Table | Purpose |
 |---|---|
@@ -242,6 +242,11 @@ The hub uses 15 MariaDB tables (auto-created on startup):
 | `slash_proposals` | Detected validator misbehavior (price deviation, non-participation, attestation divergence) |
 | `validator_rewards` | Per-round oracle reward accounting |
 | `validator_capabilities` | Per-pubkey x capability state: `qualified`, `self_test_ok`, `enabled`, `qualified_at_block` |
+| `capability_snapshots` | Quorum-signed capability set snapshots used for consensus gating |
+| `cross_chain_calls` | XCALL relay rows tracking cross-chain contract call dispatch and result phases |
+| `cross_chain_matches` | Finalized cross-chain DEX order matches |
+| `state_checkpoints` | Per-chain ledger/actions/contract hash checkpoints with optional on-chain anchor txid |
+| `telemetry_pings` | Anonymous usage pings from xchain-node operators (IP never stored) |
 
 ## Dependencies
 
