@@ -592,19 +592,31 @@ class CrossChainCallEngine extends EventEmitter {
     // The hub row is kept (status='retracted', match model) so the ANCHOR
     // archive re-archives the status drift and recovery never resurrects a
     // retracted call as injectable.
-    async retractCallsForReorg(chain, fromActionIndex){
-        let rows = await this.db.doQuery(
-            "SELECT id, call_id, phase FROM cross_chain_calls WHERE status = 'finalized' AND source_chain = ? AND source_action_index >= ?",
-            [chain, fromActionIndex]);
+    // toActionIndex (optional) bounds the retraction to a CLOSED range [from, to] for a DEFERRED
+    // retraction, so a relay row re-published inside the original open-ended range is not retracted
+    // (item 5296). Absent => open-ended, the live behavior. The bound rides the broadcastDeletion so
+    // replicas mirror the same delete.
+    async retractCallsForReorg(chain, fromActionIndex, toActionIndex){
+        let to = (toActionIndex !== undefined && toActionIndex !== null) ? Number(toActionIndex) : null;
+        let bounded = (to !== null && Number.isFinite(to) && to >= 0);
+        let selectSql = bounded
+            ? "SELECT id, call_id, phase FROM cross_chain_calls WHERE status = 'finalized' AND source_chain = ? AND source_action_index >= ? AND source_action_index <= ?"
+            : "SELECT id, call_id, phase FROM cross_chain_calls WHERE status = 'finalized' AND source_chain = ? AND source_action_index >= ?";
+        let updateSql = bounded
+            ? "UPDATE cross_chain_calls SET status = 'retracted' WHERE status = 'finalized' AND source_chain = ? AND source_action_index >= ? AND source_action_index <= ?"
+            : "UPDATE cross_chain_calls SET status = 'retracted' WHERE status = 'finalized' AND source_chain = ? AND source_action_index >= ?";
+        let params = bounded ? [chain, fromActionIndex, to] : [chain, fromActionIndex];
+        let rows = await this.db.doQuery(selectSql, params);
         if(!rows.length) return;
-        await this.db.doQuery(
-            "UPDATE cross_chain_calls SET status = 'retracted' WHERE status = 'finalized' AND source_chain = ? AND source_action_index >= ?",
-            [chain, fromActionIndex]);
+        await this.db.doQuery(updateSql, params);
         for(let r of rows) this._inflight.delete(this._roundId(r.phase, String(r.call_id)));
-        if(this.broadcaster)
-            this.broadcaster.broadcastDeletion({ table: 'cross_chain_calls', source_chain: chain, from_action_index: fromActionIndex });
+        if(this.broadcaster){
+            let evt = { table: 'cross_chain_calls', source_chain: chain, from_action_index: fromActionIndex };
+            if(bounded) evt.to_action_index = to;
+            this.broadcaster.broadcastDeletion(evt);
+        }
         console.warn('CrossChainCall: retracted ' + rows.length + ' relay row(s) for ' + chain +
-                     ' reorg below action ' + fromActionIndex + ' (should not happen past confirmation depth)');
+                     ' reorg below action ' + fromActionIndex + (bounded ? ' (bounded <= ' + to + ')' : '') + ' (should not happen past confirmation depth)');
     }
 
     async _rowExists(callId, phase){

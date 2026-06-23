@@ -270,6 +270,25 @@ describe('HubDbBroadcaster', function () {
             let b = new HubDbBroadcaster({});
             b.broadcastDeletion({ table: 'cross_chain_matches', source_chain: 'BTC', from_action_index: 100 });
         });
+
+        it('includes to_action_index for a closed-range (deferred) retraction (item 5296)', async function () {
+            let b  = new HubDbBroadcaster({});
+            let ws = makeMockWs();
+            await b.addSubscriber(ws);
+            b.broadcastDeletion({ table: 'oracle_prices', source_chain: 'BTC', from_action_index: 50, to_action_index: 75 });
+            let msg = JSON.parse(ws.send.lastCall.args[0]);
+            expect(msg.from_action_index).to.equal(50);
+            expect(msg.to_action_index).to.equal(75);
+        });
+
+        it('omits to_action_index for an open-ended (live) retraction', async function () {
+            let b  = new HubDbBroadcaster({});
+            let ws = makeMockWs();
+            await b.addSubscriber(ws);
+            b.broadcastDeletion({ table: 'oracle_prices', source_chain: 'BTC', from_action_index: 50 });
+            let msg = JSON.parse(ws.send.lastCall.args[0]);
+            expect(msg).to.not.have.property('to_action_index');
+        });
     });
 
     // ── getSubscriberCount ────────────────────────────────────────────────────

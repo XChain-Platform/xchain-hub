@@ -611,17 +611,31 @@ class CrossChainDexEngine extends EventEmitter {
 
     // Mark matches referencing a rolled-back source order as retracted and broadcast a
     // deletion so indexers skip / roll back. Called by reorg handling.
-    async retractMatchesForReorg(chain, fromActionIndex){
-        let rows = await this.db.doQuery(
-            "SELECT match_id, a_chain, a_action_index, a_amount, b_chain, b_action_index, b_amount FROM cross_chain_matches " +
-            "WHERE status = 'finalized' AND ((a_chain = ? AND a_action_index >= ?) OR (b_chain = ? AND b_action_index >= ?))",
-            [chain, fromActionIndex, chain, fromActionIndex]);
+    // toActionIndex (optional) bounds the retraction to a CLOSED range [from, to] on the matching
+    // leg for a DEFERRED retraction, so a match re-published inside the original open-ended range is
+    // not retracted (item 5296). Absent => open-ended, the live behavior. Two-sided: the bound
+    // applies to whichever leg (a/b) is on the reorged chain. The bound rides each broadcastDeletion.
+    async retractMatchesForReorg(chain, fromActionIndex, toActionIndex){
+        let to = (toActionIndex !== undefined && toActionIndex !== null) ? Number(toActionIndex) : null;
+        let bounded = (to !== null && Number.isFinite(to) && to >= 0);
+        let selectSql = bounded
+            ? "SELECT match_id, a_chain, a_action_index, a_amount, b_chain, b_action_index, b_amount FROM cross_chain_matches " +
+              "WHERE status = 'finalized' AND ((a_chain = ? AND a_action_index >= ? AND a_action_index <= ?) OR (b_chain = ? AND b_action_index >= ? AND b_action_index <= ?))"
+            : "SELECT match_id, a_chain, a_action_index, a_amount, b_chain, b_action_index, b_amount FROM cross_chain_matches " +
+              "WHERE status = 'finalized' AND ((a_chain = ? AND a_action_index >= ?) OR (b_chain = ? AND b_action_index >= ?))";
+        let params = bounded
+            ? [chain, fromActionIndex, to, chain, fromActionIndex, to]
+            : [chain, fromActionIndex, chain, fromActionIndex];
+        let rows = await this.db.doQuery(selectSql, params);
         for(let r of rows){
             await this.db.doQuery("UPDATE cross_chain_matches SET status = 'retracted' WHERE match_id = ?", [r.match_id]);
             this._applyCommit(r, -1);                   // restore both legs' remaining capacity
             this._inflight.delete(r.match_id);
-            if(this.broadcaster)
-                this.broadcaster.broadcastDeletion({ table: 'cross_chain_matches', source_chain: chain, from_action_index: fromActionIndex });
+            if(this.broadcaster){
+                let evt = { table: 'cross_chain_matches', source_chain: chain, from_action_index: fromActionIndex };
+                if(bounded) evt.to_action_index = to;
+                this.broadcaster.broadcastDeletion(evt);
+            }
         }
     }
 

@@ -73,11 +73,15 @@ function memDb() {
                                                         x.status !== 'retracted'));
             }
             if (sql.startsWith("SELECT id, call_id, phase FROM cross_chain_calls WHERE status = 'finalized' AND source_chain")) {
-                return rows.filter(r => r.status === 'finalized' && r.source_chain === params[0] && r.source_action_index >= params[1]);
+                let bounded = sql.includes('<= ?');
+                return rows.filter(r => r.status === 'finalized' && r.source_chain === params[0] && r.source_action_index >= params[1]
+                    && (!bounded || r.source_action_index <= params[2]));
             }
             if (sql.startsWith("UPDATE cross_chain_calls SET status = 'retracted'")) {
+                let bounded = sql.includes('<= ?');
                 for (let r of rows)
-                    if (r.status === 'finalized' && r.source_chain === params[0] && r.source_action_index >= params[1])
+                    if (r.status === 'finalized' && r.source_chain === params[0] && r.source_action_index >= params[1]
+                        && (!bounded || r.source_action_index <= params[2]))
                         r.status = 'retracted';
                 return [];
             }
@@ -399,6 +403,19 @@ describe('CrossChainCallEngine', function () {
             expect(broadcaster.broadcastDeletion.calledOnce).to.equal(true);
             expect(broadcaster.broadcastDeletion.firstCall.args[0]).to.deep.include(
                 { table: 'cross_chain_calls', source_chain: 'BTC', from_action_index: 40 });
+        });
+
+        it('retractCallsForReorg with a closed-range ceiling leaves a re-published row above the ceiling intact (item 5296)', async function () {
+            const { engine, db, broadcaster } = makeEngine();
+            db.rows.push(
+                { call_id: CALL_ID,         phase: 'dispatch', status: 'finalized', source_chain: 'BTC', source_action_index: 41 }, // in [40,75]
+                { call_id: 'e'.repeat(64),  phase: 'dispatch', status: 'finalized', source_chain: 'BTC', source_action_index: 90 }  // re-published A' > 75
+            );
+            await engine.retractCallsForReorg('BTC', 40, 75);
+            expect(db.rows.find(r => r.source_action_index === 41).status).to.equal('retracted');
+            expect(db.rows.find(r => r.source_action_index === 90).status).to.equal('finalized', 'row above the ceiling must survive');
+            expect(broadcaster.broadcastDeletion.firstCall.args[0]).to.deep.include(
+                { table: 'cross_chain_calls', source_chain: 'BTC', from_action_index: 40, to_action_index: 75 });
         });
     });
 });

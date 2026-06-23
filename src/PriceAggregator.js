@@ -342,44 +342,53 @@ class PriceAggregator extends EventEmitter {
     // sourceChain:     BTC | LTC | DOGE
     // fromActionIndex: lowest rolled-back action_index (inclusive)
     // Returns { retracted: { price_snapshots, oracle_prices } } with deleted row counts.
-    async retractFromActionIndex(sourceChain, fromActionIndex) {
+    // toActionIndex (optional) bounds the retraction to a CLOSED range [from, to]. A DEFERRED
+    // (queued) retraction passes it so a price row re-published inside the original open-ended
+    // range is not deleted (item 5296). Absent => open-ended `>= from`, the live-retraction
+    // behavior. The bound is mirrored onto the row:deleted event so replicas apply the same delete.
+    async retractFromActionIndex(sourceChain, fromActionIndex, toActionIndex) {
         let from = parseInt(fromActionIndex);
         if (!Number.isFinite(from) || from < 0) {
             return { error: 'invalid from_action_index' };
         }
+        let to = (toActionIndex !== undefined && toActionIndex !== null) ? parseInt(toActionIndex) : null;
+        let bounded = (to !== null && Number.isFinite(to) && to >= 0);
 
         // price_snapshots tracks the PRICE v0 round action via source_action_index
-        let snapResult = await this.db.doQuery(
-            'DELETE FROM price_snapshots WHERE source_chain = ? AND source_action_index >= ?',
-            [sourceChain, from]
-        );
+        let snapResult = bounded
+            ? await this.db.doQuery(
+                'DELETE FROM price_snapshots WHERE source_chain = ? AND source_action_index >= ? AND source_action_index <= ?',
+                [sourceChain, from, to])
+            : await this.db.doQuery(
+                'DELETE FROM price_snapshots WHERE source_chain = ? AND source_action_index >= ?',
+                [sourceChain, from]);
         // oracle_prices tracks the PRICE v1 oracle action via action_index
-        let oracleResult = await this.db.doQuery(
-            'DELETE FROM oracle_prices WHERE source_chain = ? AND action_index >= ?',
-            [sourceChain, from]
-        );
+        let oracleResult = bounded
+            ? await this.db.doQuery(
+                'DELETE FROM oracle_prices WHERE source_chain = ? AND action_index >= ? AND action_index <= ?',
+                [sourceChain, from, to])
+            : await this.db.doQuery(
+                'DELETE FROM oracle_prices WHERE source_chain = ? AND action_index >= ?',
+                [sourceChain, from]);
 
         let snapDeleted   = (snapResult   && snapResult.affectedRows   !== undefined) ? Number(snapResult.affectedRows)   : 0;
         let oracleDeleted = (oracleResult && oracleResult.affectedRows !== undefined) ? Number(oracleResult.affectedRows) : 0;
 
         // Tell the hub DB sync channel to mirror these deletes so distributed
-        // indexers prune their local price-table copies too.
+        // indexers prune their local price-table copies too. Carry to_action_index so the
+        // replica's _applyRetraction bounds its delete identically (hub<->replica parity).
         if (snapDeleted > 0) {
-            this.emit('row:deleted', {
-                table:             'price_snapshots',
-                source_chain:      sourceChain,
-                from_action_index: from
-            });
+            let evt = { table: 'price_snapshots', source_chain: sourceChain, from_action_index: from };
+            if (bounded) evt.to_action_index = to;
+            this.emit('row:deleted', evt);
         }
         if (oracleDeleted > 0) {
-            this.emit('row:deleted', {
-                table:             'oracle_prices',
-                source_chain:      sourceChain,
-                from_action_index: from
-            });
+            let evt = { table: 'oracle_prices', source_chain: sourceChain, from_action_index: from };
+            if (bounded) evt.to_action_index = to;
+            this.emit('row:deleted', evt);
         }
 
-        console.log('PriceAggregator: retracted ' + snapDeleted + ' price_snapshots + ' + oracleDeleted + ' oracle_prices rows from ' + sourceChain + ' (action_index >= ' + from + ')');
+        console.log('PriceAggregator: retracted ' + snapDeleted + ' price_snapshots + ' + oracleDeleted + ' oracle_prices rows from ' + sourceChain + ' (action_index >= ' + from + (bounded ? ' AND <= ' + to : '') + ')');
         return { retracted: { price_snapshots: snapDeleted, oracle_prices: oracleDeleted } };
     }
 }

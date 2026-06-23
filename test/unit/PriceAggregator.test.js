@@ -101,6 +101,26 @@ describe('PriceAggregator.retractFromActionIndex()', function () {
         expect(events).to.deep.equal([]);
     });
 
+    it('bounds the delete to a closed range and carries to_action_index when toActionIndex is given (item 5296)', async function () {
+        hub.db.doQuery.resolves({ affectedRows: 1 });
+        let events = [];
+        agg.on('row:deleted', e => events.push(e));
+
+        await agg.retractFromActionIndex('BTC', 50, 75);
+
+        let calls = hub.db.doQuery.getCalls();
+        let snapCall = calls.find(c => /price_snapshots/.test(c.args[0]));
+        let oracleCall = calls.find(c => /oracle_prices/.test(c.args[0]));
+        expect(snapCall.args[0]).to.match(/source_action_index >= \? AND source_action_index <= \?/);
+        expect(snapCall.args[1]).to.deep.equal(['BTC', 50, 75]);
+        expect(oracleCall.args[0]).to.match(/action_index >= \? AND action_index <= \?/);
+        expect(oracleCall.args[1]).to.deep.equal(['BTC', 50, 75]);
+        expect(events).to.deep.equal([
+            { table: 'price_snapshots', source_chain: 'BTC', from_action_index: 50, to_action_index: 75 },
+            { table: 'oracle_prices',   source_chain: 'BTC', from_action_index: 50, to_action_index: 75 }
+        ]);
+    });
+
     it('rejects a malformed from_action_index without touching the DB', async function () {
         let result = await agg.retractFromActionIndex('BTC', 'not-a-number');
         expect(result).to.have.property('error');

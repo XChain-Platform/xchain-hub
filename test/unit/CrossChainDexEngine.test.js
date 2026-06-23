@@ -526,6 +526,28 @@ describe('CrossChainDexEngine', function () {
             let eng = new CrossChainDexEngine(hub);
             await eng.retractMatchesForReorg('BTC', 999);
         });
+
+        it('bounds both legs to a closed range and carries to_action_index on the broadcast (item 5296)', async function () {
+            let broadcaster = { broadcastDeletion: sinon.stub(), broadcastRow: sinon.stub() };
+            let hub = makeDexHub({ hubDbBroadcaster: broadcaster });
+            hub.db.doQuery = sinon.stub();
+            hub.db.doQuery.onFirstCall().resolves([
+                { match_id: 'mid1', a_chain: 'BTC', a_action_index: 5, a_amount: '1', b_chain: 'LTC', b_action_index: 8, b_amount: '2' }
+            ]);
+            hub.db.doQuery.resolves([]);
+            let eng = new CrossChainDexEngine(hub);
+            eng.broadcaster = broadcaster;
+
+            await eng.retractMatchesForReorg('BTC', 5, 75);
+
+            // The SELECT must carry the bound on BOTH legs with the ceiling param.
+            let selectCall = hub.db.doQuery.getCall(0);
+            expect(selectCall.args[0]).to.match(/a_action_index >= \? AND a_action_index <= \?/);
+            expect(selectCall.args[0]).to.match(/b_action_index >= \? AND b_action_index <= \?/);
+            expect(selectCall.args[1]).to.deep.equal(['BTC', 5, 75, 'BTC', 5, 75]);
+            expect(broadcaster.broadcastDeletion.firstCall.args[0]).to.deep.include(
+                { table: 'cross_chain_matches', source_chain: 'BTC', from_action_index: 5, to_action_index: 75 });
+        });
     });
 
     // ── _resolveCapabilityValidators ─────────────────────────────────────────
