@@ -406,7 +406,7 @@ async function startApi(){
         },
 
         // Indexer has already verified PBFT signatures locally; hub deduplicates by round_number.
-        async pushpriceround({source_chain, round, timestamp, pairs, sigs, action_index, block_index}){
+        async pushpriceround({source_chain, round, timestamp, btc_block_height, pairs, sigs, action_index, block_index}){
             if(!source_chain) return {error: "source_chain is required"};
             let chainErr = validateChain(source_chain);
             if (chainErr) return chainErr;
@@ -415,9 +415,10 @@ async function startApi(){
             if(!hub.priceAggregator) return {error: "price aggregator not ready"};
             try {
                 let result = await hub.priceAggregator.receiveValidatedRound(source_chain, {
-                    round:        round,
-                    timestamp:    timestamp,
-                    pairs:        pairs,
+                    round:            round,
+                    timestamp:        timestamp,
+                    btc_block_height: btc_block_height,
+                    pairs:            pairs,
                     sigs:         sigs,
                     action_index: action_index,
                     block_index:  block_index
