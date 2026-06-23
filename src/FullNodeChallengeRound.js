@@ -140,7 +140,14 @@ class FullNodeChallengeRound {
             : Object.assign({ 'Content-Type': 'application/json' }, this.indexerKey ? { 'x-api-key': this.indexerKey } : {});
         let resp = await axios.post(url, { jsonrpc: '2.0', method, params: params || {}, id: 1 }, { headers, timeout: 15000 });
         if(resp.data && resp.data.error) throw new Error('indexer RPC error: ' + JSON.stringify(resp.data.error));
-        return resp.data ? resp.data.result : null;
+        let result = resp.data ? resp.data.result : null;
+        // The indexer reports failures in-band as result.error (a 200 with an error
+        // object), not the top-level JSON-RPC error envelope; the rest of the hub
+        // (CapabilitySnapshot, AttestationRound) already gates on result.error. Surface
+        // it here too so a poll error reaches the caller's catch instead of being
+        // returned as a valid result and silently degrading the verifier set.
+        if(result && result.error) throw new Error('indexer in-band error: ' + JSON.stringify(result.error));
+        return result;
     }
 
     async _coinCall(method, params){

@@ -231,6 +231,15 @@ describe('FullNodeChallengeRound', function () {
             const set = await eng._eligibleVerifiers(288);
             expect([...set]).to.deep.equal([V1]);
         });
+        it('falls back to genesis-only on an in-band indexer result.error (200 with error body)', async function () {
+            // The indexer reports failures as result.error, not the top-level JSON-RPC
+            // error envelope; _indexerCall must surface it so a degraded indexer does
+            // not silently widen the verifier set with an error object.
+            axiosStub.post.callsFake(async () => ({ data: { result: { error: 'indexer unavailable' } } }));
+            const eng = new FullNodeChallengeRound(makeHub());
+            const set = await eng._eligibleVerifiers(288);
+            expect([...set]).to.deep.equal([V1]);
+        });
         it('_claimantSet reads the full_node capability snapshot', async function () {
             const hub = makeHub();
             hub.capabilitySnapshot.getSnapshot.resolves({ validators: [{ pubkey: P1 }, { pubkey: P2 }] });
