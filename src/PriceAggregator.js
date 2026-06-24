@@ -185,6 +185,12 @@ class PriceAggregator extends EventEmitter {
         let proofJson = JSON.stringify(verifiedSigs);
         let validatorCount = verifiedSigs.length;
         let sourceActionIndex = roundData.action_index || null;
+        // Source-chain reorg fence (item 5308): the generation the source indexer
+        // carried on this push. Stamped on the row so a later deferred retraction
+        // (which carries the rollback's generation) deletes only stale rows and a
+        // re-published row at a recycled action_index (higher generation) survives.
+        let pushGeneration = parseInt(roundData.push_generation);
+        if (!Number.isFinite(pushGeneration) || pushGeneration < 0) pushGeneration = 0;
 
         // Capture a single hub-side timestamp before the loop so all pairs in this round
         // share the same created_at and it propagates to operators via the WS broadcast row.
@@ -202,11 +208,11 @@ class PriceAggregator extends EventEmitter {
         // a torn round (some pairs from this round, others from the prior round). The hub
         // Database has no transaction API, so a single statement is the atomicity tool.
         if (roundData.pairs.length) {
-            let placeholders = roundData.pairs.map(() => "(?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?)").join(', ');
+            let placeholders = roundData.pairs.map(() => "(?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?, ?)").join(', ');
             let params = [];
             for (let p of roundData.pairs) {
                 params.push(round, p.pair, p.price, referenceBlock, sourceChain || null, timestamp,
-                            validatorCount, proofJson, sourceChain || null, sourceActionIndex, createdAt);
+                            validatorCount, proofJson, sourceChain || null, sourceActionIndex, pushGeneration, createdAt);
                 insertedRows.push({
                     round_number:        round,
                     coin_pair:           p.pair,
@@ -220,20 +226,22 @@ class PriceAggregator extends EventEmitter {
                     status:              'finalized',
                     source_chain:        sourceChain || null,
                     source_action_index: sourceActionIndex,
+                    push_generation:     pushGeneration,
                     created_at:          createdAt
                 });
             }
             let query = `INSERT INTO price_snapshots
                 (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
                  validator_count, consensus_round, consensus_proof, status, source_chain, source_action_index,
-                 created_at)
+                 push_generation, created_at)
                 VALUES ${placeholders}
                 ON DUPLICATE KEY UPDATE
                     price = VALUES(price), reference_block = VALUES(reference_block),
                     reference_chain = VALUES(reference_chain), block_timestamp = VALUES(block_timestamp),
                     validator_count = VALUES(validator_count), consensus_proof = VALUES(consensus_proof),
                     status = 'finalized', source_chain = VALUES(source_chain),
-                    source_action_index = VALUES(source_action_index)`;
+                    source_action_index = VALUES(source_action_index),
+                    push_generation = VALUES(push_generation)`;
             try {
                 await this.db.doQuery(query, params);
             } catch (err) {
@@ -291,14 +299,18 @@ class PriceAggregator extends EventEmitter {
         let blockTime = parseInt(priceData.block_time) || 0;
         let effectiveAt = blockTime + 86400;
 
+        // Source-chain reorg fence (item 5308): see receiveValidatedRound.
+        let pushGeneration = parseInt(priceData.push_generation);
+        if (!Number.isFinite(pushGeneration) || pushGeneration < 0) pushGeneration = 0;
+
         let query = `INSERT INTO oracle_prices
-            (source_address, source_chain, coin, tick, fiat, value, fee, memo, block_time, effective_at, action_index)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+            (source_address, source_chain, coin, tick, fiat, value, fee, memo, block_time, effective_at, action_index, push_generation)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
         let args = [
             priceData.source_address, sourceChain || '',
             priceData.coin, priceData.tick, priceData.fiat,
             priceData.value, priceData.fee || null, priceData.memo || null,
-            blockTime, effectiveAt, priceData.action_index || 0
+            blockTime, effectiveAt, priceData.action_index || 0, pushGeneration
         ];
         try {
             await this.db.doQuery(query, args);
@@ -321,7 +333,8 @@ class PriceAggregator extends EventEmitter {
                 memo:           priceData.memo || null,
                 block_time:     blockTime,
                 effective_at:   effectiveAt,
-                action_index:   priceData.action_index || 0
+                action_index:   priceData.action_index || 0,
+                push_generation: pushGeneration
             }
         });
 
@@ -346,49 +359,58 @@ class PriceAggregator extends EventEmitter {
     // (queued) retraction passes it so a price row re-published inside the original open-ended
     // range is not deleted (item 5296). Absent => open-ended `>= from`, the live-retraction
     // behavior. The bound is mirrored onto the row:deleted event so replicas apply the same delete.
-    async retractFromActionIndex(sourceChain, fromActionIndex, toActionIndex) {
+    // retractionGeneration (optional, item 5308) is the source chain's push generation captured at
+    // rollback start. When present, only rows stamped with push_generation <= it are deleted, so a
+    // row re-published at a recycled action_index (higher generation) survives even though it falls
+    // inside [from, to]. Omitted (older indexer) => no fence == today's behavior; the bound is
+    // mirrored onto row:deleted so replicas fence identically.
+    async retractFromActionIndex(sourceChain, fromActionIndex, toActionIndex, retractionGeneration) {
         let from = parseInt(fromActionIndex);
         if (!Number.isFinite(from) || from < 0) {
             return { error: 'invalid from_action_index' };
         }
         let to = (toActionIndex !== undefined && toActionIndex !== null) ? parseInt(toActionIndex) : null;
         let bounded = (to !== null && Number.isFinite(to) && to >= 0);
+        let gen = (retractionGeneration !== undefined && retractionGeneration !== null) ? parseInt(retractionGeneration) : null;
+        let fenced = (gen !== null && Number.isFinite(gen) && gen >= 0);
+
+        // Build the shared WHERE tail once; the only per-table difference is the action-index column.
+        let buildArgs = (col) => {
+            let where = 'source_chain = ? AND ' + col + (bounded ? ' >= ? AND ' + col + ' <= ?' : ' >= ?') + (fenced ? ' AND push_generation <= ?' : '');
+            let args = [sourceChain, from];
+            if (bounded) args.push(to);
+            if (fenced) args.push(gen);
+            return { where, args };
+        };
 
         // price_snapshots tracks the PRICE v0 round action via source_action_index
-        let snapResult = bounded
-            ? await this.db.doQuery(
-                'DELETE FROM price_snapshots WHERE source_chain = ? AND source_action_index >= ? AND source_action_index <= ?',
-                [sourceChain, from, to])
-            : await this.db.doQuery(
-                'DELETE FROM price_snapshots WHERE source_chain = ? AND source_action_index >= ?',
-                [sourceChain, from]);
+        let snapQ = buildArgs('source_action_index');
+        let snapResult = await this.db.doQuery('DELETE FROM price_snapshots WHERE ' + snapQ.where, snapQ.args);
         // oracle_prices tracks the PRICE v1 oracle action via action_index
-        let oracleResult = bounded
-            ? await this.db.doQuery(
-                'DELETE FROM oracle_prices WHERE source_chain = ? AND action_index >= ? AND action_index <= ?',
-                [sourceChain, from, to])
-            : await this.db.doQuery(
-                'DELETE FROM oracle_prices WHERE source_chain = ? AND action_index >= ?',
-                [sourceChain, from]);
+        let oracleQ = buildArgs('action_index');
+        let oracleResult = await this.db.doQuery('DELETE FROM oracle_prices WHERE ' + oracleQ.where, oracleQ.args);
 
         let snapDeleted   = (snapResult   && snapResult.affectedRows   !== undefined) ? Number(snapResult.affectedRows)   : 0;
         let oracleDeleted = (oracleResult && oracleResult.affectedRows !== undefined) ? Number(oracleResult.affectedRows) : 0;
 
         // Tell the hub DB sync channel to mirror these deletes so distributed
-        // indexers prune their local price-table copies too. Carry to_action_index so the
-        // replica's _applyRetraction bounds its delete identically (hub<->replica parity).
+        // indexers prune their local price-table copies too. Carry to_action_index and
+        // retraction_generation so the replica's _applyRetraction bounds and fences its
+        // delete identically (hub<->replica parity).
         if (snapDeleted > 0) {
             let evt = { table: 'price_snapshots', source_chain: sourceChain, from_action_index: from };
             if (bounded) evt.to_action_index = to;
+            if (fenced) evt.retraction_generation = gen;
             this.emit('row:deleted', evt);
         }
         if (oracleDeleted > 0) {
             let evt = { table: 'oracle_prices', source_chain: sourceChain, from_action_index: from };
             if (bounded) evt.to_action_index = to;
+            if (fenced) evt.retraction_generation = gen;
             this.emit('row:deleted', evt);
         }
 
-        console.log('PriceAggregator: retracted ' + snapDeleted + ' price_snapshots + ' + oracleDeleted + ' oracle_prices rows from ' + sourceChain + ' (action_index >= ' + from + (bounded ? ' AND <= ' + to : '') + ')');
+        console.log('PriceAggregator: retracted ' + snapDeleted + ' price_snapshots + ' + oracleDeleted + ' oracle_prices rows from ' + sourceChain + ' (action_index >= ' + from + (bounded ? ' AND <= ' + to : '') + (fenced ? ' AND push_generation <= ' + gen : '') + ')');
         return { retracted: { price_snapshots: snapDeleted, oracle_prices: oracleDeleted } };
     }
 }

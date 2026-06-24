@@ -469,7 +469,9 @@ async function startApi(){
         // to_action_index (optional) bounds the retraction to a CLOSED range [from, to] for a
         // DEFERRED (queued) retraction, so a row re-published inside the original open-ended range
         // is not wiped (item 5296). Absent => open-ended, the original behavior for live retractions.
-        async pushpricereorg({source_chain, from_action_index, to_action_index}){
+        // retraction_generation (optional, item 5308) fences the delete to rows with
+        // push_generation <= it; an older indexer omits it and the hub falls back to no-fence.
+        async pushpricereorg({source_chain, from_action_index, to_action_index, retraction_generation}){
             if(!source_chain) return {error: "source_chain is required"};
             let chainErr = validateChain(source_chain);
             if (chainErr) return chainErr;
@@ -477,7 +479,7 @@ async function startApi(){
                 return {error: "from_action_index is required"};
             if(!hub.priceAggregator) return {error: "price aggregator not ready"};
             try {
-                return await hub.priceAggregator.retractFromActionIndex(source_chain, from_action_index, to_action_index);
+                return await hub.priceAggregator.retractFromActionIndex(source_chain, from_action_index, to_action_index, retraction_generation);
             } catch (err) {
                 return {error: err.message || "error retracting prices"};
             }
@@ -487,7 +489,7 @@ async function startApi(){
         // actions in a reorg. The indexer pushes its source chain plus the lowest rolled-back
         // action_index; the hub marks the matching relay rows 'retracted' (both phases) and
         // broadcasts deletions so distributed indexers prune their mirrored copies too.
-        async pushxcallreorg({source_chain, from_action_index, to_action_index}){
+        async pushxcallreorg({source_chain, from_action_index, to_action_index, retraction_generation}){
             if(!source_chain) return {error: "source_chain is required"};
             let chainErr = validateChain(source_chain);
             if (chainErr) return chainErr;
@@ -495,7 +497,7 @@ async function startApi(){
                 return {error: "from_action_index is required"};
             if(!hub.crossChainCalls) return {error: "cross-chain call engine not active"};
             try {
-                await hub.crossChainCalls.retractCallsForReorg(source_chain, from_action_index, to_action_index);
+                await hub.crossChainCalls.retractCallsForReorg(source_chain, from_action_index, to_action_index, retraction_generation);
                 return {status: "ok", source_chain, from_action_index};
             } catch (err) {
                 return {error: err.message || "error retracting cross-chain calls"};
@@ -507,7 +509,7 @@ async function startApi(){
         // hub marks every match whose retracted leg (a_chain/b_chain) is on that source chain at or
         // above that index 'retracted', restores both legs' remaining capacity, and broadcasts
         // deletions so distributed indexers prune their mirrored cross_chain_matches copies too.
-        async pushdexreorg({source_chain, from_action_index, to_action_index}){
+        async pushdexreorg({source_chain, from_action_index, to_action_index, retraction_generation}){
             if(!source_chain) return {error: "source_chain is required"};
             let chainErr = validateChain(source_chain);
             if (chainErr) return chainErr;
@@ -515,7 +517,7 @@ async function startApi(){
                 return {error: "from_action_index is required"};
             if(!hub.crossChainDex) return {error: "cross-chain dex engine not active"};
             try {
-                await hub.crossChainDex.retractMatchesForReorg(source_chain, from_action_index, to_action_index);
+                await hub.crossChainDex.retractMatchesForReorg(source_chain, from_action_index, to_action_index, retraction_generation);
                 return {status: "ok", source_chain, from_action_index};
             } catch (err) {
                 return {error: err.message || "error retracting cross-chain matches"};

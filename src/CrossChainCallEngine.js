@@ -306,7 +306,12 @@ class CrossChainCallEngine extends EventEmitter {
             cross_hops:            Number(call.cross_hops) || 0,
             effective_time:        this._relayEffectiveTime(String(call.target_chain)),
             result_status:         null,
-            return_payload_b64:    null
+            return_payload_b64:    null,
+            // Source-chain reorg fence (item 5308): the source indexer's generation
+            // for this call, mirrored from getpendingcrosschaincalls. The result row
+            // inherits it so a source-keyed retraction fences both phases by the same
+            // generation. Metadata only; NOT part of the signed canonical.
+            push_generation:       Number(call.push_generation) || 0
         };
 
         let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
@@ -383,7 +388,10 @@ class CrossChainCallEngine extends EventEmitter {
             cross_hops:            Number(dispatch.cross_hops) || 0,
             effective_time:        this._relayEffectiveTime(String(dispatch.source_chain)),
             result_status:         resultStatus,
-            return_payload_b64:    (res.return_payload_b64 == null) ? '' : String(res.return_payload_b64)
+            return_payload_b64:    (res.return_payload_b64 == null) ? '' : String(res.return_payload_b64),
+            // Inherit the source generation from the dispatch row so the source-keyed
+            // reorg retraction fences this result phase by the same generation (item 5308).
+            push_generation:       Number(dispatch.push_generation) || 0
         };
 
         let validators = await this._resolveCapabilityValidators('cross_chain', Number(snapshotBlock), row.network);
@@ -515,7 +523,7 @@ class CrossChainCallEngine extends EventEmitter {
                     'source_chain','source_action_index','source_contract_index',
                     'target_chain','target_contract_index','method','params_json',
                     'gas_limit','cross_hops','effective_time','result_status','return_payload_b64',
-                    'finalizing_view','validator_signatures'];
+                    'finalizing_view','validator_signatures','push_generation'];
         let vals = cols.map(c => row[c]);
         // A retracted row for the same (call_id, phase) can exist after a reorg.
         // INSERT IGNORE would silently discard the re-finalized content, leaving
@@ -596,27 +604,33 @@ class CrossChainCallEngine extends EventEmitter {
     // retraction, so a relay row re-published inside the original open-ended range is not retracted
     // (item 5296). Absent => open-ended, the live behavior. The bound rides the broadcastDeletion so
     // replicas mirror the same delete.
-    async retractCallsForReorg(chain, fromActionIndex, toActionIndex){
+    // retractionGeneration (optional, item 5308): when present, only rows stamped push_generation <=
+    // it are retracted, so a relay row re-finalized at a recycled source action_index (higher
+    // generation, post-rollback) survives even inside [from, to]. Omitted (older indexer) => no fence.
+    async retractCallsForReorg(chain, fromActionIndex, toActionIndex, retractionGeneration){
         let to = (toActionIndex !== undefined && toActionIndex !== null) ? Number(toActionIndex) : null;
         let bounded = (to !== null && Number.isFinite(to) && to >= 0);
-        let selectSql = bounded
-            ? "SELECT id, call_id, phase FROM cross_chain_calls WHERE status = 'finalized' AND source_chain = ? AND source_action_index >= ? AND source_action_index <= ?"
-            : "SELECT id, call_id, phase FROM cross_chain_calls WHERE status = 'finalized' AND source_chain = ? AND source_action_index >= ?";
-        let updateSql = bounded
-            ? "UPDATE cross_chain_calls SET status = 'retracted' WHERE status = 'finalized' AND source_chain = ? AND source_action_index >= ? AND source_action_index <= ?"
-            : "UPDATE cross_chain_calls SET status = 'retracted' WHERE status = 'finalized' AND source_chain = ? AND source_action_index >= ?";
-        let params = bounded ? [chain, fromActionIndex, to] : [chain, fromActionIndex];
-        let rows = await this.db.doQuery(selectSql, params);
+        let gen = (retractionGeneration !== undefined && retractionGeneration !== null) ? Number(retractionGeneration) : null;
+        let fenced = (gen !== null && Number.isFinite(gen) && gen >= 0);
+        let tail = " AND source_chain = ? AND source_action_index >= ?" +
+                   (bounded ? " AND source_action_index <= ?" : "") +
+                   (fenced ? " AND push_generation <= ?" : "");
+        let params = [chain, fromActionIndex];
+        if(bounded) params.push(to);
+        if(fenced) params.push(gen);
+        let rows = await this.db.doQuery("SELECT id, call_id, phase FROM cross_chain_calls WHERE status = 'finalized'" + tail, params);
         if(!rows.length) return;
-        await this.db.doQuery(updateSql, params);
+        await this.db.doQuery("UPDATE cross_chain_calls SET status = 'retracted' WHERE status = 'finalized'" + tail, params);
         for(let r of rows) this._inflight.delete(this._roundId(r.phase, String(r.call_id)));
         if(this.broadcaster){
             let evt = { table: 'cross_chain_calls', source_chain: chain, from_action_index: fromActionIndex };
             if(bounded) evt.to_action_index = to;
+            if(fenced) evt.retraction_generation = gen;
             this.broadcaster.broadcastDeletion(evt);
         }
         console.warn('CrossChainCall: retracted ' + rows.length + ' relay row(s) for ' + chain +
-                     ' reorg below action ' + fromActionIndex + (bounded ? ' (bounded <= ' + to + ')' : '') + ' (should not happen past confirmation depth)');
+                     ' reorg below action ' + fromActionIndex + (bounded ? ' (bounded <= ' + to + ')' : '') +
+                     (fenced ? ' (gen <= ' + gen + ')' : '') + ' (should not happen past confirmation depth)');
     }
 
     async _rowExists(callId, phase){

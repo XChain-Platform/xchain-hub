@@ -73,15 +73,21 @@ function memDb() {
                                                         x.status !== 'retracted'));
             }
             if (sql.startsWith("SELECT id, call_id, phase FROM cross_chain_calls WHERE status = 'finalized' AND source_chain")) {
-                let bounded = sql.includes('<= ?');
+                let bounded = sql.includes('source_action_index <= ?');
+                let fenced  = sql.includes('push_generation <= ?');
+                let pi = 2; let to = bounded ? params[pi++] : null; let gen = fenced ? params[pi++] : null;
                 return rows.filter(r => r.status === 'finalized' && r.source_chain === params[0] && r.source_action_index >= params[1]
-                    && (!bounded || r.source_action_index <= params[2]));
+                    && (!bounded || r.source_action_index <= to)
+                    && (!fenced  || (r.push_generation || 0) <= gen));
             }
             if (sql.startsWith("UPDATE cross_chain_calls SET status = 'retracted'")) {
-                let bounded = sql.includes('<= ?');
+                let bounded = sql.includes('source_action_index <= ?');
+                let fenced  = sql.includes('push_generation <= ?');
+                let pi = 2; let to = bounded ? params[pi++] : null; let gen = fenced ? params[pi++] : null;
                 for (let r of rows)
                     if (r.status === 'finalized' && r.source_chain === params[0] && r.source_action_index >= params[1]
-                        && (!bounded || r.source_action_index <= params[2]))
+                        && (!bounded || r.source_action_index <= to)
+                        && (!fenced  || (r.push_generation || 0) <= gen))
                         r.status = 'retracted';
                 return [];
             }
@@ -416,6 +422,21 @@ describe('CrossChainCallEngine', function () {
             expect(db.rows.find(r => r.source_action_index === 90).status).to.equal('finalized', 'row above the ceiling must survive');
             expect(broadcaster.broadcastDeletion.firstCall.args[0]).to.deep.include(
                 { table: 'cross_chain_calls', source_chain: 'BTC', from_action_index: 40, to_action_index: 75 });
+        });
+
+        it('retractCallsForReorg gen-fences: a re-finalized relay row at a RECYCLED source index survives (item 5308)', async function () {
+            const { engine, db, broadcaster } = makeEngine();
+            // Both rows at the SAME recycled source_action_index = 41 (inside [40,75]); only the
+            // generation differs. The pre-bump retraction generation is 5.
+            db.rows.push(
+                { call_id: CALL_ID,        phase: 'dispatch', status: 'finalized', source_chain: 'BTC', source_action_index: 41, push_generation: 5 }, // orphan
+                { call_id: 'f'.repeat(64), phase: 'dispatch', status: 'finalized', source_chain: 'BTC', source_action_index: 41, push_generation: 6 }  // re-finalized post-reorg
+            );
+            await engine.retractCallsForReorg('BTC', 40, 75, 5);
+            expect(db.rows.find(r => r.call_id === CALL_ID).status).to.equal('retracted', 'gen-5 orphan retracted');
+            expect(db.rows.find(r => r.call_id === 'f'.repeat(64)).status).to.equal('finalized', 'gen-6 re-finalize at the recycled index must survive');
+            expect(broadcaster.broadcastDeletion.firstCall.args[0]).to.deep.include(
+                { table: 'cross_chain_calls', source_chain: 'BTC', from_action_index: 40, to_action_index: 75, retraction_generation: 5 });
         });
     });
 });

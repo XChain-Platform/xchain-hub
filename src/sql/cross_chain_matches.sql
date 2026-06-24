@@ -24,12 +24,14 @@ CREATE TABLE cross_chain_matches (
     b_payout_addr        VARCHAR(255) NOT NULL,
     effective_time       BIGINT UNSIGNED NOT NULL,                 -- wall-clock instant indexers apply at (shared clock across chains)
     finalizing_view      INT          NOT NULL DEFAULT 0,          -- PBFT view the round finalized at; signed into the EQUIV canonical (WI-2 bump 2) so the indexer rebuilds the exact view
-    validator_signatures TEXT         NOT NULL,                    -- JSON [{pubkey,sig}] — 2f+1 over the canonical match
+    validator_signatures TEXT         NOT NULL,                    -- JSON [{pubkey,sig}]; 2f+1 over the canonical match
     status               VARCHAR(20)  NOT NULL DEFAULT 'finalized',-- finalized / retracted
     batch_root           VARCHAR(64),                              -- retained for rows stamped by the retired XDEXANCHOR audit publisher
     anchor_txid          VARCHAR(64),                              -- DOGE anchor txid (ANCHOR v1 archive back-fill; legacy XDEXANCHOR rows too)
     batch_seq            BIGINT UNSIGNED,                          -- ANCHOR v1 archive batch this match (at archived_status) was published in; hub-side only
-    archived_status      VARCHAR(20),                              -- status at last archive publish — a later retraction re-archives the match
+    archived_status      VARCHAR(20),                              -- status at last archive publish; a later retraction re-archives the match
+    a_push_generation    BIGINT       NOT NULL DEFAULT 0,          -- A-leg source-chain reorg fence (item 5308): stamped from a_chain's indexer generation
+    b_push_generation    BIGINT       NOT NULL DEFAULT 0,          -- B-leg source-chain reorg fence (item 5308): stamped from b_chain's indexer generation
     created_at           TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci;

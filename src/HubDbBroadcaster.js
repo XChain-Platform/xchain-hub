@@ -162,9 +162,12 @@ class HubDbBroadcaster {
     }
 
     // Broadcast a reorg retraction to all subscribers so they prune their local
-    // price-table copies. event: { table, source_chain, from_action_index, to_action_index? }
+    // price-table copies. event: { table, source_chain, from_action_index, to_action_index?, retraction_generation? }
     // to_action_index is included only for a CLOSED-range (deferred) retraction so subscribers
     // bound their mirrored delete identically to the hub (item 5296); absent => open-ended.
+    // retraction_generation (item 5308) is the source chain's rollback generation; subscribers
+    // fence their mirrored delete to rows with push_generation <= it, so a re-published row at a
+    // recycled action_index survives. Absent => no fence (older hub/indexer == prior behavior).
     broadcastDeletion(event) {
         if (this.subscribers.size === 0) return;
         let message;
@@ -177,6 +180,8 @@ class HubDbBroadcaster {
             };
             if (event.to_action_index !== undefined && event.to_action_index !== null)
                 payload.to_action_index = event.to_action_index;
+            if (event.retraction_generation !== undefined && event.retraction_generation !== null)
+                payload.retraction_generation = event.retraction_generation;
             message = JSON.stringify(payload, bigIntReplacer);
         } catch (e) {
             console.error('HubDbBroadcaster: serialization error:', e);

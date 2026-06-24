@@ -548,6 +548,29 @@ describe('CrossChainDexEngine', function () {
             expect(broadcaster.broadcastDeletion.firstCall.args[0]).to.deep.include(
                 { table: 'cross_chain_matches', source_chain: 'BTC', from_action_index: 5, to_action_index: 75 });
         });
+
+        it('gen-fences each leg by its OWN generation column and carries retraction_generation (item 5308)', async function () {
+            let broadcaster = { broadcastDeletion: sinon.stub(), broadcastRow: sinon.stub() };
+            let hub = makeDexHub({ hubDbBroadcaster: broadcaster });
+            hub.db.doQuery = sinon.stub();
+            hub.db.doQuery.onFirstCall().resolves([
+                { match_id: 'mid1', a_chain: 'BTC', a_action_index: 5, a_amount: '1', b_chain: 'LTC', b_action_index: 8, b_amount: '2' }
+            ]);
+            hub.db.doQuery.resolves([]);
+            let eng = new CrossChainDexEngine(hub);
+            eng.broadcaster = broadcaster;
+
+            await eng.retractMatchesForReorg('BTC', 5, 75, 9);
+
+            // Per-leg fence: a-leg uses a_push_generation, b-leg uses b_push_generation.
+            let selectCall = hub.db.doQuery.getCall(0);
+            expect(selectCall.args[0]).to.match(/a_action_index <= \? AND a_push_generation <= \?/);
+            expect(selectCall.args[0]).to.match(/b_action_index <= \? AND b_push_generation <= \?/);
+            // params: [chain, from, to, gen] per leg, concatenated for the two legs.
+            expect(selectCall.args[1]).to.deep.equal(['BTC', 5, 75, 9, 'BTC', 5, 75, 9]);
+            expect(broadcaster.broadcastDeletion.firstCall.args[0]).to.deep.include(
+                { table: 'cross_chain_matches', source_chain: 'BTC', from_action_index: 5, to_action_index: 75, retraction_generation: 9 });
+        });
     });
 
     // ── _resolveCapabilityValidators ─────────────────────────────────────────

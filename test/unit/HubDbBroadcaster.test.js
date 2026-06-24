@@ -289,6 +289,24 @@ describe('HubDbBroadcaster', function () {
             let msg = JSON.parse(ws.send.lastCall.args[0]);
             expect(msg).to.not.have.property('to_action_index');
         });
+
+        it('includes retraction_generation when present so replicas fence identically (item 5308)', async function () {
+            let b  = new HubDbBroadcaster({});
+            let ws = makeMockWs();
+            await b.addSubscriber(ws);
+            b.broadcastDeletion({ table: 'oracle_prices', source_chain: 'BTC', from_action_index: 50, to_action_index: 75, retraction_generation: 5 });
+            let msg = JSON.parse(ws.send.lastCall.args[0]);
+            expect(msg.retraction_generation).to.equal(5);
+        });
+
+        it('omits retraction_generation when absent (older indexer / no fence)', async function () {
+            let b  = new HubDbBroadcaster({});
+            let ws = makeMockWs();
+            await b.addSubscriber(ws);
+            b.broadcastDeletion({ table: 'oracle_prices', source_chain: 'BTC', from_action_index: 50 });
+            let msg = JSON.parse(ws.send.lastCall.args[0]);
+            expect(msg).to.not.have.property('retraction_generation');
+        });
     });
 
     // ── getSubscriberCount ────────────────────────────────────────────────────

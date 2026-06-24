@@ -426,7 +426,14 @@ class CrossChainDexEngine extends EventEmitter {
             b_filled_before: String(desc.hiFilledBefore),
             b_ownership:     Number(hi.give_ownership || 0),
             b_payout_addr:   hi.get_address,           // B receives on lo's chain
-            effective_time:  effectiveTime
+            effective_time:  effectiveTime,
+            // Per-leg source-chain reorg fence (item 5308): each leg lives on its own
+            // chain with its own generation, stamped from that side's open-order RPC. A
+            // source reorg retraction for chain C fences only the leg on C by its
+            // generation, so a re-published order at a recycled action_index survives.
+            // Metadata only; NOT part of the signed canonical.
+            a_push_generation: Number(lo.push_generation) || 0,
+            b_push_generation: Number(hi.push_generation) || 0
         };
 
         // Resolve the cross_chain validator set at snapshot_block (deterministic,
@@ -544,7 +551,7 @@ class CrossChainDexEngine extends EventEmitter {
         let cols = ['match_id','snapshot_block','network',
                     'a_chain','a_action_index','a_kind','a_tick','a_amount','a_filled_before','a_ownership','a_payout_addr',
                     'b_chain','b_action_index','b_kind','b_tick','b_amount','b_filled_before','b_ownership','b_payout_addr',
-                    'effective_time','finalizing_view','validator_signatures'];
+                    'effective_time','finalizing_view','validator_signatures','a_push_generation','b_push_generation'];
         let vals = cols.map(c => row[c]);
         // INSERT IGNORE: match_id is unique, so a re-finalize (e.g. another hub or a
         // restart racing the poll) is a harmless no-op.
@@ -615,18 +622,30 @@ class CrossChainDexEngine extends EventEmitter {
     // leg for a DEFERRED retraction, so a match re-published inside the original open-ended range is
     // not retracted (item 5296). Absent => open-ended, the live behavior. Two-sided: the bound
     // applies to whichever leg (a/b) is on the reorged chain. The bound rides each broadcastDeletion.
-    async retractMatchesForReorg(chain, fromActionIndex, toActionIndex){
+    // retractionGeneration (optional, item 5308): each leg carries its OWN generation
+    // (a_push_generation / b_push_generation). When present, the per-leg clause additionally
+    // requires that leg's generation <= it, so a leg re-finalized at a recycled source action_index
+    // (higher generation, post-rollback) survives. Omitted (older indexer) => no fence.
+    async retractMatchesForReorg(chain, fromActionIndex, toActionIndex, retractionGeneration){
         let to = (toActionIndex !== undefined && toActionIndex !== null) ? Number(toActionIndex) : null;
         let bounded = (to !== null && Number.isFinite(to) && to >= 0);
-        let selectSql = bounded
-            ? "SELECT match_id, a_chain, a_action_index, a_amount, b_chain, b_action_index, b_amount FROM cross_chain_matches " +
-              "WHERE status = 'finalized' AND ((a_chain = ? AND a_action_index >= ? AND a_action_index <= ?) OR (b_chain = ? AND b_action_index >= ? AND b_action_index <= ?))"
-            : "SELECT match_id, a_chain, a_action_index, a_amount, b_chain, b_action_index, b_amount FROM cross_chain_matches " +
-              "WHERE status = 'finalized' AND ((a_chain = ? AND a_action_index >= ?) OR (b_chain = ? AND b_action_index >= ?))";
-        let params = bounded
-            ? [chain, fromActionIndex, to, chain, fromActionIndex, to]
-            : [chain, fromActionIndex, chain, fromActionIndex];
-        let rows = await this.db.doQuery(selectSql, params);
+        let gen = (retractionGeneration !== undefined && retractionGeneration !== null) ? Number(retractionGeneration) : null;
+        let fenced = (gen !== null && Number.isFinite(gen) && gen >= 0);
+        // Per-leg clause for whichever side is on the reorged chain, fenced by THAT leg's generation.
+        let legClause = (col, gcol) => "(" + col + "_chain = ? AND " + col + "_action_index >= ?" +
+            (bounded ? " AND " + col + "_action_index <= ?" : "") +
+            (fenced ? " AND " + gcol + " <= ?" : "") + ")";
+        let legParams = () => {
+            let p = [chain, fromActionIndex];
+            if(bounded) p.push(to);
+            if(fenced) p.push(gen);
+            return p;
+        };
+        let where = "status = 'finalized' AND (" + legClause('a', 'a_push_generation') + " OR " + legClause('b', 'b_push_generation') + ")";
+        let params = legParams().concat(legParams());
+        let rows = await this.db.doQuery(
+            "SELECT match_id, a_chain, a_action_index, a_amount, b_chain, b_action_index, b_amount FROM cross_chain_matches WHERE " + where,
+            params);
         for(let r of rows){
             await this.db.doQuery("UPDATE cross_chain_matches SET status = 'retracted' WHERE match_id = ?", [r.match_id]);
             this._applyCommit(r, -1);                   // restore both legs' remaining capacity
@@ -634,6 +653,7 @@ class CrossChainDexEngine extends EventEmitter {
             if(this.broadcaster){
                 let evt = { table: 'cross_chain_matches', source_chain: chain, from_action_index: fromActionIndex };
                 if(bounded) evt.to_action_index = to;
+                if(fenced) evt.retraction_generation = gen;
                 this.broadcaster.broadcastDeletion(evt);
             }
         }

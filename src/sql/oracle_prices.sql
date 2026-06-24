@@ -11,6 +11,7 @@ CREATE TABLE oracle_prices (
     block_time      BIGINT UNSIGNED NOT NULL,     -- block_time of the publishing tx
     effective_at    BIGINT UNSIGNED NOT NULL,     -- when this price takes effect (block_time, or block_time+86400 for updates)
     action_index    BIGINT UNSIGNED NOT NULL,     -- action_index of the PRICE v1 tx on source_chain
+    push_generation BIGINT NOT NULL DEFAULT 0,     -- source-chain reorg fence (item 5308): bumped each rollback; a retraction deletes only rows with push_generation <= the rollback's generation, so a re-published row (higher generation) survives
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY idx_oracle_action (source_chain, action_index),
     KEY idx_oracle_tick (source_address, coin, tick, fiat),

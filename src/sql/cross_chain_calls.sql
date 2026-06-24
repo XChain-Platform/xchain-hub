@@ -1,13 +1,13 @@
 -- Cross-chain contract call relay rows (XCALL). Two immutable phases per call,
 -- both quorum-signed by the cross_chain capability set and mirrored to every
 -- indexer over the hub-DB channel (same transport as cross_chain_matches):
---   dispatch — federation-confirmed request from the source chain; target-chain
+--   dispatch: federation-confirmed request from the source chain; target-chain
 --              indexers verify the signatures and inject the execution at the
 --              first block with block_time >= effective_time.
---   result   — federation-confirmed execution outcome from the target chain;
+--   result:   federation-confirmed execution outcome from the target chain;
 --              source-chain indexers verify and inject the requester's callback.
 -- The hub-assigned `id` is BOTH the mirror cursor and the indexers'
--- deterministic injection-order key (ORDER BY id ASC) — never reorder.
+-- deterministic injection-order key (ORDER BY id ASC); never reorder.
 DROP TABLE IF EXISTS cross_chain_calls;
 CREATE TABLE cross_chain_calls (
     id                    BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, -- mirror cursor (since_id) + injection-order key
@@ -29,10 +29,11 @@ CREATE TABLE cross_chain_calls (
     status                VARCHAR(20)  NOT NULL DEFAULT 'finalized',-- row lifecycle: finalized / retracted (same model as cross_chain_matches)
     result_status         VARCHAR(20),                             -- result phase only: ok|reverted|out_of_gas|no_contract|not_callable|payload_too_large|error
     return_payload_b64    TEXT,                                    -- result phase only (sha256'd into the canonical)
-    validator_signatures  TEXT         NOT NULL,                   -- JSON [{pubkey, sig}] — 2f+1 Ed25519 over the phase canonical
+    validator_signatures  TEXT         NOT NULL,                   -- JSON [{pubkey, sig}]; 2f+1 Ed25519 over the phase canonical
     batch_seq             BIGINT UNSIGNED,                         -- ANCHOR archive batch this row was committed in; hub-side only
     archived_status       VARCHAR(20),                             -- status at archive publish (re-archive when it drifts); hub-side only
     anchor_txid           VARCHAR(80),                             -- DOGE txid of the archiving ANCHOR; hub-side audit, not mirrored
+    push_generation       BIGINT       NOT NULL DEFAULT 0,         -- source-chain reorg fence (item 5308): stamped from the source indexer's generation; a retraction deletes only rows with push_generation <= the rollback's generation
     created_at            TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COLLATE=utf8_general_ci;

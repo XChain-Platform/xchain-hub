@@ -121,6 +121,51 @@ describe('PriceAggregator.retractFromActionIndex()', function () {
         ]);
     });
 
+    it('fences the delete by push_generation and carries retraction_generation when given (item 5308)', async function () {
+        hub.db.doQuery.resolves({ affectedRows: 1 });
+        let events = [];
+        agg.on('row:deleted', e => events.push(e));
+
+        // Bounded range [50,75] AND generation fence <= 5.
+        await agg.retractFromActionIndex('BTC', 50, 75, 5);
+
+        let calls = hub.db.doQuery.getCalls();
+        let snapCall = calls.find(c => /price_snapshots/.test(c.args[0]));
+        let oracleCall = calls.find(c => /oracle_prices/.test(c.args[0]));
+        expect(snapCall.args[0]).to.match(/source_action_index >= \? AND source_action_index <= \? AND push_generation <= \?/);
+        expect(snapCall.args[1]).to.deep.equal(['BTC', 50, 75, 5]);
+        expect(oracleCall.args[0]).to.match(/action_index >= \? AND action_index <= \? AND push_generation <= \?/);
+        expect(oracleCall.args[1]).to.deep.equal(['BTC', 50, 75, 5]);
+        expect(events).to.deep.equal([
+            { table: 'price_snapshots', source_chain: 'BTC', from_action_index: 50, to_action_index: 75, retraction_generation: 5 },
+            { table: 'oracle_prices',   source_chain: 'BTC', from_action_index: 50, to_action_index: 75, retraction_generation: 5 }
+        ]);
+    });
+
+    it('applies an open-ended generation fence (live retraction: gen but no toActionIndex)', async function () {
+        hub.db.doQuery.resolves({ affectedRows: 1 });
+        let events = [];
+        agg.on('row:deleted', e => events.push(e));
+
+        // Live retraction threads the generation with no upper bound (toActionIndex null).
+        await agg.retractFromActionIndex('BTC', 50, null, 7);
+
+        let calls = hub.db.doQuery.getCalls();
+        let snapCall = calls.find(c => /price_snapshots/.test(c.args[0]));
+        expect(snapCall.args[0]).to.match(/source_action_index >= \? AND push_generation <= \?/);
+        expect(snapCall.args[0]).to.not.match(/<= \? AND push_generation/);   // no closed-range clause
+        expect(snapCall.args[1]).to.deep.equal(['BTC', 50, 7]);
+        expect(events[0]).to.deep.equal({ table: 'price_snapshots', source_chain: 'BTC', from_action_index: 50, retraction_generation: 7 });
+    });
+
+    it('omits the generation fence entirely when retractionGeneration is absent (older indexer back-compat)', async function () {
+        hub.db.doQuery.resolves({ affectedRows: 1 });
+        await agg.retractFromActionIndex('BTC', 50, 75);
+        let snapCall = hub.db.doQuery.getCalls().find(c => /price_snapshots/.test(c.args[0]));
+        expect(snapCall.args[0]).to.not.match(/push_generation/);
+        expect(snapCall.args[1]).to.deep.equal(['BTC', 50, 75]);
+    });
+
     it('rejects a malformed from_action_index without touching the DB', async function () {
         let result = await agg.retractFromActionIndex('BTC', 'not-a-number');
         expect(result).to.have.property('error');
@@ -260,22 +305,37 @@ describe('PriceAggregator.receiveOraclePrice() validation + persistence', functi
 
         let result = await agg.receiveOraclePrice('BTC', {
             source_address: 'addr1', coin: 'XCP', tick: 'GOLD', fiat: 'USD',
-            value: '1.23', fee: '0.01', memo: 'hi', block_time: 1700000000, action_index: 7
+            value: '1.23', fee: '0.01', memo: 'hi', block_time: 1700000000, action_index: 7,
+            push_generation: 4
         });
 
         expect(result).to.deep.equal({ accepted: true });
-        // Uniform 24h delay applies to every publish, first included.
+        // Uniform 24h delay applies to every publish, first included. push_generation (item 5308)
+        // is the 12th column, stamped from the push payload.
         expect(insertArgs).to.deep.equal([
             'addr1', 'BTC', 'XCP', 'GOLD', 'USD', '1.23', '0.01', 'hi',
-            1700000000, 1700086400, 7
+            1700000000, 1700086400, 7, 4
         ]);
         expect(events).to.have.length(1);
         expect(events[0].table).to.equal('oracle_prices');
         expect(events[0].row).to.include({
             source_address: 'addr1', source_chain: 'BTC', coin: 'XCP',
             tick: 'GOLD', fiat: 'USD', value: '1.23', fee: '0.01', memo: 'hi',
-            block_time: 1700000000, effective_at: 1700086400, action_index: 7
+            block_time: 1700000000, effective_at: 1700086400, action_index: 7, push_generation: 4
         });
+    });
+
+    it('defaults push_generation to 0 when the push omits it (legacy indexer)', async function () {
+        let insertArgs = null;
+        hub.db.doQuery.callsFake(async (sql, params) => {
+            if (/^INSERT INTO oracle_prices/.test(sql)) { insertArgs = params; return {}; }
+            return [];
+        });
+        await agg.receiveOraclePrice('BTC', {
+            source_address: 'addr1', coin: 'XCP', tick: 'GOLD', fiat: 'USD',
+            value: '1.23', block_time: 1700000000, action_index: 7
+        });
+        expect(insertArgs[11]).to.equal(0);     // push_generation defaults to 0
     });
 
     it('rejects a malformed or non-positive value without touching the DB', async function () {
