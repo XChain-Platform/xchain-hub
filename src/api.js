@@ -89,8 +89,8 @@ function validateChain(chain) {
 function validateLimit(limit) {
     if (limit !== undefined && limit !== null) {
         let n = parseInt(limit);
-        if (!Number.isInteger(n) || n <= 0 || n > 1000)
-            return { error: 'limit must be a positive integer no greater than 1000' };
+        if (!Number.isInteger(n) || n <= 0 || n > 10000)
+            return { error: 'limit must be a positive integer no greater than 10000' };
     }
     return null;
 }
