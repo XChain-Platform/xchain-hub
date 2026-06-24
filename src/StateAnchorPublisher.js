@@ -80,11 +80,18 @@ const StateCheckpointEngine = require('./StateCheckpointEngine.js');
 const swq                   = require('./stake_weighted_quorum.js');
 const eq                    = require('./equivocation_header.js');
 const ckpt                  = require('./checkpoint_commitment_activation.js');
+const ar                    = require('./anchor_reward_activation.js');
 
 const XANC_SIGN_REQ  = 'XANC_SIGN_REQ';
 const XANC_SIGN      = 'XANC_SIGN';
 const XANC_FINALIZED = 'XANC_FINALIZED';
 const XANC_V0_DONE   = 'XANC_V0_DONE';
+// Publisher-attestation round (anchor-reward re-derivation flag-day): the elected
+// checkpoint publisher collects a 2f+1 oracle_publish quorum ATTESTING that it is the
+// legitimate reward earner, carried on-chain in ANCHOR v4/v5 so the indexer DERIVES the
+// reward instead of trusting the forgeable push (#5311). Mirrors XANC_SIGN_REQ/SIGN.
+const XANCPUB_SIGN_REQ = 'XANCPUB_SIGN_REQ';
+const XANCPUB_SIGN     = 'XANCPUB_SIGN';
 
 // Fixed serialization order for an archived match row (the crc32 and the
 // follower byte-comparison depend on this exact order). Spec §Archive JSON.
@@ -155,6 +162,7 @@ class StateAnchorPublisher {
         this.getBalanceFn = null;
 
         this._archiveRound     = null;  // leader-side archive signing round (one at a time)
+        this._attestRound      = null;  // leader-side publisher-attestation round (one at a time)
         this._pendingMatches   = 0;     // size trigger; DB is the source of truth
         this._callHandler      = null;
         this._flushing         = false;
@@ -232,6 +240,10 @@ class StateAnchorPublisher {
         }
         if(this._archiveRound && this._archiveRound.timer) clearTimeout(this._archiveRound.timer);
         this._archiveRound = null;
+        if(this._attestRound && this._attestRound.timer) clearTimeout(this._attestRound.timer);
+        if(this._attestRound && !this._attestRound.done && this._attestRound.resolve)
+            this._attestRound.resolve({ met: false, sigs: [] });   // unblock any awaiting publish
+        this._attestRound = null;
     }
 
     // Flush: publish pending v0 checkpoints + the pending archive batch.
@@ -335,7 +347,30 @@ class StateAnchorPublisher {
                 let useV3 = ckpt.isCheckpointCommitmentActive(Number(row.snapshot_block), row.network) &&
                             row.state_root != null && row.block_merkle_root != null &&
                             row.state_root_version != null && row.block_merkle_version != null;
-                let payload = useV3 ? this._buildV3Payload(row) : this._buildV0Payload(row);
+                // Anchor-reward re-derivation flag-day: at/above it, run the publisher-
+                // attestation round (2f+1 oracle_publish quorum over XANCPUB binding THIS
+                // hub as the earner) and emit ANCHOR v4 (rootless) / v5 (root-bearing),
+                // which carries the attestation so the indexer DERIVES the reward and the
+                // forgeable hub push is retired (#5311). LIVENESS-SAFE: a degraded round
+                // (timeout / short quorum / not a snapshot member) FALLS BACK to legacy
+                // v0/v3, so the anchor always lands; only reward issuance gains the quorum
+                // dependency. A failed reward attestation must NEVER block the anchor.
+                let me = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
+                let payload;
+                if(me && ar.isAnchorRewardActive(Number(row.snapshot_block), row.network)){
+                    let attest = await this._runPublisherAttestationRound(this._cpFromRow(row), me);
+                    if(attest && attest.met && attest.sigs.length >= 1){
+                        payload = useV3 ? this._buildV5Payload(row, me, attest.sigs)
+                                        : this._buildV4Payload(row, me, attest.sigs);
+                    } else {
+                        console.warn('StateAnchorPublisher: publisher-attestation quorum not reached for ' +
+                                     row.chain + '/' + row.network + ' @ ' + row.block_index +
+                                     '; publishing legacy v' + (useV3 ? '3' : '0') + ' (anchor lands, no reward)');
+                        payload = useV3 ? this._buildV3Payload(row) : this._buildV0Payload(row);
+                    }
+                } else {
+                    payload = useV3 ? this._buildV3Payload(row) : this._buildV0Payload(row);
+                }
                 let broadcaster = signer.broadcastFn || ((p) => this._defaultBroadcast(p, signer));
                 // Multiple chains' v0 anchors go out back-to-back from the same
                 // wallet; without the retry, every cycle lands only the first
@@ -425,6 +460,201 @@ class StateAnchorPublisher {
                      String(sigs.length)];
         for(let s of sigs) parts.push(s.pubkey, s.sig);
         return parts.join('|');
+    }
+
+    // ANCHOR v4 (anchor-reward flag-day): the rootless v0 checkpoint PLUS the elected
+    // PUBLISHER pubkey and a 2f+1 oracle_publish attestation (XANCPUB) over the reward
+    // tuple, appended AFTER the root signature list. The indexer re-derives the reward
+    // from these bytes (anchor.js formats[4]), so the trusted hub push is retired (#5311).
+    // Field order MUST match the indexer parser: ...|SIG_COUNT|PUBKEY|SIG|...|PUBLISHER|
+    // ATTEST_SIG_COUNT|APUBKEY|ASIG|...
+    _buildV4Payload(row, publisher, attestSigs){
+        let sigs = this._parseSigs(row.validator_signatures);
+        let parts = ['ANCHOR', '4', row.chain, row.network, String(row.block_index), row.block_hash,
+                     row.ledger_hash, row.actions_hash, row.contract_hash,
+                     String(row.checkpoint_seq), String(row.snapshot_block), String(sigs.length)];
+        for(let s of sigs) parts.push(s.pubkey, s.sig);
+        parts.push(String(publisher).toLowerCase(), String((attestSigs || []).length));
+        for(let s of (attestSigs || [])) parts.push(String(s.pubkey).toLowerCase(), String(s.sig).toLowerCase());
+        return parts.join('|');
+    }
+
+    // ANCHOR v5: the root-bearing v3 checkpoint (SPV light-client roots + version bytes)
+    // PLUS the same publisher + XANCPUB attestation tail as v4 (indexer formats[5]). Emitted
+    // instead of v3 when the checkpoint carries roots AND the anchor-reward flag-day is met.
+    _buildV5Payload(row, publisher, attestSigs){
+        let sigs = this._parseSigs(row.validator_signatures);
+        let parts = ['ANCHOR', '5', row.chain, row.network, String(row.block_index), row.block_hash,
+                     row.ledger_hash, row.actions_hash, row.contract_hash,
+                     String(row.checkpoint_seq), String(row.snapshot_block),
+                     String(row.state_root || '').toLowerCase(), String(row.state_root_version),
+                     String(row.block_merkle_root || '').toLowerCase(), String(row.block_merkle_version),
+                     String(sigs.length)];
+        for(let s of sigs) parts.push(s.pubkey, s.sig);
+        parts.push(String(publisher).toLowerCase(), String((attestSigs || []).length));
+        for(let s of (attestSigs || [])) parts.push(String(s.pubkey).toLowerCase(), String(s.sig).toLowerCase());
+        return parts.join('|');
+    }
+
+    // Publisher-attestation canonical (XANCPUB): the string the 2f+1 oracle_publish quorum
+    // signs to ATTEST which validator earns the anchor reward. MUST be BYTE-IDENTICAL to the
+    // indexer's Anchor._rewardCanonical (a divergence forks the derived reward row). The
+    // amount is the FROZEN consensus constant (ar.ANCHOR_REWARD_AMOUNT, read from the twin
+    // module, NOT the operator-tunable ANCHOR_REWARD_PER_PUBLISH env). The EQUIV wrapper uses
+    // the checkpoint's NETWORK (cp.network) like _canonical/_archiveCanonical, NOT this.network,
+    // and a distinct 'XANCPUB|...' roundId gives the attestation its own equivocation family so
+    // a validator that signs both the checkpoint root canonical and this reward attestation in
+    // the same round is never falsely slashable.
+    _attestationCanonical(cp, publisher){
+        let base = ['XANCPUB', 'anchor_' + cp.chain, String(cp.checkpoint_seq),
+                    String(cp.snapshot_block), String(publisher || '').toLowerCase(),
+                    ar.ANCHOR_REWARD_AMOUNT].join('|');
+        if(eq.isEquivHeaderActive(cp.snapshot_block, cp.network)){
+            let roundId = 'XANCPUB|' + cp.chain + '|' + cp.network + '|' + cp.checkpoint_seq + '|' + cp.snapshot_block;
+            return eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT, roundId, 0, base);
+        }
+        return base;
+    }
+
+    // Run the publisher-attestation round for a checkpoint THIS hub is publishing.
+    // Resolves { met, sigs:[{pubkey,sig}], publisher } once a 2f+1 oracle_publish quorum
+    // (stake-weighted at/above STAKE_WEIGHTED_QUORUM, else count) co-signs XANCPUB, or
+    // { met:false } on timeout / short quorum. The SIGNING/QUORUM set is resolved at the
+    // checkpoint's snapshot_block, the SAME set the indexer (anchor.js) verifies the
+    // attestation against, so the hub never collects a quorum the chain then rejects.
+    async _runPublisherAttestationRound(cp, publisher){
+        if(!this.identity) return { met: false, sigs: [] };
+
+        let signingSet     = await this._resolveCapabilitySet('oracle_publish', Number(cp.snapshot_block));
+        let signingPubkeys = signingSet.map(v => v.pubkey);
+        let snapCount      = signingPubkeys.length;
+        let weighted       = swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block), this.network);
+        let quorum         = (snapCount <= 1) ? 1 : Math.max(2 * Math.floor((snapCount - 1) / 3) + 1, Math.ceil((snapCount + 1) / 2));
+
+        let me        = this.identity.getPubkeyHex().toLowerCase();
+        let canonical = this._attestationCanonical(cp, publisher);
+        let mySig     = this.identity.sign(canonical);
+
+        // The publisher must itself hold oracle_publish at snapshot_block, or the indexer
+        // drops the reward (PUBLISHER must be in the verified set). Fall back to a legacy
+        // anchor rather than emit a v4/v5 whose reward can never be credited.
+        if(snapCount > 0 && !signingPubkeys.includes(me)) return { met: false, sigs: [] };
+
+        let signatures = new Map();
+        signatures.set(me, mySig);
+
+        // Single-node / unresolved set: the publisher's own attestation is the quorum
+        // (mirrors the archive round's snapCount<=1 self-sign bypass).
+        if(snapCount <= 1 || !this.peerManager)
+            return { met: true, sigs: [{ pubkey: me, sig: mySig }], publisher: publisher };
+
+        return await new Promise((resolve) => {
+            let round = {
+                cp, publisher, canonical, quorum, weighted, resolve,
+                // Full {pubkey, source, weight} set so the stake-weighted tally can sum
+                // distinct-source stake, identical to the archive round.
+                validators: signingSet.map(v => ({ pubkey: v.pubkey, source: String(v.source != null ? v.source : ''), weight: String(v.amount != null ? v.amount : '0') })),
+                signatures, done: false, timer: null
+            };
+            this._attestRound = round;
+            round.timer = setTimeout(() => {
+                if(this._attestRound === round && !round.done){
+                    round.done = true;
+                    this._attestRound = null;
+                    console.warn('StateAnchorPublisher: publisher-attestation round (seq ' + cp.checkpoint_seq +
+                                 ') timed out at ' + round.signatures.size + '/' + quorum + ' sigs; legacy fallback');
+                    resolve({ met: false, sigs: Array.from(round.signatures, ([pubkey, sig]) => ({ pubkey, sig })) });
+                }
+            }, this.roundTimeoutMs);
+            if(round.timer.unref) round.timer.unref();
+
+            this.peerManager.broadcast(XANCPUB_SIGN_REQ, {
+                checkpoint: cp, publisher: publisher, sig_pubkey: me, sig: mySig
+            });
+            this._checkAttestQuorum();
+        });
+    }
+
+    _checkAttestQuorum(){
+        let round = this._attestRound;
+        if(!round || round.done) return;
+        let met = round.weighted
+            ? swq.meetsStakeThreshold(round.validators, round.signatures.keys())
+            : (round.signatures.size >= round.quorum);
+        if(!met) return;
+        round.done = true;
+        if(round.timer){ clearTimeout(round.timer); round.timer = null; }
+        this._attestRound = null;
+        round.resolve({ met: true, sigs: Array.from(round.signatures, ([pubkey, sig]) => ({ pubkey, sig })), publisher: round.publisher });
+    }
+
+    // Follower: co-sign the publisher attestation ONLY when the proposer is the
+    // legitimately rank-unlocked publisher of a checkpoint that byte-matches our own
+    // state_checkpoints row, and we ourselves hold oracle_publish at its snapshot_block.
+    // The frozen amount is enforced implicitly: we rebuild the canonical with
+    // ar.ANCHOR_REWARD_AMOUNT, so a wire-supplied amount can never be co-signed.
+    async _handleAttestSignReq(envelope){
+        let d = envelope.data;
+        if(!this.identity || !d || !d.checkpoint) return;
+        let cp        = d.checkpoint;
+        let myPubkey  = this.identity.getPubkeyHex().toLowerCase();
+        let sender    = String(d.sig_pubkey || '').toLowerCase();
+        if(sender === myPubkey) return;
+        // The publisher attests ITSELF: the proposer must be the rewarded publisher, or it
+        // is binding a pubkey it is not entitled to.
+        let publisher = String(d.publisher || '').toLowerCase();
+        if(publisher !== sender) return;
+
+        // Re-run the v0 publisher election (oracle_publish @ snapshot_block, hash-ordered by
+        // the v0 election key) and confirm the proposer is rank-unlocked on the SAME failover
+        // ladder _publishPendingCheckpoints used, bounded to our own BTC tip (anti-spam; the
+        // binding security is the checkpoint + frozen-amount re-derivation below).
+        let eligible = await this._getActiveOraclePublishPubkeys(Number(cp.snapshot_block));
+        if(eligible.length === 0) return;
+        if(eligible.length > 1){
+            let order = StateAnchorPublisher.hashOrder(this._v0ElectionKey(cp), eligible);
+            let myBtc = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
+            let since = Number.isFinite(myBtc) ? myBtc - Number(cp.snapshot_block) : null;
+            if(!this._rankUnlocked(order, sender, since)) return;          // proposer not unlocked
+        }
+        // Only co-sign if WE hold oracle_publish at snapshot_block, or the indexer would drop
+        // our attestation signature anyway (same gate the archive follower applies).
+        if(!eligible.includes(myPubkey)) return;
+
+        // The checkpoint must equal OUR own state_checkpoints row (latest seq for the height);
+        // a reorg-superseded row never attests. canonicalCheckpoint binds chain/network/
+        // block_index/hashes/checkpoint_seq/snapshot_block, so this also rejects a proposer
+        // whose seq or snapshot_block differs from ours.
+        let local = await this.db.doQuery(
+            'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? ORDER BY checkpoint_seq DESC LIMIT 1',
+            [cp.chain, cp.network, Number(cp.block_index)]);
+        if(!local || local.length === 0) return;
+        let mine = this._cpFromRow(local[0]);
+        if(StateCheckpointEngine.canonicalCheckpoint(mine) !== StateCheckpointEngine.canonicalCheckpoint(cp)) return;
+
+        let canonical = this._attestationCanonical(cp, publisher);
+        if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender)) return;   // proposer's own sig
+
+        this.peerManager.broadcast(XANCPUB_SIGN, {
+            chain: cp.chain, network: cp.network,
+            checkpoint_seq: Number(cp.checkpoint_seq), snapshot_block: Number(cp.snapshot_block),
+            sig_pubkey: myPubkey, sig: this.identity.sign(canonical)
+        });
+    }
+
+    async _handleAttestSign(envelope){
+        let d = envelope.data;
+        let round = this._attestRound;
+        if(!round || round.done || !d) return;
+        // Match the active round by checkpoint identity (chain/network/seq/snapshot_block).
+        if(String(d.chain) !== String(round.cp.chain) || String(d.network) !== String(round.cp.network) ||
+           Number(d.checkpoint_seq) !== Number(round.cp.checkpoint_seq) ||
+           Number(d.snapshot_block) !== Number(round.cp.snapshot_block)) return;
+        let pubkey = String(d.sig_pubkey || '').toLowerCase();
+        if(!round.validators.some(v => v.pubkey === pubkey)) return;
+        if(!ValidatorIdentity.verify(round.canonical, String(d.sig || ''), pubkey)) return;
+        round.signatures.set(pubkey, String(d.sig));
+        this._checkAttestQuorum();
     }
 
     // Archive round (v1/v2).
@@ -805,6 +1035,8 @@ class StateAnchorPublisher {
             case XANC_SIGN:      this._handleSign(envelope).catch(e => console.error('StateAnchorPublisher: SIGN error: ' + (e && e.message)));        break;
             case XANC_FINALIZED: this._handleFinalized(envelope).catch(e => console.error('StateAnchorPublisher: FINALIZED error: ' + (e && e.message))); break;
             case XANC_V0_DONE:   this._handleV0Done(envelope).catch(e => console.error('StateAnchorPublisher: V0_DONE error: ' + (e && e.message)));     break;
+            case XANCPUB_SIGN_REQ: this._handleAttestSignReq(envelope).catch(e => console.error('StateAnchorPublisher: XANCPUB_SIGN_REQ error: ' + (e && e.message))); break;
+            case XANCPUB_SIGN:     this._handleAttestSign(envelope).catch(e => console.error('StateAnchorPublisher: XANCPUB_SIGN error: ' + (e && e.message)));         break;
         }
     }
 
@@ -1461,4 +1693,6 @@ module.exports.XANC_SIGN_REQ  = XANC_SIGN_REQ;
 module.exports.XANC_SIGN      = XANC_SIGN;
 module.exports.XANC_FINALIZED = XANC_FINALIZED;
 module.exports.XANC_V0_DONE   = XANC_V0_DONE;
+module.exports.XANCPUB_SIGN_REQ = XANCPUB_SIGN_REQ;
+module.exports.XANCPUB_SIGN     = XANCPUB_SIGN;
 module.exports.MATCH_KEYS     = MATCH_KEYS;

@@ -21,6 +21,7 @@
  ********************************************************************/
 
 const axios = require('axios');
+const ar    = require('./anchor_reward_activation.js');
 
 class RewardTracker {
 
@@ -132,8 +133,18 @@ class RewardTracker {
 
         console.log('Rewards: ' + rewardType + ' #' + roundNumber + ': ' + amountStr + ' XCHAIN to ' + lcPubkey.substring(0, 16) + '…');
 
-        this._pushRewardsToBtcIndexer(roundNumber, [lcPubkey], amountStr, blockIndex || roundNumber, rewardType)
-            .catch(e => console.warn('Rewards: failed to push anchor reward to BTC indexer:', e));
+        // #5311: at/above the anchor-reward flag-day, the indexer DERIVES the per-chain
+        // anchor reward from the on-chain ANCHOR v4/v5 publisher attestation, so the
+        // unauthenticated, forgeable push is retired for those reward types. The hub still
+        // RECORDS the reward locally (ops visibility + the archive recovery transport). The
+        // push survives below the flag-day, and for anchor_archive (which the indexer does
+        // not derive from v4/v5) it survives always; oracle_round never pushes here.
+        let network  = (this.hub && this.hub.network) ? this.hub.network : '';
+        let isDerived = /^anchor_(BTC|LTC|DOGE)$/.test(String(rewardType)) &&
+                        ar.isAnchorRewardActive(Number(blockIndex), network);
+        if(!isDerived)
+            this._pushRewardsToBtcIndexer(roundNumber, [lcPubkey], amountStr, blockIndex || roundNumber, rewardType)
+                .catch(e => console.warn('Rewards: failed to push anchor reward to BTC indexer:', e));
     }
 
     // Resolve the staking source address that owns a signing pubkey at a block,

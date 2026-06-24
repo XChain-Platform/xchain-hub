@@ -191,12 +191,28 @@ function memDb() {
     };
 }
 
+const arMod = require('../../src/anchor_reward_activation.js');
+
 describe('StateAnchorPublisher', function () {
 
     let buses = [];
     afterEach(async function () {
         for (let bus of buses) { for (let nd of bus.nodes) await nd.pub.stop(); }
         buses = [];
+    });
+
+    // These legacy v0/v1/v3 production tests exercise the PRE-anchor-reward-flag-day
+    // producer path (still real below the flag-day on mainnet, and as the degraded-
+    // federation fallback). Pin the regtest flag-day DORMANT here so the producer keeps
+    // emitting v0/v3; the nested 'publisher-attestation round (v4/v5)' suite below
+    // re-activates it. save/restore keeps the toggle isolation-safe regardless of order.
+    let savedRegtestFlagDay;
+    beforeEach(function () {
+        savedRegtestFlagDay = arMod.ANCHOR_REWARD_ACTIVATION.regtest;
+        arMod.ANCHOR_REWARD_ACTIVATION.regtest = 999999999;
+    });
+    afterEach(function () {
+        arMod.ANCHOR_REWARD_ACTIVATION.regtest = savedRegtestFlagDay;
     });
 
     // n publishers over a shared gossip bus. Every node shares identical DB
@@ -299,6 +315,165 @@ describe('StateAnchorPublisher', function () {
     }
     async function startAll(bus) { for (let nd of bus.nodes) await nd.pub.start(); }
     async function flushAll(bus) { for (let nd of bus.nodes) await nd.pub.flush(); }
+
+    // Publisher-attestation round (v4/v5): at/above the anchor-reward flag-day the
+    // producer emits ANCHOR v4 (rootless) / v5 (root-bearing) carrying the elected
+    // publisher + a 2f+1 oracle_publish attestation over XANCPUB, so the indexer DERIVES
+    // the reward and the forgeable hub push is retired (#5311). This suite RE-ACTIVATES
+    // the regtest flag-day (the parent suite pins it dormant for the legacy v0/v3 path).
+    describe('publisher-attestation round (v4/v5)', function () {
+
+        beforeEach(function () { arMod.ANCHOR_REWARD_ACTIVATION.regtest = 0; });   // active at genesis
+
+        // Independent reimplementation of the indexer's Anchor._rewardCanonical: the hub's
+        // _attestationCanonical MUST be byte-identical to this, or the derived reward forks.
+        function rewardCanonical(cp, publisher) {
+            let base = ['XANCPUB', 'anchor_' + cp.chain, String(cp.checkpoint_seq),
+                        String(cp.snapshot_block), String(publisher).toLowerCase(),
+                        arMod.ANCHOR_REWARD_AMOUNT].join('|');
+            if (eq.isEquivHeaderActive(cp.snapshot_block, cp.network)) {
+                let roundId = 'XANCPUB|' + cp.chain + '|' + cp.network + '|' + cp.checkpoint_seq + '|' + cp.snapshot_block;
+                return eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT, roundId, 0, base);
+            }
+            return base;
+        }
+
+        it('_attestationCanonical is byte-identical to the indexer reward canonical (EQUIV-wrapped)', function () {
+            let bus = buildMesh(1);
+            let pub = bus.nodes[0].pub;
+            let cp  = pub._cpFromRow(Object.assign({}, CP_ROW));
+            let publisher = bus.nodes[0].pubkey;
+            let expected = rewardCanonical(cp, publisher);
+            // Sanity: the wrapped form is what the federation signs at/above the EQUIV flag-day.
+            expect(expected).to.equal(
+                'EQUIV|XCHECKPOINT|XANCPUB|BTC|regtest|7|100|0||XANCPUB|anchor_BTC|7|100|' +
+                publisher + '|10.00000000');
+            expect(pub._attestationCanonical(cp, publisher)).to.equal(expected);
+        });
+
+        it('single-node: flush emits ANCHOR v4 with a self-attestation the indexer can verify', async function () {
+            let bus = buildMesh(1);
+            let nd  = bus.nodes[0];
+            await startAll(bus);
+            await nd.pub.flush();
+            await sleep(30);
+
+            let v4 = nd.published.find(p => p.split('|')[1] === '4');
+            expect(v4, 'a v4 anchor was published').to.be.a('string');
+            let parts = v4.split('|');
+            let sigCount = Number(parts[11]);                              // root SIG_COUNT
+            let pubBase  = 12 + 2 * sigCount;
+            expect(parts[pubBase], 'PUBLISHER').to.equal(nd.pubkey);
+            expect(Number(parts[pubBase + 1]), 'ATTEST_SIG_COUNT').to.equal(1);
+            let aPub = parts[pubBase + 2], aSig = parts[pubBase + 3];
+            expect(aPub).to.equal(nd.pubkey);
+            let cp = nd.pub._cpFromRow(nd.db.checkpoints[0]);
+            expect(ValidatorIdentity.verify(rewardCanonical(cp, nd.pubkey), aSig, aPub)).to.be.true;
+
+            // The anchor still lands and the reward is recorded (hub-local + mirrored).
+            expect(nd.db.checkpoints[0].anchor_txid).to.be.a('string');
+            expect(nd.rewards.filter(r => r.type === 'anchor_BTC').length).to.equal(1);
+        });
+
+        it('root-bearing checkpoint emits v5 (v3 shape + publisher tail)', async function () {
+            let bus = buildMesh(1, {
+                mutate: (self, db) => {
+                    db.checkpoints[0].state_root           = 'aa'.repeat(32);
+                    db.checkpoints[0].state_root_version   = 1;
+                    db.checkpoints[0].block_merkle_root    = 'bb'.repeat(32);
+                    db.checkpoints[0].block_merkle_version = 1;
+                }
+            });
+            let nd = bus.nodes[0];
+            await startAll(bus);
+            await nd.pub.flush();
+            await sleep(30);
+
+            let v5 = nd.published.find(p => p.split('|')[1] === '5');
+            expect(v5, 'a v5 anchor was published').to.be.a('string');
+            let parts = v5.split('|');
+            expect(parts[11], 'STATE_ROOT').to.equal('aa'.repeat(32));
+            let sigCount = Number(parts[15]);                              // root SIG_COUNT (v5 sigBase)
+            let pubBase  = 16 + 2 * sigCount;
+            expect(parts[pubBase], 'PUBLISHER').to.equal(nd.pubkey);
+            expect(Number(parts[pubBase + 1]), 'ATTEST_SIG_COUNT').to.be.at.least(1);
+        });
+
+        it('N=4: the elected publisher collects a 2f+1 XANCPUB quorum and emits v4', async function () {
+            let bus = buildMesh(4, { btcBlock: 100 });
+            await startAll(bus);
+            let leader = v0Order(bus)[0];                                   // rank-0 publisher for CP_ROW
+            await leader.pub.flush();
+            await sleep(120);
+
+            let v4 = leader.published.find(p => p.split('|')[1] === '4');
+            expect(v4, 'rank-0 publisher emitted a v4').to.be.a('string');
+            let parts = v4.split('|');
+            let sigCount = Number(parts[11]);
+            let pubBase  = 12 + 2 * sigCount;
+            expect(parts[pubBase], 'PUBLISHER').to.equal(leader.pubkey);
+            let attestCount = Number(parts[pubBase + 1]);
+            expect(attestCount, '2f+1 attestation quorum').to.be.at.least(3);
+
+            // Every attestation sig verifies over the shared XANCPUB canonical and belongs
+            // to the oracle_publish set; the publisher is among the signers.
+            let cp = leader.pub._cpFromRow(leader.db.checkpoints[0]);
+            let canonical = rewardCanonical(cp, leader.pubkey);
+            let setPubkeys = new Set(bus.nodes.map(n => n.pubkey));
+            let signers = [];
+            for (let i = 0; i < attestCount; i++) {
+                let aPub = parts[pubBase + 2 + 2 * i], aSig = parts[pubBase + 2 + 2 * i + 1];
+                expect(setPubkeys.has(aPub), 'attester in oracle_publish set').to.be.true;
+                expect(ValidatorIdentity.verify(canonical, aSig, aPub)).to.be.true;
+                signers.push(aPub);
+            }
+            expect(signers).to.include(leader.pubkey);
+        });
+
+        it('liveness fallback: a publisher that cannot reach attestation quorum emits legacy v0 (anchor lands, no v4)', async function () {
+            // Degraded federation: the elected publisher is the ONLY started node, so no peer
+            // co-signs XANCPUB. The bounded round times out and the publisher FALLS BACK to a
+            // legacy v0 so the anchor still lands. A failed reward attestation must never block
+            // the anchor (the primary safety invariant).
+            let bus = buildMesh(4, { btcBlock: 100, cfg: { ANCHOR_ROUND_TIMEOUT_MS: '40' } });
+            let leader = v0Order(bus)[0];
+            await leader.pub.start();                                       // followers intentionally NOT started
+            await leader.pub.flush();
+            await sleep(40);
+
+            expect(leader.published.some(p => p.split('|')[1] === '4'), 'no v4 emitted').to.be.false;
+            let v0 = leader.published.find(p => p.split('|')[1] === '0');
+            expect(v0, 'fell back to legacy v0').to.be.a('string');
+            expect(leader.db.checkpoints[0].anchor_txid, 'anchor still landed').to.be.a('string');
+        });
+
+        it('a follower refuses to co-sign when the proposer is not the rank-unlocked publisher', async function () {
+            // The XANCPUB attestation binds the publisher to the v0 election: a non-rank-0
+            // proposer (with the ladder not yet unlocked) must collect no follower signatures.
+            let bus = buildMesh(4, { btcBlock: 100, cfg: { ANCHOR_ROUND_TIMEOUT_MS: '40' } });
+            await startAll(bus);
+            let order   = v0Order(bus);
+            let impostor = order[order.length - 1];                        // highest rank, never unlocked at since=0
+            let cp = impostor.pub._cpFromRow(impostor.db.checkpoints[0]);
+            let canonical = impostor.pub._attestationCanonical(cp, impostor.pubkey);
+
+            let collected = 0;
+            let origBroadcast = impostor.pub.peerManager.broadcast;
+            // Drive a bare REQ from the impostor and count co-signs that come back.
+            impostor.pub._attestRound = {
+                cp, publisher: impostor.pubkey, canonical, quorum: 3, weighted: false,
+                validators: bus.nodes.map(n => ({ pubkey: n.pubkey, source: '', weight: '1' })),
+                signatures: new Map([[impostor.pubkey, impostor.identity.sign(canonical)]]),
+                done: false, timer: null, resolve: () => { collected++; }
+            };
+            impostor.pub.peerManager.broadcast('XANCPUB_SIGN_REQ', {
+                checkpoint: cp, publisher: impostor.pubkey,
+                sig_pubkey: impostor.pubkey, sig: impostor.identity.sign(canonical)
+            });
+            await sleep(60);
+            expect(impostor.pub._attestRound.signatures.size, 'only the impostor self-sig').to.equal(1);
+        });
+    });
 
     it('v0 payload matches the ANCHOR spec field order', function () {
         let bus = buildMesh(1);

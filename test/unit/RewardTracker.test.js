@@ -234,6 +234,46 @@ describe('RewardTracker', function () {
     });
 
     // -----------------------------------------------------------------
+    // Anchor-reward flag-day push gating (#5311)
+    // -----------------------------------------------------------------
+
+    describe('push gating at/above the anchor-reward flag-day', function () {
+        // At/above the flag-day the indexer DERIVES the per-chain anchor reward from the
+        // on-chain ANCHOR v4/v5 publisher attestation, so the forgeable push is retired for
+        // anchor_<chain>. The hub still RECORDS the reward locally and still pushes
+        // anchor_archive (which the indexer does not derive) and pre-flag-day rewards.
+        let post;
+        beforeEach(function () {
+            post = sinon.stub(axios, 'post').resolves({ data: {} });
+        });
+
+        it('does NOT push anchor_<chain> once the flag-day is active (indexer derives it)', async function () {
+            hub.network = 'regtest';                                       // flag-day = genesis
+            rt.btcIndexerApiUrl = 'http://indexer:3000';
+            await rt.recordAnchorReward('anchor_DOGE', 8, hexPk(1), 100);
+            await new Promise(r => setImmediate(r));
+            expect(post.called, 'derived reward is not pushed').to.be.false;
+        });
+
+        it('STILL pushes anchor_archive post-flag-day (the indexer cannot derive it from v4/v5)', async function () {
+            hub.network = 'regtest';
+            rt.btcIndexerApiUrl = 'http://indexer:3000';
+            await rt.recordAnchorReward('anchor_archive', 3, hexPk(1), 100);
+            await new Promise(r => setImmediate(r));
+            expect(post.calledOnce, 'archive reward still pushed').to.be.true;
+            expect(post.getCall(0).args[1].params.reward_type).to.equal('anchor_archive');
+        });
+
+        it('STILL pushes anchor_<chain> below the flag-day (legacy push path stands)', async function () {
+            hub.network = 'mainnet';                                       // flag-day = 999999999 (dormant)
+            rt.btcIndexerApiUrl = 'http://indexer:3000';
+            await rt.recordAnchorReward('anchor_BTC', 5, hexPk(1), 100);   // 100 < flag-day
+            await new Promise(r => setImmediate(r));
+            expect(post.calledOnce, 'pre-flag-day reward still pushed').to.be.true;
+        });
+    });
+
+    // -----------------------------------------------------------------
     // resolveSourceByPubkey()
     // -----------------------------------------------------------------
 
