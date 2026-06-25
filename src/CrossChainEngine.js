@@ -25,6 +25,7 @@
 const axios        = require('axios');
 const crypto       = require('crypto');
 const EventEmitter = require('events');
+const coins        = require('./coins');
 
 const XCHAIN_ATTEST_PROPOSE = 'XCHAIN_ATTEST_PROPOSE';
 const XCHAIN_ATTEST_PREPARE = 'XCHAIN_ATTEST_PREPARE';
@@ -36,10 +37,10 @@ const XCHAIN_ATTEST_COMMIT  = 'XCHAIN_ATTEST_COMMIT';
 // Enforced in _handlePropose(): a follower verifies the proposed source action
 // against its OWN indexer for that chain and refuses to co-sign below the
 // threshold (see _verifySourceAction).
-const DEFAULT_CONFIRMATIONS = { BTC: 6, LTC: 12, DOGE: 60 };
+const DEFAULT_CONFIRMATIONS = { ...coins.DEFAULT_CONFIRMATIONS };
 
 // Allowed chain names
-const ALLOWED_CHAINS = ['BTC', 'LTC', 'DOGE'];
+const ALLOWED_CHAINS = [...coins.ALLOWED_COINS];
 
 // Resolve per-chain confirmation thresholds with the hub's standard three-tier
 // idiom: env XCHAIN_CONFIRMATIONS_<COIN> → hub p2pConfig → Tier-B default

@@ -24,6 +24,7 @@
 
 const crypto       = require('crypto');
 const EventEmitter = require('events');
+const coins        = require('./coins');
 
 const REORG_ALERT          = 'REORG_ALERT';
 const XCHAIN_REORG_PREPARE = 'XCHAIN_REORG_PREPARE';
@@ -79,7 +80,7 @@ class ReorgHandler extends EventEmitter {
     // Report a reorg (called via JSON-RPC or internally)
     async reportReorg(chain, reorgHeight, timestamp) {
         // Validate chain
-        let allowedChains = ['BTC', 'LTC', 'DOGE'];
+        let allowedChains = coins.ALLOWED_COINS;
         if (!allowedChains.includes(chain))
             throw new Error('Invalid chain: ' + chain + ' (allowed: ' + allowedChains.join(', ') + ')');
 
@@ -356,7 +357,7 @@ class ReorgHandler extends EventEmitter {
     // Determine which chains are affected by a reorg on the source chain
     // For now, returns all other supported chains (Phase 4C will be smarter about this)
     _getAffectedChains(sourceChain) {
-        let allChains = ['BTC', 'LTC', 'DOGE'];
+        let allChains = coins.ALLOWED_COINS;
         return allChains.filter(c => c !== sourceChain);
     }
 

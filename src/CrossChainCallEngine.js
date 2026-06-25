@@ -63,15 +63,16 @@ const swq                    = require('./stake_weighted_quorum.js');
 const eq                     = require('./equivocation_header.js');
 const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
 const { XCALL_MAX_HOPS }     = require('./constants.js');
+const coins                  = require('./coins');
 
-const ALLOWED_CHAINS  = ['BTC', 'LTC', 'DOGE'];
+const ALLOWED_CHAINS  = [...coins.ALLOWED_COINS];
 const DEFAULT_POLL_MS = 15000;
 
 // Per-chain confirmation depth a source request (and a target execution) must
 // reach before the federation will sign its relay row. Shares the cross-chain
 // swap thresholds (XCHAIN_CONFIRMATIONS_<COIN> env / p2pConfig overridable).
 // See CrossChainEngine's DEFAULT_CONFIRMATIONS note for the rationale.
-const DEFAULT_CONFIRMATIONS = { BTC: 6, LTC: 12, DOGE: 60 };
+const DEFAULT_CONFIRMATIONS = { ...coins.DEFAULT_CONFIRMATIONS };
 
 // Result statuses the federation will relay. Anything else from an indexer is
 // treated as 'error' (deterministic normalization happens indexer-side; this

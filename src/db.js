@@ -33,7 +33,8 @@ const DB_NAME_REGEX = /^[A-Za-z0-9_]+$/;
 // alongside the real 'bitcoin' entry, which the explorer's config loader
 // cannot map to a coin and used to crash on (configs/undefined.js). Normalize
 // the coin to its full name so chain_tips co-locate under the canonical key.
-const COIN_FULL_NAME = { BTC: 'bitcoin', LTC: 'litecoin', DOGE: 'dogecoin' };
+const coins = require('./coins');
+const COIN_FULL_NAME = { ...coins.COIN_FULL_NAME };
 
 function normalizeCoin(coin) {
     if (typeof coin !== 'string') return coin;

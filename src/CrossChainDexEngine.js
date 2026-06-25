@@ -50,8 +50,9 @@ const bc                     = require('./bcmath.js');
 const swq                    = require('./stake_weighted_quorum.js');
 const eq                     = require('./equivocation_header.js');
 const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
+const coins                  = require('./coins');
 
-const ALLOWED_CHAINS = ['BTC', 'LTC', 'DOGE'];
+const ALLOWED_CHAINS = [...coins.ALLOWED_COINS];
 const DEFAULT_POLL_MS = 15000;
 // Min on-chain confirmations a give-side escrow must have before a peer will sign
 // a proposed match (Byzantine safety against matching on a reorg-able escrow).

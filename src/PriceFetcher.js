@@ -65,8 +65,9 @@ function krakenResultCandidates(altname) {
     return [altname, canonAsset + 'Z' + fiat, canonAsset + fiat, asset + 'Z' + fiat];
 }
 
-// Supported coins (3) and fiat currencies (12)
-const COINS = ['BTC', 'LTC', 'DOGE'];
+// Supported coins (from the canonical registry) and fiat currencies (12)
+const coins = require('./coins');
+const COINS = [...coins.ALLOWED_COINS];
 const FIATS = ['USD', 'CAD', 'AUD', 'MXN', 'GBP', 'JPY', 'CNY', 'CHF', 'BRL', 'INR', 'EUR', 'KRW'];
 
 // Build all 36 coin pairs (BTC/USD, BTC/CAD, ..., DOGE/KRW)

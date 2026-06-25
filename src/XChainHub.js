@@ -20,6 +20,7 @@
  ********************************************************************/
 
 const Database           = require('./db.js');
+const coins              = require('./coins');
 const PeerManager        = require('./PeerManager.js');
 const Consensus          = require('./Consensus.js');
 const ValidatorIdentity  = require('./ValidatorIdentity.js');
@@ -763,7 +764,7 @@ class XChainHub {
                 "SELECT signing_pubkey, addr, chains FROM validators WHERE status = 'active' ORDER BY signing_pubkey"
             );
 
-            let allChains = ['BTC', 'LTC', 'DOGE'];
+            let allChains = [...coins.ALLOWED_COINS];
             let chainPairs = ['BTC-LTC', 'BTC-DOGE', 'LTC-DOGE'];
 
             for (let pair of chainPairs) {

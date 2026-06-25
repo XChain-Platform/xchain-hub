@@ -76,7 +76,15 @@ const TELEMETRY_IP_SALT        = process.env.TELEMETRY_IP_SALT || '';
 // so it is fail-closed: without this key set, the endpoint returns 401 for everyone.
 const TELEMETRY_ADMIN_KEY      = process.env.TELEMETRY_ADMIN_KEY || '';
 
-const ALLOWED_CHAINS = new Set(['BTC', 'LTC', 'DOGE']);
+const coins          = require('./coins');
+const ALLOWED_CHAINS = new Set(coins.ALLOWED_COINS);
+
+// Per-network { coin -> consensusHash } of the bundled canonical coin files,
+// computed once at load. Served on getallconfigs so a consumer can compare the
+// hub's consensus config against its OWN bundled hashes (transport-integrity
+// check); the consumer still trusts only its own pinned files, never the hub.
+const COIN_CONSENSUS_HASHES = {};
+for(const net of coins.NETWORKS) COIN_CONSENSUS_HASHES[net] = coins.consensusHashes(net);
 const WRITE_METHODS  = new Set([
     'updateconfig', 'registervalidator', 'rotatevalidator', 'deregistervalidator', 'syncvalidators',
     'propose', 'vote', 'requestattestation', 'reportreorg', 'initiateswap',
@@ -369,7 +377,9 @@ async function startApi(){
                 let watermark = await hub.getConfigWatermark();
                 let configs   = await hub.getAllConfigs(since);
                 configFetchCounters.served++;
-                return {configs, seq, watermark};
+                // coin_consensus_hashes is additive: consumers that predate it ignore
+                // the field; new consumers cross-check it against their bundled pins.
+                return {configs, seq, watermark, coin_consensus_hashes: COIN_CONSENSUS_HASHES};
             } catch (err) {
                 configFetchCounters.errors++;
                 return {error: "there was an error trying to get all configs"};

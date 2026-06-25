@@ -55,12 +55,13 @@ const ValidatorIdentity = require('./ValidatorIdentity.js');
 const swq               = require('./stake_weighted_quorum.js');
 const eq                = require('./equivocation_header.js');
 const ckpt              = require('./checkpoint_commitment_activation.js');
+const coins             = require('./coins');
 
 const XCHK_SIGN_REQ  = 'XCHK_SIGN_REQ';
 const XCHK_SIGN      = 'XCHK_SIGN';
 const XCHK_FINALIZED = 'XCHK_FINALIZED';
 
-const ALLOWED_CHAINS = ['BTC', 'LTC', 'DOGE'];
+const ALLOWED_CHAINS = [...coins.ALLOWED_COINS];
 
 class StateCheckpointEngine extends EventEmitter {
 
