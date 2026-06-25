@@ -96,10 +96,21 @@ class RewardTracker {
     // of the SAME pubkey remain idempotent (UNIQUE KEY + the existence check below).
     async recordAnchorReward(rewardType, roundNumber, pubkey, blockIndex) {
         if (typeof pubkey !== 'string' || !/^[0-9a-fA-F]{64}$/.test(pubkey)) return;
-        let amount = parseFloat(this.anchorReward);
+        let lcPubkey = pubkey.toLowerCase();
+
+        // #5311: at/above the anchor-reward flag-day the per-chain reward is DERIVED on-chain
+        // from the ANCHOR v4/v5 publisher attestation, and every indexer credits the FROZEN
+        // consensus constant (`ANCHOR_REWARD_AMOUNT`, never the wire). The hub must record (and
+        // therefore archive) that SAME frozen amount, or a recovered node (which restores the
+        // archived amount) would diverge from a live node (which derives the frozen amount) when
+        // an operator has overridden `ANCHOR_REWARD_PER_PUBLISH`. Below the flag-day, and for
+        // `anchor_archive` (not derived from v4/v5), the legacy operator-tunable amount stands.
+        let network   = (this.hub && this.hub.network) ? this.hub.network : '';
+        let isDerived = /^anchor_(BTC|LTC|DOGE)$/.test(String(rewardType)) &&
+                        ar.isAnchorRewardActive(Number(blockIndex), network);
+        let amount = parseFloat(isDerived ? ar.ANCHOR_REWARD_AMOUNT : this.anchorReward);
         if (!Number.isFinite(amount) || amount <= 0) return;
         let amountStr = amount.toFixed(8);
-        let lcPubkey  = pubkey.toLowerCase();
 
         // Cross-pubkey dedup guard: inspect any rows already holding this logical
         // anchor (round_number, reward_type) regardless of pubkey.
@@ -133,15 +144,10 @@ class RewardTracker {
 
         console.log('Rewards: ' + rewardType + ' #' + roundNumber + ': ' + amountStr + ' XCHAIN to ' + lcPubkey.substring(0, 16) + '…');
 
-        // #5311: at/above the anchor-reward flag-day, the indexer DERIVES the per-chain
-        // anchor reward from the on-chain ANCHOR v4/v5 publisher attestation, so the
-        // unauthenticated, forgeable push is retired for those reward types. The hub still
-        // RECORDS the reward locally (ops visibility + the archive recovery transport). The
-        // push survives below the flag-day, and for anchor_archive (which the indexer does
-        // not derive from v4/v5) it survives always; oracle_round never pushes here.
-        let network  = (this.hub && this.hub.network) ? this.hub.network : '';
-        let isDerived = /^anchor_(BTC|LTC|DOGE)$/.test(String(rewardType)) &&
-                        ar.isAnchorRewardActive(Number(blockIndex), network);
+        // A derived reward (per-chain, at/above the flag-day) is credited on-chain by every
+        // indexer, so the unauthenticated, forgeable `pushvalidatorrewards` write is retired for
+        // it (the #5311 vector). The push survives below the flag-day and for `anchor_archive`
+        // (which the indexer does not derive); `oracle_round` never pushes here.
         if(!isDerived)
             this._pushRewardsToBtcIndexer(roundNumber, [lcPubkey], amountStr, blockIndex || roundNumber, rewardType)
                 .catch(e => console.warn('Rewards: failed to push anchor reward to BTC indexer:', e));

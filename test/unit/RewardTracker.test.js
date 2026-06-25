@@ -271,6 +271,33 @@ describe('RewardTracker', function () {
             await new Promise(r => setImmediate(r));
             expect(post.calledOnce, 'pre-flag-day reward still pushed').to.be.true;
         });
+
+        it('records the FROZEN amount for a derived anchor_<chain> reward, ignoring an env override', async function () {
+            // A non-default ANCHOR_REWARD_PER_PUBLISH must NOT reach the recorded/archived amount
+            // for a derived reward: the indexer credits the frozen constant, so the archive (and
+            // thus recovery) has to match it or a recovered node forks the COLLECT rail.
+            let h = createMockHub({ p2pConfig: { ANCHOR_REWARD_PER_PUBLISH: '2.5' } });
+            h.network = 'regtest';                                         // flag-day = genesis
+            let rt2 = new RewardTracker(h);
+            await rt2.recordAnchorReward('anchor_DOGE', 9, hexPk(1), 100);
+            let ins = h.db.doQuery.getCall(1).args;                        // getCall(0) is the dedup SELECT
+            expect(ins[0]).to.include('INSERT IGNORE INTO validator_rewards');
+            expect(ins[1][3], 'frozen amount, not the 2.5 env override').to.equal('10.00000000');
+        });
+
+        it('still honors the env amount below the flag-day and for anchor_archive', async function () {
+            let h = createMockHub({ p2pConfig: { ANCHOR_REWARD_PER_PUBLISH: '2.5' } });
+            h.network = 'mainnet';                                         // per-chain dormant @ block 100
+            let rt2 = new RewardTracker(h);
+            await rt2.recordAnchorReward('anchor_BTC', 1, hexPk(1), 100);  // below flag-day
+            expect(h.db.doQuery.getCall(1).args[1][3]).to.equal('2.50000000');
+            // anchor_archive is never derived from v4/v5, so it keeps the env amount even on regtest.
+            let h2 = createMockHub({ p2pConfig: { ANCHOR_REWARD_PER_PUBLISH: '2.5' } });
+            h2.network = 'regtest';
+            let rt3 = new RewardTracker(h2);
+            await rt3.recordAnchorReward('anchor_archive', 2, hexPk(1), 100);
+            expect(h2.db.doQuery.getCall(1).args[1][3]).to.equal('2.50000000');
+        });
     });
 
     // -----------------------------------------------------------------

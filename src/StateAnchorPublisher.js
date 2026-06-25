@@ -1228,30 +1228,40 @@ class StateAnchorPublisher {
         //              here on every hub that saw the real announcement);
         //              absence alone is tolerated (late joiner), the
         //              re-derivation above still bounds what it can say.
-        for(let ar of (archive.rewards || [])){
-            let tag = (ar && ar.reward_type) + '/#' + (ar && ar.round_number);
-            if(!ar || !/^anchor_[A-Za-z_]+$/.test(String(ar.reward_type || ''))){
+        // Loop var is `rr` (reward row), NOT `ar`: the module import `ar`
+        // (anchor_reward_activation) is referenced below for the frozen-amount gate.
+        for(let rr of (archive.rewards || [])){
+            let tag = (rr && rr.reward_type) + '/#' + (rr && rr.round_number);
+            if(!rr || !/^anchor_[A-Za-z_]+$/.test(String(rr.reward_type || ''))){
                 console.warn('StateAnchorPublisher: archive reward ' + tag + ' has a non-anchor reward_type; NOT signing');
                 return false;
             }
-            let pubkey = String(ar.validator_pubkey || '').toLowerCase();
-            let set = await this._resolveCapabilitySet('oracle_publish', Number(ar.block_index));
+            let pubkey = String(rr.validator_pubkey || '').toLowerCase();
+            let set = await this._resolveCapabilitySet('oracle_publish', Number(rr.block_index));
             if(!set.some(v => v.pubkey === pubkey)){
                 console.warn('StateAnchorPublisher: archive reward ' + tag + ' pubkey ' + pubkey.substring(0, 12) +
-                             '... is not in the oracle_publish set at block ' + ar.block_index + '; NOT signing');
+                             '... is not in the oracle_publish set at block ' + rr.block_index + '; NOT signing');
                 return false;
             }
-            let expectedAmount = this.hub.rewardTracker ? parseFloat(this.hub.rewardTracker.anchorReward).toFixed(8) : null;
-            if(expectedAmount !== null && String(ar.amount) !== expectedAmount){
-                console.warn('StateAnchorPublisher: archive reward ' + tag + ' amount ' + ar.amount +
-                             ' != configured ' + expectedAmount + '; NOT signing');
+            // #5311: a derived per-chain reward (at/above the ANCHOR_REWARD flag-day) carries the
+            // FROZEN consensus amount that every indexer credits and recovery restores; below the
+            // flag-day and for anchor_archive the legacy operator-configured amount stands. Mirrors
+            // RewardTracker.recordAnchorReward so a leader's own archived rows verify here.
+            let isDerived = /^anchor_(BTC|LTC|DOGE)$/.test(String(rr.reward_type || '')) &&
+                            ar.isAnchorRewardActive(Number(rr.block_index), this.network);
+            let expectedAmount = isDerived
+                ? ar.ANCHOR_REWARD_AMOUNT
+                : (this.hub.rewardTracker ? parseFloat(this.hub.rewardTracker.anchorReward).toFixed(8) : null);
+            if(expectedAmount !== null && String(rr.amount) !== expectedAmount){
+                console.warn('StateAnchorPublisher: archive reward ' + tag + ' amount ' + rr.amount +
+                             ' != expected ' + expectedAmount + '; NOT signing');
                 return false;
             }
             let mySource = this.hub.rewardTracker
-                ? await this.hub.rewardTracker.resolveSourceByPubkey(pubkey, Number(ar.block_index))
+                ? await this.hub.rewardTracker.resolveSourceByPubkey(pubkey, Number(rr.block_index))
                 : null;
-            if(!mySource || String(ar.source) !== mySource){
-                console.warn('StateAnchorPublisher: archive reward ' + tag + ' source ' + ar.source +
+            if(!mySource || String(rr.source) !== mySource){
+                console.warn('StateAnchorPublisher: archive reward ' + tag + ' source ' + rr.source +
                              ' does not match our resolution (' + mySource + '); NOT signing');
                 return false;
             }
@@ -1274,7 +1284,7 @@ class StateAnchorPublisher {
             //                                        above already bounds it
             let local = await this.db.doQuery(
                 'SELECT validator_pubkey, amount, block_index FROM validator_rewards WHERE reward_type = ? AND round_number = ?',
-                [String(ar.reward_type), Number(ar.round_number)]);
+                [String(rr.reward_type), Number(rr.round_number)]);
             if(local && local.length > 0){
                 let mine = local.find(r => String(r.validator_pubkey).toLowerCase() === pubkey);
                 if(!mine){
@@ -1284,11 +1294,11 @@ class StateAnchorPublisher {
                                  '; NOT signing');
                     return false;
                 }
-                if(String(mine.amount) !== String(ar.amount) ||
-                   (mine.block_index != null && Number(mine.block_index) !== Number(ar.block_index))){
+                if(String(mine.amount) !== String(rr.amount) ||
+                   (mine.block_index != null && Number(mine.block_index) !== Number(rr.block_index))){
                     console.warn('StateAnchorPublisher: archive reward ' + tag + ' diverges from our row (' +
                                  String(mine.validator_pubkey).substring(0, 12) + '.../' + mine.amount + '/' + mine.block_index +
-                                 ' vs ' + pubkey.substring(0, 12) + '.../' + ar.amount + '/' + ar.block_index + '); NOT signing');
+                                 ' vs ' + pubkey.substring(0, 12) + '.../' + rr.amount + '/' + rr.block_index + '); NOT signing');
                     return false;
                 }
             } else {
