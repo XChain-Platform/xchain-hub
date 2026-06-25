@@ -483,6 +483,37 @@ describe('StateAnchorPublisher', function () {
             CP_ROW.ledger_hash, CP_ROW.actions_hash, CP_ROW.contract_hash, '7', '100', '1', 'pk1', 'sg1'].join('|'));
     });
 
+    // Frozen wire-byte golden vectors: the PRODUCER half of the hub<->indexer ANCHOR
+    // byte-identity contract. The v0 test above hand-asserts one shape; these pin the
+    // full v0/v3/v4/v5 wire bytes against a vendored fixture that the indexer parser
+    // asserts the OTHER half of (xchain-indexer test/unit/actions/anchor-golden-vectors.test.js,
+    // same anchor_canonical_vectors.json). A field reorder in either repo breaks its own
+    // side against the shared frozen string. Builders are invoked via the prototype with a
+    // _parseSigs stub so this needs no mesh/DB. See protocol/test-vectors/anchor_canonical.json.
+    describe('frozen ANCHOR canonical wire vectors (hub producer side)', function () {
+        const GOLDEN = require('../fixtures/anchor_canonical_vectors.json');
+        const stub = { _parseSigs: StateAnchorPublisher.prototype._parseSigs };
+        // The builders read validator_signatures as a JSON string off the row.
+        const row = Object.assign({}, GOLDEN.fixture.row, {
+            validator_signatures: JSON.stringify(GOLDEN.fixture.row.validator_signatures),
+        });
+        const pub = GOLDEN.fixture.publisher;
+        const att = GOLDEN.fixture.attest_sigs;
+
+        it('v0 builder reproduces the frozen vector byte-for-byte', function () {
+            expect(StateAnchorPublisher.prototype._buildV0Payload.call(stub, row)).to.equal(GOLDEN.vectors.v0);
+        });
+        it('v3 builder reproduces the frozen vector byte-for-byte', function () {
+            expect(StateAnchorPublisher.prototype._buildV3Payload.call(stub, row)).to.equal(GOLDEN.vectors.v3);
+        });
+        it('v4 builder reproduces the frozen vector byte-for-byte', function () {
+            expect(StateAnchorPublisher.prototype._buildV4Payload.call(stub, row, pub, att)).to.equal(GOLDEN.vectors.v4);
+        });
+        it('v5 builder reproduces the frozen vector byte-for-byte', function () {
+            expect(StateAnchorPublisher.prototype._buildV5Payload.call(stub, row, pub, att)).to.equal(GOLDEN.vectors.v5);
+        });
+    });
+
     it('single-node: flush publishes v0 + v1, archive round-trips, batch back-filled', async function () {
         let bus = buildMesh(1);
         let nd = bus.nodes[0];
