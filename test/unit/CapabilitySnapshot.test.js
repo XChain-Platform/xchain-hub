@@ -226,4 +226,69 @@ describe('CapabilitySnapshot', function () {
             expect(spy.called).to.equal(false);                // but not flagged as auth
         });
     });
+
+    // -----------------------------------------------------------------
+    // Malformed result → null (FINDING #5334)
+    //
+    // A bad-shape `validators` field must return null (routing the consensus
+    // caller through its fail-closed gate), NOT { validators: [] } which would
+    // collapse to quorum=0 and look like single-node. A LEGITIMATE empty or
+    // truncated array still yields a real snapshot.
+    // -----------------------------------------------------------------
+
+    describe('malformed indexer result (#5334)', function () {
+
+        function dataResult(result) {
+            return { data: { result: result } };
+        }
+
+        // Each fetch method paired with a base valid result for its RPC.
+        let methods = [
+            { name: 'getSnapshot',                 call: (s) => s.getSnapshot('attestation', 100),    base: { capability: 'attestation', block_index: 100, count: 1 } },
+            { name: 'getWeightSnapshot',           call: (s) => s.getWeightSnapshot('attestation', 100), base: { capability: 'attestation', block_index: 100, count: 1, source_count: 1 } },
+            { name: 'getActiveValidatorSnapshot',  call: (s) => s.getActiveValidatorSnapshot(100),     base: { block_index: 100, count: 1 } },
+            { name: 'getActiveWeightSnapshot',     call: (s) => s.getActiveWeightSnapshot(100),        base: { block_index: 100, count: 1, source_count: 1 } }
+        ];
+
+        // (d) malformed shapes return null on every fetch path.
+        let badShapes = [
+            { label: 'missing validators field', validators: undefined },
+            { label: 'validators is an object',  validators: { 0: { pubkey: 'ab' } } },
+            { label: 'validators is a string',   validators: 'ab,cd' },
+            { label: 'validators is a number',   validators: 3 }
+        ];
+
+        for (let m of methods) {
+            for (let bad of badShapes) {
+                it(m.name + ' returns null when ' + bad.label, async function () {
+                    let result = Object.assign({}, m.base);
+                    if (bad.validators === undefined) delete result.validators;
+                    else result.validators = bad.validators;
+                    axiosStub.post.resolves(dataResult(result));
+                    let snap = new CapabilitySnapshot(makeHub(null));
+                    expect(await m.call(snap)).to.equal(null);
+                });
+            }
+
+            it(m.name + ' returns a real snapshot for a VALID validators array', async function () {
+                let result = Object.assign({}, m.base, { validators: [{ pubkey: 'ab', amount: '50000' }] });
+                axiosStub.post.resolves(dataResult(result));
+                let snap = new CapabilitySnapshot(makeHub(null));
+                let out = await m.call(snap);
+                expect(out).to.not.equal(null);
+                expect(out.validators).to.be.an('array').with.lengthOf(1);
+            });
+
+            it(m.name + ' keeps a LEGITIMATE empty validators array (not null)', async function () {
+                // Empty-after-filter (no qualifying stakers at this block) is a real
+                // snapshot the consensus layer treats as valid, not a parse failure.
+                let result = Object.assign({}, m.base, { count: 0, validators: [] });
+                axiosStub.post.resolves(dataResult(result));
+                let snap = new CapabilitySnapshot(makeHub(null));
+                let out = await m.call(snap);
+                expect(out).to.not.equal(null);
+                expect(out.validators).to.be.an('array').with.lengthOf(0);
+            });
+        }
+    });
 });

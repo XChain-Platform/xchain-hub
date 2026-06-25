@@ -132,12 +132,26 @@ describe('CapabilitySnapshot (extra coverage)', function () {
             expect(result.capability).to.equal('attestation');
         });
 
-        it('uses empty array when validators is absent in result', async function () {
+        it('returns null when validators is absent (malformed shape, #5334)', async function () {
+            // A valid indexer response always carries a validators array (empty
+            // when no qualifying stakers). An absent field is a parse failure, so
+            // we return null to route the consensus caller through its
+            // fail-closed gate rather than yield a quorum=0 zero-validator set.
             axiosStub.post.resolves({
                 data: { result: { capability: 'attestation', block_index: 100, count: 0 } }
             });
             let snap = new CapabilitySnapshot(makeHub());
             let result = await snap.getSnapshot('attestation', 100);
+            expect(result).to.equal(null);
+        });
+
+        it('keeps a legitimate empty validators array (#5334)', async function () {
+            axiosStub.post.resolves({
+                data: { result: { capability: 'attestation', block_index: 100, count: 0, validators: [] } }
+            });
+            let snap = new CapabilitySnapshot(makeHub());
+            let result = await snap.getSnapshot('attestation', 100);
+            expect(result).to.not.equal(null);
             expect(result.validators).to.deep.equal([]);
         });
     });

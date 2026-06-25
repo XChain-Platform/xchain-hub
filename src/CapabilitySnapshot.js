@@ -73,6 +73,20 @@ class CapabilitySnapshot {
         return null;
     }
 
+    // Coerce an indexer result's `validators` field into a real array, or return
+    // null when the shape is MALFORMED. A valid response always carries a
+    // validators array (possibly empty after the qualifying-stake filter, or
+    // capped when `truncated`); both of those are LEGITIMATE and must produce a
+    // real snapshot, so an actual array (even length 0) passes through. Anything
+    // else (missing field, object, string, number) is a parse failure / wrong
+    // shape and returns null, which routes the caller through the consensus
+    // fail-closed gate instead of silently yielding a zero-validator snapshot
+    // (quorum=0) that is indistinguishable from single-node.
+    _coerceValidators(result) {
+        if (result && Array.isArray(result.validators)) return result.validators;
+        return null;
+    }
+
     // Fetch (or read from cache) the deterministic validator set for the given
     // capability at the given block boundary. Returns:
     //   { validators: [{pubkey, amount}, ...], count, blockIndex, capability }
@@ -114,12 +128,14 @@ class CapabilitySnapshot {
             }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
             let result = res && res.data && res.data.result;
             if (!result || result.error) return null;
+            let validators = this._coerceValidators(result);
+            if (validators === null) return null;
             let snapshot = {
                 capability:  result.capability,
                 blockIndex:  result.block_index,
                 count:       result.count,
                 truncated:   result.truncated === true,
-                validators:  result.validators || [],
+                validators:  validators,
                 expiresAt:   now + this.cacheTtlMs
             };
             this.cache.set(key, snapshot);
@@ -163,13 +179,15 @@ class CapabilitySnapshot {
             }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
             let result = res && res.data && res.data.result;
             if (!result || result.error) return null;
+            let validators = this._coerceValidators(result);
+            if (validators === null) return null;
             let snapshot = {
                 capability:  result.capability,
                 blockIndex:  result.block_index,
                 count:       result.count,
                 truncated:   result.truncated === true,
                 sourceCount: result.source_count,
-                validators:  result.validators || [],     // [{pubkey, source, weight}]
+                validators:  validators,                   // [{pubkey, source, weight}]
                 expiresAt:   now + this.cacheTtlMs
             };
             this.cache.set(key, snapshot);
@@ -203,12 +221,14 @@ class CapabilitySnapshot {
             }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
             let result = res && res.data && res.data.result;
             if (!result || result.error) return null;
+            let validators = this._coerceValidators(result);
+            if (validators === null) return null;
             let snapshot = {
                 capability:  '*',
                 blockIndex:  result.block_index,
                 count:       result.count,
                 truncated:   result.truncated === true,
-                validators:  result.validators || [],
+                validators:  validators,
                 expiresAt:   now + this.cacheTtlMs
             };
             this.cache.set(key, snapshot);
@@ -243,13 +263,15 @@ class CapabilitySnapshot {
             }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
             let result = res && res.data && res.data.result;
             if (!result || result.error) return null;
+            let validators = this._coerceValidators(result);
+            if (validators === null) return null;
             let snapshot = {
                 capability:  '*',
                 blockIndex:  result.block_index,
                 count:       result.count,
                 truncated:   result.truncated === true,
                 sourceCount: result.source_count,
-                validators:  result.validators || [],     // [{pubkey, source, weight}]
+                validators:  validators,                   // [{pubkey, source, weight}]
                 expiresAt:   now + this.cacheTtlMs
             };
             this.cache.set(key, snapshot);

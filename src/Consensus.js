@@ -85,6 +85,18 @@ class Consensus {
         this.validatorSet = validators;
     }
 
+    // Fail-closed gate for multi-hub federations. A deterministic snapshot is a
+    // real validator set locked from the indexer at the round's block boundary;
+    // it is the only thing that guarantees every hub computes quorum over the
+    // SAME set. A null snapshot (indexer down / timeout / 401-403 / malformed)
+    // means each hub would otherwise fall back to its own LOCAL validatorSet,
+    // and two hubs with different local sets could finalize the same round over
+    // different N: a federation split. Used by both the leader (propose) and
+    // follower (_handlePrePrepare) paths so they refuse in lockstep.
+    _hasDeterministicSnapshot(snapshot) {
+        return !!(snapshot && Array.isArray(snapshot.validators));
+    }
+
     async start() {
         await this._loadSeq();
 
@@ -127,6 +139,16 @@ class Consensus {
         // can't be resolved (graceful degradation; same behavior as before
         // the snapshot wiring landed).
         let { snapshot, weighted } = await this._lockSnapshot();
+        // Federation-split guard (fail closed). In a multi-hub federation, a null
+        // snapshot means each hub would fall back to its own LOCAL validatorSet,
+        // so two hubs could finalize the same config-change round over different
+        // sets. Refuse to propose rather than split. Single-host federations
+        // (minValidators <= 1) have no peer to diverge from, so they keep the
+        // existing fallback/single-node path below.
+        if (this.minValidators > 1 && !this._hasDeterministicSnapshot(snapshot)) {
+            throw new Error('Consensus: refusing to PROPOSE config change without a deterministic ' +
+                'validator snapshot (minValidators>1); indexer capability snapshot unavailable');
+        }
         // Fall back to count mode when weighted is requested but no snapshot is
         // available (BTC indexer unreachable). An empty validator list makes
         // meetsStakeThreshold always false, stalling the round permanently.
@@ -342,6 +364,18 @@ class Consensus {
             // envelope). Follower quorum-checks use proposal.quorum, so we
             // stay in lockstep with the leader for the whole round.
             let { snapshot, weighted } = await this._lockSnapshot(btcBlockHeight);
+            // Federation-split guard (fail closed), the follower twin of the
+            // propose() gate. With minValidators > 1, declining to PREPARE when
+            // no deterministic snapshot is available keeps this hub from voting
+            // over its own LOCAL validatorSet while the leader (and peers) used a
+            // different set. We create no proposal and emit no PREPARE; the round
+            // either reaches quorum without us or times out into view change.
+            if (this.minValidators > 1 && !this._hasDeterministicSnapshot(snapshot)) {
+                console.warn('Consensus: declining to PREPARE for seq ' + seq +
+                    ' without a deterministic validator snapshot (minValidators>1); ' +
+                    'indexer capability snapshot unavailable');
+                return;
+            }
             // Fall back to count mode when weighted but snapshot is unavailable,
             // matching the same guard in propose(). Without this, a follower
             // that can't reach its BTC indexer enters PBFT with validators=[]

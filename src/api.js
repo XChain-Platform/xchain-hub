@@ -41,6 +41,7 @@ const crypto    = require('crypto');
 const fs        = require('fs');
 const path      = require('path');
 const geoip     = require('geoip-lite');   // self-contained country/region DB; we read only country + region
+const { HUB_SCHEMA_VERSION } = require('./hub-schema-version');   // stamped on every mirror snapshot so a stale indexer rejects a mismatch
 
 const HUB_PORT = process.env.HUB_PORT;
 const HUB_HOST = process.env.HUB_HOST || '0.0.0.0';
@@ -53,8 +54,11 @@ const HUB_DB_KEEPALIVE_INTERVAL = parseInt(process.env.HUB_DB_KEEPALIVE_INTERVAL
 // injects no such var and HubConnector sends no key; the same over-tightening
 // that hit the indexer (771880c) and encoder (e2bf7c4) pre-launch).
 const HUB_API_KEY        = process.env.HUB_API_KEY || '';
-if(!HUB_API_KEY)
-    console.warn('WARNING: HUB_API_KEY is not set. Write methods and WebSocket subscriptions are UNAUTHENTICATED. Set a strong key for any shared or public-facing deployment.');
+// Explicit escape hatch for running keyless. A blind hard-require of HUB_API_KEY
+// crash-loops xchain-node-managed single-host deploys (no key injected), so we
+// only fail closed in validator mode (below) and let the operator opt into
+// keyless validator operation with this flag rather than refusing outright.
+const HUB_ALLOW_UNAUTHENTICATED = (process.env.HUB_ALLOW_UNAUTHENTICATED || '').toLowerCase() === 'true';
 const HUB_RATE_LIMIT_RPM = parseInt(process.env.HUB_RATE_LIMIT_RPM) || 100;
 const CORS_ORIGIN        = process.env.CORS_ORIGIN || false;
 
@@ -102,6 +106,20 @@ const DEFAULT_ORACLE_ROUND_INTERVAL_MS = 600000;
 
 // Parse optional P2P config (P2P is enabled when P2P_VALIDATOR_ADDR is set)
 const P2P_VALIDATOR_ADDR = process.env.P2P_VALIDATOR_ADDR || '';
+
+// Write-method auth posture. A keyless validator is dangerous: it would let any
+// caller drive consensus-affecting writes, so in validator mode we fail closed at
+// boot unless the operator explicitly opts into keyless operation. Non-validator
+// (config-server) hubs keep the historical loud-warn-and-allow behaviour so
+// xchain-node-managed single-host deploys (which inject no key) still start.
+if(!HUB_API_KEY){
+    if(P2P_VALIDATOR_ADDR && !HUB_ALLOW_UNAUTHENTICATED){
+        console.error('FATAL: HUB_API_KEY is not set in validator mode. Write methods would be UNAUTHENTICATED, letting anyone drive consensus-affecting writes. Set HUB_API_KEY, or set HUB_ALLOW_UNAUTHENTICATED=true to explicitly run keyless.');
+        process.exit(1);
+    }
+    console.warn('WARNING: HUB_API_KEY is not set. Write methods and WebSocket subscriptions are UNAUTHENTICATED. Set a strong key for any shared or public-facing deployment.');
+}
+
 if (P2P_VALIDATOR_ADDR && !process.env.ORACLE_EPOCH_START) {
     console.error('Missing required environment variable: ORACLE_EPOCH_START (Unix ms timestamp anchoring oracle round numbering; all hubs must share the same value)');
     process.exit(1);
@@ -827,7 +845,7 @@ async function startApi(){
                 'SELECT * FROM price_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.json({ table: 'price_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000) });
+            res.json({ table: 'price_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
         } catch (err) {
             res.status(500).json({ error: err.message || 'snapshot error' });
         }
@@ -842,7 +860,7 @@ async function startApi(){
                 'SELECT * FROM oracle_prices WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.json({ table: 'oracle_prices', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000) });
+            res.json({ table: 'oracle_prices', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
         } catch (err) {
             res.status(500).json({ error: err.message || 'snapshot error' });
         }
@@ -863,7 +881,7 @@ async function startApi(){
                 "SELECT * FROM cross_chain_matches WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?",
                 [since, limit]
             );
-            res.json({ table: 'cross_chain_matches', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000) });
+            res.json({ table: 'cross_chain_matches', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
         } catch (err) {
             res.status(500).json({ error: err.message || 'snapshot error' });
         }
@@ -878,7 +896,7 @@ async function startApi(){
                 'SELECT * FROM capability_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.json({ table: 'capability_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000) });
+            res.json({ table: 'capability_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
         } catch (err) {
             res.status(500).json({ error: err.message || 'snapshot error' });
         }
@@ -902,7 +920,7 @@ async function startApi(){
                 "FROM cross_chain_calls WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?",
                 [since, limit]
             );
-            res.json({ table: 'cross_chain_calls', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000) });
+            res.json({ table: 'cross_chain_calls', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
         } catch (err) {
             res.status(500).json({ error: err.message || 'snapshot error' });
         }
@@ -922,7 +940,7 @@ async function startApi(){
                 'FROM state_checkpoints WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.json({ table: 'state_checkpoints', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000) });
+            res.json({ table: 'state_checkpoints', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
         } catch (err) {
             res.status(500).json({ error: err.message || 'snapshot error' });
         }

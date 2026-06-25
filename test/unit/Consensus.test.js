@@ -788,13 +788,23 @@ describe('Consensus (PBFT)', function () {
     // -----------------------------------------------------------------
 
     describe('propose() additional paths', function () {
-        it('warns but still applies in single-node mode when MIN_VALIDATORS > 1', async function () {
+        it('refuses to PROPOSE without a deterministic snapshot when MIN_VALIDATORS > 1', async function () {
+            // Federation-split guard: with minValidators > 1 and a null snapshot
+            // (no capabilitySnapshot wired here), falling back to the local
+            // validatorSet would let two hubs finalize the same round over
+            // different sets. The leader must refuse instead of applying.
             consensus.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
             consensus.minValidators = 3;
-            let result = await consensus.propose({ x: 1 });
-            expect(result).to.be.true;
-            expect(hub.applyConfig.calledOnce).to.be.true;
+            let caught = null;
+            try {
+                await consensus.propose({ x: 1 });
+            } catch (e) {
+                caught = e;
+            }
+            expect(caught).to.be.an('error');
+            expect(caught.message).to.include('refusing to PROPOSE');
+            expect(hub.applyConfig.called).to.be.false;
         });
 
         it('times out → rejects the promise and initiates a view change', async function () {
@@ -1275,6 +1285,120 @@ describe('Consensus (PBFT)', function () {
             consensus.pendingViewChangePubkeys.set(1, new Set(['x']));
             await consensus.stop();
             expect(consensus.pendingViewChangePubkeys.size).to.equal(0);
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // Federation-split fail-closed gate (FINDING #5334)
+    //
+    // A null validator snapshot (indexer down / timeout / 401-403 / malformed)
+    // must HALT a multi-hub config-change round, never let each hub finalize
+    // over its own local validatorSet. Single-host federations keep applying.
+    // -----------------------------------------------------------------
+
+    describe('null-snapshot fail-closed gate (#5334)', function () {
+
+        it('_hasDeterministicSnapshot: true only for a real validators array', function () {
+            expect(consensus._hasDeterministicSnapshot(null)).to.be.false;
+            expect(consensus._hasDeterministicSnapshot({})).to.be.false;
+            expect(consensus._hasDeterministicSnapshot({ validators: 'nope' })).to.be.false;
+            expect(consensus._hasDeterministicSnapshot({ validators: {} })).to.be.false;
+            expect(consensus._hasDeterministicSnapshot({ validators: [] })).to.be.true;
+            expect(consensus._hasDeterministicSnapshot({ validators: [{ pubkey: 'ab' }] })).to.be.true;
+        });
+
+        it('(a) propose() throws when minValidators>1 and snapshot is null', async function () {
+            // Snapshot resolves to null (indexer unavailable). The leader must
+            // refuse rather than fall back to _getQuorum() over its local set.
+            consensus.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[1].addr; // leader for seq 1
+            consensus.minValidators = 4;
+            hub.capabilitySnapshot = {
+                getActiveValidatorSnapshot: sinon.stub().returns(null),
+                getQuorum: sinon.stub().returns(0)
+            };
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+
+            let caught = null;
+            try {
+                await consensus.propose({ cfg: 1 });
+            } catch (e) {
+                caught = e;
+            }
+            expect(caught).to.be.an('error');
+            expect(caught.message).to.include('refusing to PROPOSE');
+            expect(caught.message).to.include('deterministic');
+            // Nothing applied, no PRE_PREPARE broadcast.
+            expect(hub.applyConfig.called).to.be.false;
+            expect(pm.broadcast.called).to.be.false;
+        });
+
+        it('(b) follower declines to PREPARE when minValidators>1 and snapshot is null', async function () {
+            // The follower locks its own snapshot at the leader-stamped block and
+            // gets null. It must NOT create a proposal or emit PREPARE, else it
+            // would vote over its local set while peers used a different one.
+            consensus.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+            consensus.minValidators = 4;
+            hub.capabilitySnapshot = {
+                getActiveValidatorSnapshot: sinon.stub().returns(null),
+                getQuorum: sinon.stub().returns(0)
+            };
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+
+            let config = { x: 1 };
+            let digest = consensus._digest(config);
+            // seq 5, view 0: (5+0)%4 = 1 → VALIDATORS_4[1] is the legitimate leader.
+            await consensus._handlePrePrepare({
+                sender: VALIDATORS_4[1].addr,
+                data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 800000 }
+            });
+
+            expect(consensus.pendingProposals.has(5)).to.be.false;
+            expect(pm.broadcast.called).to.be.false;
+        });
+
+        it('(c) propose()/single-node still applies when minValidators<=1 and snapshot is null', async function () {
+            // No federation to split: the existing single-node direct-apply path
+            // is preserved untouched for minValidators <= 1.
+            consensus.setValidatorSet([]);
+            pm.getPeerStatus.returns([]);
+            consensus.minValidators = 1;
+            hub.capabilitySnapshot = {
+                getActiveValidatorSnapshot: sinon.stub().returns(null),
+                getQuorum: sinon.stub().returns(0)
+            };
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+
+            let result = await consensus.propose({ ok: true });
+            expect(result).to.be.true;
+            expect(hub.applyConfig.calledOnceWith({ ok: true })).to.be.true;
+        });
+
+        it('follower still PREPAREs with minValidators>1 when a real snapshot IS present', async function () {
+            // Control: a deterministic (even empty-after-filter) snapshot is not
+            // null, so the gate does not fire and the normal follower path runs.
+            consensus.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+            consensus.minValidators = 4;
+            hub.capabilitySnapshot = {
+                getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000, count: 4, validators: VALIDATORS_4 }),
+                getQuorum: sinon.stub().returns(3)
+            };
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+
+            let config = { x: 1 };
+            let digest = consensus._digest(config);
+            await consensus._handlePrePrepare({
+                sender: VALIDATORS_4[1].addr,
+                data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 800000 }
+            });
+
+            expect(consensus.pendingProposals.has(5)).to.be.true;
+            let prepare = pm.broadcast.getCalls().find(c => c.args[0] === 'PBFT_PREPARE');
+            expect(prepare).to.exist;
+            let proposal = consensus.pendingProposals.get(5);
+            if (proposal && proposal.timer) clearTimeout(proposal.timer);
         });
     });
 });

@@ -551,6 +551,19 @@ class AttestationConsensus extends EventEmitter {
                 let providerDef = this.providerRegistry.getDef(pending.providerId);
                 let strategy    = providerDef && providerDef.consensus_strategy;
                 if(strategy === 'judge_model'){
+                    // Liveness guard (item 5314): a follower re-signs the leader's
+                    // chosen body only after verifying the leader's Ed25519 sig, so it
+                    // never re-judges (LLM non-determinism makes that infeasible; the
+                    // AttestationSpotChecker audits divergence instead). At minimum it
+                    // must have independently fetched a NON-EMPTY body of its own for
+                    // this request. If its own fetch failed it abstains rather than
+                    // vouching for bytes it never evaluated; the round still reaches
+                    // quorum via other validators or correctly times out.
+                    let ownBody = myProposal.body;
+                    if(!ownBody || ownBody.length === 0){
+                        console.warn('AttestationConsensus: abstaining from judge_model PREPARE for ' + rid + ' (no own non-empty body fetched; will not co-sign leader winner)');
+                        return;
+                    }
                     // Semantic consensus: our own body is byte-divergent from the
                     // judge-selected winner even though both are valid. Re-sign
                     // the canonical winner so our vote carries a verifying

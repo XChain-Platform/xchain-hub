@@ -26,6 +26,7 @@
  ********************************************************************/
 
 const WebSocket = require('ws');
+const { HUB_SCHEMA_VERSION } = require('./hub-schema-version');
 
 // JSON replacer that converts BigInt to string (mariadb returns BigInt for BIGINT columns)
 const bigIntReplacer = (k, v) => typeof v === 'bigint' ? v.toString() : v;
@@ -151,7 +152,9 @@ class HubDbBroadcaster {
         if (this.subscribers.size === 0) return;
         let message;
         try {
-            message = JSON.stringify({ type: 'row:inserted', table: event.table, row: event.row }, bigIntReplacer);
+            // schema_version lets the indexer reject a row whose mirrored table has a
+            // DDL change it has not migrated yet, rather than silently dropping columns.
+            message = JSON.stringify({ type: 'row:inserted', table: event.table, row: event.row, schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer);
         } catch (e) {
             console.error('HubDbBroadcaster: serialization error:', e);
             return;
@@ -176,7 +179,8 @@ class HubDbBroadcaster {
                 type:              'row:deleted',
                 table:             event.table,
                 source_chain:      event.source_chain,
-                from_action_index: event.from_action_index
+                from_action_index: event.from_action_index,
+                schema_version:    HUB_SCHEMA_VERSION
             };
             if (event.to_action_index !== undefined && event.to_action_index !== null)
                 payload.to_action_index = event.to_action_index;
