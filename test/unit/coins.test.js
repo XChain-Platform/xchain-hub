@@ -88,9 +88,17 @@ describe('coins registry', () => {
         const setEnv = (k, v) => { SAVED[k] = process.env[k]; if(v === undefined) delete process.env[k]; else process.env[k] = v; };
         afterEach(() => { for(const k of Object.keys(SAVED)){ if(SAVED[k] === undefined) delete process.env[k]; else process.env[k] = SAVED[k]; } });
 
-        it('applies FEE_DESTINATION override on any network', () => {
+        it('applies FEE_DESTINATION override on non-mainnet networks', () => {
+            setEnv('XCHAIN_FEE_DESTINATION_BTC_TESTNET', 'tbOverrideAddr');
+            expect(coins.getCoinConfig('BTC', 'testnet').addresses.FEE_DESTINATION).to.equal('tbOverrideAddr');
+        });
+
+        it('IGNORES the FEE_DESTINATION override on mainnet (consensus pin escape, item 5473)', () => {
+            const pinned = coins.getCoinConfig('BTC', 'mainnet').addresses.FEE_DESTINATION;
             setEnv('XCHAIN_FEE_DESTINATION_BTC_MAINNET', 'bcOverrideAddr');
-            expect(coins.getCoinConfig('BTC', 'mainnet').addresses.FEE_DESTINATION).to.equal('bcOverrideAddr');
+            // On mainnet the env override is dropped so it cannot escape verifyConsensusPin
+            // (which hashes only the static bundle) and fork the block-hashed ledger.
+            expect(coins.getCoinConfig('BTC', 'mainnet').addresses.FEE_DESTINATION).to.equal(pinned);
         });
 
         it('binds regtest genesis from env but never affects the consensus hash', () => {
