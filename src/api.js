@@ -650,6 +650,16 @@ async function startApi(){
             }
         },
 
+        // ANCHOR publisher status (read, no auth): cumulative anchor counts plus the
+        // last-observed DOGE publisher-wallet balance + threshold, for runway
+        // monitoring. Always 200 (unlike `health`, which flips to 503 when degraded
+        // and would hide the body), so a poller can read the balance independent of
+        // overall hub health. Returns {active:false} when no publisher is running.
+        async getanchorstatus(){
+            if(!hub.stateAnchorPublisher) return { active: false };
+            return { active: true, ...hub.stateAnchorPublisher.getAnchorStats() };
+        },
+
         async getfeequote({action, chain}){
             if(!action) return {error: "action is required"};
             if(!chain) return {error: "chain is required"};

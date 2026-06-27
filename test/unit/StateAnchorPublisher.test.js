@@ -1476,3 +1476,32 @@ describe('StateAnchorPublisher', function () {
         expect(flushes, 'reaching batchSize triggers a flush').to.be.greaterThan(0);
     });
 });
+
+// Publisher-wallet runway stats (#5443): _checkBalance records the last-observed
+// DOGE balance and getAnchorStats surfaces it for the monitor/operator.
+describe('StateAnchorPublisher getAnchorStats balance', function () {
+    function newPub(cfg) {
+        return new StateAnchorPublisher({ db: {}, p2pConfig: Object.assign({ DOGE_ADDRESS: 'Dpub1' }, cfg || {}) });
+    }
+    it('starts with a null balance and exposes address + threshold', function () {
+        let s = newPub({ DOGE_LOW_BALANCE_THRESHOLD: '10' }).getAnchorStats();
+        expect(s.dogeBalance).to.equal(null);
+        expect(s.dogeBalanceAt).to.equal(null);
+        expect(s.dogeAddress).to.equal('Dpub1');
+        expect(s.lowBalanceThreshold).to.equal(10);
+    });
+    it('_checkBalance records the observed balance into getAnchorStats', async function () {
+        let pub = newPub();
+        let bal = await pub._checkBalance({ getBalanceFn: async () => 42.5 });
+        expect(bal).to.equal(42.5);
+        let s = pub.getAnchorStats();
+        expect(s.dogeBalance).to.equal(42.5);
+        expect(s.dogeBalanceAt).to.be.a('number');
+    });
+    it('a failed balance read leaves the last-observed value untouched', async function () {
+        let pub = newPub();
+        await pub._checkBalance({ getBalanceFn: async () => 5 });
+        await pub._checkBalance({ getBalanceFn: async () => { throw new Error('node down'); } });
+        expect(pub.getAnchorStats().dogeBalance).to.equal(5);   // not clobbered to null
+    });
+});

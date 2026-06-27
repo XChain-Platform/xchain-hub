@@ -177,6 +177,13 @@ class StateAnchorPublisher {
         this._archiveChunkLosses = 0;
         // Cumulative count of v0/v3 anchors successfully published on-chain.
         this._anchorsPublished = 0;
+        // Last DOGE balance observed by _checkBalance (refreshed each flush) and
+        // when, surfaced via getAnchorStats so an operator/monitor can watch the
+        // publisher wallet's runway (it spends real DOGE on every anchor cycle)
+        // without log-grepping the low-balance warning. null until the first
+        // balance read (no pipeline / before first flush).
+        this._lastBalance   = null;
+        this._lastBalanceAt = null;
     }
 
     setBroadcastHook(fn){ this.broadcastFn = fn; }
@@ -187,8 +194,16 @@ class StateAnchorPublisher {
     // can surface cumulative archive health without grepping logs.
     getAnchorStats(){
         return {
+            enabled:            this.enabled,
             anchorsPublished:   this._anchorsPublished,
-            archiveChunkLosses: this._archiveChunkLosses
+            archiveChunkLosses: this._archiveChunkLosses,
+            // Publisher-wallet runway: last-observed DOGE balance, its age, and the
+            // low-balance threshold the publisher already warns at. dogeBalance is
+            // null until the first flush reads it (or when no DOGE pipeline is set).
+            dogeAddress:        this.dogeAddress || null,
+            dogeBalance:        this._lastBalance,
+            dogeBalanceAt:      this._lastBalanceAt,
+            lowBalanceThreshold: this.lowBalanceThreshold
         };
     }
 
@@ -1692,6 +1707,10 @@ class StateAnchorPublisher {
                 if(Array.isArray(utxos)) balance = utxos.reduce((t, u) => t + (parseFloat(u.value || u.amount || 0) || 0), 0);
             }
         } catch(e){ return null; }
+        if(balance !== null){
+            this._lastBalance   = balance;
+            this._lastBalanceAt = Date.now();
+        }
         if(balance !== null && balance < this.lowBalanceThreshold)
             console.warn('StateAnchorPublisher: DOGE balance LOW (' + Number(balance).toFixed(4) + ' DOGE)');
         return balance;
