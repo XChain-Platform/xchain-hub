@@ -359,6 +359,18 @@
       "x-auth": "x-api-key header, when HUB_API_KEY is configured"
     },
     {
+      "name": "getanchorstatus",
+      "summary": "ANCHOR publisher status: cumulative publish counts plus the last-observed DOGE publisher wallet balance and low-balance threshold.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object"
+        }
+      }
+    },
+    {
       "name": "propose",
       "summary": "Submit a governance proposal.",
       "paramStructure": "by-name",
