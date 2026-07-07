@@ -22,6 +22,7 @@ const StateAnchorPublisher  = require('../../src/StateAnchorPublisher');
 const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
 const ValidatorIdentity     = require('../../src/ValidatorIdentity');
 const eq                    = require('../../src/equivocation_header.js');
+const ccr                   = require('../../src/cross_chain_royalty_activation.js');
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -53,6 +54,9 @@ function matchCanonical(m) {
         String(m.effective_time), m.network || '',
         m.a_kind || 'swap', String(m.a_filled_before != null ? m.a_filled_before : '0'),
         m.b_kind || 'swap', String(m.b_filled_before != null ? m.b_filled_before : '0')].join('|');
+    // Royalty legs ride the signed match at/above CROSS_CHAIN_ROYALTY (regtest genesis).
+    if (ccr.isCrossChainRoyaltyActive(m.snapshot_block, m.network))
+        raw += '|' + String(m.a_payout_legs || '') + '|' + String(m.b_payout_legs || '');
     // EQUIV active in regtest: TAG=XDEX, ROUND_ID=match_id, VIEW=finalizing_view (default 0).
     if (eq.isEquivHeaderActive(m.snapshot_block, m.network))
         return eq.buildEquivCanonical(eq.ENGINE_TAGS.DEX, m.match_id, (m.finalizing_view != null ? m.finalizing_view : 0), raw);

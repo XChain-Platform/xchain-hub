@@ -13,6 +13,7 @@ CREATE TABLE cross_chain_matches (
     a_filled_before      VARCHAR(250) NOT NULL DEFAULT '0',        -- A's cumulative committed fill BEFORE this match (binds sequential fills)
     a_ownership          TINYINT(1)   NOT NULL DEFAULT 0,
     a_payout_addr        VARCHAR(255) NOT NULL,
+    a_payout_legs        TEXT,                                      -- A-order royalty split (JSON [{to,bps}], a_chain encoding; NULL = none); signed into the canonical at/above CROSS_CHAIN_ROYALTY
     -- Order B (canonical-higher side). payout addr = B's receive address on A's chain.
     b_chain              VARCHAR(10)  NOT NULL,
     b_action_index       BIGINT UNSIGNED NOT NULL,
@@ -22,6 +23,7 @@ CREATE TABLE cross_chain_matches (
     b_filled_before      VARCHAR(250) NOT NULL DEFAULT '0',
     b_ownership          TINYINT(1)   NOT NULL DEFAULT 0,
     b_payout_addr        VARCHAR(255) NOT NULL,
+    b_payout_legs        TEXT,                                      -- B-order royalty split (JSON [{to,bps}], b_chain encoding; NULL = none); signed into the canonical at/above CROSS_CHAIN_ROYALTY
     effective_time       BIGINT UNSIGNED NOT NULL,                 -- wall-clock instant indexers apply at (shared clock across chains)
     finalizing_view      INT          NOT NULL DEFAULT 0,          -- PBFT view the round finalized at; signed into the EQUIV canonical (WI-2 bump 2) so the indexer rebuilds the exact view
     validator_signatures TEXT         NOT NULL,                    -- JSON [{pubkey,sig}]; 2f+1 over the canonical match

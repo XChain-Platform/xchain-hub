@@ -80,6 +80,7 @@ const StateCheckpointEngine = require('./StateCheckpointEngine.js');
 const swq                   = require('./stake_weighted_quorum.js');
 const eq                    = require('./equivocation_header.js');
 const ckpt                  = require('./checkpoint_commitment_activation.js');
+const ccr                   = require('./cross_chain_royalty_activation.js');
 const ar                    = require('./anchor_reward_activation.js');
 
 const XANC_SIGN_REQ  = 'XANC_SIGN_REQ';
@@ -102,8 +103,8 @@ const XANCPUB_SIGN     = 'XANCPUB_SIGN';
 // (action_index divergence). Archives published before this field exist
 // without it; recovery tolerates both shapes.
 const MATCH_KEYS = ['id', 'match_id', 'snapshot_block', 'network',
-    'a_chain', 'a_action_index', 'a_kind', 'a_tick', 'a_amount', 'a_filled_before', 'a_ownership', 'a_payout_addr',
-    'b_chain', 'b_action_index', 'b_kind', 'b_tick', 'b_amount', 'b_filled_before', 'b_ownership', 'b_payout_addr',
+    'a_chain', 'a_action_index', 'a_kind', 'a_tick', 'a_amount', 'a_filled_before', 'a_ownership', 'a_payout_addr', 'a_payout_legs',
+    'b_chain', 'b_action_index', 'b_kind', 'b_tick', 'b_amount', 'b_filled_before', 'b_ownership', 'b_payout_addr', 'b_payout_legs',
     'effective_time', 'finalizing_view', 'validator_signatures', 'status'];
 
 // Fixed serialization order for an archived cross-chain CALL relay row (XCALL
@@ -981,6 +982,12 @@ class StateAnchorPublisher {
                 out[k] = Number(v) ? 1 : 0;
             else if(k === 'a_tick' || k === 'b_tick')
                 out[k] = (v == null) ? null : String(v);
+            else if(k === 'a_payout_legs' || k === 'b_payout_legs'){
+                // Omit-when-null: legs only exist at/above the CROSS_CHAIN_ROYALTY flag-day
+                // (create-side deny below it), so legs-less archives stay byte-identical to
+                // those built by pre-royalty hubs and recovery tolerates both shapes.
+                if(v != null) out[k] = String(v);
+            }
             else
                 out[k] = String(v == null ? '' : v);
         }
@@ -1520,6 +1527,10 @@ class StateAnchorPublisher {
             m.a_kind || 'swap', String(m.a_filled_before != null ? m.a_filled_before : '0'),
             m.b_kind || 'swap', String(m.b_filled_before != null ? m.b_filled_before : '0')
         ].join('|');
+        // Cross-chain royalty legs ride the signed match at/above the CROSS_CHAIN_ROYALTY
+        // flag-day; below it the canonical is byte-identical to the legacy format.
+        if(ccr.isCrossChainRoyaltyActive(m.snapshot_block, m.network))
+            raw += '|' + String(m.a_payout_legs || '') + '|' + String(m.b_payout_legs || '');
         // EQUIV (WI-2 bump 2): VIEW = the archived row's finalizing_view. TAG=XDEX,
         // ROUND_ID=match_id. Byte-matches the hub engine + indexer cross_settle.
         if(eq.isEquivHeaderActive(m.snapshot_block, m.network))

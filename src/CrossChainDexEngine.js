@@ -49,6 +49,7 @@ const axios        = require('axios');
 const bc                     = require('./bcmath.js');
 const swq                    = require('./stake_weighted_quorum.js');
 const eq                     = require('./equivocation_header.js');
+const ccr                    = require('./cross_chain_royalty_activation.js');
 const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
 const coins                  = require('./coins');
 
@@ -419,6 +420,11 @@ class CrossChainDexEngine extends EventEmitter {
             a_filled_before: String(desc.loFilledBefore),
             a_ownership:     Number(lo.give_ownership || 0),
             a_payout_addr:   lo.get_address,           // A receives on hi's chain
+            // Controller-guard royalty split of each order's proceeds (JSON [{to,bps}] in the
+            // order's OWN chain encoding, or null). Copied verbatim from the source indexer's
+            // open-order feed; the proceeds chain re-encodes + applies it at cross_settle. At/
+            // above the CROSS_CHAIN_ROYALTY flag-day the legs are part of the signed canonical.
+            a_payout_legs:   lo.payout_legs || null,
             b_chain:         hi.home_coin,
             b_action_index:  Number(hi.action_index),
             b_kind:          desc.hiKind,
@@ -427,6 +433,7 @@ class CrossChainDexEngine extends EventEmitter {
             b_filled_before: String(desc.hiFilledBefore),
             b_ownership:     Number(hi.give_ownership || 0),
             b_payout_addr:   hi.get_address,           // B receives on lo's chain
+            b_payout_legs:   hi.payout_legs || null,
             effective_time:  effectiveTime,
             // Per-leg source-chain reorg fence (item 5308): each leg lives on its own
             // chain with its own generation, stamped from that side's open-order RPC. A
@@ -501,6 +508,12 @@ class CrossChainDexEngine extends EventEmitter {
         if(!this._amountsEqual(desc.loFill, row.a_amount) || !this._amountsEqual(desc.hiFill, row.b_amount)) return false;
         if(!this._amountsEqual(desc.loFilledBefore, row.a_filled_before) ||
            !this._amountsEqual(desc.hiFilledBefore, row.b_filled_before)) return false;
+        // Royalty legs must match OUR OWN indexer's view of each order. The canonical is
+        // built from the proposed row, so without this check a Byzantine leader could
+        // strip or rewrite the legs and still collect honest signatures; the source
+        // indexer stores the legs as one JSON string, so both views compare byte-equal.
+        if(String(row.a_payout_legs || '') !== String(desc.lo.payout_legs || '')) return false;
+        if(String(row.b_payout_legs || '') !== String(desc.hi.payout_legs || '')) return false;
         let derivedId = this._deriveMatchId(desc.lo, desc.hi, Number(row.snapshot_block), desc.loFilledBefore, desc.hiFilledBefore);
         if(String(derivedId).toLowerCase() !== String(row.match_id).toLowerCase()) return false;
         return true;
@@ -541,6 +554,11 @@ class CrossChainDexEngine extends EventEmitter {
             r.a_kind || 'swap', String(r.a_filled_before != null ? r.a_filled_before : '0'),
             r.b_kind || 'swap', String(r.b_filled_before != null ? r.b_filled_before : '0')
         ].join('|');
+        // Cross-chain royalty legs ride the signed match at/above the CROSS_CHAIN_ROYALTY
+        // flag-day (a colluding hub must not be able to strip a royalty at settlement);
+        // below it the canonical is byte-identical to the legacy format.
+        if(ccr.isCrossChainRoyaltyActive(r.snapshot_block, r.network))
+            raw += '|' + String(r.a_payout_legs || '') + '|' + String(r.b_payout_legs || '');
         if(eq.isEquivHeaderActive(r.snapshot_block, r.network))
             return eq.buildEquivCanonical(eq.ENGINE_TAGS.DEX, r.match_id, (view != null ? view : 0), raw);
         return raw;
@@ -550,8 +568,8 @@ class CrossChainDexEngine extends EventEmitter {
     // caller only updates the committed ledger once per fill.
     async _insertMatchRow(row){
         let cols = ['match_id','snapshot_block','network',
-                    'a_chain','a_action_index','a_kind','a_tick','a_amount','a_filled_before','a_ownership','a_payout_addr',
-                    'b_chain','b_action_index','b_kind','b_tick','b_amount','b_filled_before','b_ownership','b_payout_addr',
+                    'a_chain','a_action_index','a_kind','a_tick','a_amount','a_filled_before','a_ownership','a_payout_addr','a_payout_legs',
+                    'b_chain','b_action_index','b_kind','b_tick','b_amount','b_filled_before','b_ownership','b_payout_addr','b_payout_legs',
                     'effective_time','finalizing_view','validator_signatures','a_push_generation','b_push_generation'];
         let vals = cols.map(c => row[c]);
         // INSERT IGNORE: match_id is unique, so a re-finalize (e.g. another hub or a

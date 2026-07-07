@@ -15,6 +15,7 @@ const { expect }     = require('chai');
 const proxyquire     = require('proxyquire');
 const { createMockHub } = require('../helpers/mockHub');
 const eq             = require('../../src/equivocation_header.js');
+const ccr            = require('../../src/cross_chain_royalty_activation.js');
 
 // Warm the mathjs/bcmath require cache once, OUTSIDE any timed hook (mathjs is large and the
 // first load on the Parallels share can exceed a 5s hook timeout).
@@ -373,15 +374,18 @@ describe('CrossChainDexEngine', function () {
                 m.a_kind || 'swap', String(m.a_filled_before != null ? m.a_filled_before : '0'),
                 m.b_kind || 'swap', String(m.b_filled_before != null ? m.b_filled_before : '0')
             ].join('|');
+            // Royalty legs ride the signed match at/above CROSS_CHAIN_ROYALTY (regtest genesis).
+            if (ccr.isCrossChainRoyaltyActive(m.snapshot_block, m.network))
+                raw += '|' + String(m.a_payout_legs || '') + '|' + String(m.b_payout_legs || '');
             if (eq.isEquivHeaderActive(m.snapshot_block, m.network))
                 return eq.buildEquivCanonical(eq.ENGINE_TAGS.DEX, m.match_id, (m.finalizing_view != null ? m.finalizing_view : 0), raw);
             return raw;
         }
 
-        it('wraps the XMATCH content in the EQUIV header and appends the fill fields after network', function () {
+        it('wraps the XMATCH content in the EQUIV header and appends the fill + royalty fields after network', function () {
             let canon = eng._canonicalMatch(sampleRow());
             expect(canon).to.match(/^EQUIV\|XDEX\|abc\|0\|\|XMATCH\|/);   // gated (regtest); header then content
-            expect(canon.endsWith('|regtest|order|0|order|40')).to.be.true;
+            expect(canon.endsWith('|regtest|order|0|order|40||')).to.be.true;   // trailing '||' = empty royalty legs
         });
 
         it('byte-matches the indexer cross_settle._canonical', function () {
@@ -389,11 +393,18 @@ describe('CrossChainDexEngine', function () {
             expect(eng._canonicalMatch(row)).to.equal(indexerCanonical(row));
         });
 
+        it('signs non-null royalty legs into the canonical bytes (strip changes the bytes)', function () {
+            let row = sampleRow();
+            row.a_payout_legs = JSON.stringify([{ to: 'mjrCrhL4qjKo1oGYJb78Lp8GoBiF6yFTZM', bps: 500 }]);
+            expect(eng._canonicalMatch(row)).to.equal(indexerCanonical(row));
+            expect(eng._canonicalMatch(row)).to.not.equal(eng._canonicalMatch(sampleRow()));
+        });
+
         it('defaults kind/filled_before for a legacy (swap) row', function () {
             let row = sampleRow();
             delete row.a_kind; delete row.a_filled_before; delete row.b_kind; delete row.b_filled_before;
             expect(eng._canonicalMatch(row)).to.equal(indexerCanonical(row));
-            expect(eng._canonicalMatch(row).endsWith('|swap|0|swap|0')).to.be.true;
+            expect(eng._canonicalMatch(row).endsWith('|swap|0|swap|0||')).to.be.true;
         });
     });
 
@@ -448,8 +459,10 @@ describe('CrossChainDexEngine', function () {
                 snapshot_block: block, network: d.network,
                 a_chain: d.lo.home_coin, a_action_index: d.lo.action_index, a_kind: d.loKind, a_tick: d.lo.give_tick,
                 a_amount: d.loFill, a_filled_before: d.loFilledBefore, a_ownership: d.lo.give_ownership, a_payout_addr: d.lo.get_address,
+                a_payout_legs: d.lo.payout_legs || null,
                 b_chain: d.hi.home_coin, b_action_index: d.hi.action_index, b_kind: d.hiKind, b_tick: d.hi.give_tick,
                 b_amount: d.hiFill, b_filled_before: d.hiFilledBefore, b_ownership: d.hi.give_ownership, b_payout_addr: d.hi.get_address,
+                b_payout_legs: d.hi.payout_legs || null,
                 effective_time: 1700000000
             };
         }
@@ -484,6 +497,50 @@ describe('CrossChainDexEngine', function () {
             let { a, b } = makeOrderPair();
             let row = orderRow(eng, a, b, 100);
             row.match_id = 'f'.repeat(64);
+            sinon.stub(eng, '_findOpenOffer').callsFake(async (coin) => coin === 'DOGE' ? b : a);
+            expect(await eng.validateProposedMatch(row)).to.be.false;
+        });
+
+        // Cross-chain royalty legs: the canonical is built from the PROPOSED row, so the
+        // follower must confirm the row's legs against its own indexer's view of each order.
+        const LEGS = JSON.stringify([{ to: 'mjrCrhL4qjKo1oGYJb78Lp8GoBiF6yFTZM', bps: 500 }]);
+
+        it('returns true when the proposed royalty legs match our own view', async function () {
+            let eng = new CrossChainDexEngine(makeDexHub());
+            let { a, b } = makeOrderPair();
+            a.payout_legs = LEGS;
+            let row = orderRow(eng, a, b, 100);
+            sinon.stub(eng, '_findOpenOffer').callsFake(async (coin) => coin === 'DOGE' ? b : a);
+            expect(await eng.validateProposedMatch(row)).to.be.true;
+        });
+
+        it('returns false when the leader STRIPS the royalty legs', async function () {
+            let eng = new CrossChainDexEngine(makeDexHub());
+            let { a, b } = makeOrderPair();
+            a.payout_legs = LEGS;
+            let row = orderRow(eng, a, b, 100);
+            // a is home_coin LTC → canonical-HIGHER vs DOGE ('DOGE' < 'LTC'), so a's legs
+            // ride the B side of the row
+            row.b_payout_legs = null;
+            sinon.stub(eng, '_findOpenOffer').callsFake(async (coin) => coin === 'DOGE' ? b : a);
+            expect(await eng.validateProposedMatch(row)).to.be.false;
+        });
+
+        it('returns false when the leader REWRITES the royalty legs', async function () {
+            let eng = new CrossChainDexEngine(makeDexHub());
+            let { a, b } = makeOrderPair();
+            a.payout_legs = LEGS;
+            let row = orderRow(eng, a, b, 100);
+            row.b_payout_legs = JSON.stringify([{ to: 'attacker', bps: 500 }]);
+            sinon.stub(eng, '_findOpenOffer').callsFake(async (coin) => coin === 'DOGE' ? b : a);
+            expect(await eng.validateProposedMatch(row)).to.be.false;
+        });
+
+        it('returns false when the row claims legs our own view does not have', async function () {
+            let eng = new CrossChainDexEngine(makeDexHub());
+            let { a, b } = makeOrderPair();
+            let row = orderRow(eng, a, b, 100);
+            row.b_payout_legs = LEGS;
             sinon.stub(eng, '_findOpenOffer').callsFake(async (coin) => coin === 'DOGE' ? b : a);
             expect(await eng.validateProposedMatch(row)).to.be.false;
         });
