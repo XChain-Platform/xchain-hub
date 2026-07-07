@@ -713,11 +713,40 @@ async function startApi(){
             }
         },
 
-        async getproposals({status}){
+        async getproposals({status, parameter, limit}){
+            let limErr = validateLimit(limit);
+            if (limErr) return limErr;
             try {
-                return await hub.getProposals(status);
+                return await hub.getProposals(status, parameter, limit);
             } catch (err) {
                 return {error: "error fetching proposals"};
+            }
+        },
+
+        // List individual governance votes by proposal and/or voter. Complements
+        // getproposal (which bundles one proposal's votes): the explorer's
+        // governance pages also need list-by-voter across proposals.
+        async getvotes({proposal_id, voter_pubkey, limit}){
+            let limErr = validateLimit(limit);
+            if (limErr) return limErr;
+            try {
+                return await hub.getVotes({proposalId: proposal_id, voterPubkey: voter_pubkey, limit});
+            } catch (err) {
+                return {error: "error fetching votes"};
+            }
+        },
+
+        // List per-validator capability qualification rows, optionally filtered by
+        // pubkey and/or capability. Read-only companion to getcapabilitythresholds:
+        // thresholds say what a capability requires, this says who currently holds it.
+        async getvalidatorcapabilities({signing_pubkey, capability, limit}){
+            let limErr = validateLimit(limit);
+            if (limErr) return limErr;
+            if(!hub.capabilityRegistry) return {error: "capability registry not active"};
+            try {
+                return await hub.getValidatorCapabilities({signingPubkey: signing_pubkey, capability, limit});
+            } catch (err) {
+                return {error: "error fetching validator capabilities"};
             }
         },
 

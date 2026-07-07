@@ -446,14 +446,24 @@ class XChainHub {
         return await this.governance.vote(proposalId, voteChoice);
     }
 
-    async getProposals(status){
+    async getProposals(status, parameter, limit){
         if(!this.governance) return [];
-        return await this.governance.getProposals(status);
+        return await this.governance.getProposals(status, parameter, limit);
     }
 
     async getProposal(proposalId){
         if(!this.governance) return null;
         return await this.governance.getProposal(proposalId);
+    }
+
+    async getVotes({proposalId, voterPubkey, limit} = {}){
+        if(!this.governance) return [];
+        return await this.governance.getVotes({proposalId, voterPubkey, limit});
+    }
+
+    async getValidatorCapabilities({signingPubkey, capability, limit} = {}){
+        if(!this.capabilityRegistry) return [];
+        return await this.capabilityRegistry.listState({signingPubkey, capability, limit});
     }
 
     async requestAttestation(sourceChain, sourceActionIndex, destChain){

@@ -353,6 +353,35 @@ class CapabilityRegistry {
         }
     }
 
+    // List per-validator capability rows, optionally filtered by pubkey and/or
+    // capability. Read-only surface for external consumers (e.g. the explorer's
+    // validator-capabilities page); returns the full flag set per row so callers
+    // can distinguish "not qualified" from "operator-disabled" from "self-test failing".
+    async listState({ signingPubkey, capability, limit } = {}) {
+        let query = `SELECT id, signing_pubkey, capability, qualified, self_test_ok,
+                            enabled, qualified_at_block, updated_at
+                     FROM validator_capabilities`;
+        let where = [];
+        let args = [];
+        if (signingPubkey) {
+            where.push("signing_pubkey = ?");
+            args.push(String(signingPubkey).toLowerCase());
+        }
+        if (capability) {
+            where.push("capability = ?");
+            args.push(capability);
+        }
+        if (where.length) query += " WHERE " + where.join(" AND ");
+        let lim = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 500);
+        query += " ORDER BY id DESC LIMIT " + lim;
+        let conn = await this.db.getConnection();
+        try {
+            return await conn.query(query, args);
+        } finally {
+            await conn.release();
+        }
+    }
+
     // Get all known per-capability state for this hub's identity (operator-facing status display)
     async getOwnState(pubkey) {
         let conn = await this.db.getConnection();

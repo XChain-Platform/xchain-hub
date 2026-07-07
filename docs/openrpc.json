@@ -433,9 +433,43 @@
     },
     {
       "name": "getproposals",
-      "summary": "List governance proposals.",
+      "summary": "List governance proposals, optionally filtered by status and/or parameter name.",
       "paramStructure": "by-name",
-      "params": [],
+      "params": [
+        {
+          "name": "status",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "parameter",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
       "result": {
         "name": "result",
         "schema": {
@@ -450,6 +484,98 @@
       "params": [
         {
           "name": "proposal_id",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "name": "getvotes",
+      "summary": "List individual governance votes by proposal and/or voter.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "proposal_id",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "voter_pubkey",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "name": "getvalidatorcapabilities",
+      "summary": "Per-validator capability qualification rows (qualified, self-test, enabled flags).",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "signing_pubkey",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "capability",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "limit",
           "required": false,
           "schema": {
             "type": [
