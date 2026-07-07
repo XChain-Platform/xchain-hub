@@ -126,6 +126,32 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         expect(ValidatorIdentity.verify(canonicalMatch(row), ev.signatures[0].sig, ev.signatures[0].pubkey)).to.be.true;
     });
 
+    it('does NOT self-finalize over an EMPTY snapshot (bootstrap/mirror-lag wedge guard)', async function () {
+        // quorum 0 from an empty snapshot must NOT collapse to the single-operator
+        // fast path: a 1-sig match no populated-snapshot peer will ratify wedges the
+        // order and forks this hub's ledger. The round must abort and stay retryable.
+        let bus = buildMesh(1);
+        await startAll(bus);
+        let mid = 'ab'.repeat(32), row = sampleRow(mid);
+        await bus.nodes[0].consensus.propose(mid, { row, snapshot: { validators: [], count: 0 } });
+        await sleep(20);
+        expect(bus.nodes[0].finalized.length).to.equal(0);
+        // Aborted, not left half-open: a later propose with a real snapshot can retry.
+        expect(bus.nodes[0].consensus.pending.has(mid.toLowerCase())).to.be.false;
+    });
+
+    it('does NOT self-finalize when the sole snapshot validator is someone else', async function () {
+        let bus = buildMesh(1);
+        await startAll(bus);
+        let mid = 'ac'.repeat(32), row = sampleRow(mid);
+        let stranger = ValidatorIdentity.generate().pubkeyHex.toLowerCase();
+        await bus.nodes[0].consensus.propose(mid, {
+            row, snapshot: { validators: [{ pubkey: stranger, source: 'src:' + stranger, weight: '1', amount: '1' }], count: 1 }
+        });
+        await sleep(20);
+        expect(bus.nodes[0].finalized.length).to.equal(0);
+    });
+
     it('tolerates 1 of 4 refusing to validate (honest majority still finalizes)', async function () {
         let bus = buildMesh(4, { validate: (self) => self.i !== 2 });   // node 2 refuses
         await startAll(bus);

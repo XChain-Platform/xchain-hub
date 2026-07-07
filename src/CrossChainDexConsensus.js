@@ -235,6 +235,24 @@ class CrossChainDexConsensus extends EventEmitter {
         // in BOTH modes: the sole validator's own stake is the whole snapshot, so
         // it trivially satisfies 3·weight>2·S as well.
         if(quorum === 0){
+            // quorum 0 arises from TWO very different snapshots, and only one is safe
+            // to finalize unilaterally: a genuine single-operator federation whose sole
+            // validator is THIS hub. An EMPTY snapshot (snapCount === 0, e.g. a bootstrap
+            // / mirror-lag read or seed-local disabled) ALSO yields quorum 0, but self-
+            // signing there writes a 1-sig match that peers holding a populated snapshot
+            // will never ratify: the order wedges permanently (match_id lands in
+            // `finalized`, never re-proposed) and this hub's committed ledger forks from
+            // the federation. Only the sole-self case may fast-path; otherwise abort the
+            // round and let discovery re-propose once the snapshot populates.
+            let soleSelf = snapCount === 1 && String(validators[0].pubkey).toLowerCase() === myPubkey;
+            if(!soleSelf){
+                this.pending.delete(rid);
+                console.warn('CrossChainDexConsensus: refusing to finalize match ' + rid +
+                    ' with quorum 0 over a ' + (snapCount === 0 ? 'EMPTY' : 'non-self single-validator') +
+                    ' cross_chain snapshot (snapshot_block=' + row.snapshot_block +
+                    '); will retry when the snapshot populates');
+                return;
+            }
             try { await this.engine._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network); }
             catch(e){ console.warn('CrossChainDexConsensus: snapshot persist failed: ' + (e && e.message)); }
             let sig = this.identity.sign(canonical);
