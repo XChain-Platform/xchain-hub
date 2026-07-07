@@ -167,6 +167,22 @@ describe('CrossChainEngine', function () {
             expect(hub.db.doQuery.called).to.be.true;
         });
 
+        it('REFUSES to finalize unilaterally over an EMPTY cross_chain snapshot (federation bootstrap guard)', async function () {
+            // quorum resolves to 0 from an EMPTY capability snapshot (not a genuine
+            // single node): unilaterally minting an unverified 'attested' row here is
+            // the same hazard fixed for the DEX. Must throw, not store.
+            engine.setValidatorSet(VALIDATORS_3);
+            hub._resolveBtcLatestBlock = async () => 800000;
+            hub.capabilitySnapshot = {
+                getSnapshot: async () => ({ validators: [], count: 0 }),
+                getQuorum:   () => 0
+            };
+            let threw = false;
+            try { await engine.requestAttestation('BTC', 7, 'LTC'); }
+            catch (e) { threw = true; expect(e.message).to.match(/EMPTY cross_chain snapshot/); }
+            expect(threw, 'should refuse over an empty snapshot').to.be.true;
+        });
+
         it('returns stored attestation if already finalized', async function () {
             engine.finalized.add('BTC:42:LTC');
             hub.db.doQuery.resolves([{ attestation_id: 'BTC:42:LTC', status: 'attested' }]);

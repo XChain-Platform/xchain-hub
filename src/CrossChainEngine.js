@@ -168,6 +168,22 @@ class CrossChainEngine extends EventEmitter {
         // Single-node fallback
         let quorum = await this._resolveQuorum(sourceChain, destChain, btcBlockHeight);
         if (quorum === 0) {
+            // quorum 0 has two causes: a genuine single-operator deployment (no
+            // federation) OR an EMPTY cross_chain capability snapshot in a real
+            // federation (bootstrap / misconfig). Unilaterally minting an 'attested'
+            // row is only safe in the first case. If a capability snapshot resolved at
+            // this block but carried NO qualifying validators, refuse: finalizing over
+            // an empty federation snapshot mints an attestation no peer ratified and no
+            // depth-verification gated (the same empty-snapshot hazard fixed for the
+            // DEX). When no snapshot resolved (genuine single node) keep the fast path.
+            let snap = (this.hub.capabilitySnapshot && btcBlockHeight)
+                ? await this.hub.capabilitySnapshot.getSnapshot('cross_chain', btcBlockHeight)
+                : null;
+            if (snap && Array.isArray(snap.validators) && snap.validators.length === 0) {
+                throw new Error('CrossChain: refusing to finalize attestation ' + attestationId +
+                    ' unilaterally over an EMPTY cross_chain snapshot (block ' + btcBlockHeight +
+                    '); will retry when the snapshot populates');
+            }
             let attestation = {
                 attestationId, sourceChain, sourceActionIndex: parseInt(sourceActionIndex),
                 destChain, confirmations, status: 'attested',
