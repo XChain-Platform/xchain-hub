@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Armed `CROSS_CHAIN_ROYALTY_ACTIVATION` mainnet at BTC anchor 961000 (~2026-08-04, fleet deploy required first), byte-identical with the indexer twin.
 - Sensitive-read auth tier: `getallconfigs` requires `x-api-key` when `HUB_API_KEY` is set (its response carries DB credentials), completing the app-side policy that lets the public reverse proxy drop its IP allowlist; emergency opt-out via `HUB_SENSITIVE_READ_AUTH=0`.
 - `GET /api/v1/chain-registry`: public wallet/SDK bootstrap endpoint serving the wallet-synced chain descriptors (`src/chain-registry.json`), Ed25519-signed when the hub has an identity.
 - Read-only JSON-RPC methods `getvotes` and `getvalidatorcapabilities`, plus optional `parameter`/`limit` filters on `getproposals`, so explorers can serve governance and capability pages over RPC instead of a co-located hub DB.
