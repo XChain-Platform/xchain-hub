@@ -111,7 +111,7 @@ describe('ReorgHandler', function () {
             let emitted = null;
             rh.on('reorg:confirmed', (d) => { emitted = d; });
 
-            await rh.reportReorg('LTC', 300000, 1700000000000);
+            await rh.reportReorg('LTC', 300000, Date.now());
 
             expect(emitted).to.not.be.null;
             expect(emitted.sourceChain).to.equal('LTC');
@@ -119,8 +119,20 @@ describe('ReorgHandler', function () {
         });
 
         it('skips already-processed reorgs', async function () {
-            rh.processed.add('BTC:500000:123');
-            await rh.reportReorg('BTC', 500000, 123);
+            let ts = Date.now();
+            rh.processed.add('BTC:500000:' + ts);
+            await rh.reportReorg('BTC', 500000, ts);
+            expect(hub.db.doQuery.called).to.be.false;
+        });
+
+        it('rejects a reorg whose timestamp is far in the past (blast-radius bound)', async function () {
+            rh.setValidatorSet([]);
+            pm.getPeerStatus.returns([]);
+            let threw = false;
+            // A timestamp near epoch would otherwise DELETE nearly all attestations.
+            try { await rh.reportReorg('BTC', 500000, 1700000000000); }
+            catch (e) { threw = true; expect(e.message).to.match(/too far in the past/); }
+            expect(threw).to.be.true;
             expect(hub.db.doQuery.called).to.be.false;
         });
 
@@ -128,7 +140,7 @@ describe('ReorgHandler', function () {
             rh.setValidatorSet(VALIDATORS_3);
             pm.validatorAddr = VALIDATORS_3[0].addr;
 
-            await rh.reportReorg('BTC', 500000, 1700000000000);
+            await rh.reportReorg('BTC', 500000, Date.now());
 
             // With N=3 and quorum=1, self-prepare meets quorum immediately.
             // Broadcasts: REORG_ALERT, XCHAIN_REORG_PREPARE, XCHAIN_REORG_COMMIT
@@ -187,11 +199,12 @@ describe('ReorgHandler', function () {
         });
 
         it('PREPARE from peer is recorded', function () {
-            let reorgId = 'BTC:500:123';
-            let digest = rh._digest(reorgId, 'BTC', 500, 123);
+            let ts = Date.now();
+            let reorgId = 'BTC:500:' + ts;
+            let digest = rh._digest(reorgId, 'BTC', 500, ts);
 
             rh.pendingReorgs.set(reorgId, {
-                reorgId, chain: 'BTC', reorgHeight: 500, timestamp: 123,
+                reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
                 affectedChains: ['LTC', 'DOGE'], digest,
                 prepares: new Set(), commits: new Set(),
                 finalized: false, timer: null
@@ -199,19 +212,42 @@ describe('ReorgHandler', function () {
 
             rh._handlePrepare({
                 sender: VALIDATORS_3[1].addr,
-                data: { reorgId, chain: 'BTC', reorgHeight: 500, timestamp: 123,
+                data: { reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
                         affectedChains: ['LTC', 'DOGE'], digest }
             });
 
             expect(rh.pendingReorgs.get(reorgId).prepares.has(VALIDATORS_3[1].addr)).to.be.true;
         });
 
+        it('_handleAlert refuses an out-of-window (old) timestamp and starts no consensus', function () {
+            let ts = 1700000000000; // ~2023, far outside the 24h blast-radius window
+            let reorgId = 'BTC:500:' + ts;
+            rh._handleAlert({
+                sender: VALIDATORS_3[1].addr,
+                data: { chain: 'BTC', reorgHeight: 500, timestamp: ts, reorgId }
+            });
+            expect(rh.pendingReorgs.has(reorgId), 'no pending round for a stale reorg').to.be.false;
+            expect(pm.broadcast.called, 'no PREPARE broadcast for a stale reorg').to.be.false;
+        });
+
+        it('_handlePrepare refuses to co-sign an out-of-window (old) timestamp', function () {
+            let ts = 1700000000000;
+            let reorgId = 'BTC:500:' + ts;
+            rh._handlePrepare({
+                sender: VALIDATORS_3[1].addr,
+                data: { reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
+                        affectedChains: ['LTC', 'DOGE'], digest: rh._digest(reorgId, 'BTC', 500, ts) }
+            });
+            expect(rh.pendingReorgs.has(reorgId), 'a follower does not create a round for a stale reorg').to.be.false;
+        });
+
         it('PREPARE with wrong digest is rejected', function () {
-            let reorgId = 'BTC:500:123';
-            let digest = rh._digest(reorgId, 'BTC', 500, 123);
+            let ts = Date.now();
+            let reorgId = 'BTC:500:' + ts;
+            let digest = rh._digest(reorgId, 'BTC', 500, ts);
 
             rh.pendingReorgs.set(reorgId, {
-                reorgId, chain: 'BTC', reorgHeight: 500, timestamp: 123,
+                reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
                 affectedChains: ['LTC', 'DOGE'], digest,
                 prepares: new Set(), commits: new Set(),
                 finalized: false, timer: null
@@ -219,7 +255,7 @@ describe('ReorgHandler', function () {
 
             rh._handlePrepare({
                 sender: VALIDATORS_3[1].addr,
-                data: { reorgId, digest: 'wrong' }
+                data: { reorgId, timestamp: ts, digest: 'wrong' }
             });
 
             expect(rh.pendingReorgs.get(reorgId).prepares.size).to.equal(0);
@@ -402,10 +438,12 @@ describe('ReorgHandler', function () {
         });
 
         it('starts consensus for a new reorg alert', function () {
+            let ts = Date.now();
+            let reorgId = 'BTC:5:' + ts;
             let init = sinon.spy(rh, '_initiateReorgConsensus');
-            rh._handleAlert({ sender: 'peer', data: { chain: 'BTC', reorgHeight: 5, timestamp: 1700000000000, reorgId: 'BTC:5:1700000000000' } });
+            rh._handleAlert({ sender: 'peer', data: { chain: 'BTC', reorgHeight: 5, timestamp: ts, reorgId } });
             expect(init.calledOnce).to.be.true;
-            let p = rh.pendingReorgs.get('BTC:5:1700000000000');
+            let p = rh.pendingReorgs.get(reorgId);
             if (p && p.timer) clearTimeout(p.timer);
         });
     });

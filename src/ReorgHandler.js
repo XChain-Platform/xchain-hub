@@ -54,6 +54,31 @@ class ReorgHandler extends EventEmitter {
         this.reorgRateTracker = new Map();
 
         this.timeout = parseInt(process.env.REORG_TIMEOUT) || DEFAULT_REORG_TIMEOUT;
+
+        // Blast-radius bound. _executeRollback DELETEs attestations and disputes price
+        // snapshots relative to the reorg `timestamp`, which is caller-supplied and only
+        // sanity-checked for >= 0. A timestamp near 0 makes the rollback wipe essentially
+        // ALL attestations for the chain and dispute every finalized price snapshot. A
+        // real reorg can only invalidate RECENT state, so refuse a reorg whose timestamp
+        // is older than this window (or too far in the future) before it can drive a
+        // rollback. This does not fully verify the reorg (see the header note on the
+        // remaining validity work); it bounds the damage an unverified one can do.
+        this.maxLookbackMs = parseInt(process.env.REORG_MAX_LOOKBACK_MS) || 86400000; // 24h
+    }
+
+    // Whether a reorg timestamp is within the acceptable recent window. Shared by the
+    // local report path and the inbound ALERT/PREPARE paths so a hub never joins (or
+    // drives) a rollback round for an out-of-window timestamp. Wall-clock `now` differs
+    // slightly across hubs, but the window is far wider than any clock skew and real
+    // reorg timestamps are minutes old, so honest hubs never disagree at the boundary;
+    // a Byzantine timestamp near the edge only fails to reach quorum (fail-safe).
+    _timestampInBounds(timestamp) {
+        let t = parseInt(timestamp);
+        if (!Number.isFinite(t) || t < 0) return false;
+        let now = Date.now();
+        if (t > now + 300000) return false;                  // too far future
+        if (t < now - this.maxLookbackMs) return false;      // too far past (blast-radius bound)
+        return true;
     }
 
     setValidatorSet(validators) {
@@ -96,6 +121,9 @@ class ReorgHandler extends EventEmitter {
         let now = Date.now();
         if (t > now + 300000)
             throw new Error('timestamp is too far in the future');
+        if (t < now - this.maxLookbackMs)
+            throw new Error('timestamp is too far in the past (reorg blast-radius bound: ' +
+                this.maxLookbackMs + 'ms); a reorg can only invalidate recent state');
 
         // Rate limit: 1 report per chain per 60 seconds
         let lastReport = this.reorgRateTracker.get(chain) || 0;
@@ -163,6 +191,11 @@ class ReorgHandler extends EventEmitter {
         if (!chain || !reorgHeight || !timestamp || !reorgId) return;
         if (this.processed.has(reorgId)) return;
 
+        // Refuse to even start consensus on an out-of-window reorg. An honest majority
+        // applying this bound denies a Byzantine reporter the quorum to drive a rollback
+        // that reaches back arbitrarily far (blast-radius bound).
+        if (!this._timestampInBounds(timestamp)) return;
+
         let affectedChains = this._getAffectedChains(chain);
 
         // If we don't already have this reorg pending, start consensus
@@ -225,6 +258,11 @@ class ReorgHandler extends EventEmitter {
         if (!this._isKnownSender(envelope.sender)) return;
         let { reorgId, chain, reorgHeight, timestamp, affectedChains, digest } = envelope.data;
         if (!reorgId || !digest) return;
+
+        // A follower must not co-sign a reorg it would not itself accept: apply the same
+        // blast-radius bound as _handleAlert so a Byzantine leader can't gather quorum
+        // from followers that skipped the ALERT. PREPARE carries the timestamp.
+        if (!this._timestampInBounds(timestamp)) return;
 
         if (!this.pendingReorgs.has(reorgId)) {
             // Create pending from the received data

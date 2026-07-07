@@ -73,16 +73,18 @@ describe('Boundary: ReorgHandler', function () {
 
     describe('timestamp boundaries', function () {
 
-        it('timestamp=0 (unix epoch) is accepted and rollback runs', async function () {
+        it('timestamp=0 (unix epoch) is REJECTED by the blast-radius bound', async function () {
             rh.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
 
-            await rh.reportReorg('BTC', 100, 0);
-
-            let calls = hub.db.doQuery.args;
-            let deleteCall = calls.find(c => /DELETE FROM attestations/.test(c[0]));
-            expect(deleteCall).to.exist;
-            expect(deleteCall[1][1]).to.equal(0); // timestamp param
+            // timestamp=0 would make _executeRollback DELETE every attestation and dispute
+            // every finalized price snapshot for the chain. It is far outside the recent
+            // window, so it must be refused before any rollback runs.
+            let threw = false;
+            try { await rh.reportReorg('BTC', 100, 0); }
+            catch (e) { threw = true; expect(e.message).to.match(/too far in the past/); }
+            expect(threw).to.be.true;
+            expect(hub.db.doQuery.called).to.be.false;
         });
 
         it('far-future timestamp is rejected by validation', async function () {
@@ -112,7 +114,7 @@ describe('Boundary: ReorgHandler', function () {
             let ts = Date.now() - 1000;
             await rh.reportReorg('BTC', 200, ts);
 
-            // Second identical report — rate limiter suppresses it
+            // Second identical report: rate limiter suppresses it
             try {
                 await rh.reportReorg('BTC', 200, ts);
                 expect.fail('should have thrown');
@@ -147,10 +149,10 @@ describe('Boundary: ReorgHandler', function () {
             rh.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
 
-            let ts = 1700000000000;
+            let ts = Date.now();
             await rh.reportReorg('LTC', 300, ts);
 
-            // Should NOT broadcast — no PBFT needed
+            // Should NOT broadcast: no PBFT needed
             expect(pm.broadcast.called).to.be.false;
 
             // Should write the reorg attestation
