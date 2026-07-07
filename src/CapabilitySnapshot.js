@@ -49,6 +49,9 @@ class CapabilitySnapshot {
         // Same throttle idiom as _authWarnAt so a sustained over-limit validator
         // set raises one warning per cacheTtlMs instead of one per quorum call.
         this._truncWarnAt = 0;
+        // Last time we alarmed on a wired-but-unconfigured capability threshold.
+        // Same throttle idiom; keyed per capability so each missing one warns.
+        this._minStakeWarnAt = {};
     }
 
     // Classify a federation-read failure and return null (the fetch helpers'
@@ -108,6 +111,14 @@ class CapabilitySnapshot {
         // this a governance MIN_STAKE change leaves a stale snapshot serving the
         // old validator set for up to the TTL, splitting quorum across hubs.
         let minStake = this._resolveMinStake(capability, blockIndex);
+        // Fail closed (#S-F3): a null threshold from a LIVE registry means this
+        // capability is unconfigured, and falling back to the indexer's local config
+        // silently forks the qualifying set across independently-operated indexers.
+        // Refuse the snapshot so the caller declines to vote / aborts the round.
+        if (minStake === null && this._registryReady()) {
+            this._warnMinStakeMissing(capability);
+            return null;
+        }
         let key = capability + ':' + blockIndex + ':' + (minStake === null ? '' : minStake);
         let cached = this.cache.get(key);
         let now = Date.now();
@@ -159,6 +170,12 @@ class CapabilitySnapshot {
         // it determines the qualifying set, so a governance threshold change must
         // force a fresh fetch rather than serve a snapshot keyed to the old one.
         let minStake = this._resolveMinStake(capability, blockIndex);
+        // Fail closed (#S-F3): see getSnapshot. A live registry with no threshold for
+        // this capability must not fall back to the indexer's local config (fork risk).
+        if (minStake === null && this._registryReady()) {
+            this._warnMinStakeMissing(capability);
+            return null;
+        }
         let key = 'w:' + capability + ':' + blockIndex + ':' + (minStake === null ? '' : minStake);
         let cached = this.cache.get(key);
         let now = Date.now();
@@ -351,6 +368,32 @@ class CapabilitySnapshot {
         if (!reg || typeof reg.getMinStake !== 'function') return null;
         let v = reg.getMinStake(capability, blockIndex);
         return (v === null || v === undefined) ? null : String(v);
+    }
+
+    // True once the capability registry is wired (post-startCapabilities). The
+    // registry seeds a genesis MIN_STAKE for every CONFIGURED capability in its
+    // constructor (synchronously), so a null threshold from a READY registry means
+    // the capability was never put in HUB_CAPABILITY_CONFIG, not that we are mid-
+    // startup. Before the registry exists, min_stake is legitimately omitted (no
+    // consensus rounds run pre-startCapabilities); this distinguishes the two.
+    _registryReady() {
+        let reg = this.hub && this.hub.capabilityRegistry;
+        return !!(reg && typeof reg.getMinStake === 'function');
+    }
+
+    // Throttled loud alarm for a wired-but-unconfigured capability threshold. Same
+    // idiom as _onFetchError / the truncation alarm: one line per cacheTtlMs per cap.
+    _warnMinStakeMissing(capability) {
+        let now = Date.now();
+        if (now - (this._minStakeWarnAt[capability] || 0) > this.cacheTtlMs) {
+            this._minStakeWarnAt[capability] = now;
+            console.error('CapabilitySnapshot: capability "' + capability + '" has NO configured MIN_STAKE ' +
+                'threshold (missing from HUB_CAPABILITY_CONFIG) while the registry is live. Refusing to build a ' +
+                'snapshot for it: omitting min_stake would let each indexer apply its OWN local threshold, so two ' +
+                'hubs could qualify different validator sets for the same round and FORK. Add CAPABILITY_' +
+                String(capability).toUpperCase() + '_MIN_STAKE to HUB_CAPABILITY_CONFIG (equal to the indexer ' +
+                'constant). Rounds for this capability fail closed until then.');
+        }
     }
 
     // Drop every cached snapshot for a capability: both the count-keyed

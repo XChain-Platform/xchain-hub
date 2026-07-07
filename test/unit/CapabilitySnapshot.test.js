@@ -106,15 +106,33 @@ describe('CapabilitySnapshot', function () {
             expect(Object.prototype.hasOwnProperty.call(body.params, 'min_stake')).to.equal(false);
         });
 
-        it('omits min_stake when the registry has no threshold for the capability', async function () {
+        it('fails CLOSED when a LIVE registry has no threshold for the capability (#S-F3 fork guard)', async function () {
+            // A wired registry that resolves NO threshold means the capability was
+            // never put in HUB_CAPABILITY_CONFIG. Omitting min_stake would let each
+            // indexer apply its own local threshold and fork the qualifying set, so
+            // the snapshot must be refused (null) and the indexer never queried.
             axiosStub.post.resolves(okResult());
             let registry = { getMinStake: sinon.stub().returns(null) };
             let snap = new CapabilitySnapshot(makeHub(registry));
+            let errStub = sinon.stub(console, 'error');
 
-            await snap.getSnapshot('attestation', 100);
+            let result = await snap.getSnapshot('attestation', 100);
 
-            let body = axiosStub.post.firstCall.args[1];
-            expect(Object.prototype.hasOwnProperty.call(body.params, 'min_stake')).to.equal(false);
+            expect(result).to.equal(null);
+            expect(axiosStub.post.called).to.equal(false);
+            expect(errStub.calledWithMatch(/NO configured MIN_STAKE/)).to.equal(true);
+        });
+
+        it('fails CLOSED in getWeightSnapshot too when a live registry has no threshold', async function () {
+            axiosStub.post.resolves(okResult());
+            let registry = { getMinStake: sinon.stub().returns(null) };
+            let snap = new CapabilitySnapshot(makeHub(registry));
+            sinon.stub(console, 'error');
+
+            let result = await snap.getWeightSnapshot('attestation', 100);
+
+            expect(result).to.equal(null);
+            expect(axiosStub.post.called).to.equal(false);
         });
     });
 
