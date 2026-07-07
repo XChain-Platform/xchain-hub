@@ -66,6 +66,60 @@ describe('Security Hardening', function () {
     });
 
     // =================================================================
+    // PeerManager: Sender<->key binding (Option A transport auth)
+    //
+    // A valid Ed25519 signature authenticates the KEY, but count-mode PBFT
+    // tallies and the oracle submission map are keyed by envelope.sender. If
+    // the transport does not bind sender to the signing key, one authorized
+    // validator key can impersonate every OTHER validator's addr and forge a
+    // full quorum / poison the oracle median. This locks the binding.
+    // =================================================================
+
+    describe('PeerManager: Sender<->key binding', function () {
+        const PeerManager       = require('../../src/PeerManager');
+        const ValidatorIdentity = require('../../src/ValidatorIdentity');
+
+        const A = ValidatorIdentity.generate();
+        const B = ValidatorIdentity.generate();
+        const addrA = 'ws://a:10001', addrB = 'ws://b:10001';
+        const idA = new ValidatorIdentity(A.privkeyHex);
+
+        function makePm() {
+            let pm = new PeerManager({ P2P_VALIDATOR_ADDR: addrA, REQUIRE_SIGNATURES: true }, null);
+            pm.setValidatorPubkeys(new Map([[addrA, A.pubkeyHex], [addrB, B.pubkeyHex]]));
+            pm.setEffectiveSignerSet(new Set([A.pubkeyHex.toLowerCase(), B.pubkeyHex.toLowerCase()]));
+            return pm;
+        }
+
+        function signedAs(senderAddr) {
+            let env = { type: 'PBFT_PREPARE', id: 'e:' + Math.random().toString(16).slice(2),
+                        sender: senderAddr, timestamp: Date.now(),
+                        data: { seq: 1, configDigest: 'deadbeef' }, sig_pubkey: idA.getPubkeyHex() };
+            env.sig = idA.signEnvelope(env);
+            return env;
+        }
+
+        it('accepts a message whose sender matches the signing key', function () {
+            expect(makePm()._verifySignature(signedAs(addrA))).to.be.true;
+        });
+
+        it('rejects a message that names another validator addr but is signed by a different key', function () {
+            // Attacker A holds a valid, registered, chain-effective key, yet claims
+            // to be B. Membership passes and the signature is genuine, but the
+            // sender it claims (B) is registered to a DIFFERENT key, so it must be
+            // dropped. This is the quorum-forgery / median-poisoning primitive.
+            expect(makePm()._verifySignature(signedAs(addrB))).to.be.false;
+        });
+
+        it('rejects the forgery even when the effective signer set alone would admit the key', function () {
+            let pm = makePm();
+            // Registry still binds addrB -> B's key; effective set admits A's key.
+            // The binding (registry) must win over bare membership.
+            expect(pm._verifySignature(signedAs(addrB))).to.be.false;
+        });
+    });
+
+    // =================================================================
     // XChainHub: Fail-closed validator registry on startup
     // =================================================================
 

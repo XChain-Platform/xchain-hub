@@ -278,8 +278,28 @@ class PeerManager extends EventEmitter {
             // Not a member: reject when sigs are required (fail closed); preserve
             // the permissive mode otherwise, matching the unknown-sender path.
             if (!inSet) return !this.requireSigs;
-            return ValidatorIdentity.verify(
-                ValidatorIdentity.getSignablePayload(envelope), envelope.sig, pk);
+            if (!ValidatorIdentity.verify(
+                ValidatorIdentity.getSignablePayload(envelope), envelope.sig, pk))
+                return false;
+            // Sender<->key binding (fail closed, CONSENSUS-CRITICAL). A valid
+            // signature proves the KEY signed, but the message is attributed to
+            // envelope.sender, and every count-mode PBFT tally (Consensus /
+            // OracleConsensus / AttestationConsensus / DEX / XCALL) plus the oracle
+            // submission map key their integrity-critical sets on sender. Option A
+            // membership alone is addr-BLIND: without this check one authorized key
+            // could sign envelopes naming every OTHER validator's addr and forge a
+            // full quorum (or stuff the oracle median that all hubs then co-sign).
+            // If the registry knows this sender, the signing key MUST be the pubkey
+            // registered to it (the same addr<->pubkey binding _handleCapabilityMessage
+            // enforces). A sender the registry doesn't know still passes here (an
+            // on-chain-active key not yet in the manual registry, or a relayed gossip
+            // origin), but its votes are dropped downstream by _isKnownSender, so
+            // consensus attribution stays bound to a registered key either way.
+            if (this.validatorPubkeys) {
+                let registeredPk = this.validatorPubkeys.get(envelope.sender);
+                if (registeredPk && String(registeredPk).toLowerCase() !== pk) return false;
+            }
+            return true;
         }
 
         // --- Backward-compat path (pre-A envelope, no sig_pubkey) ---
