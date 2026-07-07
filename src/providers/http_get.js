@@ -80,6 +80,16 @@ function isForbiddenAddress(addr) {
     }
     if (net.isIPv6(ip)) {
         if (ip === '::' || ip === '::1') return true;             // unspecified / loopback
+        // Any ::-prefixed address is IPv4-compatible (::a.b.c.d) or another embedded
+        // form that reached here without a valid PUBLIC IPv4 (public v4-mapped is
+        // rewritten to dotted IPv4 above and handled by the v4 branch). None are global
+        // unicast (2000::/3), and ::a.b.c.d can smuggle an internal v4 on a host that
+        // routes it, so fail closed.
+        if (ip.startsWith('::')) return true;
+        // NAT64 (64:ff9b::/96 well-known + 64:ff9b:1::/48 local-use, RFC 6052/8215) also
+        // embeds an IPv4 in the low bits; on a host with a NAT64 gateway that reaches the
+        // private target the range checks below would miss it.
+        if (ip.startsWith('64:ff9b:')) return true;
         if (/^f[cd]/.test(ip))   return true;                     // fc00::/7 unique-local
         if (/^fe[89ab]/.test(ip)) return true;                    // fe80::/10 link-local
         if (/^ff/.test(ip))      return true;                     // multicast

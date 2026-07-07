@@ -278,6 +278,15 @@ describe('http_get.fetch: SSRF guard', function () {
         await expectGuardReject('https://[::ffff:127.0.0.1]/');
     });
 
+    it('refuses NAT64 and IPv4-compatible IPv6 that embed an internal v4', async function () {
+        // 64:ff9b::7f00:1 = NAT64 of 127.0.0.1; ::7f00:1 = IPv4-compatible ::127.0.0.1.
+        // On a host with a NAT64 gateway (or that routes v4-compatible) these reach
+        // the internal target, so the guard must fail closed on the embedding prefix.
+        await expectGuardReject('https://[64:ff9b::7f00:1]/');
+        await expectGuardReject('https://[64:ff9b::a00:5]/');   // NAT64 of 10.0.0.5
+        await expectGuardReject('https://[::7f00:1]/');         // ::127.0.0.1
+    });
+
     it('allows public IP literals adjacent to blocked ranges (boundary check)', async function () {
         // 172.32.0.1 is just past 172.16/12; 100.128.0.1 just past 100.64/10.
         // nock intercepts so no real connection is made.
