@@ -317,7 +317,13 @@ class CapabilitySnapshot {
                     'partial set; raise the frozen VALIDATOR_QUERY_LIMIT consensus constant (coordinated fleet upgrade) on the indexers so the full validator set is returned.');
             }
         }
-        let N = snapshot.count;
+        // Coerce N from the raw indexer JSON. `count` can arrive as a STRING; left
+        // uncoerced, `Math.ceil((N + 1) / 2)` string-concatenates ("5" + 1 -> "51")
+        // and explodes the quorum (26-of-5 -> permanent consensus halt / DoS). Fall
+        // back to the actual membership-set size when count is not a sane integer, so
+        // a malformed count can never silently drop quorum to a single-node bypass.
+        let N = Number(snapshot.count);
+        if (!Number.isInteger(N) || N < 0) N = Array.isArray(snapshot.validators) ? snapshot.validators.length : 0;
         if (N <= 1) return 0;
         return Math.max(2 * Math.floor((N - 1) / 3) + 1, Math.ceil((N + 1) / 2));
     }

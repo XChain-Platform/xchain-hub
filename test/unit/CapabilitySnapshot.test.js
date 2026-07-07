@@ -44,6 +44,28 @@ describe('CapabilitySnapshot', function () {
         return { data: { result: { capability: 'attestation', block_index: 100, count: 1, validators: [{ pubkey: 'ab', amount: '50000' }] } } };
     }
 
+    describe('getQuorum()', function () {
+
+        it('coerces a STRING count instead of string-concatenating it (DoS guard)', function () {
+            // Regression: `Math.ceil((N + 1) / 2)` with N a string "5" concatenates
+            // ("5" + 1 -> "51"), exploding quorum to 26-of-5 -> permanent halt. A
+            // string count must coerce identically to the numeric one.
+            let snap = new CapabilitySnapshot(makeHub(null));
+            let numeric = snap.getQuorum({ count: 5, validators: [] });
+            let asString = snap.getQuorum({ count: '5', validators: [] });
+            expect(asString).to.equal(numeric);
+            expect(asString).to.equal(3); // max(2*floor(4/3)+1, ceil(6/2)) = max(3,3)
+        });
+
+        it('falls back to the membership-set size when count is non-numeric (no single-node bypass)', function () {
+            // A malformed/absent count must NOT silently drop quorum to 0 (which
+            // would bypass consensus). Derive N from the actual validator set.
+            let snap = new CapabilitySnapshot(makeHub(null));
+            let validators = [1,2,3,4].map(i => ({ pubkey: 'k' + i }));
+            expect(snap.getQuorum({ count: 'garbage', validators })).to.equal(3);
+        });
+    });
+
     describe('getSnapshot()', function () {
 
         it('passes the hub registry MIN_STAKE as min_stake in the RPC payload', async function () {
