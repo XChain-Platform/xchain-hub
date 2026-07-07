@@ -1591,6 +1591,24 @@ class StateAnchorPublisher {
                 'UPDATE cross_chain_matches SET batch_seq = ?, archived_status = ?, anchor_txid = COALESCE(?, anchor_txid) WHERE match_id = ?',
                 [batchSeq, m.status, txid, m.match_id]);
         }
+        // Re-emit the stamped rows on the hub-DB mirror feed: anchor_txid is the one
+        // back-filled column the mirror twins carry, and without a re-broadcast a
+        // long-running streamed mirror keeps NULL forever while a later REST bootstrap
+        // serves the stamp (divergent mirrors). Retracted rows stay out of the feed
+        // (the stream already deleted them on mirrors); old sync clients INSERT IGNORE
+        // the re-delivery, so this is backward-compatible.
+        if(txid && matchIds.length && this.hub && this.hub.hubDbBroadcaster){
+            try {
+                let ids = matchIds.map(m => m.match_id);
+                let rows = await this.db.doQuery(
+                    "SELECT * FROM cross_chain_matches WHERE match_id IN (" + ids.map(() => '?').join(', ') + ") AND status <> 'retracted'",
+                    ids);
+                for(let row of rows)
+                    this.hub.hubDbBroadcaster.broadcastRow({ table: 'cross_chain_matches', row: row });
+            } catch(e){
+                console.warn('StateAnchorPublisher: anchor-stamp re-broadcast failed (mirrors converge on next bootstrap):', e.message);
+            }
+        }
         for(let c of (callIds || [])){
             await this.db.doQuery(
                 'UPDATE cross_chain_calls SET batch_seq = ?, archived_status = ?, anchor_txid = COALESCE(?, anchor_txid) WHERE call_id = ? AND phase = ?',

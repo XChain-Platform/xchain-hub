@@ -136,6 +136,9 @@ function memDb() {
             if (sql.startsWith('SELECT * FROM cross_chain_matches WHERE match_id = ?')) {
                 return matches.filter(r => r.match_id === params[0]).slice(0, 1);
             }
+            if (sql.startsWith('SELECT * FROM cross_chain_matches WHERE match_id IN')) {
+                return matches.filter(r => params.includes(r.match_id) && r.status !== 'retracted');
+            }
             if (sql.startsWith('SELECT COALESCE(GREATEST(')) {
                 let max = -1;
                 for (let r of matches)    if (r.batch_seq != null && r.batch_seq > max) max = r.batch_seq;
@@ -1375,6 +1378,44 @@ describe('StateAnchorPublisher', function () {
         }});
         expect(follower.rewards.some(r => r.type === 'anchor_archive'),
             'a complete publish DOES mirror the reward').to.be.true;
+    });
+
+    it('_backfillBatch re-broadcasts stamped match rows on the hub-DB mirror feed', async function () {
+        let bus = buildMesh(1, { matches: [matchRow('m1'), matchRow('m2', 'retracted')] });
+        let nd = bus.nodes[0];
+        let broadcast = [];
+        nd.pub.hub.hubDbBroadcaster = { broadcastRow: (ev) => broadcast.push(ev) };
+
+        await nd.pub._backfillBatch(0,
+            [{ match_id: 'm1', status: 'finalized' }, { match_id: 'm2', status: 'retracted' }],
+            'dogetx_rebroadcast', [], []);
+
+        // Only the non-retracted row re-emits (the stream already deleted retracted
+        // rows on mirrors; re-inserting one would diverge them), and it carries the
+        // freshly stamped anchor_txid plus the full signed content.
+        expect(broadcast.length, 'exactly one re-broadcast').to.equal(1);
+        expect(broadcast[0].table).to.equal('cross_chain_matches');
+        expect(broadcast[0].row.match_id).to.equal('m1');
+        expect(broadcast[0].row.anchor_txid).to.equal('dogetx_rebroadcast');
+        expect(broadcast[0].row.a_amount, 'full row, not a partial patch').to.equal('1000');
+    });
+
+    it('_backfillBatch does NOT re-broadcast on a null txid or without a broadcaster', async function () {
+        let bus = buildMesh(1);
+        let nd = bus.nodes[0];
+        let broadcast = [];
+        nd.pub.hub.hubDbBroadcaster = { broadcastRow: (ev) => broadcast.push(ev) };
+
+        // Null txid = the archive never landed on-chain (rows stay pending); there is
+        // no stamp to propagate, so the feed stays quiet.
+        await nd.pub._backfillBatch(0, [{ match_id: 'm1', status: '__partial__' }], null, [], []);
+        expect(broadcast.length, 'no re-broadcast for a null txid').to.equal(0);
+
+        // No broadcaster wired (standalone hub before start()): the back-fill itself
+        // must still complete without throwing.
+        delete nd.pub.hub.hubDbBroadcaster;
+        await nd.pub._backfillBatch(1, [{ match_id: 'm1', status: 'finalized' }], 'dogetx_x', [], []);
+        expect(nd.db.matches.find(m => m.match_id === 'm1').anchor_txid, 'back-fill still applied').to.equal('dogetx_x');
     });
 
     it('_handleSignReq bails on a stale tip (election_block far from our BTC view) before any election work', async function () {

@@ -105,6 +105,10 @@ describe('GET /api/v1/chain-registry', function () {
         expect(res.body.generatedAt).to.be.a('string');
         expect(res.body.descriptors).to.be.an('array').with.length(SNAPSHOT.descriptors.length);
         expect(res.body.signature).to.equal(undefined, 'unsigned without an identity');
+        // Browser wallets (web SPA + MV3 extension with no host_permissions)
+        // consume this cross-origin; the route must be CORS-open even though
+        // the hub's global CORS_ORIGIN defaults off.
+        expect(res.headers['Access-Control-Allow-Origin']).to.equal('*');
     });
 
     it('signs the payload when the hub has an identity', async function () {

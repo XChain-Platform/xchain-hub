@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Read-only JSON-RPC methods `getvotes` and `getvalidatorcapabilities`, plus optional `parameter`/`limit` filters on `getproposals`, so explorers can serve governance and capability pages over RPC instead of a co-located hub DB.
 
 ### Fixed
+- The ANCHOR v1 archive back-fill now re-broadcasts stamped `cross_chain_matches` rows on the hub-DB mirror feed, so streamed mirrors converge on `anchor_txid` instead of reading NULL until their next bootstrap.
+- `GET /api/v1/chain-registry` serves `Access-Control-Allow-Origin: *` so browser wallets (web SPA and the extension, which ships no host permissions) can fetch the public registry cross-origin.
 - `docs/openrpc.build.js` regains the three methods that were only hand-added to `openrpc.json`, so regenerating the spec no longer drops them.
 - Correct the `/health` config-fetch counter comment: the `config_fetch` counts are body-only telemetry, deliberately not wired to the `healthy`/503 status (a config-fetch error must not pull a healthy hub out of federation rotation); an alerting probe compares `config_fetch.errors` across scrapes.
 

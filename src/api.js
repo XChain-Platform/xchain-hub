@@ -1288,6 +1288,10 @@ async function startApi(){
                 chainRegistryCache = body;
             }
             res.set('Cache-Control', 'public, max-age=300');
+            // Public discovery surface consumed cross-origin by browser wallets
+            // (web SPA + MV3 extension, which ships no host_permissions). The
+            // global CORS_ORIGIN default stays off for everything else.
+            res.set('Access-Control-Allow-Origin', '*');
             res.json(chainRegistryCache);
         } catch (err) {
             res.status(500).json({ error: 'chain registry unavailable' });
