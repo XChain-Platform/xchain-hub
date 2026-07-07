@@ -13,6 +13,7 @@
 const sinon        = require('sinon');
 const { expect }   = require('chai');
 const Governance   = require('../../src/Governance');
+const ValidatorIdentity = require('../../src/ValidatorIdentity');
 const { createMockHub }   = require('../helpers/mockHub');
 const { VALIDATORS_3 }    = require('../helpers/fixtures');
 
@@ -357,7 +358,7 @@ describe('Governance', function () {
     });
 
     // -----------------------------------------------------------------
-    // _handleResult() — followers must apply a passed proposal too
+    // _handleResult(): followers must apply a passed proposal too
     // -----------------------------------------------------------------
 
     describe('_handleResult()', function () {
@@ -385,7 +386,7 @@ describe('Governance', function () {
             expect(emitted.newValue).to.equal('200');
         });
 
-        it('does NOT emit when already finalized (affectedRows = 0 — tally-leader loopback)', async function () {
+        it('does NOT emit when already finalized (affectedRows = 0, tally-leader loopback)', async function () {
             hub.db.doQuery.onCall(0).resolves([{ voting_end: PAST }]);
             hub.db.doQuery.onCall(1).resolves({ affectedRows: 0 });
             let emitted = false;
@@ -484,7 +485,7 @@ describe('Governance', function () {
         it('fails when quorum not met (less than 50% participation)', async function () {
             gov.setValidatorSet(VALIDATORS_3);
 
-            // Only 1 of 3 voted — below 50% quorum
+            // Only 1 of 3 voted, below 50% quorum
             hub.db.doQuery.onFirstCall().resolves([
                 { voter_pubkey: VALIDATORS_3[0].pubkey, vote: 'approve' }
             ]);
@@ -579,12 +580,39 @@ describe('Governance', function () {
             expect(hub.db.doQuery.called).to.be.false;
         });
 
-        it('_handleVote stores vote locally', function () {
+        it('_handleVote persists a registered validator vote with a valid signature', function () {
+            let kp  = ValidatorIdentity.generate();
+            let idn = new ValidatorIdentity(kp.privkeyHex);
+            gov.setValidatorSet([...VALIDATORS_3, { pubkey: kp.pubkeyHex, addr: 'ws://voter:1' }]);
+            let sig = idn.sign(JSON.stringify({ proposalId: 'gov:P:1', vote: 'approve', voter: kp.pubkeyHex }));
             gov._handleVote({
                 sender: 'peer', type: 'GOV_VOTE',
-                data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: 'abc', signature: 'sig' }
+                data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: kp.pubkeyHex, signature: sig }
             });
             expect(hub.db.doQuery.called).to.be.true;
+        });
+
+        it('_handleVote REJECTS a vote whose voterPubkey is not a registered validator (C-1 vote-stuffing guard)', function () {
+            // Valid signature, but the pubkey is a fabricated non-member: the exact
+            // primitive a Byzantine validator would use to stuff N invented voters.
+            let kp  = ValidatorIdentity.generate();
+            let idn = new ValidatorIdentity(kp.privkeyHex);
+            let sig = idn.sign(JSON.stringify({ proposalId: 'gov:P:1', vote: 'approve', voter: kp.pubkeyHex }));
+            gov._handleVote({
+                sender: 'peer', type: 'GOV_VOTE',
+                data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: kp.pubkeyHex, signature: sig }
+            });
+            expect(hub.db.doQuery.called).to.be.false;
+        });
+
+        it('_handleVote REJECTS a registered validator vote with a forged signature', function () {
+            let kp = ValidatorIdentity.generate();
+            gov.setValidatorSet([...VALIDATORS_3, { pubkey: kp.pubkeyHex, addr: 'ws://voter:1' }]);
+            gov._handleVote({
+                sender: 'peer', type: 'GOV_VOTE',
+                data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: kp.pubkeyHex, signature: 'deadbeef' }
+            });
+            expect(hub.db.doQuery.called).to.be.false;
         });
 
         it('_handlePropose defaults a missing proposerPubkey and rationale to empty strings', function () {
@@ -601,14 +629,14 @@ describe('Governance', function () {
             expect(args[5]).to.equal(''); // rationale
         });
 
-        it('_handleVote defaults a missing signature to an empty string', function () {
+        it('_handleVote REJECTS an unsigned vote (no signature to authenticate the voter)', function () {
+            let kp = ValidatorIdentity.generate();
+            gov.setValidatorSet([...VALIDATORS_3, { pubkey: kp.pubkeyHex, addr: 'ws://voter:1' }]);
             gov._handleVote({
                 sender: 'peer', type: 'GOV_VOTE',
-                data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: 'abc' }
+                data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: kp.pubkeyHex }
             });
-            let args = hub.db.doQuery.getCall(0).args[1];
-            expect(args[3]).to.equal(''); // signature (insert)
-            expect(args[5]).to.equal(''); // signature (on-duplicate update)
+            expect(hub.db.doQuery.called).to.be.false;
         });
 
         it('_handleResult updates proposal status (from the tally leader, post voting_end)', async function () {

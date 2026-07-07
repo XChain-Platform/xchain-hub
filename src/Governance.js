@@ -24,6 +24,7 @@
 
 const crypto = require('crypto');
 const EventEmitter = require('events');
+const ValidatorIdentity = require('./ValidatorIdentity.js');
 const { parseCapabilityMinStakeParam, MIN_STAKE_GOVERNANCE_DISABLED } = require('./CapabilityRegistry.js');
 const { parseAttestationProviderParam } = require('./ProviderRegistry.js');
 
@@ -331,6 +332,13 @@ class Governance extends EventEmitter {
         let { proposalId, parameter, currentValue, proposedValue, rationale, proposerPubkey, votingEnd, activationBlock } = envelope.data;
         if (!proposalId || !parameter) return;
 
+        // Only registered validators may seed a proposal into every hub's DB. Without
+        // this gate an authenticated-but-Byzantine peer could stream unbounded distinct
+        // proposalIds (unbounded governance_proposals growth on every hub, a DoS), and
+        // any non-validator that slips past a null-registry window could inject
+        // proposals. Mirrors the _isKnownSender gate on GOV_RESULT / GOV_VOTE.
+        if (!this._isKnownSender(envelope.sender)) return;
+
         // Pre-launch pin (#4352): drop a peer's CAPABILITY_*_MIN_STAKE proposal so this hub
         // never records or votes on it. With no local row, a later GOV_RESULT UPDATE matches
         // 0 rows and never emits proposal:finalized, so the threshold stays pinned.
@@ -403,6 +411,24 @@ class Governance extends EventEmitter {
     _handleVote(envelope) {
         let { proposalId, vote, voterPubkey, signature } = envelope.data;
         if (!proposalId || !vote || !voterPubkey) return;
+
+        // Authenticate the vote before persisting (consensus-tally-affecting). The
+        // table is keyed by (proposal_id, voter_pubkey), so without this ONE validator
+        // that passes the transport sig layer could insert a row per FABRICATED
+        // voterPubkey and single-handedly meet quorum + approval on any proposal.
+        // Authenticate the vote by its OWN signature (like the PBFT engines),
+        // independent of the relaying sender:
+        //   1. voterPubkey must be a registered validator's signing key, and
+        //   2. the ed25519 signature must verify over the canonical vote payload
+        //      (byte-identical to what vote() signs), proving the holder of
+        //      voterPubkey cast it.
+        // An attacker can therefore only ever cast one vote, under its own key -- which
+        // it could do legitimately anyway. Membership is checked against validatorSet
+        // (the same set the tally denominator is derived from).
+        let pk = String(voterPubkey).toLowerCase();
+        if (!this.validatorSet.some(v => String(v.pubkey).toLowerCase() === pk)) return;
+        let payload = JSON.stringify({ proposalId, vote, voter: voterPubkey });
+        if (!ValidatorIdentity.verify(payload, String(signature || ''), voterPubkey)) return;
 
         this.db.doQuery(
             `INSERT INTO governance_votes (proposal_id, voter_pubkey, vote, signature)
