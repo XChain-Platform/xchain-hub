@@ -270,6 +270,11 @@ describe('StateAnchorPublisher', function () {
                 db,
                 p2pConfig: Object.assign({ ANCHOR_INTERVAL_MS: '3600000' }, opts.cfg || {}),
                 capabilitySnapshot: { async getSnapshot() { return { validators: validators.slice(0, n) }; } },
+                // Populated oracle_publish registry: the V0_DONE/FINALIZED handlers resolve
+                // the membership set via _getActiveOraclePublishPubkeys(null), which now falls
+                // through to the registry. Mirrors a live hub (registry populated post-startup);
+                // the empty-set case is the fail-closed startup window, exercised separately.
+                capabilityRegistry: { getActiveValidators: async () => validators.slice(0, n).map(v => v.pubkey) },
                 getPeerManager: () => peerManager,
                 getIdentity: () => identity,
                 rewardTracker: {

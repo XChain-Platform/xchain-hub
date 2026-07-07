@@ -1063,7 +1063,12 @@ class StateAnchorPublisher {
         if(!d || !d.chain || !d.txid) return;
         let sender = String(d.sig_pubkey || '').toLowerCase();
         let pubkeys = await this._getActiveOraclePublishPubkeys(null);
-        if(pubkeys.length && !pubkeys.includes(sender)) return;
+        // Fail CLOSED on an empty set: d.sig_pubkey is self-asserted and the sig is
+        // verified against it, so membership in the oracle_publish set is the ONLY
+        // thing tying this announcement to a federation member. An empty set (startup /
+        // registry hiccup) must reject, not admit anyone -- otherwise a forged V0_DONE
+        // stamps a bogus anchor_txid (suppressing the real anchor) and mirrors rewards.
+        if(pubkeys.length === 0 || !pubkeys.includes(sender)) return;
         if(!ValidatorIdentity.verify(this._v0DoneCanonical(d, String(d.txid)), String(d.sig || ''), sender)) return;
         await this.db.doQuery(
             'UPDATE state_checkpoints SET anchor_txid = ? WHERE chain = ? AND network = ? AND block_index = ? AND anchor_txid IS NULL',
@@ -1480,7 +1485,10 @@ class StateAnchorPublisher {
         if(!d || !Array.isArray(d.matches)) return;
         let sender = String(d.sig_pubkey || '').toLowerCase();
         let pubkeys = await this._getActiveOraclePublishPubkeys(null);
-        if(pubkeys.length && !pubkeys.includes(sender)) return;
+        // Fail CLOSED on an empty set (see _handleV0Done): membership is the only tie
+        // to a federation member, so an empty set must reject. Otherwise a forged
+        // FINALIZED backfills real matches as archived and strands them for recovery.
+        if(pubkeys.length === 0 || !pubkeys.includes(sender)) return;
         if(!ValidatorIdentity.verify(this._finalizedCanonical(Number(d.batch_seq), d.txid, d.matches.length),
                                      String(d.sig || ''), sender)) return;
         await this._backfillBatch(Number(d.batch_seq), d.matches, d.txid ? String(d.txid) : null,
