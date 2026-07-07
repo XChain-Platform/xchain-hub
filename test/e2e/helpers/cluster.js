@@ -142,11 +142,12 @@ function buildController(hub) {
             } catch (err) { return { error: 'error fetching attestation' }; }
         },
 
-        async reportreorg({ chain, reorg_height, timestamp }) {
+        async reportreorg({ chain, reorg_height, timestamp, old_hash, new_hash }) {
             if (!chain || !reorg_height || !timestamp)
                 return { error: 'chain, reorg_height, and timestamp are required' };
             try {
-                await hub.reportReorg(chain, parseInt(reorg_height), parseInt(timestamp));
+                await hub.reportReorg(chain, parseInt(reorg_height), parseInt(timestamp),
+                    old_hash ? String(old_hash) : old_hash, new_hash ? String(new_hash) : new_hash);
                 return { status: 'success' };
             } catch (err) { return { error: err.message || 'error reporting reorg' }; }
         },
@@ -204,6 +205,17 @@ function createCluster(nodeCount, overrides) {
     let nodes   = [];  // { hub, server, apiPort, p2pPort, keypair, addr }
     let started = false;
 
+    // R2-C2 stub indexer: every hub verifies a reported reorg against its
+    // "own" indexer (getblockhashes) before co-signing, so the cluster serves
+    // one shared JSON-RPC stub whose tip/hashes tests can set via
+    // cluster.stubIndexer (hashes: { [height]: hash }).
+    let stubIndexer = { tip: 800100, network: 'regtest', hashes: {} };
+    let stubIndexerServer = null;
+    let stubIndexerUrl = '';
+    function stubHashFor(height) {
+        return require('crypto').createHash('sha256').update('stub-block-' + height).digest('hex');
+    }
+
     // Generate deterministic keypairs for each node
     let keypairs = [];
     for (let i = 0; i < nodeCount; i++) {
@@ -211,11 +223,35 @@ function createCluster(nodeCount, overrides) {
     }
 
     return {
+        stubIndexer,
+
         /**
          * Start the cluster: create hubs, P2P mesh, register validators, start Express servers.
          */
         async start() {
             if (started) return;
+
+            // Phase 0: start the shared stub indexer (see stubIndexer above).
+            let stubApp = express();
+            stubApp.use(express.json());
+            stubApp.post('/', (req, res) => {
+                let { method, params, id } = req.body || {};
+                if (method === 'getblockhashes') {
+                    let height = params && params.block_index != null ? Number(params.block_index) : stubIndexer.tip;
+                    return res.json({ jsonrpc: '2.0', id, result: {
+                        block_index: height,
+                        block_hash:  stubIndexer.hashes[height] || stubHashFor(height),
+                        network:     stubIndexer.network
+                    } });
+                }
+                res.json({ jsonrpc: '2.0', id, error: { message: 'unknown method ' + method } });
+            });
+            await new Promise((resolve) => {
+                stubIndexerServer = stubApp.listen(0, '127.0.0.1', () => {
+                    stubIndexerUrl = 'http://127.0.0.1:' + stubIndexerServer.address().port;
+                    resolve();
+                });
+            });
 
             // Pre-allocate unique P2P ports for all nodes
             // (P2P_PORT: 0 is treated as falsy by PeerManager's || operator)
@@ -247,6 +283,9 @@ function createCluster(nodeCount, overrides) {
                     COINGECKO_API_KEY:        '',
                     COINMARKETCAP_API_KEY:    overrides.COINMARKETCAP_API_KEY || '',
                     PRICE_FETCH_TIMEOUT:      5000,
+                    BTC_INDEXER_URL:          stubIndexerUrl,
+                    LTC_INDEXER_URL:          stubIndexerUrl,
+                    DOGE_INDEXER_URL:         stubIndexerUrl,
                     ...(overrides['node' + i] || {})
                 };
 
@@ -330,6 +369,10 @@ function createCluster(nodeCount, overrides) {
          * Uses timeouts to avoid hanging on stubborn WebSocket connections.
          */
         async stop() {
+            if (stubIndexerServer) {
+                try { await new Promise(r => { stubIndexerServer.close(r); setTimeout(r, 1000); }); } catch (e) { /* ignore */ }
+                stubIndexerServer = null;
+            }
             for (let node of nodes) {
                 try {
                     if (node.server) {

@@ -802,7 +802,7 @@ async function startApi(){
             }
         },
 
-        async reportreorg({chain, reorg_height, timestamp}){
+        async reportreorg({chain, reorg_height, timestamp, old_hash, new_hash}){
             if(!chain || !reorg_height || !timestamp)
                 return {error: "chain, reorg_height, and timestamp are required"};
             let chainErr = validateChain(chain);
@@ -810,8 +810,13 @@ async function startApi(){
             let rh = parseInt(reorg_height);
             if (!Number.isInteger(rh) || rh < 0)
                 return {error: "reorg_height must be a non-negative integer"};
+            // The reporter must supply its observed hash pair at reorg_height; the
+            // hub (and every co-signing peer) re-verifies new_hash against its own
+            // indexer before any rollback round can start.
+            if(!old_hash || !new_hash)
+                return {error: "old_hash and new_hash (the block hash observed at reorg_height before and after the reorg) are required"};
             try {
-                await hub.reportReorg(chain, rh, parseInt(timestamp));
+                await hub.reportReorg(chain, rh, parseInt(timestamp), String(old_hash), String(new_hash));
                 return {status: "success"};
             } catch (err) {
                 return {error: err.message || "error reporting reorg"};

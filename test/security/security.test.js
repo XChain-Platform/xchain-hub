@@ -672,6 +672,7 @@ describe('Security Hardening', function () {
             handler = new ReorgHandler(hub);
             handler.setValidatorSet([]);
             hub._peerManager.getPeerStatus.returns([]);
+            sinon.stub(handler, '_verifyReorgAgainstOwnNode').resolves(true);
         });
 
         afterEach(function () {
@@ -711,7 +712,7 @@ describe('Security Hardening', function () {
         it('reportReorg rate limits per chain (1 per 60s)', async function () {
             handler.reorgRateTracker.set('BTC', Date.now());
             try {
-                await handler.reportReorg('BTC', 100, Date.now());
+                await handler.reportReorg('BTC', 100, Date.now(), 'a'.repeat(64), 'b'.repeat(64));
                 expect.fail('should have thrown');
             } catch (e) {
                 expect(e.message).to.include('Rate limit');
@@ -722,14 +723,33 @@ describe('Security Hardening', function () {
             handler.reorgRateTracker.set('BTC', Date.now());
             hub.db.doQuery.resolves([]);
             // LTC should succeed since it has no rate limit entry
-            await handler.reportReorg('LTC', 100, Date.now());
+            await handler.reportReorg('LTC', 100, Date.now(), 'a'.repeat(64), 'b'.repeat(64));
             // Should not throw
         });
 
         it('reportReorg succeeds with valid parameters', async function () {
             hub.db.doQuery.resolves([]);
-            await handler.reportReorg('BTC', 100, Date.now());
+            await handler.reportReorg('BTC', 100, Date.now(), 'a'.repeat(64), 'b'.repeat(64));
             // Should not throw
+        });
+
+        it('reportReorg refuses a report the own indexer does not confirm', async function () {
+            handler._verifyReorgAgainstOwnNode.resolves(false);
+            try {
+                await handler.reportReorg('DOGE', 100, Date.now(), 'a'.repeat(64), 'b'.repeat(64));
+                expect.fail('should have thrown');
+            } catch (e) {
+                expect(e.message).to.include('own indexer does not confirm');
+            }
+        });
+
+        it('reportReorg requires a distinct 64-hex observed hash pair', async function () {
+            try {
+                await handler.reportReorg('DOGE', 100, Date.now());
+                expect.fail('should have thrown');
+            } catch (e) {
+                expect(e.message).to.include('distinct 64-hex');
+            }
         });
     });
 

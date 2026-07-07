@@ -32,6 +32,9 @@ describe('Chaos: Reorg During Oracle Round (XC-2)', function () {
         oracleCon = new OracleConsensus(hub, oracle);
         oracle.setConsensus(oracleCon);
         reorgHandler = new ReorgHandler(hub);
+        // R2-C2: chaos experiments exercise the round/rollback interplay, not
+        // the indexer probe (which has its own unit coverage).
+        sinon.stub(reorgHandler, '_verifyReorgAgainstOwnNode').resolves(true);
 
         // Single-node mode for simpler testing
         oracleCon.validatorSet = [];
@@ -76,7 +79,7 @@ describe('Chaos: Reorg During Oracle Round (XC-2)', function () {
                 // Fire both events concurrently
                 await Promise.all([
                     oracleCon.finalizeRound(10),
-                    reorgHandler.reportReorg('BTC', 500000, Date.now() - 60000)
+                    reorgHandler.reportReorg('BTC', 500000, Date.now() - 60000, 'a'.repeat(64), 'b'.repeat(64))
                 ]);
             },
 
@@ -106,12 +109,12 @@ describe('Chaos: Reorg During Oracle Round (XC-2)', function () {
         await reorgHandler.start();
 
         // First reorg succeeds
-        await reorgHandler.reportReorg('BTC', 500000, Date.now() - 60000);
+        await reorgHandler.reportReorg('BTC', 500000, Date.now() - 60000, 'a'.repeat(64), 'b'.repeat(64));
 
         // Second reorg on same chain within 60s is rate limited
         let err;
         try {
-            await reorgHandler.reportReorg('BTC', 500001, Date.now() - 30000);
+            await reorgHandler.reportReorg('BTC', 500001, Date.now() - 30000, 'a'.repeat(64), 'b'.repeat(64));
         } catch (e) {
             err = e;
         }
@@ -123,12 +126,12 @@ describe('Chaos: Reorg During Oracle Round (XC-2)', function () {
     it('reorg on different chain is not rate limited', async function () {
         await reorgHandler.start();
 
-        await reorgHandler.reportReorg('BTC', 500000, Date.now() - 60000);
+        await reorgHandler.reportReorg('BTC', 500000, Date.now() - 60000, 'a'.repeat(64), 'b'.repeat(64));
 
         // Different chain should work
         let err;
         try {
-            await reorgHandler.reportReorg('LTC', 300000, Date.now() - 60000);
+            await reorgHandler.reportReorg('LTC', 300000, Date.now() - 60000, 'a'.repeat(64), 'b'.repeat(64));
         } catch (e) {
             err = e;
         }
@@ -158,7 +161,7 @@ describe('Chaos: Reorg During Oracle Round (XC-2)', function () {
         oracle._handleMessage(envelope);
 
         // Process a reorg (on a chain, unrelated to oracle prices)
-        await reorgHandler.reportReorg('DOGE', 100000, Date.now() - 120000);
+        await reorgHandler.reportReorg('DOGE', 100000, Date.now() - 120000, 'a'.repeat(64), 'b'.repeat(64));
 
         // Submission should still be there
         let subs = oracle.getSubmissions(15);
@@ -171,7 +174,7 @@ describe('Chaos: Reorg During Oracle Round (XC-2)', function () {
         await reorgHandler.start();
 
         // Execute reorg first
-        await reorgHandler.reportReorg('BTC', 500000, Date.now() - 120000);
+        await reorgHandler.reportReorg('BTC', 500000, Date.now() - 120000, 'a'.repeat(64), 'b'.repeat(64));
 
         // Then finalize oracle round
         oracle.currentRound = 20;
@@ -206,7 +209,7 @@ describe('Chaos: Reorg During Oracle Round (XC-2)', function () {
 
         let err;
         try {
-            await reorgHandler.reportReorg('BTC', 1000, Date.now() + 600000);
+            await reorgHandler.reportReorg('BTC', 1000, Date.now() + 600000, 'a'.repeat(64), 'b'.repeat(64));
         } catch (e) {
             err = e;
         }

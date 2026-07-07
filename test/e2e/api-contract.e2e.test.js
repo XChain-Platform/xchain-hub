@@ -207,9 +207,15 @@ describe('E2E: API Contract Verification', function () {
         it('reportreorg + getreorghistory', async function () {
             this.timeout(10000);
             let port = cluster.getPort(0);
-            // Use timestamp=1 (epoch) to ensure rollback affects everything
+            // Recent timestamp (inside the 24h blast-radius bound) + R2-C2 hash
+            // pair; the cluster's stub indexer serves the new hash so the hub's
+            // self-node verification confirms the report.
+            let newHash = 'b'.repeat(64);
+            cluster.stubIndexer.tip = 120;
+            cluster.stubIndexer.hashes[100] = newHash;
             let res = await callRpc(port, 'reportreorg', {
-                chain: 'BTC', reorg_height: 100, timestamp: 1
+                chain: 'BTC', reorg_height: 100, timestamp: Date.now() - 3600000,
+                old_hash: 'a'.repeat(64), new_hash: newHash
             });
             expect(res.result.status).to.equal('success');
 

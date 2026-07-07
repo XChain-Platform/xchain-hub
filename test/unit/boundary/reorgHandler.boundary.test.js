@@ -16,6 +16,11 @@ const ReorgHandler   = require('../../../src/ReorgHandler');
 const { createMockHub }               = require('../../helpers/mockHub');
 const { makeValidator, VALIDATORS_4 } = require('../../helpers/fixtures');
 
+// R2-C2 wire format: reports carry the observed hash pair; the self-node
+// probe is stubbed here (it has its own unit coverage).
+const OLD_HASH = 'a'.repeat(64);
+const NEW_HASH = 'b'.repeat(64);
+
 describe('Boundary: ReorgHandler', function () {
 
     let hub, pm, rh;
@@ -24,6 +29,7 @@ describe('Boundary: ReorgHandler', function () {
         hub = createMockHub();
         pm  = hub._peerManager;
         rh  = new ReorgHandler(hub);
+        sinon.stub(rh, '_verifyReorgAgainstOwnNode').resolves(true);
     });
 
     afterEach(function () {
@@ -43,7 +49,7 @@ describe('Boundary: ReorgHandler', function () {
             rh.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
 
-            await rh.reportReorg('BTC', 0, Date.now());
+            await rh.reportReorg('BTC', 0, Date.now(), OLD_HASH, NEW_HASH);
 
             expect(hub.db.doQuery.called).to.be.true;
             // Third doQuery call is the INSERT into reorg_attestations
@@ -58,7 +64,7 @@ describe('Boundary: ReorgHandler', function () {
             pm.getPeerStatus.returns([]);
 
             let height = Number.MAX_SAFE_INTEGER;
-            await rh.reportReorg('LTC', height, Date.now());
+            await rh.reportReorg('LTC', height, Date.now(), OLD_HASH, NEW_HASH);
 
             let calls = hub.db.doQuery.args;
             let insertCall = calls.find(c => /INSERT INTO reorg_attestations/.test(c[0]));
@@ -81,7 +87,7 @@ describe('Boundary: ReorgHandler', function () {
             // every finalized price snapshot for the chain. It is far outside the recent
             // window, so it must be refused before any rollback runs.
             let threw = false;
-            try { await rh.reportReorg('BTC', 100, 0); }
+            try { await rh.reportReorg('BTC', 100, 0, OLD_HASH, NEW_HASH); }
             catch (e) { threw = true; expect(e.message).to.match(/too far in the past/); }
             expect(threw).to.be.true;
             expect(hub.db.doQuery.called).to.be.false;
@@ -93,7 +99,7 @@ describe('Boundary: ReorgHandler', function () {
 
             let futureTs = Date.now() + 1e13; // ~317 years from now
             try {
-                await rh.reportReorg('DOGE', 500, futureTs);
+                await rh.reportReorg('DOGE', 500, futureTs, OLD_HASH, NEW_HASH);
                 expect.fail('should have thrown');
             } catch (e) {
                 expect(e.message).to.include('future');
@@ -112,11 +118,11 @@ describe('Boundary: ReorgHandler', function () {
             pm.getPeerStatus.returns([]);
 
             let ts = Date.now() - 1000;
-            await rh.reportReorg('BTC', 200, ts);
+            await rh.reportReorg('BTC', 200, ts, OLD_HASH, NEW_HASH);
 
             // Second identical report: rate limiter suppresses it
             try {
-                await rh.reportReorg('BTC', 200, ts);
+                await rh.reportReorg('BTC', 200, ts, OLD_HASH, NEW_HASH);
                 expect.fail('should have thrown');
             } catch (e) {
                 expect(e.message).to.include('Rate limit');
@@ -150,7 +156,7 @@ describe('Boundary: ReorgHandler', function () {
             pm.getPeerStatus.returns([]);
 
             let ts = Date.now();
-            await rh.reportReorg('LTC', 300, ts);
+            await rh.reportReorg('LTC', 300, ts, OLD_HASH, NEW_HASH);
 
             // Should NOT broadcast: no PBFT needed
             expect(pm.broadcast.called).to.be.false;

@@ -71,10 +71,17 @@ describe('E2E: Reorg Handling Pipeline', function () {
             let attBefore = await db.doQuery("SELECT * FROM attestations WHERE source_chain = 'BTC'");
             expect(attBefore.length).to.equal(1);
 
-            // Step 2: Report reorg with a timestamp well before the attestation was created
-            // Use timestamp = 1 (epoch start) to ensure all data is affected
+            // Step 2: Report reorg with a timestamp well before the attestation was
+            // created but inside the 24h blast-radius bound (1h ago), so the
+            // just-created attestation (created_at > timestamp) is affected.
+            // R2-C2: point the cluster's stub indexer at the reorged hash so the
+            // hub's self-node verification confirms the report.
+            let newHash = 'b'.repeat(64);
+            cluster.stubIndexer.tip = 800050;
+            cluster.stubIndexer.hashes[799999] = newHash;
             let reorgRes = await callRpc(port, 'reportreorg', {
-                chain: 'BTC', reorg_height: 799999, timestamp: 1
+                chain: 'BTC', reorg_height: 799999, timestamp: Date.now() - 3600000,
+                old_hash: 'a'.repeat(64), new_hash: newHash
             });
             expect(reorgRes.result.status).to.equal('success');
 
@@ -119,10 +126,14 @@ describe('E2E: Reorg Handling Pipeline', function () {
             let allBefore = await db.doQuery("SELECT * FROM attestations ORDER BY source_chain");
             expect(allBefore.length).to.equal(2);
 
-            // Report BTC reorg
+            // Report BTC reorg (stub indexer must confirm the new hash, R2-C2)
+            let newHash = 'd'.repeat(64);
+            cluster.stubIndexer.tip = 800050;
+            cluster.stubIndexer.hashes[799999] = newHash;
             let reorgTimestamp = Date.now() - 60000;
             await callRpc(port, 'reportreorg', {
-                chain: 'BTC', reorg_height: 799999, timestamp: reorgTimestamp
+                chain: 'BTC', reorg_height: 799999, timestamp: reorgTimestamp,
+                old_hash: 'c'.repeat(64), new_hash: newHash
             });
             await new Promise(r => setTimeout(r, 500));
 

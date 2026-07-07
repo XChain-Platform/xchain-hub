@@ -92,11 +92,12 @@ describe('Integration: Reorg Handling (SC-5.x)', function () {
             // Track reorg event
             let reorgEvent = null;
             let reorgHandler = new ReorgHandler(hub);
+            sinon.stub(reorgHandler, '_verifyReorgAgainstOwnNode').resolves(true);
             reorgHandler.setValidatorSet(VALIDATORS_1);
             await reorgHandler.start();
             reorgHandler.on('reorg:confirmed', (e) => { reorgEvent = e; });
 
-            await reorgHandler.reportReorg('BTC', 800000, reorgTimestamp);
+            await reorgHandler.reportReorg('BTC', 800000, reorgTimestamp, 'a'.repeat(64), 'b'.repeat(64));
 
             await new Promise(r => setTimeout(r, 200));
 
@@ -153,6 +154,7 @@ describe('Integration: Reorg Handling (SC-5.x)', function () {
             );
 
             let reorgHandler = new ReorgHandler(hub);
+            sinon.stub(reorgHandler, '_verifyReorgAgainstOwnNode').resolves(true);
             reorgHandler.setValidatorSet(VALIDATORS_4);
             await reorgHandler.start();
 
@@ -160,7 +162,7 @@ describe('Integration: Reorg Handling (SC-5.x)', function () {
             reorgHandler.on('reorg:confirmed', (e) => { reorgEvent = e; });
 
             // Report reorg: initiates consensus
-            await reorgHandler.reportReorg('BTC', 800000, reorgTimestamp);
+            await reorgHandler.reportReorg('BTC', 800000, reorgTimestamp, 'a'.repeat(64), 'b'.repeat(64));
 
             await new Promise(r => setTimeout(r, 50));
 
@@ -214,14 +216,15 @@ describe('Integration: Reorg Handling (SC-5.x)', function () {
             let hub = createTestHub(db, VALIDATORS_1[0].addr);
 
             let reorgHandler = new ReorgHandler(hub);
+            sinon.stub(reorgHandler, '_verifyReorgAgainstOwnNode').resolves(true);
             reorgHandler.setValidatorSet(VALIDATORS_1);
             await reorgHandler.start();
 
             let reorgTimestamp = Date.now() - 10000;
 
             // Report same reorg twice
-            await reorgHandler.reportReorg('BTC', 800000, reorgTimestamp);
-            await reorgHandler.reportReorg('BTC', 800000, reorgTimestamp);
+            await reorgHandler.reportReorg('BTC', 800000, reorgTimestamp, 'a'.repeat(64), 'b'.repeat(64));
+            await reorgHandler.reportReorg('BTC', 800000, reorgTimestamp, 'a'.repeat(64), 'b'.repeat(64));
 
             await new Promise(r => setTimeout(r, 200));
 

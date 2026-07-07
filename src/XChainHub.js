@@ -418,9 +418,9 @@ class XChainHub {
         await this.reorgHandler.start();
     }
 
-    async reportReorg(chain, reorgHeight, timestamp){
+    async reportReorg(chain, reorgHeight, timestamp, oldHash, newHash){
         if(!this.reorgHandler) throw new Error('Reorg handler not active');
-        return await this.reorgHandler.reportReorg(chain, reorgHeight, timestamp);
+        return await this.reorgHandler.reportReorg(chain, reorgHeight, timestamp, oldHash, newHash);
     }
 
     async getReorgHistory(limit){

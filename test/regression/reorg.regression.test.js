@@ -16,6 +16,12 @@ const ReorgHandler   = require('../../src/ReorgHandler');
 const { createMockHub }     = require('../helpers/mockHub');
 const { VALIDATORS_3 }      = require('../helpers/fixtures');
 
+// R2-C2 wire format: every report/round carries the reporter's observed hash
+// pair, and hubs verify against their own indexer before co-signing. These
+// regressions stub the probe (its behavior has its own unit suite).
+const OLD_HASH = 'a'.repeat(64);
+const NEW_HASH = 'b'.repeat(64);
+
 describe('Regression: ReorgHandler', function () {
 
     let hub, pm, rh;
@@ -39,16 +45,18 @@ describe('Regression: ReorgHandler', function () {
 
     describe('REG-REORG-001: Reorg report validated', function () {
         it('skips already-processed reorgs @regression-p1', async function () {
-            rh.processed.add('BTC:500000:123');
-            await rh.reportReorg('BTC', 500000, 123);
+            let ts = Date.now();
+            rh.processed.add('BTC:500000:' + ts);
+            await rh.reportReorg('BTC', 500000, ts, OLD_HASH, NEW_HASH);
             expect(hub.db.doQuery.called).to.be.false;
         });
 
         it('single-node processes valid reorg @regression-p1', async function () {
             rh.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
+            sinon.stub(rh, '_verifyReorgAgainstOwnNode').resolves(true);
 
-            await rh.reportReorg('BTC', 500000, Date.now());
+            await rh.reportReorg('BTC', 500000, Date.now(), OLD_HASH, NEW_HASH);
             expect(hub.db.doQuery.callCount).to.equal(3);
         });
     });
@@ -76,40 +84,46 @@ describe('Regression: ReorgHandler', function () {
             pm.validatorAddr = VALIDATORS_3[0].addr;
         });
 
-        it('PREPARE from peer is recorded @regression-p0', function () {
-            let reorgId = 'BTC:500:123';
-            let digest = rh._digest(reorgId, 'BTC', 500, 123);
+        it('PREPARE from peer is recorded @regression-p0', async function () {
+            let ts = Date.now();
+            let reorgId = 'BTC:500:' + ts;
+            let digest = rh._digest(reorgId, 'BTC', 500, ts, OLD_HASH, NEW_HASH);
 
             rh.pendingReorgs.set(reorgId, {
-                reorgId, chain: 'BTC', reorgHeight: 500, timestamp: 123,
+                reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
                 affectedChains: ['LTC', 'DOGE'], digest,
+                oldHash: OLD_HASH, newHash: NEW_HASH, selfVerified: true,
                 prepares: new Set(), commits: new Set(),
                 finalized: false, timer: null
             });
 
-            rh._handlePrepare({
+            await rh._handlePrepare({
                 sender: VALIDATORS_3[1].addr,
-                data: { reorgId, chain: 'BTC', reorgHeight: 500, timestamp: 123,
-                        affectedChains: ['LTC', 'DOGE'], digest }
+                data: { reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
+                        affectedChains: ['LTC', 'DOGE'], digest,
+                        oldHash: OLD_HASH, newHash: NEW_HASH }
             });
 
             expect(rh.pendingReorgs.get(reorgId).prepares.has(VALIDATORS_3[1].addr)).to.be.true;
         });
 
-        it('PREPARE with wrong digest rejected @regression-p0', function () {
-            let reorgId = 'BTC:500:123';
-            let digest = rh._digest(reorgId, 'BTC', 500, 123);
+        it('PREPARE with wrong digest rejected @regression-p0', async function () {
+            let ts = Date.now();
+            let reorgId = 'BTC:500:' + ts;
+            let digest = rh._digest(reorgId, 'BTC', 500, ts, OLD_HASH, NEW_HASH);
 
             rh.pendingReorgs.set(reorgId, {
-                reorgId, chain: 'BTC', reorgHeight: 500, timestamp: 123,
+                reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
                 affectedChains: ['LTC', 'DOGE'], digest,
+                oldHash: OLD_HASH, newHash: NEW_HASH, selfVerified: true,
                 prepares: new Set(), commits: new Set(),
                 finalized: false, timer: null
             });
 
-            rh._handlePrepare({
+            await rh._handlePrepare({
                 sender: VALIDATORS_3[1].addr,
-                data: { reorgId, digest: 'wrong' }
+                data: { reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
+                        oldHash: OLD_HASH, newHash: NEW_HASH, digest: 'wrong' }
             });
 
             expect(rh.pendingReorgs.get(reorgId).prepares.size).to.equal(0);
@@ -117,11 +131,12 @@ describe('Regression: ReorgHandler', function () {
 
         it('COMMIT quorum executes rollback @regression-p0', async function () {
             let reorgId = 'BTC:500:123';
-            let digest = rh._digest(reorgId, 'BTC', 500, 123);
+            let digest = rh._digest(reorgId, 'BTC', 500, 123, OLD_HASH, NEW_HASH);
 
             rh.pendingReorgs.set(reorgId, {
                 reorgId, chain: 'BTC', reorgHeight: 500, timestamp: 123,
                 affectedChains: ['LTC', 'DOGE'], digest,
+                oldHash: OLD_HASH, newHash: NEW_HASH, selfVerified: true,
                 prepares: new Set([VALIDATORS_3[0].addr, VALIDATORS_3[1].addr]),
                 commits: new Set([VALIDATORS_3[0].addr]),
                 finalized: false, timer: null, _commitSent: true
@@ -194,8 +209,8 @@ describe('Regression: ReorgHandler', function () {
     // Digest determinism
     describe('Reorg digest determinism', function () {
         it('deterministic for same inputs @regression-p0', function () {
-            let a = rh._digest('id', 'BTC', 100, 999);
-            let b = rh._digest('id', 'BTC', 100, 999);
+            let a = rh._digest('id', 'BTC', 100, 999, OLD_HASH, NEW_HASH);
+            let b = rh._digest('id', 'BTC', 100, 999, OLD_HASH, NEW_HASH);
             expect(a).to.equal(b);
             expect(a).to.match(/^[0-9a-f]{64}$/);
         });
@@ -206,11 +221,12 @@ describe('Regression: ReorgHandler', function () {
         it('single-node emits reorg:confirmed event @regression-p1', async function () {
             rh.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
+            sinon.stub(rh, '_verifyReorgAgainstOwnNode').resolves(true);
 
             let emitted = null;
             rh.on('reorg:confirmed', (d) => { emitted = d; });
 
-            await rh.reportReorg('LTC', 300000, 1700000000000);
+            await rh.reportReorg('LTC', 300000, Date.now(), OLD_HASH, NEW_HASH);
 
             expect(emitted).to.not.be.null;
             expect(emitted.sourceChain).to.equal('LTC');

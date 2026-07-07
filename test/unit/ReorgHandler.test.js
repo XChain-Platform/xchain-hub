@@ -16,6 +16,10 @@ const ReorgHandler   = require('../../src/ReorgHandler');
 const { createMockHub }     = require('../helpers/mockHub');
 const { VALIDATORS_3, VALIDATORS_4 } = require('../helpers/fixtures');
 
+// A valid observed-hash pair for the R2-C2 wire format (distinct 64-hex).
+const OLD_HASH = 'a'.repeat(64);
+const NEW_HASH = 'b'.repeat(64);
+
 describe('ReorgHandler', function () {
 
     let hub, pm, rh;
@@ -32,6 +36,12 @@ describe('ReorgHandler', function () {
         }
         sinon.restore();
     });
+
+    // Most flow tests are about the PBFT round, not the node probe, so verification
+    // is stubbed to "confirmed". The probe itself is covered in its own section.
+    function stubVerified(result = true) {
+        return sinon.stub(rh, '_verifyReorgAgainstOwnNode').resolves(result);
+    }
 
     // -----------------------------------------------------------------
     // _getAffectedChains()
@@ -75,13 +85,39 @@ describe('ReorgHandler', function () {
 
     describe('_digest()', function () {
         it('returns 64-char hex hash', function () {
-            expect(rh._digest('BTC:100:123', 'BTC', 100, 123)).to.match(/^[0-9a-f]{64}$/);
+            expect(rh._digest('BTC:100:123', 'BTC', 100, 123, OLD_HASH, NEW_HASH)).to.match(/^[0-9a-f]{64}$/);
         });
 
         it('is deterministic', function () {
-            let a = rh._digest('id', 'BTC', 100, 999);
-            let b = rh._digest('id', 'BTC', 100, 999);
+            let a = rh._digest('id', 'BTC', 100, 999, OLD_HASH, NEW_HASH);
+            let b = rh._digest('id', 'BTC', 100, 999, OLD_HASH, NEW_HASH);
             expect(a).to.equal(b);
+        });
+
+        it('binds the observed hashes (a swapped newHash changes the digest)', function () {
+            let a = rh._digest('id', 'BTC', 100, 999, OLD_HASH, NEW_HASH);
+            let b = rh._digest('id', 'BTC', 100, 999, OLD_HASH, 'c'.repeat(64));
+            expect(a).to.not.equal(b);
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // _hashesWellFormed()
+    // -----------------------------------------------------------------
+
+    describe('_hashesWellFormed()', function () {
+        it('accepts two distinct 64-hex hashes', function () {
+            expect(rh._hashesWellFormed(OLD_HASH, NEW_HASH)).to.be.true;
+        });
+
+        it('rejects identical hashes (not a reorg)', function () {
+            expect(rh._hashesWellFormed(OLD_HASH, OLD_HASH)).to.be.false;
+        });
+
+        it('rejects non-hex / wrong-length / missing values', function () {
+            expect(rh._hashesWellFormed('xyz', NEW_HASH)).to.be.false;
+            expect(rh._hashesWellFormed(OLD_HASH, 'b'.repeat(63))).to.be.false;
+            expect(rh._hashesWellFormed(undefined, NEW_HASH)).to.be.false;
         });
     });
 
@@ -91,11 +127,12 @@ describe('ReorgHandler', function () {
 
     describe('reportReorg()', function () {
 
-        it('single-node executes rollback directly', async function () {
+        it('single-node executes rollback directly (after self-verification)', async function () {
             rh.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
+            stubVerified(true);
 
-            await rh.reportReorg('BTC', 500000, Date.now());
+            await rh.reportReorg('BTC', 500000, Date.now(), OLD_HASH, NEW_HASH);
 
             // Should have called doQuery for: delete attestations, update snapshots, insert reorg attestation
             expect(hub.db.doQuery.callCount).to.equal(3);
@@ -107,11 +144,12 @@ describe('ReorgHandler', function () {
         it('single-node emits reorg:confirmed event', async function () {
             rh.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
+            stubVerified(true);
 
             let emitted = null;
             rh.on('reorg:confirmed', (d) => { emitted = d; });
 
-            await rh.reportReorg('LTC', 300000, Date.now());
+            await rh.reportReorg('LTC', 300000, Date.now(), OLD_HASH, NEW_HASH);
 
             expect(emitted).to.not.be.null;
             expect(emitted.sourceChain).to.equal('LTC');
@@ -121,8 +159,10 @@ describe('ReorgHandler', function () {
         it('skips already-processed reorgs', async function () {
             let ts = Date.now();
             rh.processed.add('BTC:500000:' + ts);
-            await rh.reportReorg('BTC', 500000, ts);
+            let verify = stubVerified(true);
+            await rh.reportReorg('BTC', 500000, ts, OLD_HASH, NEW_HASH);
             expect(hub.db.doQuery.called).to.be.false;
+            expect(verify.called, 'no probe for an already-processed reorg').to.be.false;
         });
 
         it('rejects a reorg whose timestamp is far in the past (blast-radius bound)', async function () {
@@ -130,23 +170,242 @@ describe('ReorgHandler', function () {
             pm.getPeerStatus.returns([]);
             let threw = false;
             // A timestamp near epoch would otherwise DELETE nearly all attestations.
-            try { await rh.reportReorg('BTC', 500000, 1700000000000); }
+            try { await rh.reportReorg('BTC', 500000, 1700000000000, OLD_HASH, NEW_HASH); }
             catch (e) { threw = true; expect(e.message).to.match(/too far in the past/); }
             expect(threw).to.be.true;
             expect(hub.db.doQuery.called).to.be.false;
         });
 
-        it('multi-node broadcasts REORG_ALERT and initiates consensus', async function () {
+        it('multi-node broadcasts REORG_ALERT (carrying the hash pair) and initiates consensus', async function () {
             rh.setValidatorSet(VALIDATORS_3);
             pm.validatorAddr = VALIDATORS_3[0].addr;
+            stubVerified(true);
 
-            await rh.reportReorg('BTC', 500000, Date.now());
+            await rh.reportReorg('BTC', 500000, Date.now(), OLD_HASH, NEW_HASH);
 
             // With N=3 and quorum=1, self-prepare meets quorum immediately.
             // Broadcasts: REORG_ALERT, XCHAIN_REORG_PREPARE, XCHAIN_REORG_COMMIT
             expect(pm.broadcast.callCount).to.be.at.least(2);
             expect(pm.broadcast.getCall(0).args[0]).to.equal('REORG_ALERT');
+            expect(pm.broadcast.getCall(0).args[1].oldHash).to.equal(OLD_HASH);
+            expect(pm.broadcast.getCall(0).args[1].newHash).to.equal(NEW_HASH);
             expect(pm.broadcast.getCall(1).args[0]).to.equal('XCHAIN_REORG_PREPARE');
+            expect(pm.broadcast.getCall(1).args[1].oldHash).to.equal(OLD_HASH);
+            expect(pm.broadcast.getCall(1).args[1].newHash).to.equal(NEW_HASH);
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // R2-C2: self-node verification gates
+    // -----------------------------------------------------------------
+
+    describe('self-node verification (R2-C2)', function () {
+
+        it('reportReorg requires a well-formed, distinct hash pair', async function () {
+            rh.setValidatorSet([]);
+            pm.getPeerStatus.returns([]);
+            for (let [o, n] of [[undefined, undefined], [OLD_HASH, OLD_HASH], ['nope', NEW_HASH]]) {
+                let threw = false;
+                try { await rh.reportReorg('BTC', 500000, Date.now(), o, n); }
+                catch (e) { threw = true; expect(e.message).to.match(/distinct 64-hex/); }
+                expect(threw, 'should reject ' + o + '/' + n).to.be.true;
+            }
+            expect(hub.db.doQuery.called).to.be.false;
+        });
+
+        it('reportReorg refuses (and does not broadcast or roll back) when the own node does not confirm', async function () {
+            rh.setValidatorSet(VALIDATORS_3);
+            pm.validatorAddr = VALIDATORS_3[0].addr;
+            stubVerified(false);
+
+            let threw = false;
+            try { await rh.reportReorg('BTC', 500000, Date.now(), OLD_HASH, NEW_HASH); }
+            catch (e) { threw = true; expect(e.message).to.match(/own indexer does not confirm/); }
+            expect(threw).to.be.true;
+            expect(pm.broadcast.called).to.be.false;
+            expect(hub.db.doQuery.called).to.be.false;
+            expect(rh.pendingReorgs.size).to.equal(0);
+        });
+
+        it('single-node fast path is gated on self-verification too', async function () {
+            rh.setValidatorSet([]);
+            pm.getPeerStatus.returns([]);
+            stubVerified(false);
+
+            let threw = false;
+            try { await rh.reportReorg('BTC', 500000, Date.now(), OLD_HASH, NEW_HASH); }
+            catch (e) { threw = true; }
+            expect(threw).to.be.true;
+            expect(hub.db.doQuery.called, 'no rollback without confirmation').to.be.false;
+        });
+
+        it('_handleAlert abstains (no round, no PREPARE) when verification fails', async function () {
+            rh.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+            stubVerified(false);
+
+            let ts = Date.now();
+            let reorgId = 'BTC:500:' + ts;
+            await rh._handleAlert({
+                sender: VALIDATORS_4[1].addr,
+                data: { chain: 'BTC', reorgHeight: 500, timestamp: ts, reorgId,
+                        oldHash: OLD_HASH, newHash: NEW_HASH }
+            });
+            expect(rh.pendingReorgs.has(reorgId)).to.be.false;
+            expect(pm.broadcast.called).to.be.false;
+        });
+
+        it('_handleAlert ignores an alert missing the hash pair (legacy / malformed wire)', async function () {
+            rh.setValidatorSet(VALIDATORS_4);
+            let verify = stubVerified(true);
+            let ts = Date.now();
+            await rh._handleAlert({
+                sender: VALIDATORS_4[1].addr,
+                data: { chain: 'BTC', reorgHeight: 500, timestamp: ts, reorgId: 'BTC:500:' + ts }
+            });
+            expect(rh.pendingReorgs.size).to.equal(0);
+            expect(verify.called, 'no probe for a hashless alert').to.be.false;
+        });
+
+        it('_handlePrepare (leader-bypass path) abstains when verification fails', async function () {
+            rh.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+            stubVerified(false);
+
+            let ts = Date.now();
+            let reorgId = 'LTC:300:' + ts;
+            let digest = rh._digest(reorgId, 'LTC', 300, ts, OLD_HASH, NEW_HASH);
+            await rh._handlePrepare({
+                sender: VALIDATORS_4[1].addr,
+                data: { reorgId, chain: 'LTC', reorgHeight: 300, timestamp: ts,
+                        affectedChains: ['BTC', 'DOGE'], digest,
+                        oldHash: OLD_HASH, newHash: NEW_HASH }
+            });
+            expect(rh.pendingReorgs.has(reorgId)).to.be.false;
+        });
+
+        it('_handlePrepare recomputes the digest and drops a wire digest that does not match the fields', async function () {
+            rh.setValidatorSet(VALIDATORS_4);
+            let verify = stubVerified(true);
+
+            let ts = Date.now();
+            let reorgId = 'LTC:300:' + ts;
+            // Digest computed over a DIFFERENT newHash than the wire fields carry.
+            let poisoned = rh._digest(reorgId, 'LTC', 300, ts, OLD_HASH, 'c'.repeat(64));
+            await rh._handlePrepare({
+                sender: VALIDATORS_4[1].addr,
+                data: { reorgId, chain: 'LTC', reorgHeight: 300, timestamp: ts,
+                        affectedChains: ['BTC', 'DOGE'], digest: poisoned,
+                        oldHash: OLD_HASH, newHash: NEW_HASH }
+            });
+            expect(rh.pendingReorgs.has(reorgId)).to.be.false;
+            expect(verify.called, 'digest mismatch is dropped before probing').to.be.false;
+        });
+
+        it('an unverified pending round never commits or rolls back, regardless of votes', async function () {
+            rh.setValidatorSet(VALIDATORS_3);
+            pm.validatorAddr = VALIDATORS_3[0].addr;
+
+            let reorgId = 'BTC:500:123';
+            let digest = rh._digest(reorgId, 'BTC', 500, 123, OLD_HASH, NEW_HASH);
+            rh.pendingReorgs.set(reorgId, {
+                reorgId, chain: 'BTC', reorgHeight: 500, timestamp: 123,
+                affectedChains: ['LTC', 'DOGE'], digest, oldHash: OLD_HASH, newHash: NEW_HASH,
+                selfVerified: false,
+                quorum: 2,
+                prepares: new Set([VALIDATORS_3[0].addr, VALIDATORS_3[1].addr]),
+                commits: new Set([VALIDATORS_3[0].addr, VALIDATORS_3[1].addr]),
+                finalized: false, timer: null
+            });
+
+            rh._checkPrepareQuorum(reorgId);
+            expect(pm.broadcast.called, 'no COMMIT broadcast for an unverified round').to.be.false;
+
+            rh._checkCommitQuorum(reorgId);
+            await new Promise(r => setTimeout(r, 20));
+            expect(hub.db.doQuery.called, 'no rollback for an unverified round').to.be.false;
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // _probeOwnNode(): the actual indexer probe
+    // -----------------------------------------------------------------
+
+    describe('_probeOwnNode()', function () {
+
+        beforeEach(function () {
+            rh.indexers.BTC = { url: 'http://btc-indexer.test', key: '' };
+            rh.network = 'regtest';
+        });
+
+        function stubIndexer(tip, at) {
+            return sinon.stub(rh, '_indexerCall').callsFake(async (coin, method, params) => {
+                if (params && params.block_index != null) return at;
+                return tip;
+            });
+        }
+
+        it('abstains (false) without an indexer endpoint', async function () {
+            rh.indexers.BTC = { url: '', key: '' };
+            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+        });
+
+        it('confirms when the node serves newHash at reorgHeight on the right network', async function () {
+            stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
+                        { block_index: 500, block_hash: NEW_HASH, network: 'regtest' });
+            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.true;
+        });
+
+        it('abstains while the node still serves the pre-reorg hash (lagging sync)', async function () {
+            stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
+                        { block_index: 500, block_hash: OLD_HASH, network: 'regtest' });
+            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+        });
+
+        it('rejects a reorgHeight above the own tip', async function () {
+            let ic = stubIndexer({ block_index: 400, block_hash: 'f'.repeat(64), network: 'regtest' }, null);
+            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+            expect(ic.callCount, 'no second call past the tip bound').to.equal(1);
+        });
+
+        it('rejects a reorgHeight deeper than REORG_MAX_DEPTH below the tip', async function () {
+            rh.maxReorgDepth = 100;
+            let ic = stubIndexer({ block_index: 1000, block_hash: 'f'.repeat(64), network: 'regtest' }, null);
+            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+            expect(ic.callCount).to.equal(1);
+        });
+
+        it('rejects a cross-network (or network-agnostic) answer', async function () {
+            stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
+                        { block_index: 500, block_hash: NEW_HASH, network: 'mainnet' });
+            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+
+            sinon.restore();
+            stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
+                        { block_index: 500, block_hash: NEW_HASH });
+            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+        });
+
+        it('reuses the tip response when reorgHeight IS the tip (single RPC)', async function () {
+            let ic = stubIndexer({ block_index: 500, block_hash: NEW_HASH, network: 'regtest' }, null);
+            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.true;
+            expect(ic.callCount).to.equal(1);
+        });
+
+        it('_verifyReorgAgainstOwnNode maps an RPC error to abstain (false), never a throw', async function () {
+            sinon.stub(rh, '_indexerCall').rejects(new Error('ECONNREFUSED'));
+            expect(await rh._verifyReorgAgainstOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+        });
+
+        it('_verifyReorgAgainstOwnNode dedupes concurrent probes for the same observation', async function () {
+            let resolveProbe;
+            sinon.stub(rh, '_probeOwnNode').callsFake(() => new Promise(res => { resolveProbe = res; }));
+            let p1 = rh._verifyReorgAgainstOwnNode('BTC', 500, OLD_HASH, NEW_HASH);
+            let p2 = rh._verifyReorgAgainstOwnNode('BTC', 500, OLD_HASH, NEW_HASH);
+            resolveProbe(true);
+            expect(await p1).to.be.true;
+            expect(await p2).to.be.true;
+            expect(rh._probeOwnNode.callCount).to.equal(1);
         });
     });
 
@@ -198,64 +457,71 @@ describe('ReorgHandler', function () {
             pm.validatorAddr = VALIDATORS_3[0].addr;
         });
 
-        it('PREPARE from peer is recorded', function () {
+        it('PREPARE from peer is recorded', async function () {
             let ts = Date.now();
             let reorgId = 'BTC:500:' + ts;
-            let digest = rh._digest(reorgId, 'BTC', 500, ts);
+            let digest = rh._digest(reorgId, 'BTC', 500, ts, OLD_HASH, NEW_HASH);
 
             rh.pendingReorgs.set(reorgId, {
                 reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
                 affectedChains: ['LTC', 'DOGE'], digest,
+                oldHash: OLD_HASH, newHash: NEW_HASH, selfVerified: true,
                 prepares: new Set(), commits: new Set(),
                 finalized: false, timer: null
             });
 
-            rh._handlePrepare({
+            await rh._handlePrepare({
                 sender: VALIDATORS_3[1].addr,
                 data: { reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
-                        affectedChains: ['LTC', 'DOGE'], digest }
+                        affectedChains: ['LTC', 'DOGE'], digest,
+                        oldHash: OLD_HASH, newHash: NEW_HASH }
             });
 
             expect(rh.pendingReorgs.get(reorgId).prepares.has(VALIDATORS_3[1].addr)).to.be.true;
         });
 
-        it('_handleAlert refuses an out-of-window (old) timestamp and starts no consensus', function () {
+        it('_handleAlert refuses an out-of-window (old) timestamp and starts no consensus', async function () {
             let ts = 1700000000000; // ~2023, far outside the 24h blast-radius window
             let reorgId = 'BTC:500:' + ts;
-            rh._handleAlert({
+            await rh._handleAlert({
                 sender: VALIDATORS_3[1].addr,
-                data: { chain: 'BTC', reorgHeight: 500, timestamp: ts, reorgId }
+                data: { chain: 'BTC', reorgHeight: 500, timestamp: ts, reorgId,
+                        oldHash: OLD_HASH, newHash: NEW_HASH }
             });
             expect(rh.pendingReorgs.has(reorgId), 'no pending round for a stale reorg').to.be.false;
             expect(pm.broadcast.called, 'no PREPARE broadcast for a stale reorg').to.be.false;
         });
 
-        it('_handlePrepare refuses to co-sign an out-of-window (old) timestamp', function () {
+        it('_handlePrepare refuses to co-sign an out-of-window (old) timestamp', async function () {
             let ts = 1700000000000;
             let reorgId = 'BTC:500:' + ts;
-            rh._handlePrepare({
+            await rh._handlePrepare({
                 sender: VALIDATORS_3[1].addr,
                 data: { reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
-                        affectedChains: ['LTC', 'DOGE'], digest: rh._digest(reorgId, 'BTC', 500, ts) }
+                        affectedChains: ['LTC', 'DOGE'],
+                        digest: rh._digest(reorgId, 'BTC', 500, ts, OLD_HASH, NEW_HASH),
+                        oldHash: OLD_HASH, newHash: NEW_HASH }
             });
             expect(rh.pendingReorgs.has(reorgId), 'a follower does not create a round for a stale reorg').to.be.false;
         });
 
-        it('PREPARE with wrong digest is rejected', function () {
+        it('PREPARE with wrong digest is rejected', async function () {
             let ts = Date.now();
             let reorgId = 'BTC:500:' + ts;
-            let digest = rh._digest(reorgId, 'BTC', 500, ts);
+            let digest = rh._digest(reorgId, 'BTC', 500, ts, OLD_HASH, NEW_HASH);
 
             rh.pendingReorgs.set(reorgId, {
                 reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
                 affectedChains: ['LTC', 'DOGE'], digest,
+                oldHash: OLD_HASH, newHash: NEW_HASH, selfVerified: true,
                 prepares: new Set(), commits: new Set(),
                 finalized: false, timer: null
             });
 
-            rh._handlePrepare({
+            await rh._handlePrepare({
                 sender: VALIDATORS_3[1].addr,
-                data: { reorgId, timestamp: ts, digest: 'wrong' }
+                data: { reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
+                        oldHash: OLD_HASH, newHash: NEW_HASH, digest: 'wrong' }
             });
 
             expect(rh.pendingReorgs.get(reorgId).prepares.size).to.equal(0);
@@ -263,11 +529,12 @@ describe('ReorgHandler', function () {
 
         it('COMMIT quorum executes rollback', async function () {
             let reorgId = 'BTC:500:123';
-            let digest = rh._digest(reorgId, 'BTC', 500, 123);
+            let digest = rh._digest(reorgId, 'BTC', 500, 123, OLD_HASH, NEW_HASH);
 
             rh.pendingReorgs.set(reorgId, {
                 reorgId, chain: 'BTC', reorgHeight: 500, timestamp: 123,
                 affectedChains: ['LTC', 'DOGE'], digest,
+                oldHash: OLD_HASH, newHash: NEW_HASH, selfVerified: true,
                 prepares: new Set([VALIDATORS_3[0].addr, VALIDATORS_3[1].addr]),
                 commits: new Set([VALIDATORS_3[0].addr]),
                 finalized: false, timer: null, _commitSent: true
@@ -313,11 +580,12 @@ describe('ReorgHandler', function () {
             // must time out (N=3 would finalize immediately at quorum=1).
             rh.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[0].addr;
+            stubVerified(true);
 
             let emitted = null;
             rh.on('reorg:timeout', (d) => { emitted = d; });
 
-            await rh.reportReorg('BTC', 500000, 1700000000000);
+            await rh.reportReorg('BTC', 500000, 1700000000000, OLD_HASH, NEW_HASH);
             let reorgId = 'BTC:500000:1700000000000';
 
             // Round is pending, no event yet.
@@ -335,22 +603,24 @@ describe('ReorgHandler', function () {
             expect(rh.pendingReorgs.has(reorgId)).to.be.false;
         });
 
-        it('emits reorg:timeout for a follower-created round (PREPARE path) that never reaches quorum', function () {
+        it('emits reorg:timeout for a follower-created round (PREPARE path) that never reaches quorum', async function () {
             clock = sinon.useFakeTimers({ now: 1700000000000 });
             rh.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[0].addr;
+            stubVerified(true);
 
             let reorgId = 'LTC:300:1700000000000';
-            let digest = rh._digest(reorgId, 'LTC', 300, 1700000000000);
+            let digest = rh._digest(reorgId, 'LTC', 300, 1700000000000, OLD_HASH, NEW_HASH);
 
             let emitted = null;
             rh.on('reorg:timeout', (d) => { emitted = d; });
 
             // A peer's PREPARE creates the pending round locally.
-            rh._handlePrepare({
+            await rh._handlePrepare({
                 sender: VALIDATORS_4[1].addr,
                 data: { reorgId, chain: 'LTC', reorgHeight: 300, timestamp: 1700000000000,
-                        affectedChains: ['BTC', 'DOGE'], digest }
+                        affectedChains: ['BTC', 'DOGE'], digest,
+                        oldHash: OLD_HASH, newHash: NEW_HASH }
             });
             expect(rh.pendingReorgs.has(reorgId)).to.be.true;
 
@@ -402,17 +672,25 @@ describe('ReorgHandler', function () {
     });
 
     describe('_handleMessage dispatch', function () {
-        it('routes alert / prepare / commit and ignores unknown types', function () {
+        it('routes alert / prepare / commit and ignores unknown types', async function () {
             let a = sinon.spy(rh, '_handleAlert');
             let p = sinon.spy(rh, '_handlePrepare');
             let c = sinon.spy(rh, '_handleCommit');
-            rh._handleMessage({ type: 'REORG_ALERT', data: {} });
-            rh._handleMessage({ type: 'XCHAIN_REORG_PREPARE', data: {} });
-            rh._handleMessage({ type: 'XCHAIN_REORG_COMMIT', data: {} });
-            expect(() => rh._handleMessage({ type: 'NOPE', data: {} })).to.not.throw();
+            await rh._handleMessage({ type: 'REORG_ALERT', data: {} });
+            await rh._handleMessage({ type: 'XCHAIN_REORG_PREPARE', data: {} });
+            await rh._handleMessage({ type: 'XCHAIN_REORG_COMMIT', data: {} });
+            await rh._handleMessage({ type: 'NOPE', data: {} });
             expect(a.calledOnce).to.be.true;
             expect(p.calledOnce).to.be.true;
             expect(c.calledOnce).to.be.true;
+        });
+
+        it('the start() listener surfaces (does not crash on) handler rejections', async function () {
+            await rh.start();
+            sinon.stub(rh, '_handleMessage').rejects(new Error('boom'));
+            expect(() => pm.emit('message', { type: 'REORG_ALERT', data: {} })).to.not.throw();
+            await new Promise(r => setTimeout(r, 10));
+            await rh.stop();
         });
     });
 
@@ -426,22 +704,23 @@ describe('ReorgHandler', function () {
             pm.validatorAddr = VALIDATORS_4[0].addr;
         });
 
-        it('ignores an alert with missing fields', function () {
-            rh._handleAlert({ sender: 'peer', data: { chain: 'BTC' } });
+        it('ignores an alert with missing fields', async function () {
+            await rh._handleAlert({ sender: 'peer', data: { chain: 'BTC' } });
             expect(rh.pendingReorgs.size).to.equal(0);
         });
 
-        it('ignores an alert for an already-processed reorg', function () {
+        it('ignores an alert for an already-processed reorg', async function () {
             rh.processed.add('BTC:5:1700000000000');
-            rh._handleAlert({ sender: 'peer', data: { chain: 'BTC', reorgHeight: 5, timestamp: 1700000000000, reorgId: 'BTC:5:1700000000000' } });
+            await rh._handleAlert({ sender: 'peer', data: { chain: 'BTC', reorgHeight: 5, timestamp: 1700000000000, reorgId: 'BTC:5:1700000000000', oldHash: OLD_HASH, newHash: NEW_HASH } });
             expect(rh.pendingReorgs.size).to.equal(0);
         });
 
-        it('starts consensus for a new reorg alert', function () {
+        it('starts consensus for a new (verified) reorg alert', async function () {
+            stubVerified(true);
             let ts = Date.now();
             let reorgId = 'BTC:5:' + ts;
             let init = sinon.spy(rh, '_initiateReorgConsensus');
-            rh._handleAlert({ sender: 'peer', data: { chain: 'BTC', reorgHeight: 5, timestamp: ts, reorgId } });
+            await rh._handleAlert({ sender: 'peer', data: { chain: 'BTC', reorgHeight: 5, timestamp: ts, reorgId, oldHash: OLD_HASH, newHash: NEW_HASH } });
             expect(init.calledOnce).to.be.true;
             let p = rh.pendingReorgs.get(reorgId);
             if (p && p.timer) clearTimeout(p.timer);
@@ -454,34 +733,34 @@ describe('ReorgHandler', function () {
 
     describe('reportReorg() validation', function () {
         it('rejects an unsupported chain', async function () {
-            try { await rh.reportReorg('ETH', 5, Date.now()); expect.fail('should throw'); }
+            try { await rh.reportReorg('ETH', 5, Date.now(), OLD_HASH, NEW_HASH); expect.fail('should throw'); }
             catch (e) { expect(e.message).to.include('Invalid chain'); }
         });
 
         it('rejects a negative / non-integer reorgHeight', async function () {
-            try { await rh.reportReorg('BTC', -1, Date.now()); expect.fail('should throw'); }
+            try { await rh.reportReorg('BTC', -1, Date.now(), OLD_HASH, NEW_HASH); expect.fail('should throw'); }
             catch (e) { expect(e.message).to.include('non-negative integer'); }
         });
 
         it('rejects a negative timestamp', async function () {
-            try { await rh.reportReorg('BTC', 5, -1); expect.fail('should throw'); }
+            try { await rh.reportReorg('BTC', 5, -1, OLD_HASH, NEW_HASH); expect.fail('should throw'); }
             catch (e) { expect(e.message).to.include('non-negative number'); }
         });
 
         it('rejects a timestamp too far in the future', async function () {
-            try { await rh.reportReorg('BTC', 5, Date.now() + 600000); expect.fail('should throw'); }
+            try { await rh.reportReorg('BTC', 5, Date.now() + 600000, OLD_HASH, NEW_HASH); expect.fail('should throw'); }
             catch (e) { expect(e.message).to.include('future'); }
         });
 
         it('enforces the per-chain rate limit', async function () {
             rh.reorgRateTracker.set('BTC', Date.now());
-            try { await rh.reportReorg('BTC', 5, Date.now()); expect.fail('should throw'); }
+            try { await rh.reportReorg('BTC', 5, Date.now(), OLD_HASH, NEW_HASH); expect.fail('should throw'); }
             catch (e) { expect(e.message).to.include('Rate limit'); }
         });
 
         it('_initiateReorgConsensus is a no-op for an already-pending reorg', function () {
             rh.pendingReorgs.set('r1', { timer: null });
-            rh._initiateReorgConsensus('r1', 'BTC', 5, 1, ['LTC', 'DOGE']);
+            rh._initiateReorgConsensus('r1', 'BTC', 5, 1, ['LTC', 'DOGE'], OLD_HASH, NEW_HASH);
             expect(rh.pendingReorgs.get('r1')).to.deep.equal({ timer: null });
         });
     });
@@ -492,7 +771,7 @@ describe('ReorgHandler', function () {
             rh.pendingReorgs.set('BTC:5:1', {
                 chain: 'BTC', reorgHeight: 5, timestamp: 1,
                 prepares: new Set(['a', 'b']), commits: new Set(['a', 'b']),
-                finalized: false, timer: null, quorum: 2, digest: 'd'
+                finalized: false, timer: null, quorum: 2, digest: 'd', selfVerified: true
             });
             rh._checkCommitQuorum('BTC:5:1');
             await new Promise(r => setTimeout(r, 20));
