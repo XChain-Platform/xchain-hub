@@ -55,7 +55,7 @@
     },
     {
       "name": "getallconfigs",
-      "summary": "Service discovery: connection parameters for every platform service on this chain.",
+      "summary": "Service discovery: connection parameters for every platform service on this chain (mesh-internal: includes DB credentials, keyed like a write).",
       "paramStructure": "by-name",
       "params": [],
       "result": {
@@ -63,7 +63,8 @@
         "schema": {
           "type": "object"
         }
-      }
+      },
+      "x-auth": "x-api-key header, when HUB_API_KEY is configured"
     },
     {
       "name": "updateconfig",

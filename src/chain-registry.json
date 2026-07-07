@@ -1,0 +1,636 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-07T02:20:12.803Z",
+  "descriptors": [
+    {
+      "coin": "bitcoin",
+      "displayName": "Bitcoin",
+      "color": "#F7931A",
+      "addressTypes": [
+        "p2pkh",
+        "p2sh-p2wpkh",
+        "p2wpkh",
+        "p2tr"
+      ],
+      "defaultAddressType": "p2wpkh",
+      "derivationPaths": {
+        "p2pkh": "m/44'/0'/A'/C/I",
+        "p2sh-p2wpkh": "m/49'/0'/A'/C/I",
+        "p2wpkh": "m/84'/0'/A'/C/I",
+        "p2tr": "m/86'/0'/A'/C/I"
+      },
+      "feeStrategy": {
+        "unit": "sats-per-vbyte",
+        "supportedStrategies": [
+          "low",
+          "normal",
+          "fast",
+          "custom"
+        ],
+        "defaultStrategy": "normal",
+        "rbfSupported": true
+      },
+      "supportedActions": [
+        "AIRDROP",
+        "BATCH",
+        "BROADCAST",
+        "CALLBACK",
+        "COINPAY",
+        "COLLECT",
+        "DELEGATE",
+        "DEPLOY",
+        "DEPOSIT",
+        "DESTROY",
+        "DISPENSER",
+        "DIVIDEND",
+        "EXECUTE",
+        "FILE",
+        "ISSUE",
+        "LINK",
+        "LIST",
+        "MESSAGE",
+        "MINT",
+        "ORDER",
+        "PRICE",
+        "SEND",
+        "SLEEP",
+        "STAKE",
+        "SWAP",
+        "SWEEP",
+        "UNSTAKE",
+        "VOTE",
+        "WITHDRAW"
+      ],
+      "uriScheme": "bitcoin",
+      "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
+      "id": "bitcoin-mainnet",
+      "networkKind": "mainnet",
+      "icon": "bitcoin-mainnet-icon-20.png",
+      "wifVersionByte": 128,
+      "explorer": {
+        "defaultUrl": "https://explorer.xchain.io/BTC",
+        "defaultPort": 443
+      },
+      "encoder": {
+        "defaultUrl": "https://encoder.xchain.io/BTC",
+        "defaultPort": 443
+      },
+      "hub": {
+        "defaultUrl": "https://hub.xchain.io/BTC",
+        "defaultPort": 443
+      }
+    },
+    {
+      "coin": "bitcoin",
+      "displayName": "Bitcoin",
+      "color": "#F7931A",
+      "addressTypes": [
+        "p2pkh",
+        "p2sh-p2wpkh",
+        "p2wpkh",
+        "p2tr"
+      ],
+      "defaultAddressType": "p2wpkh",
+      "derivationPaths": {
+        "p2pkh": "m/44'/0'/A'/C/I",
+        "p2sh-p2wpkh": "m/49'/0'/A'/C/I",
+        "p2wpkh": "m/84'/0'/A'/C/I",
+        "p2tr": "m/86'/0'/A'/C/I"
+      },
+      "feeStrategy": {
+        "unit": "sats-per-vbyte",
+        "supportedStrategies": [
+          "low",
+          "normal",
+          "fast",
+          "custom"
+        ],
+        "defaultStrategy": "normal",
+        "rbfSupported": true
+      },
+      "supportedActions": [
+        "AIRDROP",
+        "BATCH",
+        "BROADCAST",
+        "CALLBACK",
+        "COINPAY",
+        "COLLECT",
+        "DELEGATE",
+        "DEPLOY",
+        "DEPOSIT",
+        "DESTROY",
+        "DISPENSER",
+        "DIVIDEND",
+        "EXECUTE",
+        "FILE",
+        "ISSUE",
+        "LINK",
+        "LIST",
+        "MESSAGE",
+        "MINT",
+        "ORDER",
+        "PRICE",
+        "SEND",
+        "SLEEP",
+        "STAKE",
+        "SWAP",
+        "SWEEP",
+        "UNSTAKE",
+        "VOTE",
+        "WITHDRAW"
+      ],
+      "uriScheme": "bitcoin",
+      "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
+      "id": "bitcoin-testnet",
+      "networkKind": "testnet",
+      "icon": "bitcoin-testnet-icon-20.png",
+      "wifVersionByte": 239,
+      "explorer": {
+        "defaultUrl": "https://explorer.xchain.io/TBTC",
+        "defaultPort": 443
+      },
+      "encoder": {
+        "defaultUrl": "https://encoder.xchain.io/TBTC",
+        "defaultPort": 443
+      },
+      "hub": {
+        "defaultUrl": "https://hub.xchain.io/TBTC",
+        "defaultPort": 443
+      }
+    },
+    {
+      "coin": "bitcoin",
+      "displayName": "Bitcoin",
+      "color": "#F7931A",
+      "addressTypes": [
+        "p2pkh",
+        "p2sh-p2wpkh",
+        "p2wpkh",
+        "p2tr"
+      ],
+      "defaultAddressType": "p2wpkh",
+      "derivationPaths": {
+        "p2pkh": "m/44'/0'/A'/C/I",
+        "p2sh-p2wpkh": "m/49'/0'/A'/C/I",
+        "p2wpkh": "m/84'/0'/A'/C/I",
+        "p2tr": "m/86'/0'/A'/C/I"
+      },
+      "feeStrategy": {
+        "unit": "sats-per-vbyte",
+        "supportedStrategies": [
+          "low",
+          "normal",
+          "fast",
+          "custom"
+        ],
+        "defaultStrategy": "normal",
+        "rbfSupported": true
+      },
+      "supportedActions": [
+        "AIRDROP",
+        "BATCH",
+        "BROADCAST",
+        "CALLBACK",
+        "COINPAY",
+        "COLLECT",
+        "DELEGATE",
+        "DEPLOY",
+        "DEPOSIT",
+        "DESTROY",
+        "DISPENSER",
+        "DIVIDEND",
+        "EXECUTE",
+        "FILE",
+        "ISSUE",
+        "LINK",
+        "LIST",
+        "MESSAGE",
+        "MINT",
+        "ORDER",
+        "PRICE",
+        "SEND",
+        "SLEEP",
+        "STAKE",
+        "SWAP",
+        "SWEEP",
+        "UNSTAKE",
+        "VOTE",
+        "WITHDRAW"
+      ],
+      "uriScheme": "bitcoin",
+      "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
+      "id": "bitcoin-regtest",
+      "networkKind": "regtest",
+      "icon": "bitcoin-regtest-icon-20.png",
+      "wifVersionByte": 239,
+      "explorer": {
+        "defaultUrl": "http://localhost",
+        "defaultPort": 18080
+      },
+      "encoder": {
+        "defaultUrl": "http://localhost",
+        "defaultPort": 3023
+      },
+      "hub": {
+        "defaultUrl": "http://localhost",
+        "defaultPort": 10000
+      }
+    },
+    {
+      "coin": "dogecoin",
+      "displayName": "Dogecoin",
+      "color": "#C2A633",
+      "addressTypes": [
+        "p2pkh"
+      ],
+      "defaultAddressType": "p2pkh",
+      "derivationPaths": {
+        "p2pkh": "m/44'/3'/A'/C/I"
+      },
+      "feeStrategy": {
+        "unit": "sats-per-kbyte",
+        "supportedStrategies": [
+          "low",
+          "normal",
+          "fast",
+          "custom"
+        ],
+        "defaultStrategy": "normal",
+        "rbfSupported": false
+      },
+      "supportedActions": [
+        "AIRDROP",
+        "BATCH",
+        "BROADCAST",
+        "CALLBACK",
+        "COINPAY",
+        "DESTROY",
+        "DISPENSER",
+        "DIVIDEND",
+        "FILE",
+        "ISSUE",
+        "LINK",
+        "LIST",
+        "MESSAGE",
+        "MINT",
+        "ORDER",
+        "PRICE",
+        "SEND",
+        "SLEEP",
+        "SWAP",
+        "SWEEP",
+        "VOTE"
+      ],
+      "uriScheme": "dogecoin",
+      "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
+      "id": "dogecoin-mainnet",
+      "networkKind": "mainnet",
+      "icon": "dogecoin-mainnet-icon-20.png",
+      "wifVersionByte": 158,
+      "explorer": {
+        "defaultUrl": "https://explorer.xchain.io/DOGE",
+        "defaultPort": 443
+      },
+      "encoder": {
+        "defaultUrl": "https://encoder.xchain.io/DOGE",
+        "defaultPort": 443
+      },
+      "hub": {
+        "defaultUrl": "https://hub.xchain.io/DOGE",
+        "defaultPort": 443
+      }
+    },
+    {
+      "coin": "dogecoin",
+      "displayName": "Dogecoin",
+      "color": "#C2A633",
+      "addressTypes": [
+        "p2pkh"
+      ],
+      "defaultAddressType": "p2pkh",
+      "derivationPaths": {
+        "p2pkh": "m/44'/3'/A'/C/I"
+      },
+      "feeStrategy": {
+        "unit": "sats-per-kbyte",
+        "supportedStrategies": [
+          "low",
+          "normal",
+          "fast",
+          "custom"
+        ],
+        "defaultStrategy": "normal",
+        "rbfSupported": false
+      },
+      "supportedActions": [
+        "AIRDROP",
+        "BATCH",
+        "BROADCAST",
+        "CALLBACK",
+        "COINPAY",
+        "DESTROY",
+        "DISPENSER",
+        "DIVIDEND",
+        "FILE",
+        "ISSUE",
+        "LINK",
+        "LIST",
+        "MESSAGE",
+        "MINT",
+        "ORDER",
+        "PRICE",
+        "SEND",
+        "SLEEP",
+        "SWAP",
+        "SWEEP",
+        "VOTE"
+      ],
+      "uriScheme": "dogecoin",
+      "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
+      "id": "dogecoin-testnet",
+      "networkKind": "testnet",
+      "icon": "dogecoin-testnet-icon-20.png",
+      "wifVersionByte": 241,
+      "explorer": {
+        "defaultUrl": "https://explorer.xchain.io/TDOGE",
+        "defaultPort": 443
+      },
+      "encoder": {
+        "defaultUrl": "https://encoder.xchain.io/TDOGE",
+        "defaultPort": 443
+      },
+      "hub": {
+        "defaultUrl": "https://hub.xchain.io/TDOGE",
+        "defaultPort": 443
+      }
+    },
+    {
+      "coin": "dogecoin",
+      "displayName": "Dogecoin",
+      "color": "#C2A633",
+      "addressTypes": [
+        "p2pkh"
+      ],
+      "defaultAddressType": "p2pkh",
+      "derivationPaths": {
+        "p2pkh": "m/44'/3'/A'/C/I"
+      },
+      "feeStrategy": {
+        "unit": "sats-per-kbyte",
+        "supportedStrategies": [
+          "low",
+          "normal",
+          "fast",
+          "custom"
+        ],
+        "defaultStrategy": "normal",
+        "rbfSupported": false
+      },
+      "supportedActions": [
+        "AIRDROP",
+        "BATCH",
+        "BROADCAST",
+        "CALLBACK",
+        "COINPAY",
+        "DESTROY",
+        "DISPENSER",
+        "DIVIDEND",
+        "FILE",
+        "ISSUE",
+        "LINK",
+        "LIST",
+        "MESSAGE",
+        "MINT",
+        "ORDER",
+        "PRICE",
+        "SEND",
+        "SLEEP",
+        "SWAP",
+        "SWEEP",
+        "VOTE"
+      ],
+      "uriScheme": "dogecoin",
+      "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
+      "id": "dogecoin-regtest",
+      "networkKind": "regtest",
+      "icon": "dogecoin-regtest-icon-20.png",
+      "wifVersionByte": 239,
+      "explorer": {
+        "defaultUrl": "http://localhost",
+        "defaultPort": 18080
+      },
+      "encoder": {
+        "defaultUrl": "http://localhost",
+        "defaultPort": 3123
+      },
+      "hub": {
+        "defaultUrl": "http://localhost",
+        "defaultPort": 10000
+      }
+    },
+    {
+      "coin": "litecoin",
+      "displayName": "Litecoin",
+      "color": "#345D9D",
+      "addressTypes": [
+        "p2pkh",
+        "p2sh-p2wpkh",
+        "p2wpkh"
+      ],
+      "defaultAddressType": "p2wpkh",
+      "derivationPaths": {
+        "p2pkh": "m/44'/2'/A'/C/I",
+        "p2sh-p2wpkh": "m/49'/2'/A'/C/I",
+        "p2wpkh": "m/84'/2'/A'/C/I"
+      },
+      "feeStrategy": {
+        "unit": "sats-per-vbyte",
+        "supportedStrategies": [
+          "low",
+          "normal",
+          "fast",
+          "custom"
+        ],
+        "defaultStrategy": "normal",
+        "rbfSupported": true
+      },
+      "supportedActions": [
+        "AIRDROP",
+        "BATCH",
+        "BROADCAST",
+        "CALLBACK",
+        "COINPAY",
+        "DESTROY",
+        "DISPENSER",
+        "DIVIDEND",
+        "FILE",
+        "ISSUE",
+        "LINK",
+        "LIST",
+        "MESSAGE",
+        "MINT",
+        "ORDER",
+        "PRICE",
+        "SEND",
+        "SLEEP",
+        "SWAP",
+        "SWEEP",
+        "VOTE"
+      ],
+      "uriScheme": "litecoin",
+      "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
+      "id": "litecoin-mainnet",
+      "networkKind": "mainnet",
+      "icon": "litecoin-mainnet-icon-20.png",
+      "wifVersionByte": 176,
+      "explorer": {
+        "defaultUrl": "https://explorer.xchain.io/LTC",
+        "defaultPort": 443
+      },
+      "encoder": {
+        "defaultUrl": "https://encoder.xchain.io/LTC",
+        "defaultPort": 443
+      },
+      "hub": {
+        "defaultUrl": "https://hub.xchain.io/LTC",
+        "defaultPort": 443
+      }
+    },
+    {
+      "coin": "litecoin",
+      "displayName": "Litecoin",
+      "color": "#345D9D",
+      "addressTypes": [
+        "p2pkh",
+        "p2sh-p2wpkh",
+        "p2wpkh"
+      ],
+      "defaultAddressType": "p2wpkh",
+      "derivationPaths": {
+        "p2pkh": "m/44'/2'/A'/C/I",
+        "p2sh-p2wpkh": "m/49'/2'/A'/C/I",
+        "p2wpkh": "m/84'/2'/A'/C/I"
+      },
+      "feeStrategy": {
+        "unit": "sats-per-vbyte",
+        "supportedStrategies": [
+          "low",
+          "normal",
+          "fast",
+          "custom"
+        ],
+        "defaultStrategy": "normal",
+        "rbfSupported": true
+      },
+      "supportedActions": [
+        "AIRDROP",
+        "BATCH",
+        "BROADCAST",
+        "CALLBACK",
+        "COINPAY",
+        "DESTROY",
+        "DISPENSER",
+        "DIVIDEND",
+        "FILE",
+        "ISSUE",
+        "LINK",
+        "LIST",
+        "MESSAGE",
+        "MINT",
+        "ORDER",
+        "PRICE",
+        "SEND",
+        "SLEEP",
+        "SWAP",
+        "SWEEP",
+        "VOTE"
+      ],
+      "uriScheme": "litecoin",
+      "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
+      "id": "litecoin-testnet",
+      "networkKind": "testnet",
+      "icon": "litecoin-testnet-icon-20.png",
+      "wifVersionByte": 239,
+      "explorer": {
+        "defaultUrl": "https://explorer.xchain.io/TLTC",
+        "defaultPort": 443
+      },
+      "encoder": {
+        "defaultUrl": "https://encoder.xchain.io/TLTC",
+        "defaultPort": 443
+      },
+      "hub": {
+        "defaultUrl": "https://hub.xchain.io/TLTC",
+        "defaultPort": 443
+      }
+    },
+    {
+      "coin": "litecoin",
+      "displayName": "Litecoin",
+      "color": "#345D9D",
+      "addressTypes": [
+        "p2pkh",
+        "p2sh-p2wpkh",
+        "p2wpkh"
+      ],
+      "defaultAddressType": "p2wpkh",
+      "derivationPaths": {
+        "p2pkh": "m/44'/2'/A'/C/I",
+        "p2sh-p2wpkh": "m/49'/2'/A'/C/I",
+        "p2wpkh": "m/84'/2'/A'/C/I"
+      },
+      "feeStrategy": {
+        "unit": "sats-per-vbyte",
+        "supportedStrategies": [
+          "low",
+          "normal",
+          "fast",
+          "custom"
+        ],
+        "defaultStrategy": "normal",
+        "rbfSupported": true
+      },
+      "supportedActions": [
+        "AIRDROP",
+        "BATCH",
+        "BROADCAST",
+        "CALLBACK",
+        "COINPAY",
+        "DESTROY",
+        "DISPENSER",
+        "DIVIDEND",
+        "FILE",
+        "ISSUE",
+        "LINK",
+        "LIST",
+        "MESSAGE",
+        "MINT",
+        "ORDER",
+        "PRICE",
+        "SEND",
+        "SLEEP",
+        "SWAP",
+        "SWEEP",
+        "VOTE"
+      ],
+      "uriScheme": "litecoin",
+      "adsDonationAddress": "PLACEHOLDER_REPLACE_BEFORE_MAINNET",
+      "id": "litecoin-regtest",
+      "networkKind": "regtest",
+      "icon": "litecoin-regtest-icon-20.png",
+      "wifVersionByte": 239,
+      "explorer": {
+        "defaultUrl": "http://localhost",
+        "defaultPort": 18080
+      },
+      "encoder": {
+        "defaultUrl": "http://localhost",
+        "defaultPort": 3223
+      },
+      "hub": {
+        "defaultUrl": "http://localhost",
+        "defaultPort": 10000
+      }
+    }
+  ]
+}

@@ -92,6 +92,17 @@ const WRITE_METHODS  = new Set([
     'pushdexreorg', 'anchorflush'
 ]);
 
+// Read methods whose RESPONSE is mesh-internal, keyed like writes when
+// HUB_API_KEY is set: getallconfigs returns every service's connection
+// parameters including DB user/pass, so it must never be publicly readable.
+// This is the app-side half of retiring the hub.xchain.io Apache IP-allowlist
+// lockdown (2026-06-26): once every mesh caller sends x-api-key, the vhost can
+// proxy POST publicly and this tier carries the policy. Escape hatch for a
+// staged rollout or emergency rollback: HUB_SENSITIVE_READ_AUTH=0 disables
+// enforcement for these methods only (writes stay keyed).
+const SENSITIVE_READ_METHODS = new Set(['getallconfigs']);
+const SENSITIVE_READ_AUTH = process.env.HUB_SENSITIVE_READ_AUTH !== '0';
+
 function validateChain(chain) {
     if (!ALLOWED_CHAINS.has(chain))
         return { error: 'chain must be one of: BTC, LTC, DOGE' };
@@ -249,12 +260,16 @@ async function startApi(){
         legacyHeaders: false
     }));
 
-    // API key enforcement for write methods (only when a key is configured;
-    // see the HUB_API_KEY note above)
+    // API key enforcement for write methods and sensitive reads (only when a
+    // key is configured; see the HUB_API_KEY and SENSITIVE_READ_METHODS notes
+    // above). Everything not in either set is the public read tier, protected
+    // only by the per-IP rate limit.
     app.use((req, res, next) => {
         if (!HUB_API_KEY) return next();
         let method = req.body && req.body.method;
-        if (method && WRITE_METHODS.has(method.toLowerCase())) {
+        let gated = method && (WRITE_METHODS.has(method.toLowerCase()) ||
+            (SENSITIVE_READ_AUTH && SENSITIVE_READ_METHODS.has(method.toLowerCase())));
+        if (gated) {
             let provided = req.headers['x-api-key'] || '';
             let a = Buffer.from(provided), b = Buffer.from(HUB_API_KEY);
             if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
@@ -1238,6 +1253,44 @@ async function startApi(){
             res.json({ enabled: true, window_days: days, operators });
         } catch (err) {
             res.status(500).json({ error: err.message || 'telemetry operators error' });
+        }
+    });
+
+    // Public chain registry for wallet/SDK bootstrap (wallet spec G007 / §9.7).
+    // Serves the wallet-authored descriptor snapshot vendored at
+    // src/chain-registry.json (synced from the wallet's bundled descriptors by
+    // xchain-wallet/bin/sync-chain-registry.mjs; drift-guarded in CI). Public
+    // read tier by design: endpoint URLs + UX metadata only, no secrets. When
+    // this hub has a signing identity (validator mode) the response also
+    // carries an Ed25519 signature so clients can verify before merging:
+    //   signature = sign('XCHAIN_CHAIN_REGISTRY_V1|' + generated_at + '|' +
+    //                    sha256hex(JSON.stringify(descriptors)))
+    let chainRegistryCache = null;
+    app.get('/api/v1/chain-registry', (req, res) => {
+        try {
+            if (!chainRegistryCache) {
+                const raw = JSON.parse(fs.readFileSync(path.join(__dirname, 'chain-registry.json'), 'utf8'));
+                const body = {
+                    schema_version: raw.schema_version,
+                    generatedAt:    raw.generated_at,
+                    descriptors:    raw.descriptors
+                };
+                try {
+                    const identity = hub.getIdentity ? hub.getIdentity() : null;
+                    if (identity && identity.getPubkeyHex && identity.sign) {
+                        const digest = crypto.createHash('sha256')
+                            .update(JSON.stringify(raw.descriptors)).digest('hex');
+                        body.signer_pubkey = identity.getPubkeyHex();
+                        body.signature = identity.sign(
+                            'XCHAIN_CHAIN_REGISTRY_V1|' + raw.generated_at + '|' + digest);
+                    }
+                } catch (e) { /* standalone hub: served unsigned */ }
+                chainRegistryCache = body;
+            }
+            res.set('Cache-Control', 'public, max-age=300');
+            res.json(chainRegistryCache);
+        } catch (err) {
+            res.status(500).json({ error: 'chain registry unavailable' });
         }
     });
 

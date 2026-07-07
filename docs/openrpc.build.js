@@ -21,7 +21,7 @@ const path = require('path');
 const METHODS = [
     ['ping', 'Health check.', []],
     ['health', 'Detailed health: DB, oracle staleness, P2P state (503 when degraded).', []],
-    ['getallconfigs', 'Service discovery: connection parameters for every platform service on this chain.', []],
+    ['getallconfigs', 'Service discovery: connection parameters for every platform service on this chain (mesh-internal: includes DB credentials, keyed like a write).', [], { auth: true }],
     ['updateconfig', 'Update a service config entry (PBFT-replicated in validator mode).', ['config'], { auth: true }],
     ['getoraclesubmissions', 'Raw per-validator oracle price submissions for recent rounds.', []],
     ['getpricesnapshots', 'PBFT-finalized price snapshots (trimmed-median rounds).', ['limit']],

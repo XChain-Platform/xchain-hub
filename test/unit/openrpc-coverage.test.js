@@ -33,19 +33,27 @@ describe('openrpc.json method coverage', () => {
     const writeBlock = src.slice(src.indexOf('WRITE_METHODS'), src.indexOf(']', src.indexOf('WRITE_METHODS')));
     const writeMethods = [...writeBlock.matchAll(/'([a-z_0-9]+)'/g)].map((m) => m[1]);
 
+    // x-auth covers everything keyed when HUB_API_KEY is set: writes plus the
+    // sensitive-read tier (getallconfigs et al.), so extract both sets.
+    const sensIdx = src.indexOf('SENSITIVE_READ_METHODS = new Set(');
+    const sensBlock = src.slice(sensIdx, src.indexOf(')', sensIdx));
+    const sensitiveReads = [...sensBlock.matchAll(/'([a-z_0-9]+)'/g)].map((m) => m[1]);
+    const keyedMethods = [...new Set([...writeMethods, ...sensitiveReads])];
+
     it('extracts sane method lists', () => {
         assert.ok(controllerMethods.includes('ping') && controllerMethods.includes('getallconfigs'),
             `controller extraction broken: ${controllerMethods.join(', ')}`);
         assert.ok(writeMethods.includes('updateconfig'), 'WRITE_METHODS extraction broken');
+        assert.ok(sensitiveReads.includes('getallconfigs'), 'SENSITIVE_READ_METHODS extraction broken');
     });
 
     it('spec methods === controller methods', () => {
         assert.deepStrictEqual(spec.methods.map((m) => m.name).sort(), [...controllerMethods].sort());
     });
 
-    it('spec x-auth flags === WRITE_METHODS', () => {
+    it('spec x-auth flags === WRITE_METHODS + SENSITIVE_READ_METHODS', () => {
         const flagged = spec.methods.filter((m) => m['x-auth']).map((m) => m.name).sort();
-        assert.deepStrictEqual(flagged, [...writeMethods].sort());
+        assert.deepStrictEqual(flagged, [...keyedMethods].sort());
     });
 
     it('every method has a summary and by-name params', () => {
