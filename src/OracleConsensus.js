@@ -89,6 +89,14 @@ class OracleConsensus extends EventEmitter {
         this.earlyMessageTtl      = new Map();   // round -> expiresAt (ms)
         this.earlyMessageTtlMs    = 60 * 1000;
         this.earlyMessageMaxPerRound = 64;
+        // Cap the number of DISTINCT round keys held at once. `round` is taken from
+        // attacker-controlled envelope.data, so without this a single Byzantine
+        // validator streaming PREPAREs with millions of fresh round numbers inside
+        // the 60s TTL grows earlyMessages without bound (memory DoS) and makes every
+        // _pruneEarlyMessages an O(rounds) scan (O(n^2) CPU). Map preserves insertion
+        // order, so eviction is FIFO on the oldest round key. 256 >> any legitimate
+        // in-flight round concurrency (rounds are ~10 min apart).
+        this.earlyMessageMaxRounds = parseInt(process.env.ORACLE_EARLY_MSG_MAX_ROUNDS) || 256;
 
         this.validatorSet = [];
 
@@ -188,6 +196,13 @@ class OracleConsensus extends EventEmitter {
         this._pruneEarlyMessages(now);
         let arr = this.earlyMessages.get(round);
         if (!arr) {
+            // Bound the number of distinct buffered rounds (attacker picks `round`).
+            // Map iteration is insertion-ordered, so evict the OLDEST round key first.
+            while (this.earlyMessages.size >= this.earlyMessageMaxRounds) {
+                let oldest = this.earlyMessages.keys().next().value;
+                this.earlyMessages.delete(oldest);
+                this.earlyMessageTtl.delete(oldest);
+            }
             arr = [];
             this.earlyMessages.set(round, arr);
         }
