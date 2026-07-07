@@ -130,9 +130,16 @@ describe('E2E: API Contract Verification', function () {
         });
 
         it('getfeequote', async function () {
+            // getFeeQuote fails closed without a finalized XCHAIN/USD oracle
+            // price (native-fee hub-DB gate), so seed one.
+            await cluster.getDb().doQuery(
+                `INSERT INTO price_snapshots (round_number, coin_pair, price, validator_count, consensus_proof, status)
+                 VALUES (1, 'XCHAIN/USD', '0.10000000', 1, '{}', 'finalized')`
+            );
             let res = await callRpc(cluster.getPort(0), 'getfeequote', { action: 'ISSUE', chain: 'BTC' });
             expect(res.result.gasCost).to.equal(100000);
             expect(res.result.xchainAmount).to.equal('1.00000000');
+            expect(res.result.xchainUsd).to.equal('0.10000000');
         });
 
         it('requestattestation + getattestation', async function () {

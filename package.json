@@ -29,7 +29,7 @@
     "test:all": "mocha 'test/**/*.test.js' --timeout 30000 --recursive",
     "test:smoke": "mocha 'test/smoke/**/*.smoke.test.js' --timeout 5000 --recursive --bail",
     "test:security": "mocha 'test/security/**/*.test.js' --timeout 5000 --recursive",
-    "test:e2e": "mocha 'test/e2e/**/*.e2e.test.js' --timeout 30000 --recursive",
+    "test:e2e": "mocha 'test/e2e/**/*.e2e.test.js' --timeout 30000 --recursive --exit",
     "test:fuzz": "mocha 'test/fuzz/**/*.fuzz.test.js' --timeout 30000 --recursive",
     "test:perf": "mocha 'test/performance/**/*.perf.test.js' --timeout 300000 --recursive",
     "test:regression": "mocha 'test/regression/**/*.regression.test.js' --timeout 5000 --recursive",

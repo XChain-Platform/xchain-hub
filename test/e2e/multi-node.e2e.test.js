@@ -220,8 +220,8 @@ describe('E2E: Multi-Node Cluster', function () {
 
             expect(results[0]).to.deep.equal(results[1]);
             expect(results[1]).to.deep.equal(results[2]);
-            expect(results[0].BTC).to.exist;
-            expect(results[0].BTC.mainnet.decoder.host).to.equal('consistent.local');
+            expect(results[0].configs.BTC).to.exist;
+            expect(results[0].configs.BTC.mainnet.decoder.host).to.equal('consistent.local');
         });
 
         it('all nodes return identical validator list', async function () {

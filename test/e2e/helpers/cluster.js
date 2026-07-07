@@ -24,6 +24,13 @@ const DB_NAME = process.env.TEST_DB_NAME || 'xchain_hub_test';
 const DB_USER = process.env.TEST_DB_USER || 'root';
 const DB_PASS = process.env.TEST_DB_PASS || '';
 
+const ALLOWED_CHAINS = new Set(['BTC', 'LTC', 'DOGE']);
+function validateChain(chain) {
+    if (!ALLOWED_CHAINS.has(chain))
+        return { error: 'chain must be one of: BTC, LTC, DOGE' };
+    return null;
+}
+
 /**
  * Build the JSON-RPC controller for a hub instance.
  * Mirrors the controller in src/api.js.
@@ -87,8 +94,36 @@ function buildController(hub) {
         async getfeequote({ action, chain }) {
             if (!action) return { error: 'action is required' };
             if (!chain) return { error: 'chain is required' };
+            let chainErr = validateChain(chain);
+            if (chainErr) return chainErr;
             try { return await hub.getFeeQuote(action, chain); }
             catch (err) { return { error: 'error calculating fee quote' }; }
+        },
+
+        async pushxcallreorg({ source_chain, from_action_index, to_action_index, retraction_generation }) {
+            if (!source_chain) return { error: 'source_chain is required' };
+            let chainErr = validateChain(source_chain);
+            if (chainErr) return chainErr;
+            if (from_action_index === undefined || from_action_index === null)
+                return { error: 'from_action_index is required' };
+            if (!hub.crossChainCalls) return { error: 'cross-chain call engine not active' };
+            try {
+                await hub.crossChainCalls.retractCallsForReorg(source_chain, from_action_index, to_action_index, retraction_generation);
+                return { status: 'ok', source_chain, from_action_index };
+            } catch (err) { return { error: err.message || 'error retracting cross-chain calls' }; }
+        },
+
+        async pushdexreorg({ source_chain, from_action_index, to_action_index, retraction_generation }) {
+            if (!source_chain) return { error: 'source_chain is required' };
+            let chainErr = validateChain(source_chain);
+            if (chainErr) return chainErr;
+            if (from_action_index === undefined || from_action_index === null)
+                return { error: 'from_action_index is required' };
+            if (!hub.crossChainDex) return { error: 'cross-chain dex engine not active' };
+            try {
+                await hub.crossChainDex.retractMatchesForReorg(source_chain, from_action_index, to_action_index, retraction_generation);
+                return { status: 'ok', source_chain, from_action_index };
+            } catch (err) { return { error: err.message || 'error retracting cross-chain matches' }; }
         },
 
         async propose({ parameter, current_value, proposed_value, rationale }) {
@@ -204,12 +239,20 @@ function createCluster(nodeCount, overrides) {
 
     let nodes   = [];  // { hub, server, apiPort, p2pPort, keypair, addr }
     let started = false;
+    // OracleConsensus reads ORACLE_MIN_SUBMISSIONS from process.env at
+    // construction with a 2-hub diversity floor; a single-node cluster must
+    // set 1 (the same explicit opt-in real single-host deployments use) or
+    // every finalization skips. Saved/restored around the cluster lifetime.
+    let savedMinSubmissions;
 
     // R2-C2 stub indexer: every hub verifies a reported reorg against its
     // "own" indexer (getblockhashes) before co-signing, so the cluster serves
     // one shared JSON-RPC stub whose tip/hashes tests can set via
-    // cluster.stubIndexer (hashes: { [height]: hash }).
-    let stubIndexer = { tip: 800100, network: 'regtest', hashes: {} };
+    // cluster.stubIndexer (hashes: { [height]: hash }). CrossChainEngine
+    // followers likewise verify a proposed source action via
+    // getactionconfirmations before PREPARing; `actions` overrides the
+    // default confirmed response per action_index.
+    let stubIndexer = { tip: 800100, network: 'regtest', hashes: {}, actions: {} };
     let stubIndexerServer = null;
     let stubIndexerUrl = '';
     function stubHashFor(height) {
@@ -231,6 +274,11 @@ function createCluster(nodeCount, overrides) {
         async start() {
             if (started) return;
 
+            if (nodeCount === 1) {
+                savedMinSubmissions = process.env.ORACLE_MIN_SUBMISSIONS;
+                process.env.ORACLE_MIN_SUBMISSIONS = '1';
+            }
+
             // Phase 0: start the shared stub indexer (see stubIndexer above).
             let stubApp = express();
             stubApp.use(express.json());
@@ -243,6 +291,11 @@ function createCluster(nodeCount, overrides) {
                         block_hash:  stubIndexer.hashes[height] || stubHashFor(height),
                         network:     stubIndexer.network
                     } });
+                }
+                if (method === 'getactionconfirmations') {
+                    let idx = params && params.action_index != null ? Number(params.action_index) : 0;
+                    return res.json({ jsonrpc: '2.0', id,
+                        result: stubIndexer.actions[idx] || { exists: true, confirmations: 100 } });
                 }
                 res.json({ jsonrpc: '2.0', id, error: { message: 'unknown method ' + method } });
             });
@@ -369,6 +422,10 @@ function createCluster(nodeCount, overrides) {
          * Uses timeouts to avoid hanging on stubborn WebSocket connections.
          */
         async stop() {
+            if (nodeCount === 1) {
+                if (savedMinSubmissions === undefined) delete process.env.ORACLE_MIN_SUBMISSIONS;
+                else process.env.ORACLE_MIN_SUBMISSIONS = savedMinSubmissions;
+            }
             if (stubIndexerServer) {
                 try { await new Promise(r => { stubIndexerServer.close(r); setTimeout(r, 1000); }); } catch (e) { /* ignore */ }
                 stubIndexerServer = null;

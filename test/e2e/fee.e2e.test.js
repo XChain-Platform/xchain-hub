@@ -16,6 +16,16 @@ const priceMocks    = require('./helpers/priceMocks');
 const { createCluster } = require('./helpers/cluster');
 const { callRpc }       = require('./helpers/rpcClient');
 
+// getFeeQuote refuses to quote without a finalized XCHAIN/USD oracle price
+// (fails closed); the oracle round only finalizes coin/USD pairs, so tests
+// seed the XCHAIN=$1 placeholder directly.
+async function seedXchainUsd(cluster) {
+    await cluster.getDb().doQuery(
+        `INSERT INTO price_snapshots (round_number, coin_pair, price, validator_count, consensus_proof, status)
+         VALUES (1, 'XCHAIN/USD', '1.00000000', 1, '{}', 'finalized')`
+    );
+}
+
 describe('E2E: Fee Quote Pipeline', function () {
 
     let cluster;
@@ -70,6 +80,11 @@ describe('E2E: Fee Quote Pipeline', function () {
             let round = cluster.getHub(0).oracle.getCurrentRound();
             await cluster.triggerOracleFinalization(0, round);
 
+            // getFeeQuote fails closed without a finalized XCHAIN/USD price
+            // (native-fee hub-DB gate); XCHAIN/USD comes from user-published
+            // PRICE actions, not the oracle round, so seed the $1 placeholder.
+            await seedXchainUsd(cluster);
+
             // Get fee quote for ISSUE action on BTC
             let fee = await callRpc(port, 'getfeequote', { action: 'ISSUE', chain: 'BTC' });
             expect(fee.result.action).to.equal('ISSUE');
@@ -94,6 +109,7 @@ describe('E2E: Fee Quote Pipeline', function () {
             cluster = createCluster(1);
             await cluster.start();
             let port = cluster.getPort(0);
+            await seedXchainUsd(cluster);
 
             // ISSUE = 100k gas, ISSUE_SUBTOKEN = 50k gas
             let issue = await callRpc(port, 'getfeequote', { action: 'ISSUE', chain: 'BTC' });
@@ -117,11 +133,12 @@ describe('E2E: Fee Quote Pipeline', function () {
             await cluster.start();
             let port = cluster.getPort(0);
 
-            // No oracle round run, no price data
+            // XCHAIN/USD alone (the fail-closed minimum); no BTC/USD data
+            await seedXchainUsd(cluster);
             let fee = await callRpc(port, 'getfeequote', { action: 'ISSUE', chain: 'BTC' });
             expect(fee.result.gasCost).to.equal(100000);
             expect(fee.result.xchainAmount).to.equal('1.00000000');
-            // No native coin conversion without price data
+            // No native coin conversion without coin price data
             expect(fee.result.nativeCoinAmount).to.not.exist;
         });
 

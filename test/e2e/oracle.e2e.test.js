@@ -25,7 +25,7 @@ describe('E2E: Oracle Price Pipeline', function () {
     before(async function () {
         this.timeout(15000);
         try { await testDb.setup(); } catch (e) {
-            console.warn('MariaDB unavailable — skipping E2E oracle tests');
+            console.warn('MariaDB unavailable: skipping E2E oracle tests');
             return;
         }
         priceMocks.setup();
@@ -127,7 +127,7 @@ describe('E2E: Oracle Price Pipeline', function () {
     });
 
     // E2E-ORACLE-003: One external API down
-    describe('E2E-ORACLE-003: One API down — graceful degradation', function () {
+    describe('E2E-ORACLE-003: One API down, graceful degradation', function () {
 
         it('continues with remaining source when CoinGecko fails', async function () {
             this.timeout(15000);
@@ -153,8 +153,8 @@ describe('E2E: Oracle Price Pipeline', function () {
         });
     });
 
-    // E2E-ORACLE-004: All APIs down — round skipped
-    describe('E2E-ORACLE-004: All APIs down — round skipped', function () {
+    // E2E-ORACLE-004: All APIs down, round skipped
+    describe('E2E-ORACLE-004: All APIs down, round skipped', function () {
 
         it('skips round when no prices are fetched', async function () {
             this.timeout(15000);
@@ -211,7 +211,7 @@ describe('E2E: Oracle Price Pipeline', function () {
             let db = cluster.getDb();
             await assertRewardDistributed(db, round, 1);
 
-            // Verify via API — validator status shows unclaimed rewards
+            // Verify via API: validator status shows unclaimed rewards
             let status = await callRpc(port, 'getvalidatorstatus', { signing_pubkey: pubkey });
             expect(status.result.validator).to.exist;
             let unclaimed = parseFloat(status.result.unclaimedRewards);
@@ -244,6 +244,11 @@ describe('E2E: Oracle Price Pipeline', function () {
             priceMocks.mockCoinGeckoSuccess({
                 bitcoin: { usd: 105000 }, litecoin: { usd: 90 }, dogecoin: { usd: 0.18 }
             });
+
+            // Round numbers derive from wall-clock time against ORACLE_EPOCH_START
+            // (not a counter), and _executeRound dedupes on the derived number; shift
+            // the epoch back one interval so round 2 lands on a distinct number.
+            cluster.getHub(0).oracle.epochStart -= cluster.getHub(0).oracle.roundInterval;
 
             // Round 2
             await cluster.triggerOracleRound(0);
