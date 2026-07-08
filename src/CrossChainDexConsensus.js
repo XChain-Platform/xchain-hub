@@ -370,13 +370,22 @@ class CrossChainDexConsensus extends EventEmitter {
             // from the row WE pre-built at discovery, so byte-equality here
             // deadlocked every round whose hubs polled in different seconds.
             // The leader's row passed independent validation above; adopt it as
-            // the round canonical, unless we already committed to another.
-            if(pending._commitSent) return;
+            // the round canonical, unless we already committed to another VALUE.
+            // A canonical that differs only because the view advanced (OUR row
+            // at the leader's view == the leader's canonical) is value-identical:
+            // with the EQUIV header active every view change moves the canonical
+            // bytes, and refusing post-commit adoption of the same value would
+            // deadlock every commit-phase node out of the new view, starving
+            // failover quorum (H-8). PBFT forbids committing to a different
+            // value, not re-voting the same value under a new view.
+            let sameValueNewView = (this.engine._canonicalMatch(pending.row, view) === canonical);
+            if(pending._commitSent && !sameValueNewView) return;
             pending.row       = row;
             pending.canonical = canonical;
             pending.signatures.clear();   // any collected sigs were over the old canonical
             pending.prepares.clear();
             pending.commits.clear();
+            pending._commitSent = false;
             adopted = true;
             console.log('CrossChainDexConsensus: adopted leader canonical for ' + rid.substring(0,16) + '...');
         }
@@ -568,6 +577,22 @@ class CrossChainDexConsensus extends EventEmitter {
         if(view > pending.view) pending.view = view;
         let newLeader = this._leaderFor(rid, pending.validators, view);
         if(newLeader === pending.myPubkey){
+            // Rebuild the round canonical for the NEW view before signing (H-8):
+            // once the EQUIV header is active the view is folded into the
+            // canonical, so re-signing the view-0 bytes under a new-view PROPOSE
+            // fails every follower's verification (they recompute at d.view) and
+            // failover can never make progress. Votes collected so far covered
+            // the OLD canonical, so they are dropped with it; below the EQUIV
+            // flag-day the rebuild is byte-identical and this is a no-op that
+            // preserves collected votes.
+            let canonical = this.engine._canonicalMatch(pending.row, pending.view);
+            if(canonical !== pending.canonical){
+                pending.canonical = canonical;
+                pending.signatures.clear();
+                pending.prepares.clear();
+                pending.commits.clear();
+                pending._commitSent = false;
+            }
             if(this.peerManager) this.peerManager.broadcast(this.types.NEW_VIEW, {
                 matchId: rid, view: view, sig_pubkey: pending.myPubkey, sig: this._signControl(this.controlTags.nv, rid, view)
             });

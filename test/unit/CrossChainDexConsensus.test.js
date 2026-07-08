@@ -71,7 +71,9 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
             let engine = {
                 hub: { p2pConfig: { XDEX_ROUND_TIMEOUT_MS: opts.roundTimeoutMs || 120000 } },
                 peerManager, identity, capSnapshot: null,
-                _canonicalMatch: canonicalMatch,
+                // opts.canonical simulates the EQUIV-header-active engine, whose
+                // canonical folds the view (H-8 regression); default ignores view.
+                _canonicalMatch: opts.canonical || canonicalMatch,
                 _persistCapabilitySnapshot: async () => {},
                 validateProposedMatch: async () => (opts.validate ? opts.validate(self) : true)
             };
@@ -180,6 +182,37 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         await proposeAll(bus, mid, sampleRow(mid));
         await sleep(1300);                                              // a few 80ms view-change rounds
         expect(bus.nodes.filter(nd => !nd.crashed && nd.finalized.length === 1).length).to.equal(3);
+    });
+
+    it('leader failover finalizes when the canonical folds the view (EQUIV header active; H-8 regression)', async function () {
+        // With the EQUIV header active, _canonicalMatch(row, view) moves with the
+        // view, so a new-view leader that re-signs the view-0 canonical produces a
+        // PROPOSE no follower verifies (they recompute at d.view) and failover is
+        // dead. This pins the fix: the rotated leader rebuilds + re-signs the
+        // canonical for the current view, followers (including any that already
+        // sent COMMIT in the old view) re-adopt the value-identical new-view
+        // canonical, and the round finalizes with signatures that verify under
+        // the FINAL view's canonical, not view 0's.
+        this.timeout(5000);
+        const equivCanonical = (r, view) => canonicalMatch(r) + '|EQ|' + Number(view || 0);
+        let mid = 'ee'.repeat(32);
+        let bus = buildMesh(4, { roundTimeoutMs: 80, canonical: equivCanonical });
+        let crashed = bus.nodes.find(nd => nd.pubkey === leaderPubkey(bus, mid, 0));
+        crashed.crashed = true;                                         // never participates
+        await startAll(bus);
+        await proposeAll(bus, mid, sampleRow(mid));
+        await sleep(1300);                                              // a few 80ms view-change rounds
+
+        let live = bus.nodes.filter(nd => !nd.crashed);
+        expect(live.filter(nd => nd.finalized.length === 1).length, 'all live nodes finalize').to.equal(3);
+        let ev = live[0].finalized[0];
+        expect(ev.view, 'the round finalized under a post-failover view').to.be.at.least(1);
+        let finalCanon = equivCanonical(ev.row, ev.view);
+        expect(ev.signatures.length).to.be.at.least(3);
+        expect(ev.signatures.every(s => ValidatorIdentity.verify(finalCanon, s.sig, s.pubkey)),
+            'every quorum signature verifies under the final view canonical').to.be.true;
+        expect(ev.signatures.some(s => ValidatorIdentity.verify(equivCanonical(ev.row, 0), s.sig, s.pubkey)),
+            'no stale view-0 signature survives into the quorum set').to.be.false;
     });
 
     it('abandons a stale round past its max lifetime and emits match:abandoned (so the engine re-proposes)', async function () {
