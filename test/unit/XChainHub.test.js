@@ -290,6 +290,67 @@ describe('XChainHub', function () {
     });
 
     // -----------------------------------------------------------------
+    // Oracle price staleness (deepdive L-5)
+    // -----------------------------------------------------------------
+
+    describe('oracle price staleness (L-5)', function () {
+        let hub;
+        beforeEach(function () {
+            hub = new XChainHub('host', 3306, 'db', 'user', 'pass', null);
+            hub.db = mockDb;
+        });
+
+        const nowS = () => Math.floor(Date.now() / 1000);
+
+        it('getPriceStatus flags a snapshot older than the max age as stale', async function () {
+            // block_timestamp 2h old, default bound 1800s -> stale.
+            mockDb.doQuery.resolves([{ price: '100000', coin_pair: 'BTC/USD', block_timestamp: nowS() - 7200 }]);
+            let s = await hub.getPriceStatus('BTC/USD');
+            expect(s.stale).to.equal(true);
+            expect(s.fresh).to.equal(false);
+            expect(s.missing).to.equal(false);
+            expect(s.maxAgeSeconds).to.equal(1800);
+            expect(s.ageSeconds).to.be.greaterThan(1800);
+        });
+
+        it('getPriceStatus keeps a fresh snapshot fresh', async function () {
+            mockDb.doQuery.resolves([{ price: '100000', coin_pair: 'BTC/USD', block_timestamp: nowS() - 60 }]);
+            let s = await hub.getPriceStatus('BTC/USD');
+            expect(s.fresh).to.equal(true);
+            expect(s.stale).to.equal(false);
+        });
+
+        it('getPriceStatus never ages out a snapshot with no usable block_timestamp', async function () {
+            mockDb.doQuery.resolves([{ price: '100000', coin_pair: 'BTC/USD', block_timestamp: 0 }]);
+            let s = await hub.getPriceStatus('BTC/USD');
+            expect(s.fresh).to.equal(true);
+            expect(s.ageSeconds).to.equal(null);
+        });
+
+        it('getPrice returns null for a stale snapshot (fails closed)', async function () {
+            mockDb.doQuery.resolves([{ price: '100000', coin_pair: 'BTC/USD', block_timestamp: nowS() - 7200 }]);
+            expect(await hub.getPrice('BTC/USD')).to.be.null;
+        });
+
+        it('getFeeQuote refuses to quote off a stale XCHAIN/USD price', async function () {
+            // Both getPrice calls resolve the same stale row; XCHAIN/USD stale -> throw.
+            mockDb.doQuery.resolves([{ price: '1.00', coin_pair: 'XCHAIN/USD', block_timestamp: nowS() - 7200 }]);
+            let threw = false;
+            try { await hub.getFeeQuote('ISSUE', 'BTC'); } catch (e) { threw = true; }
+            expect(threw, 'stale oracle must fail the quote closed').to.equal(true);
+        });
+
+        it('honours ORACLE_MAX_PRICE_AGE_SECONDS from p2pConfig (0 disables the bound)', async function () {
+            let h = new XChainHub('host', 3306, 'db', 'user', 'pass', { ORACLE_MAX_PRICE_AGE_SECONDS: 0 });
+            h.db = mockDb;
+            mockDb.doQuery.resolves([{ price: '100000', coin_pair: 'BTC/USD', block_timestamp: nowS() - 999999 }]);
+            let s = await h.getPriceStatus('BTC/USD');
+            expect(s.stale).to.equal(false);
+            expect(s.maxAgeSeconds).to.equal(0);
+        });
+    });
+
+    // -----------------------------------------------------------------
     // Governance-driven capability config hot-reload
     // -----------------------------------------------------------------
 

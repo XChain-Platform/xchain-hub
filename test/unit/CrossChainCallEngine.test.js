@@ -67,8 +67,12 @@ function memDb() {
                 // Mirrors the LEFT JOIN ... AND r.status <> 'retracted' predicate
                 // (#4478): a 'retracted' result row no longer suppresses the
                 // dispatch, so the result can be re-relayed after a deep reorg.
+                // The optional `AND d.call_id NOT IN (?, ...)` clause (M-14) parks
+                // result-less rows; excluded call_ids arrive as params[1..].
+                let excluded = sql.includes('NOT IN') ? params.slice(1) : [];
                 return rows.filter(r => r.phase === 'dispatch' && r.status === 'finalized' &&
                                         r.target_chain === params[0] &&
+                                        !excluded.includes(r.call_id) &&
                                         !rows.some(x => x.call_id === r.call_id && x.phase === 'result' &&
                                                         x.status !== 'retracted'));
             }
@@ -118,7 +122,8 @@ function makeEngine(opts) {
     };
     const engine = new CrossChainCallEngine(hub);
     // Never let a unit test gossip or run a real round.
-    engine.consensus = { propose: sinon.stub().resolves(), start: sinon.stub(), stop: sinon.stub(), on: () => {} };
+    engine.consensus = { propose: sinon.stub().resolves(), start: sinon.stub(), stop: sinon.stub(), on: () => {},
+                         forgetFinalized: sinon.stub() };
     return { engine, db, broadcaster };
 }
 
@@ -437,6 +442,79 @@ describe('CrossChainCallEngine', function () {
             expect(db.rows.find(r => r.call_id === 'f'.repeat(64)).status).to.equal('finalized', 'gen-6 re-finalize at the recycled index must survive');
             expect(broadcaster.broadcastDeletion.firstCall.args[0]).to.deep.include(
                 { table: 'cross_chain_calls', source_chain: 'BTC', from_action_index: 40, to_action_index: 75, retraction_generation: 5 });
+        });
+
+        // M-13: retraction must clear the consensus finalized-ring entry for BOTH phases,
+        // otherwise a call re-confirmed after this reorg can never re-run its deterministic
+        // round (propose() no-ops on a finalized id) and is stranded in 'retracted' forever.
+        it('retractCallsForReorg clears the consensus finalized ring for every retracted round (M-13)', async function () {
+            const { engine, db } = makeEngine();
+            db.rows.push(
+                { call_id: CALL_ID, phase: 'dispatch', status: 'finalized', source_chain: 'BTC', source_action_index: 41 },
+                { call_id: CALL_ID, phase: 'result',   status: 'finalized', source_chain: 'BTC', source_action_index: 41 }
+            );
+            await engine.retractCallsForReorg('BTC', 40);
+            const forgot = engine.consensus.forgetFinalized.getCalls().map(c => c.args[0]);
+            expect(forgot).to.include(sha256('XCALLROUND|dispatch|' + CALL_ID));
+            expect(forgot).to.include(sha256('XCALLROUND|result|' + CALL_ID));
+        });
+    });
+
+    // M-14: the result poll must not let a permanently result-less dispatch pin the
+    // ORDER BY id ASC window and starve newer dispatches (head-of-line blocking).
+    describe('result-relay backoff (head-of-line blocking, M-14)', function () {
+
+        it('parks a result-less dispatch so a newer dispatch is no longer starved', async function () {
+            const { engine, db } = makeEngine();
+            // One older result-less dispatch (id 1) and one newer (id 2), both targeting DOGE.
+            db.rows.push(
+                { id: 1, call_id: 'a'.repeat(64), phase: 'dispatch', status: 'finalized', target_chain: 'DOGE', source_chain: 'BTC', source_action_index: 1 },
+                { id: 2, call_id: 'b'.repeat(64), phase: 'dispatch', status: 'finalized', target_chain: 'DOGE', source_chain: 'BTC', source_action_index: 2 }
+            );
+            // No result exists on the target for either call: _maybeRelayResult returns false.
+            sinon.stub(engine, '_indexerCall').resolves({ exists: false });
+
+            // First poll: both are attempted and parked (result-less).
+            await engine._pollTargetResults('DOGE');
+            expect(engine._resultBackoff.has('a'.repeat(64))).to.equal(true);
+            expect(engine._resultBackoff.has('b'.repeat(64))).to.equal(true);
+
+            // Second poll: both are inside their backoff window, so both are excluded
+            // from the hot query. The window is free for whatever arrives next.
+            const spy = sinon.spy(engine, '_maybeRelayResult');
+            await engine._pollTargetResults('DOGE');
+            expect(spy.called).to.equal(false, 'parked rows must not be re-polled while backed off');
+        });
+
+        it('clears backoff once the result becomes available', async function () {
+            const { engine, db } = makeEngine();
+            db.rows.push(
+                { id: 1, call_id: 'a'.repeat(64), phase: 'dispatch', status: 'finalized', target_chain: 'DOGE', source_chain: 'BTC', source_action_index: 1 }
+            );
+            const relay = sinon.stub(engine, '_maybeRelayResult');
+            relay.onFirstCall().resolves(false);   // result absent -> park
+            relay.onSecondCall().resolves(true);    // result arrived -> round proposed
+
+            await engine._pollTargetResults('DOGE');
+            expect(engine._resultBackoff.has('a'.repeat(64))).to.equal(true);
+
+            // Force the backoff window to have elapsed, then poll again.
+            engine._resultBackoff.get('a'.repeat(64)).nextAt = Date.now() - 1;
+            await engine._pollTargetResults('DOGE');
+            expect(engine._resultBackoff.has('a'.repeat(64))).to.equal(false, 'a delivered result clears backoff');
+        });
+
+        it('exponential backoff grows and is capped', function () {
+            const { engine } = makeEngine();
+            const id = 'a'.repeat(64);
+            const t0 = Date.now();
+            engine._parkResult(id);
+            const first = engine._resultBackoff.get(id).nextAt - t0;
+            engine._parkResult(id);
+            const second = engine._resultBackoff.get(id).nextAt - Date.now();
+            expect(second).to.be.greaterThan(first - 5);       // second delay >= first (allow scheduling slack)
+            for (let i = 0; i < 40; i++) engine._parkResult(id);
+            expect(engine._resultBackoff.get(id).nextAt - Date.now()).to.be.at.most(60 * 60 * 1000 + 5);
         });
     });
 });

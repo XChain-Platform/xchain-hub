@@ -128,6 +128,35 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         expect(ValidatorIdentity.verify(canonicalMatch(row), ev.signatures[0].sig, ev.signatures[0].pubkey)).to.be.true;
     });
 
+    // M-13: after a round finalizes, its id sits in the finalized ring and propose()
+    // is a no-op (steady-state dedup). A reorg that RETRACTS the row then re-confirms
+    // the action must be able to re-run the round; forgetFinalized drops the ring
+    // entry so the next propose() finalizes a FRESH round instead of stranding the
+    // call/match in 'retracted' forever.
+    it('forgetFinalized lets a retracted-then-reconfirmed round re-finalize (M-13)', async function () {
+        let bus = buildMesh(1);
+        await startAll(bus);
+        let nd = bus.nodes[0];
+        let mid = 'cc'.repeat(32), row = sampleRow(mid);
+
+        await nd.consensus.propose(mid, { row, snapshot: { validators: validatorsOf(bus), count: 1 } });
+        await sleep(20);
+        expect(nd.finalized.length).to.equal(1);
+        expect(nd.consensus.finalized.has(mid)).to.equal(true);
+
+        // Without forgetting, a re-propose is suppressed by the finalized ring.
+        await nd.consensus.propose(mid, { row, snapshot: { validators: validatorsOf(bus), count: 1 } });
+        await sleep(20);
+        expect(nd.finalized.length).to.equal(1, 'ring must suppress a duplicate finalize');
+
+        // Retraction clears the ring; the next propose runs a fresh round.
+        expect(nd.consensus.forgetFinalized(mid)).to.equal(true);
+        expect(nd.consensus.finalized.has(mid)).to.equal(false);
+        await nd.consensus.propose(mid, { row, snapshot: { validators: validatorsOf(bus), count: 1 } });
+        await sleep(20);
+        expect(nd.finalized.length).to.equal(2, 're-confirmed action must re-finalize after retraction');
+    });
+
     it('does NOT self-finalize over an EMPTY snapshot (bootstrap/mirror-lag wedge guard)', async function () {
         // quorum 0 from an empty snapshot must NOT collapse to the single-operator
         // fast path: a 1-sig match no populated-snapshot peer will ratify wedges the

@@ -509,6 +509,34 @@ class CrossChainDexConsensus extends EventEmitter {
         if(cleanup.unref) cleanup.unref();             // housekeeping timer; never pin process liveness
     }
 
+    // Reorg support (deepdive M-13): drop a round id from the finalized ring so a
+    // re-confirmed action can run a FRESH round for it. Once a round finalizes its
+    // id sits in `finalized` (ring-buffer bounded) and propose() no-ops on it, which
+    // is correct steady-state dedup but permanently wrong after a reorg RETRACTS the
+    // row and the underlying action later re-confirms: the deterministic round can
+    // never re-finalize and the call/match stays stranded in 'retracted'. Retraction
+    // paths call this so the next propose() runs. Also evicts any live pending round
+    // (and its cached FINAL_SYNC payload) so a round still in flight at retraction
+    // time cannot finalize afterward and resurrect the just-retracted row. Exactly-once
+    // still holds: the DB row keyed on (call_id/match_id, phase) is the single slot
+    // indexers act on, and re-finalization overwrites it (ON DUPLICATE KEY UPDATE),
+    // so at most one live row exists per confirmed action.
+    forgetFinalized(rid){
+        rid = String(rid).toLowerCase();
+        let had = this.finalized.delete(rid);
+        this.finalizedRows.delete(rid);
+        if(had){
+            let i = this._finalizedOrder.indexOf(rid);
+            if(i >= 0) this._finalizedOrder.splice(i, 1);
+        }
+        let p = this.pending.get(rid);
+        if(p){
+            if(p.timer) clearTimeout(p.timer);
+            this.pending.delete(rid);
+        }
+        return had;
+    }
+
     _markFinalized(rid, row, signatures, view){
         if(this.finalized.has(rid)) return;
         this.finalized.add(rid);

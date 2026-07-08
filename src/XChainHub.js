@@ -807,10 +807,45 @@ class XChainHub {
         return await this.db.doQuery(query, [limit || 50]);
     }
 
-    async getPrice(coinPair) {
+    // Oracle price staleness bound in seconds (deepdive L-5). Mirrors the indexer's
+    // ORACLE_MAX_PRICE_AGE_SECONDS (getFeeOraclePrices / db.getLatestPrice), default
+    // 1800, so the hub's advisory getprice/getfeequote reject the same stale rounds
+    // the indexer's fee gate rejects instead of serving an arbitrarily old price. 0
+    // disables the bound. block_timestamp is stored in Unix SECONDS (OracleConsensus).
+    _oracleMaxAgeSeconds() {
+        let raw = (this.p2pConfig && this.p2pConfig.ORACLE_MAX_PRICE_AGE_SECONDS != null)
+            ? this.p2pConfig.ORACLE_MAX_PRICE_AGE_SECONDS
+            : process.env.ORACLE_MAX_PRICE_AGE_SECONDS;
+        let v = parseInt(raw, 10);
+        return Number.isFinite(v) ? v : 1800;
+    }
+
+    // Latest finalized snapshot for a coin pair plus a staleness verdict (L-5).
+    // { row, fresh, stale, missing, ageSeconds, maxAgeSeconds }. A snapshot whose
+    // reference-block timestamp is older than the oracle max age is flagged stale so
+    // callers can refuse it rather than serve it. A snapshot with no usable
+    // block_timestamp (0/absent, e.g. legacy rows) is never aged out (age unknown).
+    async getPriceStatus(coinPair) {
         let query = "SELECT * FROM price_snapshots WHERE coin_pair = ? AND status = 'finalized' ORDER BY round_number DESC LIMIT 1";
         let rows = await this.db.doQuery(query, [coinPair]);
-        return rows.length > 0 ? rows[0] : null;
+        let maxAge = this._oracleMaxAgeSeconds();
+        if (rows.length === 0)
+            return { row: null, fresh: false, stale: false, missing: true, ageSeconds: null, maxAgeSeconds: maxAge };
+        let row = rows[0];
+        let snapTs = Number(row.block_timestamp);
+        let nowS = Math.floor(Date.now() / 1000);
+        let age = (Number.isFinite(snapTs) && snapTs > 0) ? (nowS - snapTs) : null;
+        let stale = (maxAge > 0 && age !== null && age > maxAge);
+        return { row: row, fresh: !stale, stale: stale, missing: false, ageSeconds: age, maxAgeSeconds: maxAge };
+    }
+
+    // Freshest finalized price for a coin pair, or null when missing OR stale. Returning
+    // null on stale makes getFeeQuote fail closed (it treats an unavailable price as an
+    // error) instead of quoting off an outdated oracle round (L-5). Callers that need to
+    // distinguish stale from missing use getPriceStatus.
+    async getPrice(coinPair) {
+        let s = await this.getPriceStatus(coinPair);
+        return s.fresh ? s.row : null;
     }
 
     // Sync validators from external data (e.g., indexer staking data)

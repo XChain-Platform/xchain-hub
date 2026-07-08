@@ -669,6 +669,10 @@ class CrossChainDexEngine extends EventEmitter {
             await this.db.doQuery("UPDATE cross_chain_matches SET status = 'retracted' WHERE match_id = ?", [r.match_id]);
             this._applyCommit(r, -1);                   // restore both legs' remaining capacity
             this._inflight.delete(r.match_id);
+            // Clear the consensus finalized-ring entry (M-13): the match_id is the
+            // round id, and without this a match re-formed after this reorg can never
+            // re-finalize (propose() no-ops on a finalized id), stranding it in 'retracted'.
+            this.consensus.forgetFinalized(r.match_id);
             if(this.broadcaster){
                 let evt = { table: 'cross_chain_matches', source_chain: chain, from_action_index: fromActionIndex };
                 if(bounded) evt.to_action_index = to;

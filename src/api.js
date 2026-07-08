@@ -439,8 +439,14 @@ async function startApi(){
         async getprice({coin_pair}){
             if(!coin_pair) return {error: "coin_pair is required"};
             try {
-                let price = await hub.getPrice(coin_pair);
-                return price || {error: "no price data for " + coin_pair};
+                // Return an explicit stale/unavailable error rather than an aged-out
+                // price (L-5): the hub is advisory, but a consumer cannot tell a stale
+                // price from a fresh one, so gate on the same bound the indexer enforces.
+                let s = await hub.getPriceStatus(coin_pair);
+                if(s.missing) return {error: "no price data for " + coin_pair};
+                if(s.stale)   return {error: "oracle price for " + coin_pair + " is stale (age " +
+                                             s.ageSeconds + "s exceeds max " + s.maxAgeSeconds + "s)"};
+                return s.row;
             } catch (err) {
                 return {error: "error fetching price"};
             }

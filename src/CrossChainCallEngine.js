@@ -106,6 +106,21 @@ const NOMINAL_BLOCK_INTERVAL_S = { BTC: 600, LTC: 150, DOGE: 60 };
 // leader's row and break the round. Caps a mis-set XCALL_RELAY_MARGIN_BLOCKS.
 const RELAY_MARGIN_MAX_S = 3000;
 
+// Result-relay backoff (deepdive M-14). A dispatch row whose target execution
+// never yields a result at confirmation depth (e.g. the execution was reorged
+// away and never re-injected) matches the result poll's WHERE clause forever.
+// Under a plain `ORDER BY id ASC LIMIT n` window such rows, being the lowest ids,
+// would pin the window and starve every newer dispatch (head-of-line blocking).
+// A result-less row is parked with an exponential next-retry time and excluded
+// from the hot window until then, so fresh dispatches always get in while the
+// stuck row is retried on a slow cadence. Node-local only: which rows THIS hub
+// proposes first is not a consensus decision (every hub re-verifies each round
+// independently and any hub can lead it), so parking never blocks participation.
+const RESULT_BACKOFF_BASE_MS    = 60 * 1000;        // first re-attempt delay for a result-less dispatch
+const RESULT_BACKOFF_MAX_MS     = 60 * 60 * 1000;   // exponential backoff ceiling (1h)
+const RESULT_BACKOFF_EXCLUDE_MAX = 500;             // max parked call_ids excluded per query (bounds query size)
+const RESULT_BACKOFF_MAP_MAX    = 10000;            // parked-map cap; FIFO evict just retries an entry sooner (safe)
+
 class CrossChainCallEngine extends EventEmitter {
 
     constructor(hub){
@@ -186,6 +201,10 @@ class CrossChainCallEngine extends EventEmitter {
         // Process-lifetime counter for result-relay attempt failures (one per
         // per-call catch in _pollTargetResults). Surfaced by getcrosschaincallstats.
         this._resultAttemptFailures = 0;
+
+        // Node-local result-relay backoff (M-14): call_id -> { attempts, nextAt (ms epoch) }.
+        // Parked entries are excluded from the result poll's hot window until nextAt.
+        this._resultBackoff = new Map();
     }
 
     async start(){
@@ -335,37 +354,74 @@ class CrossChainCallEngine extends EventEmitter {
         // the deterministic 'expired' callback). Filtering retracted result rows
         // back out re-opens re-discovery; _maybeRelayResult re-relay is idempotent
         // (synthetic TX_HASH dedup) so re-relay after re-discovery is safe.
+        // Exclude call_ids still inside their backoff window so a permanently
+        // result-less dispatch cannot pin the ORDER BY id ASC window (M-14). Bounded
+        // to keep the NOT IN list (and query) small; beyond the bound the remaining
+        // parked rows fall back to the id-window, which is the pre-fix behavior only
+        // for that pathological tail.
+        let now = Date.now();
+        let parked = [];
+        for(let [cid, b] of this._resultBackoff){
+            if(b.nextAt > now){ parked.push(cid); if(parked.length >= RESULT_BACKOFF_EXCLUDE_MAX) break; }
+        }
+        let exclude = parked.length ? (" AND d.call_id NOT IN (" + parked.map(() => '?').join(',') + ")") : "";
         let pending = await this.db.doQuery(
             "SELECT d.* FROM cross_chain_calls d " +
             "LEFT JOIN cross_chain_calls r ON r.call_id = d.call_id AND r.phase = 'result' AND r.status <> 'retracted' " +
-            "WHERE d.phase = 'dispatch' AND d.status = 'finalized' AND d.target_chain = ? AND r.id IS NULL " +
-            "ORDER BY d.id ASC LIMIT 100", [coin]);
+            "WHERE d.phase = 'dispatch' AND d.status = 'finalized' AND d.target_chain = ? AND r.id IS NULL" + exclude +
+            " ORDER BY d.id ASC LIMIT 100", [coin, ...parked]);
         for(let d of pending){
-            try { await this._maybeRelayResult(coin, d); }
-            catch(e){
+            let callId = String(d.call_id).toLowerCase();
+            try {
+                // _maybeRelayResult returns false when the result is not yet available
+                // (missing / below depth): park it so it leaves the hot window. Any
+                // other outcome (round proposed, or already in flight) clears backoff.
+                let relayed = await this._maybeRelayResult(coin, d);
+                if(relayed === false) this._parkResult(callId);
+                else this._resultBackoff.delete(callId);
+            } catch(e){
                 this._resultAttemptFailures++;
+                this._parkResult(callId);
                 console.warn('CrossChainCall: result attempt failed for ' +
-                             String(d.call_id).substring(0, 16) + '...: ' + (e && e.message));
+                             callId.substring(0, 16) + '...: ' + (e && e.message));
             }
         }
     }
 
+    // Park a result-less dispatch with exponential backoff so it exits the hot poll
+    // window; it re-enters once nextAt elapses. See RESULT_BACKOFF_* rationale.
+    _parkResult(callId){
+        let evicting = !this._resultBackoff.has(callId) && this._resultBackoff.size >= RESULT_BACKOFF_MAP_MAX;
+        if(evicting){
+            let oldest = this._resultBackoff.keys().next().value;
+            if(oldest !== undefined) this._resultBackoff.delete(oldest);
+        }
+        let b = this._resultBackoff.get(callId) || { attempts: 0, nextAt: 0 };
+        b.attempts++;
+        let delay = Math.min(RESULT_BACKOFF_BASE_MS * Math.pow(2, b.attempts - 1), RESULT_BACKOFF_MAX_MS);
+        b.nextAt = Date.now() + delay;
+        this._resultBackoff.set(callId, b);
+    }
+
+    // Returns true when the result exists and a relay round was proposed (or is
+    // already in flight); false when the result is not yet available (missing on the
+    // target indexer, or not yet at confirmation depth) so the caller can park it (M-14).
     async _maybeRelayResult(coin, dispatch){
         let callId = String(dispatch.call_id).toLowerCase();
         let roundId = this._roundId('result', callId);
-        if(this._inflight.has(roundId)) return;
+        if(this._inflight.has(roundId)) return true;   // round already progressing; don't park
 
         let res;
         try { res = await this._indexerCall(coin, 'getcrosschaincallresult', { call_id: callId }); }
-        catch(e){ return; }
-        if(!res || res.exists !== true) return;
+        catch(e){ return false; }
+        if(!res || res.exists !== true) return false;
 
         // Execution must be at confirmation depth on the target chain before the
         // federation vouches for it back to the source chain (a shallow target
         // reorg would otherwise relay an outcome that never finalized).
         let latest = Number(res.latest_block_index);
         let depth  = latest - Number(res.executed_block_index) + 1;
-        if(!Number.isFinite(depth) || depth < this.confirmations[coin]) return;
+        if(!Number.isFinite(depth) || depth < this.confirmations[coin]) return false;
 
         let resultStatus = RESULT_STATUSES.includes(res.status) ? String(res.status) : 'error';
 
@@ -403,6 +459,7 @@ class CrossChainCallEngine extends EventEmitter {
             this._inflight.delete(roundId);
             throw e;
         }
+        return true;   // result found and a relay round proposed; clear any backoff
     }
 
     // Canonical signing strings. MUST byte-match the indexer's verifiers
@@ -622,7 +679,16 @@ class CrossChainCallEngine extends EventEmitter {
         let rows = await this.db.doQuery("SELECT id, call_id, phase FROM cross_chain_calls WHERE status = 'finalized'" + tail, params);
         if(!rows.length) return;
         await this.db.doQuery("UPDATE cross_chain_calls SET status = 'retracted' WHERE status = 'finalized'" + tail, params);
-        for(let r of rows) this._inflight.delete(this._roundId(r.phase, String(r.call_id)));
+        for(let r of rows){
+            let rid = this._roundId(r.phase, String(r.call_id));
+            this._inflight.delete(rid);
+            // Clear the consensus finalized-ring entry too (M-13): without this the
+            // round can never re-run, so a call re-confirmed after this reorg stays
+            // stranded in 'retracted'. Also drops any result-relay backoff so the
+            // re-confirmed call re-enters the hot poll window immediately.
+            this.consensus.forgetFinalized(rid);
+            this._resultBackoff.delete(String(r.call_id).toLowerCase());
+        }
         if(this.broadcaster){
             let evt = { table: 'cross_chain_calls', source_chain: chain, from_action_index: fromActionIndex };
             if(bounded) evt.to_action_index = to;
