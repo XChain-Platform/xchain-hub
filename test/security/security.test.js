@@ -14,8 +14,13 @@ const sinon          = require('sinon');
 const { expect }     = require('chai');
 const proxyquire     = require('proxyquire');
 const { createMockHub }    = require('../helpers/mockHub');
+const { PRICE_MAX }        = require('../../src/constants.js');
 const { VALIDATORS_3, VALIDATORS_4, makeValidator, SAMPLE_PRICES,
         buildSubmissions } = require('../helpers/fixtures');
+// A price strictly above the accepted (0, PRICE_MAX) band, used as the
+// out-of-bounds sentinel so these bound tests track PRICE_MAX (widened over time
+// from 10M) instead of a hardcoded literal that silently rots.
+const OVER_CAP_PRICE = String(PRICE_MAX * 2);
 
 describe('Security Hardening', function () {
 
@@ -304,15 +309,25 @@ describe('Security Hardening', function () {
     describe('Consensus: Minimum quorum warning', function () {
         const Consensus = require('../../src/Consensus');
 
-        it('logs warning when quorum=0 and minValidators > 1', async function () {
+        it('refuses to propose (fail closed) when minValidators > 1 and no deterministic snapshot', async function () {
+            // Hardened behavior (federation-split guard): a multi-hub federation with no
+            // deterministic validator snapshot no longer falls back to single-node apply
+            // (which would let two hubs finalize the same config round over different local
+            // sets). It fails closed instead. The mock hub resolves no capability snapshot,
+            // so this exercises the refusal path.
             let hub = createMockHub();
             let consensus = new Consensus(hub);
             consensus.minValidators = 3;
             consensus.setValidatorSet([]);
             hub._peerManager.getPeerStatus.returns([]);
-            let warnStub = sinon.stub(console, 'warn');
-            await consensus.propose({ x: 1 });
-            expect(warnStub.calledWith(sinon.match(/single-node mode/))).to.be.true;
+            let threw = null;
+            try {
+                await consensus.propose({ x: 1 });
+            } catch (e) {
+                threw = e;
+            }
+            expect(threw, 'propose must reject rather than apply unilaterally').to.exist;
+            expect(threw.message).to.match(/deterministic|snapshot/i);
         });
 
         it('does not log warning when minValidators is 1', async function () {
@@ -392,9 +407,9 @@ describe('Security Hardening', function () {
             oc = new OracleConsensus(hub, { getSubmissions: sinon.stub() });
         });
 
-        it('_aggregate() rejects prices >= 10,000,000', function () {
+        it('_aggregate() rejects prices >= PRICE_MAX', function () {
             let subs = buildSubmissions([
-                { sender: 'v1', prices: [{ coinPair: 'BTC/USD', price: '10000000' }] },
+                { sender: 'v1', prices: [{ coinPair: 'BTC/USD', price: OVER_CAP_PRICE }] },
                 { sender: 'v2', prices: [{ coinPair: 'BTC/USD', price: '100000' }] }
             ]);
             let result = oc._aggregate(subs, 'BTC/USD');
@@ -412,7 +427,7 @@ describe('Security Hardening', function () {
 
         it('_aggregate() returns null when all prices are out of bounds', function () {
             let subs = buildSubmissions([
-                { sender: 'v1', prices: [{ coinPair: 'BTC/USD', price: '99999999' }] },
+                { sender: 'v1', prices: [{ coinPair: 'BTC/USD', price: OVER_CAP_PRICE }] },
                 { sender: 'v2', prices: [{ coinPair: 'BTC/USD', price: '-5' }] }
             ]);
             let result = oc._aggregate(subs, 'BTC/USD');
@@ -448,7 +463,7 @@ describe('Security Hardening', function () {
                     prices: [
                         { coinPair: 'BTC/USD', price: '100000', sources: 1 },
                         { coinPair: 'LTC/USD', price: '-5', sources: 1 },
-                        { coinPair: 'DOGE/USD', price: '99999999', sources: 1 }
+                        { coinPair: 'DOGE/USD', price: OVER_CAP_PRICE, sources: 1 }
                     ],
                     sources: 3
                 }
@@ -566,6 +581,11 @@ describe('Security Hardening', function () {
         });
 
         it('_handlePropose accepts valid attestation ID format', async function () {
+            // A follower now also verifies the proposed source action against its own
+            // indexer before co-signing (anti-forgery hardening). That path has its own
+            // coverage; here we stub it true to exercise the format-acceptance branch this
+            // test targets, mirroring the '_handlePropose rejects invalid format' twin above.
+            sinon.stub(engine, '_verifySourceAction').resolves(true);
             let attestationId = 'BTC:1:LTC';
             let digest = engine._digest(attestationId, 3);
             let envelope = {
@@ -1254,8 +1274,10 @@ describe('Security Hardening', function () {
             expect(result.error).to.include('limit');
         });
 
-        it('getpricesnapshots rejects limit > 1000', async function () {
-            let result = await controller.getpricesnapshots({ limit: 1001 });
+        it('getpricesnapshots rejects limit over the cap', async function () {
+            // validateLimit caps at 10000 (widened from 1000); use a value above the
+            // current cap so this tracks the source bound instead of a stale literal.
+            let result = await controller.getpricesnapshots({ limit: 10001 });
             expect(result.error).to.include('limit');
         });
 
@@ -1279,8 +1301,8 @@ describe('Security Hardening', function () {
             expect(result.error).to.include('non-negative integer');
         });
 
-        it('getreorghistory rejects limit > 1000', async function () {
-            let result = await controller.getreorghistory({ limit: 5000 });
+        it('getreorghistory rejects limit over the cap', async function () {
+            let result = await controller.getreorghistory({ limit: 10001 });
             expect(result.error).to.include('limit');
         });
 
