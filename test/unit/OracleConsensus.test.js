@@ -389,6 +389,34 @@ describe('OracleConsensus', function () {
     });
 
     // -----------------------------------------------------------------
+    // _isEmptyFederationSnapshot()
+    // -----------------------------------------------------------------
+
+    describe('_isEmptyFederationSnapshot()', function () {
+
+        it('false for a null snapshot (indexer-unreachable degradation path)', function () {
+            oc.setValidatorSet(VALIDATORS_3);
+            expect(oc._isEmptyFederationSnapshot(null)).to.be.false;
+        });
+
+        it('true for an empty snapshot when federated (>= 2 registered validators)', function () {
+            oc.setValidatorSet(VALIDATORS_3);   // _getQuorum() = 2
+            expect(oc._isEmptyFederationSnapshot({ validators: [], count: 0 })).to.be.true;
+        });
+
+        it('false for an empty snapshot when single-node (no validators, no peers)', function () {
+            oc.setValidatorSet([]);
+            pm.getPeerStatus.returns([]);       // _getQuorum() = 0
+            expect(oc._isEmptyFederationSnapshot({ validators: [], count: 0 })).to.be.false;
+        });
+
+        it('false for a non-empty snapshot even when federated', function () {
+            oc.setValidatorSet(VALIDATORS_3);
+            expect(oc._isEmptyFederationSnapshot({ validators: [{ pubkey: 'aa' }], count: 1 })).to.be.false;
+        });
+    });
+
+    // -----------------------------------------------------------------
     // _digest()
     // -----------------------------------------------------------------
 
@@ -491,6 +519,67 @@ describe('OracleConsensus', function () {
             await oc.finalizeRound(1);
             expect(storeSpy.callCount).to.equal(1);
             expect(emitCount).to.equal(1);
+        });
+
+        it('federation with an empty price snapshot skips instead of self-finalizing', async function () {
+            // Federated: 3 registered validators -> _getQuorum() = 2 (> 0).
+            oc.setValidatorSet(VALIDATORS_3);
+            pm.validatorAddr = VALIDATORS_3[0].addr;   // even as leader, must skip
+            // Indexer returned ZERO qualifying price validators at this block.
+            let emptySnap = { validators: [], count: 0 };
+            hub.capabilitySnapshot = {
+                getSnapshot:       sinon.stub().resolves(emptySnap),
+                getWeightSnapshot: sinon.stub().resolves(emptySnap),
+                getQuorum:         sinon.stub().returns(0)
+            };
+
+            let entries = [
+                { sender: pm.validatorAddr, prices: [{ coinPair: 'BTC/USD', price: '100000' }] }
+            ];
+            oracleRound.getSubmissions.returns(buildSubmissions(entries));
+
+            let emitCount = 0;
+            oc.on('round:finalized', () => { emitCount++; });
+            let storeSpy = sinon.spy(oc, '_storeSnapshot');
+
+            await oc.finalizeRound(1, 900000, 1700000000);
+
+            // Skipped, not finalized: no snapshot store, no round:finalized emit,
+            // no PROPOSE broadcast, and a 'skipped' row persisted.
+            expect(storeSpy.callCount).to.equal(0);
+            expect(emitCount).to.equal(0);
+            expect(pm.broadcast.called).to.be.false;
+            expect(oc.finalized.has(1)).to.be.true;
+            let skippedInsert = hub.db.doQuery.getCalls().some(c => /skipped/.test(String(c.args[0])));
+            expect(skippedInsert).to.be.true;
+        });
+
+        it('single-node with an empty snapshot still self-finalizes (bootstrap preserved)', async function () {
+            // Not federated: no registered validators and no peers -> _getQuorum() = 0.
+            oc.setValidatorSet([]);
+            pm.getPeerStatus.returns([]);
+            let emptySnap = { validators: [], count: 0 };
+            hub.capabilitySnapshot = {
+                getSnapshot:       sinon.stub().resolves(emptySnap),
+                getWeightSnapshot: sinon.stub().resolves(emptySnap),
+                getQuorum:         sinon.stub().returns(0)
+            };
+
+            let entries = [
+                { sender: pm.validatorAddr, prices: [{ coinPair: 'BTC/USD', price: '100000' }] }
+            ];
+            oracleRound.getSubmissions.returns(buildSubmissions(entries));
+
+            let emitCount = 0;
+            let emitted = null;
+            oc.on('round:finalized', (data) => { emitCount++; emitted = data; });
+            let storeSpy = sinon.spy(oc, '_storeSnapshot');
+
+            await oc.finalizeRound(1, 900000, 1700000000);
+
+            expect(storeSpy.callCount).to.equal(1);
+            expect(emitCount).to.equal(1);
+            expect(emitted.round).to.equal(1);
         });
 
         it('non-leader does not propose', async function () {

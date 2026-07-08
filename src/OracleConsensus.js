@@ -338,6 +338,20 @@ class OracleConsensus extends EventEmitter {
                 : null;
         }
 
+        // A federation whose price-qualifying set is empty at this block must skip
+        // the round, not self-finalize it: getQuorum(empty)=0 would otherwise take
+        // the single-node bypass below and publish a one-signature PRICE v0 the
+        // indexer's stake gate rejects (see _isEmptyFederationSnapshot). Genuine
+        // single-node / regtest bootstrap (no federation) is unaffected and still
+        // self-finalizes via the quorum===0 path.
+        if (this._isEmptyFederationSnapshot(snapshot)) {
+            console.warn('Oracle: Round ' + round + ' qualified ZERO price validators at block ' +
+                btcBlockHeight + ' while this hub is federated; skipping rather than self-finalizing a ' +
+                'single-signature round the indexer stake gate would reject.');
+            await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'empty qualifying validator snapshot');
+            return;
+        }
+
         let quorum = snapshot
             ? this.hub.capabilitySnapshot.getQuorum(snapshot)
             : this._getQuorum();
@@ -711,6 +725,18 @@ class OracleConsensus extends EventEmitter {
             let quorum = snap
                 ? this.hub.capabilitySnapshot.getQuorum(snap)
                 : this._getQuorum();
+            // Refuse to open a pending round on an empty federation snapshot: quorum
+            // would be 0 and _quorumMet (count mode) returns `size >= 0` = true, so a
+            // single PREPARE/COMMIT would finalize. A legitimate leader skips such a
+            // round (finalizeRound), so a PROPOSE for one is spurious/Byzantine; drop
+            // it. Genuine single-node hubs receive no PROPOSEs, and a healthy
+            // federation snapshot is non-empty, so this only bites the bad case.
+            if (this._isEmptyFederationSnapshot(snap)) {
+                console.warn('Oracle: dropping PROPOSE for round ' + round + ': empty price-qualifying ' +
+                    'snapshot at block ' + blockHeight + ' on a federated hub (a legitimate leader skips ' +
+                    'such a round; not accepting a single-signature finalization).');
+                return;
+            }
             let pending = {
                 round:          round,
                 prices:         prices,
@@ -1195,6 +1221,24 @@ class OracleConsensus extends EventEmitter {
         // Majority floor: bare 2f+1 degenerates to quorum=1 at N=3 (f=0),
         // letting a single validator finalize alone.
         return Math.max(2 * f + 1, Math.ceil((N + 1) / 2));
+    }
+
+    // True when a capability snapshot was fetched but qualified ZERO validators
+    // AND this hub is part of a federation. getQuorum() over an empty snapshot
+    // returns 0, which collides with the genuine single-node bypass; taking that
+    // bypass in a federation self-finalizes the round with ONE signature, storing
+    // a divergent 'finalized' row and publishing a PRICE v0 the indexer's
+    // >2/3-stake gate then rejects. Such a round must be SKIPPED instead. The
+    // federation test is `_getQuorum() > 0` (validatorSet has >=2 registered
+    // members, or a live peer is connected); a genuine single-node / regtest
+    // bootstrap has `_getQuorum() === 0`, so it keeps the self-finalize path. A
+    // null snapshot (indexer unreachable) is NOT this case: that is the separate
+    // graceful-degradation-to-live-count path and is left untouched.
+    _isEmptyFederationSnapshot(snapshot) {
+        if (!snapshot) return false;
+        let vals = snapshot.validators;
+        let empty = !Array.isArray(vals) || vals.length === 0;
+        return empty && this._getQuorum() > 0;
     }
 
     _digest(round, prices) {

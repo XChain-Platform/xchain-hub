@@ -97,6 +97,22 @@ class Consensus {
         return !!(snapshot && Array.isArray(snapshot.validators));
     }
 
+    // True when a block-anchored snapshot was fetched but qualified ZERO
+    // validators in a federation (minValidators > 1). getQuorum(empty) = 0
+    // collides with the genuine single-node bypass below; applying a config
+    // change over an empty federation snapshot means every hub applies it with
+    // NO quorum (a transient empty staker set is not a mandate). An empty
+    // snapshot passes _hasDeterministicSnapshot (it is a real, agreed-upon
+    // empty set), so that gate alone does not catch this. Mirrors the
+    // empty-snapshot guard already in CrossChainEngine / the DEX, and the
+    // OracleConsensus fix. A null snapshot is a DIFFERENT case handled by
+    // _hasDeterministicSnapshot (fail closed for federations); this is only the
+    // present-but-empty case.
+    _isEmptyFederationSnapshot(snapshot) {
+        return this.minValidators > 1 && !!snapshot &&
+            Array.isArray(snapshot.validators) && snapshot.validators.length === 0;
+    }
+
     async start() {
         await this._loadSeq();
 
@@ -160,8 +176,17 @@ class Consensus {
             ? this.hub.capabilitySnapshot.getQuorum(snapshot)
             : this._getQuorum();
 
-        // Single-node fallback: no peers connected -> apply directly
+        // Single-node fallback: no peers connected -> apply directly. But a
+        // present-but-empty federation snapshot also yields quorum 0; applying
+        // unilaterally there would let every hub commit a config change no quorum
+        // ratified. Refuse and retry when the snapshot populates (leader twin of
+        // the follower decline below).
         if (quorum === 0) {
+            if (this._isEmptyFederationSnapshot(snapshot)) {
+                throw new Error('Consensus: refusing to apply config change unilaterally over an EMPTY ' +
+                    'active-validator snapshot (block ' + snapshot.blockIndex + ', minValidators>1); ' +
+                    'will retry when the snapshot populates');
+            }
             if (this.minValidators > 1) {
                 console.warn('Consensus: operating in single-node mode (MIN_VALIDATORS=' + this.minValidators + ' but quorum is 0)');
             }
@@ -388,6 +413,19 @@ class Consensus {
             let quorum = snapshot
                 ? this.hub.capabilitySnapshot.getQuorum(snapshot)
                 : this._getQuorum();
+
+            // Decline to PREPARE over an empty federation snapshot: quorum would be
+            // 0 and the count-mode quorum check (`size >= 0`) would let a single
+            // PREPARE finalize, applying a config change no quorum ratified. A
+            // legitimate leader refuses to propose such a round, so a PRE_PREPARE for
+            // one is spurious; create no proposal and let it time out into view
+            // change (follower twin of the propose() refusal above).
+            if (this._isEmptyFederationSnapshot(snapshot)) {
+                console.warn('Consensus: declining to PREPARE for seq ' + seq +
+                    ' over an EMPTY active-validator snapshot (block ' + btcBlockHeight +
+                    ', minValidators>1); a legitimate leader skips such a round.');
+                return;
+            }
 
             // Create a follower proposal (no resolve/reject; we didn't initiate it)
             let proposal = {

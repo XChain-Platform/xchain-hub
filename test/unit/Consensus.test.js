@@ -1375,6 +1375,78 @@ describe('Consensus (PBFT)', function () {
             expect(hub.applyConfig.calledOnceWith({ ok: true })).to.be.true;
         });
 
+        it('_isEmptyFederationSnapshot: true only for a present-but-empty snapshot in a federation', function () {
+            consensus.minValidators = 4;
+            expect(consensus._isEmptyFederationSnapshot(null)).to.be.false;
+            expect(consensus._isEmptyFederationSnapshot({ validators: [] })).to.be.true;
+            expect(consensus._isEmptyFederationSnapshot({ validators: [{ pubkey: 'ab' }] })).to.be.false;
+            consensus.minValidators = 1;
+            expect(consensus._isEmptyFederationSnapshot({ validators: [] })).to.be.false;
+        });
+
+        it('(a2) propose() throws over an EMPTY federation snapshot instead of applying unilaterally', async function () {
+            // A present-but-empty snapshot yields quorum 0 and passes
+            // _hasDeterministicSnapshot, so the null-gate does not catch it. The
+            // leader must refuse rather than apply the change with no quorum.
+            consensus.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[1].addr;
+            consensus.minValidators = 4;
+            hub.capabilitySnapshot = {
+                getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000, count: 0, validators: [] }),
+                getQuorum: sinon.stub().returns(0)
+            };
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+
+            let caught = null;
+            try {
+                await consensus.propose({ cfg: 1 });
+            } catch (e) {
+                caught = e;
+            }
+            expect(caught).to.be.an('error');
+            expect(caught.message).to.include('EMPTY');
+            expect(hub.applyConfig.called).to.be.false;
+            expect(pm.broadcast.called).to.be.false;
+        });
+
+        it('(b2) follower declines to PREPARE over an EMPTY federation snapshot', async function () {
+            consensus.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+            consensus.minValidators = 4;
+            hub.capabilitySnapshot = {
+                getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000, count: 0, validators: [] }),
+                getQuorum: sinon.stub().returns(0)
+            };
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+
+            let config = { x: 1 };
+            let digest = consensus._digest(config);
+            await consensus._handlePrePrepare({
+                sender: VALIDATORS_4[1].addr,
+                data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 800000 }
+            });
+
+            expect(consensus.pendingProposals.has(5)).to.be.false;
+            expect(pm.broadcast.called).to.be.false;
+        });
+
+        it('(c2) single-node (minValidators<=1) still applies over an empty snapshot', async function () {
+            // The empty-federation guard requires minValidators>1, so a genuine
+            // single-node hub keeps the direct-apply bootstrap path.
+            consensus.setValidatorSet([]);
+            pm.getPeerStatus.returns([]);
+            consensus.minValidators = 1;
+            hub.capabilitySnapshot = {
+                getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000, count: 0, validators: [] }),
+                getQuorum: sinon.stub().returns(0)
+            };
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+
+            let result = await consensus.propose({ ok: true });
+            expect(result).to.be.true;
+            expect(hub.applyConfig.calledOnceWith({ ok: true })).to.be.true;
+        });
+
         it('follower still PREPAREs with minValidators>1 when a real snapshot IS present', async function () {
             // Control: a deterministic (even empty-after-filter) snapshot is not
             // null, so the gate does not fire and the normal follower path runs.

@@ -90,6 +90,25 @@ class CapabilitySnapshot {
         return null;
     }
 
+    // Freshness / echo guard. The indexer fail-closes on a not-yet-indexed block
+    // (`block_index > latest` -> error, surfaced here as a null snapshot) and
+    // echoes the REQUESTED block on success, so a mismatch means the indexer
+    // answered for a different height than asked. Locking a snapshot mislabeled
+    // with `requested` would let two hubs compute quorum over different validator
+    // sets for the same round. Reject on mismatch (throttled log reuses the auth
+    // idiom). Returns true when the echoed block matches the request.
+    _blockEchoOk(method, result, requested) {
+        if (Number(result.block_index) === Number(requested)) return true;
+        let now = Date.now();
+        if (now - this._authWarnAt > this.cacheTtlMs) {
+            this._authWarnAt = now;
+            console.error('CapabilitySnapshot: ' + method + ' returned block_index ' + result.block_index +
+                ' for requested block ' + requested + '; rejecting snapshot (freshness/echo mismatch, ' +
+                'possible indexer bug or misconfiguration).');
+        }
+        return false;
+    }
+
     // Fetch (or read from cache) the deterministic validator set for the given
     // capability at the given block boundary. Returns:
     //   { validators: [{pubkey, amount}, ...], count, blockIndex, capability }
@@ -141,6 +160,7 @@ class CapabilitySnapshot {
             if (!result || result.error) return null;
             let validators = this._coerceValidators(result);
             if (validators === null) return null;
+            if (!this._blockEchoOk('getcapabilityvalidators', result, blockIndex)) return null;
             let snapshot = {
                 capability:  result.capability,
                 blockIndex:  result.block_index,
@@ -198,6 +218,7 @@ class CapabilitySnapshot {
             if (!result || result.error) return null;
             let validators = this._coerceValidators(result);
             if (validators === null) return null;
+            if (!this._blockEchoOk('getstakeweightsbycapability', result, blockIndex)) return null;
             let snapshot = {
                 capability:  result.capability,
                 blockIndex:  result.block_index,
@@ -240,6 +261,7 @@ class CapabilitySnapshot {
             if (!result || result.error) return null;
             let validators = this._coerceValidators(result);
             if (validators === null) return null;
+            if (!this._blockEchoOk('getactivevalidators', result, blockIndex)) return null;
             let snapshot = {
                 capability:  '*',
                 blockIndex:  result.block_index,
@@ -282,6 +304,7 @@ class CapabilitySnapshot {
             if (!result || result.error) return null;
             let validators = this._coerceValidators(result);
             if (validators === null) return null;
+            if (!this._blockEchoOk('getactivestakeweights', result, blockIndex)) return null;
             let snapshot = {
                 capability:  '*',
                 blockIndex:  result.block_index,

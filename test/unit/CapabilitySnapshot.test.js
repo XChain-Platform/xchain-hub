@@ -86,6 +86,23 @@ describe('CapabilitySnapshot', function () {
             expect(registry.getMinStake.calledWith('attestation')).to.equal(true);
         });
 
+        it('rejects a snapshot whose echoed block_index differs from the request (freshness guard)', async function () {
+            // The indexer fail-closes on an un-indexed block and echoes the requested
+            // block on success, so a mismatch means it answered for a different height.
+            // Locking that snapshot would let two hubs use different validator sets for
+            // the same round, so it must be refused (null) rather than cached.
+            axiosStub.post.resolves({ data: { result: {
+                capability: 'attestation', block_index: 99, count: 1,
+                validators: [{ pubkey: 'ab', amount: '50000' }]
+            } } });
+            sinon.stub(console, 'error');
+            let registry = { getMinStake: sinon.stub().returns('25000') };
+            let snap = new CapabilitySnapshot(makeHub(registry));
+
+            let result = await snap.getSnapshot('attestation', 100);
+            expect(result).to.equal(null);
+        });
+
         it('coerces a numeric MIN_STAKE to a string', async function () {
             axiosStub.post.resolves(okResult());
             let registry = { getMinStake: sinon.stub().returns(25000) };
