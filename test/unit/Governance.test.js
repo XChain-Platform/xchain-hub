@@ -580,6 +580,38 @@ describe('Governance', function () {
             expect(hub.db.doQuery.called).to.be.false;
         });
 
+        it('_handlePropose DROPS an inbound out-of-bounds numeric proposal (change-bounds guard)', function () {
+            // 100 -> 200 is +100%, over the +50% MAX_INCREASE. propose() rejects it
+            // locally; a Byzantine peer that skips propose() and broadcasts the raw
+            // GOV_PROPOSE must not get every hub to record and vote on it.
+            gov._handlePropose({
+                sender: 'peer', type: 'GOV_PROPOSE',
+                data: {
+                    proposalId: 'gov:P:1', parameter: 'P',
+                    currentValue: '100', proposedValue: '200',
+                    rationale: 'drain', proposerPubkey: 'abc',
+                    votingEnd: new Date().toISOString()
+                }
+            });
+            expect(hub.db.doQuery.called).to.be.false;
+        });
+
+        it('_handlePropose persists an inbound non-numeric proposal (bounds guard is a no-op there)', function () {
+            // The bounds check only applies to numeric parameters; a non-numeric
+            // change must still be recorded so it can be voted on.
+            gov._handlePropose({
+                sender: 'peer', type: 'GOV_PROPOSE',
+                data: {
+                    proposalId: 'gov:MODE:1', parameter: 'MODE',
+                    currentValue: 'fast', proposedValue: 'slow',
+                    rationale: 'switch', proposerPubkey: 'abc',
+                    votingEnd: new Date().toISOString()
+                }
+            });
+            expect(hub.db.doQuery.called).to.be.true;
+            expect(hub.db.doQuery.getCall(0).args[0]).to.include('INSERT IGNORE');
+        });
+
         it('_handleVote persists a registered validator vote with a valid signature', function () {
             let kp  = ValidatorIdentity.generate();
             let idn = new ValidatorIdentity(kp.privkeyHex);

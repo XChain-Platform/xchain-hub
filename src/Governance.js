@@ -395,6 +395,28 @@ class Governance extends EventEmitter {
             activation = Number(activationBlock);
         }
 
+        // Re-validate the change bounds on the follower path, mirroring the
+        // activation_block re-check above. propose() enforces them locally, but a
+        // Byzantine peer can broadcast a raw GOV_PROPOSE that never went through
+        // propose(); without this, every hub records and votes on an out-of-bounds
+        // change. Drop it (never record it) so the whole federation ignores it,
+        // matching the MIN_STAKE and block-anchor drops above. _validateChangeBounds
+        // is a no-op for non-numeric parameters, so only numeric out-of-bounds
+        // proposals are affected.
+        //
+        // DEPLOY NOTE: enforce fleet-wide in one coordinated upgrade. During a
+        // mixed-version window, fixed hubs drop an out-of-bounds Byzantine proposal
+        // while unfixed hubs persist it, so the two disagree on its existence (and
+        // could reach different tally outcomes). Legitimate proposals always pass
+        // bounds (propose() validated them), so honest traffic never diverges.
+        try {
+            this._validateChangeBounds(parameter, currentValue, proposedValue);
+        } catch (e) {
+            console.warn('Governance: dropping inbound proposal ' + proposalId + ' (' + parameter +
+                '): change exceeds allowed bounds: ' + e.message);
+            return;
+        }
+
         this.db.doQuery(
             `INSERT IGNORE INTO governance_proposals
                 (proposal_id, proposer_pubkey, parameter, current_value, proposed_value,
