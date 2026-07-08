@@ -285,7 +285,7 @@ describe('SlashDetector', function () {
             expect(hub.db.doQuery.called).to.be.false;
         });
 
-        it('30 consecutive misses triggers non_participation slash', async function () {
+        it('30 consecutive misses triggers non_participation slash and latches', async function () {
             sd.missedRounds.set(VALIDATORS_3[0].pubkey, 29);
 
             await sd._checkParticipation(30, [], VALIDATORS_3);
@@ -293,24 +293,61 @@ describe('SlashDetector', function () {
             expect(hub.db.doQuery.called).to.be.true;
             let args = hub.db.doQuery.getCall(0).args;
             expect(args[1][1]).to.equal('non_participation');
+            // Latched after the row persisted, so it won't re-fire next round.
+            expect(sd.nonParticipationFired.get(VALIDATORS_3[0].pubkey)).to.be.true;
         });
 
-        it('participation resets the missed counter to 0', async function () {
+        it('participation resets the missed counter to 0 and re-arms the latch', async function () {
             sd.missedRounds.set(VALIDATORS_3[0].pubkey, 25);
+            sd.nonParticipationFired.set(VALIDATORS_3[0].pubkey, true);
 
             // Validator 0 participates
             await sd._checkParticipation(26, [VALIDATORS_3[0].pubkey], VALIDATORS_3);
             expect(sd.missedRounds.get(VALIDATORS_3[0].pubkey)).to.equal(0);
+            expect(sd.nonParticipationFired.get(VALIDATORS_3[0].pubkey)).to.be.false;
         });
 
-        it('31st miss does NOT trigger again (only on exact threshold)', async function () {
-            sd.missedRounds.set(VALIDATORS_3[0].pubkey, 30);
+        it('does not re-fire once latched (one proposal per miss-streak)', async function () {
+            // Cross the threshold at 30 (fires + latches), then miss again at 31.
+            sd.missedRounds.set(VALIDATORS_3[0].pubkey, 29);
+            await sd._checkParticipation(30, [], VALIDATORS_3);
             hub.db.doQuery.resetHistory();
 
             await sd._checkParticipation(31, [], VALIDATORS_3);
             expect(sd.missedRounds.get(VALIDATORS_3[0].pubkey)).to.equal(31);
-            // 31 !== 30, so no new proposal
+            // Latch is set, so no second proposal for the same streak.
             expect(hub.db.doQuery.called).to.be.false;
+        });
+
+        it('re-fires past the threshold while un-latched (retry after a lost record)', async function () {
+            // Streak already past the threshold but never recorded (e.g. a prior
+            // DB write failed, so the offense is un-latched). The next miss must
+            // still record it rather than lose the offense forever.
+            sd.missedRounds.set(VALIDATORS_3[0].pubkey, 30);
+            sd.nonParticipationFired.set(VALIDATORS_3[0].pubkey, false);
+            hub.db.doQuery.resetHistory();
+
+            await sd._checkParticipation(31, [], VALIDATORS_3);
+            expect(hub.db.doQuery.called).to.be.true;
+            expect(hub.db.doQuery.getCall(0).args[1][1]).to.equal('non_participation');
+            expect(sd.nonParticipationFired.get(VALIDATORS_3[0].pubkey)).to.be.true;
+        });
+
+        it('a failed record leaves the offense un-latched so it retries next round', async function () {
+            sd.missedRounds.set(VALIDATORS_3[0].pubkey, 29);
+            hub.db.doQuery.rejects(new Error('db down'));
+
+            await sd._checkParticipation(30, [], VALIDATORS_3);
+            // Write failed, so the latch is NOT set.
+            expect(sd.nonParticipationFired.get(VALIDATORS_3[0].pubkey)).to.not.equal(true);
+
+            // Next round the write succeeds and the offense is finally recorded.
+            hub.db.doQuery.resetHistory();
+            hub.db.doQuery.resolves([]);
+            await sd._checkParticipation(31, [], VALIDATORS_3);
+            expect(hub.db.doQuery.called).to.be.true;
+            expect(hub.db.doQuery.getCall(0).args[1][1]).to.equal('non_participation');
+            expect(sd.nonParticipationFired.get(VALIDATORS_3[0].pubkey)).to.be.true;
         });
 
         it('handles empty allValidators gracefully', async function () {

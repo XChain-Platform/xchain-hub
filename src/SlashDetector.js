@@ -44,6 +44,13 @@ class SlashDetector {
         // of the 3-in-24h threshold, not on every deviation while the window
         // stays saturated: Map<pubkey, bool>
         this.repeatedDeviationFired = new Map();
+
+        // Latch per validator so non_participation fires once per crossing of
+        // the missed-rounds threshold. It is set only after the proposal row
+        // persists, so a failed DB write leaves the offense un-latched and it
+        // retries on the next missed round instead of being lost. Re-arms when
+        // the validator participates again: Map<pubkey, bool>
+        this.nonParticipationFired = new Map();
     }
 
     // Check a finalized round for slashable offenses
@@ -120,17 +127,26 @@ class SlashDetector {
         for (let v of allValidators) {
             if (participantSet.has(v.pubkey)) {
                 this.missedRounds.set(v.pubkey, 0);
+                // Re-arm the latch so a fresh miss-streak can be reported again.
+                this.nonParticipationFired.set(v.pubkey, false);
             } else {
                 let missed = (this.missedRounds.get(v.pubkey) || 0) + 1;
                 this.missedRounds.set(v.pubkey, missed);
 
-                if (missed === this.missedRoundsThreshold) {
+                // Fire once per streak at or past the threshold. `>=` plus the
+                // latch keeps a single proposal per crossing while staying
+                // retry-safe: an exact `===` fired only at the precise count, so
+                // a DB write that failed at the threshold (errors are swallowed
+                // in _recordSlashProposal) could never be retried and the offense
+                // was lost. The latch is set only after the row persists.
+                if (missed >= this.missedRoundsThreshold && !this.nonParticipationFired.get(v.pubkey)) {
                     console.warn('Slash: Validator ' + v.pubkey.substring(0, 16) +
                         '... missed ' + missed + ' consecutive rounds');
 
-                    await this._recordSlashProposal(v.pubkey, 'non_participation', round,
+                    let recorded = await this._recordSlashProposal(v.pubkey, 'non_participation', round,
                         JSON.stringify({ missedRounds: missed })
                     );
+                    if (recorded) this.nonParticipationFired.set(v.pubkey, true);
                 }
             }
         }
@@ -177,15 +193,22 @@ class SlashDetector {
         }
     }
 
+    // Returns true only when the row persisted, so callers can latch a
+    // once-per-crossing offense on success and safely retry on a failed write.
     async _recordSlashProposal(validatorPubkey, offenseType, round, evidence) {
         if (typeof validatorPubkey !== 'string' || !/^[0-9a-fA-F]{64}$/.test(validatorPubkey)) {
             console.warn('SlashDetector: Invalid pubkey format; skipping slash proposal');
-            return;
+            return false;
         }
         let query = `INSERT INTO slash_proposals (validator_pubkey, offense_type, round_number, evidence)
                      VALUES (?, ?, ?, ?)`;
-        await this.db.doQuery(query, [validatorPubkey, offenseType, round, evidence])
-            .catch(e => console.error('Error recording slash proposal:', e));
+        try {
+            await this.db.doQuery(query, [validatorPubkey, offenseType, round, evidence]);
+            return true;
+        } catch (e) {
+            console.error('Error recording slash proposal:', e);
+            return false;
+        }
     }
 
     _resolveValidatorPubkey(addr) {
