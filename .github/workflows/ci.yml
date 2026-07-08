@@ -13,6 +13,9 @@ on:
 jobs:
   ci:
     uses: XChain-Platform/.github/.github/workflows/ci-reusable.yml@master
-    # Override the Node version for a repo if ever needed:
-    # with:
-    #   node-version: "20"
+    with:
+      # Opt into the perf gate: the hub's perf suites self-skip when MariaDB is
+      # absent, so they are safe to run on a bare CI runner as a post-gate step.
+      run-perf: true
+      perf-script: "test:perf"
+      # node-version: "20"   # override the Node major here if ever needed
