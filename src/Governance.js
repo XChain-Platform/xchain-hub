@@ -612,10 +612,17 @@ class Governance extends EventEmitter {
 
         let newStatus = approved ? 'passed' : 'failed';
 
-        await this.db.doQuery(
+        // Gate the broadcast + emit on the status transition actually landing on THIS
+        // row. setInterval(_checkExpiredProposals) does not await its async pass, so a
+        // slow DB lets the next tick re-select the still-'voting' proposal and re-tally
+        // it; the status='voting' WHERE clause makes only one UPDATE affect a row, but
+        // without this affectedRows check both passes would broadcast GOV_RESULT and
+        // emit proposal:finalized, double-applying on the leader. Mirrors _handleResult.
+        let res = await this.db.doQuery(
             "UPDATE governance_proposals SET status = ?, applied_at = NOW() WHERE proposal_id = ? AND status = 'voting'",
             [newStatus, proposal.proposal_id]
         );
+        if (!res || !res.affectedRows) return;
 
         this.peerManager.broadcast(GOV_RESULT, {
             proposalId: proposal.proposal_id,

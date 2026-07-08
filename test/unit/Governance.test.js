@@ -446,7 +446,7 @@ describe('Governance', function () {
                 { voter_pubkey: VALIDATORS_3[1].pubkey, vote: 'approve' },
                 { voter_pubkey: VALIDATORS_3[2].pubkey, vote: 'reject' }
             ]);
-            hub.db.doQuery.onSecondCall().resolves(); // UPDATE
+            hub.db.doQuery.onSecondCall().resolves({ affectedRows: 1 }); // UPDATE (status transition landed)
 
             let emitted = null;
             gov.on('proposal:finalized', (d) => { emitted = d; });
@@ -503,7 +503,7 @@ describe('Governance', function () {
                 { voter_pubkey: VALIDATORS_3[0].pubkey, vote: 'approve' },
                 { voter_pubkey: VALIDATORS_3[1].pubkey, vote: 'approve' }
             ]);
-            hub.db.doQuery.onSecondCall().resolves();
+            hub.db.doQuery.onSecondCall().resolves({ affectedRows: 1 });
 
             await gov._tallyProposal({ proposal_id: 'gov:P:1', parameter: 'P' });
 

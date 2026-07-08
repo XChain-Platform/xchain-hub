@@ -67,6 +67,12 @@ class OracleRound {
         this.maxSubmissionsPerRound  = parseInt(this.config.ORACLE_MAX_SUBMISSIONS_PER_ROUND) || 200;
         this.priceMax               = PRICE_MAX;
 
+        // Canonical coin-pair whitelist. Submitted prices for any pair outside this
+        // fixed set are dropped on ingest, so a peer cannot inject a fabricated pair
+        // (e.g. BTC/ZZZ) that would flow into the aggregate and finalize with no
+        // deviation history to gate it.
+        this.canonicalPairs = new Set(PriceFetcher.getCoinPairs());
+
         // Chain-tip health tracking
         this.lastSuccessfulChainTipFetchAt = null;
         this.chainTipFetchFailures         = 0;
@@ -459,11 +465,30 @@ class OracleRound {
     }
 
     // Handle incoming gossip messages
+    // A sender counts only if it maps to a registered validator pubkey. Mirrors
+    // OracleConsensus._isKnownSender: a null registry fails closed; an empty
+    // registry is the permissive bootstrap window (before syncvalidators has run).
+    _isRegisteredSender(sender) {
+        let registry = this.peerManager && this.peerManager.validatorPubkeys;
+        if (!registry) return false;
+        if (registry.size === 0) return true;
+        return registry.has(sender);
+    }
+
     _handleMessage(envelope) {
         if (envelope.type !== ORACLE_PRICE_SUBMIT) return;
 
         let { round, prices, sources } = envelope.data;
         if (!round || !prices || !Array.isArray(prices)) return;
+
+        // Drop submissions from senders that are not registered validators. Without
+        // this gate a single authorized signing key can broadcast many submissions,
+        // each naming a distinct fake `sender` (PeerManager only binds sender<->key
+        // when the sender is already registered), Sybil-stuffing the trimmed-median
+        // aggregate and the ORACLE_MIN_SUBMISSIONS diversity floor with one node.
+        // Mirrors OracleConsensus._isKnownSender, including the empty-registry
+        // permissive bootstrap window.
+        if (!this._isRegisteredSender(envelope.sender)) return;
 
         // Only accept submissions for current or next round
         if (round < this.currentRound - 1 || round > this.currentRound + 1) return;
@@ -491,7 +516,9 @@ class OracleRound {
         }
 
         // Validate individual prices: filter to positive finite values within bounds
+        // AND to the canonical pair whitelist (reject fabricated/novel coin pairs).
         let validPrices = prices.filter(p => {
+            if (!p || !this.canonicalPairs.has(p.coinPair)) return false;
             let val = parseFloat(p.price);
             return Number.isFinite(val) && val > 0 && val < this.priceMax;
         });

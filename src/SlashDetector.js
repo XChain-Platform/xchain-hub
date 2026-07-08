@@ -114,7 +114,7 @@ class SlashDetector {
                 );
 
                 // Track once per (validator, round) for the repeated-deviation check
-                this._trackDeviation(pubkey, round);
+                await this._trackDeviation(pubkey, round);
             }
         }
     }
@@ -143,16 +143,23 @@ class SlashDetector {
                     console.warn('Slash: Validator ' + v.pubkey.substring(0, 16) +
                         '... missed ' + missed + ' consecutive rounds');
 
+                    // Latch optimistically BEFORE the await, then re-arm if the write
+                    // failed. checkRound is driven by the un-serialized round:finalized
+                    // listener, so two overlapping finalizations could both read the
+                    // latch as false during the first call's DB round-trip and record a
+                    // duplicate proposal. Setting the latch first closes that TOCTOU
+                    // window while a failed write still re-arms for a retry next round.
+                    this.nonParticipationFired.set(v.pubkey, true);
                     let recorded = await this._recordSlashProposal(v.pubkey, 'non_participation', round,
                         JSON.stringify({ missedRounds: missed })
                     );
-                    if (recorded) this.nonParticipationFired.set(v.pubkey, true);
+                    if (!recorded) this.nonParticipationFired.set(v.pubkey, false);
                 }
             }
         }
     }
 
-    _trackDeviation(pubkey, round) {
+    async _trackDeviation(pubkey, round) {
         if (!this.recentDeviations.has(pubkey)) {
             this.recentDeviations.set(pubkey, []);
         }
@@ -176,17 +183,24 @@ class SlashDetector {
         // stays ≥3. The latch re-arms when pruning drops the window below 3.
         if (deviations.length >= 3) {
             if (!this.repeatedDeviationFired.get(pubkey)) {
-                this.repeatedDeviationFired.set(pubkey, true);
-
                 console.warn('Slash: Validator ' + pubkey.substring(0, 16) +
                     '... has 3+ price deviations in 24 hours');
 
-                this._recordSlashProposal(pubkey, 'repeated_deviation', round,
+                // Latch optimistically BEFORE the await, then re-arm on a failed write.
+                // Setting it first closes the TOCTOU window: this method is now awaited
+                // but overlapping deviations for the same validator would otherwise all
+                // read the latch as false during the DB round-trip and each record a
+                // duplicate. Re-arming on failure preserves retry-safety, the original
+                // bug was a latch set before an un-awaited write that, on failure, was
+                // never retried because the saturated window never re-armed it.
+                this.repeatedDeviationFired.set(pubkey, true);
+                let recorded = await this._recordSlashProposal(pubkey, 'repeated_deviation', round,
                     JSON.stringify({
                         deviationsIn24h: deviations.length,
                         rounds: deviations.slice(-50).map(d => d.round)
                     })
                 );
+                if (!recorded) this.repeatedDeviationFired.set(pubkey, false);
             }
         } else {
             this.repeatedDeviationFired.set(pubkey, false);

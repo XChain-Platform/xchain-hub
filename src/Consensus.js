@@ -37,6 +37,12 @@ const PBFT_NEW_VIEW    = 'PBFT_NEW_VIEW';
 
 const DEFAULT_TIMEOUT = 30000; // 30 seconds
 
+// Max views ahead of the local view that an inbound VIEW_CHANGE may name. Bounds
+// pendingViewChanges to at most this many live buckets so a Byzantine validator
+// cannot seed unbounded entries with ever-increasing view numbers. Leader failover
+// only ever advances the view a handful of steps, so this clears real churn easily.
+const MAX_VIEW_SKEW = 100;
+
 class Consensus {
 
     constructor(hub) {
@@ -689,6 +695,17 @@ class Consensus {
     _handleViewChange(envelope) {
         let { view, seq } = envelope.data;
         if (typeof view !== 'number' || typeof seq !== 'number') return;
+
+        // A VIEW_CHANGE must never rewind the view. Without this, a quorum of votes
+        // for a view LOWER than the local one rewinds this.view, changing leader
+        // election (seq+view)%N and desyncing rotation across the federation during
+        // ordinary partition recovery. The bound is STRICT less-than, not <=: a node
+        // that initiated a view change advances this.view to the target and then
+        // collects inbound votes FOR that same view, so votes where view == this.view
+        // are legitimate and must still be counted. The forward-skew cap bounds
+        // pendingViewChanges to at most MAX_VIEW_SKEW live buckets, so a Byzantine
+        // validator cannot seed unbounded entries with ever-increasing view numbers.
+        if (view < this.view || view > this.view + MAX_VIEW_SKEW) return;
 
         // Only count VIEW_CHANGE votes from registered validators; view-change
         // quorum is the same Set.size tally as PREPARE/COMMIT.

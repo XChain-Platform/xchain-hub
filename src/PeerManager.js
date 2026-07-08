@@ -388,10 +388,16 @@ class PeerManager extends EventEmitter {
         // verified message). envelope.sender is intentionally excluded here because
         // the signature has not been checked yet: using it would let an attacker name
         // a known peer's address in the envelope to claim the higher ceiling for
-        // otherwise-unverified traffic (~20x headroom amplification). The bucket key
-        // (ratePeer) still includes envelope.sender so the dedup + tracking work
-        // correctly after verification.
-        let ratePeer = knownAddr || ws._peerAddr || envelope.sender;
+        // otherwise-unverified traffic (~20x headroom amplification).
+        //
+        // The bucket KEY is also a transport-verified identifier (ws._remoteIp), never
+        // envelope.sender: an unverified connection could otherwise mint a brand-new
+        // bucket per message by rotating envelope.sender, so every message would be the
+        // first in its window (count=1) and the anti-spam ceiling would never trigger,
+        // while peerMsgCounts grew one permanent entry per forged sender. Keying on the
+        // connection's remote IP forces all of one connection's pre-verification traffic
+        // through a single bucket.
+        let ratePeer = knownAddr || ws._peerAddr || ws._remoteIp || envelope.sender;
         let rateCeil = this.peers.has(knownAddr || ws._peerAddr) ? this.knownMsgRateLimit : this.msgRateLimit;
         if (!this._checkMsgRate(ratePeer, rateCeil)) {
             console.warn('P2P: Rate limit exceeded for peer ' + ratePeer + '; dropping message');
@@ -597,6 +603,12 @@ class PeerManager extends EventEmitter {
             for (let [id, expiresAt] of this.seenIds) {
                 if (now >= expiresAt) this.seenIds.delete(id);
             }
+            // Prune rate buckets whose 60s window has elapsed. A never-reused key
+            // (e.g. a churned remote IP) would otherwise persist forever, so this
+            // is what keeps peerMsgCounts bounded to the active-peer set.
+            for (let [addr, entry] of this.peerMsgCounts) {
+                if ((now - entry.windowStart) > 60000) this.peerMsgCounts.delete(addr);
+            }
         }, this.config.P2P_DEDUP_PRUNE_INTERVAL || 30000);
     }
 
@@ -646,6 +658,13 @@ class PeerManager extends EventEmitter {
         let now = Date.now();
         let entry = this.peerMsgCounts.get(addr);
         if (!entry || (now - entry.windowStart) > 60000) {
+            // Hard size cap as a backstop to the interval pruner: evict the oldest
+            // bucket if the map is full so a burst of distinct keys between prune
+            // cycles cannot grow it without bound (mirrors _addToDedup).
+            if (!entry && this.peerMsgCounts.size >= this.dedupCacheMax) {
+                let oldest = this.peerMsgCounts.keys().next().value;
+                this.peerMsgCounts.delete(oldest);
+            }
             this.peerMsgCounts.set(addr, { count: 1, windowStart: now });
             return true;
         }

@@ -477,8 +477,13 @@ class ReorgHandler extends EventEmitter {
             [chain, timestamp]
         );
 
+        // price_snapshots.block_timestamp is Unix SECONDS (OracleConsensus / PriceAggregator
+        // write Math.floor(Date.now()/1000)), but the reorg `timestamp` is MILLISECONDS
+        // (validated against Date.now()). Divide to compare in the same unit, matching the
+        // attestations DELETE above; without this the seconds column never exceeds the ms
+        // literal and the dispute silently matches zero rows.
         await this.db.doQuery(
-            "UPDATE price_snapshots SET status = 'disputed' WHERE block_timestamp > ? AND status = 'finalized'",
+            "UPDATE price_snapshots SET status = 'disputed' WHERE block_timestamp > ? / 1000 AND status = 'finalized'",
             [timestamp]
         );
 

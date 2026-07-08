@@ -698,6 +698,26 @@ class OracleConsensus extends EventEmitter {
                     }
                 }
             }
+
+            // Coverage check. The per-price loop above only bounds the pairs the
+            // proposer chose to INCLUDE; it never checks for pairs the proposer
+            // dropped. An honest leader proposes every pair the round priced (it
+            // stores a skipped round rather than an empty/truncated set), so a
+            // Byzantine leader omitting a pair this hub priced locally is the only
+            // way to reach here with missing coverage. Withhold co-sign (same
+            // fail-safe path as a deviation disagreement) so a suppressed pair can't
+            // silently freeze consumers on the prior snapshot for the round window.
+            if (!Array.isArray(prices) || prices.length === 0) {
+                reject('(all)', 'empty or malformed price set', { reason: 'empty-proposal' });
+                return;
+            }
+            let proposedPairs = new Set(prices.map(p => p && p.coinPair));
+            for (let coinPair of localByPair.keys()) {
+                if (!proposedPairs.has(coinPair)) {
+                    reject(coinPair, 'priced locally but omitted from proposal', { reason: 'missing-pairs' });
+                    return;
+                }
+            }
         }
 
         // Create or update pending round. The validator-set snapshot is locked

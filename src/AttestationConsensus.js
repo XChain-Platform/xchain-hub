@@ -430,11 +430,21 @@ class AttestationConsensus extends EventEmitter {
         let winnerHashHex = winnerHash.toString('hex');
         let providerDef = this.providerRegistry.getDef(pending.providerId);
         let strategy = providerDef && providerDef.consensus_strategy;
+        // The canonical the on-chain verifier reconstructs binds `status` (hardcoded
+        // 'ok' for a winner), but a proposal stores only {body, meta, sig} and its sig
+        // was verified in _handlePropose over the sender's own wire status. A proposer
+        // can match the winner body+meta yet have signed over status='fail', so its sig
+        // does NOT verify over the winner canonical. Re-verify here before counting it,
+        // mirroring _handlePrepare (614) and _handleCommit; an unverifiable sig inflates
+        // signatures.size and the indexer would deterministically reject the response.
+        let winnerCanonical = this._buildCanonical(rid, pending.providerId, winner.body, pending.status, winner.meta, Number(pending.request.block_index)).toString('utf8');
         for(let [pubkey, p] of pending.proposals){
             let pHash = crypto.createHash('sha256').update(p.body).digest();
             let matchesWinner = (Buffer.compare(pHash, winnerHash) === 0 && p.meta === winner.meta);
-            if(matchesWinner){
+            if(matchesWinner && ValidatorIdentity.verify(winnerCanonical, String(p.sig), pubkey)){
                 pending.signatures.set(pubkey, p.sig);
+            } else if(matchesWinner){
+                console.warn('AttestationConsensus: PROPOSE sig not over winner canonical from ' + String(pubkey).substring(0,16) + '... (not counted)');
             } else if(strategy === 'byte_equality' && this.hub.slashDetector){
                 // Diverged proposal under byte_equality; record as slash candidate.
                 // Best-effort; failures don't disrupt the round.
