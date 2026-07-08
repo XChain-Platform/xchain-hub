@@ -266,15 +266,24 @@ async function startApi(){
     // only by the per-IP rate limit.
     app.use((req, res, next) => {
         if (!HUB_API_KEY) return next();
-        let method = req.body && req.body.method;
-        let gated = method && (WRITE_METHODS.has(method.toLowerCase()) ||
-            (SENSITIVE_READ_AUTH && SENSITIVE_READ_METHODS.has(method.toLowerCase())));
+        // A JSON-RPC batch arrives as an array of call objects; a single call as
+        // one object. express-json-rpc-router dispatches every element of an
+        // array body, so the gate must inspect ALL of them: require a key if ANY
+        // element invokes a write or sensitive-read method. Reading req.body.method
+        // off an array leaves it undefined, which is how a batch previously smuggled
+        // gated methods past the check unauthenticated.
+        let calls = Array.isArray(req.body) ? req.body : [req.body];
+        let gated = calls.some(call => {
+            let method = call && call.method;
+            return method && (WRITE_METHODS.has(method.toLowerCase()) ||
+                (SENSITIVE_READ_AUTH && SENSITIVE_READ_METHODS.has(method.toLowerCase())));
+        });
         if (gated) {
             let provided = req.headers['x-api-key'] || '';
             let a = Buffer.from(provided), b = Buffer.from(HUB_API_KEY);
             if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
                 return res.status(401).json({
-                    jsonrpc: '2.0', id: req.body.id || null,
+                    jsonrpc: '2.0', id: (Array.isArray(req.body) ? null : (req.body && req.body.id)) || null,
                     error: { code: -32001, message: 'Unauthorized' }
                 });
             }

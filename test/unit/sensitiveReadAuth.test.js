@@ -83,14 +83,19 @@ async function bootApi(env) {
     // The auth middleware is the app.use() function that 401s an unkeyed
     // write when a key is configured (or, keyless boot, the one that calls
     // next() for a write without touching res). Identify it by probing.
-    function drive(mw, method, apiKey) {
+    function drive(mw, methodOrMethods, apiKey) {
         const res = {
             statusCode: 200,
             status(code) { this.statusCode = code; return this; },
             json(body) { this.body = body; return this; }
         };
+        // An array of methods drives a JSON-RPC batch (array body); a string
+        // drives a single call (object body).
+        const body = Array.isArray(methodOrMethods)
+            ? methodOrMethods.map((m, i) => ({ method: m, id: i + 1 }))
+            : { method: methodOrMethods, id: 1 };
         let nexted = false;
-        mw({ body: { method, id: 1 }, headers: apiKey ? { 'x-api-key': apiKey } : {} },
+        mw({ body, headers: apiKey ? { 'x-api-key': apiKey } : {} },
            res, () => { nexted = true; });
         return { nexted, res };
     }
@@ -104,7 +109,10 @@ async function bootApi(env) {
         } catch (_) { /* not the auth middleware */ }
     }
     expect(authMw, 'auth middleware not found among app.use() calls').to.not.equal(null);
-    return { request: (method, apiKey) => drive(authMw, method, apiKey) };
+    return {
+        request:      (method, apiKey)  => drive(authMw, method, apiKey),
+        requestBatch: (methods, apiKey) => drive(authMw, methods, apiKey)
+    };
 }
 
 describe('hub API-key tiers (writes + sensitive reads vs public reads)', function () {
@@ -137,6 +145,23 @@ describe('hub API-key tiers (writes + sensitive reads vs public reads)', functio
 
         it('wrong key on a sensitive read is 401', function () {
             expect(api.request('getallconfigs', 'nope').res.statusCode).to.equal(401);
+        });
+
+        it('batch with a gated method and no key is 401 (bypass regression)', function () {
+            // A JSON-RPC array body must not slip a write past the gate: the
+            // pre-fix middleware read req.body.method off the array (undefined)
+            // and called next() unauthenticated.
+            const { nexted, res } = api.requestBatch(['ping', 'updateconfig'], undefined);
+            expect(nexted).to.equal(false);
+            expect(res.statusCode).to.equal(401);
+        });
+
+        it('batch of a gated method with the key passes', function () {
+            expect(api.requestBatch(['ping', 'getallconfigs'], KEY).nexted).to.equal(true);
+        });
+
+        it('batch of only public reads passes without a key', function () {
+            expect(api.requestBatch(['ping', 'getproposals'], undefined).nexted).to.equal(true);
         });
     });
 
