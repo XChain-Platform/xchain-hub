@@ -151,7 +151,7 @@ describe('CrossChainEngine', function () {
     });
 
     // -----------------------------------------------------------------
-    // requestAttestation() — single-node fallback
+    // requestAttestation() - single-node fallback
     // -----------------------------------------------------------------
 
     describe('requestAttestation()', function () {
@@ -359,13 +359,13 @@ describe('CrossChainEngine', function () {
     });
 
     // -----------------------------------------------------------------
-    // Quorum locking — consensus-divergence regression
+    // Quorum locking - consensus-divergence regression
     //
     // The quorum threshold for a PBFT round must be captured when the
     // pending attestation is created, NOT re-derived live on every
     // prepare/commit check. If the validator set changes mid-round, two
     // hubs holding different in-memory sets would otherwise compute
-    // different thresholds for the same round — one commits, the other
+    // different thresholds for the same round - one commits, the other
     // stalls forever, and the federation diverges.
     // -----------------------------------------------------------------
 
@@ -400,7 +400,7 @@ describe('CrossChainEngine', function () {
 
         it('commits at the round-start quorum even after validatorSet GROWS mid-round', async function () {
             // Round starts with N=4 (quorum=3). A larger set synced mid-round
-            // would yield quorum=5 live — which would wrongly stall this node.
+            // would yield quorum=5 live - which would wrongly stall this node.
             engine.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[0].addr;
             let attestationId = 'BTC:1:LTC';
@@ -414,7 +414,7 @@ describe('CrossChainEngine', function () {
             // After PROPOSE: prepares = {self, sender} = 2; one PREPARE broadcast.
             pm.broadcast.resetHistory();
 
-            // Validator set GROWS mid-round — live quorum would now be 5.
+            // Validator set GROWS mid-round - live quorum would now be 5.
             engine.setValidatorSet(VALIDATORS_7);
 
             // Third prepare arrives → 3 prepares. Locked quorum=3 → COMMIT must fire.
@@ -429,7 +429,7 @@ describe('CrossChainEngine', function () {
 
         it('does NOT commit early if validatorSet SHRINKS mid-round', async function () {
             // Round starts with N=7 (quorum=5). A shrunk set synced mid-round
-            // would yield quorum=1 live — which would wrongly commit too early.
+            // would yield quorum=1 live - which would wrongly commit too early.
             engine.setValidatorSet(VALIDATORS_7);
             pm.validatorAddr = VALIDATORS_7[0].addr;
             let attestationId = 'BTC:1:LTC';
@@ -442,7 +442,7 @@ describe('CrossChainEngine', function () {
             });
             pm.broadcast.resetHistory();
 
-            // Validator set SHRINKS mid-round — live quorum would now be 1.
+            // Validator set SHRINKS mid-round - live quorum would now be 1.
             engine.setValidatorSet([makeValidator(0)]);
 
             // Third prepare → 3 prepares. Locked quorum=5 → still NOT met, no COMMIT.
@@ -458,7 +458,7 @@ describe('CrossChainEngine', function () {
     });
 
     // -----------------------------------------------------------------
-    // Source-action verification — the fail-closed follower guard that
+    // Source-action verification - the fail-closed follower guard that
     // replaced the Phase-4C "trust the proposer's claim" TODO. A follower
     // confirms the proposed source action against its OWN indexer (via
     // getactionconfirmations) and refuses to co-sign when the action is

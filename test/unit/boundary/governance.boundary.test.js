@@ -35,84 +35,84 @@ describe('Boundary: Governance', function () {
     });
 
     // -----------------------------------------------------------------
-    // _validateChangeBounds — normal parameters (MAX_INCREASE=50%, MAX_DECREASE=33%)
+    // _validateChangeBounds - normal parameters (MAX_INCREASE=50%, MAX_DECREASE=33%)
     // -----------------------------------------------------------------
 
-    describe('_validateChangeBounds — normal parameters', function () {
+    describe('_validateChangeBounds - normal parameters', function () {
 
-        it('exactly 50% increase (100→150) — should NOT throw', function () {
+        it('exactly 50% increase (100→150) - should NOT throw', function () {
             expect(() => gov._validateChangeBounds('SOME_PARAM', '100', '150')).to.not.throw();
         });
 
-        it('50.1% increase (100→150.1) — should throw', function () {
+        it('50.1% increase (100→150.1) - should throw', function () {
             expect(() => gov._validateChangeBounds('SOME_PARAM', '100', '150.1')).to.throw(/exceeds maximum/);
         });
 
-        it('exactly 33% decrease (100→67) — should NOT throw', function () {
+        it('exactly 33% decrease (100→67) - should NOT throw', function () {
             // changeRatio = (67-100)/100 = -0.33, equals -MAX_DECREASE so not strictly less
             expect(() => gov._validateChangeBounds('SOME_PARAM', '100', '67')).to.not.throw();
         });
 
-        it('33.1% decrease (100→66.9) — should throw', function () {
+        it('33.1% decrease (100→66.9) - should throw', function () {
             // changeRatio = (66.9-100)/100 = -0.331
             expect(() => gov._validateChangeBounds('SOME_PARAM', '100', '66.9')).to.throw(/exceeds maximum/);
         });
     });
 
     // -----------------------------------------------------------------
-    // _validateChangeBounds — slashing parameters (MAX_SLASH_INCREASE=25%, MAX_SLASH_DECREASE=20%)
+    // _validateChangeBounds - slashing parameters (MAX_SLASH_INCREASE=25%, MAX_SLASH_DECREASE=20%)
     // -----------------------------------------------------------------
 
-    describe('_validateChangeBounds — slashing parameters', function () {
+    describe('_validateChangeBounds - slashing parameters', function () {
 
-        it('SLASH_DEVIATION_THRESHOLD: exactly 25% increase — should NOT throw', function () {
+        it('SLASH_DEVIATION_THRESHOLD: exactly 25% increase - should NOT throw', function () {
             expect(() => gov._validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '100', '125')).to.not.throw();
         });
 
-        it('SLASH_DEVIATION_THRESHOLD: 25.1% increase — should throw', function () {
+        it('SLASH_DEVIATION_THRESHOLD: 25.1% increase - should throw', function () {
             expect(() => gov._validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '100', '125.1')).to.throw(/exceeds maximum/);
         });
 
-        it('SLASH_MISSED_ROUNDS_THRESHOLD: exactly 20% decrease — should NOT throw', function () {
+        it('SLASH_MISSED_ROUNDS_THRESHOLD: exactly 20% decrease - should NOT throw', function () {
             // changeRatio = (80-100)/100 = -0.20
             expect(() => gov._validateChangeBounds('SLASH_MISSED_ROUNDS_THRESHOLD', '100', '80')).to.not.throw();
         });
 
-        it('SLASH_MISSED_ROUNDS_THRESHOLD: 20.1% decrease — should throw', function () {
+        it('SLASH_MISSED_ROUNDS_THRESHOLD: 20.1% decrease - should throw', function () {
             // changeRatio = (79.9-100)/100 = -0.201
             expect(() => gov._validateChangeBounds('SLASH_MISSED_ROUNDS_THRESHOLD', '100', '79.9')).to.throw(/exceeds maximum/);
         });
     });
 
     // -----------------------------------------------------------------
-    // _validateChangeBounds — skip conditions
+    // _validateChangeBounds - skip conditions
     // -----------------------------------------------------------------
 
-    describe('_validateChangeBounds — skip conditions', function () {
+    describe('_validateChangeBounds - skip conditions', function () {
 
-        it('currentValue="0" — skips validation (no throw)', function () {
+        it('currentValue="0" - skips validation (no throw)', function () {
             // Division by zero guard: current === 0 → return early
             expect(() => gov._validateChangeBounds('SOME_PARAM', '0', '999')).to.not.throw();
         });
 
-        it('non-numeric values ("abc","def") — skips validation (no throw)', function () {
+        it('non-numeric values ("abc","def") - skips validation (no throw)', function () {
             expect(() => gov._validateChangeBounds('SOME_PARAM', 'abc', 'def')).to.not.throw();
         });
 
-        it('negative current value — ratio inverts direction (increase from -100 to -50 is 50%)', function () {
+        it('negative current value - ratio inverts direction (increase from -100 to -50 is 50%)', function () {
             // changeRatio = (-50 - -100) / -100 = 50 / -100 = -0.50 → treated as decrease
             // -0.50 < -0.33 so this should throw for normal params
             expect(() => gov._validateChangeBounds('SOME_PARAM', '-100', '-50')).to.throw(/exceeds maximum/);
         });
 
-        it('very small values: 0.001→0.0015 (50% increase) — boundary math with floats', function () {
+        it('very small values: 0.001→0.0015 (50% increase) - boundary math with floats', function () {
             // changeRatio = (0.0015 - 0.001) / 0.001 = 0.5 exactly
             expect(() => gov._validateChangeBounds('SOME_PARAM', '0.001', '0.0015')).to.not.throw();
         });
     });
 
     // -----------------------------------------------------------------
-    // _tallyProposal — quorum and approval boundary cases
+    // _tallyProposal - quorum and approval boundary cases
     //
     // Formula: quorum = totalVotes >= ceil(validatorCount / 2)
     //          passed = quorumMet && approvals >= ceil(validatorCount * 2 / 3)
@@ -124,7 +124,7 @@ describe('Boundary: Governance', function () {
     //   We inspect the first argument of the UPDATE call to check status.
     // -----------------------------------------------------------------
 
-    describe('_tallyProposal — quorum and approval boundary cases', function () {
+    describe('_tallyProposal - quorum and approval boundary cases', function () {
 
         function makeProposal(id) {
             return { proposal_id: id, parameter: 'SOME_PARAM', current_value: '100', proposed_value: '120' };
@@ -143,7 +143,7 @@ describe('Boundary: Governance', function () {
                 .onSecondCall().resolves([]);      // UPDATE proposal
             let proposal = makeProposal('prop-test');
             await gov._tallyProposal(proposal);
-            // Second call is the UPDATE — first arg of args array is the SQL args array
+            // Second call is the UPDATE - first arg of args array is the SQL args array
             let updateArgs = hub.db.doQuery.secondCall.args[1];
             return updateArgs[0]; // newStatus is first bind param
         }
@@ -192,13 +192,13 @@ describe('Boundary: Governance', function () {
     });
 
     // -----------------------------------------------------------------
-    // propose() — cooldown boundary conditions
+    // propose() - cooldown boundary conditions
     //
     // COOLDOWN_DAYS = 14. propose() checks the last failed proposal's
     // voting_end; if Date.now() < votingEnd + 14 days, it throws.
     // -----------------------------------------------------------------
 
-    describe('propose() — cooldown boundary', function () {
+    describe('propose() - cooldown boundary', function () {
 
         function setupPropose(lastFailedVotingEnd) {
             hub.db.doQuery
@@ -207,7 +207,7 @@ describe('Boundary: Governance', function () {
                 .onThirdCall().resolves([]);                                    // INSERT (if reached)
         }
 
-        it('cooldown exactly expired (14 days + 1 ms ago) — allowed (no throw)', async function () {
+        it('cooldown exactly expired (14 days + 1 ms ago) - allowed (no throw)', async function () {
             let cooldownMs = 14 * 24 * 60 * 60 * 1000;
             // voting_end was 14 days + 1 ms ago → cooldownEnd = voting_end + 14d = 1 ms ago → expired
             let votingEnd = new Date(Date.now() - cooldownMs - 1);
@@ -222,7 +222,7 @@ describe('Boundary: Governance', function () {
             expect(threw).to.equal(false);
         });
 
-        it('cooldown not yet expired (failed 13 days ago) — blocked (throws)', async function () {
+        it('cooldown not yet expired (failed 13 days ago) - blocked (throws)', async function () {
             let thirteenDaysMs = 13 * 24 * 60 * 60 * 1000;
             // voting_end was 13 days ago → cooldownEnd = voting_end + 14d = 1 day from now → not expired
             let votingEnd = new Date(Date.now() - thirteenDaysMs);

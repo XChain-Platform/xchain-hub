@@ -1,4 +1,4 @@
-# FINAL — the slim per-repo replacement for .github/workflows/ci.yml
+# FINAL - the slim per-repo replacement for .github/workflows/ci.yml
 # Drop this into each npm repo. It does nothing but delegate to the shared definition.
 # Pinned @master: push the reusable workflow once and every caller picks it up on its
 # next run. (Switch to a moving @v1 tag later if you want change-control.)

@@ -17,14 +17,14 @@
  *
  * The validator-specific risk is QUIET DIVERGENCE: two honest hubs, fed the
  * same oracle submissions but in different network arrival orders, must compute
- * the SAME finalized price and sign the SAME canonical PRICE v0 payload — else
+ * the SAME finalized price and sign the SAME canonical PRICE v0 payload - else
  * their signatures don't match and the round can't finalize (or worse, the
  * federation splits). This pins two properties of OracleConsensus aggregation:
  *
  *   1. trimmed median is correct + discards outliers, and is independent of
  *      submission arrival order;
  *   2. the canonical PRICE v0 payload (what every hub signs) is byte-identical
- *      regardless of arrival order — even when the aggregate array order differs,
+ *      regardless of arrival order - even when the aggregate array order differs,
  *      because pairs are sorted before serialization.
  *
  * Pure (no DB / no network) so it runs in CI on every change.
@@ -51,7 +51,7 @@ describe('Regression: Oracle determinism', function () {
 
     // 7 validators. BTC/USD carries an outlier (99999) that trimming must drop.
     // v6 lists its pairs LTC-first so that, under a reversed arrival order, the
-    // aggregate array comes out in a DIFFERENT order than the forward order —
+    // aggregate array comes out in a DIFFERENT order than the forward order -
     // which is exactly what the canonical (pair-sorted) payload must absorb.
     const ENTRIES = [
         ['v0', [{ coinPair: 'BTC/USD', price: '100' }, { coinPair: 'LTC/USD', price: '70' }]],
@@ -91,7 +91,7 @@ describe('Regression: Oracle determinism', function () {
         const rawFwd = oc._aggregateAll(submissions(ENTRIES, FWD)).map((p) => p.coinPair).join(',');
         const rawRev = oc._aggregateAll(submissions(ENTRIES, REV)).map((p) => p.coinPair).join(',');
         assert.notStrictEqual(rawFwd, rawRev, 'expected aggregate array order to differ by arrival order');
-        assert.strictEqual(fwd, rev, 'canonical payload diverged with arrival order — signatures would not match');
+        assert.strictEqual(fwd, rev, 'canonical payload diverged with arrival order - signatures would not match');
         assert.strictEqual(fwd, mix);
     });
 });

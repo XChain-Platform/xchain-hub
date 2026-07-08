@@ -1,7 +1,7 @@
 # xchain-hub Configuration
 
 The hub is configured entirely through environment variables (typically loaded
-from a `.env` file in the service root — copy `.env.example` to `.env` to start).
+from a `.env` file in the service root - copy `.env.example` to `.env` to start).
 This document is the authoritative catalogue of every variable the hub reads,
 grouped by concern.
 
@@ -9,7 +9,7 @@ The hub is the platform's **config oracle and cross-chain coordinator**: it
 serves configuration to the indexer/explorer, runs the validator P2P cluster,
 drives PBFT consensus and oracle price rounds, and publishes attestations and
 oracle prices on-chain. A misconfigured hub can therefore affect the whole
-validator federation — read the **Silent-failure variables** section first.
+validator federation - read the **Silent-failure variables** section first.
 
 ---
 
@@ -18,7 +18,7 @@ validator federation — read the **Silent-failure variables** section first.
 Two variables degrade security when left empty. The hub starts and appears
 healthy, so the misconfiguration is easy to miss.
 
-### `HUB_API_KEY` — empty disables API authentication
+### `HUB_API_KEY` - empty disables API authentication
 
 When `HUB_API_KEY` is set, authentication fails closed: mutating methods
 (`updateconfig`, `registervalidator`, `propose`, `vote`, `requestattestation`,
@@ -38,14 +38,14 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 Clients then send it on each request (the indexer reads the same value as
 `HUB_API_KEY`, the encoder-facing services as their `*_ENCODER_API_KEY`, etc.).
 
-### `SIGNING_PRIVKEY_HEX` — empty means unsigned P2P messages / no federation identity
+### `SIGNING_PRIVKEY_HEX` - empty means unsigned P2P messages / no federation identity
 
 `SIGNING_PRIVKEY_HEX` is the Ed25519 private key (a 32-byte seed, encoded as 64
 hex characters) that authenticates this hub's P2P messages to the rest of the
 validator federation. When the P2P cluster is enabled (see `P2P_VALIDATOR_ADDR`)
 but this key is empty, the hub **loads no validator identity**: outbound messages
 go out unsigned and this hub has no verifiable identity among its peers. Nothing
-fails loudly — the hub simply never participates as an authenticated validator,
+fails loudly - the hub simply never participates as an authenticated validator,
 and depending on peers' `REQUIRE_SIGNATURES` its messages may be silently dropped.
 
 **Generate a key pair** (the private seed is what you set; keep it secret):
@@ -61,7 +61,7 @@ validator's pubkey must be registered in the cluster so peers can verify its
 signatures.
 
 > The key format is validated: it must be exactly 64 hex characters. An invalid
-> non-empty value throws at startup — only the **empty** case is silent.
+> non-empty value throws at startup - only the **empty** case is silent.
 
 ---
 
@@ -69,7 +69,7 @@ signatures.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `HUB_PORT` | **Yes** | — | TCP port the REST/JSON-RPC API binds to. The hub will not start without it. |
+| `HUB_PORT` | **Yes** | - | TCP port the REST/JSON-RPC API binds to. The hub will not start without it. |
 | `HUB_HOST` | No | `0.0.0.0` | Bind interface. |
 | `HUB_DB_KEEPALIVE_INTERVAL` | No | `30000` | DB keep-alive ping interval (ms). |
 
@@ -77,7 +77,7 @@ signatures.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `HUB_API_KEY` | **Prod** | _empty_ | API key required on write requests and WS upgrades when set. **Empty leaves them open (startup warning) — see above.** |
+| `HUB_API_KEY` | **Prod** | _empty_ | API key required on write requests and WS upgrades when set. **Empty leaves them open (startup warning) - see above.** |
 | `HUB_RATE_LIMIT_RPM` | No | `100` | Requests per minute per client. |
 | `CORS_ORIGIN` | No | `false` | Allowed CORS origin; `false` disables cross-origin requests. |
 
@@ -85,11 +85,11 @@ signatures.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `HUB_DB_HOST` | **Yes** | — | MariaDB host. |
-| `HUB_DB_PORT` | **Yes** | — | MariaDB port. |
-| `HUB_DB_NAME` | **Yes** | — | Database name. |
-| `HUB_DB_USER` | **Yes** | — | Database user. |
-| `HUB_DB_PASS` | **Yes** | — | Database password. |
+| `HUB_DB_HOST` | **Yes** | - | MariaDB host. |
+| `HUB_DB_PORT` | **Yes** | - | MariaDB port. |
+| `HUB_DB_NAME` | **Yes** | - | Database name. |
+| `HUB_DB_USER` | **Yes** | - | Database user. |
+| `HUB_DB_PASS` | **Yes** | - | Database password. |
 | `DB_QUERY_TIMEOUT` | No | `30000` | Per-query timeout (ms). |
 
 ## Telemetry collector
@@ -113,8 +113,8 @@ handler, governance, and attestation subsystems are **all enabled only when
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `P2P_VALIDATOR_ADDR` | No | _empty_ | This validator's address. Setting it enables the entire P2P/validator stack. |
-| `ORACLE_EPOCH_START` | **If P2P** | — | Unix-ms timestamp anchoring oracle round numbering. Must be identical across all hubs in the federation. The hub exits at startup if P2P is enabled and this is unset. |
-| `SIGNING_PRIVKEY_HEX` | **If P2P** | _empty_ | Ed25519 seed (64 hex chars). **Empty = unsigned / no identity — see above.** |
+| `ORACLE_EPOCH_START` | **If P2P** | - | Unix-ms timestamp anchoring oracle round numbering. Must be identical across all hubs in the federation. The hub exits at startup if P2P is enabled and this is unset. |
+| `SIGNING_PRIVKEY_HEX` | **If P2P** | _empty_ | Ed25519 seed (64 hex chars). **Empty = unsigned / no identity - see above.** |
 | `REQUIRE_SIGNATURES` | No | `true` | Reject unsigned or invalid peer messages. |
 | `P2P_PORT` | No | `10001` | P2P listener port. |
 | `P2P_HOST` | No | `0.0.0.0` | P2P bind interface. |

@@ -45,7 +45,7 @@ function matchRow(id, status) {
     };
 }
 
-// XMATCH canonical (mirror of the publisher's _matchCanonical) — fixtures sign
+// XMATCH canonical (mirror of the publisher's _matchCanonical) - fixtures sign
 // real Ed25519 sigs over it so the follower's cryptographic verification passes.
 function matchCanonical(m) {
     let raw = ['XMATCH', m.match_id, String(m.snapshot_block),
@@ -287,7 +287,7 @@ describe('StateAnchorPublisher', function () {
                 rewardTracker: {
                     anchorReward: '10.00000000',
                     recordAnchorReward: async (type, round, pubkey, blk) => { self.rewards.push({ type, round, pubkey, blk }); },
-                    // Block-scoped indexer resolution — deterministic, so every
+                    // Block-scoped indexer resolution - deterministic, so every
                     // hub resolves the same source (overridable for divergence
                     // / unresolvable-source tests).
                     resolveSourceByPubkey: async (pubkey, blk) => (opts.sourceResolver
@@ -596,7 +596,7 @@ describe('StateAnchorPublisher', function () {
         // Decouple on-chain anchoring from checkpoint production. With N=2 only
         // even seqs are eligible; the odd one is never anchored (it lives only in
         // the off-chain mirror). Seeds: seq6 already anchored, seq7 (odd, null),
-        // seq8 (even, null) — the latest eligible unanchored is seq8.
+        // seq8 (even, null) - the latest eligible unanchored is seq8.
         let bus = buildMesh(1, {
             cfg: { ANCHOR_CHECKPOINT_EVERY_N: '2' },
             mutate: (self, db) => {
@@ -681,9 +681,9 @@ describe('StateAnchorPublisher', function () {
             expect(nd.db.matches[0].archived_status).to.equal('finalized');
         }
 
-        // Rewards: EVERY hub records both rows — the earner at publish time, the
+        // Rewards: EVERY hub records both rows - the earner at publish time, the
         // rest by mirroring the signature-verified V0_DONE / FINALIZED
-        // announcements — credited to the publisher/leader with the quorum-agreed
+        // announcements - credited to the publisher/leader with the quorum-agreed
         // snapshot_block, so all hubs hold identical reward rows and any of them
         // can build/verify the archive's rewards section.
         for (let nd of bus.nodes) {
@@ -738,7 +738,7 @@ describe('StateAnchorPublisher', function () {
 
     // ── anchor-reward archive rail (F10) ────────────────────────────────────
     // Anchor-publish rewards are hub-pushed rows the indexer can never re-derive
-    // from a chain parse — the archive is their recovery transport. Rows carry
+    // from a chain parse - the archive is their recovery transport. Rows carry
     // no per-row signatures, so followers verify them by RE-DERIVATION.
 
     const pkOf = (i) => new ValidatorIdentity(String(10 + i).repeat(32).slice(0, 64)).getPubkeyHex().toLowerCase();
@@ -759,7 +759,7 @@ describe('StateAnchorPublisher', function () {
         await sleep(150);
 
         // Rewards-only batches publish (the empty-check includes rewards) with a
-        // real co-sign quorum — followers re-derived every archived field.
+        // real co-sign quorum - followers re-derived every archived field.
         let v1Nodes = bus.nodes.filter(nd => nd.published.some(p => p.split('|')[1] === '1'));
         expect(v1Nodes.length).to.equal(1);
         expect(v1Nodes[0]).to.equal(leader);
@@ -780,7 +780,7 @@ describe('StateAnchorPublisher', function () {
             s.capability === 'oracle_publish' && s.snapshot_block === 100).length).to.equal(4);
 
         // batch_seq back-filled on the leader directly and on followers via
-        // XANC_FINALIZED — the row leaves the pending set federation-wide.
+        // XANC_FINALIZED - the row leaves the pending set federation-wide.
         for (let nd of bus.nodes)
             expect(nd.db.rewardRows[0].batch_seq, 'node ' + nd.i).to.equal(0);
     });
@@ -834,7 +834,7 @@ describe('StateAnchorPublisher', function () {
         expect(await verify(Object.assign({}, good, { amount: '11.00000000' }))).to.equal(false);
         // Source must match our own block-scoped indexer resolution.
         expect(await verify(Object.assign({}, good, { source: 'src_forged' }))).to.equal(false);
-        // A held (type, round) row must agree — a leader crediting itself for
+        // A held (type, round) row must agree - a leader crediting itself for
         // another hub's publish diverges here on every honest hub.
         expect(await verify(Object.assign({}, good, { validator_pubkey: pk1, source: srcOf(pk1) }))).to.equal(false);
         // Absence alone is tolerated (late joiner): an unheld round still
@@ -849,7 +849,7 @@ describe('StateAnchorPublisher', function () {
 
     it('followers tolerate per-hub mirror ids in archived rows (id is bookkeeping, not consensus)', async function () {
         // Live finding (3-hub venue): each hub assigns its own AUTO_INCREMENT id
-        // to the same finalized row (hub1=60, hub2=36, hub3=34 for one call) —
+        // to the same finalized row (hub1=60, hub2=36, hub3=34 for one call) -
         // byte-comparing ids made every multi-hub archive unverifiable.
         let bus = buildMesh(4, { btcBlock: 101 });
         let leader = archiveLeader(bus);
@@ -879,7 +879,7 @@ describe('StateAnchorPublisher', function () {
         let v0s = bus.nodes.filter(nd => nd.published.some(p => p.split('|')[1] === '0'));
         expect(v0s.length).to.equal(1);
         expect(v0s[0]).to.equal(order[1]);
-        // Back-fill reached rank 0 too — it won't double-publish when it returns.
+        // Back-fill reached rank 0 too - it won't double-publish when it returns.
         await order[0].pub.flush();
         await sleep(30);
         expect(bus.nodes.flatMap(nd => nd.published).filter(p => p.split('|')[1] === '0').length).to.equal(1);
@@ -887,7 +887,7 @@ describe('StateAnchorPublisher', function () {
 
     it('archive failover ladder: a non-leader publishes once its rank unlocks, with full co-sign quorum', async function () {
         // Live finding (3-hub test cluster): the archive election had NO rank
-        // tolerance — a signer-less elected leader stalled archiving (only
+        // tolerance - a signer-less elected leader stalled archiving (only
         // 1-of-3 elections could publish), and on a static regtest tip the
         // same leader won forever. The election key is now content-anchored
         // (wrapper checkpoint + batch seq) and ranks unlock like v0 anchors:
@@ -906,10 +906,10 @@ describe('StateAnchorPublisher', function () {
         let v1Nodes = bus.nodes.filter(nd => nd.published.some(p => p.split('|')[1] === '1'));
         expect(v1Nodes.length).to.equal(1);
         expect(v1Nodes[0]).to.equal(order[1]);
-        // Followers co-signed the rank-1 publisher — a real quorum, not a self-sign.
+        // Followers co-signed the rank-1 publisher - a real quorum, not a self-sign.
         let v1 = order[1].published.find(p => p.split('|')[1] === '1').split('|');
         expect(Number(v1[16])).to.be.at.least(3);
-        // Back-fill reached every node — the stalled rank-0 won't re-archive on return.
+        // Back-fill reached every node - the stalled rank-0 won't re-archive on return.
         for (let nd of bus.nodes) expect(nd.db.matches[0].batch_seq, 'node ' + nd.i).to.equal(0);
     });
 
@@ -959,7 +959,7 @@ describe('StateAnchorPublisher', function () {
     // An empty eligible set (empty validator snapshot, or an indexer that resolves
     // to no oracle_publish members) must DEFER publication, not bypass the election
     // gate. The pre-fix bug skipped the gate on an empty set, so every hub anchored
-    // the same checkpoint from its own DOGE wallet — a guaranteed N-way double-
+    // the same checkpoint from its own DOGE wallet - a guaranteed N-way double-
     // anchor + fee burn. Both call sites (v0 anchor + v1/v2 archive) fail closed.
     it('an empty oracle_publish set defers publication (no v0 anchor, no v1 archive, no reward)', async function () {
         let bus = buildMesh(3, { btcBlock: 200 });
@@ -996,7 +996,7 @@ describe('StateAnchorPublisher', function () {
     // wire, and the indexer + full-parse recovery verify the wrapper signatures
     // against oracle_publish AT snapshot_block. The leader is elected by the
     // current BTC block for liveness, but the SIGNING/QUORUM set must track
-    // snapshot_block — otherwise, when oracle_publish membership drifts inside the
+    // snapshot_block - otherwise, when oracle_publish membership drifts inside the
     // tolerance window, a signer present only in the election set contributes a
     // signature the indexer drops, the v1 stores `invalid`, and the rows (already
     // dequeued) become permanently unrecoverable.
@@ -1022,7 +1022,7 @@ describe('StateAnchorPublisher', function () {
         await sleep(150);
 
         // Exactly one v1, and every signature on it belongs to the snapshot_block
-        // set — so the indexer, verifying against oracle_publish @ snapshot_block,
+        // set - so the indexer, verifying against oracle_publish @ snapshot_block,
         // accepts them all and stores the archive `valid`.
         let v1s = bus.nodes.flatMap(nd => nd.published.filter(p => p.split('|')[1] === '1'));
         expect(v1s.length, 'exactly one v1 archive').to.equal(1);
@@ -1060,7 +1060,7 @@ describe('StateAnchorPublisher', function () {
         let batchSeq = 0, count = 1, crc = 'deadbeef';
         let canonical = nd.pub._archiveCanonical(cp, batchSeq, count, crc, 1);
         // A 3-member snapshot signing set (quorum 2) but only the leader's own
-        // signature collected (1 valid) — the indexer would reject it as invalid.
+        // signature collected (1 valid) - the indexer would reject it as invalid.
         let validators = [nd.pubkey, pkOf(1), pkOf(2)];
         let round = {
             cp, batchSeq, crc, count, canonical,
@@ -1105,7 +1105,7 @@ describe('StateAnchorPublisher', function () {
 
     it('a batch that loses v2 chunks is NOT marked archived and re-archives under a fresh seq', async function () {
         // Live finding (bug G): chunk broadcasts hitting txn-mempool-conflict
-        // were lost while the batch was already back-filled as archived — an
+        // were lost while the batch was already back-filled as archived - an
         // unrecoverable archive (recovery refuses incomplete batches). A partial
         // publish must keep the rows pending and the retry must use a NEW seq
         // (two v1 anchors sharing one seq corrupt chunk reassembly).
@@ -1165,7 +1165,7 @@ describe('StateAnchorPublisher', function () {
         await nd.pub.flush();
         await sleep(30);
 
-        // Two conflicts absorbed by the retry — the checkpoint still anchors this flush.
+        // Two conflicts absorbed by the retry - the checkpoint still anchors this flush.
         expect(v0Failures).to.equal(2);
         expect(nd.db.checkpoints[0].anchor_txid).to.equal('txid1');
 
@@ -1258,7 +1258,7 @@ describe('StateAnchorPublisher', function () {
     //    quorum + on-chain VALIDITY gate must apply the SAME stake-weighted rule
     //    the indexer (anchor.js) and full-parse recovery verify against. Pre-fix it
     //    was count-only, so a count-met-but-stake-short batch was published+dequeued
-    //    while every indexer rejected it — stranding settled state in an
+    //    while every indexer rejected it - stranding settled state in an
     //    unrecoverable hole. (The mesh tests above run with hub.network undefined →
     //    legacy count; here we drive network='regtest', activation=0 → weighted.)
     describe('stake-weighted archive quorum', function () {
@@ -1285,9 +1285,9 @@ describe('StateAnchorPublisher', function () {
             let pub = weightedPub();
             let { ids, set } = stakeSet();
             let minority = sigsFrom(ids.slice(1));                    // 3×10% = 30 of 100
-            // Count regime would ACCEPT (3 of 4 ≥ 2f+1) — exactly the pre-fix producer bug.
+            // Count regime would ACCEPT (3 of 4 ≥ 2f+1) - exactly the pre-fix producer bug.
             expect(pub._quorumVerified(CANON, minority, set, false)).to.equal(true);
-            // Stake regime REJECTS (3·30 = 90 ≤ 2·100 = 200) — matches the indexer/recovery verdict.
+            // Stake regime REJECTS (3·30 = 90 ≤ 2·100 = 200) - matches the indexer/recovery verdict.
             expect(pub._quorumVerified(CANON, minority, set, true)).to.equal(false);
         });
 
@@ -1312,7 +1312,7 @@ describe('StateAnchorPublisher', function () {
             expect(published, 'sub-stake archive must not publish').to.equal(false);
             expect(pub._archiveRound, 'round stays open for more sigs').to.not.equal(null);
 
-            // The SAME 3 sigs WOULD fire under legacy count — proving the regime, not
+            // The SAME 3 sigs WOULD fire under legacy count - proving the regime, not
             // the signature count, is what now gates the dequeue.
             pub._archiveRound.weighted = false;
             await pub._checkArchiveQuorum();
@@ -1372,7 +1372,7 @@ describe('StateAnchorPublisher', function () {
         expect(follower.rewards.some(r => r.type === 'anchor_archive'),
             'no archive reward on a __partial__ publish').to.be.false;
 
-        // (2) CONTROL — a COMPLETE archive (no sentinel) DOES mirror the reward. Also proves the
+        // (2) CONTROL - a COMPLETE archive (no sentinel) DOES mirror the reward. Also proves the
         // envelope is well-formed enough to reach the reward gate (guards against a false pass
         // where _backfillBatch silently failed for both cases).
         let cMatches = [matchRow('mc', 'finalized')];
@@ -1495,7 +1495,7 @@ describe('StateAnchorPublisher', function () {
         await follower.pub._handleSignReq(mkReq());
         expect(canonCalls, 'excluded follower stops before the archive canonical').to.equal(0);
 
-        // (2) CONTROL — INCLUDED in the snapshot_block set → proceeds to build the canonical (then the
+        // (2) CONTROL - INCLUDED in the snapshot_block set → proceeds to build the canonical (then the
         // bogus sig fails verification harmlessly). Proves the membership gate is what stops case (1).
         follower.pub._getActiveOraclePublishPubkeys = async (blk) =>
             (Number(blk) === Number(cp.snapshot_block)) ? [leader.pubkey, follower.pubkey] : [];

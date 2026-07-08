@@ -23,7 +23,7 @@ describe('E2E: Governance Pipeline', function () {
     before(async function () {
         this.timeout(15000);
         try { await testDb.setup(); } catch (e) {
-            console.warn('MariaDB unavailable — skipping E2E governance tests');
+            console.warn('MariaDB unavailable - skipping E2E governance tests');
             return;
         }
         priceMocks.setup();
@@ -51,7 +51,7 @@ describe('E2E: Governance Pipeline', function () {
     });
 
     // E2E-GOV-001: Propose → vote → tally → passed
-    describe('E2E-GOV-001: Proposal lifecycle — approve', function () {
+    describe('E2E-GOV-001: Proposal lifecycle - approve', function () {
 
         it('proposal passes with validator approval and tally', async function () {
             this.timeout(15000);
@@ -135,7 +135,7 @@ describe('E2E: Governance Pipeline', function () {
             expect(updated.result.proposal).to.exist;
             expect(updated.result.proposal.status).to.equal('failed');
 
-            // Try to re-propose the same parameter — should be blocked by cooldown
+            // Try to re-propose the same parameter - should be blocked by cooldown
             let retryRes = await callRpc(port, 'propose', {
                 parameter: 'ORACLE_ROUND_INTERVAL', current_value: '600000',
                 proposed_value: '450000', rationale: 'Retry'
@@ -184,7 +184,7 @@ describe('E2E: Governance Pipeline', function () {
             await cluster.start();
             let port = cluster.getPort(0);
 
-            // 20% increase — within 50% limit
+            // 20% increase - within 50% limit
             let res = await callRpc(port, 'propose', {
                 parameter: 'ORACLE_ROUND_INTERVAL', current_value: '600000',
                 proposed_value: '720000', rationale: 'Within bounds'
@@ -199,7 +199,7 @@ describe('E2E: Governance Pipeline', function () {
             await cluster.start();
             let port = cluster.getPort(0);
 
-            // 30% increase on slash param — exceeds 25% limit for slashing
+            // 30% increase on slash param - exceeds 25% limit for slashing
             let res = await callRpc(port, 'propose', {
                 parameter: 'SLASH_DEVIATION_THRESHOLD', current_value: '0.05',
                 proposed_value: '0.065', rationale: 'Too much for slash param'
