@@ -417,6 +417,32 @@ describe('Consensus (PBFT)', function () {
             expect(resolved).to.be.true;
             expect(consensus.applied.has(digest)).to.be.true;
         });
+
+        it('does NOT apply config twice under a re-entrant COMMIT while the apply is in flight', async function () {
+            // Stress-sweep 2026-07-08: `applied` is set only after the async apply
+            // resolves, so a second COMMIT reaching quorum mid-apply would re-run
+            // _applyConfig without the _applying in-flight guard.
+            let config = { y: 2 };
+            let digest = consensus._digest(config);
+            let release;
+            hub.applyConfig = sinon.stub().returns(new Promise(r => { release = r; })); // held pending
+
+            consensus.pendingProposals.set(6, {
+                config, digest,
+                prepares: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr, VALIDATORS_4[2].addr]),
+                commits:  new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr, VALIDATORS_4[2].addr]), // quorum met
+                resolved: false, applied: false, timer: null, _commitSent: true,
+                resolve: () => {}, reject: () => {}
+            });
+
+            consensus._checkCommitQuorum(6);   // starts the (pending) apply
+            consensus._checkCommitQuorum(6);   // re-entrant while in flight: must be a no-op
+            expect(hub.applyConfig.calledOnce).to.be.true;
+
+            release();
+            await new Promise(r => setTimeout(r, 20));
+            expect(consensus.applied.has(digest)).to.be.true; // still applies exactly once
+        });
     });
 
     // -----------------------------------------------------------------

@@ -633,10 +633,19 @@ class Consensus {
 
     _checkCommitQuorum(seq) {
         let proposal = this.pendingProposals.get(seq);
-        if (!proposal || proposal.applied) return;
+        if (!proposal || proposal.applied || proposal._applying) return;
 
         // Same quorum rule as _checkPrepareQuorum; see _quorumMet.
         if (this._quorumMet(proposal, proposal.commits, proposal.commitPubkeys)) {
+            // Synchronous in-flight guard, distinct from the durable `applied` marker.
+            // _applyConfig/_saveSeq are async, and `applied` is only set after they
+            // resolve (deliberately, so a _saveSeq failure leaves it false for retry).
+            // Without this flag a second COMMIT that reaches quorum in a later event-loop
+            // turn while the apply is still pending would pass the `!applied` gate and run
+            // _applyConfig a second time for one committed round. Harmless for today's
+            // idempotent config upsert, but a hazard for any future non-idempotent apply.
+            // Cleared in the catch so a failed apply can still be retried.
+            proposal._applying = true;
             // proposal.applied is set AFTER both _applyConfig and _saveSeq succeed.
             // Setting it early (before the awaits) would silence the stale-seq gate
             // on re-entry but leave applied=true after a _saveSeq failure, so the
@@ -676,6 +685,9 @@ class Consensus {
                 // when the DB recovers. Reject the proposer's promise if present
                 // so the caller can surface the error.
                 console.error('PBFT: Error applying config (seq ' + seq + '):', err.message);
+                // Clear the in-flight guard so a subsequent COMMIT can retry the apply
+                // when the DB recovers (proposal.applied is still false).
+                proposal._applying = false;
                 if (!proposal.resolved && proposal.reject) {
                     proposal.resolved = true;
                     if (proposal.timer) clearTimeout(proposal.timer);

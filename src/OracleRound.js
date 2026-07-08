@@ -55,8 +55,12 @@ class OracleRound {
         // Oracle consensus engine (set via setConsensus after creation)
         this.oracleConsensus = null;
 
-        // Finalization timer
-        this.finalizationTimer = null;
+        // Per-round finalization timers, keyed by round. A single shared timer let a
+        // second round scheduled within one submission window clear the earlier round's
+        // timer before it fired, dropping that round's finalization entirely (no
+        // price_snapshots row, not even a skipped one). Keying by round mirrors
+        // OracleConsensus.leaderTimers.
+        this.finalizationTimers = new Map();
 
         // Message handler reference
         this._messageHandler = null;
@@ -184,10 +188,8 @@ class OracleRound {
             clearInterval(this.roundTimer);
             this.roundTimer = null;
         }
-        if (this.finalizationTimer) {
-            clearTimeout(this.finalizationTimer);
-            this.finalizationTimer = null;
-        }
+        for (let t of this.finalizationTimers.values()) clearTimeout(t);
+        this.finalizationTimers.clear();
     }
 
     // Get the current round number
@@ -445,8 +447,10 @@ class OracleRound {
         // Capture the BTC chain tip values for this round at scheduling time
         let btcBlockHeight = this.currentBtcBlockHeight;
         let btcBlockTime   = this.currentBtcBlockTime;
-        if (this.finalizationTimer) clearTimeout(this.finalizationTimer);
-        this.finalizationTimer = setTimeout(() => {
+        let prior = this.finalizationTimers.get(round);
+        if (prior) clearTimeout(prior);
+        let timer = setTimeout(() => {
+            this.finalizationTimers.delete(round);
             if (this.oracleConsensus) {
                 if (this.chainTipFallbackActive) {
                     let lastGoodTip = this.lastSuccessfulChainTipFetchAt ?? this._startTime;
@@ -462,6 +466,7 @@ class OracleRound {
                 });
             }
         }, this.submissionWindow);
+        this.finalizationTimers.set(round, timer);
     }
 
     // Handle incoming gossip messages

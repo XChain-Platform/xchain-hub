@@ -49,7 +49,7 @@ describe('OracleRound (extra coverage)', function () {
         // Clean up any timers
         if (or.roundTimer)        { clearInterval(or.roundTimer); or.roundTimer = null; }
         if (or.initialRoundTimer) { clearTimeout(or.initialRoundTimer); or.initialRoundTimer = null; }
-        if (or.finalizationTimer) { clearTimeout(or.finalizationTimer); or.finalizationTimer = null; }
+        if (or.finalizationTimers) { for (let t of or.finalizationTimers.values()) clearTimeout(t); or.finalizationTimers.clear(); }
     });
 
     // ── stop() ──────────────────────────────────────────────────────────────
@@ -70,10 +70,11 @@ describe('OracleRound (extra coverage)', function () {
             expect(or.initialRoundTimer).to.be.null;
         });
 
-        it('clears finalizationTimer', async function () {
-            or.finalizationTimer = setTimeout(() => {}, 100000);
+        it('clears all finalization timers', async function () {
+            or.finalizationTimers.set(1, setTimeout(() => {}, 100000));
+            or.finalizationTimers.set(2, setTimeout(() => {}, 100000));
             await or.stop();
-            expect(or.finalizationTimer).to.be.null;
+            expect(or.finalizationTimers.size).to.equal(0);
         });
 
         it('clears roundTimer', async function () {
@@ -101,7 +102,7 @@ describe('OracleRound (extra coverage)', function () {
 
     // ── _executeRound: chain-tip branch coverage ─────────────────────────────
 
-    describe('_executeRound() — BTC chain tip fallback', function () {
+    describe('_executeRound(): BTC chain tip fallback', function () {
         it('uses round number as fallback when getChainTip returns null', async function () {
             hub.db.getChainTip = sinon.stub().resolves(null);
             await or._executeRound();
@@ -190,7 +191,7 @@ describe('OracleRound (extra coverage)', function () {
 
     // ── _handleMessage: edge cases ───────────────────────────────────────────
 
-    describe('_handleMessage() — edge cases', function () {
+    describe('_handleMessage(): edge cases', function () {
 
         it('ignores messages with missing round/prices', function () {
             or._handleMessage({ type: 'ORACLE_PRICE_SUBMIT', sender: 'peer', data: { round: null, prices: null } });
@@ -296,7 +297,7 @@ describe('OracleRound (extra coverage)', function () {
 
     // ── _scheduleFinalization: fallback suppression ──────────────────────────
 
-    describe('_scheduleFinalization() — fallback suppression', function () {
+    describe('_scheduleFinalization(): fallback suppression', function () {
         it('suppresses finalization when fallback active for > roundInterval', function (done) {
             // Set a very short submissionWindow so the timer fires quickly
             or.submissionWindow = 10;
@@ -325,6 +326,42 @@ describe('OracleRound (extra coverage)', function () {
                 done();
             }, 50);
         });
+
+        // Stress-sweep 2026-07-08: the per-round timer map. A single shared timer let a
+        // second round scheduled within one submission window clear the first round's
+        // timer, dropping its finalization entirely.
+        it('keeps a per-round timer so scheduling a second round does not evict the first', function () {
+            or.submissionWindow = 100000; // long enough that neither fires during the test
+            or._scheduleFinalization(1);
+            or._scheduleFinalization(2);
+            expect(or.finalizationTimers.has(1)).to.be.true;
+            expect(or.finalizationTimers.has(2)).to.be.true;
+            expect(or.finalizationTimers.size).to.equal(2);
+        });
+
+        it('both scheduled rounds finalize (neither is silently dropped)', function (done) {
+            or.submissionWindow = 10;
+            or.chainTipFallbackActive = false;
+            let finalizeStub = sinon.stub().resolves();
+            or.oracleConsensus = { finalizeRound: finalizeStub };
+            or._scheduleFinalization(7);
+            or._scheduleFinalization(8);
+            setTimeout(() => {
+                let rounds = finalizeStub.getCalls().map(c => c.args[0]).sort();
+                expect(rounds).to.deep.equal([7, 8]);
+                expect(or.finalizationTimers.size).to.equal(0); // entries deleted on fire
+                done();
+            }, 50);
+        });
+
+        it('re-scheduling the same round replaces its timer (no duplicate/leak)', function () {
+            or.submissionWindow = 100000;
+            or._scheduleFinalization(3);
+            let first = or.finalizationTimers.get(3);
+            or._scheduleFinalization(3);
+            expect(or.finalizationTimers.size).to.equal(1);
+            expect(or.finalizationTimers.get(3)).to.not.equal(first);
+        });
     });
 
     // ── _pruneSubmissions ────────────────────────────────────────────────────
@@ -344,7 +381,7 @@ describe('OracleRound (extra coverage)', function () {
 
     // ── _persistSubmissions: pubkey fallbacks ────────────────────────────────
 
-    describe('_persistSubmissions() — pubkey fallbacks', function () {
+    describe('_persistSubmissions(): pubkey fallbacks', function () {
         it('uses identity pubkey when validatorPubkey is null', function () {
             hub.db.doQuery = sinon.stub().resolves([]);
             or._persistSubmissions(1, 'me', [{ coinPair: 'BTC/USD', price: '100', sources: 1 }], null);
@@ -365,7 +402,7 @@ describe('OracleRound (extra coverage)', function () {
 
     // ── getSubmissionsInfo: DB error fallback ────────────────────────────────
 
-    describe('getSubmissionsInfo() — DB error', function () {
+    describe('getSubmissionsInfo(): DB error', function () {
         it('returns info without skippedRounds when DB query fails', async function () {
             hub.db.doQuery = sinon.stub().rejects(new Error('db error'));
             await or._executeRound();
