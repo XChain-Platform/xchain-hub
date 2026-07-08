@@ -480,10 +480,18 @@ class Database {
             try {
                 results = await db.query(query, args);
             } catch (error){
+                // Always rethrow. Swallowing non-transactional errors returned [] to
+                // callers that write consensus/coordination rows (mirrors, configs,
+                // prices), so a failed INSERT/UPDATE read as success and the row was
+                // silently missing downstream. An empty result must mean a genuinely
+                // empty SELECT, never a failed query.
                 console.error('Error running database query:', error);
-                if(tx) throw error;
+                throw error;
+            } finally {
+                // Release in finally so an error no longer leaks the pooled
+                // connection. Transaction connections are owned by the caller.
+                if(!tx) await db.release();
             }
-            if(!tx) await db.release();
         }
         return results;
     }

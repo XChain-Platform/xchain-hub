@@ -154,10 +154,16 @@ describe('Database', function () {
             expect(mockConn.query.getCall(0).args[1][0]).to.equal('{"key":"value"}');
         });
 
-        it('returns empty array on query error (non-transaction)', async function () {
+        it('throws on query error and still releases the connection (H-9: no false write success)', async function () {
             mockConn.query.rejects(new Error('syntax error'));
-            let result = await db.doQuery('BAD SQL');
-            expect(result).to.deep.equal([]);
+            let thrown = null;
+            try {
+                await db.doQuery('BAD SQL');
+            } catch (e) {
+                thrown = e;
+            }
+            expect(thrown).to.be.an('error');
+            expect(thrown.message).to.equal('syntax error');
             expect(mockConn.release.calledOnce).to.be.true;
         });
     });

@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Read-only JSON-RPC methods `getvotes` and `getvalidatorcapabilities`, plus optional `parameter`/`limit` filters on `getproposals`, so explorers can serve governance and capability pages over RPC instead of a co-located hub DB.
 
 ### Fixed
+- `db.doQuery` rethrows query errors instead of returning an empty result on non-transactional failures, so a failed coordination/mirror write can no longer read as success (and its pooled connection is released in a `finally`).
+- Async timer and event entry points that reach the DB (round rewards, swap tracking, governance results, oracle rounds, hub-DB subscribe, keepalive ping) now catch and log instead of risking a process-killing unhandled rejection.
 - The ANCHOR v1 archive back-fill now re-broadcasts stamped `cross_chain_matches` rows on the hub-DB mirror feed, so streamed mirrors converge on `anchor_txid` instead of reading NULL until their next bootstrap.
 - `GET /api/v1/chain-registry` serves `Access-Control-Allow-Origin: *` so browser wallets (web SPA and the extension, which ships no host permissions) can fetch the public registry cross-origin.
 - `docs/openrpc.build.js` regains the three methods that were only hand-added to `openrpc.json`, so regenerating the spec no longer drops them.

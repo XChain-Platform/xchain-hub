@@ -226,21 +226,27 @@ class XChainHub {
         this.slashDetector = new SlashDetector(this);
 
         this.oracleConsensus.on('round:finalized', async (event) => {
-            // Resolve participant addrs to pubkeys for rewards
-            let participantPubkeys = [];
-            if(this.peerManager.validatorPubkeys){
-                for(let addr of event.participants){
-                    let pk = this.peerManager.validatorPubkeys.get(addr);
-                    if(pk) participantPubkeys.push(pk);
+            // Guarded: db.doQuery now throws on query errors, and a rejection out
+            // of an EventEmitter listener is an unhandled rejection (process exit).
+            try {
+                // Resolve participant addrs to pubkeys for rewards
+                let participantPubkeys = [];
+                if(this.peerManager.validatorPubkeys){
+                    for(let addr of event.participants){
+                        let pk = this.peerManager.validatorPubkeys.get(addr);
+                        if(pk) participantPubkeys.push(pk);
+                    }
                 }
+
+                await this.rewardTracker.distributeRewards(event.round, participantPubkeys, event.btcBlockHeight);
+
+                await this.slashDetector.checkRound(
+                    event.round, event.submissions, event.prices,
+                    participantPubkeys, validators
+                );
+            } catch (e){
+                console.error('round:finalized reward/slash handling failed for round ' + (event && event.round) + ':', e && e.message ? e.message : e);
             }
-
-            await this.rewardTracker.distributeRewards(event.round, participantPubkeys, event.btcBlockHeight);
-
-            await this.slashDetector.checkRound(
-                event.round, event.submissions, event.prices,
-                participantPubkeys, validators
-            );
         });
 
         await this.oracleConsensus.start();

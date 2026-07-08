@@ -324,7 +324,12 @@ class Governance extends EventEmitter {
         switch (envelope.type) {
             case GOV_PROPOSE: this._handlePropose(envelope); break;
             case GOV_VOTE:    this._handleVote(envelope);    break;
-            case GOV_RESULT:  this._handleResult(envelope);  break;
+            case GOV_RESULT:
+                // async: a rejection out of the gossip dispatcher would be an
+                // unhandled rejection (process exit), so catch and log here.
+                this._handleResult(envelope).catch(e =>
+                    console.error('Governance: GOV_RESULT handler error:', e && e.message ? e.message : e));
+                break;
         }
     }
 

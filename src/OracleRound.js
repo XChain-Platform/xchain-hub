@@ -7,7 +7,7 @@
  *
  * This file is part of XChain Platform. Licensed under the GNU Affero
  * General Public License v3.0 or later; see LICENSE.md. A commercial
- * license (without AGPL source-disclosure terms) is available —
+ * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
  **********************************************************************
@@ -119,7 +119,7 @@ class OracleRound {
         this._messageHandler = (envelope) => this._handleMessage(envelope);
         this.peerManager.on('message', this._messageHandler);
 
-        // Start the round timer — handles both the first run and the aligned cadence
+        // Start the round timer; it handles both the first run and the aligned cadence
         this._startRoundTimer();
 
         console.log('Oracle round system started (interval: ' + (this.roundInterval / 1000) + 's, window: ' + (this.submissionWindow / 1000) + 's)');
@@ -129,7 +129,7 @@ class OracleRound {
     // price_snapshots so they survive a restart. The constructor initialises both
     // to a clean-slate value (0 / null); without this step a hub that restarts
     // mid-outage would present zero skipped rounds and no last-success time even
-    // though the durable record shows otherwise — masking the gap from /health and
+    // though the durable record shows otherwise, masking the gap from /health and
     // the diagnostics RPC. price_snapshots is durable, so this is purely an
     // observability rehydrate, never a recompute of price data.
     async _hydrateFreshnessCounters() {
@@ -149,7 +149,7 @@ class OracleRound {
             }
 
             // (b) Distinct rounds recorded after the last finalized round that did
-            // NOT finalize — the consecutive trailing skip streak. With no finalized
+            // NOT finalize: the consecutive trailing skip streak. With no finalized
             // round at all (lastFinalizedRound = -1) this counts every recorded
             // non-finalized round.
             let skipRows = await this.db.doQuery(
@@ -216,7 +216,7 @@ class OracleRound {
                 "SELECT DISTINCT round_number FROM price_snapshots WHERE status = 'skipped' ORDER BY round_number DESC LIMIT 50");
             skippedRounds = rows.map(r => Number(r.round_number));
         } catch (err) {
-            // Non-fatal — diagnostics still return the in-memory state if the read fails
+            // Non-fatal: diagnostics still return the in-memory state if the read fails
             console.warn('Oracle: failed to read skipped rounds for diagnostics:', err);
         }
 
@@ -269,18 +269,25 @@ class OracleRound {
         let elapsedInRound  = (Date.now() - this.epochStart) % this.roundInterval;
         let timeToNextRound = this.roundInterval - elapsedInRound;
 
+        // A rejection out of a bare timer callback is an unhandled rejection
+        // (process exit), so every timer-driven round execution catches here.
+        const runRound = () => {
+            this._executeRound().catch(err =>
+                console.error('OracleRound: round execution error:', err && err.message ? err.message : err));
+        };
+
         let initialDelay = 5000;
         if (elapsedInRound + initialDelay < this.submissionWindow) {
             this.initialRoundTimer = setTimeout(() => {
                 this.initialRoundTimer = null;
-                this._executeRound();
+                runRound();
             }, initialDelay);
         }
 
         // Align to the next round boundary, then run on a steady interval
         setTimeout(() => {
-            this._executeRound();
-            this.roundTimer = setInterval(() => this._executeRound(), this.roundInterval);
+            runRound();
+            this.roundTimer = setInterval(runRound, this.roundInterval);
         }, timeToNextRound);
     }
 
@@ -317,16 +324,16 @@ class OracleRound {
             } else {
                 // No pushed chain tip in the hub DB. The indexer→hub `pushchaintip`
                 // path only populates getChainTip when an indexer is co-located with
-                // (and configured to push to) this hub — which a master/standalone hub
+                // (and configured to push to) this hub, which a master/standalone hub
                 // box running the oracle may not have. Before degrading to the round
                 // number, try the hub's direct indexer resolver (getlatestblock via
                 // BTC_INDEXER_API_URL or the configs table). It returns only a height,
                 // so anchor the timestamp to the wall clock. A real height is a real
-                // anchor, so clear the fallback flag — finalization must NOT be
+                // anchor, so clear the fallback flag: finalization must NOT be
                 // suppressed when we have an authoritative block height.
                 let directHeight = null;
                 try { directHeight = await this.hub._resolveBtcLatestBlock(); }
-                catch (_) { /* resolver failed — fall through to round-number anchor */ }
+                catch (_) { /* resolver failed; fall through to round-number anchor */ }
 
                 if (directHeight) {
                     this.currentBtcBlockHeight         = directHeight;
@@ -338,13 +345,13 @@ class OracleRound {
                     // clock, so block-age monitoring does not apply.
                     this.anchorTipBlockTime = null;
                 } else {
-                    // No BTC tip available at all — fall back to round number
+                    // No BTC tip available at all; fall back to round number
                     this.chainTipFetchFailures++;
                     if (!this.chainTipFallbackActive) this.chainTipFallbackActive = true;
                     if (this.chainTipFetchFailures > 1) {
-                        console.error('Oracle: BTC chain tip unavailable (failure ' + this.chainTipFetchFailures + ') — using round number as fallback anchor');
+                        console.error('Oracle: BTC chain tip unavailable (failure ' + this.chainTipFetchFailures + '); using round number as fallback anchor');
                     } else {
-                        console.warn('Oracle: BTC chain tip unavailable — using round number as fallback anchor');
+                        console.warn('Oracle: BTC chain tip unavailable; using round number as fallback anchor');
                     }
                     this.currentBtcBlockHeight = this.currentRound;
                     this.currentBtcBlockTime   = Math.floor(Date.now() / 1000);
@@ -390,7 +397,7 @@ class OracleRound {
 
         if (!prices || prices.length === 0) {
             console.warn('Oracle: No prices available for round ' + this.currentRound);
-            // Same rationale as the fetch-failure path above — record the gap.
+            // Same rationale as the fetch-failure path above: record the gap.
             this._scheduleFinalization(this.currentRound);
             this.consecutiveSkippedRounds++;
             return;
@@ -399,7 +406,7 @@ class OracleRound {
         // Count total sources across all pairs
         let totalSources = prices.reduce((sum, p) => sum + p.sources, 0);
 
-        console.log('Oracle: Round ' + this.currentRound + ' — fetched ' + prices.length +
+        console.log('Oracle: Round ' + this.currentRound + ' - fetched ' + prices.length +
             ' pairs from ' + totalSources + ' source queries');
 
         // Broadcast our submission via gossip
@@ -439,7 +446,7 @@ class OracleRound {
                     let lastGoodTip = this.lastSuccessfulChainTipFetchAt ?? this._startTime;
                     if ((Date.now() - lastGoodTip) > this.roundInterval) {
                         console.error('Oracle: Skipping finalization for round ' + round +
-                            ' — chain-tip fallback active for >' + Math.round(this.roundInterval / 1000) +
+                            '; chain-tip fallback active for >' + Math.round(this.roundInterval / 1000) +
                             's; btcBlockHeight anchor is unreliable, PRICE payload suppressed');
                         return;
                     }
@@ -464,7 +471,7 @@ class OracleRound {
         // Check if we're still within the submission window
         let elapsed = Date.now() - this.roundStartTime;
         if (round === this.currentRound && elapsed > this.submissionWindow) {
-            // Late submission — still record it but log
+            // Late submission: still record it but log
             console.log('Oracle: Late submission from ' + envelope.sender + ' for round ' + round);
         }
 
@@ -479,11 +486,11 @@ class OracleRound {
 
         // Enforce max submissions per round
         if (roundSubs.size >= this.maxSubmissionsPerRound) {
-            console.warn('Oracle: Max submissions per round reached for round ' + round + ' — dropping from ' + envelope.sender);
+            console.warn('Oracle: Max submissions per round reached for round ' + round + '; dropping from ' + envelope.sender);
             return;
         }
 
-        // Validate individual prices — filter to positive finite values within bounds
+        // Validate individual prices: filter to positive finite values within bounds
         let validPrices = prices.filter(p => {
             let val = parseFloat(p.price);
             return Number.isFinite(val) && val > 0 && val < this.priceMax;
@@ -499,7 +506,7 @@ class OracleRound {
         console.log('Oracle: Received submission from ' + envelope.sender +
             ' for round ' + round + ' (' + roundSubs.size + ' total)');
 
-        // Resolve sender's validator pubkey. Drop the DB persist if unresolved —
+        // Resolve sender's validator pubkey. Drop the DB persist if unresolved:
         // keeps the in-memory submission for aggregation but avoids placeholder rows.
         let validatorPubkey = null;
         if (this.peerManager.validatorPubkeys) {

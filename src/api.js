@@ -1352,7 +1352,8 @@ async function startApi(){
         }
         wss.handleUpgrade(request, socket, head, (ws) => {
             if (hub.hubDbBroadcaster) {
-                hub.hubDbBroadcaster.addSubscriber(ws, request);
+                hub.hubDbBroadcaster.addSubscriber(ws, request).catch(e =>
+                    console.error('HubDbBroadcaster: addSubscriber failed:', e && e.message ? e.message : e));
             } else {
                 try { ws.close(1011, 'Hub DB broadcaster not ready'); } catch (e) { /* ignore */ }
             }
@@ -1376,7 +1377,10 @@ async function startApi(){
     }
 
     const pingInterval = setInterval(() => {
-        if (!hub.hubDbBroadcaster) return;
+        // Also guard subscribers: unit tests wire mock hubs whose broadcaster
+        // lacks the set, and an uncaught throw here fails whichever unrelated
+        // test file happens to be running when the timer fires.
+        if (!hub.hubDbBroadcaster || !hub.hubDbBroadcaster.subscribers) return;
         for (let ws of hub.hubDbBroadcaster.subscribers) {
             if (ws.readyState === WebSocket.OPEN) {
                 try { ws.ping(); } catch (e) { /* ignore */ }
