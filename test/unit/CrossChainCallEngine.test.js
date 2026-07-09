@@ -517,4 +517,22 @@ describe('CrossChainCallEngine', function () {
             expect(engine._resultBackoff.get(id).nextAt - Date.now()).to.be.at.most(60 * 60 * 1000 + 5);
         });
     });
+
+    describe('_resolveCapabilityValidators (SWQ-TRUNC flag propagation)', function () {
+        it('carries truncated=true through the .map when the weighted snapshot overflowed the cap', async function () {
+            const { engine } = makeEngine();
+            engine.capSnapshot.getWeightSnapshot = async () => ({
+                validators: [{ pubkey: 'a'.repeat(64), source: 's1', weight: '1' }], count: 1, truncated: true
+            });
+            const vals = await engine._resolveCapabilityValidators('cross_chain', 100, 'regtest');
+            // The consensus fails closed only when the flag survives the map (meetsStakeThreshold).
+            expect(vals.truncated).to.equal(true);
+        });
+
+        it('does NOT mark truncated for a complete weighted snapshot', async function () {
+            const { engine } = makeEngine();
+            const vals = await engine._resolveCapabilityValidators('cross_chain', 100, 'regtest');
+            expect(vals.truncated).to.not.equal(true);
+        });
+    });
 });

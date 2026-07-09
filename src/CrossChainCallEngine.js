@@ -636,8 +636,13 @@ class CrossChainCallEngine extends EventEmitter {
         if(this.capSnapshot){
             if(weighted){
                 let snap = await this.capSnapshot.getWeightSnapshot(capability, block);
-                if(snap && Array.isArray(snap.validators))
+                if(snap && Array.isArray(snap.validators)){
                     validators = snap.validators.map(v => ({ pubkey: v.pubkey, source: String(v.source != null ? v.source : ''), weight: String(v.weight != null ? v.weight : '0'), amount: String(v.weight != null ? v.weight : '0') }));
+                    // Carry the truncation flag through the .map so the consensus fails
+                    // closed on an over-cap weighted snapshot (SWQ-TRUNC parity with the
+                    // indexer consumers; meetsStakeThreshold under-counts a truncated S).
+                    if(snap.truncated === true) validators.truncated = true;
+                }
             } else {
                 let snap = await this.capSnapshot.getSnapshot(capability, block);
                 if(snap && Array.isArray(snap.validators))

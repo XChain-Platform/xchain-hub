@@ -202,6 +202,28 @@ class CrossChainDexConsensus extends EventEmitter {
         // Gated on the row's BTC snapshot_block + network so hub and every indexer
         // flip on the same anchor. Below activation: byte-for-byte the count rule.
         let weighted   = swq.isStakeWeightedQuorumActive(row.snapshot_block, row.network);
+
+        // Fail CLOSED on a TRUNCATED weighted snapshot (SWQ-TRUNC parity). At/above
+        // STAKE_WEIGHTED_QUORUM the tally is summed STAKE; a snapshot that overflowed the
+        // frozen VALIDATOR_QUERY_LIMIT has silently-dropped sources, so S is under-counted
+        // and the strict 2/3 bar could finalize a round a full snapshot would reject (the
+        // stake-eviction forge SWQ-TRUNC-1 closed on the consumer side). Every indexer
+        // consumer already fails closed on it (meetsStakeThreshold), so a round proposed
+        // here could ONLY mirror a row every indexer rejects. Refuse up front, release the
+        // engine's inflight slot (match:abandoned) so discovery retries once the set fits,
+        // and alarm the operator to raise the (frozen, coordinated) VALIDATOR_QUERY_LIMIT.
+        // The COUNT path (below activation) stays proceed-on-truncation: the cap is
+        // cross-hub deterministic there (CapabilitySnapshot.getQuorum), so quorum is
+        // consistent fleet-wide and refusing would needlessly halt.
+        if(weighted && validators && validators.truncated === true){
+            console.error('CrossChainDexConsensus: refusing round ' + rid.substring(0, 16) +
+                '... over a TRUNCATED weighted cross_chain snapshot (snapshot_block=' + row.snapshot_block +
+                '): the cross_chain set overflowed VALIDATOR_QUERY_LIMIT so summed stake S is under-counted and ' +
+                'no quorum can safely finalize; raise VALIDATOR_QUERY_LIMIT (coordinated fleet upgrade). Will retry when the set fits.');
+            this.emit('match:abandoned', { matchId: rid });
+            return;
+        }
+
         let quorum     = (snapCount <= 1) ? 0 : Math.max(2 * Math.floor((snapCount - 1) / 3) + 1, Math.ceil((snapCount + 1) / 2));
         let canonical  = this.engine._canonicalMatch(row, 0);   // new round always starts at view 0
         let myPubkey   = this.identity.getPubkeyHex().toLowerCase();
@@ -251,6 +273,11 @@ class CrossChainDexConsensus extends EventEmitter {
                     ' with quorum 0 over a ' + (snapCount === 0 ? 'EMPTY' : 'non-self single-validator') +
                     ' cross_chain snapshot (snapshot_block=' + row.snapshot_block +
                     '); will retry when the snapshot populates');
+                // Release the engine's inflight slot so discovery re-proposes once the
+                // snapshot populates. Without this the engine (which added round_id to
+                // _inflight before calling propose) never re-attempts the call/match on
+                // THIS hub, wedging its participation even as leader.
+                this.emit('match:abandoned', { matchId: rid });
                 return;
             }
             try { await this.engine._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network); }

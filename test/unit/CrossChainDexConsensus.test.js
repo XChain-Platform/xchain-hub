@@ -164,11 +164,50 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         let bus = buildMesh(1);
         await startAll(bus);
         let mid = 'ab'.repeat(32), row = sampleRow(mid);
+        let abandoned = [];
+        bus.nodes[0].consensus.on('match:abandoned', (ev) => abandoned.push(String(ev.matchId)));
         await bus.nodes[0].consensus.propose(mid, { row, snapshot: { validators: [], count: 0 } });
         await sleep(20);
         expect(bus.nodes[0].finalized.length).to.equal(0);
         // Aborted, not left half-open: a later propose with a real snapshot can retry.
         expect(bus.nodes[0].consensus.pending.has(mid.toLowerCase())).to.be.false;
+        // The refuse must emit match:abandoned so the engine releases its _inflight slot;
+        // without it the engine (which added round_id to _inflight before propose) never
+        // re-attempts the call/match on this hub even once the snapshot populates.
+        expect(abandoned).to.include(mid.toLowerCase());
+    });
+
+    it('fails CLOSED over a TRUNCATED weighted snapshot and releases the round (SWQ-TRUNC)', async function () {
+        // At/above STAKE_WEIGHTED_QUORUM (regtest = genesis) a snapshot that overflowed
+        // VALIDATOR_QUERY_LIMIT under-counts summed stake S; every indexer consumer fails
+        // closed on it, so the hub must refuse rather than mirror a row all indexers reject.
+        let bus = buildMesh(4);
+        await startAll(bus);
+        let mid = 'ad'.repeat(32), row = sampleRow(mid);   // regtest snapshot_block 100 -> weighted
+        let abandoned = [];
+        for (let nd of bus.nodes) nd.consensus.on('match:abandoned', (ev) => abandoned.push(String(ev.matchId)));
+        let snap = { validators: validatorsOf(bus), count: bus.nodes.length };
+        snap.validators.truncated = true;                  // indexer hit VALIDATOR_QUERY_LIMIT
+        for (let nd of bus.nodes) await nd.consensus.propose(mid, { row, snapshot: snap });
+        await sleep(150);
+        expect(bus.nodes.every(nd => nd.finalized.length === 0), 'no node finalizes a truncated weighted round').to.be.true;
+        expect(bus.nodes.every(nd => nd.consensus.pending.has(mid.toLowerCase()) === false), 'round released, retryable').to.be.true;
+        expect(abandoned.filter(m => m === mid.toLowerCase()).length).to.equal(bus.nodes.length, 'each node releases its inflight slot');
+    });
+
+    it('a TRUNCATED count snapshot (below STAKE_WEIGHTED_QUORUM) still finalizes (deterministic cap)', async function () {
+        // The count path is proceed-on-truncation: the cap is cross-hub deterministic, so
+        // quorum stays consistent fleet-wide (CapabilitySnapshot.getQuorum). Only the
+        // weighted path fails closed.
+        let bus = buildMesh(4);
+        await startAll(bus);
+        let mid = 'ae'.repeat(32), row = sampleRow(mid);
+        row.network = 'mainnet'; row.snapshot_block = 100;   // below 961000 -> count path
+        let snap = { validators: validatorsOf(bus), count: bus.nodes.length };
+        snap.validators.truncated = true;
+        for (let nd of bus.nodes) await nd.consensus.propose(mid, { row, snapshot: snap });
+        await sleep(150);
+        expect(bus.nodes.every(nd => nd.finalized.length === 1), 'count path proceeds on a deterministic truncation cap').to.be.true;
     });
 
     it('does NOT self-finalize when the sole snapshot validator is someone else', async function () {
