@@ -1,21 +1,67 @@
-# FINAL - the slim per-repo replacement for .github/workflows/ci.yml
-# Drop this into each npm repo. It does nothing but delegate to the shared definition.
-# Pinned @master: push the reusable workflow once and every caller picks it up on its
-# next run. (Switch to a moving @v1 tag later if you want change-control.)
+# Per-repo CI for xchain-hub. The gate delegates to the shared reusable workflow;
+# a dedicated perf job runs the performance suite against a real MariaDB.
+#
+# Why a separate job instead of run-perf on the reusable call: a caller cannot
+# inject a `services:` container into a reusable (workflow_call) job, and GitHub
+# Actions has no conditional service, so wiring MariaDB into the shared workflow
+# would force all ~8 other callers to spin up a database they never use. Keeping
+# the DB here means only the hub pays for it.
 name: CI
 
 on:
   push:
-    branches: [master]          # use [main] for repos whose default branch is main
+    branches: [master]
   pull_request:
     branches: [master]
 
 jobs:
   ci:
     uses: XChain-Platform/.github/.github/workflows/ci-reusable.yml@master
-    with:
-      # Opt into the perf gate: the hub's perf suites self-skip when MariaDB is
-      # absent, so they are safe to run on a bare CI runner as a post-gate step.
-      run-perf: true
-      perf-script: "test:perf"
-      # node-version: "20"   # override the Node major here if ever needed
+    # Perf now runs in the dedicated `perf` job below (with a database), so the
+    # gate does not also run the self-skipping perf step.
+
+  perf:
+    # Only spend the perf runtime once the gate is green.
+    needs: ci
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          # Empty root password: the perf suite's testDb helper defaults to
+          # user root / empty password on 127.0.0.1:3306, so the container needs
+          # no credential literal. The DB is ephemeral and holds only synthetic
+          # test data. MARIADB_DATABASE pre-creates the schema-less DB the helper
+          # then populates via verifyTables() (auto-creates tables from src/sql).
+          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: 1
+          MARIADB_DATABASE: xchain_hub_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Run performance suite
+        env:
+          # testDb helper defaults already match the service (127.0.0.1:3306,
+          # root, empty password, xchain_hub_test); set explicitly for clarity.
+          TEST_DB_HOST: 127.0.0.1
+          TEST_DB_PORT: "3306"
+          TEST_DB_USER: root
+          TEST_DB_NAME: xchain_hub_test
+          # Keep the soak bounded so CI stays fast (suite default is 120s).
+          SOAK_DURATION_MS: "15000"
+        run: npm run test:perf
