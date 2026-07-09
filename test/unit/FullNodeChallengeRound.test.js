@@ -309,6 +309,22 @@ describe('FullNodeChallengeRound', function () {
             expect(done, 'XNODE_DONE broadcast').to.exist;
         });
 
+        it('does not double-broadcast when two triggers cross quorum concurrently (NODE-DOUBLECAST-1)', async function () {
+            const hub = makeHub();                       // V1 = sole genesis verifier → quorum 1
+            const eng = await startEpoch(hub);
+            const st = eng.rounds.get(288);
+            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer: ANSWER, sig_pubkey: P1, sig: 's' });
+            // Hold the verdict broadcast open so a second finalize can race the first's await.
+            let release = null, calls = 0;
+            eng.broadcastFn = () => { calls++; return new Promise(res => { release = () => res({ txid: 'TX' + calls }); }); };
+            const p1 = eng._closeCollection(288);        // leader self-signs → quorum 1 → _maybeFinalize (broadcast held open)
+            const p2 = eng._maybeFinalize(288);          // a second trigger during the broadcast await must NOT re-broadcast
+            release();
+            await Promise.all([p1, p2]);
+            expect(calls, 'verdict broadcast exactly once').to.equal(1);
+            expect(st.finalized).to.equal(true);
+        });
+
         it('a non-leader does not broadcast a verdict', async function () {
             // identity V2 is eligible (we add it to genesis) but rank may not be 0;
             // force two verifiers so quorum is 2 and a single self-sign cannot finalize.

@@ -367,15 +367,22 @@ class FullNodeChallengeRound {
         let quorum = Math.floor((2 * state.eligible.size) / 3) + 1;
         if(state.sigs.size < quorum) return;
 
+        // Optimistic finalize lock: _maybeFinalize runs on EVERY incoming XNODE_SIGN
+        // (and from _closeCollection), so without claiming the round BEFORE the async
+        // broadcast, two sigs that cross quorum within the broadcast's await window both
+        // pass the `finalized` guard above and the leader emits the NODEPROOF verdict tx
+        // twice (wasted BTC fee; the second is a same-challenge replay). Claim the round
+        // now and revert on failure so a later sig/tick can still retry.
+        state.finalized = true;
         let wire = this._buildVerdictWire(state);
         try {
             let res = await this._broadcastVerdict(wire);
-            state.finalized = true;
             state.txid = res && res.txid ? res.txid : null;
             this.peerManager && this.peerManager.broadcast(XNODE_DONE, { epoch, challengeId: state.challengeId, txid: state.txid });
             console.log('FullNodeChallengeRound: verdict broadcast epoch=' + epoch + ' pass=' + state.passList.length +
                         ' sigs=' + state.sigs.size + '/' + quorum + (state.txid ? ' txid=' + state.txid : ''));
         } catch(e){
+            state.finalized = false;   // broadcast failed; unlock so a later sig/tick retries
             console.warn('FullNodeChallengeRound: verdict broadcast failed (epoch ' + epoch + '):', e && e.message ? e.message : e);
         }
     }
