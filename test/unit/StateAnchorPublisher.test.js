@@ -1298,6 +1298,20 @@ describe('StateAnchorPublisher', function () {
             expect(pub._quorumVerified(CANON, majority, set, true)).to.equal(true);    // 3·80 = 240 > 200
         });
 
+        it('_quorumVerified: a TRUNCATED weighted set fails CLOSED regardless of stake (XHUB-TRUNC-2)', function () {
+            // An over-cap snapshot under-counts S; a stake-evicted minority could otherwise
+            // authenticate a fabricated archived match/call. Mirrors the DEX/Call consensus
+            // refuse and meetsStakeThreshold's own fail-closed.
+            let pub = weightedPub();
+            let { ids, set } = stakeSet();
+            set.truncated = true;                                    // resolved set overflowed VALIDATOR_QUERY_LIMIT
+            let all = sigsFrom(ids);                                 // 100% of stake WOULD clear the 2/3 bar
+            expect(pub._quorumVerified(CANON, all, set, true)).to.equal(false);   // ...but truncated -> fail closed
+            // COUNT path is proceed-on-truncation (deterministic cap; matches getQuorum).
+            let three = sigsFrom(ids.slice(1));                      // 3 of 4 >= 2f+1
+            expect(pub._quorumVerified(CANON, three, set, false)).to.equal(true);
+        });
+
         it('_checkArchiveQuorum: a count-met-but-stake-short round does NOT publish/dequeue', async function () {
             let pub = weightedPub();
             let { ids, set } = stakeSet();
@@ -1472,6 +1486,19 @@ describe('StateAnchorPublisher', function () {
         expect(set2).to.deep.equal([{ pubkey: 'pka', amount: '1', source: '' }]);
     });
 
+    it('_resolveCapabilitySet carries the truncated flag from a weighted snapshot (XHUB-TRUNC-2)', async function () {
+        let bus = buildMesh(1);
+        let nd = bus.nodes[0];
+        nd.pub.network = 'regtest';                          // SWQ active -> weighted path
+        nd.pub.capSnapshot = {
+            getWeightSnapshot: async () => ({ validators: [{ pubkey: 'PKA', weight: '7', source: 'srcA' }], truncated: true }),
+            getSnapshot:       async () => ({ validators: [] })
+        };
+        let set = await nd.pub._resolveCapabilitySet('oracle_publish', 100);
+        // Without the flag surviving the map, the archive quorum path would not fail closed.
+        expect(set.truncated).to.equal(true);
+    });
+
     it('_handleSignReq: a follower NOT in the snapshot_block signing set does not co-sign', async function () {
         let bus = buildMesh(2, { btcBlock: 500 });
         let follower = bus.nodes[0];
@@ -1501,6 +1528,33 @@ describe('StateAnchorPublisher', function () {
             (Number(blk) === Number(cp.snapshot_block)) ? [leader.pubkey, follower.pubkey] : [];
         await follower.pub._handleSignReq(mkReq());
         expect(canonCalls, 'included follower builds the archive canonical').to.equal(1);
+    });
+
+    // XANC-V0DONE partial: the peer back-fill UPDATE now keys on checkpoint_seq, exactly like
+    // the publisher's own stamp, so one V0_DONE cannot mark a DIFFERENT/other seq row at the
+    // height. (The full suppression fix - verifying the announced txid on-chain - is an open item.)
+    it('_handleV0Done: stamps anchor_txid keyed on checkpoint_seq', async function () {
+        let bus = buildMesh(1);
+        let nd = bus.nodes[0];
+        nd.pub._getActiveOraclePublishPubkeys = async () => [nd.pubkey];
+        nd.pub._recordReward = () => {};                     // isolate the UPDATE assertion
+        let calls = [];
+        nd.pub.db.doQuery = async (sql, params) => {
+            calls.push({ sql, params });
+            if (sql.startsWith('SELECT snapshot_block FROM state_checkpoints')) return [{ snapshot_block: 100 }];
+            return [];
+        };
+        let d = { chain: 'BTC', network: 'regtest', block_index: 494, checkpoint_seq: 7, txid: 'aa'.repeat(32) };
+        d.sig_pubkey = nd.pubkey;
+        d.sig = nd.identity.sign(nd.pub._v0DoneCanonical(d, d.txid));
+
+        await nd.pub._handleV0Done({ type: 'XANC_V0_DONE', sender: nd.pubkey, data: d });
+
+        let upd = calls.find(c => c.sql.startsWith('UPDATE state_checkpoints SET anchor_txid'));
+        expect(upd, 'UPDATE issued').to.exist;
+        expect(upd.sql).to.match(/checkpoint_seq = \?/);
+        expect(upd.sql).to.match(/anchor_txid IS NULL/);
+        expect(upd.params[4]).to.equal(7);
     });
 
     it('size-trigger: reaching batchSize match:finalized events fires a flush', async function () {

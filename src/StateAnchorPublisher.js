@@ -832,15 +832,20 @@ class StateAnchorPublisher {
         let signatures = new Map();
         if(snapCount <= 1 || signingPubkeys.includes(myPubkey)) signatures.set(myPubkey, mySig);
 
+        // Full {pubkey, source, weight} set so _checkArchiveQuorum can tally
+        // distinct-source stake (weight carries the source's stake when weighted).
+        // Preserve the truncation flag so the weighted archive quorum (_checkArchiveQuorum
+        // via meetsStakeThreshold) fails closed on an over-cap oracle_publish snapshot.
+        let roundValidators = signingSet.map(v => ({ pubkey: v.pubkey, source: String(v.source != null ? v.source : ''), weight: String(v.amount != null ? v.amount : '0') }));
+        if(signingSet.truncated === true) roundValidators.truncated = true;
+
         let round = {
             cp, batchSeq, crc, b64, chunks, canonical, quorum, weighted, signer, electionBlock,
             count:      archive.count,
             matchIds:   matches.map(m => ({ match_id: m.match_id, status: m.status })),
             callIds:    calls.map(c => ({ call_id: c.call_id, phase: c.phase, status: c.status })),
             rewardIds:  rewardRows.map(({row}) => ({ reward_type: String(row.reward_type), round_number: Number(row.round_number), validator_pubkey: String(row.validator_pubkey).toLowerCase() })),
-            // Full {pubkey, source, weight} set so _checkArchiveQuorum can tally
-            // distinct-source stake (weight carries the source's stake when weighted).
-            validators: signingSet.map(v => ({ pubkey: v.pubkey, source: String(v.source != null ? v.source : ''), weight: String(v.amount != null ? v.amount : '0') })),
+            validators: roundValidators,
             signatures: signatures,
             done:       false,
             timer:      null
@@ -911,8 +916,14 @@ class StateAnchorPublisher {
             try {
                 if(weighted){
                     let snap = await this.capSnapshot.getWeightSnapshot(capability, Number(block));
-                    if(snap && Array.isArray(snap.validators) && snap.validators.length > 0)
-                        return snap.validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), amount: String(v.weight != null ? v.weight : '0'), source: String(v.source != null ? v.source : '') }));
+                    if(snap && Array.isArray(snap.validators) && snap.validators.length > 0){
+                        let set = snap.validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), amount: String(v.weight != null ? v.weight : '0'), source: String(v.source != null ? v.source : '') }));
+                        // Carry the truncation flag so the weighted quorum verdict fails closed
+                        // on an over-cap snapshot (SWQ-TRUNC parity: a truncated set under-counts
+                        // S, so a stake-evicted minority could otherwise clear the 2/3 bar).
+                        if(snap.truncated === true) set.truncated = true;
+                        return set;
+                    }
                 } else {
                     let snap = await this.capSnapshot.getSnapshot(capability, Number(block));
                     if(snap && Array.isArray(snap.validators) && snap.validators.length > 0)
@@ -1573,6 +1584,12 @@ class StateAnchorPublisher {
     // set (bare-pubkey callers must now pass objects). Used to gate the wrapper's own
     // on-chain validity and every archived match/call against its cross_chain set.
     _quorumVerified(canonical, sigs, validatorSet, weighted){
+        // Fail CLOSED on a TRUNCATED weighted set (SWQ-TRUNC parity, mirrors
+        // meetsStakeThreshold + the DEX/Call consensus refuse): an over-cap snapshot
+        // under-counts summed stake S, so a stake-evicted minority could otherwise clear
+        // the strict 2/3 bar and authenticate a fabricated archived match/call (or the
+        // wrapper). The COUNT path proceeds (deterministic cap; see CapabilitySnapshot.getQuorum).
+        if(weighted && validatorSet && validatorSet.truncated === true) return false;
         let qualified = new Set((validatorSet || []).map(v => String(v.pubkey).toLowerCase()));
         if(qualified.size === 0) return false;
         let validSigners = [], seen = new Set();
