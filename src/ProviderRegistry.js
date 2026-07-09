@@ -58,11 +58,27 @@ const DEFAULTS = {
         min_fee_xchain:         '0',
         deadline_window_blocks: 20,
         additional_config: {
+            // ORDERED fallback chain: index 0 is the primary; later entries
+            // serve when the block-height escalation ladder advances (see
+            // attestation_escalation.js). Single-vendor by default; adding a
+            // second vendor's model here is a GOVERNANCE action (with an
+            // activation block) so mixed-version fleets never diverge on the
+            // pinned fetch model.
             approved_models: [
                 'claude-sonnet-4-6',
                 'claude-opus-4-7'
             ],
             judge_model:                 'claude-haiku-4-5',
+            // Leader-local judge alternates for vendor outages (providers/llm.js).
+            // Empty by default; governance populates alongside approved_models.
+            judge_fallback_models:       [],
+            // Explicit model-id → vendor overrides for ids the provider's
+            // prefix inference can't classify.
+            model_vendors:               {},
+            // When true, the llm self-test fails unless credentials resolve for
+            // every vendor on the chains above (validators skip llm rounds and
+            // accrue missed_count until they provision fallback keys).
+            require_all_vendors:         false,
             judge_equivalence_threshold: 0.85,
             max_completion_tokens:       1024,
             default_temperature:         0,

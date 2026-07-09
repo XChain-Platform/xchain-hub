@@ -26,25 +26,37 @@
  *   agree(proposals)         -> Promise<{ body, meta } | null>
  *   healthCheck()            -> Promise<{ ok, error? }>
  *
- * Two transports are supported and resolved at call time per the operator's
- * configured credentials (see lib/hub-credentials.js):
+ * MULTI-VENDOR: each model in the governance-approved chain maps to a
+ * vendor (inferred from the model id, overridable via additional_config
+ * `model_vendors`). Vendor transports, resolved at call time per the
+ * operator's configured credentials (see lib/hub-credentials.js):
  *
- *   `claude_spawn`: shells out to the `claude` CLI. Preferred. Auth
+ *   anthropic:
+ *     `claude_spawn`: shells out to the `claude` CLI. Preferred. Auth
  *                     inherits from CLAUDE_CONFIG_DIR (auto-refreshing
  *                     refresh token written by `claude login`) or
  *                     CLAUDE_CODE_OAUTH_TOKEN. Cost model: Claude Code
  *                     subscription. Determinism: CLI does not expose
  *                     temperature; redundancy>=3 still converges via the
  *                     judge_model agreement check.
- *
- *   `anthropic_api`: direct HTTPS to api.anthropic.com using
+ *     `anthropic_api`: direct HTTPS to api.anthropic.com using
  *                     ANTHROPIC_API_KEY. Pay-per-token API billing.
  *                     Supports temperature=0 explicitly.
+ *
+ *   openai:
+ *     `openai_api`:  direct HTTPS to api.openai.com (chat completions)
+ *                     using OPENAI_API_KEY / HUB_OPENAI_API_KEY. Serves the
+ *                     fallback slots of the approved_models chain so an
+ *                     Anthropic outage cannot take the whole provider down.
+ *
+ * Which model actually served a request is consensus-visible: fetch()
+ * returns it as `meta`, which the canonical signature binds and the ATTEST
+ * v1 wire records on-chain.
  *
  ********************************************************************/
 
 const https = require('https');
-const { resolveHubLlmAuth } = require('../lib/hub-credentials');
+const { resolveHubLlmAuth, resolveLlmVendorAuth } = require('../lib/hub-credentials');
 const { runClaudePrint } = require('../lib/claude-spawn');
 
 const _tokenUsage = { inputTokens: 0, outputTokens: 0, calls: 0 };
@@ -54,9 +66,33 @@ const _tokenUsage = { inputTokens: 0, outputTokens: 0, calls: 0 };
 // spec §3 fallbacks for first-startup before any governance proposal.
 let APPROVED_MODELS = ['claude-sonnet-4-6', 'claude-opus-4-7'];
 let JUDGE_MODEL     = 'claude-haiku-4-5';
+// Ordered alternates the leader's agree() walks when the pinned judge's
+// vendor is unreachable. Leader-local reachability fallback, NOT consensus
+// state: followers never re-judge, so no cross-hub determinism is needed.
+let JUDGE_FALLBACK_MODELS = [];
+// Explicit model-id → vendor overrides for ids the prefix inference below
+// doesn't know. Governance-controlled, so a new vendor's model can be
+// approved without a code deploy (its transport still needs code).
+let MODEL_VENDORS = {};
+// When true, healthCheck() fails unless credentials resolve for EVERY vendor
+// on the fetch + judge chains (self-test enforcement of fallback readiness).
+// Governance flips this once the federation has provisioned fallback keys.
+let REQUIRE_ALL_VENDORS = false;
 let MAX_TOKENS_DEFAULT  = 1024;
 let DEFAULT_TEMPERATURE = 0;
 let PROMPT_ENVELOPE_VERSION = 1;
+
+// Map a model id to its vendor. Explicit MODEL_VENDORS overrides win, then
+// id-prefix inference. Unknown ids throw at call time (never guess a vendor:
+// sending a prompt to the wrong API leaks it to an unintended third party).
+function vendorOfModel(model) {
+    let id = String(model || '');
+    if (MODEL_VENDORS && typeof MODEL_VENDORS[id] === 'string') return MODEL_VENDORS[id];
+    if (/^claude-/.test(id))                 return 'anthropic';
+    if (/^(gpt-|chatgpt-|o[0-9])/.test(id))  return 'openai';
+    throw new Error('llm: cannot infer vendor for model "' + id + '" (add it to additional_config.model_vendors)');
+}
+exports._vendorOfModel = vendorOfModel;
 
 // Allow ProviderRegistry to inject the registered provider def at load time
 // so governance-controlled `additional_config` takes effect without a hub
@@ -67,6 +103,12 @@ exports._setConfig = (def) => {
     if (Array.isArray(ac.approved_models) && ac.approved_models.length > 0)
         APPROVED_MODELS = ac.approved_models.slice();
     if (ac.judge_model)                JUDGE_MODEL             = String(ac.judge_model);
+    if (Array.isArray(ac.judge_fallback_models))
+        JUDGE_FALLBACK_MODELS = ac.judge_fallback_models.map(String);
+    if (ac.model_vendors && typeof ac.model_vendors === 'object')
+        MODEL_VENDORS = { ...ac.model_vendors };
+    if (typeof ac.require_all_vendors === 'boolean')
+        REQUIRE_ALL_VENDORS = ac.require_all_vendors;
     if (Number(ac.max_completion_tokens))  MAX_TOKENS_DEFAULT  = Number(ac.max_completion_tokens);
     if (typeof ac.default_temperature === 'number') DEFAULT_TEMPERATURE = ac.default_temperature;
     if (Number(ac.prompt_envelope_version)) PROMPT_ENVELOPE_VERSION = Number(ac.prompt_envelope_version);
@@ -89,6 +131,19 @@ exports.fetch = async (payload, options) => {
         throw new Error('llm: envelope.prompt (string) is required');
     if (envelope.envelope_version !== undefined && Number(envelope.envelope_version) > PROMPT_ENVELOPE_VERSION)
         throw new Error('llm: unsupported envelope_version (got ' + envelope.envelope_version + ', max ' + PROMPT_ENVELOPE_VERSION + ')');
+
+    // Requester-controlled fallback policy. 'any' (default): serve from any
+    // approved model on the chain. 'strict': the requesting contract only
+    // trusts the PRIMARY model (its prompts were engineered against it); when
+    // the escalation ladder has advanced past rank 0 the fetch fails instead,
+    // and the round records provider_error / the request expires + refunds.
+    // options.modelRank is the pinned model's rank on the block-anchored
+    // approved_models ladder (0 = primary), supplied by AttestationRound.
+    let fallbackPolicy = (envelope.fallback === undefined) ? 'any' : String(envelope.fallback);
+    if (fallbackPolicy !== 'any' && fallbackPolicy !== 'strict')
+        throw new Error('llm: envelope.fallback must be "any" or "strict"');
+    if (fallbackPolicy === 'strict' && Number(options.modelRank) > 0)
+        throw new Error('llm: fallback_policy_strict - request only accepts the primary approved model');
 
     // The fetch model is supplied by the caller as options.pinnedModel, resolved
     // from the block-anchored provider config at the request's block so every
@@ -148,17 +203,34 @@ exports.agree = async (proposals, options) => {
     let candidates = proposals.map(p => Buffer.isBuffer(p.body) ? p.body.toString('utf8') : String(p.body || ''));
     let judgePrompt = _buildJudgePrompt(candidates);
 
-    let judgeText;
-    try {
-        judgeText = await _runLlm({
-            prompt:      judgePrompt,
-            model:       judgeModel,
-            maxTokens:   256,
-            temperature: 0
-        });
-    } catch (_) {
-        // Judge unreachable: defer to no_quorum. Validators will retry on
-        // the next request. (Spec §6.4 ack residual risk.)
+    // Judge fallback chain: pinned judge first, then the configured
+    // alternates (deduped). Only TRANSPORT failures (vendor down, no creds,
+    // timeout) advance the chain; a reachable judge's verdict, however
+    // unparseable, is a judgment outcome and must not be re-asked of a
+    // different model. Leader-local: followers adopt the leader's winner and
+    // never re-judge, so this needs no cross-hub determinism.
+    let judgeChain = [judgeModel, ...JUDGE_FALLBACK_MODELS.filter(m => m && m !== judgeModel)];
+    let judgeText  = null;
+    let reached    = false;
+    for (let jm of judgeChain) {
+        try {
+            judgeText = await _runLlm({
+                prompt:      judgePrompt,
+                model:       jm,
+                maxTokens:   256,
+                temperature: 0
+            });
+            reached = true;
+            if (jm !== judgeModel)
+                console.warn('llm: judge fell back to ' + jm + ' (pinned ' + judgeModel + ' unreachable)');
+            break;
+        } catch (e) {
+            console.warn('llm: judge model ' + jm + ' unreachable: ' + (e && e.message ? e.message : e));
+        }
+    }
+    if (!reached) {
+        // Whole judge chain unreachable: defer to no_quorum. Validators will
+        // retry on the next round. (Spec §6.4 ack residual risk.)
         return null;
     }
 
@@ -183,21 +255,79 @@ exports.agree = async (proposals, options) => {
     return null;
 };
 
-// Capability self-test probe. Confirms at least one credential path is
-// configured. Avoids burning quota on a real completion at startup. A
-// missing/misconfigured credential is the only fixed failure mode this
-// probe needs to catch.
+// Capability self-test probe. Confirms credential paths are configured for
+// the vendors the current model chains actually use. Avoids burning quota on
+// a real completion at startup; a missing/misconfigured credential is the
+// fixed failure mode this probe needs to catch.
+//
+// Verdict: the PRIMARY model's vendor must resolve, or the hub cannot serve
+// the happy path at all. Missing FALLBACK-vendor credentials degrade the
+// result (reported in `vendors`/`missing`) and only fail the probe when
+// governance has set require_all_vendors - the economic enforcement lever:
+// a failed self-test makes this validator skip llm rounds while still being
+// counted in N, so unserved rounds expire and accrue missed_count against it.
 exports.healthCheck = async (ctx) => {
-    const auth = resolveHubLlmAuth(ctx);
-    if (!auth.ok) return { ok: false, error: auth.detail || auth.reason || 'no_credential_configured' };
-    return { ok: true, transport: auth.transport, source: auth.source, tokenUsage: { ..._tokenUsage } };
+    let chainModels = [...APPROVED_MODELS, JUDGE_MODEL, ...JUDGE_FALLBACK_MODELS].filter(Boolean);
+    let vendors = [];
+    for (let m of chainModels) {
+        let v;
+        try { v = vendorOfModel(m); }
+        catch (_) { return { ok: false, error: 'unmapped vendor for model "' + m + '" (set additional_config.model_vendors)' }; }
+        if (vendors.indexOf(v) === -1) vendors.push(v);
+    }
+    if (vendors.length === 0) vendors.push('anthropic');
+
+    let primaryVendor = vendors[0];
+    try { if (APPROVED_MODELS[0]) primaryVendor = vendorOfModel(APPROVED_MODELS[0]); } catch (_) {}
+
+    let resolved = {};
+    let missing  = [];
+    let primaryAuth = null;
+    for (let v of vendors) {
+        let auth = resolveLlmVendorAuth(v, ctx);
+        resolved[v] = !!auth.ok;
+        if (!auth.ok) missing.push(v);
+        if (v === primaryVendor) primaryAuth = auth;
+    }
+
+    if (!primaryAuth || !primaryAuth.ok) {
+        return { ok: false, error: (primaryAuth && (primaryAuth.detail || primaryAuth.reason)) || 'no_credential_configured',
+                 vendors: resolved, missing };
+    }
+    if (REQUIRE_ALL_VENDORS && missing.length > 0) {
+        return { ok: false, error: 'missing credentials for fallback vendor(s): ' + missing.join(', ') +
+                 ' (require_all_vendors is set)', vendors: resolved, missing };
+    }
+    let res = { ok: true, transport: primaryAuth.transport, source: primaryAuth.source,
+                vendors: resolved, tokenUsage: { ..._tokenUsage } };
+    if (missing.length > 0) res.missing = missing;
+    return res;
 };
 
-// Pick the configured transport and execute the LLM call.
+// Pick the model's vendor + configured transport and execute the LLM call.
 // Returns the response text (string). Throws on transport-level failure.
 async function _runLlm({ prompt, system, model, maxTokens, temperature, timeoutMs }) {
-    const auth = resolveHubLlmAuth();
+    const vendor = vendorOfModel(model);
+    const auth   = resolveLlmVendorAuth(vendor);
     if (!auth.ok) throw new Error('llm: ' + (auth.detail || auth.reason || 'no credentials'));
+
+    if (auth.transport === 'openai_api') {
+        const reqBody = {
+            model,
+            max_completion_tokens: maxTokens,
+            messages: []
+        };
+        if (system) reqBody.messages.push({ role: 'system', content: system });
+        reqBody.messages.push({ role: 'user', content: prompt });
+        // Some OpenAI reasoning models reject explicit temperature; only send
+        // a caller-meaningful value and let the API default otherwise.
+        if (typeof temperature === 'number') reqBody.temperature = temperature;
+        const result = await _callOpenAi('/v1/chat/completions', reqBody, auth.apiKey, { timeoutMs });
+        let choice = Array.isArray(result.choices) ? result.choices[0] : null;
+        let text   = (choice && choice.message && typeof choice.message.content === 'string')
+            ? choice.message.content : '';
+        return text;
+    }
 
     if (auth.transport === 'claude_spawn') {
         // The CLI doesn't expose temperature or a hard max-tokens cap;
@@ -291,6 +421,56 @@ async function _callAnthropic(apiPath, body, apiKey, options) {
                     safeResolve(json);
                 } catch (e) {
                     safeReject(new Error('llm: Anthropic API: malformed response (' + str.substring(0, 200) + ')'));
+                }
+            });
+            res.on('error', (e) => safeReject(new Error('llm: response error: ' + e.message)));
+        });
+        req.on('error',   (e) => safeReject(new Error('llm: request error: ' + e.message)));
+        req.on('timeout', ()  => { req.destroy(); safeReject(new Error('llm: timeout after ' + timeoutMs + 'ms')); });
+        req.write(data);
+        req.end();
+    });
+}
+
+async function _callOpenAi(apiPath, body, apiKey, options) {
+    let timeoutMs = Number(options && options.timeoutMs) || 30000;
+    let data = JSON.stringify(body);
+
+    return await new Promise((resolve, reject) => {
+        let settled = false;
+        let safeResolve = (v) => { if (!settled) { settled = true; resolve(v); } };
+        let safeReject  = (e) => { if (!settled) { settled = true; reject(e); } };
+
+        let req = https.request({
+            method:   'POST',
+            hostname: 'api.openai.com',
+            path:     apiPath,
+            headers: {
+                'Content-Type':   'application/json',
+                'Authorization':  'Bearer ' + apiKey,
+                'Content-Length': Buffer.byteLength(data)
+            },
+            timeout: timeoutMs
+        }, (res) => {
+            let chunks = [];
+            res.on('data', (c) => chunks.push(c));
+            res.on('end',  () => {
+                let str = Buffer.concat(chunks).toString('utf8');
+                try {
+                    let json = JSON.parse(str);
+                    if (json.error) {
+                        let msg = (json.error && json.error.message) ? json.error.message : JSON.stringify(json);
+                        safeReject(new Error('llm: OpenAI API: ' + msg));
+                        return;
+                    }
+                    if (json.usage) {
+                        _tokenUsage.inputTokens  += json.usage.prompt_tokens     ?? 0;
+                        _tokenUsage.outputTokens += json.usage.completion_tokens ?? 0;
+                        _tokenUsage.calls        += 1;
+                    }
+                    safeResolve(json);
+                } catch (e) {
+                    safeReject(new Error('llm: OpenAI API: malformed response (' + str.substring(0, 200) + ')'));
                 }
             });
             res.on('error', (e) => safeReject(new Error('llm: response error: ' + e.message)));

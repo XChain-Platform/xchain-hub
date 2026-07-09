@@ -36,6 +36,7 @@ const crypto = require('crypto');
 const axios  = require('axios');
 const bc     = require('./bcmath.js');
 const swq    = require('./stake_weighted_quorum.js');
+const esc    = require('./attestation_escalation.js');
 
 const ATTEST_PROPOSE = 'ATTEST_PROPOSE';
 
@@ -79,6 +80,10 @@ class AttestationRound {
         this.pollMs         = parseInt(this.config.ATTESTATION_POLL_MS)        || DEFAULT_POLL_MS;
         this.confirmations  = parseInt(this.config.ATTESTATION_CONFIRMATIONS)  || DEFAULT_CONFIRMATIONS;
         this.fetchTimeoutMs = parseInt(this.config.ATTESTATION_FETCH_TIMEOUT)  || DEFAULT_FETCH_TIMEOUT;
+        // Blocks of leader silence before the round leader rotates one slot down
+        // the responsible set (and the model-fallback ladder advances; both are
+        // pure functions of chain height, see attestation_escalation.js).
+        this.leaderRotationBlocks = parseInt(this.config.ATTESTATION_LEADER_ROTATION_BLOCKS) || esc.DEFAULT_ROTATION_WINDOW_BLOCKS;
         // How long a request stays in `seen` before it can be re-evaluated.
         // Defaults to 5 poll cycles so transient skips clear quickly while
         // still suppressing the steady-state re-poll of confirmed work.
@@ -176,7 +181,7 @@ class AttestationRound {
             if(Number(req.block_index) + this.confirmations > latestBlock) continue;
 
             this.seen.set(rid, Date.now());
-            this._startRound(req).catch(e =>
+            this._startRound(req, latestBlock).catch(e =>
                 console.error('AttestationRound: start failed for ' + rid.substring(0,16) + '...: ' + (e && e.message ? e.message : e))
             );
         }
@@ -214,7 +219,10 @@ class AttestationRound {
     }
 
     // Idempotent: repeat calls for the same requestId are dropped.
-    async _startRound(request){
+    // `latestBlock` is the indexer tip observed by the poll that surfaced this
+    // request; it drives the deterministic leader-rotation + model-fallback
+    // ladders (attestation_escalation.js).
+    async _startRound(request, latestBlock){
         let rid          = String(request.request_id).toLowerCase();
         let providerId   = String(request.provider_id);
         let redundancy   = Number(request.redundancy) || 1;
@@ -255,7 +263,18 @@ class AttestationRound {
         }
 
         let responsible = this._computeResponsibleSet(snapshot.validators, rid, redundancy, weighted);
-        let leaderPubkey = responsible[0] ? responsible[0].pubkey : null;
+        // Leader rotation (Phase 4): a silent leader must not stall the request
+        // until deadline expiry. The leader slot advances one step down the
+        // hash-ordered responsible set per rotation window of elapsed chain
+        // time. The SET stays identical (indexer signature validation keys on
+        // membership, never on leadership), only the slot that runs agree() and
+        // broadcasts first moves. Falls back to slot 0 when the poll couldn't
+        // resolve a tip height.
+        let step = Number.isFinite(Number(latestBlock)) && Number(latestBlock) > 0
+            ? esc.escalationStep(Number(latestBlock), snapshotBlk, this.confirmations, this.leaderRotationBlocks)
+            : 0;
+        let leaderIdx    = esc.leaderIndex(step, responsible.length);
+        let leaderPubkey = responsible[leaderIdx] ? responsible[leaderIdx].pubkey : (responsible[0] ? responsible[0].pubkey : null);
         let amResponsible = responsible.some(v => v.pubkey === myPubkey);
         if(!amResponsible){
             // Not in the responsible set; log so operators can distinguish "saw and skipped" from "never polled".
@@ -274,7 +293,18 @@ class AttestationRound {
         // block cannot alter an in-flight round. Mirrors the block-anchored MIN_STAKE
         // resolution that locks the responsible set.
         let pinnedAc = this.providerRegistry.getAdditionalConfig(providerId, snapshotBlk) || {};
-        let pinnedFetchModel = (Array.isArray(pinnedAc.approved_models) && pinnedAc.approved_models[0]) || null;
+        // Model fallback ladder (Phase 4): the block-anchored approved_models
+        // list is an ORDERED fallback chain. The request's serviceable span is
+        // split into one segment per model, so a dead primary vendor stops
+        // burning the deadline window once the chain crosses into the next
+        // segment. Deterministic: every hub derives the same modelIdx from the
+        // same chain height, so all validators in a round fetch with the SAME
+        // model (a judge_model round mixing vendors would fail equivalence).
+        let approvedModels = Array.isArray(pinnedAc.approved_models) ? pinnedAc.approved_models : [];
+        let modelIdx = Number.isFinite(Number(latestBlock)) && Number(latestBlock) > 0
+            ? esc.modelIndex(Number(latestBlock), snapshotBlk, this.confirmations, Number(request.deadline_block), approvedModels.length)
+            : 0;
+        let pinnedFetchModel = approvedModels[modelIdx] || approvedModels[0] || null;
         let pinnedJudgeModel = pinnedAc.judge_model || null;
         if(!pinnedFetchModel){
             console.warn('AttestationRound: provider "' + providerId + '" has no approved_models at block ' +
@@ -295,20 +325,24 @@ class AttestationRound {
         }
 
         // Fetch the payload via the provider module. Capped at provider's max
-        // response bytes; timeout from config. Failure burns the round on this
-        // validator (slashing missed-validators is Phase 4).
-        let fetched;
+        // response bytes; timeout from config. A failed fetch no longer goes
+        // silent: it becomes a status='provider_error' proposal (empty body,
+        // empty meta) so the round can quorum-sign an explicit non-ok ATTEST v1
+        // (Phase 4) instead of stalling every peer until deadline expiry.
+        let fetched   = null;
+        let myStatus  = 'ok';
         try {
             fetched = await providerModule.fetch(request.payload, {
                 maxResponseBytes: providerDef.max_response_bytes,
                 timeoutMs:        this.fetchTimeoutMs,
-                pinnedModel:      pinnedFetchModel
+                pinnedModel:      pinnedFetchModel,
+                // Rank of the pinned model on the fallback ladder; providers
+                // enforce request-level fallback policy on it (llm 'strict').
+                modelRank:        modelIdx
             });
         } catch (e) {
             console.warn('AttestationRound: fetch failed for ' + rid.substring(0,16) + '...: ', e);
-            // Persist 'inactive' so we don't retry the same broken URL forever.
-            this.rounds.set(rid, { request, role: amLeader ? 'leader' : 'follower', error: e.message, proposedAt: Date.now() });
-            return;
+            myStatus = 'provider_error';
         }
 
         let roundState = {
@@ -320,15 +354,23 @@ class AttestationRound {
             leaderPubkey:   leaderPubkey,
             redundancy:     redundancy,
             providerId:     providerId,
-            myProposal:     { body: fetched.body, meta: fetched.meta },
+            // Error proposals carry an empty body and empty meta so every
+            // failed fetcher signs the IDENTICAL canonical bytes (the non-ok
+            // outcome converges without a judge; see AttestationConsensus).
+            myProposal:     (myStatus === 'ok')
+                ? { body: fetched.body, meta: fetched.meta, status: 'ok' }
+                : { body: Buffer.alloc(0), meta: '', status: myStatus },
             pinnedJudgeModel: pinnedJudgeModel,
+            error:          (myStatus === 'ok') ? undefined : myStatus,
             proposedAt:     Date.now()
         };
         this.rounds.set(rid, roundState);
 
         console.log('AttestationRound: ' + (amLeader ? '[LEADER]' : '[FOLLOWER]') +
                     ' proposing ' + rid.substring(0,16) + '... (provider=' + providerId +
-                    ', body=' + fetched.body.length + 'B, meta=' + fetched.meta + ')');
+                    ', status=' + myStatus +
+                    (myStatus === 'ok' ? ', body=' + fetched.body.length + 'B, meta=' + fetched.meta : '') +
+                    ', model=' + (pinnedFetchModel || 'default') + '[' + modelIdx + '], leaderSlot=' + leaderIdx + ')');
 
         // Hand to consensus so it can collect PROPOSEs from other validators
         // and drive PBFT. Consensus is responsible for the actual ATTEST_PROPOSE

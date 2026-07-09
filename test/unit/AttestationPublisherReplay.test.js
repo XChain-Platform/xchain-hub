@@ -202,3 +202,130 @@ describe('AttestationPublisher: crash replay and follower failover', function ()
         expect(readQueue(queueFile)).to.have.length(1, 'queue retained for a later sweep');
     });
 });
+
+describe('AttestationPublisher: non-ok (Phase 4) publication discipline', function () {
+
+    let queueFile;
+
+    beforeEach(function () {
+        queueFile = path.join(os.tmpdir(), 'attq-nonok-' + process.pid + '-' + Math.floor(Math.random() * 1e9) + '.jsonl');
+    });
+
+    afterEach(function () {
+        sinon.restore();
+        try { fs.unlinkSync(queueFile); } catch (_) {}
+    });
+
+    function makePublisher(myPub) {
+        const pub = new AttestationPublisher(makeHub(myPub || MY_PUB));
+        pub.queuePath = queueFile;
+        return pub;
+    }
+
+    function nonOkEvent(leaderPubkey) {
+        const rid = 'dd'.repeat(32);
+        return {
+            requestId:    rid,
+            request:      { block_index: 100, redundancy: 1 },
+            providerId:   'llm',
+            responseBody: Buffer.alloc(0),
+            meta:         '',
+            status:       'provider_error',
+            signatures:   [{ pubkey: MY_PUB, sig: '00'.repeat(64) }],
+            leaderPubkey: leaderPubkey
+        };
+    }
+
+    it('a FOLLOWER neither enqueues nor broadcasts a non-ok response', async function () {
+        const pub = makePublisher(MY_PUB);
+        const bcast = sinon.stub().resolves({ txid: 'x' });
+        pub.setBroadcastHook(bcast);
+        await pub.onRequestFinalized(nonOkEvent(LEADER_PUB));  // someone else leads
+        expect(bcast.called).to.equal(false);
+        expect(readQueue(queueFile)).to.have.length(0);
+    });
+
+    it('the LEADER enqueues (with status) and broadcasts a non-ok response', async function () {
+        const pub = makePublisher(MY_PUB);
+        const bcast = sinon.stub().resolves({ txid: 'nonok-txid' });
+        pub.setBroadcastHook(bcast);
+        await pub.onRequestFinalized(nonOkEvent(MY_PUB));
+        expect(bcast.calledOnce).to.equal(true);
+        const wire = bcast.firstCall.args[0];
+        expect(wire).to.match(/^ATTEST\|1\|/);
+        expect(wire.split('|')[5]).to.equal('provider_error');
+        // Broadcast succeeded → entry dropped again.
+        expect(readQueue(queueFile)).to.have.length(0);
+    });
+
+    it('the sweep drops a stale non-ok entry without re-broadcasting (request still pending)', async function () {
+        const rid = 'dd'.repeat(32);
+        const pub = makePublisher(MY_PUB);
+        const bcast = sinon.stub().resolves({ txid: 'x' });
+        pub.setBroadcastHook(bcast);
+        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set([rid]));
+        // Older than failoverWindowBlocks * approxBlockMs (2 * 10min default).
+        writeQueue(queueFile, [{
+            ts:           Date.now() - (3 * 600000),
+            requestId:    rid,
+            wire:         'ATTEST|1|' + rid + '|llm||provider_error||1|' + MY_PUB + '|' + '00'.repeat(64),
+            status:       'provider_error',
+            requestBlock: 100,
+            responsible:  [MY_PUB],
+            leaderPubkey: MY_PUB
+        }]);
+        await pub._processQueue();
+        expect(bcast.called).to.equal(false);
+        expect(readQueue(queueFile)).to.have.length(0);
+    });
+
+    it('the sweep still retries a FRESH non-ok leader entry (crash recovery window)', async function () {
+        const rid = 'dd'.repeat(32);
+        const pub = makePublisher(MY_PUB);
+        const bcast = sinon.stub().resolves({ txid: 'retry-txid' });
+        pub.setBroadcastHook(bcast);
+        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set([rid]));
+        // Old enough to clear the leader-retry grace, young enough to keep.
+        writeQueue(queueFile, [{
+            ts:           Date.now() - 120000,
+            requestId:    rid,
+            wire:         'ATTEST|1|' + rid + '|llm||provider_error||1|' + MY_PUB + '|' + '00'.repeat(64),
+            status:       'provider_error',
+            requestBlock: 100,
+            responsible:  [MY_PUB],
+            leaderPubkey: MY_PUB
+        }]);
+        await pub._processQueue();
+        expect(bcast.calledOnce).to.equal(true);
+        expect(readQueue(queueFile)).to.have.length(0);
+    });
+});
+
+describe('AttestationPublisher: _myRank with a rotated round leader', function () {
+
+    const OTHER_PUB = 'dd'.repeat(32);
+
+    it('ranks relative to the recorded leader, not hash-slot 0', function () {
+        const pub = new AttestationPublisher(makeHub(MY_PUB));
+        // Hash order: [MY_PUB, LEADER_PUB, OTHER_PUB], but the round rotated
+        // to LEADER_PUB (slot 1). Step-in order becomes LEADER→OTHER→MY.
+        const entry = {
+            responsible:  [MY_PUB, LEADER_PUB, OTHER_PUB],
+            leaderPubkey: LEADER_PUB
+        };
+        expect(pub._myRank(entry)).to.equal(2);
+        const pub2 = new AttestationPublisher(makeHub(LEADER_PUB));
+        expect(pub2._myRank(entry)).to.equal(0);
+        const pub3 = new AttestationPublisher(makeHub(OTHER_PUB));
+        expect(pub3._myRank(entry)).to.equal(1);
+    });
+
+    it('keeps hash order when the leader is slot 0 (no rotation)', function () {
+        const pub = new AttestationPublisher(makeHub(MY_PUB));
+        const entry = {
+            responsible:  [LEADER_PUB, MY_PUB],
+            leaderPubkey: LEADER_PUB
+        };
+        expect(pub._myRank(entry)).to.equal(1);
+    });
+});

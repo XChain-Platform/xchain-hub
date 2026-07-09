@@ -29,16 +29,19 @@
 
 // Providers this self-test knows how to probe. Each module must export
 // `healthCheck() -> { ok, error? }`. http_get is always probed; llm is
-// only probed when ANY supported credential path resolves (CLAUDE_CONFIG_DIR,
-// CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY, or the default isolated dir),
-// so a stack that hasn't opted in to LLM doesn't flag the capability as
-// unhealthy.
-const { resolveHubLlmAuth } = require('../lib/hub-credentials');
+// only probed when ANY supported credential path resolves for ANY vendor
+// (CLAUDE_CONFIG_DIR, CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY,
+// OPENAI_API_KEY, or the default isolated dir), so a stack that hasn't opted
+// in to LLM doesn't flag the capability as unhealthy. Whether the resolved
+// credentials actually cover the approved model chain (primary vendor
+// required; ALL vendors when governance sets require_all_vendors) is the llm
+// module's healthCheck verdict, probed below.
+const { resolveHubLlmAuth, resolveOpenAiAuth } = require('../lib/hub-credentials');
 
 const PROVIDER_PROBES = {
     http_get: require('../providers/http_get.js')
 };
-if (resolveHubLlmAuth().ok){
+if (resolveHubLlmAuth().ok || resolveOpenAiAuth().ok){
     PROVIDER_PROBES.llm = require('../providers/llm.js');
 }
 

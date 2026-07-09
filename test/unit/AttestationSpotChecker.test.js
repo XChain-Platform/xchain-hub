@@ -46,7 +46,9 @@ function makeFinalizedEvent(overrides) {
         requestId:    'rid001',
         providerId:   'http_get',
         responseBody: Buffer.from('response text', 'utf8'),
-        status:       'finalized',
+        // The consensus event's status field carries the ATTEST wire status;
+        // an ok round emits 'ok' (non-ok rounds are inconclusive spot-checks).
+        status:       'ok',
         meta:         '200',
         signatures:   [{ pubkey: 'pubkey1' }, { pubkey: 'pubkey2' }],
         leaderPubkey: 'pubkey1',
@@ -376,5 +378,57 @@ describe('AttestationSpotChecker', function () {
             // Failures recorded for both signers
             expect(sc._failuresFor('pubkey1')).to.have.length(1);
         });
+    });
+});
+
+describe('AttestationSpotChecker: non-ok finalizations (Phase 4)', function () {
+
+    const sinon = require('sinon');
+    const { expect } = require('chai');
+    const AttestationSpotChecker = require('../../src/AttestationSpotChecker');
+
+    afterEach(function () { sinon.restore(); });
+
+    function makeChecker() {
+        const hub = { p2pConfig: {}, attestationConsensus: null, slashDetector: null };
+        const registry = { getModule: sinon.stub().returns({ agree: sinon.stub().resolves(null) }) };
+        return new AttestationSpotChecker(hub, registry);
+    }
+
+    it('treats a provider_error finalization as inconclusive: no failures, entry retained', async function () {
+        const checker = makeChecker();
+        const rid = 'ab'.repeat(32);
+        checker.register(rid, 'llm', 'expected answer');
+        await checker.onRequestFinalized({
+            requestId:    rid,
+            providerId:   'llm',
+            responseBody: Buffer.alloc(0),
+            meta:         '',
+            status:       'provider_error',
+            signatures:   [{ pubkey: 'aa'.repeat(32), sig: '00'.repeat(64) }]
+        });
+        expect(checker._failuresFor('aa'.repeat(32))).to.have.length(0);
+        // Entry stays queued: the request is still pending on-chain and a
+        // later ok round must still be judged.
+        expect(checker.isSpotCheck(rid)).to.equal(true);
+    });
+
+    it('still judges (and can fail) an ok finalization after a prior non-ok one', async function () {
+        const checker = makeChecker();
+        const rid = 'cd'.repeat(32);
+        checker.register(rid, 'llm', 'expected answer');
+        await checker.onRequestFinalized({ requestId: rid, providerId: 'llm', responseBody: Buffer.alloc(0), meta: '', status: 'no_quorum', signatures: [] });
+        expect(checker.isSpotCheck(rid)).to.equal(true);
+        await checker.onRequestFinalized({
+            requestId:    rid,
+            providerId:   'llm',
+            responseBody: Buffer.from('wrong answer'),
+            meta:         'claude-sonnet-4-6',
+            status:       'ok',
+            signatures:   [{ pubkey: 'bb'.repeat(32), sig: '00'.repeat(64) }]
+        });
+        // agree() stub returns null → judged non-equivalent → failure recorded.
+        expect(checker._failuresFor('bb'.repeat(32))).to.have.length(1);
+        expect(checker.isSpotCheck(rid)).to.equal(false);
     });
 });

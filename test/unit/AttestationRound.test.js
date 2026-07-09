@@ -607,6 +607,93 @@ describe('AttestationRound', function () {
         });
     });
 
+    // ── _startRound escalation ladders (Phase 4) ─────────────────────────────
+
+    describe('_startRound() escalation ladders', function () {
+
+        const ME = 'aa'.repeat(32);
+        const BB = 'bb'.repeat(32);
+
+        function makeRequest(overrides) {
+            return {
+                request_id:   'rid0001',
+                provider_id:  'llm',
+                redundancy:   3,
+                block_index:  100,
+                action_index: 1,
+                deadline_block: 120,
+                payload:      JSON.stringify({ prompt: 'hi' }),
+                ...overrides
+            };
+        }
+
+        function setup(regOverrides) {
+            let capSS = { getSnapshot: sinon.stub().resolves({ validators: [{ pubkey: ME }, { pubkey: BB }] }) };
+            let hub   = makeHub({ capabilitySnapshot: capSS });
+            hub.getIdentity = () => makeIdentity(ME);
+            let fetchStub = sinon.stub().resolves({ body: Buffer.from('ok'), meta: 'claude-sonnet-4-6' });
+            let reg = makeProviderRegistry({
+                getModule: sinon.stub().returns({ fetch: fetchStub }),
+                getAdditionalConfig: sinon.stub().returns({
+                    approved_models: ['claude-sonnet-4-6', 'gpt-5-mini'],
+                    judge_model:     'claude-haiku-4-5'
+                }),
+                ...(regOverrides || {})
+            });
+            let ar = new AttestationRound(hub, reg);
+            sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: ME, hash: '00' }, { pubkey: BB, hash: '01' }]);
+            let consensus = { propose: sinon.stub().resolves() };
+            ar.setConsensus(consensus);
+            return { ar, fetchStub, consensus };
+        }
+
+        it('keeps slot 0 as leader inside the first rotation window', async function () {
+            let { ar, consensus } = setup();
+            // confirmations=3: serviceable from block 103; tip 104 is step 0.
+            await ar._startRound(makeRequest(), 104);
+            let state = consensus.propose.firstCall.args[1];
+            expect(state.leaderPubkey).to.equal(ME);
+            expect(state.role).to.equal('leader');
+        });
+
+        it('rotates the leader one slot after a silent rotation window', async function () {
+            let { ar, consensus } = setup();
+            // step = floor((106-103)/2) = 1 → leader slot 1 (BB); I follow.
+            await ar._startRound(makeRequest(), 106);
+            let state = consensus.propose.firstCall.args[1];
+            expect(state.leaderPubkey).to.equal(BB);
+            expect(state.role).to.equal('follower');
+        });
+
+        it('pins the primary model in the first deadline segment', async function () {
+            let { ar, fetchStub } = setup();
+            // span [103,120] = 17 blocks, 2 models → segment 8.5; tip 106 → rank 0
+            await ar._startRound(makeRequest(), 106);
+            expect(fetchStub.firstCall.args[1].pinnedModel).to.equal('claude-sonnet-4-6');
+            expect(fetchStub.firstCall.args[1].modelRank).to.equal(0);
+        });
+
+        it('escalates to the fallback model in the second deadline segment', async function () {
+            let { ar, fetchStub } = setup();
+            // tip 115: elapsed 12 ≥ 8.5 → rank 1 (gpt-5-mini)
+            await ar._startRound(makeRequest(), 115);
+            expect(fetchStub.firstCall.args[1].pinnedModel).to.equal('gpt-5-mini');
+            expect(fetchStub.firstCall.args[1].modelRank).to.equal(1);
+        });
+
+        it('proposes a provider_error round (empty body/meta) when the fetch fails', async function () {
+            let { ar, fetchStub, consensus } = setup();
+            fetchStub.rejects(new Error('vendor 529'));
+            await ar._startRound(makeRequest(), 104);
+            expect(consensus.propose.calledOnce).to.be.true;
+            let state = consensus.propose.firstCall.args[1];
+            expect(state.myProposal.status).to.equal('provider_error');
+            expect(state.myProposal.body.length).to.equal(0);
+            expect(state.myProposal.meta).to.equal('');
+            expect(ar.rounds.get('rid0001').error).to.equal('provider_error');
+        });
+    });
+
     // ── ATTEST_PROPOSE export ────────────────────────────────────────────────
 
     describe('module exports', function () {

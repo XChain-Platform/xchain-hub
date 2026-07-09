@@ -42,18 +42,35 @@ function _withEnv(extra, fn){
     const saved = {};
     const keys  = ['HUB_CLAUDE_CONFIG_DIR','CLAUDE_CONFIG_DIR',
                    'HUB_CLAUDE_CODE_OAUTH_TOKEN','CLAUDE_CODE_OAUTH_TOKEN',
-                   'ANTHROPIC_API_KEY','LLM_DEFAULT_MODEL'];
+                   'ANTHROPIC_API_KEY','LLM_DEFAULT_MODEL',
+                   'HUB_OPENAI_API_KEY','OPENAI_API_KEY'];
     for (const k of keys){ saved[k] = process.env[k]; }
-    try {
-        for (const k of keys){ delete process.env[k]; }
-        for (const [k,v] of Object.entries(extra || {})) { process.env[k] = v; }
-        return fn();
-    } finally {
+    const restore = () => {
         for (const k of keys){
             if (saved[k] === undefined) delete process.env[k];
             else                        process.env[k] = saved[k];
         }
+    };
+    let result;
+    try {
+        for (const k of keys){ delete process.env[k]; }
+        for (const [k,v] of Object.entries(extra || {})) { process.env[k] = v; }
+        result = fn();
+    } catch (e) {
+        restore();
+        throw e;
     }
+    // An async fn must keep the scenario env across its awaits (credential
+    // resolution happens per _runLlm call, not just in the sync prefix), so
+    // restore only once the promise settles.
+    if (result && typeof result.then === 'function') {
+        return Promise.resolve(result).then(
+            (v) => { restore(); return v; },
+            (e) => { restore(); throw e; }
+        );
+    }
+    restore();
+    return result;
 }
 
 // Reload the module under each scenario so its env-dependent require-time
@@ -808,10 +825,16 @@ describe('llm provider, auth credential fallback chain', function () {
         savedCredsCacheEntry = require.cache[credsKey];
 
         const fakeResolve = sinon.stub().returns(authResult);
+        const fakeOpenAi  = sinon.stub().returns({ ok: false, reason: 'no_credential_configured' });
         require.cache[credsKey] = {
             id: credsKey, filename: credsKey, loaded: true,
             exports: {
                 resolveHubLlmAuth: fakeResolve,
+                resolveOpenAiAuth: fakeOpenAi,
+                // Mirror the real module's vendor dispatch so llm.js's
+                // multi-vendor paths route through the same stubs.
+                resolveLlmVendorAuth: (vendor, ctx) =>
+                    (vendor === 'openai') ? fakeOpenAi(ctx) : fakeResolve(ctx),
                 DEFAULT_HUB_CLAUDE_CONFIG_DIR: '/tmp/fake-dir'
             }
         };
@@ -939,5 +962,304 @@ describe('llm provider, _callAnthropic error format edge cases', function () {
         catch (e) { err = e; }
         expect(err).to.exist;
         expect(err.message).to.match(/Anthropic API/);
+    });
+});
+
+// ---- Multi-vendor fallback chain (Phase 4) ---------------------------------
+
+describe('llm provider, vendor inference', function () {
+
+    afterEach(function () { sinon.restore(); });
+
+    it('maps claude-* to anthropic and gpt-*/o-series to openai', function () {
+        const llm = _reloadProvider();
+        expect(llm._vendorOfModel('claude-sonnet-4-6')).to.equal('anthropic');
+        expect(llm._vendorOfModel('gpt-5-mini')).to.equal('openai');
+        expect(llm._vendorOfModel('o3-mini')).to.equal('openai');
+        expect(llm._vendorOfModel('chatgpt-4o-latest')).to.equal('openai');
+    });
+
+    it('throws on an unmapped model id instead of guessing a vendor', function () {
+        const llm = _reloadProvider();
+        expect(() => llm._vendorOfModel('llama-3-70b')).to.throw(/cannot infer vendor/);
+    });
+
+    it('honors explicit model_vendors overrides from additional_config', function () {
+        const llm = _reloadProvider();
+        llm._setConfig({ additional_config: { model_vendors: { 'llama-3-70b': 'openai' } } });
+        expect(llm._vendorOfModel('llama-3-70b')).to.equal('openai');
+    });
+});
+
+describe('llm provider, fetch via openai_api', function () {
+
+    afterEach(function () {
+        nock.cleanAll();
+        sinon.restore();
+    });
+
+    it('serves an openai-vendor pinned model through api.openai.com', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            const scope = nock('https://api.openai.com')
+                .post('/v1/chat/completions', (body) => {
+                    expect(body.model).to.equal('gpt-5-mini');
+                    expect(body.messages[body.messages.length - 1].content).to.equal('hello');
+                    return true;
+                })
+                .reply(200, {
+                    choices: [{ message: { role: 'assistant', content: 'world' } }],
+                    usage:   { prompt_tokens: 3, completion_tokens: 2 }
+                });
+            const res = await llm.fetch(JSON.stringify({ prompt: 'hello' }), { pinnedModel: 'gpt-5-mini' });
+            expect(res.body.toString('utf8')).to.equal('world');
+            expect(res.meta).to.equal('gpt-5-mini');
+            expect(scope.isDone()).to.equal(true);
+        });
+    });
+
+    it('threads the system prompt as a system message', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            nock('https://api.openai.com')
+                .post('/v1/chat/completions', (body) => {
+                    expect(body.messages[0]).to.deep.equal({ role: 'system', content: 'be terse' });
+                    return true;
+                })
+                .reply(200, { choices: [{ message: { content: 'ok' } }] });
+            const res = await llm.fetch(JSON.stringify({ prompt: 'q', system: 'be terse' }), { pinnedModel: 'gpt-5-mini' });
+            expect(res.body.toString('utf8')).to.equal('ok');
+        });
+    });
+
+    it('fails a claude-vendor model when only OpenAI credentials exist', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            let err;
+            try { await llm.fetch(JSON.stringify({ prompt: 'q' }), { pinnedModel: 'claude-sonnet-4-6' }); }
+            catch (e) { err = e; }
+            expect(err).to.exist;
+            expect(err.message).to.match(/HUB_CLAUDE_CONFIG_DIR|ANTHROPIC_API_KEY|no_credential/);
+        });
+    });
+
+    it('rejects on an OpenAI API error payload', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            nock('https://api.openai.com')
+                .post('/v1/chat/completions')
+                .reply(429, { error: { message: 'rate limited' } });
+            let err;
+            try { await llm.fetch(JSON.stringify({ prompt: 'q' }), { pinnedModel: 'gpt-5-mini' }); }
+            catch (e) { err = e; }
+            expect(err).to.exist;
+            expect(err.message).to.match(/OpenAI API: rate limited/);
+        });
+    });
+});
+
+describe('llm provider, requester fallback policy', function () {
+
+    afterEach(function () {
+        nock.cleanAll();
+        sinon.restore();
+    });
+
+    it('rejects an unknown envelope.fallback value', async function () {
+        const llm = _reloadProvider();
+        let err;
+        try { await llm.fetch(JSON.stringify({ prompt: 'q', fallback: 'maybe' }), {}); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.message).to.match(/envelope.fallback/);
+    });
+
+    it('strict policy refuses a non-primary model without calling any vendor', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            let err;
+            try {
+                await llm.fetch(JSON.stringify({ prompt: 'q', fallback: 'strict' }),
+                                { pinnedModel: 'gpt-5-mini', modelRank: 1 });
+            } catch (e) { err = e; }
+            expect(err).to.exist;
+            expect(err.message).to.match(/fallback_policy_strict/);
+            expect(nock.pendingMocks().length).to.equal(0);  // nothing was even mocked; no call attempted
+        });
+    });
+
+    it('strict policy still serves the primary model (rank 0)', async function () {
+        await _withEnv({ ANTHROPIC_API_KEY: 'sk-test' }, async () => {
+            const llm = _reloadProvider();
+            nock('https://api.anthropic.com')
+                .post('/v1/messages')
+                .reply(200, { content: [{ type: 'text', text: 'primary answer' }] });
+            const res = await llm.fetch(JSON.stringify({ prompt: 'q', fallback: 'strict' }),
+                                        { pinnedModel: 'claude-sonnet-4-6', modelRank: 0 });
+            expect(res.body.toString('utf8')).to.equal('primary answer');
+        });
+    });
+
+    it('default policy (any) serves a fallback-rank model', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            nock('https://api.openai.com')
+                .post('/v1/chat/completions')
+                .reply(200, { choices: [{ message: { content: 'fallback answer' } }] });
+            const res = await llm.fetch(JSON.stringify({ prompt: 'q' }),
+                                        { pinnedModel: 'gpt-5-mini', modelRank: 1 });
+            expect(res.body.toString('utf8')).to.equal('fallback answer');
+        });
+    });
+});
+
+describe('llm provider, judge fallback chain', function () {
+
+    afterEach(function () {
+        nock.cleanAll();
+        sinon.restore();
+    });
+
+    const PROPOSALS = [
+        { body: Buffer.from('answer A'), meta: 'claude-sonnet-4-6' },
+        { body: Buffer.from('answer A.'), meta: 'claude-sonnet-4-6' }
+    ];
+
+    it('falls back to an alternate-vendor judge when the pinned judge vendor is down', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            llm._setConfig({ additional_config: { judge_fallback_models: ['gpt-5-mini'] } });
+            // Pinned judge is claude-* with NO anthropic creds → transport
+            // failure → chain advances to the OpenAI judge below.
+            nock('https://api.openai.com')
+                .post('/v1/chat/completions', (body) => body.model === 'gpt-5-mini')
+                .reply(200, { choices: [{ message: { content: '{"equivalent": true, "canonical_index": 1}' } }] });
+            const winner = await llm.agree(PROPOSALS, { pinnedJudgeModel: 'claude-haiku-4-5' });
+            expect(winner).to.exist;
+            expect(winner.body.toString('utf8')).to.equal('answer A');
+        });
+    });
+
+    it('returns null when the whole judge chain is unreachable', async function () {
+        await _withEnv({}, async () => {
+            const llm = _reloadProvider();
+            llm._setConfig({ additional_config: { judge_fallback_models: ['gpt-5-mini'] } });
+            const winner = await llm.agree(PROPOSALS, { pinnedJudgeModel: 'claude-haiku-4-5' });
+            expect(winner).to.equal(null);
+        });
+    });
+
+    it('does NOT advance the chain on a reachable judge with an unparseable verdict', async function () {
+        await _withEnv({ ANTHROPIC_API_KEY: 'sk-test' }, async () => {
+            const llm = _reloadProvider();
+            llm._setConfig({ additional_config: { judge_fallback_models: ['gpt-5-mini'] } });
+            nock('https://api.anthropic.com')
+                .post('/v1/messages')
+                .reply(200, { content: [{ type: 'text', text: 'I cannot decide' }] });
+            // No openai mock: reaching for gpt-5-mini would throw a nock error.
+            const winner = await llm.agree(PROPOSALS, { pinnedJudgeModel: 'claude-haiku-4-5' });
+            expect(winner).to.equal(null);
+        });
+    });
+});
+
+describe('llm provider, multi-vendor healthCheck', function () {
+
+    afterEach(function () { sinon.restore(); });
+
+    it('is ok with primary-vendor creds; missing fallback vendors are reported, not fatal', async function () {
+        const result = await _withEnv({ ANTHROPIC_API_KEY: 'sk-test' }, async () => {
+            const llm = _reloadProvider();
+            llm._setConfig({ additional_config: {
+                approved_models: ['claude-sonnet-4-6', 'gpt-5-mini'],
+                judge_model:     'claude-haiku-4-5'
+            } });
+            return await llm.healthCheck({ defaultConfigDir: HERMETIC_DEFAULT_DIR });
+        });
+        expect(result.ok).to.equal(true);
+        expect(result.vendors).to.deep.equal({ anthropic: true, openai: false });
+        expect(result.missing).to.deep.equal(['openai']);
+    });
+
+    it('fails when require_all_vendors is set and a fallback vendor has no creds', async function () {
+        const result = await _withEnv({ ANTHROPIC_API_KEY: 'sk-test' }, async () => {
+            const llm = _reloadProvider();
+            llm._setConfig({ additional_config: {
+                approved_models:     ['claude-sonnet-4-6', 'gpt-5-mini'],
+                judge_model:         'claude-haiku-4-5',
+                require_all_vendors: true
+            } });
+            return await llm.healthCheck({ defaultConfigDir: HERMETIC_DEFAULT_DIR });
+        });
+        expect(result.ok).to.equal(false);
+        expect(result.error).to.match(/openai/);
+    });
+
+    it('passes require_all_vendors once every vendor resolves', async function () {
+        const result = await _withEnv({ ANTHROPIC_API_KEY: 'sk-test', OPENAI_API_KEY: 'sk-oai' }, async () => {
+            const llm = _reloadProvider();
+            llm._setConfig({ additional_config: {
+                approved_models:     ['claude-sonnet-4-6', 'gpt-5-mini'],
+                judge_model:         'claude-haiku-4-5',
+                judge_fallback_models: ['gpt-5-mini'],
+                require_all_vendors: true
+            } });
+            return await llm.healthCheck({ defaultConfigDir: HERMETIC_DEFAULT_DIR });
+        });
+        expect(result.ok).to.equal(true);
+        expect(result.vendors).to.deep.equal({ anthropic: true, openai: true });
+        expect(result.missing).to.equal(undefined);
+    });
+
+    it('fails when the PRIMARY vendor has no creds even if a fallback vendor does', async function () {
+        const result = await _withEnv({ OPENAI_API_KEY: 'sk-oai' }, async () => {
+            const llm = _reloadProvider();
+            llm._setConfig({ additional_config: {
+                approved_models: ['claude-sonnet-4-6', 'gpt-5-mini'],
+                judge_model:     'claude-haiku-4-5'
+            } });
+            return await llm.healthCheck({ defaultConfigDir: HERMETIC_DEFAULT_DIR });
+        });
+        expect(result.ok).to.equal(false);
+        expect(result.vendors).to.deep.equal({ anthropic: false, openai: true });
+    });
+});
+
+// ---- hub-credentials vendor resolution -------------------------------------
+
+describe('hub-credentials, resolveOpenAiAuth / resolveLlmVendorAuth', function () {
+
+    function freshCreds() {
+        delete require.cache[require.resolve('../../src/lib/hub-credentials.js')];
+        return require('../../src/lib/hub-credentials.js');
+    }
+
+    it('resolves HUB_OPENAI_API_KEY ahead of OPENAI_API_KEY', function () {
+        const creds = freshCreds();
+        const r = creds.resolveOpenAiAuth({ env: { HUB_OPENAI_API_KEY: 'hub-key', OPENAI_API_KEY: 'ambient-key' } });
+        expect(r.ok).to.equal(true);
+        expect(r.transport).to.equal('openai_api');
+        expect(r.source).to.equal('hub_api_key');
+        expect(r.apiKey).to.equal('hub-key');
+    });
+
+    it('reports no_credential_configured when neither OpenAI var is set', function () {
+        const creds = freshCreds();
+        const r = creds.resolveOpenAiAuth({ env: {} });
+        expect(r.ok).to.equal(false);
+        expect(r.reason).to.equal('no_credential_configured');
+    });
+
+    it('dispatches vendors and rejects unknown ones', function () {
+        const creds = freshCreds();
+        const oai = creds.resolveLlmVendorAuth('openai', { env: { OPENAI_API_KEY: 'k' } });
+        expect(oai.ok).to.equal(true);
+        expect(oai.transport).to.equal('openai_api');
+        const anth = creds.resolveLlmVendorAuth('anthropic', { env: { ANTHROPIC_API_KEY: 'k' }, defaultConfigDir: HERMETIC_DEFAULT_DIR });
+        expect(anth.ok).to.equal(true);
+        expect(anth.transport).to.equal('anthropic_api');
+        const unknown = creds.resolveLlmVendorAuth('acme', { env: {} });
+        expect(unknown.ok).to.equal(false);
+        expect(unknown.reason).to.equal('unknown_vendor');
     });
 });

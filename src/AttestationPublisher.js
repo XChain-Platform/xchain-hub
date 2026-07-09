@@ -194,6 +194,16 @@ class AttestationPublisher {
             return;
         }
 
+        // Non-ok responses (provider_error / no_quorum, Phase 4) are advisory
+        // audit rows: the request STAYS pending on the indexer, so the sweep's
+        // "still pending → not yet landed" replay guard cannot tell a landed
+        // non-ok row from a lost one. To keep double-publication impossible,
+        // only the LEADER handles a non-ok response (no follower WAL step-in),
+        // and its queue entry carries the status so the sweep bounds retries.
+        // Losing one advisory row to a leader crash is acceptable; the
+        // deadline-expiry path remains the terminal backstop.
+        let responseStatus = String(event.status || 'ok');
+
         // Recompute the responsible-set ordering so any node (not just the
         // leader) knows its rank for failover step-in. Persisted on the queue
         // entry so the ordering survives a restart without re-querying snapshots.
@@ -203,17 +213,23 @@ class AttestationPublisher {
         let leaderPubkey = event.leaderPubkey ? String(event.leaderPubkey).toLowerCase()
                          : (responsible && responsible.length ? responsible[0] : null);
 
+        let isLeader = (leaderPubkey && myPubkey && leaderPubkey === myPubkey);
+        if (responseStatus !== 'ok' && !isLeader){
+            // Advisory row; see the non-ok note above. No WAL, no step-in.
+            return;
+        }
+
         // Durable write-ahead log BEFORE the send attempt.
         this._enqueue({
             ts:           Date.now(),
             requestId:    event.requestId,
             wire:         payload,
+            status:       responseStatus,
             requestBlock: requestBlock,
             responsible:  responsible || undefined,
             leaderPubkey: leaderPubkey || undefined
         });
 
-        let isLeader = (leaderPubkey && myPubkey && leaderPubkey === myPubkey);
         if (!isLeader){
             // Followers persist and wait. If the leader stays silent, the
             // failover sweep promotes the next responsible validator in turn.
@@ -300,8 +316,18 @@ class AttestationPublisher {
         let myPubkey = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
         if (!myPubkey) return null;
         if (Array.isArray(entry.responsible) && entry.responsible.length){
-            let idx = entry.responsible.map(p => String(p).toLowerCase()).indexOf(myPubkey);
-            return idx >= 0 ? idx : null;
+            let ordered = entry.responsible.map(p => String(p).toLowerCase());
+            let idx = ordered.indexOf(myPubkey);
+            if (idx < 0) return null;
+            // The consensus leader ROTATES down the hash order when earlier
+            // slots go silent (attestation_escalation.js), so the round's
+            // actual broadcaster may not be hash-slot 0. Rank relative to the
+            // recorded round leader, or the hash-slot-0 hub would fast-retry
+            // (leaderRetryMs) a response the real leader already broadcast
+            // that merely hasn't confirmed into a block yet.
+            let leaderIdx = entry.leaderPubkey ? ordered.indexOf(String(entry.leaderPubkey).toLowerCase()) : 0;
+            if (leaderIdx < 0) leaderIdx = 0;
+            return (idx - leaderIdx + ordered.length) % ordered.length;
         }
         // Fallback when the responsible ordering couldn't be computed: treat the
         // recorded leader as rank 0 and ourselves as the sole follower (rank 1).
@@ -379,6 +405,18 @@ class AttestationPublisher {
 
             if (!pendingIds.has(rid)){
                 // Already resolved on-chain; clear it out.
+                drop.add(rid);
+                continue;
+            }
+
+            // Non-ok entries (Phase 4 advisory rows) leave the request pending
+            // BY DESIGN, so "still pending" proves nothing about whether the
+            // row landed. Retry only briefly (crash recovery / transient
+            // encoder failure), then drop rather than risk duplicate audit
+            // rows; the deadline-expiry path is the terminal backstop.
+            let entryStatus = String(entry.status || 'ok');
+            let age0 = now - (Number(entry.ts) || 0);
+            if (entryStatus !== 'ok' && age0 > this.failoverWindowBlocks * this.approxBlockMs){
                 drop.add(rid);
                 continue;
             }

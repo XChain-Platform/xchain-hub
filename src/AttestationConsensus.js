@@ -76,6 +76,17 @@ class AttestationConsensus extends EventEmitter {
         this._finalizedOrder = [];
         this.finalizedMax    = parseInt(this.config.ATTESTATION_FINALIZED_MAX) || 10000;
 
+        // Non-ok publication throttle (Phase 4). A non-ok finalization leaves
+        // the request PENDING on the indexer (retryable), so without a throttle
+        // every subsequent failed retry round would quorum-sign and broadcast
+        // the same provider_error/no_quorum response again, burning a BTC tx
+        // per poll cycle for no new information. One publication per
+        // (request_id, status) is the audit trail; the deadline-expiry path
+        // remains the terminal backstop. Ring-bounded like `finalized`.
+        // Map<rid, Set<status>>
+        this.nonOkPublished       = new Map();
+        this._nonOkPublishedOrder = [];
+
         // Early-arrival buffer. With staggered hub polls, the first proposer's
         // PROPOSE often reaches peers before they start their own round.
         // _handlePropose silently returns at `if(!pending)`, losing the vote.
@@ -127,6 +138,8 @@ class AttestationConsensus extends EventEmitter {
         this.earlyMessages.clear();
         this.earlyMessageTtl.clear();
         this.earlyCommits.clear();
+        this.nonOkPublished.clear();
+        this._nonOkPublishedOrder = [];
     }
 
     _pruneEarlyMessages(now){
@@ -212,7 +225,11 @@ class AttestationConsensus extends EventEmitter {
         let myPubkey  = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
         let myBody    = roundState.myProposal.body;
         let myMeta    = roundState.myProposal.meta;
-        let mySig     = this._signCanonical(rid, roundState.providerId, myBody, 'ok', myMeta, Number(roundState.request.block_index));
+        // A failed fetch proposes status='provider_error' with an empty body
+        // (see AttestationRound); the canonical binds the status, so the sig
+        // is only ever valid for the outcome the proposer actually observed.
+        let myStatus  = roundState.myProposal.status || 'ok';
+        let mySig     = this._signCanonical(rid, roundState.providerId, myBody, myStatus, myMeta, Number(roundState.request.block_index));
 
         let pending = {
             requestId:    rid,
@@ -246,7 +263,7 @@ class AttestationConsensus extends EventEmitter {
         };
 
         if(myPubkey && myBody && mySig){
-            pending.proposals.set(myPubkey, { body: myBody, meta: myMeta, sig: mySig });
+            pending.proposals.set(myPubkey, { body: myBody, meta: myMeta, sig: mySig, status: myStatus });
         }
 
         pending.timer = setTimeout(() => {
@@ -265,7 +282,7 @@ class AttestationConsensus extends EventEmitter {
                 providerId: pending.providerId,
                 body_b64:   myBody ? myBody.toString('base64') : '',
                 meta:       String(myMeta || ''),
-                status:     'ok',
+                status:     myStatus,
                 sig_pubkey: myPubkey,
                 sig:        mySig
             });
@@ -345,9 +362,10 @@ class AttestationConsensus extends EventEmitter {
             return;
         }
 
-        // Store (idempotent; dedup by sender pubkey)
+        // Store (idempotent; dedup by sender pubkey). Status is trusted only
+        // because the sig was just verified over a canonical that binds it.
         if(!pending.proposals.has(senderPubkey)){
-            pending.proposals.set(senderPubkey, { body: body, meta: meta, sig: String(d.sig) });
+            pending.proposals.set(senderPubkey, { body: body, meta: meta, sig: String(d.sig), status: String(d.status || 'ok') });
         }
 
         this._maybeAdvanceFromProposals(rid).catch(e =>
@@ -369,8 +387,22 @@ class AttestationConsensus extends EventEmitter {
 
         // Wait until we have at least REDUNDANCY proposals (or all responsible
         // validators have submitted). Single-validator collapses to immediate.
+        // Error proposals count toward arrival: a round where every fetch
+        // failed must still advance (to a non-ok outcome), not stall.
         let need = Math.min(pending.redundancy, pending.responsible.length);
         if(pending.proposals.size < need) return;
+
+        // Split ok fetches from error reports. Every responsible validator
+        // failing its fetch is the provider-outage signal: publish an explicit
+        // status='provider_error' ATTEST v1 (Phase 4) so the outage is an
+        // on-chain fact instead of a silent stall. The outcome is
+        // deterministic (empty body, empty meta, same status → identical
+        // canonical on every hub), so no judge call and no leader gate.
+        let okProposals = [...pending.proposals.values()].filter(p => (p.status || 'ok') === 'ok');
+        if(okProposals.length === 0){
+            this._establishNonOkWinner(rid, 'provider_error');
+            return;
+        }
 
         // Run provider's consensus strategy
         let providerModule = this.providerRegistry.getModule(pending.providerId);
@@ -378,7 +410,7 @@ class AttestationConsensus extends EventEmitter {
             console.warn('AttestationConsensus: provider ' + pending.providerId + ' has no agree(); cannot finalize ' + rid.substring(0,16) + '...');
             return;
         }
-        let proposalsArr = [...pending.proposals.values()];
+        let proposalsArr = okProposals;
 
         // judge_model is non-deterministic across hubs: each runs its own LLM
         // judge over its own proposal ordering and may select a different winning
@@ -413,8 +445,10 @@ class AttestationConsensus extends EventEmitter {
 
         if(!winner){
             console.log('AttestationConsensus: no consensus on ' + rid.substring(0,16) + '... (' + proposalsArr.length + ' proposals diverged)');
-            // STATUS=no_quorum response is published in Phase 4. For now, let
-            // the deadline-expiry handler on the indexer flip status to expired.
+            // Phase 4: publish an explicit STATUS=no_quorum ATTEST v1 (audit
+            // row; the request stays pending on the indexer so later retry
+            // rounds can still fulfill it before the deadline).
+            this._establishNonOkWinner(rid, 'no_quorum');
             return;
         }
 
@@ -445,8 +479,10 @@ class AttestationConsensus extends EventEmitter {
                 pending.signatures.set(pubkey, p.sig);
             } else if(matchesWinner){
                 console.warn('AttestationConsensus: PROPOSE sig not over winner canonical from ' + String(pubkey).substring(0,16) + '... (not counted)');
-            } else if(strategy === 'byte_equality' && this.hub.slashDetector){
-                // Diverged proposal under byte_equality; record as slash candidate.
+            } else if(strategy === 'byte_equality' && (p.status || 'ok') === 'ok' && this.hub.slashDetector){
+                // Diverged OK proposal under byte_equality; record as slash
+                // candidate. An honest status='provider_error' report is a
+                // fetch failure, not a divergence; it must never accrue here.
                 // Best-effort; failures don't disrupt the round.
                 this.hub.slashDetector.recordAttestationDivergence(
                     pubkey, rid, pending.providerId, pHash.toString('hex'), winnerHashHex
@@ -493,6 +529,77 @@ class AttestationConsensus extends EventEmitter {
         this._drainEarlyMessages(rid);
     }
 
+    // Establish a NON-OK round outcome (Phase 4): winner is the canonical
+    // empty body + empty meta with an explicit failure status, so every hub
+    // that reaches the same conclusion signs byte-identical canonicals and the
+    // round converges without a judge call. Statuses:
+    //   provider_error - every responsible fetch failed (upstream outage)
+    //   no_quorum      - fetches succeeded but agree() found no equivalence
+    // The indexer treats both as RETRYABLE: the request stays pending, so a
+    // later round (e.g. after the model-fallback ladder advances) can still
+    // fulfill it. Throttled to one publication per (request_id, status).
+    _establishNonOkWinner(rid, status){
+        let pending = this.pending.get(rid);
+        if(!pending || pending.finalized || pending.winner) return;
+
+        let seen = this.nonOkPublished.get(rid);
+        if(seen && seen.has(status)) return;  // already on-chain; retries stay silent
+
+        pending.winner = { body: Buffer.alloc(0), meta: '' };
+        pending.status = status;
+
+        // Error PROPOSEs were signed over this exact canonical (empty body,
+        // empty meta, same status), so their sigs transfer directly. Anything
+        // else (e.g. this hub's own OK proposal ahead of a no_quorum verdict)
+        // needs a fresh signature over the non-ok canonical.
+        let winnerCanonical = this._buildCanonical(rid, pending.providerId, pending.winner.body, status, pending.winner.meta, Number(pending.request.block_index)).toString('utf8');
+        for(let [pubkey, p] of pending.proposals){
+            if(ValidatorIdentity.verify(winnerCanonical, String(p.sig), pubkey))
+                pending.signatures.set(pubkey, String(p.sig));
+        }
+        if(pending.myPubkey && pending.proposals.has(pending.myPubkey) && !pending.signatures.has(pending.myPubkey)){
+            let reSig = this._signCanonical(rid, pending.providerId, pending.winner.body, status, pending.winner.meta, Number(pending.request.block_index));
+            if(reSig) pending.signatures.set(pending.myPubkey, reSig);
+        }
+
+        console.log('AttestationConsensus: non-ok outcome status=' + status + ' for ' + rid.substring(0,16) +
+                    '... (' + pending.signatures.size + ' aligned sig(s))');
+
+        let mySig = pending.signatures.get(pending.myPubkey) || null;
+        if(this.peerManager){
+            this.peerManager.broadcast(ATTEST_PREPARE, {
+                requestId:  rid,
+                providerId: pending.providerId,
+                body_b64:   '',
+                meta:       '',
+                status:     status,
+                sig_pubkey: pending.myPubkey,
+                sig:        mySig
+            });
+        }
+        if(pending.myPubkey) pending.prepares.add(pending.myPubkey);
+
+        this._checkPrepareQuorum(rid);
+        this._drainEarlyCommits(rid);
+        this._drainEarlyMessages(rid);
+    }
+
+    // Record that a non-ok status has been published for a request, bounding
+    // the map with the same FIFO ring discipline as `finalized`.
+    _recordNonOkPublished(rid, status){
+        let set = this.nonOkPublished.get(rid);
+        if(!set){
+            set = new Set();
+            this.nonOkPublished.set(rid, set);
+            this._nonOkPublishedOrder.push(rid);
+            if(this._nonOkPublishedOrder.length > this.finalizedMax){
+                let oldest = this._nonOkPublishedOrder.shift();
+                this.nonOkPublished.delete(oldest);
+            }
+        }
+        set.add(status);
+    }
+
     _handlePrepare(envelope){
         let d = envelope.data;
         if(!d || !d.requestId) return;
@@ -521,7 +628,68 @@ class AttestationConsensus extends EventEmitter {
         let meta = String(d.meta || '');
         let status = String(d.status || 'ok');
 
-        if(!pending.winner){
+        if(!pending.winner && status !== 'ok'){
+            // NON-OK adoption (Phase 4). A non-ok outcome is DETERMINISTIC
+            // (canonical empty body + empty meta + status), so unlike a
+            // judge_model ok-winner it may be established by ANY responsible
+            // sender, not just the leader: a dead leader must not block an
+            // outage from being recorded. Safety comes from the co-sign rules
+            // below (a hub only vouches for what it observed), never from
+            // trusting the sender.
+            if(body.length !== 0 || meta !== ''){
+                console.warn('AttestationConsensus: non-ok PREPARE with non-canonical body/meta from ' + senderPubkey.substring(0,16) + '... (rejected)');
+                return;
+            }
+            let seenNonOk = this.nonOkPublished.get(rid);
+            if(seenNonOk && seenNonOk.has(status)) return;  // this status already published; don't co-sign a duplicate
+            if(!d.sig || !d.sig_pubkey){
+                console.warn('AttestationConsensus: unsigned non-ok PREPARE rejected from ' + senderPubkey.substring(0,16) + '...');
+                return;
+            }
+            let canonical = this._buildCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index));
+            if(!ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
+                console.warn('AttestationConsensus: bad non-ok PREPARE sig from ' + senderPubkey.substring(0,16) + '...');
+                return;
+            }
+            pending.signatures.set(senderPubkey, String(d.sig));
+            pending.winner = { body: body, meta: meta };
+            pending.status = status;
+
+            // Co-sign policy: only vouch for a failure mode we can stand
+            // behind ourselves.
+            //   provider_error - our own fetch must ALSO have failed. A hub
+            //                    whose fetch succeeded has direct evidence the
+            //                    provider is up and abstains.
+            //   no_quorum      - we participated (produced a proposal) but no
+            //                    equivalence verdict is checkable by a
+            //                    follower (only the leader runs the judge), so
+            //                    participation is the strongest local check.
+            let myProposal = pending.proposals.get(pending.myPubkey);
+            let mayCoSign  = !!myProposal && (status === 'no_quorum' || (myProposal.status || 'ok') !== 'ok');
+            if(mayCoSign && !pending.signatures.has(pending.myPubkey)){
+                let reSig = ValidatorIdentity.verify(canonical.toString('utf8'), String(myProposal.sig || ''), pending.myPubkey)
+                    ? String(myProposal.sig)
+                    : this._signCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index));
+                if(reSig){
+                    pending.signatures.set(pending.myPubkey, reSig);
+                    // Echo our endorsing PREPARE exactly once (this !winner
+                    // block only runs on first adoption) so prepare-quorum is
+                    // reachable; mirrors the judge_model ok-winner echo.
+                    if(this.peerManager){
+                        this.peerManager.broadcast(ATTEST_PREPARE, {
+                            requestId:  rid,
+                            providerId: pending.providerId,
+                            body_b64:   '',
+                            meta:       '',
+                            status:     status,
+                            sig_pubkey: pending.myPubkey,
+                            sig:        reSig
+                        });
+                        pending.prepares.add(pending.myPubkey);
+                    }
+                }
+            }
+        } else if(!pending.winner){
             // judge_model is non-deterministic across hubs: only the ELECTED LEADER
             // runs agree() and its selected body is the canonical winner. So only the
             // leader's PREPARE may establish the winner. A Byzantine responsible
@@ -718,7 +886,16 @@ class AttestationConsensus extends EventEmitter {
         if(pending.signatures.size < needed) return;
 
         pending.finalized = true;
-        this._markFinalized(rid);
+        if(pending.status === 'ok'){
+            // Terminal on the hub: the indexer flips the request to fulfilled.
+            this._markFinalized(rid);
+        } else {
+            // Non-ok statuses are RETRYABLE on the indexer (the request stays
+            // pending), so the rid must NOT enter `finalized` or no retry round
+            // could ever start. Record the publication instead so retries stop
+            // re-publishing the same failure (once per request_id + status).
+            this._recordNonOkPublished(rid, pending.status);
+        }
         if(pending.timer) clearTimeout(pending.timer);
 
         // We need at least max(REDUNDANCY, quorum) sigs on the on-chain response.

@@ -127,6 +127,15 @@ class AttestationSpotChecker {
         let rid = String(event.requestId).toLowerCase();
         let entry = this._queue.get(rid);
         if (!entry) return;  // Not a spot-check
+
+        // A non-ok finalization (Phase 4: provider_error / no_quorum) is an
+        // honest outage report, not an answer; judging its empty body against
+        // the expected pattern would charge spot-check failures to validators
+        // for truthfully reporting downtime. Leave the queue entry in place:
+        // the request is still pending on-chain and a later ok round (e.g.
+        // after the model-fallback ladder advances) still gets checked.
+        if (String(event.status || 'ok') !== 'ok') return;
+
         this._queue.delete(rid);
 
         if (entry.providerId !== event.providerId) {

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- LLM attestation outage resilience (Phase 4): failed rounds publish throttled `provider_error`/`no_quorum` ATTEST v1 audit rows, the round leader rotates per `ATTESTATION_LEADER_ROTATION_BLOCKS`, and the llm provider goes multi-vendor (block-anchored `approved_models` fallback ladder, `openai_api` transport, judge fallback chain, `require_all_vendors` enforcement).
 - Armed the four BTC-anchored activation twins (checkpoint commitment, EQUIV header, stake-weighted quorum, anchor reward) at BTC 961000 (~2026-08-04), in lockstep with the indexer.
 - Armed `CROSS_CHAIN_ROYALTY_ACTIVATION` mainnet at BTC anchor 961000 (~2026-08-04, fleet deploy required first), byte-identical with the indexer twin.
 - Sensitive-read auth tier: `getallconfigs` requires `x-api-key` when `HUB_API_KEY` is set (its response carries DB credentials), completing the app-side policy that lets the public reverse proxy drop its IP allowlist; emergency opt-out via `HUB_SENSITIVE_READ_AUTH=0`.

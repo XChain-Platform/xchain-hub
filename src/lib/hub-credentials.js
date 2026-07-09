@@ -124,7 +124,41 @@ function resolveHubLlmAuth(ctx) {
     };
 }
 
+// Resolve OpenAI credentials for the LLM provider's fallback-vendor models.
+// Returns { ok: true, transport: 'openai_api', source, apiKey } or
+// { ok: false, reason, detail }. HUB_OPENAI_API_KEY (hub-scoped) wins over
+// OPENAI_API_KEY (ambient), mirroring the HUB_-prefix convention above.
+function resolveOpenAiAuth(ctx) {
+    const envSource = (ctx && ctx.env) || process.env;
+    const hubKey = _trim(envSource.HUB_OPENAI_API_KEY);
+    const key    = _trim(envSource.OPENAI_API_KEY);
+    if (hubKey) return { ok: true, transport: 'openai_api', source: 'hub_api_key', apiKey: hubKey };
+    if (key)    return { ok: true, transport: 'openai_api', source: 'api_key',     apiKey: key };
+    return {
+        ok: false,
+        transport: null,
+        source: null,
+        reason: 'no_credential_configured',
+        detail: 'Set HUB_OPENAI_API_KEY (preferred, hub-scoped) or OPENAI_API_KEY to serve ' +
+                'OpenAI-vendor models on the llm attestation fallback chain.'
+    };
+}
+
+// Vendor-keyed dispatch used by providers/llm.js. `vendor` is the value
+// inferred from the model id (see llm.js vendorOfModel).
+function resolveLlmVendorAuth(vendor, ctx) {
+    switch (String(vendor || '')) {
+        case 'anthropic': return resolveHubLlmAuth(ctx);
+        case 'openai':    return resolveOpenAiAuth(ctx);
+        default:
+            return { ok: false, transport: null, source: null,
+                     reason: 'unknown_vendor', detail: 'No credential resolver for vendor "' + vendor + '"' };
+    }
+}
+
 module.exports = {
     resolveHubLlmAuth,
+    resolveOpenAiAuth,
+    resolveLlmVendorAuth,
     DEFAULT_HUB_CLAUDE_CONFIG_DIR
 };
