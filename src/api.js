@@ -470,7 +470,7 @@ async function startApi(){
         },
 
         // Indexer has already verified PBFT signatures locally; hub deduplicates by round_number.
-        async pushpriceround({source_chain, round, timestamp, btc_block_height, pairs, sigs, action_index, block_index}){
+        async pushpriceround({source_chain, round, timestamp, btc_block_height, pairs, sigs, action_index, block_index, push_generation}){
             if(!source_chain) return {error: "source_chain is required"};
             let chainErr = validateChain(source_chain);
             if (chainErr) return chainErr;
@@ -485,7 +485,10 @@ async function startApi(){
                     pairs:            pairs,
                     sigs:         sigs,
                     action_index: action_index,
-                    block_index:  block_index
+                    block_index:  block_index,
+                    // HUB-RETRACT-4: forward the source rollback generation (was dropped here, so
+                    // every row was stamped generation 0 and the reorg fence was inert).
+                    push_generation: push_generation
                 });
                 return result;
             } catch (err) {
@@ -493,7 +496,7 @@ async function startApi(){
             }
         },
 
-        async pushoracleprice({source_chain, source_address, coin, tick, fiat, value, fee, memo, block_time, action_index}){
+        async pushoracleprice({source_chain, source_address, coin, tick, fiat, value, fee, memo, block_time, action_index, push_generation}){
             if(!source_chain) return {error: "source_chain is required"};
             let chainErr = validateChain(source_chain);
             if (chainErr) return chainErr;
@@ -511,7 +514,10 @@ async function startApi(){
                     fee:            fee,
                     memo:           memo,
                     block_time:     block_time,
-                    action_index:   action_index
+                    action_index:   action_index,
+                    // HUB-RETRACT-4: forward the source rollback generation (was dropped here, so
+                    // every row was stamped generation 0 and the reorg fence was inert).
+                    push_generation: push_generation
                 });
                 return result;
             } catch (err) {

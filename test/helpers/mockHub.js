@@ -28,6 +28,11 @@ function createMockHub(overrides = {}) {
         // null (tip unavailable) so the round falls back to its round-number
         // anchor without throwing; tests needing a real tip override this.
         getChainTip: sinon.stub().resolves(null),
+        // HUB-RETRACT-4 price ingest fence. Default: no watermark recorded, so ingest
+        // never rejects (pre-fix behaviour); tests that exercise the fence override
+        // getPriceIngestWatermark to return a {retraction_generation, from_action_index}.
+        getPriceIngestWatermark: sinon.stub().resolves(null),
+        bumpPriceIngestWatermark: sinon.stub().resolves(),
         close: sinon.stub().resolves()
     };
 

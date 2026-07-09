@@ -597,6 +597,46 @@ class Database {
         return w == null ? 0 : Number(w);
     }
 
+    // HUB-RETRACT-4: per-source-chain price ingest fence. Returns the highest source-chain
+    // rollback generation whose price retraction the hub has processed, plus that retraction's
+    // orphaned-range lower bound; or null when no retraction has ever been recorded for the chain
+    // (so pre-reorg generation-0 pushes are never rejected). PriceAggregator rejects an incoming
+    // price push whose push_generation <= retraction_generation AND action_index >= from_action_index:
+    // exactly a stale replay of a rolled-back action arriving after its retraction (the re-published
+    // canonical row carries a higher generation and passes).
+    async getPriceIngestWatermark(sourceChain){
+        let rows = await this.doQuery(
+            "SELECT retraction_generation, from_action_index FROM price_ingest_watermarks WHERE source_chain = ? LIMIT 1",
+            [sourceChain]);
+        if(!rows || rows.length === 0) return null;
+        return {
+            retraction_generation: Number(rows[0].retraction_generation) || 0,
+            from_action_index:     Number(rows[0].from_action_index) || 0
+        };
+    }
+
+    // Raise a chain's ingest fence to a retraction's generation. Monotonic in generation: a higher
+    // generation replaces the stored (generation, from); the same generation only widens the
+    // orphaned range downward (LEAST from); a lower generation is ignored. The from_action_index
+    // assignment is ordered BEFORE retraction_generation so its CASE reads the OLD generation
+    // (MariaDB evaluates ON DUPLICATE assignments left to right).
+    async bumpPriceIngestWatermark(sourceChain, generation, fromActionIndex){
+        let gen  = Number(generation);
+        let from = Number(fromActionIndex);
+        if(!Number.isFinite(gen) || gen < 0) return;
+        if(!Number.isFinite(from) || from < 0) from = 0;
+        await this.doQuery(
+            `INSERT INTO price_ingest_watermarks (source_chain, retraction_generation, from_action_index)
+             VALUES (?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+                from_action_index = CASE
+                    WHEN VALUES(retraction_generation) > retraction_generation THEN VALUES(from_action_index)
+                    WHEN VALUES(retraction_generation) = retraction_generation THEN LEAST(from_action_index, VALUES(from_action_index))
+                    ELSE from_action_index END,
+                retraction_generation = GREATEST(retraction_generation, VALUES(retraction_generation))`,
+            [sourceChain, gen, from]);
+    }
+
     // Returns 0 on a fresh node or unparseable value.
     async getLastSeq(){
         let rows = await this.doQuery(

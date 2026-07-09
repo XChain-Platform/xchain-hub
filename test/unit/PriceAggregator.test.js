@@ -172,6 +172,26 @@ describe('PriceAggregator.retractFromActionIndex()', function () {
         expect(hub.db.doQuery.called).to.equal(false);
     });
 
+    it('HUB-RETRACT-4: records the ingest watermark (generation + from) on a fenced retraction', async function () {
+        hub.db.doQuery.resolves({ affectedRows: 1 });
+        await agg.retractFromActionIndex('BTC', 50, null, 7);
+        expect(hub.db.bumpPriceIngestWatermark.calledOnce).to.equal(true);
+        // (source_chain, retraction_generation, from_action_index)
+        expect(hub.db.bumpPriceIngestWatermark.firstCall.args).to.deep.equal(['BTC', 7, 50]);
+    });
+
+    it('HUB-RETRACT-4: records the watermark even on a 0-row delete (the stale push may not have arrived yet)', async function () {
+        hub.db.doQuery.resolves({ affectedRows: 0 });
+        await agg.retractFromActionIndex('DOGE', 12, null, 3);
+        expect(hub.db.bumpPriceIngestWatermark.calledOnceWith('DOGE', 3, 12)).to.equal(true);
+    });
+
+    it('HUB-RETRACT-4: does NOT record a watermark on an unfenced retraction (older indexer omits the generation)', async function () {
+        hub.db.doQuery.resolves({ affectedRows: 1 });
+        await agg.retractFromActionIndex('BTC', 50, 75);   // no retractionGeneration
+        expect(hub.db.bumpPriceIngestWatermark.called).to.equal(false);
+    });
+
     it('treats a DELETE result with no affectedRows as zero deletions (and emits nothing)', async function () {
         // Some drivers return an array (not a result object): guard against undefined.
         hub.db.doQuery.resolves([]);
@@ -338,6 +358,58 @@ describe('PriceAggregator.receiveOraclePrice() validation + persistence', functi
         expect(insertArgs[11]).to.equal(0);     // push_generation defaults to 0
     });
 
+    it('HUB-RETRACT-4: rejects a stale replay (generation <= watermark AND action_index in the orphaned range)', async function () {
+        hub.db.getPriceIngestWatermark.resolves({ retraction_generation: 5, from_action_index: 100 });
+        let result = await agg.receiveOraclePrice('BTC', { ...VALID, action_index: 120, push_generation: 5 });
+        expect(result).to.deep.equal({ accepted: false, reason: 'stale (retracted generation)' });
+        // Rejected before any dedupe SELECT / INSERT touches oracle_prices.
+        expect(hub.db.doQuery.called).to.equal(false);
+    });
+
+    it('HUB-RETRACT-4: does NOT false-reject a legitimate late push BELOW the orphaned range', async function () {
+        hub.db.getPriceIngestWatermark.resolves({ retraction_generation: 5, from_action_index: 100 });
+        hub.db.doQuery.callsFake(async (sql) => (/^INSERT INTO oracle_prices/.test(sql) ? {} : []));
+        // action_index 50 < from 100: it survived the reorg and must ingest even at the old generation.
+        let result = await agg.receiveOraclePrice('BTC', { ...VALID, action_index: 50, push_generation: 5 });
+        expect(result).to.deep.equal({ accepted: true });
+    });
+
+    it('HUB-RETRACT-4: accepts the canonical re-publication at a higher generation (monotonic upsert)', async function () {
+        hub.db.getPriceIngestWatermark.resolves({ retraction_generation: 5, from_action_index: 100 });
+        let insertArgs = null;
+        hub.db.doQuery.callsFake(async (sql, params) => {
+            if (/^INSERT INTO oracle_prices/.test(sql)) { insertArgs = params; return {}; }
+            return []; // dedupe misses
+        });
+        let result = await agg.receiveOraclePrice('BTC', { ...VALID, action_index: 120, push_generation: 6 });
+        expect(result).to.deep.equal({ accepted: true });
+        expect(insertArgs[11]).to.equal(6);
+        let insertCall = hub.db.doQuery.getCalls().find(c => /^INSERT INTO oracle_prices/.test(c.args[0]));
+        expect(insertCall.args[0]).to.match(/ON DUPLICATE KEY UPDATE/);
+        expect(insertCall.args[0]).to.match(/push_generation = GREATEST\(push_generation, VALUES\(push_generation\)\)/);
+    });
+
+    it('HUB-RETRACT-4: a strictly newer generation supersedes a stale existing row (not a duplicate)', async function () {
+        let insertArgs = null;
+        hub.db.doQuery.callsFake(async (sql, params) => {
+            if (/^SELECT id, push_generation FROM oracle_prices/.test(sql)) return [{ id: 1, push_generation: 3 }];
+            if (/^INSERT INTO oracle_prices/.test(sql)) { insertArgs = params; return {}; }
+            return [];
+        });
+        let result = await agg.receiveOraclePrice('BTC', { ...VALID, action_index: 7, push_generation: 6 });
+        expect(result).to.deep.equal({ accepted: true });
+        expect(insertArgs[11]).to.equal(6);
+    });
+
+    it('HUB-RETRACT-4: an equal-or-older generation at the same key is still a duplicate', async function () {
+        hub.db.doQuery.callsFake(async (sql) => {
+            if (/^SELECT id, push_generation FROM oracle_prices/.test(sql)) return [{ id: 1, push_generation: 6 }];
+            return [];
+        });
+        let result = await agg.receiveOraclePrice('BTC', { ...VALID, action_index: 7, push_generation: 6 });
+        expect(result).to.deep.equal({ accepted: false, reason: 'duplicate' });
+    });
+
     it('rejects a malformed or non-positive value without touching the DB', async function () {
         for (let value of ['abc', '-1', '0', '1.123456789', '1e5']) {
             let result = await agg.receiveOraclePrice('BTC', { ...VALID, value });
@@ -453,6 +525,17 @@ describe('PriceAggregator.receiveValidatedRound()', function () {
         let r3 = await agg.receiveValidatedRound('BTC', makeRound({ btc_block_height: undefined }));
         expect(r3).to.deep.equal({ accepted: false, reason: 'invalid btc_block_height' });
         expect(hub.db.doQuery.called).to.equal(false);
+    });
+
+    it('HUB-RETRACT-4: rejects a stale round replay (generation <= watermark, action_index in the orphaned range)', async function () {
+        stubDb();
+        hub.db.getPriceIngestWatermark.resolves({ retraction_generation: 5, from_action_index: 100 });
+        // A validly-signed round that reaches quorum but replays a rolled-back action_index at the
+        // pre-reorg generation must be rejected before it re-inserts the orphaned round.
+        let result = await agg.receiveValidatedRound('BTC', makeRound({ action_index: 120, push_generation: 5 }));
+        expect(result).to.deep.equal({ accepted: false, reason: 'stale (retracted generation)' });
+        let inserted = hub.db.doQuery.getCalls().some(c => /^INSERT INTO price_snapshots/.test(c.args[0]));
+        expect(inserted).to.equal(false);
     });
 
     it('rejects malformed pairs instead of silently skipping them', async function () {

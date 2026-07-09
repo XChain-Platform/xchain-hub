@@ -290,6 +290,46 @@ describe('Database', function () {
     });
 
     // -----------------------------------------------------------------
+    // Price ingest watermark (HUB-RETRACT-4)
+    // -----------------------------------------------------------------
+
+    describe('getPriceIngestWatermark() / bumpPriceIngestWatermark()', function () {
+        let db;
+        beforeEach(function () { db = new Database('h', 3306, 'db', 'u', 'p'); });
+
+        it('returns null when no watermark row exists for the chain (so pre-reorg pushes are never rejected)', async function () {
+            mockConn.query.resolves([]);
+            expect(await db.getPriceIngestWatermark('BTC')).to.equal(null);
+        });
+
+        it('returns the parsed generation + orphaned-range bound when a row exists', async function () {
+            mockConn.query.resolves([{ retraction_generation: '5', from_action_index: '100' }]);
+            expect(await db.getPriceIngestWatermark('BTC')).to.deep.equal({ retraction_generation: 5, from_action_index: 100 });
+        });
+
+        it('issues a generation-monotonic upsert (GREATEST generation, LEAST from at equal generation)', async function () {
+            await db.bumpPriceIngestWatermark('DOGE', 7, 50);
+            let call = mockConn.query.getCalls().find(c => /INSERT INTO price_ingest_watermarks/.test(c.args[0]));
+            expect(call, 'upsert issued').to.exist;
+            expect(call.args[0]).to.match(/ON DUPLICATE KEY UPDATE/);
+            expect(call.args[0]).to.match(/retraction_generation = GREATEST\(retraction_generation, VALUES\(retraction_generation\)\)/);
+            expect(call.args[0]).to.match(/LEAST\(from_action_index, VALUES\(from_action_index\)\)/);
+            expect(call.args[1]).to.deep.equal(['DOGE', 7, 50]);
+        });
+
+        it('ignores a negative/non-finite generation without touching the DB', async function () {
+            await db.bumpPriceIngestWatermark('BTC', -1, 10);
+            expect(mockConn.query.called).to.equal(false);
+        });
+
+        it('coerces a negative from_action_index to 0', async function () {
+            await db.bumpPriceIngestWatermark('BTC', 3, -9);
+            let call = mockConn.query.getCalls().find(c => /INSERT INTO price_ingest_watermarks/.test(c.args[0]));
+            expect(call.args[1]).to.deep.equal(['BTC', 3, 0]);
+        });
+    });
+
+    // -----------------------------------------------------------------
     // close()
     // -----------------------------------------------------------------
 

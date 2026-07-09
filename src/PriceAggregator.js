@@ -192,6 +192,18 @@ class PriceAggregator extends EventEmitter {
         let pushGeneration = parseInt(roundData.push_generation);
         if (!Number.isFinite(pushGeneration) || pushGeneration < 0) pushGeneration = 0;
 
+        // HUB-RETRACT-4: same stale-replay ingest fence as receiveOraclePrice. A PBFT round push
+        // that arrives after its source action was rolled back and retracted (carrying the pre-reorg
+        // generation) is rejected; the re-published canonical round carries a higher generation. No
+        // action_index (older sender) => no fence, as before.
+        let roundActionIndex = parseInt(sourceActionIndex);
+        if (Number.isFinite(roundActionIndex)) {
+            let wm = await this.db.getPriceIngestWatermark(sourceChain || '');
+            if (wm && pushGeneration <= wm.retraction_generation && roundActionIndex >= wm.from_action_index) {
+                return { accepted: false, reason: 'stale (retracted generation)' };
+            }
+        }
+
         // Capture a single hub-side timestamp before the loop so all pairs in this round
         // share the same created_at and it propagates to operators via the WS broadcast row.
         let createdAt = new Date();
@@ -279,12 +291,38 @@ class PriceAggregator extends EventEmitter {
             return { accepted: false, reason: 'invalid fee' };
         }
 
+        // Source-chain reorg fence (item 5308): the generation the source indexer carried on
+        // this push (0 when absent/malformed). See receiveValidatedRound.
+        let pushGeneration = parseInt(priceData.push_generation);
+        if (!Number.isFinite(pushGeneration) || pushGeneration < 0) pushGeneration = 0;
+        let actionIndex = parseInt(priceData.action_index) || 0;
+
+        // HUB-RETRACT-4: reject a stale replay of a rolled-back PRICE action. A fire-and-forget v1
+        // push that failed and was re-enqueued, or an in-flight HTTP push, can land AFTER the reorg
+        // retraction that deleted its row, still carrying the pre-reorg generation. The ingest fence
+        // rejects any push whose generation <= the chain's processed retraction generation AND whose
+        // action_index sits in that retraction's orphaned range; the re-published canonical row
+        // carries a higher generation (or a below-orphan action_index) and passes. No watermark row
+        // exists until the first retraction, so genuine pre-reorg generation-0 pushes are never hit.
+        let wm = await this.db.getPriceIngestWatermark(sourceChain || '');
+        if (wm && pushGeneration <= wm.retraction_generation && actionIndex >= wm.from_action_index) {
+            return { accepted: false, reason: 'stale (retracted generation)' };
+        }
+
+        // Dedupe by (source_address, source_chain, action_index). A strictly NEWER-generation push
+        // at a recycled action_index is NOT a duplicate: it is the canonical re-publication and must
+        // supersede a stale row that escaped retraction (the monotonic upsert below overwrites only
+        // when strictly newer). An equal-or-older generation is a true idempotent duplicate.
         let existing = await this.db.doQuery(
-            'SELECT id FROM oracle_prices WHERE source_address = ? AND source_chain = ? AND action_index = ? LIMIT 1',
-            [priceData.source_address, sourceChain || '', priceData.action_index || 0]
+            'SELECT id, push_generation FROM oracle_prices WHERE source_address = ? AND source_chain = ? AND action_index = ? LIMIT 1',
+            [priceData.source_address, sourceChain || '', actionIndex]
         );
         if (existing && existing.length > 0) {
-            return { accepted: false, reason: 'duplicate' };
+            let existingGen = parseInt(existing[0].push_generation) || 0;
+            if (pushGeneration <= existingGen) {
+                return { accepted: false, reason: 'duplicate' };
+            }
+            // else fall through: a newer generation supersedes the stale row via the upsert.
         }
 
         // Determine effective_at: every publish (first or update) is delayed by 24h
@@ -299,18 +337,29 @@ class PriceAggregator extends EventEmitter {
         let blockTime = parseInt(priceData.block_time) || 0;
         let effectiveAt = blockTime + 86400;
 
-        // Source-chain reorg fence (item 5308): see receiveValidatedRound.
-        let pushGeneration = parseInt(priceData.push_generation);
-        if (!Number.isFinite(pushGeneration) || pushGeneration < 0) pushGeneration = 0;
-
+        // Generation-monotonic upsert (HUB-RETRACT-4): on the (source_chain, action_index) unique
+        // key, a lower-or-equal generation never overwrites a newer row, so a late stale push can
+        // neither insert an orphan (fenced above) nor clobber the canonical re-publication here.
+        // push_generation is assigned LAST so every column IF reads the pre-update generation.
         let query = `INSERT INTO oracle_prices
             (source_address, source_chain, coin, tick, fiat, value, fee, memo, block_time, effective_at, action_index, push_generation)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                source_address = IF(VALUES(push_generation) > push_generation, VALUES(source_address), source_address),
+                coin           = IF(VALUES(push_generation) > push_generation, VALUES(coin), coin),
+                tick           = IF(VALUES(push_generation) > push_generation, VALUES(tick), tick),
+                fiat           = IF(VALUES(push_generation) > push_generation, VALUES(fiat), fiat),
+                value          = IF(VALUES(push_generation) > push_generation, VALUES(value), value),
+                fee            = IF(VALUES(push_generation) > push_generation, VALUES(fee), fee),
+                memo           = IF(VALUES(push_generation) > push_generation, VALUES(memo), memo),
+                block_time     = IF(VALUES(push_generation) > push_generation, VALUES(block_time), block_time),
+                effective_at   = IF(VALUES(push_generation) > push_generation, VALUES(effective_at), effective_at),
+                push_generation = GREATEST(push_generation, VALUES(push_generation))`;
         let args = [
             priceData.source_address, sourceChain || '',
             priceData.coin, priceData.tick, priceData.fiat,
             priceData.value, priceData.fee || null, priceData.memo || null,
-            blockTime, effectiveAt, priceData.action_index || 0, pushGeneration
+            blockTime, effectiveAt, actionIndex, pushGeneration
         ];
         try {
             await this.db.doQuery(query, args);
@@ -408,6 +457,20 @@ class PriceAggregator extends EventEmitter {
             if (bounded) evt.to_action_index = to;
             if (fenced) evt.retraction_generation = gen;
             this.emit('row:deleted', evt);
+        }
+
+        // HUB-RETRACT-4: durably record this retraction's generation + orphaned-range lower bound
+        // so a stale price push (a fire-and-forget or in-flight PRICE arriving AFTER the delete, or
+        // a retried push carrying the pre-reorg generation) is rejected at ingest instead of
+        // re-inserting the orphan. Only when the source carried a generation to fence on; without
+        // it we cannot tell stale from fresh, so we leave the fence untouched (pre-fix behaviour).
+        // Runs even on a 0-row delete: the stale push may not have arrived yet.
+        if (fenced) {
+            try {
+                await this.db.bumpPriceIngestWatermark(sourceChain, gen, from);
+            } catch (e) {
+                console.error('PriceAggregator: ingest-watermark bump failed for ' + sourceChain + ':', e && e.message);
+            }
         }
 
         console.log('PriceAggregator: retracted ' + snapDeleted + ' price_snapshots + ' + oracleDeleted + ' oracle_prices rows from ' + sourceChain + ' (action_index >= ' + from + (bounded ? ' AND <= ' + to : '') + (fenced ? ' AND push_generation <= ' + gen : '') + ')');
