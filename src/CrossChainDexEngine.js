@@ -494,6 +494,17 @@ class CrossChainDexEngine extends EventEmitter {
     // match. A Byzantine leader cannot get us to sign a match we can't independently see.
     async validateProposedMatch(row){
         if(!row || row.a_chain === row.b_chain) return false;
+        // Leader-chosen effective_time is ADOPTED (it is not part of the match_id, so a
+        // follower cannot re-derive it) and signed into the canonical. Bound it to a sane
+        // window of our own clock, exactly as CrossChainCallEngine.validateProposedMatch
+        // does for relay rows. Without this a Byzantine leader could stamp a far-future
+        // effective_time and finalize a match whose indexer settlement (applied at
+        // effective_time <= block_time) never fires, locking BOTH matched escrows
+        // indefinitely (a griefing / liveness attack). Honest leaders stamp _nowSeconds(),
+        // so the +/-3600s window never rejects an honest proposal (same clock-skew
+        // tolerance as the call relay).
+        if(!Number.isFinite(Number(row.effective_time)) ||
+           Math.abs(Number(row.effective_time) - this._nowSeconds()) > 3600) return false;
         let a = await this._findOpenOffer(row.a_chain, Number(row.a_action_index));
         let b = await this._findOpenOffer(row.b_chain, Number(row.b_action_index));
         if(!a || !b) return false;

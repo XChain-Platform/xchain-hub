@@ -463,7 +463,10 @@ describe('CrossChainDexEngine', function () {
                 b_chain: d.hi.home_coin, b_action_index: d.hi.action_index, b_kind: d.hiKind, b_tick: d.hi.give_tick,
                 b_amount: d.hiFill, b_filled_before: d.hiFilledBefore, b_ownership: d.hi.give_ownership, b_payout_addr: d.hi.get_address,
                 b_payout_legs: d.hi.payout_legs || null,
-                effective_time: 1700000000
+                // Honest leaders stamp _nowSeconds(); validateProposedMatch bounds this to
+                // +/-3600s of the follower's clock (a Byzantine far-future stamp would lock
+                // the escrows), so use the engine's own clock rather than a fixed timestamp.
+                effective_time: eng._nowSeconds()
             };
         }
 
@@ -541,6 +544,27 @@ describe('CrossChainDexEngine', function () {
             let { a, b } = makeOrderPair();
             let row = orderRow(eng, a, b, 100);
             row.b_payout_legs = LEGS;
+            sinon.stub(eng, '_findOpenOffer').callsFake(async (coin) => coin === 'DOGE' ? b : a);
+            expect(await eng.validateProposedMatch(row)).to.be.false;
+        });
+
+        it('returns false when the leader stamps a far-future effective_time (escrow-lock griefing, XDEX-ETIME-1)', async function () {
+            let eng = new CrossChainDexEngine(makeDexHub());
+            let { a, b } = makeOrderPair();
+            let row = orderRow(eng, a, b, 100);
+            // Everything else re-derives identically; only the leader's effective_time is
+            // pushed far into the future. Without the bound the follower would sign it and
+            // the finalized match would never settle, locking both escrows.
+            row.effective_time = eng._nowSeconds() + 30 * 24 * 3600;   // +30 days
+            sinon.stub(eng, '_findOpenOffer').callsFake(async (coin) => coin === 'DOGE' ? b : a);
+            expect(await eng.validateProposedMatch(row)).to.be.false;
+        });
+
+        it('returns false when effective_time is non-numeric', async function () {
+            let eng = new CrossChainDexEngine(makeDexHub());
+            let { a, b } = makeOrderPair();
+            let row = orderRow(eng, a, b, 100);
+            row.effective_time = 'not-a-time';
             sinon.stub(eng, '_findOpenOffer').callsFake(async (coin) => coin === 'DOGE' ? b : a);
             expect(await eng.validateProposedMatch(row)).to.be.false;
         });
