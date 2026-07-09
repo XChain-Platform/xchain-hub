@@ -290,9 +290,14 @@ class StateCheckpointEngine extends EventEmitter {
             return;
         }
 
+        // Re-map to the signer-verification shape, preserving the truncation flag so
+        // _checkQuorum's meetsStakeThreshold still fails closed on an over-cap snapshot
+        // (the .map would otherwise drop it, same defect class as the resolver above).
+        let pendingValidators = validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), source: String(v.source != null ? v.source : ''), weight: String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0')) }));
+        if(validators.truncated === true) pendingValidators.truncated = true;
         let pending = {
             id, cp, canonical, quorum, weighted,
-            validators: validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), source: String(v.source != null ? v.source : ''), weight: String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0')) })),
+            validators: pendingValidators,
             signatures: new Map([[myPubkey, mySig]]),
             done:       false,
             timer:      null
@@ -560,8 +565,16 @@ class StateCheckpointEngine extends EventEmitter {
         if(this.capSnapshot){
             if(weighted){
                 let snap = await this.capSnapshot.getWeightSnapshot(capability, block);
-                if(snap && Array.isArray(snap.validators))
+                if(snap && Array.isArray(snap.validators)){
                     validators = snap.validators.map(v => ({ pubkey: v.pubkey, source: String(v.source != null ? v.source : ''), weight: String(v.weight != null ? v.weight : '0'), amount: String(v.weight != null ? v.weight : '0') }));
+                    // Carry the truncation flag through the .map so the quorum check fails
+                    // closed on an over-cap weighted snapshot (SWQ-TRUNC parity with the sibling
+                    // engines CrossChainDexEngine/CrossChainCallEngine and the indexer consumers;
+                    // meetsStakeThreshold under-counts a truncated S, so a stake-evicted minority
+                    // could otherwise clear the strict 2/3 bar and finalize a checkpoint a full
+                    // snapshot would reject - the root of XHUB-TRUNC-1, which this engine missed).
+                    if(snap.truncated === true) validators.truncated = true;
+                }
             } else {
                 let snap = await this.capSnapshot.getSnapshot(capability, block);
                 if(snap && Array.isArray(snap.validators))

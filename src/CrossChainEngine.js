@@ -335,6 +335,21 @@ class CrossChainEngine extends EventEmitter {
             // freezes the same N for this round. Falls back to the live set when
             // the indexer is unreachable or the envelope predates this field.
             let quorum = await this._resolveQuorum(sourceChain, destChain, btcBlockHeight);
+            // A follower must NEVER finalize over a quorum of 0. Unlike the leader's
+            // single-operator fast path (requestAttestation, which self-signs only after
+            // confirming no federation snapshot resolved), reaching _handlePropose means a
+            // PEER proposed, so a federation exists. A 0 quorum here means the cross_chain
+            // capability snapshot at btcBlockHeight resolved EMPTY (bootstrap / a misconfigured
+            // indexer / an unpopulated qualifying set); co-signing would let a single PROPOSE
+            // mint an 'attested' row no quorum ratified, which downstream indexers then settle
+            // from escrow. This is the same empty-snapshot hazard the leader path already guards
+            // and the DEX engine was hardened against. Refuse; the round retries once the
+            // snapshot populates. (A genuine single-node hub has no peers, so never reaches here.)
+            if (quorum === 0) {
+                console.warn('CrossChain: refusing to PREPARE ' + attestationId +
+                    ': cross_chain snapshot resolved a 0 quorum (empty / bootstrap) at block ' + btcBlockHeight);
+                return;
+            }
             this.pendingAttestations.set(attestationId, {
                 attestationId, sourceChain, sourceActionIndex, destChain,
                 confirmations, digest,

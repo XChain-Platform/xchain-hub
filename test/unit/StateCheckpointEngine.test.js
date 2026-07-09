@@ -362,4 +362,33 @@ describe('StateCheckpointEngine', function () {
         expect(nd.db.checkpoints[0].block_index, 'tip minus confirmations').to.equal(TIP.block_index - 3); // 497
         expect(nd.db.checkpoints[0].snapshot_block, 'cadence block, not offset').to.equal(100);
     });
+
+    // ── XCHK-TRUNC-1: an over-cap (truncated) weighted oracle_publish snapshot must carry
+    // its .truncated flag through _resolveCapabilityValidators so meetsStakeThreshold fails
+    // closed; otherwise the under-counted stake S lets a minority clear the 2/3 bar and
+    // finalize a checkpoint a full snapshot would reject (the XHUB-TRUNC-1 root, missed here). ──
+    describe('truncated-snapshot fail-closed (XCHK-TRUNC-1)', function () {
+        const swq = require('../../src/stake_weighted_quorum');
+
+        function makeEngine(snapshotResult) {
+            let eng = new StateCheckpointEngine({ db: { doQuery: async () => [] }, network: 'regtest' });
+            eng.capSnapshot = { getWeightSnapshot: async () => snapshotResult };
+            return eng;
+        }
+
+        it('carries truncated=true through the weighted resolver, so meetsStakeThreshold fails closed', async function () {
+            let eng = makeEngine({ validators: [{ pubkey: 'aa', source: 's1', weight: '100' }], truncated: true });
+            let validators = await eng._resolveCapabilityValidators('oracle_publish', 100);
+            expect(validators.truncated).to.be.true;
+            // The exact computation _handleFinalized runs (weighted path) now refuses.
+            expect(swq.meetsStakeThreshold(validators, ['aa'])).to.be.false;
+        });
+
+        it('leaves the flag unset for a non-truncated snapshot (quorum proceeds normally)', async function () {
+            let eng = makeEngine({ validators: [{ pubkey: 'aa', source: 's1', weight: '100' }], truncated: false });
+            let validators = await eng._resolveCapabilityValidators('oracle_publish', 100);
+            expect(validators.truncated).to.be.undefined;
+            expect(swq.meetsStakeThreshold(validators, ['aa'])).to.be.true;
+        });
+    });
 });

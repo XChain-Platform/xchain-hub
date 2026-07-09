@@ -568,6 +568,53 @@ describe('CrossChainDexEngine', function () {
             sinon.stub(eng, '_findOpenOffer').callsFake(async (coin) => coin === 'DOGE' ? b : a);
             expect(await eng.validateProposedMatch(row)).to.be.false;
         });
+
+        // ── XDEX-GEN-FORGE-1: the per-leg source-reorg fence (a_/b_push_generation) is not
+        // in the signed canonical or match_id, so a follower must re-derive it from its own
+        // offer view or a Byzantine leader can stamp an inflated generation no honest
+        // retraction can ever fence (a match on a rolled-back order that is never retracted).
+        it('returns true when the proposed push_generation matches our own offer view', async function () {
+            let eng = new CrossChainDexEngine(makeDexHub());
+            let { a, b } = makeOrderPair();
+            // a=LTC (row b-leg / desc.hi), b=DOGE (row a-leg / desc.lo) since 'DOGE' < 'LTC'.
+            b.push_generation = 3; a.push_generation = 5;
+            let row = orderRow(eng, a, b, 100);
+            row.a_push_generation = 3; row.b_push_generation = 5;
+            sinon.stub(eng, '_findOpenOffer').callsFake(async (coin) => coin === 'DOGE' ? b : a);
+            expect(await eng.validateProposedMatch(row)).to.be.true;
+        });
+
+        it('returns false when the leader inflates a_push_generation (forged reorg fence)', async function () {
+            let eng = new CrossChainDexEngine(makeDexHub());
+            let { a, b } = makeOrderPair();
+            b.push_generation = 3; a.push_generation = 5;
+            let row = orderRow(eng, a, b, 100);
+            // Everything re-derives identically; only the fence is inflated to a value no
+            // honest retraction_generation can reach, escaping retraction forever.
+            row.a_push_generation = 9007199254740992;   // 2^53
+            row.b_push_generation = 5;
+            sinon.stub(eng, '_findOpenOffer').callsFake(async (coin) => coin === 'DOGE' ? b : a);
+            expect(await eng.validateProposedMatch(row)).to.be.false;
+        });
+
+        it('returns false when the leader inflates b_push_generation', async function () {
+            let eng = new CrossChainDexEngine(makeDexHub());
+            let { a, b } = makeOrderPair();
+            b.push_generation = 3; a.push_generation = 5;
+            let row = orderRow(eng, a, b, 100);
+            row.a_push_generation = 3;
+            row.b_push_generation = 42;                 // does not match a.push_generation (5)
+            sinon.stub(eng, '_findOpenOffer').callsFake(async (coin) => coin === 'DOGE' ? b : a);
+            expect(await eng.validateProposedMatch(row)).to.be.false;
+        });
+
+        it('treats absent generations as 0 on both sides (legacy indexer parity)', async function () {
+            let eng = new CrossChainDexEngine(makeDexHub());
+            let { a, b } = makeOrderPair();
+            let row = orderRow(eng, a, b, 100);   // no push_generation set anywhere → 0 === 0
+            sinon.stub(eng, '_findOpenOffer').callsFake(async (coin) => coin === 'DOGE' ? b : a);
+            expect(await eng.validateProposedMatch(row)).to.be.true;
+        });
     });
 
     // ── retractMatchesForReorg ────────────────────────────────────────────────
@@ -748,6 +795,79 @@ describe('CrossChainDexEngine', function () {
             eng.capSnapshot = { getSnapshot: sinon.stub().resolves({ validators: [] }) };
             await eng._persistCapabilitySnapshot('cross_chain', 100);
             expect(hub.db.doQuery.called).to.be.false;
+        });
+    });
+
+    // ── XDEX-MINCONF-BYPASS-1: the discovery/leader path (and the single-node fast path
+    // that never calls the follower check) must enforce the confirmation-depth floor too. ──
+    describe('_discoverAndMatch(): confirmation-depth floor', function () {
+        it('drops offers shallower than minConfirmations on the discovery path', async function () {
+            let eng = new CrossChainDexEngine(makeDexHub());
+            eng.minConfirmations = 6;
+            eng.indexers.BTC.url = 'http://btc';   // pass the per-coin URL guard
+            // latest tip 20: block 11 is 10 deep (kept), block 19 is 2 deep (dropped at floor 6).
+            sinon.stub(eng, '_indexerCall').resolves({
+                network: 'regtest', latest_block_index: 20,
+                orders: [ { action_index: 1, block_index: 11 }, { action_index: 2, block_index: 19 } ]
+            });
+            let captured;
+            sinon.stub(eng, '_findMatches').callsFake((obc) => { captured = obc; return []; });
+            await eng._discoverAndMatch();
+            let seen = (captured.BTC || []).map(o => o.action_index);
+            expect(seen).to.include(1);
+            expect(seen).to.not.include(2);
+        });
+
+        it('keeps every offer at the default floor of 1 (no-op)', async function () {
+            let eng = new CrossChainDexEngine(makeDexHub());   // minConfirmations defaults to 1
+            eng.indexers.BTC.url = 'http://btc';
+            sinon.stub(eng, '_indexerCall').resolves({
+                network: 'regtest', latest_block_index: 20,
+                orders: [ { action_index: 1, block_index: 20 }, { action_index: 2, block_index: 11 } ]
+            });
+            let captured;
+            sinon.stub(eng, '_findMatches').callsFake((obc) => { captured = obc; return []; });
+            await eng._discoverAndMatch();
+            expect((captured.BTC || []).map(o => o.action_index)).to.have.members([1, 2]);
+        });
+    });
+
+    // ── XDEX-REFORM-STRAND-1: a crossing retracted then re-formed at the same snapshot_block
+    // re-derives the same (unique) match_id, so INSERT IGNORE would strand it on the stale
+    // 'retracted' row; _insertMatchRow revives it, without ever double-counting a real dup. ──
+    describe('_insertMatchRow(): retracted-row revive', function () {
+        const reviveRow = () => ({
+            match_id: 'm'.repeat(64), validator_signatures: '[]', finalizing_view: 0, effective_time: 1700000000,
+            a_chain: 'DOGE', a_action_index: 7, a_kind: 'order', a_tick: 'DOGT', a_amount: '20', a_filled_before: '0', a_ownership: 0, a_payout_addr: 'Da', a_payout_legs: null,
+            b_chain: 'LTC', b_action_index: 1, b_kind: 'order', b_tick: 'LTCT', b_amount: '40', b_filled_before: '0', b_ownership: 0, b_payout_addr: 'Lb', b_payout_legs: null,
+            a_push_generation: 0, b_push_generation: 0
+        });
+
+        it('revives a retracted row to finalized when INSERT IGNORE no-ops', async function () {
+            let hub = makeDexHub();
+            let q = sinon.stub();
+            q.onCall(0).resolves({ affectedRows: 0 });   // INSERT IGNORE hits the retained retracted row
+            q.onCall(1).resolves({ affectedRows: 1 });   // UPDATE ... WHERE status='retracted' revives it
+            q.resolves([]);                              // broadcast re-read
+            hub.db.doQuery = q;
+            let eng = new CrossChainDexEngine(hub);
+            let inserted = await eng._insertMatchRow(reviveRow());
+            expect(inserted).to.be.true;
+            let updateSql = q.getCall(1).args[0];
+            expect(updateSql).to.match(/UPDATE cross_chain_matches SET status = 'finalized'/);
+            expect(updateSql).to.match(/status = 'retracted'/);
+        });
+
+        it('stays a no-op when the existing row is already finalized (no double-count)', async function () {
+            let hub = makeDexHub();
+            let q = sinon.stub();
+            q.onCall(0).resolves({ affectedRows: 0 });   // genuine duplicate finalize
+            q.onCall(1).resolves({ affectedRows: 0 });   // revive matches nothing (row is 'finalized', not 'retracted')
+            q.resolves([]);
+            hub.db.doQuery = q;
+            let eng = new CrossChainDexEngine(hub);
+            let inserted = await eng._insertMatchRow(reviveRow());
+            expect(inserted).to.be.false;
         });
     });
 

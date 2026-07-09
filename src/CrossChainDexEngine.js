@@ -209,8 +209,19 @@ class CrossChainDexEngine extends EventEmitter {
                 // with no network (pre-network-scoping indexer) is unsafe to match, so we drop
                 // the whole coin's book rather than risk a network-agnostic match.
                 let net = res && res.network ? String(res.network) : '';
+                let latest = Number(res && res.latest_block_index);
+                // Enforce the confirmation-depth floor on the DISCOVERY/leader path too, not
+                // only the follower's validateProposedMatch (_findOpenOffer): the single-node
+                // (quorum-0) fast path in CrossChainDexConsensus.propose self-signs + finalizes
+                // WITHOUT ever calling the follower check, so without this gate XDEX_MIN_CONFIRMATIONS
+                // is silently inert on a single operator and a match can settle against a
+                // reorg-able escrow. Deep-enough = (latest - block_index + 1) >= minConfirmations;
+                // an offer with no resolvable depth is kept (the default floor is 1, and an
+                // indexed order is already >= 1 deep, so this is a no-op at the default).
+                let deepEnough = (o) => !(Number.isFinite(latest) && Number.isFinite(Number(o.block_index)) &&
+                                          (latest - Number(o.block_index) + 1) < this.minConfirmations);
                 offersByCoin[coin] = (res && res.orders && net)
-                    ? res.orders.map(o => Object.assign({ home_coin: coin, home_network: net }, o))
+                    ? res.orders.filter(deepEnough).map(o => Object.assign({ home_coin: coin, home_network: net }, o))
                     : [];
             } catch(e){
                 offersByCoin[coin] = [];
@@ -525,6 +536,17 @@ class CrossChainDexEngine extends EventEmitter {
         // indexer stores the legs as one JSON string, so both views compare byte-equal.
         if(String(row.a_payout_legs || '') !== String(desc.lo.payout_legs || '')) return false;
         if(String(row.b_payout_legs || '') !== String(desc.hi.payout_legs || '')) return false;
+        // Per-leg source-reorg fence (item 5308): a_push_generation / b_push_generation are
+        // NOT part of the signed canonical or the match_id, so a Byzantine leader can stamp an
+        // inflated generation that no honest post-reorg retraction (which fences on
+        // <leg>_push_generation <= retraction_generation) can ever match, permanently pinning a
+        // match on a rolled-back source order = a cross-chain double-spend. Re-derive each leg's
+        // generation from OUR OWN open-order view and refuse a row whose fence disagrees. Honest
+        // hubs read the same per-coin generation, so a synced federation never rejects; a follower
+        // whose indexer briefly lags just defers signing until it catches up (same tolerance as
+        // the effective_time bound above).
+        if((Number(row.a_push_generation) || 0) !== (Number(desc.lo.push_generation) || 0)) return false;
+        if((Number(row.b_push_generation) || 0) !== (Number(desc.hi.push_generation) || 0)) return false;
         let derivedId = this._deriveMatchId(desc.lo, desc.hi, Number(row.snapshot_block), desc.loFilledBefore, desc.hiFilledBefore);
         if(String(derivedId).toLowerCase() !== String(row.match_id).toLowerCase()) return false;
         return true;
@@ -589,6 +611,22 @@ class CrossChainDexEngine extends EventEmitter {
             'INSERT IGNORE INTO cross_chain_matches (' + cols.join(', ') + ') VALUES (' + cols.map(() => '?').join(', ') + ')',
             vals);
         let inserted = !!(res && Number(res.affectedRows) > 0);
+        // A retracted row keeps its (unique) match_id. When a reorg retracts a crossing and the
+        // SAME crossing re-forms at the same BTC snapshot_block, _deriveMatchId yields the
+        // identical id, so the INSERT IGNORE above no-ops against the stale 'retracted' row and
+        // the re-formed match would be stranded (never settled, committed capacity never
+        // re-applied) until the BTC tip advances and yields a new snapshot_block/id. Revive the
+        // retracted row to 'finalized' with THIS round's signatures and treat the revive as a
+        // fresh insert so the committed-fill ledger is re-applied. A row already 'finalized' is
+        // left untouched (status='retracted' guard), preserving the double-finalize dedupe so a
+        // genuine duplicate finalize never double-counts a fill.
+        if(!inserted){
+            let revive = await this.db.doQuery(
+                "UPDATE cross_chain_matches SET status = 'finalized', validator_signatures = ?, " +
+                "finalizing_view = ?, effective_time = ? WHERE match_id = ? AND status = 'retracted'",
+                [row.validator_signatures, row.finalizing_view, row.effective_time, row.match_id]);
+            if(revive && Number(revive.affectedRows) > 0) inserted = true;
+        }
         // Mirror to indexers: re-read the row (to get its AUTO_INCREMENT id) and broadcast.
         if(this.broadcaster){
             let read = await this.db.doQuery('SELECT * FROM cross_chain_matches WHERE match_id = ? LIMIT 1', [row.match_id]);

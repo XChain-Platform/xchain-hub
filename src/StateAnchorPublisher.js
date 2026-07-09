@@ -1088,9 +1088,15 @@ class StateAnchorPublisher {
         // stamps a bogus anchor_txid (suppressing the real anchor) and mirrors rewards.
         if(pubkeys.length === 0 || !pubkeys.includes(sender)) return;
         if(!ValidatorIdentity.verify(this._v0DoneCanonical(d, String(d.txid)), String(d.sig || ''), sender)) return;
+        // Key the stamp on checkpoint_seq exactly as the publisher's own stamp does
+        // (line ~413): checkpoint_seq is part of the signed _v0DoneCanonical, so binding it
+        // here stops one V0_DONE from marking a DIFFERENT (or multiple) seq row(s) at the
+        // same height. NOTE: this does NOT close XANC-V0DONE-SUPPRESS-1 - the announced txid
+        // is still not verified on-chain, so a Byzantine oracle_publish member can suppress
+        // the first honest anchor. See the stress-sweep handover open items for the full fix.
         await this.db.doQuery(
-            'UPDATE state_checkpoints SET anchor_txid = ? WHERE chain = ? AND network = ? AND block_index = ? AND anchor_txid IS NULL',
-            [String(d.txid), String(d.chain), String(d.network), Number(d.block_index)]);
+            'UPDATE state_checkpoints SET anchor_txid = ? WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? AND anchor_txid IS NULL',
+            [String(d.txid), String(d.chain), String(d.network), Number(d.block_index), Number(d.checkpoint_seq)]);
         // Mirror the publisher's anchor reward locally (sender is signature-
         // verified above) so every hub holds the same reward rows and any of
         // them can archive/verify the rewards section. The snapshot_block comes

@@ -369,6 +369,59 @@ describe('CrossChainEngine', function () {
     // stalls forever, and the federation diverges.
     // -----------------------------------------------------------------
 
+    // -----------------------------------------------------------------
+    // XCE-EMPTYSNAP-1: a follower must never finalize an attestation over a
+    // 0 quorum (an EMPTY cross_chain snapshot). Only the leader's fast path
+    // may self-sign, and only when NO federation snapshot resolved.
+    // -----------------------------------------------------------------
+    describe('empty-snapshot guard (XCE-EMPTYSNAP-1)', function () {
+
+        it('refuses to PREPARE when the cross_chain snapshot resolves a 0 quorum', async function () {
+            engine.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+            // A snapshot resolves at the round's block but carries NO qualifying validators,
+            // so getQuorum → 0 (bootstrap / misconfigured indexer). The follower must refuse.
+            hub.capabilitySnapshot = {
+                getSnapshot: sinon.stub().resolves({ validators: [], count: 0 }),
+                getQuorum:   sinon.stub().returns(0)
+            };
+            let attestationId = 'BTC:1:LTC';
+            let digest = engine._digest(attestationId, 3);
+
+            await engine._handlePropose({
+                sender: VALIDATORS_4[1].addr,
+                data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
+                        destChain: 'LTC', confirmations: 3, digest, btcBlockHeight: 500 }
+            });
+
+            // No pending, no PREPARE/COMMIT: the un-quorum'd round is dropped up front.
+            expect(engine.pendingAttestations.has(attestationId)).to.be.false;
+            expect(pm.broadcast.called).to.be.false;
+        });
+
+        it('still opens the round when the snapshot resolves a real quorum', async function () {
+            engine.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+            hub.capabilitySnapshot = {
+                getSnapshot: sinon.stub().resolves({ validators: [{}], count: 4 }),
+                getQuorum:   sinon.stub().returns(3)
+            };
+            let attestationId = 'BTC:2:LTC';
+            let digest = engine._digest(attestationId, 3);
+
+            await engine._handlePropose({
+                sender: VALIDATORS_4[1].addr,
+                data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 2,
+                        destChain: 'LTC', confirmations: 3, digest, btcBlockHeight: 500 }
+            });
+
+            expect(engine.pendingAttestations.has(attestationId)).to.be.true;
+            let pending = engine.pendingAttestations.get(attestationId);
+            expect(pending.quorum).to.equal(3);
+            if (pending.timer) clearTimeout(pending.timer);
+        });
+    });
+
     describe('quorum locking', function () {
 
         it('locks quorum into the pending object on the leader (PROPOSE) path', async function () {
