@@ -1557,6 +1557,43 @@ describe('StateAnchorPublisher', function () {
         expect(upd.params[4]).to.equal(7);
     });
 
+    // XANC-V0DONE-SUPPRESS-1 / XANC-REWARD-THEFT-1: a V0_DONE from an oracle_publish member
+    // that is NOT the rank-unlocked elected v0 publisher for the referenced checkpoint must be
+    // rejected - otherwise a single Byzantine member forges a txid, stamps anchor_txid (the
+    // `IS NULL` selector then skips the row fleet-wide, suppressing the real anchor) and mirrors
+    // itself the reward. The gate re-runs the publisher's own election from the LOCAL
+    // checkpoint's snapshot_block (no signed-canonical change).
+    it('_handleV0Done: rejects a forged V0_DONE from a non-elected oracle_publish member', async function () {
+        let bus = buildMesh(3);                     // default btcBlock=100 == snapshot_block => since=0, only rank 0 unlocked
+        let order = v0Order(bus, CP_ROW);
+        let attacker = order[2];                    // a member, but not the elected (rank-0) publisher
+        let receiver = order[1];
+        let d = { chain: CP_ROW.chain, network: CP_ROW.network, block_index: CP_ROW.block_index,
+                  checkpoint_seq: CP_ROW.checkpoint_seq, txid: 'aa'.repeat(32) };
+        d.sig_pubkey = attacker.pubkey;
+        d.sig = attacker.identity.sign(receiver.pub._v0DoneCanonical(d, d.txid));
+
+        await receiver.pub._handleV0Done({ type: 'XANC_V0_DONE', sender: attacker.pubkey, data: d });
+
+        expect(receiver.db.checkpoints[0].anchor_txid, 'forged V0_DONE must not stamp (suppression blocked)').to.equal(null);
+        expect(receiver.rewards.length, 'forged V0_DONE must not mirror a reward (theft blocked)').to.equal(0);
+    });
+
+    it('_handleV0Done: accepts a V0_DONE from the rank-unlocked elected publisher', async function () {
+        let bus = buildMesh(3);
+        let order = v0Order(bus, CP_ROW);
+        let publisher = order[0];                   // rank 0 is always unlocked
+        let receiver  = order[1];
+        let d = { chain: CP_ROW.chain, network: CP_ROW.network, block_index: CP_ROW.block_index,
+                  checkpoint_seq: CP_ROW.checkpoint_seq, txid: 'bb'.repeat(32) };
+        d.sig_pubkey = publisher.pubkey;
+        d.sig = publisher.identity.sign(receiver.pub._v0DoneCanonical(d, d.txid));
+
+        await receiver.pub._handleV0Done({ type: 'XANC_V0_DONE', sender: publisher.pubkey, data: d });
+
+        expect(receiver.db.checkpoints[0].anchor_txid, 'elected publisher V0_DONE stamps').to.equal('bb'.repeat(32));
+    });
+
     it('size-trigger: reaching batchSize match:finalized events fires a flush', async function () {
         let EventEmitter = require('events');
         let bus = buildMesh(1);

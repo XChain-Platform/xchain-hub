@@ -1073,9 +1073,12 @@ class StateAnchorPublisher {
         }
     }
 
-    // Peer back-fill for a published v0 anchor. Anti-spam only (membership +
-    // signature); a fabricated txid can at worst suppress a re-anchor, and the
-    // row's hashes were already quorum-signed. First writer wins (IS NULL guard).
+    // Peer back-fill for a published v0 anchor. Gated on membership + signature +
+    // the sender being the rank-unlocked ELECTED v0 publisher for the referenced
+    // checkpoint (see the election re-derivation below); a non-elected member can
+    // no longer suppress the anchor or mirror itself the reward. The residual
+    // (a Byzantine elected publisher announcing a fake txid) needs on-chain txid
+    // verification. First writer wins (IS NULL guard).
     async _handleV0Done(envelope){
         let d = envelope.data;
         if(!d || !d.chain || !d.txid) return;
@@ -1088,6 +1091,34 @@ class StateAnchorPublisher {
         // stamps a bogus anchor_txid (suppressing the real anchor) and mirrors rewards.
         if(pubkeys.length === 0 || !pubkeys.includes(sender)) return;
         if(!ValidatorIdentity.verify(this._v0DoneCanonical(d, String(d.txid)), String(d.sig || ''), sender)) return;
+        // XANC-V0DONE-SUPPRESS-1 / XANC-REWARD-THEFT-1: membership + signature alone let ANY
+        // oracle_publish member self-assert an anchor for a checkpoint it never published,
+        // stamping a bogus anchor_txid (suppressing the real anchor fleet-wide via the
+        // `anchor_txid IS NULL` selector) and mirroring itself the reward. Re-run the SAME v0
+        // publisher election the real publisher ran (_publishPendingCheckpoints): resolve
+        // oracle_publish at THIS checkpoint's snapshot_block and require the sender to be
+        // rank-unlocked on the failover ladder. snapshot_block is read from our own
+        // quorum-agreed checkpoint row (not the wire), so this needs NO signed-canonical
+        // change. It rejects any NON-elected member; a Byzantine ELECTED publisher (a far
+        // smaller surface, fully closed only by on-chain txid verification - open item) can
+        // still self-suppress its own election share. Rejecting a V0_DONE only ever risks a
+        // redundant re-anchor (benign, the direction the code already tolerates), never a
+        // fork, so using the receiver's own BTC-tip view for rank-unlock is safe here (same
+        // pattern as _handleSignReq).
+        let ckptRows = await this.db.doQuery(
+            'SELECT snapshot_block FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? LIMIT 1',
+            [String(d.chain), String(d.network), Number(d.block_index), Number(d.checkpoint_seq)]);
+        if(!ckptRows || ckptRows.length === 0) return;   // no local copy of the referenced checkpoint: cannot vet the election
+        let electionSet = await this._getActiveOraclePublishPubkeys(Number(ckptRows[0].snapshot_block));
+        if(electionSet.length === 0) return;             // fail closed: unresolved election set
+        if(electionSet.length > 1){
+            let order = StateAnchorPublisher.hashOrder(
+                this._v0ElectionKey({ chain: d.chain, network: d.network, checkpoint_seq: d.checkpoint_seq, snapshot_block: Number(ckptRows[0].snapshot_block) }),
+                electionSet);
+            let myBtc = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
+            let since = Number.isFinite(myBtc) ? myBtc - Number(ckptRows[0].snapshot_block) : null;
+            if(!this._rankUnlocked(order, sender, since)) return;   // sender is not a rank-unlocked elected publisher
+        }
         // Key the stamp on checkpoint_seq exactly as the publisher's own stamp does
         // (line ~413): checkpoint_seq is part of the signed _v0DoneCanonical, so binding it
         // here stops one V0_DONE from marking a DIFFERENT (or multiple) seq row(s) at the
