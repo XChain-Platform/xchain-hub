@@ -356,13 +356,13 @@ class StateAnchorPublisher {
     // (unresolved/unavailable) set means abstain (fail closed), never a
     // free-for-all where every hub double-anchors the same checkpoint.
     _mayPublish(order, sinceBlocks){
-        if(order.length === 0) return false;
+        // Single source of truth for the v0 failover ladder: delegate to _rankUnlocked
+        // over our own pubkey so the leader-election path and its follower verifiers can
+        // never drift. Behaviour is identical to the prior inline form: an empty order or
+        // a pubkey absent from it -> rank < 0 -> false; rank 0 (incl. the order.length===1
+        // case) -> true; otherwise rank <= unlocked.
         if(!this.identity) return false;
-        let rank = order.indexOf(String(this.identity.getPubkeyHex()).toLowerCase());
-        if(rank < 0) return false;
-        if(order.length === 1) return true;
-        let unlocked = Number.isFinite(sinceBlocks) ? Math.floor(Math.max(0, sinceBlocks) / this.electionToleranceBlocks) : 0;
-        return rank <= unlocked;
+        return this._rankUnlocked(order, String(this.identity.getPubkeyHex()).toLowerCase(), sinceBlocks);
     }
 
     // v0: one per chain/network (the LATEST checkpoint that has no anchor yet).
@@ -624,11 +624,18 @@ class StateAnchorPublisher {
             return { met: true, sigs: [{ pubkey: me, sig: mySig }], publisher: publisher };
 
         return await new Promise((resolve) => {
+            // Full {pubkey, source, weight} set so the stake-weighted tally can sum
+            // distinct-source stake, identical to the archive round.
+            let roundValidators = signingSet.map(v => ({ pubkey: v.pubkey, source: String(v.source != null ? v.source : ''), weight: String(v.amount != null ? v.amount : '0') }));
+            // Preserve the truncation flag so the weighted reward quorum
+            // (_checkAttestQuorum via meetsStakeThreshold) fails closed on an over-cap
+            // oracle_publish snapshot, identical to the archive round (_startArchiveRound:899).
+            // Without this the publisher-attestation quorum fail-OPENS on a truncated set,
+            // emitting a v4/v5 whose reward the indexer would drop (stranded credit).
+            if(signingSet.truncated === true) roundValidators.truncated = true;
             let round = {
                 cp, publisher, canonical, quorum, weighted, resolve,
-                // Full {pubkey, source, weight} set so the stake-weighted tally can sum
-                // distinct-source stake, identical to the archive round.
-                validators: signingSet.map(v => ({ pubkey: v.pubkey, source: String(v.source != null ? v.source : ''), weight: String(v.amount != null ? v.amount : '0') })),
+                validators: roundValidators,
                 signatures, done: false, timer: null
             };
             this._attestRound = round;
@@ -1217,9 +1224,13 @@ class StateAnchorPublisher {
         // them can archive/verify the rewards section. The snapshot_block comes
         // from OUR copy of the checkpoint row (quorum-agreed state, identical
         // on every hub).
-        let cps = await this.db.doQuery(
-            'SELECT snapshot_block FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? ORDER BY checkpoint_seq DESC LIMIT 1',
-            [String(d.chain), String(d.network), Number(d.block_index)]);
+        // Mirror against the EXACT announced+verified checkpoint (ckptRows[0], keyed on
+        // d.checkpoint_seq above), NOT the latest seq at this height. When a reorg leaves
+        // more than one checkpoint_seq at the same block_index with different
+        // snapshot_blocks, the latest-seq row's snapshot_block diverges from the seq the
+        // publisher actually anchored + recorded its reward under, forking peer reward rows
+        // from the publisher's (a live-vs-recovered COLLECT-ledger fork).
+        let cps = [{ snapshot_block: ckptRows[0].snapshot_block }];
         // At/above the anchor-reward flag-day the per-chain reward is indexer-
         // DERIVED from the on-chain v4/v5 attestation. V0_DONE does not say (and
         // its signed canonical does not bind) WHICH payload version landed, so a

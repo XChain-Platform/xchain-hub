@@ -255,6 +255,94 @@ describe('ReorgHandler', function () {
             expect(pm.broadcast.called).to.be.false;
         });
 
+        it('reportReorg rejects a timestamp that predates the reorged block\'s own block_time', async function () {
+            // R1 (over-rollback): a registered reporter announcing a REAL reorg with a
+            // far-past timestamp must be refused once our own node shows the reorged
+            // block is fresh (a reorg cannot be observed before the block existed).
+            rh.setValidatorSet([]);
+            pm.getPeerStatus.returns([]);
+            let blockTime = Date.now() - 60000;                       // block mined 1 min ago
+            stubVerified({ blockTimeMs: blockTime });
+
+            let threw = false;
+            let ts = blockTime - rh.timestampSkewToleranceMs - 60000; // predates block beyond tolerance
+            try { await rh.reportReorg('BTC', 500000, ts, OLD_HASH, NEW_HASH); }
+            catch (e) { threw = true; expect(e.message).to.match(/predates the reorged block/); }
+            expect(threw).to.be.true;
+            expect(hub.db.doQuery.called, 'no rollback for an over-reaching timestamp').to.be.false;
+            expect(pm.broadcast.called).to.be.false;
+        });
+
+        it('single-node rollback anchors its bound to the observed block_time', async function () {
+            rh.setValidatorSet([]);
+            pm.getPeerStatus.returns([]);
+            let blockTime = Date.now() - 600000;                      // reorged block 10 min old
+            stubVerified({ blockTimeMs: blockTime });
+
+            await rh.reportReorg('BTC', 500000, Date.now(), OLD_HASH, NEW_HASH);
+
+            expect(hub.db.doQuery.getCall(0).args[1][1], 'DELETE bound = block_time, not reported now')
+                .to.equal(blockTime);
+            expect(hub.db.doQuery.getCall(1).args[1][0], 'dispute bound = block_time').to.equal(blockTime);
+        });
+
+        it('_handleAlert abstains when the timestamp predates the observed block_time', async function () {
+            rh.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+            let blockTime = Date.now() - 60000;
+            stubVerified({ blockTimeMs: blockTime });
+
+            let ts = blockTime - rh.timestampSkewToleranceMs - 60000;
+            let reorgId = 'BTC:500:' + ts;
+            await rh._handleAlert({
+                sender: VALIDATORS_4[1].addr,
+                data: { chain: 'BTC', reorgHeight: 500, timestamp: ts, reorgId,
+                        oldHash: OLD_HASH, newHash: NEW_HASH }
+            });
+            expect(rh.pendingReorgs.has(reorgId), 'no round co-signed').to.be.false;
+            expect(pm.broadcast.called).to.be.false;
+        });
+
+        it('_handlePrepare (leader-bypass) abstains when the timestamp predates the observed block_time', async function () {
+            rh.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+            let blockTime = Date.now() - 60000;
+            stubVerified({ blockTimeMs: blockTime });
+
+            let ts = blockTime - rh.timestampSkewToleranceMs - 60000;
+            let reorgId = 'BTC:500:' + ts;
+            let digest = rh._digest(reorgId, 'BTC', 500, ts, OLD_HASH, NEW_HASH);
+            await rh._handlePrepare({
+                sender: VALIDATORS_4[1].addr,
+                data: { reorgId, chain: 'BTC', reorgHeight: 500, timestamp: ts,
+                        affectedChains: ['LTC', 'DOGE'], digest,
+                        oldHash: OLD_HASH, newHash: NEW_HASH }
+            });
+            expect(rh.pendingReorgs.has(reorgId), 'no round joined').to.be.false;
+        });
+
+        it('a consensus round carries the observed block_time into the rollback bound', async function () {
+            rh.setValidatorSet(VALIDATORS_3);
+            pm.validatorAddr = VALIDATORS_3[0].addr;
+            let blockTime = Date.now() - 600000;
+            stubVerified({ blockTimeMs: blockTime });
+
+            let ts = Date.now();
+            await rh.reportReorg('BTC', 500000, ts, OLD_HASH, NEW_HASH);
+            let reorgId = 'BTC:500000:' + ts;
+            let pending = rh.pendingReorgs.get(reorgId);
+            expect(pending, 'round created').to.exist;
+            expect(pending.observedBlockTimeMs).to.equal(blockTime);
+
+            // Drive the round to commit quorum and confirm the executed bound.
+            pending.commits.add(VALIDATORS_3[1].addr);
+            pending.commits.add(VALIDATORS_3[2].addr);
+            rh._checkCommitQuorum(reorgId);
+            await new Promise(r => setImmediate(r));
+            expect(hub.db.doQuery.getCall(0).args[1][1], 'quorum rollback bound = block_time')
+                .to.equal(blockTime);
+        });
+
         it('_handleAlert ignores an alert missing the hash pair (legacy / malformed wire)', async function () {
             rh.setValidatorSet(VALIDATORS_4);
             let verify = stubVerified(true);
@@ -421,7 +509,17 @@ describe('ReorgHandler', function () {
         it('confirms when the node serves newHash at reorgHeight on the right network', async function () {
             stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
                         { block_index: 500, block_hash: NEW_HASH, network: 'regtest' });
-            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.true;
+            let r = await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH);
+            expect(r).to.be.ok;
+            expect(r.blockTimeMs, 'no block_time served → null anchor (legacy bound)').to.equal(null);
+        });
+
+        it('captures the served block_time (seconds) as the ms rollback anchor', async function () {
+            stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
+                        { block_index: 500, block_hash: NEW_HASH, network: 'regtest', block_time: 1700000000 });
+            let r = await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH);
+            expect(r).to.be.ok;
+            expect(r.blockTimeMs).to.equal(1700000000000);
         });
 
         it('abstains while the node still serves the pre-reorg hash (lagging sync)', async function () {
@@ -456,7 +554,7 @@ describe('ReorgHandler', function () {
 
         it('reuses the tip response when reorgHeight IS the tip (single RPC)', async function () {
             let ic = stubIndexer({ block_index: 500, block_hash: NEW_HASH, network: 'regtest' }, null);
-            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.true;
+            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.ok;
             expect(ic.callCount).to.equal(1);
         });
 
@@ -483,24 +581,47 @@ describe('ReorgHandler', function () {
 
     describe('_executeRollback()', function () {
 
-        it('deletes attestations for affected chain after timestamp', async function () {
-            await rh._executeRollback('BTC', 500000, 1700000000000, 'reorg-1', 3, '[]');
+        it('deletes attestations for affected chain after a recent timestamp (legacy fallback bound)', async function () {
+            let ts = Date.now() - 60000;
+            await rh._executeRollback('BTC', 500000, ts, 'reorg-1', 3, '[]');
 
             let deleteCall = hub.db.doQuery.getCall(0);
             expect(deleteCall.args[0]).to.include('DELETE FROM attestations');
             expect(deleteCall.args[1][0]).to.equal('BTC');
-            expect(deleteCall.args[1][1]).to.equal(1700000000000);
+            expect(deleteCall.args[1][1]).to.equal(ts);
+        });
+
+        it('anchors the DELETE/UPDATE bound to the observed block_time, not the reported timestamp', async function () {
+            // R1 (over/under-rollback): the reporter-supplied timestamp is gameable,
+            // so the bound must come from OUR OWN node's block_time for reorgHeight.
+            let reported  = Date.now() - 12 * 3600000;   // adversarial far-past report
+            let blockTime = Date.now() - 600000;         // the reorged block is 10 min old
+            await rh._executeRollback('BTC', 500000, reported, 'reorg-bt', 3, '[]', blockTime);
+
+            expect(hub.db.doQuery.getCall(0).args[1][1], 'attestation DELETE bound').to.equal(blockTime);
+            expect(hub.db.doQuery.getCall(1).args[1][0], 'snapshot dispute bound').to.equal(blockTime);
+        });
+
+        it('clamps the rollback bound to the lookback floor (blast-radius bound)', async function () {
+            let before = Date.now() - rh.maxLookbackMs;
+            await rh._executeRollback('BTC', 500000, Date.now(), 'reorg-deep', 3, '[]',
+                Date.now() - 3 * rh.maxLookbackMs);      // fabricated deep "reorg" block_time
+            let after = Date.now() - rh.maxLookbackMs;
+
+            let bound = hub.db.doQuery.getCall(0).args[1][1];
+            expect(bound, 'bound never reaches past the lookback window').to.be.at.least(before);
+            expect(bound).to.be.at.most(after);
         });
 
         it('marks price snapshots as disputed', async function () {
-            await rh._executeRollback('BTC', 500000, 1700000000000, 'reorg-1', 3, '[]');
+            await rh._executeRollback('BTC', 500000, Date.now() - 60000, 'reorg-1', 3, '[]');
 
             let updateCall = hub.db.doQuery.getCall(1);
             expect(updateCall.args[0]).to.include("status = 'disputed'");
         });
 
         it('stores reorg attestation', async function () {
-            await rh._executeRollback('BTC', 500000, 1700000000000, 'reorg-1', 3, '["v1","v2","v3"]');
+            await rh._executeRollback('BTC', 500000, Date.now() - 60000, 'reorg-1', 3, '["v1","v2","v3"]');
 
             let insertCall = hub.db.doQuery.getCall(2);
             expect(insertCall.args[0]).to.include('reorg_attestations');
@@ -509,7 +630,7 @@ describe('ReorgHandler', function () {
         });
 
         it('adds reorgId to processed set', async function () {
-            await rh._executeRollback('BTC', 500000, 1700000000000, 'reorg-x', 1, '[]');
+            await rh._executeRollback('BTC', 500000, Date.now() - 60000, 'reorg-x', 1, '[]');
             expect(rh.processed.has('reorg-x')).to.be.true;
         });
     });

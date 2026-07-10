@@ -89,8 +89,13 @@ class StateCheckpointEngine extends EventEmitter {
 
         // Regtest seams: shared with the cross-chain DEX engine so a no-BTC
         // regtest configures its deterministic anchor + seeded validator once.
-        this._snapshotBlockOverride = parseInt(process.env.XDEX_SNAPSHOT_BLOCK || cfg.XDEX_SNAPSHOT_BLOCK);
-        this._seedLocalValidator    = (process.env.XDEX_SEED_LOCAL_VALIDATOR === '1' ||
+        // Network-gated (item decff441): the snapshot-block override feeds the SIGNED
+        // checkpoint canonical and the seeded validator joins the federation set, so a
+        // stray env var or configs-table row must never reach them on mainnet/testnet.
+        // Honored ONLY on regtest; NaN/false everywhere else (fail closed to the real set).
+        let _isRegtest = (this.network === 'regtest');
+        this._snapshotBlockOverride = _isRegtest ? parseInt(process.env.XDEX_SNAPSHOT_BLOCK || cfg.XDEX_SNAPSHOT_BLOCK) : NaN;
+        this._seedLocalValidator    = _isRegtest && (process.env.XDEX_SEED_LOCAL_VALIDATOR === '1' ||
                                        cfg.XDEX_SEED_LOCAL_VALIDATOR === '1' || cfg.XDEX_SEED_LOCAL_VALIDATOR === true);
 
         // Per-coin indexer JSON-RPC endpoints (same env surface as CrossChainDexEngine).

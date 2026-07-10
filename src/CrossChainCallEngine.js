@@ -543,8 +543,12 @@ class CrossChainCallEngine extends EventEmitter {
     async _validateResult(row){
         // The dispatch row must already be finalized in our own DB (we never
         // vouch for a result of a dispatch we don't know).
+        // Treat a retracted dispatch as absent, exactly as the sibling dispatch lookups
+        // do (a reorg marks status='retracted' + broadcasts a deletion). Without this
+        // filter a follower co-signs a result round bound to a dispatch its own reorg
+        // already retracted (item 5ecc2867).
         let d = await this.db.doQuery(
-            "SELECT * FROM cross_chain_calls WHERE call_id = ? AND phase = 'dispatch' LIMIT 1",
+            "SELECT * FROM cross_chain_calls WHERE call_id = ? AND phase = 'dispatch' AND status <> 'retracted' LIMIT 1",
             [String(row.call_id).toLowerCase()]);
         if(!d.length) return false;
         if(String(d[0].source_chain) !== String(row.source_chain) ||

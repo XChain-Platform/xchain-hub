@@ -23,6 +23,8 @@
  *
  ********************************************************************/
 
+const { ORACLE_DEVIATION_THRESHOLD } = require('./constants');
+
 const MAX_DEVIATIONS_PER_VALIDATOR = 1000;
 
 class SlashDetector {
@@ -31,7 +33,30 @@ class SlashDetector {
         this.hub = hub;
         this.db  = hub.db;
 
-        this.deviationThreshold    = parseFloat(hub.p2pConfig.SLASH_DEVIATION_THRESHOLD || '0.05');    // 5%
+        // Price-deviation slash band. Defaults to the federation-uniform
+        // ORACLE_DEVIATION_THRESHOLD (constants.js), the same band the oracle
+        // co-sign gate (OracleConsensus._handlePropose) and the exactly-2-source
+        // publish gate (_aggregate) enforce, so by default we never slash a
+        // submission the federation just co-signed. A SLASH_DEVIATION_THRESHOLD
+        // override (env / governance) is still honored, but guarded:
+        //  - TIGHTER than the co-sign band would slash submitters INSIDE the
+        //    co-signed band (the exact inversion of the "never sign a price we
+        //    would slash" invariant), so it fails fast at construction;
+        //  - LOOSER only lets some co-sign-rejected deviations go unslashed
+        //    (a leniency/liveness asymmetry, not wrongful slashing), so it warns.
+        this.deviationThreshold = parseFloat(hub.p2pConfig.SLASH_DEVIATION_THRESHOLD) || ORACLE_DEVIATION_THRESHOLD;
+        if (this.deviationThreshold < ORACLE_DEVIATION_THRESHOLD) {
+            throw new Error('SLASH_DEVIATION_THRESHOLD (' + this.deviationThreshold +
+                ') is below the federation-uniform ORACLE_DEVIATION_THRESHOLD (' +
+                ORACLE_DEVIATION_THRESHOLD + '): this would slash submissions inside the ' +
+                'co-signed band. Remove the override or set it >= the oracle band.');
+        }
+        if (this.deviationThreshold !== ORACLE_DEVIATION_THRESHOLD) {
+            console.warn('SlashDetector: SLASH_DEVIATION_THRESHOLD=' + this.deviationThreshold +
+                ' diverges from the federation-uniform ORACLE_DEVIATION_THRESHOLD=' +
+                ORACLE_DEVIATION_THRESHOLD + '; deviations between the two bands will be ' +
+                'co-sign-rejected but never slashed.');
+        }
         this.missedRoundsThreshold = parseInt(hub.p2pConfig.SLASH_MISSED_ROUNDS_THRESHOLD || '30');     // 30 rounds
 
         // Track consecutive missed rounds per validator: Map<pubkey, count>

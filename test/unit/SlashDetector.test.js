@@ -59,6 +59,24 @@ describe('SlashDetector', function () {
             expect(sd2.deviationThreshold).to.equal(0.05);
             expect(sd2.missedRoundsThreshold).to.equal(30);
         });
+
+        it('binds the default slash band to the federation-uniform oracle co-sign band', function () {
+            let { ORACLE_DEVIATION_THRESHOLD } = require('../../src/constants');
+            let sd2 = new SlashDetector(createMockHub({ p2pConfig: {} }));
+            expect(sd2.deviationThreshold).to.equal(ORACLE_DEVIATION_THRESHOLD);
+        });
+
+        it('fail-fasts on a slash band tighter than the co-sign band (would slash inside the co-signed band)', function () {
+            expect(() => new SlashDetector(createMockHub({ p2pConfig: { SLASH_DEVIATION_THRESHOLD: '0.03' } })))
+                .to.throw(/below the federation-uniform ORACLE_DEVIATION_THRESHOLD/);
+        });
+
+        it('warns (but runs) on a looser slash band', function () {
+            let warn = sinon.stub(console, 'warn');
+            let sd2 = new SlashDetector(createMockHub({ p2pConfig: { SLASH_DEVIATION_THRESHOLD: '0.0625' } }));
+            expect(sd2.deviationThreshold).to.equal(0.0625);
+            expect(warn.calledWithMatch(/diverges from the federation-uniform/)).to.equal(true);
+        });
     });
 
     // -----------------------------------------------------------------
