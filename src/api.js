@@ -1435,11 +1435,14 @@ async function startApi(){
         forceTimer.unref();
 
         try {
-            if (hub.hubDbBroadcaster) {
-                for (let ws of hub.hubDbBroadcaster.subscribers) {
+            // Guarded on its own: a throw here (e.g. a hub built without a live
+            // broadcaster) must not skip the HTTP-server close and hub.close() below,
+            // or shutdown silently drops the DB-pool drain for every later step.
+            try {
+                for (let ws of (hub.hubDbBroadcaster && hub.hubDbBroadcaster.subscribers) || []) {
                     try { ws.close(1001, 'shutting down'); } catch (e) { /* ignore */ }
                 }
-            }
+            } catch (e) { /* ignore: subscriber set unavailable */ }
             try { wss.close(); } catch (e) { /* ignore */ }
 
             // Stop accepting HTTP connections; force-close lingering keep-alives so
