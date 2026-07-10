@@ -1377,6 +1377,12 @@ describe('StateAnchorPublisher', function () {
         let leader   = bus.nodes[1];          // signature-verified sender; both are oracle_publish validators
         let txid = 'dogetx_partialtest', snap = 100;
 
+        // This test drives _handleFinalized directly (bypassing the SIGN_REQ round
+        // that normally binds the elected leader), so seed the observed-leader
+        // binding the same way _handleSignReq would after validating the election.
+        follower.pub._recordObservedArchiveLeader(0, leader.pubkey);
+        follower.pub._recordObservedArchiveLeader(1, leader.pubkey);
+
         // (1) PARTIAL: a match carries the __partial__ sentinel → the follower must NOT mirror the reward.
         let pMatches = [matchRow('mp', '__partial__')];
         await follower.pub._handleFinalized({ data: {
@@ -1396,6 +1402,61 @@ describe('StateAnchorPublisher', function () {
         }});
         expect(follower.rewards.some(r => r.type === 'anchor_archive'),
             'a complete publish DOES mirror the reward').to.be.true;
+    });
+
+    it('a forged XANC_FINALIZED from an un-observed member is rejected: no back-fill, no reward', async function () {
+        // XANC-FINALIZED-STRAND-1 + XANC-REWARD-THEFT-1 (archive half): membership +
+        // signature alone let ANY oracle_publish member forge a FINALIZED. Without the
+        // observed-leader gate the forge would (a) mark m1 archived under a bogus
+        // batch_seq (stranding it from full-parse recovery) and (b) mirror the
+        // anchor_archive reward crediting the attacker (minting COLLECT XCHAIN, since
+        // the archive reward push is NOT retired by the anchor-reward flag-day).
+        let bus = buildMesh(2);
+        let follower = bus.nodes[0];
+        let attacker = bus.nodes[1];        // a real oracle_publish member, but no observed archive election for seq 7
+        let txid = 'dogetx_forged', snap = 100;
+        let fMatches = [matchRow('m1', 'finalized')];
+        let env = () => ({ data: {
+            batch_seq: 7, txid: txid, snapshot_block: snap, matches: fMatches, calls: [], rewards: [],
+            sig_pubkey: attacker.pubkey, sig: attacker.identity.sign(follower.pub._finalizedCanonical(7, txid, fMatches.length))
+        }});
+
+        await follower.pub._handleFinalized(env());
+        let m1 = follower.db.matches.find(m => m.match_id === 'm1');
+        expect(m1.archived_status, 'row NOT archived by the forge').to.not.equal('finalized');
+        expect(m1.batch_seq, 'no bogus batch_seq stamped').to.equal(null);
+        expect(follower.rewards.some(r => r.type === 'anchor_archive'), 'no forged archive reward').to.equal(false);
+
+        // The SAME envelope IS honored once the follower has observed that member's
+        // election for the batch, proving the gate (not a malformed envelope) rejected it.
+        follower.pub._recordObservedArchiveLeader(7, attacker.pubkey);
+        await follower.pub._handleFinalized(env());
+        expect(follower.db.matches.find(m => m.match_id === 'm1').archived_status,
+            'observed leader IS honored').to.equal('finalized');
+        expect(follower.rewards.some(r => r.type === 'anchor_archive'),
+            'observed leader mirrors the reward').to.equal(true);
+    });
+
+    it('_handleSignReq binds the elected archive leader locally (the FINALIZED gate source)', async function () {
+        let bus = buildMesh(3);
+        let batchSeq = 0;
+        let leader   = archiveLeader(bus, batchSeq);
+        let follower = bus.nodes.find(nd => nd !== leader);
+        let cp = Object.assign({}, CP_ROW);
+        // A SIGN_REQ that passes the election/rank check (valid sender + election_block)
+        // but carries no usable archive (empty archive_b64) still binds the leader,
+        // because the bind happens before the co-sign eligibility + archive checks.
+        let canonical = follower.pub._archiveCanonical(cp, batchSeq, 1, 'deadbeef', 1);
+        await follower.pub._handleSignReq({ data: {
+            checkpoint: cp, election_block: 100, batch_seq: batchSeq,
+            match_count: 1, batch_crc32: 'deadbeef', total_chunks: 1, archive_b64: '',
+            sig_pubkey: leader.pubkey, sig: leader.identity.sign(canonical)
+        }});
+        expect(follower.pub._isObservedArchiveLeader(batchSeq, leader.pubkey),
+            'follower bound the elected leader for the batch').to.equal(true);
+        let notLeader = bus.nodes.find(nd => nd !== leader && nd !== follower);
+        expect(follower.pub._isObservedArchiveLeader(batchSeq, notLeader.pubkey),
+            'a non-elected member is not bound').to.equal(false);
     });
 
     it('_backfillBatch re-broadcasts stamped match rows on the hub-DB mirror feed', async function () {

@@ -185,6 +185,17 @@ class StateAnchorPublisher {
         // balance read (no pipeline / before first flush).
         this._lastBalance   = null;
         this._lastBalanceAt = null;
+        // Locally-observed archive-round leaders: batch_seq -> Set(elected leader
+        // pubkeys). Populated in _handleSignReq the moment this hub validates a
+        // SIGN_REQ sender as the (rank-unlocked) elected archive leader for that
+        // batch_seq, and consulted in _handleFinalized to authenticate the
+        // FINALIZED sender. The archive election is keyed on election_block (the
+        // BTC tip at archive time), which the FINALIZED canonical does NOT carry,
+        // so it cannot be re-derived at finalize time; this binds it from the
+        // round we actually observed. Bounded (batch_seq is monotonic, evict the
+        // smallest keys) so a long-lived hub never grows this without limit.
+        this._observedArchiveLeaders = new Map();
+        this._observedArchiveLeadersCap = 256;
     }
 
     setBroadcastHook(fn){ this.broadcastFn = fn; }
@@ -1171,6 +1182,13 @@ class StateAnchorPublisher {
             let since = electionBlock - Number(cp.snapshot_block);
             if(!this._rankUnlocked(order, sender, since)) return;            // not unlocked on the failover ladder
         }
+        // The sender has validated as the (rank-unlocked) elected archive leader
+        // for this batch_seq at election_block. Bind it locally BEFORE the
+        // snapshot-set co-sign check below, so an election-set member that will
+        // NOT co-sign (present only at election_block, not at snapshot_block) can
+        // still authenticate this leader's later XANC_FINALIZED and back-fill.
+        if(electionPubkeys.includes(sender))
+            this._recordObservedArchiveLeader(Number(d.batch_seq), sender);
         // MY co-sign eligibility, by contrast, is gated on the snapshot_block
         // SIGNING set: the indexer + recovery only count a wrapper signature whose
         // signer holds oracle_publish AT snapshot_block, so a follower present only
@@ -1546,6 +1564,22 @@ class StateAnchorPublisher {
         if(pubkeys.length === 0 || !pubkeys.includes(sender)) return;
         if(!ValidatorIdentity.verify(this._finalizedCanonical(Number(d.batch_seq), d.txid, d.matches.length),
                                      String(d.sig || ''), sender)) return;
+        // Authenticate the FINALIZED sender as an archive leader we actually
+        // observed getting elected for THIS batch_seq (via _handleSignReq). The
+        // archive election is keyed on election_block, which the FINALIZED
+        // canonical does NOT carry, so membership + signature alone let ANY
+        // oracle_publish member forge a FINALIZED that (a) marks settled rows
+        // archived under a bogus batch_seq -> stranded from full-parse recovery
+        // (XANC-FINALIZED-STRAND-1), and (b) mirrors the anchor_archive reward
+        // crediting itself -> mints COLLECT-spendable XCHAIN, since the archive
+        // reward push is NOT retired by the anchor-reward flag-day (RewardTracker
+        // only derives anchor_<CHAIN> on-chain; anchor_archive still pushes). Fail
+        // closed on an un-observed round: back-fill is local bookkeeping the rows
+        // re-archive under a fresh seq if missed, and the elected leader records
+        // its own reward directly (co-signers' mirrors are redundant, INSERT
+        // IGNORE-deduped). A Byzantine ELECTED leader announcing a never-published
+        // txid is the residual, closable only by on-chain DOGE txid verification.
+        if(!this._isObservedArchiveLeader(Number(d.batch_seq), sender)) return;
         await this._backfillBatch(Number(d.batch_seq), d.matches, d.txid ? String(d.txid) : null,
                                   Array.isArray(d.calls) ? d.calls : [],
                                   Array.isArray(d.rewards) ? d.rewards : []);
@@ -1561,6 +1595,29 @@ class StateAnchorPublisher {
 
     _finalizedCanonical(batchSeq, txid, count){
         return 'XANCFIN|' + String(batchSeq) + '|' + String(txid || '') + '|' + String(count);
+    }
+
+    // Record that `pubkey` validated as the elected archive leader for `batchSeq`
+    // (called from _handleSignReq after the election/rank check passes). Stored as
+    // a SET because the failover ladder can legitimately unlock more than one rank
+    // for the same batch_seq, and this hub may observe successive proposers.
+    _recordObservedArchiveLeader(batchSeq, pubkey){
+        if(!Number.isFinite(batchSeq) || !pubkey) return;
+        let set = this._observedArchiveLeaders.get(batchSeq);
+        if(!set){ set = new Set(); this._observedArchiveLeaders.set(batchSeq, set); }
+        set.add(String(pubkey).toLowerCase());
+        // Bounded memory: batch_seq is monotonic, so evict the smallest keys.
+        while(this._observedArchiveLeaders.size > this._observedArchiveLeadersCap){
+            let oldest = null;
+            for(let k of this._observedArchiveLeaders.keys()) if(oldest === null || k < oldest) oldest = k;
+            if(oldest === null) break;
+            this._observedArchiveLeaders.delete(oldest);
+        }
+    }
+
+    _isObservedArchiveLeader(batchSeq, pubkey){
+        let set = this._observedArchiveLeaders.get(batchSeq);
+        return !!set && set.has(String(pubkey || '').toLowerCase());
     }
 
     // XMATCH canonical: byte-identical to CrossChainDexEngine._canonicalMatch /
