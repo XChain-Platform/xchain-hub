@@ -131,6 +131,21 @@ describe('OracleConsensus', function () {
             expect(oc._aggregate(subs, 'ETH/USD')).to.be.null;
         });
 
+        // Item #180: the clamp-emptied null path previously had NO log line at
+        // all, so a pair whose every submission failed the >0/<PRICE_MAX clamp
+        // vanished from the round with no signal.
+        it('logs a drop warning naming the pair when no usable values survive the clamp', function () {
+            let warn = sinon.stub(console, 'warn');
+            try {
+                expect(oc._aggregate(new Map(), 'BTC/USD')).to.be.null;
+                expect(warn.calledOnce).to.be.true;
+                expect(warn.firstCall.args[0]).to.include('BTC/USD');
+                expect(warn.firstCall.args[0]).to.include('dropping');
+            } finally {
+                warn.restore();
+            }
+        });
+
         it('ignores zero and negative prices', function () {
             let entries = [
                 { sender: 'v1', prices: [{ coinPair: 'BTC/USD', price: '0' }] },
@@ -323,6 +338,36 @@ describe('OracleConsensus', function () {
         it('the {pair → median} mapping is order-insensitive (raw array order is NOT canonical: see flag)', function () {
             expect(norm(oc._aggregateAll(buildSubmissions(fwd))))
                 .to.deep.equal(norm(oc._aggregateAll(buildSubmissions(rev))));
+        });
+
+        // Executable guard for the FLAG above. A canonical pair-sort of the local
+        // aggregation makes _digest order-invariant across submission arrival
+        // orders; the raw (unsorted) array does NOT. This pins the requirement
+        // that ANY future path re-deriving a digest from LOCAL aggregation must
+        // canonicalize the pair order first. It deliberately does NOT touch the
+        // live on-wire _digest path (followers still hash the leader's propagated
+        // array), so it is not a consensus change - only a test-side invariant.
+        const canonical = (arr) => arr.slice().sort((a, b) => (a.coinPair < b.coinPair ? -1 : a.coinPair > b.coinPair ? 1 : 0));
+
+        it('_digest is order-invariant once the local aggregation is canonically pair-sorted', function () {
+            let fwdAgg = oc._aggregateAll(buildSubmissions(fwd));
+            let revAgg = oc._aggregateAll(buildSubmissions(rev));
+            expect(oc._digest(1, canonical(fwdAgg)))
+                .to.equal(oc._digest(1, canonical(revAgg)));
+        });
+
+        it('_digest over the RAW (un-canonicalized) local aggregation is order-DEPENDENT (why canonicalization is required)', function () {
+            // Force the two aggregations to differ in array order for the same
+            // multiset. If _aggregateAll happens to emit the same order for fwd/rev
+            // (single pair, or first-seen coincides), reversing one array still
+            // exercises the order dependence the FLAG warns about.
+            let fwdAgg = oc._aggregateAll(buildSubmissions(fwd));
+            let reordered = fwdAgg.slice().reverse();
+            if (fwdAgg.length > 1) {
+                expect(oc._digest(1, fwdAgg)).to.not.equal(oc._digest(1, reordered));
+                // ...and canonicalization collapses that difference:
+                expect(oc._digest(1, canonical(fwdAgg))).to.equal(oc._digest(1, canonical(reordered)));
+            }
         });
     });
 

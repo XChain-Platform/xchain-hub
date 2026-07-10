@@ -24,9 +24,12 @@
  *        provider.agree(proposals) -> winner. Sign canonical bytes for the
  *        winner. Broadcast ATTEST_PREPARE.
  *   ATTEST_PREPARE handler
- *     -> collect prepares; on PBFT quorum (max(2f+1, ceil((N+1)/2)) over responsible
- *        set, size=REDUNDANCY; for small N this can require unanimity), broadcast
- *        ATTEST_COMMIT.
+ *     -> collect prepares; finalize on max(quorum, REDUNDANCY). The PBFT quorum
+ *        (max(2f+1, ceil((N+1)/2)) over the responsible set, size=REDUNDANCY) is
+ *        provably <= REDUNDANCY by construction, so REDUNDANCY is the binding
+ *        threshold in every reachable case; the 2f+1/majority form is retained as
+ *        scaffolding but is currently dominated (see the invariant in propose()).
+ *        Broadcast ATTEST_COMMIT.
  *   ATTEST_COMMIT handler
  *     -> collect commits; on quorum, emit 'request:finalized' for the
  *        publisher to ship the on-chain ATTEST v1 (response).
@@ -167,8 +170,15 @@ class AttestationConsensus extends EventEmitter {
     _drainEarlyMessages(rid){
         let arr = this.earlyMessages.get(rid);
         if(!arr) return;
+        let expiresAt = this.earlyMessageTtl.get(rid);
         this.earlyMessages.delete(rid);
         this.earlyMessageTtl.delete(rid);
+        // Enforce the buffer TTL on REPLAY, not only on write (_bufferEarlyMessage). A
+        // round that times out and is later re-proposed under the same rid would otherwise
+        // replay stale PBFT envelopes buffered during the prior attempt; the attestation
+        // canonical carries no attempt discriminator, so those sigs still verify and leak
+        // prior-attempt votes into the fresh round. Drop an expired buffer, don't replay it.
+        if(expiresAt !== undefined && Date.now() > expiresAt) return;
         for(let env of arr){
             this._handleMessage(env);
         }
@@ -216,6 +226,15 @@ class AttestationConsensus extends EventEmitter {
         // would make the threshold unreachable whenever N > REDUNDANCY and
         // deadlock every round until timeout. The 2f+1 form is floored at a
         // simple majority (bare 2f+1 degenerates to quorum=1 at size 3).
+        // INVARIANT: quorum <= redundancy by construction. AttestationRound builds
+        // the responsible set as slice(0, max(1, redundancy)), so
+        // responsible.length <= redundancy, and both 2f+1 and ceil((R+1)/2) are
+        // <= responsible.length for all R >= 1. The finalization gates therefore
+        // compute max(quorum, redundancy), which always resolves to redundancy:
+        // redundancy is the binding finalization threshold, not this PBFT quorum.
+        // `quorum` is retained as PBFT scaffolding (and to document intent) but
+        // never sets the gate today. Do NOT wire it into a new path expecting it
+        // to bind without first re-checking this invariant.
         let responsible = roundState.responsible || [];
         let quorum      = responsible.length <= 1
             ? 0
@@ -776,7 +795,37 @@ class AttestationConsensus extends EventEmitter {
                     let winnerHash = crypto.createHash('sha256').update(body).digest();
                     let myHash     = crypto.createHash('sha256').update(myProposal.body).digest();
                     if(Buffer.compare(winnerHash, myHash) === 0 && myProposal.meta === meta){
-                        pending.signatures.set(pending.myPubkey, myProposal.sig);
+                        // Our PROPOSE sig transfers only if it verifies over the winner
+                        // canonical (it binds status: a matching body signed over a
+                        // non-ok status does not verify; see _maybeAdvanceFromProposals);
+                        // otherwise re-sign the winner canonical.
+                        let mySig = ValidatorIdentity.verify(canonical.toString('utf8'), String(myProposal.sig || ''), pending.myPubkey)
+                            ? String(myProposal.sig)
+                            : this._signCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index));
+                        if(mySig) pending.signatures.set(pending.myPubkey, mySig);
+                        // Prepare-quorum liveness (mirrors the judge_model echo above):
+                        // we adopted the winner from a peer's PREPARE BEFORE running our
+                        // own agree() (gossip reordering: missed a PROPOSE, got the
+                        // derived PREPARE), and the winner-set early-return in
+                        // _maybeAdvanceFromProposals means we will never broadcast our
+                        // own PREPARE by any other route. Without this echo every
+                        // responsible node tops out one prepare short of
+                        // max(quorum, REDUNDANCY), no COMMIT is ever sent, and the round
+                        // expires despite enough matching signatures. Echo exactly once
+                        // (this !winner block runs only on first adoption) and self-add
+                        // to prepares; a non-matching body still abstains entirely.
+                        if(mySig && this.peerManager){
+                            this.peerManager.broadcast(ATTEST_PREPARE, {
+                                requestId:  rid,
+                                providerId: pending.providerId,
+                                body_b64:   pending.winner.body.toString('base64'),
+                                meta:       String(pending.winner.meta || ''),
+                                status:     pending.status,
+                                sig_pubkey: pending.myPubkey,
+                                sig:        mySig
+                            });
+                            pending.prepares.add(pending.myPubkey);
+                        }
                     }
                 }
             }
@@ -816,7 +865,9 @@ class AttestationConsensus extends EventEmitter {
 
         let quorum = pending.quorum;
         // For very small federations (e.g. N=1) quorum can be 0 from
-        // getQuorum; collapse to REDUNDANCY in that case.
+        // getQuorum; collapse to REDUNDANCY in that case. Given the
+        // quorum <= redundancy invariant (see propose()), this max() always
+        // resolves to redundancy: the effective gate is redundancy-of-redundancy.
         let needed = Math.max(quorum, pending.redundancy);
 
         if(pending.prepares.size >= needed){
@@ -873,6 +924,8 @@ class AttestationConsensus extends EventEmitter {
     _checkCommitQuorum(rid){
         let pending = this.pending.get(rid);
         if(!pending || pending.finalized) return;
+        // As in _checkPrepareQuorum: quorum <= redundancy by construction (see
+        // propose()), so this max() always resolves to redundancy.
         let needed = Math.max(pending.quorum, pending.redundancy);
         // Gate on the number of VALID signatures over the canonical body, not on
         // raw participation (commits.size). A COMMIT vote is counted even when it

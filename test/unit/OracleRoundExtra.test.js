@@ -409,6 +409,24 @@ describe('OracleRound (extra coverage)', function () {
             let info = await or.getSubmissionsInfo();
             expect(info).to.have.property('currentRound');
             expect(info.skippedRounds).to.deep.equal([]);
+            expect(info.droppedPairs).to.deep.equal([]);
+        });
+    });
+
+    // ── getSubmissionsInfo: whole-round skips vs per-pair drops (item #180) ──
+
+    describe('getSubmissionsInfo(): skipped rounds and per-pair drops', function () {
+        it('separates whole-round skips (skippedRounds) from per-pair drops (droppedPairs)', async function () {
+            hub.db.doQuery = sinon.stub().callsFake(async (sql) => {
+                if (/NOT EXISTS/i.test(sql)) return [{ round_number: 41 }, { round_number: 40 }];
+                if (/coin_pair/i.test(sql))  return [{ round_number: 42, coin_pair: 'LTC/USD' }];
+                return [];
+            });
+            let info = await or.getSubmissionsInfo();
+            expect(info.skippedRounds).to.deep.equal([41, 40]);
+            expect(info.skippedCount).to.equal(2);
+            expect(info.droppedPairs).to.deep.equal([{ round: 42, coinPair: 'LTC/USD' }]);
+            expect(info.droppedPairCount).to.equal(1);
         });
     });
 });

@@ -15,6 +15,7 @@
 const sinon            = require('sinon');
 const { expect }       = require('chai');
 const OracleConsensus  = require('../../src/OracleConsensus');
+const PriceFetcher     = require('../../src/PriceFetcher');
 const { createMockHub }       = require('../helpers/mockHub');
 const { VALIDATORS_3, buildSubmissions } = require('../helpers/fixtures');
 
@@ -103,6 +104,9 @@ describe('OracleConsensus: follower price validation / minSubmissions / broadcas
     // #3707: a finalized round must be written atomically (one statement) so a
     // getfeequote / getpricesnapshots reader can never observe a torn round.
     it('_storeSnapshot writes the whole round in a single multi-row INSERT (atomic)', async function () {
+        // Pin the configured pair set to exactly the finalized pairs so the
+        // per-pair skip-marker write (item #180, covered below) stays quiet here.
+        sinon.stub(PriceFetcher, 'getCoinPairs').returns(['BTC/USD', 'XCHAIN/USD']);
         let insertCalls = [];
         hub.db.doQuery.callsFake(async (sql, params) => {
             if (/^INSERT INTO price_snapshots/i.test(sql)) { insertCalls.push({ sql, params }); return {}; }
@@ -115,6 +119,40 @@ describe('OracleConsensus: follower price validation / minSubmissions / broadcas
         expect(insertCalls).to.have.length(1);                                  // ONE statement, not one-per-pair
         expect((insertCalls[0].sql.match(/\(\?, \?, \?/g) || []).length).to.equal(2); // two value tuples
         expect(insertCalls[0].sql).to.match(/ON DUPLICATE KEY UPDATE/);
+    });
+
+    // Item #180: a pair that drops out of an otherwise-finalizing round must leave
+    // a durable per-pair 'skipped' snapshot row (before this, it got neither a
+    // finalized nor a skipped row and consumers silently fell back a round).
+    it('_storeSnapshot records durable per-pair skipped rows for configured pairs missing from the round', async function () {
+        sinon.stub(PriceFetcher, 'getCoinPairs').returns(['BTC/USD', 'XCHAIN/USD', 'LTC/USD']);
+        let insertCalls = [];
+        hub.db.doQuery.callsFake(async (sql, params) => {
+            if (/^INSERT INTO price_snapshots/i.test(sql)) { insertCalls.push({ sql, params }); return {}; }
+            return [];
+        });
+        await oc._storeSnapshot(7, [
+            { coinPair: 'BTC/USD', price: '100000' },
+            { coinPair: 'XCHAIN/USD', price: '0.50000000' }
+        ], 3, 'proof', 100, 1700000000);
+        expect(insertCalls).to.have.length(2);                                  // finalized statement + skip-marker statement
+        let skip = insertCalls[1];
+        expect(skip.sql).to.include("'skipped'");
+        expect(skip.sql).to.match(/ON DUPLICATE KEY UPDATE/);                   // never demotes a finalized row
+        expect(skip.sql).to.match(/IF\(status = 'skipped'/);
+        expect(skip.params).to.deep.equal([7, 'LTC/USD', 100, 1700000000]);     // only the dropped pair, same round refs
+    });
+
+    it('_storeSnapshot writes no skip markers when every configured pair finalized', async function () {
+        sinon.stub(PriceFetcher, 'getCoinPairs').returns(['BTC/USD']);
+        let insertCalls = [];
+        hub.db.doQuery.callsFake(async (sql, params) => {
+            if (/^INSERT INTO price_snapshots/i.test(sql)) { insertCalls.push({ sql, params }); return {}; }
+            return [];
+        });
+        await oc._storeSnapshot(8, [{ coinPair: 'BTC/USD', price: '100000' }], 3, 'proof', 100, 1700000000);
+        expect(insertCalls).to.have.length(1);
+        expect(insertCalls[0].sql).to.include("'finalized'");
     });
 
     // #3955: a withheld co-sign emits an observability signal so a feed-disagreement

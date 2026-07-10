@@ -812,25 +812,74 @@ describe('AttestationConsensus: judge_model multi-hub PREPARE-quorum (#128e849)'
         expect(pending.winner.body.toString()).to.equal(P1_BODY.toString());
     });
 
-    it('byte_equality round is unaffected: no extra re-broadcast', async function () {
-        // Replace the provider registry with a byte_equality one.
+    // byte_equality PREPARE-adoption (gossip reordering: a peer's PREPARE arrives
+    // while we still hold fewer than `need` proposals, so we adopt before running
+    // our own agree()). The adopt path must echo our own endorsing PREPARE and
+    // self-add to prepares, or the winner-set early-return in
+    // _maybeAdvanceFromProposals silences this node for the whole round: every
+    // responsible node then caps at R-1 prepares < max(quorum, REDUNDANCY), no
+    // COMMIT is ever sent, and the round expires (permanent request loss).
+    it('byte_equality adopt: echoes own PREPARE once + self-adds, so the round un-deadlocks', async function () {
         c = new AttestationConsensus(hub, makeRealProviderRegistry(proposals => proposals[0], 'byte_equality'));
         c.on('request:finalized', e => finalized.push(e));
         const BODY = Buffer.from('shared-body');
+        // Only OUR proposal is in (1 of 3 needed): winner is NOT yet set, so the
+        // incoming peer PREPARE takes the adoption path.
         await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', REDUNDANCY));
         await flush();
+        let pending = c.pending.get(RID);
+        expect(pending.winner, 'pre-winner adopt window').to.equal(null);
         let prepBefore = hub._peerManager.broadcast.getCalls()
             .filter(call => call.args[0] === 'ATTEST_PREPARE').length;
 
-        // Simulate leader PREPARE (p1) arriving at our byte_equality follower.
+        // p1's PREPARE (byte-identical body) arrives first: adopted as winner.
         c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY));
+        await flush();
+
+        let prepBroadcasts = hub._peerManager.broadcast.getCalls()
+            .filter(call => call.args[0] === 'ATTEST_PREPARE');
+        expect(prepBroadcasts.length - prepBefore, 'exactly one endorsing echo').to.equal(1);
+        let sent = prepBroadcasts[prepBroadcasts.length - 1].args[1];
+        expect(sent.sig_pubkey).to.equal(pub(me));
+        expect(Buffer.from(sent.body_b64, 'base64').toString()).to.equal(BODY.toString());
+        expect(pending.prepares.has(pub(me)), 'self-vote recorded').to.equal(true);
+        // Our stored signature verifies over the winner canonical.
+        let canon = buildCanonical(RID, 'http_get', BODY, 'ok', '');
+        expect(ValidatorIdentity.verify(canon.toString('utf8'), pending.signatures.get(pub(me)), pub(me))).to.equal(true);
+
+        // p2's PREPARE lands: prepares = {me, p1, p2} reaches max(quorum, REDUNDANCY)
+        // and the COMMIT goes out - the round no longer deadlocks to expiry.
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, BODY));
+        await flush();
+        expect(pending.prepares.size).to.be.at.least(Math.max(pending.quorum, REDUNDANCY));
+        expect(pending._commitSent, 'COMMIT sent after prepare-quorum').to.equal(true);
+
+        // A further PREPARE re-delivery must NOT echo again (fires once per round).
+        let prepAfterQuorum = hub._peerManager.broadcast.getCalls()
+            .filter(call => call.args[0] === 'ATTEST_PREPARE').length;
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY));
+        await flush();
+        let prepFinal = hub._peerManager.broadcast.getCalls()
+            .filter(call => call.args[0] === 'ATTEST_PREPARE').length;
+        expect(prepFinal - prepAfterQuorum, 'no second echo').to.equal(0);
+    });
+
+    it('byte_equality adopt: a DIVERGENT own body still abstains (no echo, no self-sig)', async function () {
+        c = new AttestationConsensus(hub, makeRealProviderRegistry(proposals => proposals[0], 'byte_equality'));
+        await c.propose(RID, roundState(me, [me, p1, p2], Buffer.from('my-divergent-body'), 'http_get', REDUNDANCY));
+        await flush();
+        let pending = c.pending.get(RID);
+        let prepBefore = hub._peerManager.broadcast.getCalls()
+            .filter(call => call.args[0] === 'ATTEST_PREPARE').length;
+
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, Buffer.from('winner-body')));
         await flush();
 
         let prepAfter = hub._peerManager.broadcast.getCalls()
             .filter(call => call.args[0] === 'ATTEST_PREPARE').length;
-        // byte_equality: we already broadcast our own PREPARE from _maybeAdvanceFromProposals;
-        // handling a peer PREPARE must NOT trigger a second re-broadcast.
-        expect(prepAfter - prepBefore).to.equal(0);
+        expect(prepAfter - prepBefore, 'divergence is never papered over').to.equal(0);
+        expect(pending.prepares.has(pub(me))).to.equal(false);
+        expect(pending.signatures.has(pub(me))).to.equal(false);
     });
 });
 

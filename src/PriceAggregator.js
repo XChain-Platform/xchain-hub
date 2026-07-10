@@ -33,6 +33,7 @@
 const EventEmitter      = require('events');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const eq                = require('./equivocation_header.js');
+const { PRICE_MAX }     = require('./constants.js');
 
 class PriceAggregator extends EventEmitter {
 
@@ -111,7 +112,13 @@ class PriceAggregator extends EventEmitter {
         // below is byte-exact with what the validators signed
         for (let p of roundData.pairs) {
             if (!p || typeof p.pair !== 'string' || !/^[A-Z]{3,5}\/[A-Z]{3,5}$/.test(p.pair) ||
-                p.price === undefined || p.price === null || !/^[0-9]+(\.[0-9]+)?$/.test(String(p.price))) {
+                p.price === undefined || p.price === null || !/^[0-9]+(\.[0-9]+)?$/.test(String(p.price)) ||
+                // Enforce the consensus PRICE_MAX ceiling at ingest, as constants.js mandates
+                // ("the ingestion layer must reject anything at or above it"); every other
+                // price entry point already does, so the ingest/aggregate bounds cannot drift
+                // apart and a Byzantine round cannot smuggle an at/above-PRICE_MAX pair past
+                // ingest (item 9e6c0acd).
+                !(parseFloat(String(p.price)) < PRICE_MAX)) {
                 return { accepted: false, reason: 'invalid pairs' };
             }
         }
@@ -283,7 +290,8 @@ class PriceAggregator extends EventEmitter {
         // hub cannot re-check that cryptographically; the gates here are the
         // authenticated push channel, strict field validation (mirroring the
         // indexer's wire-format rules), and the uniform 24h effective_at delay.
-        if (!/^[0-9]+(\.[0-9]{1,8})?$/.test(String(priceData.value)) || parseFloat(priceData.value) <= 0) {
+        if (!/^[0-9]+(\.[0-9]{1,8})?$/.test(String(priceData.value)) || parseFloat(priceData.value) <= 0 ||
+            !(parseFloat(priceData.value) < PRICE_MAX)) {   // PRICE_MAX ceiling at ingest (item 9e6c0acd)
             return { accepted: false, reason: 'invalid value' };
         }
         if (priceData.fee !== undefined && priceData.fee !== null && priceData.fee !== '' &&

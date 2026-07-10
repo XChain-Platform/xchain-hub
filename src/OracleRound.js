@@ -218,14 +218,38 @@ class OracleRound {
         // the current and previous round (see _pruneSubmissions), so a missed round
         // is otherwise invisible; the durable record lives in price_snapshots
         // (status='skipped', written when a round produces no usable prices).
+        // skippedRounds keeps its whole-round semantic (no pair finalized): the
+        // per-pair skip markers _storeSnapshot writes for partially-dropped rounds
+        // (item #180) must not inflate the feed-outage count. Those partial drops
+        // surface separately as droppedPairs.
         let skippedRounds = [];
+        let droppedPairs = [];
         try {
             let rows = await this.db.doQuery(
-                "SELECT DISTINCT round_number FROM price_snapshots WHERE status = 'skipped' ORDER BY round_number DESC LIMIT 50");
+                `SELECT DISTINCT s.round_number FROM price_snapshots s
+                 WHERE s.status = 'skipped' AND NOT EXISTS (
+                   SELECT 1 FROM price_snapshots f
+                   WHERE f.round_number = s.round_number AND f.status = 'finalized')
+                 ORDER BY s.round_number DESC LIMIT 50`);
             skippedRounds = rows.map(r => Number(r.round_number));
         } catch (err) {
             // Non-fatal: diagnostics still return the in-memory state if the read fails
             console.warn('Oracle: failed to read skipped rounds for diagnostics:', err);
+        }
+        try {
+            // Per-pair drops (item #180): pairs skipped inside a round that
+            // otherwise finalized (aggregation clamp / deviation gate / trim, or
+            // absent from the leader's proposal), so a single pair silently
+            // ceasing to publish is observable while the round looks healthy.
+            let rows = await this.db.doQuery(
+                `SELECT s.round_number, s.coin_pair FROM price_snapshots s
+                 WHERE s.status = 'skipped' AND EXISTS (
+                   SELECT 1 FROM price_snapshots f
+                   WHERE f.round_number = s.round_number AND f.status = 'finalized')
+                 ORDER BY s.round_number DESC, s.coin_pair ASC LIMIT 50`);
+            droppedPairs = rows.map(r => ({ round: Number(r.round_number), coinPair: r.coin_pair }));
+        } catch (err) {
+            console.warn('Oracle: failed to read per-pair drops for diagnostics:', err);
         }
 
         return {
@@ -236,6 +260,8 @@ class OracleRound {
             submissions:              info,
             skippedRounds:            skippedRounds,
             skippedCount:             skippedRounds.length,
+            droppedPairs:             droppedPairs,
+            droppedPairCount:         droppedPairs.length,
             consecutiveSkippedRounds: this.consecutiveSkippedRounds,
             oracle_fetch_failures:    this.fetchFailures,
             lastSuccessfulRoundTime:  this.lastSuccessfulRoundTime,
@@ -484,7 +510,9 @@ class OracleRound {
         if (envelope.type !== ORACLE_PRICE_SUBMIT) return;
 
         let { round, prices, sources } = envelope.data;
-        if (!round || !prices || !Array.isArray(prices)) return;
+        // Round 0 is a real, valid round (first interval after ORACLE_EPOCH_START); guard
+        // on integer/non-negative, not falsiness, or a genesis round-0 submission is dropped.
+        if (!Number.isInteger(round) || round < 0 || !prices || !Array.isArray(prices)) return;
 
         // Drop submissions from senders that are not registered validators. Without
         // this gate a single authorized signing key can broadcast many submissions,
@@ -527,7 +555,18 @@ class OracleRound {
             let val = parseFloat(p.price);
             return Number.isFinite(val) && val > 0 && val < this.priceMax;
         });
-        if (validPrices.length === 0) return;
+        // Surface both drop paths (item ce5a2d5d): the sibling drops at lines 531/545
+        // already log, this filter was the one silent gap. A partial drop masks a peer
+        // degrading pair coverage; a zero-valid drop masks the true cause of a
+        // below-minimum-submissions round skip.
+        if (validPrices.length < prices.length)
+            console.warn('Oracle: dropped ' + (prices.length - validPrices.length) + ' invalid/non-canonical pair(s) from '
+                + envelope.sender + ' for round ' + round);
+        if (validPrices.length === 0) {
+            console.warn('Oracle: submission from ' + envelope.sender + ' for round ' + round
+                + ' had zero valid pairs (of ' + prices.length + '); discarding entire submission');
+            return;
+        }
 
         roundSubs.set(envelope.sender, {
             prices:    validPrices,

@@ -555,7 +555,10 @@ class OracleConsensus extends EventEmitter {
 
     async _handlePropose(envelope) {
         let { round, prices, digest, btcBlockHeight, btcBlockTime, sig_pubkey, sig } = envelope.data;
-        if (!round || !prices || !digest) return;
+        // Round 0 is a real, valid round (the first ORACLE_ROUND_INTERVAL after
+        // ORACLE_EPOCH_START); guard on integer/non-negative, not falsiness, so a
+        // genesis round-0 PROPOSE is not silently dropped as malformed.
+        if (!Number.isInteger(round) || round < 0 || !prices || !digest) return;
         if (this.finalized.has(round)) return;
 
         // Discard proposals from senders that are not registered validators
@@ -635,14 +638,26 @@ class OracleConsensus extends EventEmitter {
         // would PREPARE/COMMIT and contribute signatures to whatever prices it proposed (the digest
         // check only proves the proposer's array hashes to its own digest). Mirror CrossChainEngine's
         // "never trust the proposer's claim": reject (no PREPARE/sign) any pair outside the hard
-        // PRICE_MAX bound, or (when this hub has its own aggregate for the pair) more than the slash
-        // deviation threshold away from it, refusing to co-sign exactly what we'd be slashed for.
+        // PRICE_MAX bound, or (when this hub has its own aggregate for the pair) more than the
+        // federation-uniform ORACLE_DEVIATION_THRESHOLD away from it. This gate deliberately does
+        // NOT read the per-operator SLASH_DEVIATION_THRESHOLD (constants.js explains why: per-hub
+        // bands would split accept/withhold decisions at the +-band edge); SlashDetector defaults
+        // its slash band to the same constant and fail-fasts on a tighter override, so by default
+        // we never co-sign exactly what we'd be slashed for.
         // Fix (seq 4083): for pairs where this hub has no local submission, also check the last
         // finalized price_snapshots value if available, to narrow the acceptance window beyond the
         // very loose PRICE_MAX bound. Without this a Byzantine leader can inject any price in
         // (0, PRICE_MAX) for any pair that quorum co-signers did not price locally.
         {
-            let localByPair  = new Map((this._aggregateAll(submissions) || []).map(a => [a.coinPair, a.price]));
+            // Exclude the PROPOSER's own submission from the deviation reference: a
+            // Byzantine leader/fallback must not be its own co-sign reference. With its
+            // gossiped submission in the reference, a pair only IT submitted (in our local
+            // view) self-validates at deviation 0, letting it inject any (0, PRICE_MAX)
+            // price for pairs we did not independently fetch. Excluding it makes such a
+            // pair fall through to the historical-snapshot bound below.
+            let refSubs = new Map();
+            if (submissions) for (let [addr, sub] of submissions) if (addr !== envelope.sender) refSubs.set(addr, sub);
+            let localByPair  = new Map((this._aggregateAll(refSubs) || []).map(a => [a.coinPair, a.price]));
             // Federation-uniform deviation band (shared constant, not per-hub config) so
             // every hub's accept/withhold boundary is identical; deviation is computed in
             // bignumber (bcmath) per the platform mandate, removing the +-band-boundary
@@ -774,6 +789,17 @@ class OracleConsensus extends EventEmitter {
                     ? snap.validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), source: String(v.source != null ? v.source : ''), weight: String(v.weight != null ? v.weight : '0') }))
                     : [],
                 timer:          setTimeout(() => {
+                    // Surface the follower-side PROPOSE-round timeout (item 4268e0fb).
+                    // The leader path logs its finalization timeout, but this eviction
+                    // fired in total silence, hiding a follower stuck below commit quorum.
+                    // Mirror the StateCheckpointEngine._roundTimeouts counter convention.
+                    let p = this.pendingRounds.get(round);
+                    if (p && !p.finalized) {
+                        this._roundTimeouts = (this._roundTimeouts || 0) + 1;
+                        console.warn('Oracle: PROPOSE round ' + round + ' timed out before commit quorum ('
+                            + (p.prepares ? p.prepares.size : 0) + ' prepares, '
+                            + (p.commits ? p.commits.size : 0) + ' commits, quorum ' + p.quorum + ')');
+                    }
                     this.pendingRounds.delete(round);
                 }, this.finalizationTimeout)
             };
@@ -820,7 +846,7 @@ class OracleConsensus extends EventEmitter {
 
     _handlePrepare(envelope) {
         let { round, digest, sig_pubkey, sig } = envelope.data;
-        if (!round || !digest) return;
+        if (!Number.isInteger(round) || round < 0 || !digest) return;   // round 0 is valid (see _handlePropose)
 
         // Only count PREPARE votes from registered validators.
         if (!this._isKnownSender(envelope.sender)) return;
@@ -842,7 +868,7 @@ class OracleConsensus extends EventEmitter {
 
     _handleCommit(envelope) {
         let { round, digest, sig_pubkey, sig } = envelope.data;
-        if (!round || !digest) return;
+        if (!Number.isInteger(round) || round < 0 || !digest) return;   // round 0 is valid (see _handlePropose)
 
         // Only count COMMIT votes from registered validators.
         if (!this._isKnownSender(envelope.sender)) return;
@@ -951,6 +977,7 @@ class OracleConsensus extends EventEmitter {
     }
 
     _aggregateAll(submissions) {
+        if (!submissions) return [];   // no submission map for this round (guard: for..of undefined throws)
         let coinPairs = new Set();
         for (let [sender, sub] of submissions) {
             if (sub.prices && Array.isArray(sub.prices)) {
@@ -972,6 +999,7 @@ class OracleConsensus extends EventEmitter {
 
     // Aggregate a single coin pair using trimmed median
     _aggregate(submissions, coinPair) {
+        if (!submissions) return null;
         // Collect all prices for this pair. Keep the original string `s` alongside a
         // float `f` used only for ordering. The median value itself is computed in
         // bignumber (bcmath) per the platform's bignumber mandate, so the
@@ -996,7 +1024,14 @@ class OracleConsensus extends EventEmitter {
             }
         }
 
-        if (values.length === 0) return null;
+        if (values.length === 0) {
+            // Surface the drop (item #180): without this line a pair whose every
+            // submission fails the >0 / <PRICE_MAX clamp (or is absent) vanishes
+            // from the round with no signal at all.
+            console.warn('Oracle: dropping ' + coinPair + ' this round: no usable submission '
+                + 'values (all missing, non-numeric, or outside the price clamp)');
+            return null;
+        }
 
         // Sort ascending (ordering only; float compare is fine here)
         values.sort((a, b) => a.f - b.f);
@@ -1007,9 +1042,10 @@ class OracleConsensus extends EventEmitter {
         // Refuse to publish this pair when the two disagree enough that the mean would put
         // BOTH submitters outside the deviation threshold, i.e. each is more than
         // ORACLE_DEVIATION_THRESHOLD from the mean, which for sorted values reduces to
-        // (hi - lo) / (hi + lo) > threshold. That is the exact condition under which
-        // SlashDetector would slash both, so we never federation-sign a price we would then
-        // slash; the pair is simply omitted this round and consumers hold the last snapshot.
+        // (hi - lo) / (hi + lo) > threshold. That matches SlashDetector's default band
+        // (it defaults to this same ORACLE_DEVIATION_THRESHOLD and fail-fasts on a tighter
+        // override), so we never federation-sign a price we would then slash; the pair is
+        // simply omitted this round and consumers hold the last snapshot.
         // Uses the hardcoded constant (not an env value) and bignumber math so every hub
         // gates identically. CONSENSUS-CRITICAL: deploy fleet-wide atomically.
         if (values.length === 2) {
@@ -1032,8 +1068,13 @@ class OracleConsensus extends EventEmitter {
             values = values.slice(trimCount, values.length - trimCount);
         }
 
-        // If trimming removed everything, use original sorted array
-        if (values.length === 0) return null;
+        // Defensive: the slice above always leaves >= 1 value when it runs, but
+        // if trimming ever empties the array, surface the drop instead of
+        // silently omitting the pair (item #180).
+        if (values.length === 0) {
+            console.warn('Oracle: dropping ' + coinPair + ' this round: trimming emptied the value set');
+            return null;
+        }
 
         // Compute median in bignumber (no float midpoint average / .toFixed artifact)
         let mid = Math.floor(values.length / 2);
@@ -1065,6 +1106,40 @@ class OracleConsensus extends EventEmitter {
                  block_timestamp = VALUES(block_timestamp), validator_count = VALUES(validator_count),
                  consensus_proof = VALUES(consensus_proof), status = 'finalized'`;
         await this.db.doQuery(query, params);
+
+        // Durable per-pair skip markers (item #180). A pair can drop out of a
+        // round that otherwise finalizes (aggregation clamp/deviation-gate/trim
+        // returns null, or the leader simply didn't propose it); before this,
+        // that pair got neither a 'finalized' nor a 'skipped' row, so consumers
+        // silently fell back to the previous round with no observable signal.
+        // Write a 'skipped' row (same shape as _storeSkippedRound) for every
+        // configured pair absent from the finalized set, so the drop is durable,
+        // countable, and visible to getSubmissionsInfo/dashboard health. This is
+        // derived from the finalized proposal + local pair config, so every hub
+        // writes the same rows deterministically. Best-effort: never fail the
+        // finalized write over the marker.
+        try {
+            let finalizedPairs = new Set(prices.map(p => p.coinPair));
+            let missingPairs = PriceFetcher.getCoinPairs().filter(pair => !finalizedPairs.has(pair));
+            if (missingPairs.length) {
+                console.warn('Oracle: round ' + round + ' finalized without ' + missingPairs.length
+                    + ' configured pair(s): ' + missingPairs.join(', ')
+                    + '; recording per-pair skipped snapshot(s)');
+                let skipPlaceholders = missingPairs.map(() => "(?, ?, NULL, ?, 'BTC', ?, 0, 1, '[]', 'skipped')").join(', ');
+                let skipParams = [];
+                for (let pair of missingPairs) skipParams.push(round, pair, referenceBlock, blockTimestamp);
+                await this.db.doQuery(`INSERT INTO price_snapshots
+                    (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
+                     validator_count, consensus_round, consensus_proof, status)
+                    VALUES ${skipPlaceholders}
+                    ON DUPLICATE KEY UPDATE
+                     reference_block = IF(status = 'skipped', VALUES(reference_block), reference_block),
+                     block_timestamp = IF(status = 'skipped', VALUES(block_timestamp), block_timestamp),
+                     status = IF(status = 'skipped', 'skipped', status)`, skipParams);
+            }
+        } catch (e) {
+            console.error('Oracle: error recording per-pair skipped snapshot(s) for round ' + round + ':', e.message);
+        }
 
         // Update the in-memory last-finalized-price cache so the co-sign gate in
         // _handlePropose can apply a historical-deviation check for pairs a hub

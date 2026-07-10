@@ -166,6 +166,12 @@ class PriceFetcher {
                     price:    median,
                     sources:  values.length
                 });
+            } else {
+                // Surface a pair every source stopped returning (item 9162297b): without
+                // this the pair silently vanishes from the submission, masking a per-hub
+                // degradation while the round still looks healthy.
+                console.warn('Oracle PriceFetcher: no source returned a value for ' + pair
+                    + ' this fetch; omitting it from the submission');
             }
         }
 
