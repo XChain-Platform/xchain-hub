@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add a `health` JSON-RPC method that probes the DB and reports the circuit-breaker state (`dbCircuit`), returning HTTP 503 when the DB is unreachable or the breaker is open.
 
 ### Changed
+- `hub-credentials.js`: default hub Claude CLI config dir renamed `~/.claude-xchain-hub` to `~/.claude-xchain` (standardizes the per-platform `~/.claude-<platform>` convention).
 - `XChainHub.js`: the BTC indexer-URL resolver reads the renamed flat-config key `INDEXER_URL` (was `INDEXER_HOST`); nested lookup unchanged, no behavioral change.
 - `package.json`: pinned `mariadb` 3.5.2 to exact versions (dropped `^` caret ranges) so installs resolve a byte-identical tree; no source changes.
 - `OracleConsensus.js`: `_storeSkippedRound()` takes a `reason` argument so the round-skipped log states why (`no submissions` / below-threshold / empty aggregation); log-message-only.

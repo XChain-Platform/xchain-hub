@@ -33,8 +33,8 @@
  *   3. HUB_CLAUDE_CODE_OAUTH_TOKEN  (hub-scoped token; paired with isolated dir)
  *   4. CLAUDE_CODE_OAUTH_TOKEN  (standard CLI env)
  *   5. ANTHROPIC_API_KEY        (direct API mode)
- *   6. Default ~/.claude-xchain-hub if it's been pre-populated by
- *      `CLAUDE_CONFIG_DIR=~/.claude-xchain-hub claude login`
+ *   6. Default ~/.claude-xchain if it's been pre-populated by
+ *      `CLAUDE_CONFIG_DIR=~/.claude-xchain claude login`
  *
  * The `_checkConfigDir` gate ensures empty or stale dir values fall through
  * cleanly to the next candidate. Token-only paths get paired with an
@@ -50,7 +50,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const DEFAULT_HUB_CLAUDE_CONFIG_DIR = path.join(os.homedir(), '.claude-xchain-hub');
+const DEFAULT_HUB_CLAUDE_CONFIG_DIR = path.join(os.homedir(), '.claude-xchain');
 
 function _trim(v) { return (v == null) ? '' : String(v).trim(); }
 

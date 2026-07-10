@@ -34,7 +34,7 @@ const path = require('path');
 const os = require('os');
 
 // Guaranteed-nonexistent default-config-dir path, so resolveHubLlmAuth's
-// final fallback to ~/.claude-xchain-hub doesn't bleed real operator state
+// final fallback to ~/.claude-xchain doesn't bleed real operator state
 // into env-cleared scenarios.
 const HERMETIC_DEFAULT_DIR = path.join(os.tmpdir(), 'llm-provider-test-noexist-' + process.pid);
 
