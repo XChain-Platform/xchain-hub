@@ -212,7 +212,8 @@ class StateAnchorPublisher {
         // BTC/LTC/DOGE checkpoint) is a DOGE transaction, and only the DOGE
         // decoder+indexer decode the P2SH anchor payload (a raw getrawtransaction
         // cannot bind the tx to the checkpoint). Unset -> _verifyAnchorOnChain
-        // abstains, preserving legacy behavior for a hub with no DOGE indexer wired.
+        // returns 'no-indexer' and the receiver paths abstain (fail closed); wire
+        // DOGE_INDEXER_URL fleet-wide before deploy.
         this.indexers = {};
         for(let coin of coins.ALLOWED_COINS){
             this.indexers[coin] = {
@@ -1243,8 +1244,9 @@ class StateAnchorPublisher {
     // Returns the string 'verified' ONLY when the on-chain row exists, is not a
     // decoded-invalid, is buried >= XCHAIN_CONFIRMATIONS_DOGE deep, and its payload
     // hashes byte-match our checkpoint. Every other outcome returns a short reason
-    // the caller treats as ABSTAIN (skip stamp+reward): 'no-indexer' (opt-out for a
-    // hub with no DOGE indexer wired -> legacy behavior preserved), 'unreachable',
+    // the caller treats as ABSTAIN (skip stamp+reward): 'no-indexer' (a hub with no
+    // DOGE indexer wired fails closed, i.e. skips the receiver stamp+reward; wire
+    // DOGE_INDEXER_URL fleet-wide before deploy), 'unreachable',
     // 'absent', 'shallow' are the benign redundant-re-anchor direction the receiver
     // paths already tolerate; 'rejected:status' / 'rejected:mismatch' are a
     // positively-detected forge. NOTE: getanchoraction is keyed on the checkpoint
