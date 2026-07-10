@@ -161,13 +161,17 @@ function memDb() {
                 return rewardRows.filter(r => r.reward_type === params[0] && r.round_number === params[1]).slice(0, 1);
             }
             if (sql.startsWith('UPDATE validator_rewards SET batch_seq')) {
+                let onlyPending = sql.includes('batch_seq IS NULL');
                 for (let r of rewardRows)
                     if (r.reward_type === params[1] && r.round_number === params[2] &&
-                        String(r.validator_pubkey).toLowerCase() === params[3]) r.batch_seq = params[0];
+                        String(r.validator_pubkey).toLowerCase() === params[3] &&
+                        (!onlyPending || r.batch_seq == null)) r.batch_seq = params[0];
                 return [];
             }
             if (sql.startsWith('UPDATE cross_chain_matches SET batch_seq')) {
-                for (let r of matches) if (r.match_id === params[3]) {
+                let onlyEligible = sql.includes('batch_seq IS NULL OR archived_status <> status');
+                for (let r of matches) if (r.match_id === params[3] &&
+                    (!onlyEligible || r.batch_seq == null || r.archived_status !== r.status)) {
                     r.batch_seq = params[0]; r.archived_status = params[1];
                     if (params[2] != null) r.anchor_txid = params[2];
                 }
@@ -180,7 +184,9 @@ function memDb() {
                 return calls.filter(r => r.call_id === params[0] && r.phase === params[1]).slice(0, 1);
             }
             if (sql.startsWith('UPDATE cross_chain_calls SET batch_seq')) {
-                for (let r of calls) if (r.call_id === params[3] && r.phase === params[4]) {
+                let onlyEligible = sql.includes('batch_seq IS NULL OR archived_status <> status');
+                for (let r of calls) if (r.call_id === params[3] && r.phase === params[4] &&
+                    (!onlyEligible || r.batch_seq == null || r.archived_status !== r.status)) {
                     r.batch_seq = params[0]; r.archived_status = params[1];
                     if (params[2] != null) r.anchor_txid = params[2];
                 }
@@ -275,7 +281,12 @@ describe('StateAnchorPublisher', function () {
 
             let hub = {
                 db,
-                p2pConfig: Object.assign({ ANCHOR_INTERVAL_MS: '3600000' }, opts.cfg || {}),
+                // DOGE_INDEXER_URL wired so _verifyAnchorOnChain runs its real gate;
+                // the _indexerCall stub below (installed per node) answers
+                // getanchoraction from the node's OWN checkpoint rows, i.e. the
+                // honest case (the on-chain anchor byte-matches the local checkpoint
+                // at full depth). Adversarial receiver-path tests override the stub.
+                p2pConfig: Object.assign({ ANCHOR_INTERVAL_MS: '3600000', DOGE_INDEXER_URL: 'http://doge-indexer.test' }, opts.cfg || {}),
                 capabilitySnapshot: { async getSnapshot() { return { validators: validators.slice(0, n) }; } },
                 // Populated oracle_publish registry: the V0_DONE/FINALIZED handlers resolve
                 // the membership set via _getActiveOraclePublishPubkeys(null), which now falls
@@ -298,6 +309,22 @@ describe('StateAnchorPublisher', function () {
             };
             self.db  = db;
             self.pub = new StateAnchorPublisher(hub);
+            // Default on-chain ANCHOR oracle: answer getanchoraction from this
+            // node's own checkpoint rows so the honest receiver path (V0_DONE /
+            // FINALIZED for a checkpoint we actually hold) verifies at full depth.
+            // Returns exists:false for an unknown checkpoint (the phantom-txid case).
+            self.pub._indexerCall = async (coin, method, params) => {
+                if (method !== 'getanchoraction') return null;
+                let r = db.checkpoints.find(c => c.chain === params.chain && c.network === params.network &&
+                    Number(c.block_index) === Number(params.block_index));
+                if (!r) return { exists: false, confirmations: 0 };
+                return {
+                    exists: true, status: 'valid', version: 0, confirmations: self.pub.dogeConfirmations,
+                    block_hash: r.block_hash, ledger_hash: r.ledger_hash,
+                    actions_hash: r.actions_hash, contract_hash: r.contract_hash,
+                    state_root: r.state_root || null, block_merkle_root: r.block_merkle_root || null
+                };
+            };
             self.pub.setBroadcastHook(async (payload) => {
                 self.published.push(payload);
                 return { txid: 'txid' + self.published.length };
@@ -457,6 +484,35 @@ describe('StateAnchorPublisher', function () {
             let v0 = leader.published.find(p => p.split('|')[1] === '0');
             expect(v0, 'fell back to legacy v0').to.be.a('string');
             expect(leader.db.checkpoints[0].anchor_txid, 'anchor still landed').to.be.a('string');
+            // Reward-parity guard: at/above the flag-day no live indexer derives a
+            // reward from a legacy v0 (formats 4/5 only) and the hub push is retired,
+            // so recording one here would strand it in hub/archive bookkeeping and
+            // fork a recovered ledger from live nodes. The degraded publish must
+            // withhold the reward entirely.
+            expect(leader.rewards.filter(r => r.type === 'anchor_BTC').length,
+                'no anchor_BTC reward on a degraded legacy fallback').to.equal(0);
+        });
+
+        it('a peer does NOT mirror the anchor_<chain> reward from V0_DONE at/above the flag-day', async function () {
+            // V0_DONE does not carry (and its canonical does not bind) which payload
+            // version landed, so at/above the flag-day the mirror could mint a reward
+            // for a degraded legacy fallback no live indexer credits. Peers therefore
+            // skip the mirror entirely; live + recovering indexers derive the credit
+            // from the on-chain v4/v5 attestation instead.
+            let bus = buildMesh(3);
+            let order = v0Order(bus, CP_ROW);
+            let publisher = order[0];
+            let receiver  = order[1];
+            let d = { chain: CP_ROW.chain, network: CP_ROW.network, block_index: CP_ROW.block_index,
+                      checkpoint_seq: CP_ROW.checkpoint_seq, txid: 'cc'.repeat(32) };
+            d.sig_pubkey = publisher.pubkey;
+            d.sig = publisher.identity.sign(receiver.pub._v0DoneCanonical(d, d.txid));
+
+            await receiver.pub._handleV0Done({ type: 'XANC_V0_DONE', sender: publisher.pubkey, data: d });
+
+            expect(receiver.db.checkpoints[0].anchor_txid, 'the stamp itself still lands').to.equal('cc'.repeat(32));
+            expect(receiver.rewards.filter(r => r.type === 'anchor_BTC').length,
+                'no mirrored anchor_BTC at/above the flag-day').to.equal(0);
         });
 
         it('a follower refuses to co-sign when the proposer is not the rank-unlocked publisher', async function () {
@@ -1379,9 +1435,12 @@ describe('StateAnchorPublisher', function () {
 
         // This test drives _handleFinalized directly (bypassing the SIGN_REQ round
         // that normally binds the elected leader), so seed the observed-leader
-        // binding the same way _handleSignReq would after validating the election.
-        follower.pub._recordObservedArchiveLeader(0, leader.pubkey);
-        follower.pub._recordObservedArchiveLeader(1, leader.pubkey);
+        // binding AND the batch's checkpoint identity the same way _handleSignReq
+        // would after validating the election. The checkpoint (CP_ROW, in the mesh
+        // DB) then verifies on-chain via the harness getanchoraction oracle, so the
+        // COMPLETE control reaches the reward mirror.
+        follower.pub._recordObservedArchiveLeader(0, leader.pubkey, CP_ROW);
+        follower.pub._recordObservedArchiveLeader(1, leader.pubkey, CP_ROW);
 
         // (1) PARTIAL: a match carries the __partial__ sentinel → the follower must NOT mirror the reward.
         let pMatches = [matchRow('mp', '__partial__')];
@@ -1428,13 +1487,131 @@ describe('StateAnchorPublisher', function () {
         expect(follower.rewards.some(r => r.type === 'anchor_archive'), 'no forged archive reward').to.equal(false);
 
         // The SAME envelope IS honored once the follower has observed that member's
-        // election for the batch, proving the gate (not a malformed envelope) rejected it.
-        follower.pub._recordObservedArchiveLeader(7, attacker.pubkey);
+        // election (with the batch's checkpoint identity) for the batch, proving the
+        // gate (not a malformed envelope) rejected it.
+        follower.pub._recordObservedArchiveLeader(7, attacker.pubkey, CP_ROW);
         await follower.pub._handleFinalized(env());
         expect(follower.db.matches.find(m => m.match_id === 'm1').archived_status,
             'observed leader IS honored').to.equal('finalized');
         expect(follower.rewards.some(r => r.type === 'anchor_archive'),
             'observed leader mirrors the reward').to.equal(true);
+    });
+
+    it('a FINALIZED for a batch whose checkpoint was NEVER anchored on-chain mirrors NO archive reward', async function () {
+        // XANC-REWARD-THEFT-1 (archive half, LIVE): an elected-yet-Byzantine leader
+        // that announces a FINALIZED for an archive it never published on DOGE must
+        // earn nothing. The back-fill (local bookkeeping) still applies; only the
+        // COLLECT-spendable anchor_archive reward mirror is gated on the batch's
+        // checkpoint being on-chain at depth.
+        let bus = buildMesh(2);
+        let follower = bus.nodes[0];
+        let leader   = bus.nodes[1];
+        follower.pub._recordObservedArchiveLeader(9, leader.pubkey, CP_ROW);        // observed + checkpoint identity stashed
+        follower.pub._indexerCall = async () => ({ exists: false, confirmations: 0 });  // the checkpoint was never anchored
+        let fMatches = [matchRow('m1', 'finalized')];
+        await follower.pub._handleFinalized({ data: {
+            batch_seq: 9, txid: 'dogetx_phantom', snapshot_block: 100, matches: fMatches, calls: [], rewards: [],
+            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(9, 'dogetx_phantom', fMatches.length))
+        }});
+        expect(follower.rewards.some(r => r.type === 'anchor_archive'),
+            'phantom archive earns no COLLECT-spendable reward').to.equal(false);
+        expect(follower.db.matches.find(m => m.match_id === 'm1').batch_seq,
+            'back-fill still applies (rows re-archive on a fresh seq if the checkpoint later confirms)').to.equal(9);
+    });
+
+    it('a FINALIZED whose announced status diverges from the local row is rejected (unsigned content)', async function () {
+        // XANC-FINALIZED-CONTENT-1: the XANCFIN canonical binds only (batch_seq,
+        // txid, match COUNT), so a Byzantine ELECTED leader could announce
+        // attacker-chosen id/status lists. The receiver must re-verify announced
+        // content against its own rows before stamping.
+        let bus = buildMesh(2);
+        let follower = bus.nodes[0];
+        let leader   = bus.nodes[1];
+        follower.pub._recordObservedArchiveLeader(4, leader.pubkey);   // leader IS observed for the batch
+
+        // Announce m1 with a status that diverges from the follower's row
+        // ('finalized'): stamping it would mark the row archived under a bogus
+        // terminal status and strand it from every future archive round.
+        let fMatches = [matchRow('m1', 'attacker_status')];
+        await follower.pub._handleFinalized({ data: {
+            batch_seq: 4, txid: 'dogetx_content', snapshot_block: 100, matches: fMatches, calls: [], rewards: [],
+            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(4, 'dogetx_content', fMatches.length))
+        }});
+        let m1 = follower.db.matches.find(m => m.match_id === 'm1');
+        expect(m1.batch_seq, 'no batch_seq stamped from diverging content').to.equal(null);
+        expect(m1.archived_status, 'no archived_status stamped').to.equal(null);
+        expect(follower.rewards.some(r => r.type === 'anchor_archive'), 'no reward mirrored').to.equal(false);
+
+        // Control: the TRUE status (and the __partial__ sentinel) both pass, so
+        // the rejection above came from the content check, not a malformed envelope.
+        let okMatches = [matchRow('m1', 'finalized')];
+        await follower.pub._handleFinalized({ data: {
+            batch_seq: 4, txid: 'dogetx_content', snapshot_block: 100, matches: okMatches, calls: [], rewards: [],
+            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(4, 'dogetx_content', okMatches.length))
+        }});
+        expect(follower.db.matches.find(m => m.match_id === 'm1').batch_seq,
+            'matching content IS stamped').to.equal(4);
+    });
+
+    it('a FINALIZED with a non-anchor reward_type in the reward list is rejected', async function () {
+        let bus = buildMesh(2);
+        let follower = bus.nodes[0];
+        let leader   = bus.nodes[1];
+        follower.pub._recordObservedArchiveLeader(5, leader.pubkey);
+        follower.db.rewardRows.push({ reward_type: 'oracle_round', round_number: 1,
+                                      validator_pubkey: leader.pubkey, batch_seq: null, block_index: 100 });
+        let fMatches = [matchRow('m1', 'finalized')];
+        await follower.pub._handleFinalized({ data: {
+            batch_seq: 5, txid: 'dogetx_rw', snapshot_block: 100, matches: fMatches, calls: [],
+            rewards: [{ reward_type: 'oracle_round', round_number: 1, validator_pubkey: leader.pubkey }],
+            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(5, 'dogetx_rw', fMatches.length))
+        }});
+        expect(follower.db.rewardRows[0].batch_seq, 'indexer-derived reward row NOT stamped').to.equal(null);
+        expect(follower.db.matches.find(m => m.match_id === 'm1').batch_seq, 'whole message rejected').to.equal(null);
+    });
+
+    it('the archive-reward mirror rejects a snapshot_block where the sender holds no oracle_publish', async function () {
+        let bus = buildMesh(2);
+        let follower = bus.nodes[0];
+        let leader   = bus.nodes[1];
+        follower.pub._recordObservedArchiveLeader(6, leader.pubkey);
+        // d.snapshot_block is unsigned: resolve an EMPTY oracle_publish set at the
+        // announced block (membership everywhere else stays intact).
+        let orig = follower.pub._getActiveOraclePublishPubkeys.bind(follower.pub);
+        follower.pub._getActiveOraclePublishPubkeys = async (blk) => (blk === 999999 ? [] : orig(blk));
+        let fMatches = [matchRow('m1', 'finalized')];
+        await follower.pub._handleFinalized({ data: {
+            batch_seq: 6, txid: 'dogetx_snap', snapshot_block: 999999, matches: fMatches, calls: [], rewards: [],
+            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(6, 'dogetx_snap', fMatches.length))
+        }});
+        expect(follower.db.matches.find(m => m.match_id === 'm1').batch_seq,
+            'back-fill itself still applies').to.equal(6);
+        expect(follower.rewards.some(r => r.type === 'anchor_archive'),
+            'no reward mirrored for an unresolvable snapshot_block').to.equal(false);
+    });
+
+    it('_backfillBatch cannot re-stamp a fully archived row, but a __partial__ row re-stamps', async function () {
+        // Guard = the pending selectors' archive-eligibility predicate: a settled
+        // row (batch_seq set AND archived_status = status) is immutable to a
+        // replayed/forged FINALIZED; a __partial__ sentinel row must still take
+        // its fresh seq on the legitimate re-archive.
+        let archived = Object.assign(matchRow('ma', 'finalized'), { batch_seq: 0, archived_status: 'finalized', anchor_txid: 'dogetx_orig' });
+        let partial  = Object.assign(matchRow('mp', 'finalized'), { batch_seq: 0, archived_status: '__partial__' });
+        let bus = buildMesh(1, { matches: [archived, partial],
+                                 rewards: [{ reward_type: 'anchor_DOGE', round_number: 3,
+                                             validator_pubkey: 'aa'.repeat(32), batch_seq: 2, block_index: 100 }] });
+        let nd = bus.nodes[0];
+
+        await nd.pub._backfillBatch(9,
+            [{ match_id: 'ma', status: 'finalized' }, { match_id: 'mp', status: 'finalized' }],
+            'dogetx_replay', [],
+            [{ reward_type: 'anchor_DOGE', round_number: 3, validator_pubkey: 'aa'.repeat(32) }]);
+
+        let ma = nd.db.matches.find(m => m.match_id === 'ma');
+        expect(ma.batch_seq, 'settled row keeps its original batch').to.equal(0);
+        expect(ma.anchor_txid, 'settled row keeps its original txid').to.equal('dogetx_orig');
+        expect(nd.db.matches.find(m => m.match_id === 'mp').batch_seq, '__partial__ row re-stamps').to.equal(9);
+        expect(nd.db.rewardRows[0].batch_seq, 'already-archived reward row keeps its batch').to.equal(2);
     });
 
     it('_handleSignReq binds the elected archive leader locally (the FINALIZED gate source)', async function () {
@@ -1599,9 +1776,13 @@ describe('StateAnchorPublisher', function () {
         let nd = bus.nodes[0];
         nd.pub._getActiveOraclePublishPubkeys = async () => [nd.pubkey];
         nd.pub._recordReward = () => {};                     // isolate the UPDATE assertion
+        nd.pub._verifyAnchorOnChain = async () => 'verified';  // isolate from the on-chain gate (covered separately)
         let calls = [];
         nd.pub.db.doQuery = async (sql, params) => {
             calls.push({ sql, params });
+            // The exact-identity SELECT feeds both the election vet and the on-chain
+            // gate, so it must carry the checkpoint hashes + snapshot_block.
+            if (sql.startsWith('SELECT * FROM state_checkpoints')) return [Object.assign({}, CP_ROW, { snapshot_block: 100 })];
             if (sql.startsWith('SELECT snapshot_block FROM state_checkpoints')) return [{ snapshot_block: 100 }];
             return [];
         };
@@ -1653,6 +1834,98 @@ describe('StateAnchorPublisher', function () {
         await receiver.pub._handleV0Done({ type: 'XANC_V0_DONE', sender: publisher.pubkey, data: d });
 
         expect(receiver.db.checkpoints[0].anchor_txid, 'elected publisher V0_DONE stamps').to.equal('bb'.repeat(32));
+        // BELOW the anchor-reward flag-day (outer-suite pin) the hub rows are the
+        // reward's only transport, so the mirror still fires (control for the
+        // at/above-flag-day skip asserted in the v4/v5 suite).
+        expect(receiver.rewards.filter(r => r.type === 'anchor_BTC').length,
+            'below flag-day the mirror records the reward').to.equal(1);
+    });
+
+    // XANC-ELECTED-FORGE-1 / XANC-V0DONE-SUPPRESS-1 residual: the election gate
+    // proves the SENDER is an elected v0 publisher but not that the announced
+    // anchor was ever mined. _verifyAnchorOnChain asks OUR OWN DOGE indexer
+    // (getanchoraction) for the DECODED anchor at THIS checkpoint and only lets the
+    // stamp+reward through when it exists, is not decoded-invalid, is buried
+    // >= XCHAIN_CONFIRMATIONS_DOGE, and its payload hashes byte-match our copy.
+    describe('_handleV0Done on-chain ANCHOR verification', function () {
+        // Build a signed V0_DONE from the rank-0 (always unlocked) elected publisher
+        // for the mesh checkpoint, returning {receiver, d}.
+        function electedV0Done(bus, txid) {
+            let order = v0Order(bus, CP_ROW);
+            let publisher = order[0], receiver = order[1];
+            let d = { chain: CP_ROW.chain, network: CP_ROW.network, block_index: CP_ROW.block_index,
+                      checkpoint_seq: CP_ROW.checkpoint_seq, txid: txid };
+            d.sig_pubkey = publisher.pubkey;
+            d.sig = publisher.identity.sign(receiver.pub._v0DoneCanonical(d, d.txid));
+            return { publisher, receiver, d };
+        }
+        let matching = {
+            block_hash: CP_ROW.block_hash, ledger_hash: CP_ROW.ledger_hash,
+            actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash
+        };
+
+        it('ACCEPTS when the DOGE indexer confirms the anchor at depth with matching hashes', async function () {
+            let bus = buildMesh(3);
+            let { publisher, receiver, d } = electedV0Done(bus, 'ab'.repeat(32));
+            receiver.pub._indexerCall = async (coin, method, params) => Object.assign(
+                { exists: true, status: 'valid', version: 0, confirmations: 60 }, matching);
+            await receiver.pub._handleV0Done({ type: 'XANC_V0_DONE', sender: publisher.pubkey, data: d });
+            expect(receiver.db.checkpoints[0].anchor_txid, 'confirmed anchor stamps').to.equal('ab'.repeat(32));
+            expect(receiver.rewards.filter(r => r.type === 'anchor_BTC').length, 'confirmed anchor mirrors reward').to.equal(1);
+        });
+
+        it('ABSTAINS (no stamp/reward) when the anchor is ABSENT on-chain (phantom txid)', async function () {
+            let bus = buildMesh(3);
+            let { publisher, receiver, d } = electedV0Done(bus, 'ac'.repeat(32));
+            receiver.pub._indexerCall = async () => ({ exists: false, confirmations: 0 });
+            await receiver.pub._handleV0Done({ type: 'XANC_V0_DONE', sender: publisher.pubkey, data: d });
+            expect(receiver.db.checkpoints[0].anchor_txid, 'phantom anchor must not stamp (suppression blocked)').to.equal(null);
+            expect(receiver.rewards.length, 'phantom anchor must not mirror a reward').to.equal(0);
+        });
+
+        it('ABSTAINS when the anchor is SHALLOWER than XCHAIN_CONFIRMATIONS_DOGE', async function () {
+            let bus = buildMesh(3);
+            let { publisher, receiver, d } = electedV0Done(bus, 'ad'.repeat(32));
+            receiver.pub._indexerCall = async () => Object.assign(
+                { exists: true, status: 'valid', version: 0, confirmations: 59 }, matching);
+            await receiver.pub._handleV0Done({ type: 'XANC_V0_DONE', sender: publisher.pubkey, data: d });
+            expect(receiver.db.checkpoints[0].anchor_txid, '0..59-conf anchor must not stamp').to.equal(null);
+            expect(receiver.rewards.length, 'shallow anchor must not mirror a reward').to.equal(0);
+        });
+
+        it('REJECTS when the DECODED anchor status is invalid', async function () {
+            let bus = buildMesh(3);
+            let { publisher, receiver, d } = electedV0Done(bus, 'ae'.repeat(32));
+            receiver.pub._indexerCall = async () => Object.assign(
+                { exists: true, status: 'invalid: ledger_hash mismatch', version: 0, confirmations: 60 }, matching);
+            await receiver.pub._handleV0Done({ type: 'XANC_V0_DONE', sender: publisher.pubkey, data: d });
+            expect(receiver.db.checkpoints[0].anchor_txid, 'decoded-invalid anchor must not stamp').to.equal(null);
+            expect(receiver.rewards.length, 'decoded-invalid anchor must not mirror a reward').to.equal(0);
+        });
+
+        it('REJECTS when the on-chain payload hashes do NOT byte-match our checkpoint', async function () {
+            let bus = buildMesh(3);
+            let { publisher, receiver, d } = electedV0Done(bus, 'af'.repeat(32));
+            receiver.pub._indexerCall = async () => ({
+                exists: true, status: 'valid', version: 0, confirmations: 60,
+                block_hash: 'ff'.repeat(32),                         // diverges from CP_ROW.block_hash
+                ledger_hash: CP_ROW.ledger_hash, actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash
+            });
+            await receiver.pub._handleV0Done({ type: 'XANC_V0_DONE', sender: publisher.pubkey, data: d });
+            expect(receiver.db.checkpoints[0].anchor_txid, 'hash-mismatched anchor must not stamp').to.equal(null);
+            expect(receiver.rewards.length, 'hash-mismatched anchor must not mirror a reward').to.equal(0);
+        });
+
+        it('ABSTAINS (no stamp/reward) when no DOGE indexer is wired', async function () {
+            let bus = buildMesh(3, { cfg: { DOGE_INDEXER_URL: '' } });   // hub opts out of on-chain verification
+            let { publisher, receiver, d } = electedV0Done(bus, 'ba'.repeat(32));
+            let called = 0;
+            receiver.pub._indexerCall = async () => { called++; return { exists: true, status: 'valid', confirmations: 60 }; };
+            await receiver.pub._handleV0Done({ type: 'XANC_V0_DONE', sender: publisher.pubkey, data: d });
+            expect(called, 'no-indexer short-circuits before any RPC').to.equal(0);
+            expect(receiver.db.checkpoints[0].anchor_txid, 'unverifiable anchor must not stamp').to.equal(null);
+            expect(receiver.rewards.length, 'unverifiable anchor must not mirror a reward').to.equal(0);
+        });
     });
 
     it('size-trigger: reaching batchSize match:finalized events fires a flush', async function () {
