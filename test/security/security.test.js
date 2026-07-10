@@ -1291,6 +1291,16 @@ describe('Security Hardening', function () {
             expect(result).to.be.an('array');
         });
 
+        it('getpricesnapshots rejects an unknown status filter', async function () {
+            let result = await controller.getpricesnapshots({ limit: 10, status: 'bogus' });
+            expect(result.error).to.include('status');
+        });
+
+        it("getpricesnapshots accepts status 'all' (health consumers)", async function () {
+            let result = await controller.getpricesnapshots({ limit: 10, status: 'all' });
+            expect(result).to.be.an('array');
+        });
+
         it('reportreorg rejects invalid chain', async function () {
             let result = await controller.reportreorg({ chain: 'ETH', reorg_height: '100', timestamp: String(Date.now()) });
             expect(result.error).to.include('BTC');

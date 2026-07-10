@@ -101,6 +101,14 @@ class XChainHub {
     }
 
     async start(){
+        // Verify the bundled canonical coin files against CONSENSUS_CONFIG_PIN before
+        // any DB or serving work (mirrors xchain-indexer's boot check). The hub is the
+        // platform's config oracle: it acts on this config (PBFT/oracle/attestation)
+        // and serves consensusHashes to every consumer, so a drifted/corrupted bundle
+        // must halt boot rather than propagate federation-wide. A null pin (mainnet,
+        // pre-arm) skips; a mismatch on an armed network throws (fail-closed).
+        for(const net of coins.NETWORKS) coins.verifyConsensusPin(net);
+
         this.db = new Database(this.dbHost, this.dbPort, this.dbName, this.dbUser, this.dbPass);
         await this.db.createDatabase();
         await this.db.verifyTables();
@@ -802,22 +810,59 @@ class XChainHub {
         return chainPairMap;
     }
 
-    async getPriceSnapshots(limit) {
+    // status: optional filter. Default 'finalized' (the historical contract; fee
+    // and price consumers must never see skipped/disputed rows here). 'all'
+    // additionally returns skipped (round produced no usable price for the pair)
+    // and disputed (reorg-retracted) rows so health/monitoring consumers can see
+    // the failure states instead of silently falling back to an older finalized
+    // round. Additive: existing callers are unchanged.
+    async getPriceSnapshots(limit, status) {
+        if (status === 'all') {
+            let query = "SELECT * FROM price_snapshots ORDER BY round_number DESC, coin_pair ASC LIMIT ?";
+            return await this.db.doQuery(query, [limit || 50]);
+        }
         let query = "SELECT * FROM price_snapshots WHERE status = 'finalized' ORDER BY round_number DESC, coin_pair ASC LIMIT ?";
         return await this.db.doQuery(query, [limit || 50]);
     }
 
     // Oracle price staleness bound in seconds (deepdive L-5). Mirrors the indexer's
-    // ORACLE_MAX_PRICE_AGE_SECONDS (getFeeOraclePrices / db.getLatestPrice), default
-    // 1800, so the hub's advisory getprice/getfeequote reject the same stale rounds
-    // the indexer's fee gate rejects instead of serving an arbitrarily old price. 0
-    // disables the bound. block_timestamp is stored in Unix SECONDS (OracleConsensus).
-    _oracleMaxAgeSeconds() {
+    // ORACLE_MAX_PRICE_AGE_SECONDS (getFeeOraclePrices / db.getLatestPrice), so the
+    // hub's advisory getprice/getfeequote reject the same stale rounds the indexer's
+    // fee gate rejects instead of serving an arbitrarily old price. 0 disables the
+    // bound. block_timestamp is stored in Unix SECONDS (OracleConsensus). Precedence:
+    // p2pConfig / env override, else the consensus-pinned value from the canonical
+    // coin registry (never a hardcoded literal, so a coordinated release that changes
+    // the pinned ORACLE_MAX_PRICE_AGE_SECONDS can't silently diverge the hub advisory
+    // from the indexer gate).
+    _oracleMaxAgeSeconds(coinPair) {
         let raw = (this.p2pConfig && this.p2pConfig.ORACLE_MAX_PRICE_AGE_SECONDS != null)
             ? this.p2pConfig.ORACLE_MAX_PRICE_AGE_SECONDS
             : process.env.ORACLE_MAX_PRICE_AGE_SECONDS;
         let v = parseInt(raw, 10);
-        return Number.isFinite(v) ? v : 1800;
+        if (Number.isFinite(v)) return v;
+        return this._registryOracleMaxAge(coinPair);
+    }
+
+    // The consensus-pinned ORACLE_MAX_PRICE_AGE_SECONDS for the coin pair, read from
+    // the canonical coin registry (the same source the consensus hash covers). The
+    // pair's base tick selects the coin; a pair with no registry coin (e.g. the
+    // XCHAIN/USD advisory pair) or an unknown network falls back to a known registry
+    // coin (BTC) so no literal copy of the pinned constant lives in this file.
+    _registryOracleMaxAge(coinPair) {
+        let network = this.network || 'mainnet';
+        let baseTick = String(coinPair || '').split('/')[0];
+        let candidates = [[baseTick, network], ['BTC', network], ['BTC', 'mainnet']];
+        for (let [tick, net] of candidates) {
+            try {
+                let cfg = coins.getCoinConfig(tick, net);
+                let age = Number(cfg && cfg.ORACLE_MAX_PRICE_AGE_SECONDS);
+                if (Number.isFinite(age)) return age;
+            } catch (e) { /* non-registry pair or unknown network; try the next candidate */ }
+        }
+        // Registry unavailable (should never happen: the coin bundle is vendored in).
+        // Return null so the caller's `maxAge > 0` guard fails open on staleness rather
+        // than reintroducing a hardcoded copy of the consensus-pinned constant.
+        return null;
     }
 
     // Latest finalized snapshot for a coin pair plus a staleness verdict (L-5).
@@ -828,7 +873,7 @@ class XChainHub {
     async getPriceStatus(coinPair) {
         let query = "SELECT * FROM price_snapshots WHERE coin_pair = ? AND status = 'finalized' ORDER BY round_number DESC LIMIT 1";
         let rows = await this.db.doQuery(query, [coinPair]);
-        let maxAge = this._oracleMaxAgeSeconds();
+        let maxAge = this._oracleMaxAgeSeconds(coinPair);
         if (rows.length === 0)
             return { row: null, fresh: false, stale: false, missing: true, ageSeconds: null, maxAgeSeconds: maxAge };
         let row = rows[0];

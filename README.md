@@ -65,7 +65,7 @@ npm install
 cat > .env << 'EOF'
 HUB_HOST=0.0.0.0
 HUB_PORT=10000
-HUB_DB_HOST=localhost
+HUB_DB_HOST=127.0.0.1
 HUB_DB_PORT=3306
 HUB_DB_NAME=XChain_Hub
 HUB_DB_USER=xchain

@@ -65,6 +65,42 @@ describe('XChainHub', function () {
     });
 
     // -----------------------------------------------------------------
+    // start(): fail-closed consensus-pin verification at boot
+    // -----------------------------------------------------------------
+
+    describe('start() consensus-pin verification', function () {
+        const coins = require('../../src/coins');
+
+        it('fails closed on an armed-pin mismatch before any DB work', async function () {
+            let verify = sinon.stub(coins, 'verifyConsensusPin')
+                .throws(new Error('CONSENSUS CONFIG PIN MISMATCH for BTC/testnet'));
+            let hub = new XChainHub('host', 3306, 'db', 'user', 'pass', {});
+            try {
+                await hub.start();
+                expect.fail('start() must not resolve on a pin mismatch');
+            } catch (e) {
+                expect(e.message).to.match(/PIN MISMATCH/);
+            }
+            expect(verify.called).to.equal(true);
+            // Fail-closed: the drifted node never reached DB/serving work.
+            expect(mockDb.createDatabase.called).to.equal(false);
+        });
+
+        it('verifies every network before DB/serving work begins', async function () {
+            let verify = sinon.stub(coins, 'verifyConsensusPin').returns({ ok: true, skipped: false });
+            // Sentinel on the LAST network proves all networks are checked
+            // before start() proceeds to DB construction.
+            verify.onCall(coins.NETWORKS.length - 1).throws(new Error('sentinel: last network reached'));
+            let hub = new XChainHub('host', 3306, 'db', 'user', 'pass', {});
+            try { await hub.start(); } catch (e) { /* sentinel */ }
+            expect(verify.callCount).to.equal(coins.NETWORKS.length);
+            for (let i = 0; i < coins.NETWORKS.length; i++)
+                expect(verify.getCall(i).args[0]).to.equal(coins.NETWORKS[i]);
+            expect(mockDb.createDatabase.called).to.equal(false);
+        });
+    });
+
+    // -----------------------------------------------------------------
     // applyConfig()
     // -----------------------------------------------------------------
 
@@ -348,6 +384,15 @@ describe('XChainHub', function () {
             expect(s.stale).to.equal(false);
             expect(s.maxAgeSeconds).to.equal(0);
         });
+
+        it('sources the default bound from the consensus-pinned coin registry (no literal 1800)', function () {
+            const coins = require('../../src/coins');
+            // No env/p2pConfig override -> the bound is the registry value, not a literal.
+            const pinned = Number(coins.getCoinConfig('BTC', 'mainnet').ORACLE_MAX_PRICE_AGE_SECONDS);
+            expect(hub._oracleMaxAgeSeconds('BTC/USD')).to.equal(pinned);
+            // A non-registry advisory pair (XCHAIN/USD) still resolves via the BTC fallback.
+            expect(hub._oracleMaxAgeSeconds('XCHAIN/USD')).to.equal(pinned);
+        });
     });
 
     // -----------------------------------------------------------------
@@ -535,6 +580,16 @@ describe('XChainHub', function () {
             await hub.getPriceSnapshots(5);
             expect(mockDb.doQuery.getCall(0).args[1]).to.deep.equal([5]);
             expect(mockDb.doQuery.getCall(0).args[0]).to.include('price_snapshots');
+            // Default stays finalized-only (fee/price consumers unchanged);
+            // status='all' additionally returns skipped/disputed rows so
+            // health/monitoring consumers can see stall/fork states (#180 seam).
+            expect(mockDb.doQuery.getCall(0).args[0]).to.include("status = 'finalized'");
+            mockDb.doQuery.resetHistory();
+            mockDb.doQuery.resolves([{ coin_pair: 'BTC/USD' }]);
+            await hub.getPriceSnapshots(5, 'all');
+            expect(mockDb.doQuery.getCall(0).args[0]).to.include('price_snapshots');
+            expect(mockDb.doQuery.getCall(0).args[0]).to.not.include("status = 'finalized'");
+            expect(mockDb.doQuery.getCall(0).args[1]).to.deep.equal([5]);
 
             mockDb.doQuery.resetHistory();
             mockDb.doQuery.resolves([{ coin_pair: 'BTC/USD' }]);

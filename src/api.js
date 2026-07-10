@@ -425,11 +425,16 @@ async function startApi(){
             return await oracle.getSubmissionsInfo();
         },
 
-        async getpricesnapshots({limit}){
+        // status is optional and additive: omitted/'finalized' preserves the
+        // historical finalized-only contract; 'all' includes skipped/disputed
+        // rows for health/monitoring consumers (dashboard oracle-feed parity).
+        async getpricesnapshots({limit, status}){
             let limErr = validateLimit(limit);
             if (limErr) return limErr;
+            if (status !== undefined && status !== 'finalized' && status !== 'all')
+                return {error: "status must be 'finalized' or 'all'"};
             try {
-                let snapshots = await hub.getPriceSnapshots(limit || 50);
+                let snapshots = await hub.getPriceSnapshots(limit || 50, status);
                 return snapshots;
             } catch (err) {
                 return {error: "error fetching price snapshots"};
@@ -995,6 +1000,9 @@ async function startApi(){
     // GET /hub-db/snapshot/cross_chain_calls: full snapshot of cross_chain_calls table.
     // Explicit column list: batch_seq/archived_status/anchor_txid are hub-side ANCHOR
     // audit metadata and are NOT mirrored (the indexer mirror schema has no such columns).
+    // finalizing_view (signed into the EQUIV canonical) and push_generation (source-chain
+    // reorg fence, item 5308) ARE mirror-consumed and MUST be included, or a freshly
+    // bootstrapped mirror rebuilds the wrong EQUIV view and mis-fences reorg retractions.
     app.get('/hub-db/snapshot/cross_chain_calls', async (req, res) => {
         try {
             if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
@@ -1006,7 +1014,8 @@ async function startApi(){
             let rows = await hub.db.doQuery(
                 'SELECT id, call_id, phase, snapshot_block, network, source_chain, source_action_index, ' +
                 'source_contract_index, target_chain, target_contract_index, method, params_json, gas_limit, ' +
-                "cross_hops, effective_time, status, result_status, return_payload_b64, validator_signatures, created_at " +
+                'cross_hops, effective_time, status, finalizing_view, push_generation, result_status, ' +
+                "return_payload_b64, validator_signatures, created_at " +
                 "FROM cross_chain_calls WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?",
                 [since, limit]
             );

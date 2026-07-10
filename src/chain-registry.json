@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-07-07T02:20:12.803Z",
+  "generated_at": "2026-07-10T04:07:50.713Z",
   "descriptors": [
     {
       "coin": "bitcoin",
@@ -31,6 +31,7 @@
         "rbfSupported": true
       },
       "supportedActions": [
+        "ADDRESS",
         "AIRDROP",
         "BATCH",
         "BROADCAST",
@@ -109,6 +110,7 @@
         "rbfSupported": true
       },
       "supportedActions": [
+        "ADDRESS",
         "AIRDROP",
         "BATCH",
         "BROADCAST",
@@ -187,6 +189,7 @@
         "rbfSupported": true
       },
       "supportedActions": [
+        "ADDRESS",
         "AIRDROP",
         "BATCH",
         "BROADCAST",
@@ -259,6 +262,7 @@
         "rbfSupported": false
       },
       "supportedActions": [
+        "ADDRESS",
         "AIRDROP",
         "BATCH",
         "BROADCAST",
@@ -323,6 +327,7 @@
         "rbfSupported": false
       },
       "supportedActions": [
+        "ADDRESS",
         "AIRDROP",
         "BATCH",
         "BROADCAST",
@@ -387,6 +392,7 @@
         "rbfSupported": false
       },
       "supportedActions": [
+        "ADDRESS",
         "AIRDROP",
         "BATCH",
         "BROADCAST",
@@ -455,6 +461,7 @@
         "rbfSupported": true
       },
       "supportedActions": [
+        "ADDRESS",
         "AIRDROP",
         "BATCH",
         "BROADCAST",
@@ -523,6 +530,7 @@
         "rbfSupported": true
       },
       "supportedActions": [
+        "ADDRESS",
         "AIRDROP",
         "BATCH",
         "BROADCAST",
@@ -591,6 +599,7 @@
         "rbfSupported": true
       },
       "supportedActions": [
+        "ADDRESS",
         "AIRDROP",
         "BATCH",
         "BROADCAST",

@@ -103,6 +103,7 @@ a keyed one-way hash, then discards the IP.
 | `TELEMETRY_ENABLED` | No | `true` | Accept telemetry pings. Set `false` on a private/local hub. |
 | `TELEMETRY_RETENTION_DAYS` | No | `90` | Prune telemetry rows older than N days. |
 | `TELEMETRY_IP_SALT` | No | _empty_ | Secret salt for the one-way IP hash. Without it, `ip_hash` is left null (an unsalted hash would be trivially reversible). |
+| `TELEMETRY_ADMIN_KEY` | No | _empty_ | `x-api-key` gate for the telemetry admin/query surface (empty leaves it fail-closed). Must match the value the dashboard service is configured with. |
 
 ## P2P validator cluster
 
@@ -176,6 +177,7 @@ Wallet and encoder the hub uses to publish ATTEST responses on Bitcoin.
 | `ATTESTATION_LEADER_RETRY_MS` | No | `60000` | Grace (ms) before the sweep retries the leader's own un-broadcast entry. |
 | `ATTESTATION_BLOCK_MS` | No | `600000` | Approx block time (ms) used to translate the failover window into a wall-clock silence threshold. |
 | `ATTESTATION_TIMEOUT` | No | `60000` | Attestation timeout (ms). |
+| `ATTESTATION_ROUND_TTL_MS` | No | `3600000` (1h) | Time-to-live for in-memory attestation round entries before lazy eviction. |
 | `REORG_TIMEOUT` | No | `60000` | Reorg-handler timeout (ms). |
 
 ## DOGE oracle publisher
@@ -199,6 +201,52 @@ Wallet and encoder the hub uses to publish oracle prices on Dogecoin.
 | `BTC_INDEXER_API_URL` | No | _empty_ | Bitcoin indexer endpoint used for reward tracking. |
 | `BTC_INDEXER_API_KEY` | No | _empty_ | API key for the Bitcoin indexer. |
 | `MAX_INDEXER_LAG_BLOCKS` | No | `200` | Max blocks the indexer's committed tip may trail the decoder before the hub treats the indexer's latest-block response as stale and falls back to graceful degradation, rather than anchoring a consensus snapshot on a lagging tip. |
+
+## Cross-chain / checkpoint confirmation depth
+
+Consensus-affecting confirmation depths. Both also resolve from the hub
+`p2pConfig` and fall back to per-coin defaults; the env var is the highest-
+precedence override.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `XCHAIN_CONFIRMATIONS_<COIN>` | No | per-coin | Cross-chain attestation/swap confirmation depth for `<COIN>` (e.g. `XCHAIN_CONFIRMATIONS_BTC`). Consensus-affecting: read by `CrossChainEngine` / `CrossChainCallEngine`. |
+| `CHECKPOINT_CONFIRMATIONS` | No | `6` | State-checkpoint confirmation depth (`StateCheckpointEngine`). Consensus-affecting. |
+
+## Genesis / regtest binding
+
+Regtest-only genesis overrides (ignored on mainnet/testnet, which use the frozen
+bundled values). Consensus-relevant: they bind the local chain's genesis anchor.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `XCHAIN_GENESIS_BLOCK` | Regtest only | per-coin | Genesis block height for a regtest chain. |
+| `XCHAIN_GENESIS_LEDGER_HASH` | Regtest only | per-coin | Genesis ledger-hash pin for a regtest chain. |
+| `XCHAIN_GENESIS_DUMP_HASH` | Regtest only | per-coin | Genesis dump-hash pin for a regtest chain. |
+
+## Fee destination override
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `XCHAIN_FEE_DESTINATION_<COIN>_<NETWORK>` | Regtest only | bundled | Overrides the native-fee destination address for `<COIN>` on `<NETWORK>`. **Honored on regtest only**: on mainnet/testnet it is ignored (logged) because `FEE_DESTINATION` is consensus-pinned and an env override would escape the freeze and fork the block-hashed ledger. |
+
+## Full-node challenge
+
+Full-node challenge/proof configuration. Each key resolves from its `FULLNODE_*`
+env var, else the bundled per-coin `FULLNODE` block.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `FULLNODE_ENABLED` | No | `true` | Enable the full-node challenge round. |
+| `FULLNODE_CHALLENGE_INTERVAL_BLOCKS` | No | `144` | Blocks between challenge rounds. |
+| `FULLNODE_CONFIRM_DEPTH` | No | per-coin | Confirmation depth for challenge proofs. |
+| `FULLNODE_PROOF_WINDOW_BLOCKS` | No | per-coin | Blocks a challenged node has to submit a proof. |
+| `FULLNODE_VERDICT_ACCEPT_WINDOW_BLOCKS` | No | per-coin | Blocks to accept a verdict. |
+| `FULLNODE_REWARD_PASS_WINDOW_BLOCKS` | No | per-coin | Blocks in the reward-pass window. |
+| `FULLNODE_MIN_PASS_RATE_BPS` | No | per-coin | Minimum pass rate (basis points). |
+| `FULLNODE_REWARD_SHARE` | No | per-coin | Reward share for passing full nodes. |
+| `FULLNODE_GENESIS_VERIFIERS` | No | per-coin | Comma-separated genesis verifier pubkeys (lowercased). |
+| `FULLNODE_BTC_RPC` | If enabled | _empty_ | Bitcoin RPC endpoint the full-node capability probes. |
 
 ## Governance
 

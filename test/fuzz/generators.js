@@ -11,19 +11,23 @@
 // contact legal@dankest.llc.
 
 const fc = require('fast-check');
+const { PRICE_MAX } = require('../../src/constants');
 
 // ---------------------------------------------------------------------------
 // Prices
 // ---------------------------------------------------------------------------
 
 // Positive finite price as a JS number (realistic oracle range).
-// Upper bound is just below the oracle's PRICE_MAX cap (10,000,000) so generated
-// values reach the high-magnitude non-USD range (KRW/JPY ~ millions per BTC) where
+// Upper bound is derived from (just below) the oracle's live PRICE_MAX cap
+// (10,000,000,000 / 1e10) so generated values reach the high-magnitude non-USD
+// range (KRW/JPY ~ hundreds of millions per BTC, e.g. BTC/KRW ~1.35e8) where
 // parseFloat + toFixed(8) precision is most at risk, while staying within the
 // production validity filter (val < PRICE_MAX) so prices aren't silently dropped.
+// Sourcing the bound from PRICE_MAX keeps this generator from drifting stale if
+// the ceiling is raised again.
 function fc_price() {
-    return fc.double({ min: 0.00000001, max: 9_999_999, noNaN: true, noDefaultInfinity: true })
-        .filter(n => Number.isFinite(n) && n > 0);
+    return fc.double({ min: 0.00000001, max: PRICE_MAX - 1, noNaN: true, noDefaultInfinity: true })
+        .filter(n => Number.isFinite(n) && n > 0 && n < PRICE_MAX);
 }
 
 // Price as a numeric string (what submissions carry)

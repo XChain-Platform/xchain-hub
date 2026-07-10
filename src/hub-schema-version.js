@@ -16,10 +16,15 @@
  *
  * Single source of truth for the schema-version handshake stamped on every
  * mirror row the hub streams (and snapshots over REST) to indexers. Bump this
- * when any mirrored table (cross_chain_calls, price_snapshots,
- * capability_snapshots, state_checkpoints) gains a DDL change a stale indexer
- * cannot interpret; the indexer rejects a mismatch so a hub-side column added
- * before the indexer migrates cannot be silently dropped and fork the ledger.
+ * when ANY table in the indexer's mirror set gains a DDL change a stale indexer
+ * cannot interpret. As of now that set is six tables: oracle_prices,
+ * price_snapshots, cross_chain_matches, cross_chain_calls, capability_snapshots,
+ * state_checkpoints (see xchain-indexer/src/hub_db_sync.js RETRACTION_COLUMNS +
+ * CROSS_CHAIN_TABLES). oracle_prices and cross_chain_matches gate the settlement
+ * barriers waitForOracleSyncTimestamp / waitForMatchSync, so omitting them here
+ * is a ledger-fork risk. The indexer rejects a version mismatch so a hub-side
+ * column added before the indexer migrates cannot be silently dropped and fork
+ * the ledger.
  *
  ********************************************************************/
 

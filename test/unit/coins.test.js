@@ -71,7 +71,67 @@ describe('coins registry', () => {
     it('excludes display-only fields from the consensus subset', () => {
         const subset = coins.consensusSubset('BTC', 'mainnet');
         expect(subset.addresses).to.not.have.property('EXPLORER');
-        expect(subset).to.not.have.keys('genesis', 'firstBlock', 'displayName', 'confirmations');
+        // .any.keys, not exact-set .keys: the exact-set form is only true when the
+        // subset has EXACTLY these keys, so its negation was vacuously true and
+        // could never catch a display-only field leaking into the pinned subset.
+        expect(subset).to.not.have.any.keys('genesis', 'firstBlock', 'displayName', 'confirmations');
+    });
+
+    // Every resolved top-level key that is deliberately NOT part of the hashed
+    // consensus subset. Shared classification source for the completeness guard:
+    // a NEW top-level coin key must either join consensusSubset() or be added here
+    // as a conscious display/operational call. An unclassified key fails the guard
+    // instead of silently dropping out of the pin (the golden-hash test only
+    // catches changes to fields already IN the subset, not omissions).
+    const NON_CONSENSUS_TOP_LEVEL_KEYS = new Set([
+        'tick', 'fullName', 'displayName', 'site', // identity/display metadata
+        'decimals', 'confirmations',               // display / operator-tunable depth
+        'network',                                 // redundant with the (tick, network) hash key
+        'firstBlock',                              // node-local scan start, not validity-gating
+        'genesis',                                 // deliberately excluded: genesis.js fail-closes on its own hashes
+        'FEE_PAYMENT_MODE',                        // informational only; not read at runtime (see coin files)
+    ]);
+
+    it('covers every non-display top-level coin key in the consensus subset (completeness guard)', () => {
+        for(const tick of coins.ALLOWED_COINS){
+            for(const net of coins.NETWORKS){
+                const resolved = coins.getCoinConfig(tick, net);
+                const subset   = coins.consensusSubset(tick, net);
+                for(const key of Object.keys(resolved)){
+                    if(NON_CONSENSUS_TOP_LEVEL_KEYS.has(key)) continue;
+                    expect(subset, `${tick}/${net}: top-level key '${key}' is neither in consensusSubset nor classified in NON_CONSENSUS_TOP_LEVEL_KEYS`)
+                        .to.have.property(key);
+                }
+            }
+        }
+    });
+
+    it('derives the address exclusion from each coin file\'s DISPLAY_ONLY_ADDRESS_ROLES (no magic string)', () => {
+        for(const tick of coins.ALLOWED_COINS){
+            const coinFile = require(`../../src/coins/${tick}.js`);
+            // Behavior freeze: today exactly EXPLORER is display-only. Changing this
+            // list changes the consensus hash and requires a coordinated pin bump.
+            expect(coinFile.DISPLAY_ONLY_ADDRESS_ROLES, tick).to.deep.equal(['EXPLORER']);
+            for(const net of coins.NETWORKS){
+                const subset = coins.consensusSubset(tick, net);
+                for(const role of coinFile.DISPLAY_ONLY_ADDRESS_ROLES)
+                    expect(subset.addresses, `${tick}/${net}`).to.not.have.property(role);
+            }
+        }
+    });
+
+    it('a newly-declared display-only role is excluded and cannot shift the consensus hash', () => {
+        const BTC = require('../../src/coins/BTC.js');
+        const before = coins.consensusHash('BTC', 'mainnet');
+        BTC.networks.mainnet.addresses.TESTONLY = '1TestDisplayOnlyRoleXXXXXXXXXXXXXX';
+        BTC.DISPLAY_ONLY_ADDRESS_ROLES.push('TESTONLY');
+        try {
+            expect(coins.consensusSubset('BTC', 'mainnet').addresses).to.not.have.property('TESTONLY');
+            expect(coins.consensusHash('BTC', 'mainnet')).to.equal(before);
+        } finally {
+            delete BTC.networks.mainnet.addresses.TESTONLY;
+            BTC.DISPLAY_ONLY_ADDRESS_ROLES.pop();
+        }
     });
 
     it('does not mutate the source modules when a caller edits the result', () => {
@@ -88,9 +148,9 @@ describe('coins registry', () => {
         const setEnv = (k, v) => { SAVED[k] = process.env[k]; if(v === undefined) delete process.env[k]; else process.env[k] = v; };
         afterEach(() => { for(const k of Object.keys(SAVED)){ if(SAVED[k] === undefined) delete process.env[k]; else process.env[k] = SAVED[k]; } });
 
-        it('applies FEE_DESTINATION override on non-mainnet networks', () => {
-            setEnv('XCHAIN_FEE_DESTINATION_BTC_TESTNET', 'tbOverrideAddr');
-            expect(coins.getCoinConfig('BTC', 'testnet').addresses.FEE_DESTINATION).to.equal('tbOverrideAddr');
+        it('applies FEE_DESTINATION override on regtest only', () => {
+            setEnv('XCHAIN_FEE_DESTINATION_BTC_REGTEST', 'rtOverrideAddr');
+            expect(coins.getCoinConfig('BTC', 'regtest').addresses.FEE_DESTINATION).to.equal('rtOverrideAddr');
         });
 
         it('IGNORES the FEE_DESTINATION override on mainnet (consensus pin escape, item 5473)', () => {
@@ -99,6 +159,15 @@ describe('coins registry', () => {
             // On mainnet the env override is dropped so it cannot escape verifyConsensusPin
             // (which hashes only the static bundle) and fork the block-hashed ledger.
             expect(coins.getCoinConfig('BTC', 'mainnet').addresses.FEE_DESTINATION).to.equal(pinned);
+        });
+
+        it('IGNORES the FEE_DESTINATION override on testnet (armed pin, multi-operator fork risk)', () => {
+            // Testnet carries a real armed CONSENSUS_CONFIG_PIN; an env-resolved override
+            // would escape the static-bundle hash exactly as on mainnet, letting two
+            // operators accept/reject the same native-fee action differently.
+            const pinned = coins.getCoinConfig('BTC', 'testnet').addresses.FEE_DESTINATION;
+            setEnv('XCHAIN_FEE_DESTINATION_BTC_TESTNET', 'tbOverrideAddr');
+            expect(coins.getCoinConfig('BTC', 'testnet').addresses.FEE_DESTINATION).to.equal(pinned);
         });
 
         it('binds regtest genesis from env but never affects the consensus hash', () => {
