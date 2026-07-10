@@ -118,6 +118,15 @@ function validateLimit(limit) {
     return null;
 }
 
+function validateSince(since) {
+    if (since !== undefined && since !== null && since !== '') {
+        let n = parseInt(since);
+        if (!Number.isFinite(n) || n < 0)
+            return { error: 'since_id must be a non-negative integer' };
+    }
+    return null;
+}
+
 // Default oracle round interval (10 min). Declared here (before the p2pConfig
 // object literal that references it) so the const is in scope at evaluation time.
 // OracleRound.js keeps its own copy with a cross-ref comment; both must stay in sync.
@@ -935,6 +944,7 @@ async function startApi(){
         try {
             if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
+            if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
             let rows = await hub.db.doQuery(
                 'SELECT * FROM price_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?',
@@ -950,6 +960,7 @@ async function startApi(){
         try {
             if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
+            if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
             let rows = await hub.db.doQuery(
                 'SELECT * FROM oracle_prices WHERE id > ? ORDER BY id ASC LIMIT ?',
@@ -965,6 +976,7 @@ async function startApi(){
         try {
             if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
+            if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
             // Exclude retracted rows: the streaming path DELETEs them on reorg
             // (retractMatchesForReorg marks status='retracted' for the ANCHOR archive and
@@ -986,6 +998,7 @@ async function startApi(){
         try {
             if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
+            if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
             let rows = await hub.db.doQuery(
                 'SELECT * FROM capability_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?',
@@ -1007,6 +1020,7 @@ async function startApi(){
         try {
             if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
+            if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
             // Exclude retracted rows (see the cross_chain_matches snapshot above): the
             // streaming path DELETEs them on reorg (retractCallsForReorg), so a bootstrapping
@@ -1032,6 +1046,7 @@ async function startApi(){
         try {
             if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
             let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
+            if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
             let rows = await hub.db.doQuery(
                 'SELECT id, chain, network, block_index, block_hash, ledger_hash, actions_hash, ' +
