@@ -1192,7 +1192,13 @@ class StateAnchorPublisher {
         // failover ladder unlocks at ~electionToleranceBlocks BTC blocks per rank
         // (hours), far slower than the ~60-conf DOGE window, so waiting for depth does
         // not open a practical double-anchor race.
-        let vOnChain = await this._verifyAnchorOnChain(ckptRows[0]);
+        //
+        // d.txid is bound into the signed _v0DoneCanonical, so binding it here closes
+        // the v0 half of XANC-ELECTED-FORGE-1: an ELECTED publisher announcing a
+        // never-mined txid, or pointing at a real anchor for a DIFFERENT checkpoint,
+        // no longer stamps (the phantom stamp is what suppresses the real anchor via
+        // the `anchor_txid IS NULL` selector).
+        let vOnChain = await this._verifyAnchorOnChain(ckptRows[0], { txid: String(d.txid) });
         if(vOnChain !== 'verified'){
             console.warn('StateAnchorPublisher: V0_DONE for ' + d.chain + '/' + d.network + ' @ ' +
                          d.block_index + '/' + d.checkpoint_seq + ' NOT on-chain verified (' + vOnChain +
@@ -1248,30 +1254,61 @@ class StateAnchorPublisher {
     // DOGE indexer wired fails closed, i.e. skips the receiver stamp+reward; wire
     // DOGE_INDEXER_URL fleet-wide before deploy), 'unreachable',
     // 'absent', 'shallow' are the benign redundant-re-anchor direction the receiver
-    // paths already tolerate; 'rejected:status' / 'rejected:mismatch' are a
-    // positively-detected forge. NOTE: getanchoraction is keyed on the checkpoint
-    // identity and returns the highest-action-index anchor for it, so this binds
-    // "this checkpoint was anchored on DOGE at depth", not a specific anchor
-    // version/txid; full txid-level binding needs a getanchoraction txid/version
-    // filter (indexer follow-up), which chiefly matters for the archive residual.
-    async _verifyAnchorOnChain(cp){
+    // paths already tolerate; 'rejected:status' / 'rejected:mismatch' /
+    // 'rejected:txid' / 'rejected:version' are a positively-detected forge.
+    //
+    // `expect` BINDS the announcement to a specific on-chain transaction:
+    //   expect.txid    - the txid the peer announced (signed into the V0_DONE /
+    //                    FINALIZED canonical), so an elected-but-Byzantine publisher
+    //                    cannot point at a real-but-different anchor, nor at a
+    //                    never-mined one (XANC-ELECTED-FORGE-1).
+    //   expect.version - narrows to a specific ANCHOR version (the archive gate binds
+    //                    the v1 head), since one checkpoint_seq carries both the v0/v3
+    //                    checkpoint anchor and the v1 archive anchor.
+    // Without `expect` this only proves "this checkpoint is anchored at depth".
+    //
+    // FAIL CLOSED against an un-upgraded indexer: one that predates the txid filter
+    // silently ignores the param and returns no `txid`, so a caller that asked to bind
+    // a txid gets 'no-txid-support' (ABSTAIN) rather than a false 'verified'. Roll the
+    // DOGE indexers before the hubs.
+    async _verifyAnchorOnChain(cp, expect){
         if(!cp) return 'no-checkpoint';
         let ix = this.indexers && this.indexers.DOGE;
         if(!ix || !ix.url) return 'no-indexer';
+        let want = expect || {};
+        let wantTxid = want.txid ? String(want.txid).toLowerCase() : null;
         let res;
         try {
-            res = await this._indexerCall('DOGE', 'getanchoraction', {
+            let params = {
                 chain: String(cp.chain), network: String(cp.network),
                 block_index: Number(cp.block_index), checkpoint_seq: Number(cp.checkpoint_seq)
-            });
+            };
+            if(wantTxid)                 params.txid    = wantTxid;
+            if(want.version != null)     params.version = Number(want.version);
+            res = await this._indexerCall('DOGE', 'getanchoraction', params);
         } catch(e){
             console.warn('StateAnchorPublisher: getanchoraction unreachable for ' + cp.chain + '/' + cp.network +
                          ' @ ' + cp.block_index + '/' + cp.checkpoint_seq + ': ' + (e && e.message));
             return 'unreachable';
         }
-        if(!res || !res.exists) return 'absent';
+        if(!res || !res.exists){
+            // The filtered lookup found nothing. `checkpoint_anchored` says whether ANY
+            // anchor exists for this checkpoint: if one does, the announced txid is a
+            // forge (the checkpoint is anchored, just not by that tx). If none does, the
+            // checkpoint simply is not anchored yet, which is the benign direction.
+            if(wantTxid && res && res.checkpoint_anchored) return 'rejected:txid';
+            return 'absent';
+        }
         if(/^invalid/i.test(String(res.status || ''))) return 'rejected:status';
         if(!(Number(res.confirmations) >= this.dogeConfirmations)) return 'shallow';
+        // Re-check the binding client-side. The indexer already filtered, so this only
+        // fires against an indexer that ignored the filter (pre-upgrade) or answered
+        // inconsistently; either way we must not trust an unbound row.
+        if(wantTxid){
+            if(!res.txid) return 'no-txid-support';
+            if(String(res.txid).toLowerCase() !== wantTxid) return 'rejected:txid';
+        }
+        if(want.version != null && Number(res.version) !== Number(want.version)) return 'rejected:version';
         // Byte-match the decoded on-chain payload against our own checkpoint. The
         // four core hashes are present on every checkpoint version; state_root and
         // block_merkle_root are compared only when the on-chain anchor is a
@@ -1782,7 +1819,10 @@ class StateAnchorPublisher {
                 // anchor - the elected leader records its own reward directly, so a
                 // co-signer's mirror is redundant (INSERT IGNORE-deduped) and the
                 // rows re-archive under a fresh seq if the checkpoint later confirms.
-                let archiveVerified = await this._verifyArchiveCheckpointOnChain(Number(d.batch_seq));
+                // d.txid is bound into the signed _finalizedCanonical and names the v1
+                // archive head, so it is passed through to bind the specific archive
+                // transaction, not merely "some anchor for this checkpoint".
+                let archiveVerified = await this._verifyArchiveCheckpointOnChain(Number(d.batch_seq), String(d.txid));
                 if(archiveVerified === 'verified')
                     this._recordReward('anchor_archive', Number(d.batch_seq), sender, Number(d.snapshot_block));
                 else
@@ -1880,19 +1920,22 @@ class StateAnchorPublisher {
     // state_checkpoints row (never the wire), then defers to _verifyAnchorOnChain.
     // Returns 'no-checkpoint-id' (never saw the SIGN_REQ) / 'absent-local' (we do
     // not hold the referenced checkpoint) as ABSTAIN reasons, else the
-    // _verifyAnchorOnChain verdict. NOTE: getanchoraction is keyed on the checkpoint
-    // identity, so this proves the CHECKPOINT was anchored at depth, not that this
-    // specific v1 archive txid landed; full archive-txid binding needs a
-    // getanchoraction txid/version filter (indexer follow-up) and would close the
-    // remaining elected-leader archive reward-theft residual.
-    async _verifyArchiveCheckpointOnChain(batchSeq){
+    // _verifyAnchorOnChain verdict. `announcedTxid` is the FINALIZED's txid, which is
+    // bound into the signed _finalizedCanonical and is the txid of the v1 ARCHIVE HEAD
+    // (_publishArchive broadcasts the v1 payload first, then the v2 continuation
+    // chunks). Binding it, plus version 1, closes the archive half of
+    // XANC-ELECTED-FORGE-1: proving the CHECKPOINT is anchored is not enough, because
+    // an elected leader could reference a real-but-different anchored checkpoint and
+    // still mirror itself the (LIVE, not flag-day-retired) anchor_archive reward.
+    async _verifyArchiveCheckpointOnChain(batchSeq, announcedTxid){
         let id = this._observedArchiveCheckpoint(batchSeq);
         if(!id) return 'no-checkpoint-id';
         let rows = await this.db.doQuery(
             'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? LIMIT 1',
             [id.chain, id.network, Number(id.block_index), Number(id.checkpoint_seq)]);
         if(!rows || rows.length === 0) return 'absent-local';
-        return this._verifyAnchorOnChain(rows[0]);
+        if(!announcedTxid) return 'no-txid';
+        return this._verifyAnchorOnChain(rows[0], { txid: String(announcedTxid), version: 1 });
     }
 
     // XMATCH canonical: byte-identical to CrossChainDexEngine._canonicalMatch /

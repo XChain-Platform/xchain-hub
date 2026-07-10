@@ -313,13 +313,22 @@ describe('StateAnchorPublisher', function () {
             // node's own checkpoint rows so the honest receiver path (V0_DONE /
             // FINALIZED for a checkpoint we actually hold) verifies at full depth.
             // Returns exists:false for an unknown checkpoint (the phantom-txid case).
+            //
+            // Models the HONEST case for the txid/version filter: the announced txid IS
+            // the transaction the anchor landed in, and the requested version is the one
+            // on-chain, so the row is echoed back bound to whatever the caller asked for.
+            // Adversarial receiver-path tests override this stub to return a different
+            // txid (forge), checkpoint_anchored, or no txid at all (stale indexer).
             self.pub._indexerCall = async (coin, method, params) => {
                 if (method !== 'getanchoraction') return null;
                 let r = db.checkpoints.find(c => c.chain === params.chain && c.network === params.network &&
                     Number(c.block_index) === Number(params.block_index));
-                if (!r) return { exists: false, confirmations: 0 };
+                if (!r) return { exists: false, checkpoint_anchored: false, confirmations: 0 };
                 return {
-                    exists: true, status: 'valid', version: 0, confirmations: self.pub.dogeConfirmations,
+                    exists: true, checkpoint_anchored: true, status: 'valid',
+                    version: (params.version != null) ? Number(params.version) : 0,
+                    txid: params.txid || 'onchain-txid',
+                    confirmations: self.pub.dogeConfirmations,
                     block_hash: r.block_hash, ledger_hash: r.ledger_hash,
                     actions_hash: r.actions_hash, contract_hash: r.contract_hash,
                     state_root: r.state_root || null, block_merkle_root: r.block_merkle_root || null
@@ -1519,6 +1528,52 @@ describe('StateAnchorPublisher', function () {
             'back-fill still applies (rows re-archive on a fresh seq if the checkpoint later confirms)').to.equal(9);
     });
 
+    // ── XANC-ELECTED-FORGE-1 (archive half): bind the v1 archive txid ────────────
+    // Proving the CHECKPOINT is anchored is not enough: an elected leader could
+    // reference a real-but-different anchored checkpoint and still mirror itself the
+    // anchor_archive reward, which is LIVE (not retired by the anchor-reward flag-day).
+
+    it('a FINALIZED binds the announced archive txid and v1 version to the indexer lookup', async function () {
+        let bus = buildMesh(2);
+        let follower = bus.nodes[0];
+        let leader   = bus.nodes[1];
+        follower.pub._recordObservedArchiveLeader(11, leader.pubkey, CP_ROW);
+        let seen = null;
+        follower.pub._indexerCall = async (coin, method, params) => {
+            seen = params;
+            return { exists: true, checkpoint_anchored: true, status: 'valid', version: Number(params.version),
+                     confirmations: follower.pub.dogeConfirmations, txid: params.txid,
+                     block_hash: CP_ROW.block_hash, ledger_hash: CP_ROW.ledger_hash,
+                     actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash };
+        };
+        let fMatches = [matchRow('m1', 'finalized')];
+        await follower.pub._handleFinalized({ data: {
+            batch_seq: 11, txid: 'ab'.repeat(32), snapshot_block: 100, matches: fMatches, calls: [], rewards: [],
+            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(11, 'ab'.repeat(32), fMatches.length))
+        }});
+        expect(seen.txid, 'archive gate binds the announced v1 head txid').to.equal('ab'.repeat(32));
+        expect(seen.version, 'archive gate binds ANCHOR v1').to.equal(1);
+        expect(follower.rewards.some(r => r.type === 'anchor_archive'),
+            'a verified archive anchor mirrors the reward').to.equal(true);
+    });
+
+    it('a FINALIZED naming a txid that is NOT the on-chain archive earns no reward', async function () {
+        let bus = buildMesh(2);
+        let follower = bus.nodes[0];
+        let leader   = bus.nodes[1];
+        follower.pub._recordObservedArchiveLeader(12, leader.pubkey, CP_ROW);
+        // The checkpoint IS anchored, but no v1 archive with the announced txid exists:
+        // the elected leader is referencing someone else's anchor.
+        follower.pub._indexerCall = async () => ({ exists: false, checkpoint_anchored: true, confirmations: 0 });
+        let fMatches = [matchRow('m1', 'finalized')];
+        await follower.pub._handleFinalized({ data: {
+            batch_seq: 12, txid: 'ff'.repeat(32), snapshot_block: 100, matches: fMatches, calls: [], rewards: [],
+            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(12, 'ff'.repeat(32), fMatches.length))
+        }});
+        expect(follower.rewards.some(r => r.type === 'anchor_archive'),
+            'referencing a different anchor earns nothing').to.equal(false);
+    });
+
     it('a FINALIZED whose announced status diverges from the local row is rejected (unsigned content)', async function () {
         // XANC-FINALIZED-CONTENT-1: the XANCFIN canonical binds only (batch_seq,
         // txid, match COUNT), so a Byzantine ELECTED leader could announce
@@ -1867,8 +1922,10 @@ describe('StateAnchorPublisher', function () {
         it('ACCEPTS when the DOGE indexer confirms the anchor at depth with matching hashes', async function () {
             let bus = buildMesh(3);
             let { publisher, receiver, d } = electedV0Done(bus, 'ab'.repeat(32));
+            // Honest indexer: the announced txid is the tx the anchor landed in.
             receiver.pub._indexerCall = async (coin, method, params) => Object.assign(
-                { exists: true, status: 'valid', version: 0, confirmations: 60 }, matching);
+                { exists: true, checkpoint_anchored: true, status: 'valid', version: 0,
+                  confirmations: 60, txid: params.txid }, matching);
             await receiver.pub._handleV0Done({ type: 'XANC_V0_DONE', sender: publisher.pubkey, data: d });
             expect(receiver.db.checkpoints[0].anchor_txid, 'confirmed anchor stamps').to.equal('ab'.repeat(32));
             expect(receiver.rewards.filter(r => r.type === 'anchor_BTC').length, 'confirmed anchor mirrors reward').to.equal(1);
@@ -1881,6 +1938,58 @@ describe('StateAnchorPublisher', function () {
             await receiver.pub._handleV0Done({ type: 'XANC_V0_DONE', sender: publisher.pubkey, data: d });
             expect(receiver.db.checkpoints[0].anchor_txid, 'phantom anchor must not stamp (suppression blocked)').to.equal(null);
             expect(receiver.rewards.length, 'phantom anchor must not mirror a reward').to.equal(0);
+        });
+
+        // ── XANC-ELECTED-FORGE-1 (v0 half): the announced txid is now BOUND ──────
+        // The election gate proves the sender is an elected publisher; it does NOT
+        // prove the sender published THIS anchor. Before the txid binding, an elected
+        // publisher could announce any txid for a checkpoint that happened to be
+        // anchored, stamp it, and suppress the real anchor via `anchor_txid IS NULL`.
+
+        it('REJECTS a fabricated txid for a checkpoint that IS anchored (elected-publisher forge)', async function () {
+            let bus = buildMesh(3);
+            let { publisher, receiver, d } = electedV0Done(bus, 'ff'.repeat(32));
+            // Checkpoint is genuinely anchored, but by a DIFFERENT transaction: the
+            // filtered lookup misses, and checkpoint_anchored marks it a positive forge.
+            receiver.pub._indexerCall = async () => ({ exists: false, checkpoint_anchored: true, confirmations: 0 });
+            await receiver.pub._handleV0Done({ type: 'XANC_V0_DONE', sender: publisher.pubkey, data: d });
+            expect(receiver.db.checkpoints[0].anchor_txid, 'forged txid must not stamp').to.equal(null);
+            expect(receiver.rewards.length, 'forged txid must not mirror a reward').to.equal(0);
+        });
+
+        it('REJECTS when the indexer returns an anchor whose txid differs from the announced one', async function () {
+            let bus = buildMesh(3);
+            let { publisher, receiver, d } = electedV0Done(bus, 'ab'.repeat(32));
+            // An indexer that ignored the filter and returned the newest anchor instead.
+            receiver.pub._indexerCall = async () => Object.assign(
+                { exists: true, checkpoint_anchored: true, status: 'valid', version: 0,
+                  confirmations: 60, txid: 'cd'.repeat(32) }, matching);
+            await receiver.pub._handleV0Done({ type: 'XANC_V0_DONE', sender: publisher.pubkey, data: d });
+            expect(receiver.db.checkpoints[0].anchor_txid, 'unbound anchor must not stamp').to.equal(null);
+        });
+
+        it('FAILS CLOSED against an indexer too old to return a txid (roll indexers first)', async function () {
+            let bus = buildMesh(3);
+            let { publisher, receiver, d } = electedV0Done(bus, 'ab'.repeat(32));
+            // Pre-filter indexer: ignores the txid param, response carries no txid.
+            receiver.pub._indexerCall = async () => Object.assign(
+                { exists: true, status: 'valid', version: 0, confirmations: 60 }, matching);
+            await receiver.pub._handleV0Done({ type: 'XANC_V0_DONE', sender: publisher.pubkey, data: d });
+            expect(receiver.db.checkpoints[0].anchor_txid, 'unbindable anchor must not stamp').to.equal(null);
+            expect(receiver.rewards.length, 'unbindable anchor must not mirror a reward').to.equal(0);
+        });
+
+        it('passes the announced txid to the indexer as a filter', async function () {
+            let bus = buildMesh(3);
+            let { publisher, receiver, d } = electedV0Done(bus, 'ab'.repeat(32));
+            let seen = null;
+            receiver.pub._indexerCall = async (coin, method, params) => {
+                seen = params;
+                return Object.assign({ exists: true, checkpoint_anchored: true, status: 'valid', version: 0,
+                                       confirmations: 60, txid: params.txid }, matching);
+            };
+            await receiver.pub._handleV0Done({ type: 'XANC_V0_DONE', sender: publisher.pubkey, data: d });
+            expect(seen.txid, 'V0_DONE binds the announced txid').to.equal('ab'.repeat(32));
         });
 
         it('ABSTAINS when the anchor is SHALLOWER than XCHAIN_CONFIRMATIONS_DOGE', async function () {
