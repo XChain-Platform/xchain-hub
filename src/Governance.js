@@ -323,7 +323,12 @@ class Governance extends EventEmitter {
     _handleMessage(envelope) {
         switch (envelope.type) {
             case GOV_PROPOSE: this._handlePropose(envelope); break;
-            case GOV_VOTE:    this._handleVote(envelope);    break;
+            case GOV_VOTE:
+                // async (a proposal-window lookup): surface rejections instead of
+                // letting them escape the gossip dispatcher as an unhandled rejection.
+                this._handleVote(envelope).catch(e =>
+                    console.error('Governance: GOV_VOTE handler error:', e && e.message ? e.message : e));
+                break;
             case GOV_RESULT:
                 // async: a rejection out of the gossip dispatcher would be an
                 // unhandled rejection (process exit), so catch and log here.
@@ -334,7 +339,7 @@ class Governance extends EventEmitter {
     }
 
     _handlePropose(envelope) {
-        let { proposalId, parameter, currentValue, proposedValue, rationale, proposerPubkey, votingEnd, activationBlock } = envelope.data;
+        let { proposalId, parameter, currentValue, proposedValue, rationale, proposerPubkey, activationBlock } = envelope.data;
         if (!proposalId || !parameter) return;
 
         // Only registered validators may seed a proposal into every hub's DB. Without
@@ -422,20 +427,33 @@ class Governance extends EventEmitter {
             return;
         }
 
+        // Compute voting_end LOCALLY (voting_start = NOW() + votingPeriod) rather than
+        // trusting the proposer-supplied wire value (GOV-VOTINGEND-FORGE-1). votingPeriod
+        // is a required federation-uniform constant, so every honest hub derives the same
+        // window within gossip-delivery skew (seconds), far inside the >=60s tally margin.
+        // Trusting the wire value let a single Byzantine validator broadcast a raw
+        // GOV_PROPOSE with a far-future votingEnd: the row's voting_end <= NOW() never
+        // matches in _checkExpiredProposals, so it is never tallied and never leaves
+        // 'voting', and propose() then refuses every honest proposal for that parameter
+        // ('Active proposal already exists') -- permanent governance censorship of that
+        // knob, repeatable across every parameter. GOV_RESULT also trusts this voting_end
+        // in its early-result guard, so a forged future window blocks recovery too.
+        let localVotingEnd = new Date(Date.now() + this.votingPeriod);
+
         this.db.doQuery(
             `INSERT IGNORE INTO governance_proposals
                 (proposal_id, proposer_pubkey, parameter, current_value, proposed_value,
                  rationale, status, voting_start, voting_end, activation_block)
              VALUES (?, ?, ?, ?, ?, ?, 'voting', NOW(), ?, ?)`,
             [proposalId, proposerPubkey || '', parameter, currentValue, proposedValue,
-             rationale || '', votingEnd, activation]
+             rationale || '', localVotingEnd, activation]
         ).catch(e => console.error('Governance: failed to persist inbound proposal ' + proposalId + ':', e));
         // INSERT IGNORE already absorbs a duplicate proposal_id without raising, so the only
         // failures reaching here are real (dropped DB connection, deadlock, value-too-long,
         // schema drift). Logging them ties "why didn't node X vote on proposal P?" to its cause.
     }
 
-    _handleVote(envelope) {
+    async _handleVote(envelope) {
         let { proposalId, vote, voterPubkey, signature } = envelope.data;
         if (!proposalId || !vote || !voterPubkey) return;
 
@@ -456,6 +474,24 @@ class Governance extends EventEmitter {
         if (!this.validatorSet.some(v => String(v.pubkey).toLowerCase() === pk)) return;
         let payload = JSON.stringify({ proposalId, vote, voter: voterPubkey });
         if (!ValidatorIdentity.verify(payload, String(signature || ''), voterPubkey)) return;
+
+        // Drop a gossiped vote for a proposal that is not OPEN on this hub (GOV-LATEVOTE-1).
+        // The honest vote() path already refuses a vote once voting_end has passed, but this
+        // gossip-acceptance path had no such guard, so a validly-signed GOV_VOTE broadcast in
+        // the window between voting_end and the leader's tally tick (<= tallyInterval) was
+        // upserted and counted, letting a boundary proposal be flipped after its close.
+        // Require a local status='voting' row whose voting_end is still in the future; a
+        // proposal this hub never recorded (no row) is dropped rather than counted blind.
+        let prows;
+        try {
+            prows = await this.db.doQuery(
+                "SELECT voting_end FROM governance_proposals WHERE proposal_id = ? AND status = 'voting' LIMIT 1",
+                [proposalId]);
+        } catch (e) {
+            console.error('Governance: failed to look up proposal for inbound vote ' + proposalId + ':', e && e.message ? e.message : e);
+            return;
+        }
+        if (!prows.length || new Date(prows[0].voting_end).getTime() < Date.now()) return;
 
         this.db.doQuery(
             `INSERT INTO governance_votes (proposal_id, voter_pubkey, vote, signature)

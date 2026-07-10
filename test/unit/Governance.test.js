@@ -566,6 +566,26 @@ describe('Governance', function () {
             expect(hub.db.doQuery.getCall(0).args[0]).to.include('INSERT IGNORE');
         });
 
+        it('_handlePropose IGNORES a far-future wire votingEnd and recomputes voting_end locally (GOV-VOTINGEND-FORGE-1)', function () {
+            // A single Byzantine validator sets votingEnd to year 3000: if trusted, the row's
+            // voting_end never reaches NOW(), so it is never tallied, never leaves 'voting', and
+            // propose() then refuses every honest proposal for 'P' forever (permanent censorship).
+            gov._handlePropose({
+                sender: 'peer', type: 'GOV_PROPOSE',
+                data: {
+                    proposalId: 'gov:P:1', parameter: 'P',
+                    currentValue: '100', proposedValue: '120',
+                    rationale: 'censor', proposerPubkey: 'abc',
+                    votingEnd: '3000-01-01T00:00:00Z'
+                }
+            });
+            expect(hub.db.doQuery.getCall(0).args[0]).to.include('INSERT IGNORE');
+            let persistedVotingEnd = new Date(hub.db.doQuery.getCall(0).args[1][6]).getTime();
+            let expected = Date.now() + gov.votingPeriod;
+            // Locally recomputed to ~now + votingPeriod, NOT the year-3000 wire value.
+            expect(Math.abs(persistedVotingEnd - expected)).to.be.lessThan(10000);
+        });
+
         it('_handlePropose DROPS an inbound CAPABILITY_*_MIN_STAKE proposal (pinned #4352)', function () {
             gov._handlePropose({
                 sender: 'peer', type: 'GOV_PROPOSE',
@@ -612,16 +632,51 @@ describe('Governance', function () {
             expect(hub.db.doQuery.getCall(0).args[0]).to.include('INSERT IGNORE');
         });
 
-        it('_handleVote persists a registered validator vote with a valid signature', function () {
+        it('_handleVote persists a registered validator vote with a valid signature (proposal still open)', async function () {
             let kp  = ValidatorIdentity.generate();
             let idn = new ValidatorIdentity(kp.privkeyHex);
             gov.setValidatorSet([...VALIDATORS_3, { pubkey: kp.pubkeyHex, addr: 'ws://voter:1' }]);
+            // Proposal-open lookup (GOV-LATEVOTE-1 guard) resolves to a future voting_end.
+            hub.db.doQuery.withArgs(sinon.match(/SELECT voting_end FROM governance_proposals/))
+                .resolves([{ voting_end: new Date(Date.now() + 86400000) }]);
             let sig = idn.sign(JSON.stringify({ proposalId: 'gov:P:1', vote: 'approve', voter: kp.pubkeyHex }));
-            gov._handleVote({
+            await gov._handleVote({
                 sender: 'peer', type: 'GOV_VOTE',
                 data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: kp.pubkeyHex, signature: sig }
             });
-            expect(hub.db.doQuery.called).to.be.true;
+            expect(hub.db.doQuery.calledWithMatch(sinon.match(/INSERT INTO governance_votes/)),
+                'the vote row is inserted').to.be.true;
+        });
+
+        it('_handleVote DROPS a validly-signed vote whose proposal window has closed (GOV-LATEVOTE-1)', async function () {
+            let kp  = ValidatorIdentity.generate();
+            let idn = new ValidatorIdentity(kp.privkeyHex);
+            gov.setValidatorSet([...VALIDATORS_3, { pubkey: kp.pubkeyHex, addr: 'ws://voter:1' }]);
+            // The proposal is still 'voting' but voting_end has already elapsed: the honest
+            // vote() path refuses this; the gossip path must too, or a post-close vote is tallied.
+            hub.db.doQuery.withArgs(sinon.match(/SELECT voting_end FROM governance_proposals/))
+                .resolves([{ voting_end: new Date(Date.now() - 1000) }]);
+            let sig = idn.sign(JSON.stringify({ proposalId: 'gov:P:1', vote: 'approve', voter: kp.pubkeyHex }));
+            await gov._handleVote({
+                sender: 'peer', type: 'GOV_VOTE',
+                data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: kp.pubkeyHex, signature: sig }
+            });
+            expect(hub.db.doQuery.calledWithMatch(sinon.match(/INSERT INTO governance_votes/)),
+                'no vote row inserted for a closed proposal').to.be.false;
+        });
+
+        it('_handleVote DROPS a validly-signed vote for a proposal this hub never recorded (GOV-LATEVOTE-1)', async function () {
+            let kp  = ValidatorIdentity.generate();
+            let idn = new ValidatorIdentity(kp.privkeyHex);
+            gov.setValidatorSet([...VALIDATORS_3, { pubkey: kp.pubkeyHex, addr: 'ws://voter:1' }]);
+            hub.db.doQuery.withArgs(sinon.match(/SELECT voting_end FROM governance_proposals/)).resolves([]);
+            let sig = idn.sign(JSON.stringify({ proposalId: 'gov:GHOST:1', vote: 'approve', voter: kp.pubkeyHex }));
+            await gov._handleVote({
+                sender: 'peer', type: 'GOV_VOTE',
+                data: { proposalId: 'gov:GHOST:1', vote: 'approve', voterPubkey: kp.pubkeyHex, signature: sig }
+            });
+            expect(hub.db.doQuery.calledWithMatch(sinon.match(/INSERT INTO governance_votes/)),
+                'no vote row inserted with no local proposal').to.be.false;
         });
 
         it('_handleVote REJECTS a vote whose voterPubkey is not a registered validator (C-1 vote-stuffing guard)', function () {

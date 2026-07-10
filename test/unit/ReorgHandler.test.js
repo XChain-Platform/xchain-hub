@@ -267,6 +267,74 @@ describe('ReorgHandler', function () {
             expect(verify.called, 'no probe for a hashless alert').to.be.false;
         });
 
+        it('_handleAlert drops an ALERT whose reorgId is not the canonical chain:height:timestamp (REORG-INBOUND-UNBOUNDED-ROUNDS-1)', async function () {
+            rh.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+            let verify = stubVerified(true);
+            let ts = Date.now();
+            // Real (chain, height, timestamp) but an attacker-minted reorgId string: without
+            // the binding this would create a fresh round (and PREPARE fan-out) per distinct id.
+            await rh._handleAlert({
+                sender: VALIDATORS_4[1].addr,
+                data: { chain: 'BTC', reorgHeight: 500, timestamp: ts, reorgId: 'FORGED:' + ts,
+                        oldHash: OLD_HASH, newHash: NEW_HASH }
+            });
+            expect(rh.pendingReorgs.size, 'no round created for a non-canonical reorgId').to.equal(0);
+            expect(verify.called, 'dropped before the indexer probe').to.be.false;
+        });
+
+        it('_handleAlert abstains at the concurrent-round cap (REORG-INBOUND-UNBOUNDED-ROUNDS-1)', async function () {
+            rh.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+            let verify = stubVerified(true);
+            rh.maxPendingReorgs = 1;
+            rh.pendingReorgs.set('BTC:1:1', { reorgId: 'BTC:1:1', timer: null });   // at cap
+            let ts = Date.now();
+            await rh._handleAlert({
+                sender: VALIDATORS_4[1].addr,
+                data: { chain: 'BTC', reorgHeight: 500, timestamp: ts, reorgId: 'BTC:500:' + ts,
+                        oldHash: OLD_HASH, newHash: NEW_HASH }
+            });
+            expect(rh.pendingReorgs.has('BTC:500:' + ts), 'no new round past the cap').to.be.false;
+            expect(verify.called, 'cap checked before the indexer probe').to.be.false;
+        });
+
+        it('_handlePrepare drops a PREPARE whose reorgId is not canonical (REORG-INBOUND-UNBOUNDED-ROUNDS-1)', async function () {
+            rh.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+            let verify = stubVerified(true);
+            let ts = Date.now();
+            let reorgId = 'FORGED:' + ts;
+            let digest = rh._digest(reorgId, 'LTC', 300, ts, OLD_HASH, NEW_HASH);
+            await rh._handlePrepare({
+                sender: VALIDATORS_4[1].addr,
+                data: { reorgId, chain: 'LTC', reorgHeight: 300, timestamp: ts,
+                        affectedChains: ['BTC', 'DOGE'], digest, oldHash: OLD_HASH, newHash: NEW_HASH }
+            });
+            expect(rh.pendingReorgs.has(reorgId), 'no round for a non-canonical reorgId').to.be.false;
+            expect(verify.called, 'dropped before the indexer probe').to.be.false;
+        });
+
+        it('reportReorg does NOT consume the rate budget when self-verification fails (REORG-RATELIMIT-BEFORE-VERIFY-1)', async function () {
+            rh.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+            let verify = sinon.stub(rh, '_verifyReorgAgainstOwnNode');
+            verify.onFirstCall().resolves(false);   // local node momentarily lagging
+            verify.onSecondCall().resolves(true);    // re-synced on the retry
+            let ts = Date.now();
+
+            let threw = false;
+            try { await rh.reportReorg('BTC', 500000, ts, OLD_HASH, NEW_HASH); }
+            catch (e) { threw = true; expect(e.message).to.match(/own indexer does not confirm/); }
+            expect(threw, 'the failed report throws').to.be.true;
+            expect(rh.reorgRateTracker.has('BTC'), 'a failed verify does not burn the 60s budget').to.be.false;
+
+            // The retry (node now synced) is therefore not rate-limited and broadcasts the ALERT.
+            await rh.reportReorg('BTC', 500001, ts + 1, OLD_HASH, NEW_HASH);
+            expect(pm.broadcast.getCalls().some(c => c.args[0] === 'REORG_ALERT'),
+                'the genuine retry is not blocked by the rate limit').to.be.true;
+        });
+
         it('_handlePrepare (leader-bypass path) abstains when verification fails', async function () {
             rh.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[0].addr;

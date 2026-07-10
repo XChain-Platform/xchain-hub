@@ -105,6 +105,20 @@ class ReorgHandler extends EventEmitter {
         // burst of ALERT+PREPARE for the same reorg shares one pair of indexer calls
         // instead of re-querying per message (async handlers are reentrant).
         this._verifying = new Map();
+
+        // Cap on concurrent consensus rounds. The inbound ALERT/PREPARE paths are not
+        // rate-limited (only the local reportReorg path is), so a burst of distinct
+        // reorgIds could otherwise grow pendingReorgs without bound and fan a PREPARE to
+        // every peer per entry (REORG-INBOUND-UNBOUNDED-ROUNDS-1). Rounds self-expire on
+        // the timeout, so this only bounds a burst; a real reorg needs one round per chain.
+        this.maxPendingReorgs = parseInt(process.env.REORG_MAX_PENDING) || 64;
+    }
+
+    // The canonical reorgId for an observation. Honest reporters build it from these exact
+    // fields (see reportReorg), so an inbound ALERT/PREPARE whose wire reorgId differs is
+    // either malformed or an attempt to mint many distinct rounds from one observation.
+    _canonicalReorgId(chain, reorgHeight, timestamp) {
+        return chain + ':' + reorgHeight + ':' + timestamp;
     }
 
     // Whether a reorg timestamp is within the acceptable recent window. Shared by the
@@ -191,13 +205,18 @@ class ReorgHandler extends EventEmitter {
             throw new Error('oldHash and newHash must be distinct 64-hex block hashes ' +
                 '(the hash observed at reorgHeight before the reorg, and the one served now)');
 
-        // Rate limit: 1 report per chain per 60 seconds
+        // Rate limit: 1 report per chain per 60 seconds. CHECK the budget here, but do
+        // NOT consume it until the report actually passes self-verification and will be
+        // acted on (below). Consuming it up-front let a report that fails verification
+        // (typically a momentarily-lagging local node during a real reorg, or a duplicate
+        // early-return) burn the 60s window, so the operator's retry after the node
+        // re-syncs was rejected exactly when the genuine ALERT needed to go out
+        // (REORG-RATELIMIT-BEFORE-VERIFY-1).
         let lastReport = this.reorgRateTracker.get(chain) || 0;
         if (now - lastReport < 60000)
             throw new Error('Rate limit: only one reorg report per chain per 60 seconds');
-        this.reorgRateTracker.set(chain, now);
 
-        let reorgId = chain + ':' + reorgHeight + ':' + timestamp;
+        let reorgId = this._canonicalReorgId(chain, reorgHeight, timestamp);
 
         if (this.processed.has(reorgId)) return;
 
@@ -205,6 +224,10 @@ class ReorgHandler extends EventEmitter {
         if (!(await this._verifyReorgAgainstOwnNode(chain, h, oldHash, newHash)))
             throw new Error('own indexer does not confirm this reorg ' +
                 '(node must serve newHash at reorgHeight, within depth bounds, on the federation network)');
+
+        // Verified and about to act: now consume the per-chain rate budget (covers both
+        // the single-node local-execute path and the broadcast+consensus path below).
+        this.reorgRateTracker.set(chain, now);
 
         // Single-node fallback
         let quorum = this._getQuorum();
@@ -260,8 +283,17 @@ class ReorgHandler extends EventEmitter {
         if (!this._isKnownSender(envelope.sender)) return;
         let { chain, reorgHeight, timestamp, reorgId, oldHash, newHash } = envelope.data;
         if (!chain || !reorgHeight || !timestamp || !reorgId) return;
+        // Bind reorgId to its canonical (chain:reorgHeight:timestamp) form so one valid
+        // observation cannot spawn unlimited distinct rounds (REORG-INBOUND-UNBOUNDED-ROUNDS-1):
+        // the self-verify in-flight key excludes reorgId/timestamp, so without this a Byzantine
+        // validator could re-broadcast the same real (height,newHash) under endless reorgId
+        // strings, each creating a fresh round + PREPARE fan-out. Honest reporters always send
+        // this exact form (reportReorg), so legitimate ALERTs are unaffected.
+        if (reorgId !== this._canonicalReorgId(chain, reorgHeight, timestamp)) return;
         if (this.processed.has(reorgId)) return;
         if (this.pendingReorgs.has(reorgId)) return;
+        // Abstain when already at the concurrent-round cap (a later ALERT retries).
+        if (this.pendingReorgs.size >= this.maxPendingReorgs) return;
 
         // Refuse to even start consensus on an out-of-window reorg. An honest majority
         // applying this bound denies a Byzantine reporter the quorum to drive a rollback
@@ -341,6 +373,12 @@ class ReorgHandler extends EventEmitter {
         if (!this._isKnownSender(envelope.sender)) return;
         let { reorgId, chain, reorgHeight, timestamp, affectedChains, digest, oldHash, newHash } = envelope.data;
         if (!reorgId || !digest) return;
+        // Same canonical-reorgId binding as _handleAlert: reject a PREPARE whose reorgId is
+        // not the canonical form of its own (chain,reorgHeight,timestamp), so the round-
+        // creation path here cannot be driven with attacker-minted reorgId strings
+        // (REORG-INBOUND-UNBOUNDED-ROUNDS-1).
+        if (!chain || !reorgHeight || !timestamp) return;
+        if (reorgId !== this._canonicalReorgId(chain, reorgHeight, timestamp)) return;
 
         // A follower must not co-sign a reorg it would not itself accept: apply the same
         // blast-radius bound as _handleAlert so a Byzantine leader can't gather quorum
@@ -358,6 +396,10 @@ class ReorgHandler extends EventEmitter {
 
         if (!this.pendingReorgs.has(reorgId)) {
             if (this.processed.has(reorgId)) return;
+            // Abstain when already at the concurrent-round cap, BEFORE the indexer probe,
+            // so a burst of distinct rounds can neither grow pendingReorgs without bound
+            // nor amplify self-verification RPCs (REORG-INBOUND-UNBOUNDED-ROUNDS-1).
+            if (this.pendingReorgs.size >= this.maxPendingReorgs) return;
 
             // Leader-bypass path (we never saw the ALERT): verify against our own
             // node BEFORE creating the round. On failure we abstain entirely; a
