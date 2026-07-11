@@ -155,6 +155,55 @@ describe('OracleConsensus: follower price validation / minSubmissions / broadcas
         expect(insertCalls[0].sql).to.include("'finalized'");
     });
 
+    // #1452: the co-sign gate must reject any proposed pair outside the canonical
+    // whitelist (the SAME set ingest enforces via OracleRound.canonicalPairs). A
+    // fabricated pair has no live local aggregate and no finalized history, so both
+    // deviation gates are absent and it would otherwise finalize on the PRICE_MAX
+    // bound alone - a single Byzantine leader price-injection path.
+    it('rejects (no sign/PREPARE) a proposal carrying a non-canonical pair', async function () {
+        oracleRound.canonicalPairs = new Set(['BTC/USD', 'XCHAIN/USD']);
+        oracleRound.getSubmissions.returns(new Map()); // no local aggregate: only bound + whitelist apply
+        // Honest aggregate for a canonical pair PLUS one fabricated pair the fetcher never serves.
+        await oc._handlePropose(proposeEnvelope([
+            { coinPair: 'BTC/USD', price: '100000' },
+            { coinPair: 'BTC/ZZZ', price: '123' }        // fabricated, in-range price
+        ]));
+        expect(oc.pendingRounds.has(ROUND)).to.be.false; // withheld
+        expect(pm.broadcast.called).to.be.false;
+    });
+
+    it('emits oracle:propose-rejected with reason non-canonical-pair for a fabricated pair', async function () {
+        oracleRound.canonicalPairs = new Set(['BTC/USD']);
+        oracleRound.getSubmissions.returns(new Map());
+        let events = [];
+        oc.on('oracle:propose-rejected', e => events.push(e));
+        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/ZZZ', price: '123' }]));
+        expect(oc.pendingRounds.has(ROUND)).to.be.false;
+        expect(events).to.have.length(1);
+        expect(events[0].reason).to.equal('non-canonical-pair');
+        expect(events[0].coinPair).to.equal('BTC/ZZZ');
+        expect(events[0].round).to.equal(ROUND);
+    });
+
+    it('accepts an all-canonical proposal when the whitelist is active (no false positives)', async function () {
+        oracleRound.canonicalPairs = new Set(['BTC/USD', 'XCHAIN/USD']);
+        oracleRound.getSubmissions.returns(new Map());
+        await oc._handlePropose(proposeEnvelope([
+            { coinPair: 'BTC/USD', price: '100000' },
+            { coinPair: 'XCHAIN/USD', price: '0.50000000' }
+        ]));
+        expect(oc.pendingRounds.has(ROUND)).to.be.true; // co-signed
+    });
+
+    it('fails open: an empty/absent whitelist never withholds on a legitimate pair', async function () {
+        // Bootstrap / misconfig: a stale-empty canonicalPairs must not make honest
+        // followers withhold on real pairs (over-strict = self-inflicted liveness loss).
+        oracleRound.canonicalPairs = new Set();          // size 0 -> whitelist skipped
+        oracleRound.getSubmissions.returns(new Map());
+        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '100000' }]));
+        expect(oc.pendingRounds.has(ROUND)).to.be.true;
+    });
+
     // #3955: a withheld co-sign emits an observability signal so a feed-disagreement
     // timeout is distinguishable from a leader crash.
     it('emits oracle:propose-rejected when a proposed price is withheld', async function () {

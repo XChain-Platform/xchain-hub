@@ -200,6 +200,15 @@ class FullNodeChallengeRound {
 
         // Set<pubkey>: who may SIGN / who may be verified
         let eligible  = await this._eligibleVerifiers(epoch);
+        // Unresolved eligible set (indexer RPC failure): ABSTAIN for this epoch
+        // rather than run on a per-hub-divergent member list. No round state is
+        // created, so this hub neither elects/claims leadership, signs, nor
+        // broadcasts a verdict; a later tick re-attempts once the indexer recovers
+        // (while still inside the verdict-accept window).
+        if(eligible === null){
+            console.warn('FullNodeChallengeRound: epoch=' + epoch + ' skipped (eligible-verifier set unresolved; abstaining rather than running on a genesis-only subset)');
+            return;
+        }
         let claimants = await this._claimantSet(epoch);
         let myPubkey = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
 
@@ -471,6 +480,19 @@ class FullNodeChallengeRound {
     // Eligible verifiers at the epoch block: verified full nodes (from the
     // indexer) union configured genesis verifiers. Matches the indexer's acceptance
     // rule in nodeproof.js so a quorum the hub assembles is one the chain accepts.
+    //
+    // CONSENSUS-CRITICAL: the returned set is the domain of leader election
+    // (_electedLeader / _isLeader) and the 2/3+1 quorum denominator (_maybeFinalize).
+    // On an UNRESOLVED set (any indexer RPC failure: 401 / timeout / transport) this
+    // returns null so the caller ABSTAINS (skips the epoch), rather than degrading to
+    // the genesis-only subset. A per-hub, reachability-dependent fallback would split
+    // the federation's view of the member list across honest hubs (divergent leader /
+    // quorum -> duplicate or stalled on-chain NODEPROOF verdicts). This fails CLOSED,
+    // matching _claimantSet in this file and the StateAnchorPublisher / CrossChainEngine
+    // siblings; it trades liveness on a prolonged indexer outage for cross-hub safety.
+    // The legitimate genesis-only path (a genuinely genesis-only federation) is on the
+    // SUCCESS branch, where the indexer returns an empty validators list; only the
+    // error-degradation path changes.
     async _eligibleVerifiers(epoch){
         let set = new Set(this.genesis);
         try {
@@ -483,9 +505,10 @@ class FullNodeChallengeRound {
         } catch(err){
             let status = err && err.response && err.response.status;
             if (status === 401)
-                console.warn('FullNodeChallengeRound: _eligibleVerifiers: 401 Unauthorized from indexer (misconfigured API key?); falling back to genesis-only set');
+                console.warn('FullNodeChallengeRound: _eligibleVerifiers: 401 Unauthorized from indexer (misconfigured API key?); ABSTAINING (skip epoch), NOT degrading to genesis-only');
             else
-                console.warn('FullNodeChallengeRound: _eligibleVerifiers: RPC error (absent/old indexer or transport failure: ' + (err && err.message) + '); falling back to genesis-only set');
+                console.warn('FullNodeChallengeRound: _eligibleVerifiers: RPC error (absent/old indexer or transport failure: ' + (err && err.message) + '); ABSTAINING (skip epoch), NOT degrading to genesis-only');
+            return null;
         }
         return set;
     }

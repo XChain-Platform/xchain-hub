@@ -700,6 +700,21 @@ class OracleConsensus extends EventEmitter {
             // float-ULP ambiguity. A reject emits oracle:propose-rejected so a feed-
             // disagreement withhold is distinguishable from a leader crash.
             let devThreshold = ORACLE_DEVIATION_THRESHOLD;
+            // Canonical-pair whitelist for the co-sign gate. Ingest already drops a
+            // fabricated pair (OracleRound.canonicalPairs, built from
+            // PriceFetcher.getCoinPairs()), but the propose path never re-checked it:
+            // a pair the leader invents has no live local aggregate and no finalized
+            // history, so both deviation gates below are structurally absent and it
+            // falls through with only the (0, PRICE_MAX) bound. A single Byzantine
+            // round-robin leader could thus get a non-canonical pair (e.g. BTC/ZZZ)
+            // quorum co-signed and finalized. Read the SAME set the ingest path uses
+            // (this.oracleRound.canonicalPairs) so the two cannot drift. Fail-open on
+            // an empty/absent whitelist (bootstrap / misconfig) so honest followers
+            // never withhold on legitimate pairs when the source is momentarily stale.
+            let canonicalPairs = (this.oracleRound &&
+                this.oracleRound.canonicalPairs && this.oracleRound.canonicalPairs.size)
+                ? this.oracleRound.canonicalPairs
+                : null;
             let reject = (coinPair, detail, extra) => {
                 console.warn('Oracle: rejecting PROPOSE round ' + round + ' from ' + envelope.sender +
                     ': ' + coinPair + ' ' + detail);
@@ -710,6 +725,15 @@ class OracleConsensus extends EventEmitter {
                 if (!(Number.isFinite(val) && val > 0 && val < PRICE_MAX)) {
                     reject(p.coinPair, 'price ' + p.price + ' outside (0, PRICE_MAX)',
                         { reason: 'out-of-range', proposed: String(p.price) });
+                    return;
+                }
+                // Canonical-pair membership: withhold co-sign on any pair ingest would
+                // have dropped, closing the fabricated-pair injection path (same fail-safe
+                // withhold path as a deviation disagreement). Skipped when the whitelist is
+                // empty/absent so a stale source cannot freeze honest followers.
+                if (canonicalPairs && !canonicalPairs.has(p.coinPair)) {
+                    reject(p.coinPair, 'pair not in canonical whitelist',
+                        { reason: 'non-canonical-pair', proposed: String(p.price) });
                     return;
                 }
                 let local = localByPair.get(p.coinPair);
@@ -1010,41 +1034,83 @@ class OracleConsensus extends EventEmitter {
         if (this._quorumMet(pending, pending.commits)) {
             pending.finalized = true;
             if (pending.timer) clearTimeout(pending.timer);
-
-            let validatorCount = pending.prepares.size;
-            let proof = JSON.stringify([...pending.commits]);
-
-            this._storeSnapshot(round, pending.prices, validatorCount, proof, pending.btcBlockHeight, pending.btcBlockTime)
-                .then(() => {
-                    this._markFinalized(round);
-                    this.pendingRounds.delete(round);
-                    this._clearRoundTracking(round);
-                    console.log('Oracle: Round ' + round + ' finalized (' +
-                        pending.prepares.size + ' prepares, ' +
-                        pending.commits.size + ' commits)');
-
-                    // Convert collected signatures to the [{pubkey, sig}, ...] array format used by OraclePublisher
-                    let sigsArray = [];
-                    for (let [pubkey, sig] of pending.signatures) {
-                        sigsArray.push({ pubkey: pubkey, sig: sig });
-                    }
-
-                    this.emit('round:finalized', {
-                        round:          round,
-                        btcBlockHeight: pending.btcBlockHeight,
-                        btcBlockTime:   pending.btcBlockTime,
-                        prices:         pending.prices,
-                        participants:   [...pending.prepares],
-                        signatures:     sigsArray,
-                        submissions:    this.oracleRound.getSubmissions(round)
-                    });
-                })
-                .catch(err => {
-                    console.error('Oracle: Error storing snapshot for round ' + round + ':', err.message);
-                    this.pendingRounds.delete(round);
-                    this._clearRoundTracking(round);
-                });
+            // Fire-and-forget (mirrors the prior promise-chain behavior); durability,
+            // retry, and re-drive-on-failure live in _finalizeCommittedRound.
+            this._finalizeCommittedRound(round);
         }
+    }
+
+    // Persist a quorum-finalized round's snapshot, then mark finalized + emit
+    // round:finalized. A round reaching commit quorum carries collected validator
+    // signatures, so a transient DB error while storing MUST NOT silently drop it
+    // (the prior code deleted pending + tracking in the .catch with no retry and no
+    // durable record, leaving pending.finalized already true so replayed COMMITs
+    // could never re-finalize; the round evaporated on a one-off DB hiccup). Retry
+    // the store a bounded number of times; only on durable success do we _markFinalized,
+    // delete round state, and emit. If every attempt fails we do NOT delete round state
+    // and we RESET pending.finalized=false, so a later replayed COMMIT re-enters
+    // _checkCommitQuorum and re-drives finalization instead of the round being lost.
+    async _finalizeCommittedRound(round) {
+        let pending = this.pendingRounds.get(round);
+        if (!pending) return;
+
+        let validatorCount = pending.prepares.size;
+        let proof = JSON.stringify([...pending.commits]);
+
+        const maxAttempts = 3;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                await this._storeSnapshot(round, pending.prices, validatorCount, proof,
+                    pending.btcBlockHeight, pending.btcBlockTime);
+
+                // Persistence succeeded: now (and only now) it is safe to finalize and
+                // drop the in-memory round state.
+                this._markFinalized(round);
+                this.pendingRounds.delete(round);
+                this._clearRoundTracking(round);
+                console.log('Oracle: Round ' + round + ' finalized (' +
+                    pending.prepares.size + ' prepares, ' +
+                    pending.commits.size + ' commits)' +
+                    (attempt > 1 ? ' after ' + attempt + ' store attempts' : ''));
+
+                // Convert collected signatures to the [{pubkey, sig}, ...] array format used by OraclePublisher
+                let sigsArray = [];
+                for (let [pubkey, sig] of pending.signatures) {
+                    sigsArray.push({ pubkey: pubkey, sig: sig });
+                }
+
+                this.emit('round:finalized', {
+                    round:          round,
+                    btcBlockHeight: pending.btcBlockHeight,
+                    btcBlockTime:   pending.btcBlockTime,
+                    prices:         pending.prices,
+                    participants:   [...pending.prepares],
+                    signatures:     sigsArray,
+                    submissions:    this.oracleRound.getSubmissions(round)
+                });
+                return;
+            } catch (err) {
+                console.error('Oracle: Error storing snapshot for round ' + round +
+                    ' (attempt ' + attempt + '/' + maxAttempts + '):', err.message);
+                if (attempt < maxAttempts) {
+                    // Linear backoff between retries for a transient DB hiccup.
+                    await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+                    // The shared tree could have been cleared out from under us by a
+                    // concurrent path; bail if the round is gone.
+                    if (!this.pendingRounds.has(round)) return;
+                }
+            }
+        }
+
+        // Every store attempt failed. Do NOT delete round state and do NOT leave
+        // pending.finalized=true: resetting it lets a subsequent replayed COMMIT
+        // re-enter _checkCommitQuorum and re-drive finalization once the DB recovers,
+        // rather than the quorum-signed round being silently and permanently dropped.
+        console.error('Oracle: Round ' + round + ' snapshot store failed after ' +
+            maxAttempts + ' attempts; retaining round state for re-finalization on the ' +
+            'next COMMIT (round NOT dropped).');
+        let stillPending = this.pendingRounds.get(round);
+        if (stillPending) stillPending.finalized = false;
     }
 
     _aggregateAll(submissions) {

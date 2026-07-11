@@ -225,20 +225,53 @@ describe('FullNodeChallengeRound', function () {
             const set = await eng._eligibleVerifiers(288);
             expect([...set].sort()).to.deep.equal([V1, V2].sort());
         });
-        it('falls back to genesis-only when the verifiers RPC is unavailable', async function () {
+        it('ABSTAINS (returns null) rather than degrading to genesis-only when the verifiers RPC is unavailable', async function () {
+            // Consensus-critical: a per-hub, reachability-dependent fallback to the
+            // genesis-only subset would split leader election and the quorum
+            // denominator across honest hubs. Fail CLOSED instead (see _eligibleVerifiers).
             axiosStub.post.rejects(new Error('no rpc'));
             const eng = new FullNodeChallengeRound(makeHub());
             const set = await eng._eligibleVerifiers(288);
-            expect([...set]).to.deep.equal([V1]);
+            expect(set).to.equal(null);
         });
-        it('falls back to genesis-only on an in-band indexer result.error (200 with error body)', async function () {
+        it('ABSTAINS (returns null) on an in-band indexer result.error (200 with error body)', async function () {
             // The indexer reports failures as result.error, not the top-level JSON-RPC
-            // error envelope; _indexerCall must surface it so a degraded indexer does
-            // not silently widen the verifier set with an error object.
+            // error envelope; _indexerCall surfaces it so a degraded indexer causes an
+            // abstain, not a silently narrowed (genesis-only) verifier set.
             axiosStub.post.callsFake(async () => ({ data: { result: { error: 'indexer unavailable' } } }));
             const eng = new FullNodeChallengeRound(makeHub());
             const set = await eng._eligibleVerifiers(288);
+            expect(set).to.equal(null);
+        });
+        it('a genuinely genesis-only federation still resolves (empty indexer list is NOT an error)', async function () {
+            // Preserve the legitimate genesis-only path: a successful indexer call that
+            // returns no verified full nodes yields the configured genesis set, not an abstain.
+            wireRpc({ verifiers: [] });
+            const eng = new FullNodeChallengeRound(makeHub());       // genesis = [V1]
+            const set = await eng._eligibleVerifiers(288);
             expect([...set]).to.deep.equal([V1]);
+        });
+        it('_runEpoch abstains (creates no round, emits no verdict) when the verifier set is unresolved', async function () {
+            // RPC-failure abstain regression: getblockhashes succeeds (so _runEpoch is
+            // reached) but getfullnodeverifiers fails. The hub must skip the epoch:
+            // no round state, no leadership, no sign request, no verdict broadcast.
+            const block = { tx: [{ vout: [{ scriptPubKey: { hex: 'deadbeef' } }] }] };
+            axiosStub.post.callsFake(async (url, body) => {
+                const m = body.method;
+                if (m === 'getblockhashes')       return { data: { result: { block_index: 288, ledger_hash: SEED } } };
+                if (m === 'getfullnodeverifiers') throw new Error('indexer timeout');
+                if (m === 'getblockhash')         return { data: { result: 'HASH' } };
+                if (m === 'getblock')             return { data: { result: block } };
+                return { data: { result: null } };
+            });
+            const hub = makeHub();
+            const eng = new FullNodeChallengeRound(hub);
+            eng.broadcastFn = sinon.stub().resolves({ txid: 'TX' });
+            await eng._runEpoch(288, 300);
+            expect(eng.rounds.has(288), 'no round state created on abstain').to.equal(false);
+            expect(eng.broadcastFn.called, 'no verdict broadcast on abstain').to.equal(false);
+            const req = hub._pm.broadcast.getCalls().find(c => c.args[0] === 'XNODE_SIGN_REQ');
+            expect(req, 'no sign request on abstain').to.not.exist;
         });
         it('_claimantSet reads the full_node capability snapshot', async function () {
             const hub = makeHub();

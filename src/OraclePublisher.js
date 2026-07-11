@@ -74,6 +74,15 @@ class OraclePublisher {
         this.publishedCount     = 0;
         this.lastPublishedRound = null;
         this.lastPublishedTxid  = null;
+        // In-process at-most-once guard. Round ids broadcast this process lifetime
+        // are recorded here the instant broadcaster(payload) succeeds. If the
+        // post-broadcast queue rewrite fails (disk full, permissions, transient I/O),
+        // the just-published round stays on the durable queue file; without this set
+        // the next _processQueue tick would re-read and RE-BROADCAST it, spending real
+        // DOGE twice for the same round. Consulted before every broadcast so a failed
+        // rewrite can never turn into a duplicate on-chain PRICE. Cleared once the
+        // durable queue is confirmed rewritten (no published round can still be on it).
+        this._publishedRounds   = new Set();
         this.lastObservedBalance = null;
         this.dogeAddress        = process.env.DOGE_ADDRESS || cfg.DOGE_ADDRESS || '';
         this.dogePubkeyHex      = process.env.DOGE_PUBKEY_HEX || cfg.DOGE_PUBKEY_HEX || '';
@@ -377,7 +386,11 @@ class OraclePublisher {
         }
     }
 
-    // Rewrite the queue with the given entries (used after successful publishes)
+    // Rewrite the queue with the given entries (used after successful publishes).
+    // Returns true on a durable rewrite, false if the truncating write failed. The
+    // dequeue side must NOT swallow a failure: on false the just-published rounds are
+    // still on the durable queue, so the caller keeps its in-process dedup guard armed
+    // (preventing re-broadcast) and surfaces the failure loudly for operator repair.
     _rewriteQueue(entries) {
         let lines = entries.map(e => JSON.stringify(e)).join('\n') + (entries.length > 0 ? '\n' : '');
         try {
@@ -385,8 +398,10 @@ class OraclePublisher {
             fs.writeSync(fd, lines);
             fs.fsyncSync(fd);
             fs.closeSync(fd);
+            return true;
         } catch (e) {
             console.error('OraclePublisher: failed to rewrite queue:', e);
+            return false;
         }
     }
 
@@ -411,6 +426,15 @@ class OraclePublisher {
                 continue;
             }
 
+            // At-most-once guard. If this round was already broadcast this process
+            // lifetime, it is only still on the queue because a prior tick's rewrite
+            // failed to truncate it. Re-broadcasting would spend DOGE twice, so drop
+            // the stale entry (do not push to remaining) instead of sending again.
+            if (this._publishedRounds.has(entry.round)) {
+                console.warn('OraclePublisher: round ' + entry.round + ' already broadcast this process lifetime; dropping stale queue entry without re-broadcast (a prior queue rewrite must have failed)');
+                continue;
+            }
+
             let payload = this.buildPriceV0Wire(entry.round, entry.btcBlockTime, entry.prices, entry.sigs, entry.btcBlockHeight);
 
             // Choose broadcast strategy: custom hook overrides, otherwise use the default encoder pipeline
@@ -425,6 +449,10 @@ class OraclePublisher {
                     continue;
                 }
                 let result = await broadcaster(payload);
+                // Record the round as published BEFORE the queue rewrite. This is the
+                // at-most-once anchor: even if the rewrite below fails and leaves this
+                // round on the durable queue, the next tick's guard will skip it.
+                this._publishedRounds.add(entry.round);
                 console.log('OraclePublisher: published round ' + entry.round + ' (txid: ' + (result && result.txid) + ')');
                 this.publishedCount++;
                 this.lastPublishedRound = entry.round;
@@ -440,7 +468,23 @@ class OraclePublisher {
             }
         }
 
-        this._rewriteQueue(remaining);
+        // Dequeue-side rewrite must fail loud, mirroring the enqueue path's "refuse
+        // to ack if queue is unwritable" stance. On success the durable queue now
+        // equals `remaining` (which never holds a published round), so no published
+        // round can still be on disk and the dedup guard can be reset to bound its
+        // growth. On failure the published rounds remain on the queue file: keep the
+        // guard armed (it prevents the re-broadcast) and surface the failure so an
+        // operator repairs the queue before a restart drops the in-memory guard.
+        let rewritten = this._rewriteQueue(remaining);
+        if (rewritten) {
+            this._publishedRounds.clear();
+        } else {
+            console.error('OraclePublisher: CRITICAL - queue rewrite failed after publishing; ' +
+                'published rounds remain on the durable queue at ' + this.queuePath + '. The in-process ' +
+                'dedup guard prevents re-broadcast for this process lifetime, but a restart before the ' +
+                'queue file is repaired would re-broadcast already-published rounds (duplicate DOGE spend). ' +
+                'Fix the queue file writability now.');
+        }
     }
 
     // Snapshot of the publish rail's health for operator diagnostics. Intended to

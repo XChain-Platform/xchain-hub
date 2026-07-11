@@ -509,6 +509,64 @@ describe('OraclePublisher', function () {
         });
     });
 
+    // ── At-most-once under queue-rewrite failure ───────────────────────────────
+    // Regression for the swallowed _rewriteQueue failure that let an already-
+    // published round stay on the durable queue and be re-broadcast on the next
+    // tick, spending real DOGE twice for the same PRICE v0 round.
+    describe('_processQueue() at-most-once under rewrite failure', function () {
+        it('broadcasts a round exactly once even when the post-broadcast queue rewrite keeps failing', async function () {
+            let entry = { round: 7, btcBlockTime: 1700000000, prices: [], sigs: [], attempts: 0 };
+            // The queue file durably retains the entry on every read, simulating a
+            // rewrite that never truncates it (disk full / permissions flip after a
+            // successful broadcast).
+            fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');
+            // Force every queue rewrite (openSync 'w') to fail.
+            fsMock.openSync.throws(new Error('ENOSPC: no space left on device'));
+            let hub = makeHub();
+            let pub = new OraclePublisher(hub);
+            let broadcastStub = sinon.stub().resolves({ txid: 'tx-7' });
+            pub.broadcastFn  = broadcastStub;
+            pub.getBalanceFn = sinon.stub().resolves(50);
+
+            await pub._processQueue(); // tick 1: broadcasts round 7, rewrite fails
+            await pub._processQueue(); // tick 2: entry still on queue; must NOT re-broadcast
+
+            expect(broadcastStub.calledOnce).to.be.true;
+            expect(pub._publishedRounds.has(7)).to.be.true;
+        });
+
+        it('keeps the dedup guard armed and surfaces a CRITICAL error when the rewrite fails', async function () {
+            let entry = { round: 8, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
+            fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');
+            fsMock.openSync.throws(new Error('EACCES: permission denied'));
+            let errStub = sinon.stub(console, 'error');
+            let hub = makeHub();
+            let pub = new OraclePublisher(hub);
+            pub.broadcastFn  = sinon.stub().resolves({ txid: 'tx-8' });
+            pub.getBalanceFn = sinon.stub().resolves(50);
+
+            await pub._processQueue();
+
+            expect(pub._publishedRounds.has(8)).to.be.true;
+            let loggedCritical = errStub.getCalls().some(c => String(c.args[0]).includes('CRITICAL'));
+            expect(loggedCritical).to.be.true;
+        });
+
+        it('clears the dedup guard after a successful queue rewrite so it does not grow unbounded', async function () {
+            let entry = { round: 9, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
+            fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');
+            // openSync default returns 99 (success), so the rewrite succeeds.
+            let hub = makeHub();
+            let pub = new OraclePublisher(hub);
+            pub.broadcastFn  = sinon.stub().resolves({ txid: 'tx-9' });
+            pub.getBalanceFn = sinon.stub().resolves(50);
+
+            await pub._processQueue();
+
+            expect(pub._publishedRounds.size).to.equal(0);
+        });
+    });
+
     // ── start ────────────────────────────────────────────────────────────────
 
     describe('start()', function () {
