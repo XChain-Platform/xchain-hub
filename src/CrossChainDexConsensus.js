@@ -113,6 +113,14 @@ class CrossChainDexConsensus extends EventEmitter {
         this.earlyMessageTtl  = new Map();
         this.earlyMessageTtlMs    = 60 * 1000;
         this.earlyMessageMaxPerId = 32;
+        // A-F5: early buffering happens BEFORE the round (and thus membership)
+        // exists, so an attacker could (a) flood arbitrary match_ids to grow the
+        // map without bound (only per-id was capped) and (b) buffer a PROPOSE
+        // carrying an unbounded `row` (this engine had no size gate at all). Cap
+        // both: a distinct-id ceiling with FIFO eviction, and a serialized-size
+        // gate on each buffered envelope.
+        this.earlyMessageMaxDistinctIds = parseInt(this.config.XDEX_EARLY_MSG_MAX_IDS) || 512;
+        this.earlyMessageMaxBytes       = parseInt(this.config.XDEX_EARLY_MSG_MAX_BYTES) || 131072;
 
         this._messageHandler = null;
         this.roundTimeoutMs  = parseInt(this.config.XDEX_ROUND_TIMEOUT_MS) || DEFAULT_ROUND_TIMEOUT_MS;
@@ -153,8 +161,24 @@ class CrossChainDexConsensus extends EventEmitter {
     _bufferEarlyMessage(id, envelope){
         let now = Date.now();
         this._pruneEarlyMessages(now);
+        // Size gate (A-F5): drop an oversized pre-membership envelope rather than
+        // buffer it. A PROPOSE's `row` is the only large field and a legitimate
+        // one is far under this ceiling; this only rejects abuse.
+        let sz;
+        try { sz = JSON.stringify(envelope.data || '').length; }
+        catch(e){ return; }   // unserializable (cycle) -> never a real message
+        if(sz > this.earlyMessageMaxBytes) return;
         let arr = this.earlyMessages.get(id);
-        if(!arr){ arr = []; this.earlyMessages.set(id, arr); }
+        if(!arr){
+            // Distinct-id ceiling (A-F5): evict the OLDEST buffered id (Map is
+            // insertion-ordered) before adding a new one so an attacker flooding
+            // fresh match_ids cannot grow the buffer without bound within the TTL.
+            if(this.earlyMessages.size >= this.earlyMessageMaxDistinctIds){
+                let oldest = this.earlyMessages.keys().next().value;
+                if(oldest !== undefined){ this.earlyMessages.delete(oldest); this.earlyMessageTtl.delete(oldest); }
+            }
+            arr = []; this.earlyMessages.set(id, arr);
+        }
         if(arr.length >= this.earlyMessageMaxPerId) return;
         arr.push(envelope);
         this.earlyMessageTtl.set(id, now + this.earlyMessageTtlMs);
@@ -711,6 +735,22 @@ class CrossChainDexConsensus extends EventEmitter {
             return;
         }
         if(!this._verifyControl(this.controlTags.nv, rid, view, announcer, d.sig)) return;
+        // Quorum gate (A-F3): a valid leader signature over NEW_VIEW is NOT proof
+        // that a real view-change quorum occurred. Without this, a Byzantine node
+        // that is the deterministic leader for some future view can unilaterally
+        // drag every honest hub's `pending.view` forward with no 2f+1 VIEW_CHANGE
+        // votes behind it (griefing / forced-failover). Require this hub to have
+        // independently collected a view-change quorum for `view` (the same votes
+        // _maybeAssumeLeadership counts) before advancing. If the votes have not
+        // arrived yet we simply do not advance here; an honest advance still
+        // happens via _maybeAssumeLeadership as the VIEW_CHANGE votes land, and
+        // the round's own timeout re-triggers view-change otherwise, so liveness
+        // is preserved and bounded.
+        let votes = pending.viewChanges.get(view);
+        if(!votes || !this._meetsQuorum(pending, votes)){
+            console.warn('CrossChainDexConsensus: deferring NEW_VIEW for view ' + view + ' (no local view-change quorum yet)');
+            return;
+        }
         pending.view = view;
     }
 }

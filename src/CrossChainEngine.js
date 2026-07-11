@@ -74,8 +74,16 @@ class CrossChainEngine extends EventEmitter {
         // Pending attestations: Map<attestationId, pending>
         this.pendingAttestations = new Map();
 
-        // Finalized attestation IDs
+        // Finalized attestation IDs, bounded FIFO (R2-CCF4): this set is a
+        // steady-state dedup guard that only ever grew, so a long-lived hub
+        // leaked one entry per finalized attestation forever. Cap it with an
+        // insertion-order ring, mirroring CrossChainDexConsensus._markFinalized.
+        // The window only needs to outlast in-flight rounds for the same id, so
+        // a large bound is ample; re-finalization after eviction is harmless
+        // (the DB row keyed on attestationId is idempotent via ON DUPLICATE KEY).
         this.finalized = new Set();
+        this._finalizedOrder = [];
+        this.finalizedMax = parseInt(process.env.XCHAIN_ATTEST_FINALIZED_MAX, 10) || 10000;
 
         // Message handler
         this._messageHandler = null;
@@ -509,7 +517,7 @@ class CrossChainEngine extends EventEmitter {
 
             this._storeAttestation(attestation)
                 .then(() => {
-                    this.finalized.add(attestationId);
+                    this._markFinalized(attestationId);
                     this.pendingAttestations.delete(attestationId);
 
                     console.log('CrossChain: Attestation finalized: ' + attestationId +
@@ -608,6 +616,19 @@ class CrossChainEngine extends EventEmitter {
         // Majority floor: bare 2f+1 degenerates to quorum=1 at N=3 (f=0),
         // letting a single validator finalize alone.
         return Math.max(2 * f + 1, Math.ceil((N + 1) / 2));
+    }
+
+    // Record a finalized attestation id under the bounded FIFO ring (R2-CCF4).
+    // Evicts the oldest id once the window is full so the set cannot grow without
+    // limit over the process lifetime.
+    _markFinalized(attestationId) {
+        if (this.finalized.has(attestationId)) return;
+        this.finalized.add(attestationId);
+        this._finalizedOrder.push(attestationId);
+        if (this._finalizedOrder.length > this.finalizedMax) {
+            let oldest = this._finalizedOrder.shift();
+            this.finalized.delete(oldest);
+        }
     }
 
     _digest(attestationId, confirmations) {

@@ -326,10 +326,21 @@ class FullNodeChallengeRound {
             try { state.myAnswer = await this._computeAnswer(state.target, state.seed); }
             catch(e){ return; }
         }
+        let passSet = new Set(pass);
         for(let pk of pass){
             if(!state.claimants.has(pk)) return;                // outsider in the list
             let a = state.answers.get(pk);
             if(a === undefined || a !== state.myAnswer) return; // can't confirm: refuse to sign
+        }
+        // Completeness (R2-FN3): the leader could silently DROP an honest claimant
+        // from the pass list (the loop above only validates listed entries, not
+        // omissions). Refuse to sign unless the list is a superset of every
+        // claimant we have INDEPENDENTLY confirmed correct against our own node,
+        // so a censoring leader cannot exclude an honest full node with our
+        // signature. (Answers still in flight are simply not yet in our set, so
+        // this never forces a premature refusal; the round re-signs as they land.)
+        for(let [pk, a] of state.answers){
+            if(state.claimants.has(pk) && a === state.myAnswer && !passSet.has(pk)) return;
         }
         let sorted = pass.slice().sort();
         let sig = this.identity.sign(this._verdictCanonical(state.challengeId, state.epoch, sorted));

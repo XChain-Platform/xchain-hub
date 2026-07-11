@@ -348,6 +348,46 @@ describe('FullNodeChallengeRound', function () {
         });
     });
 
+    // ── R2-FN3: a verifier must refuse to sign a PASS list that OMITS a claimant
+    //    it independently confirmed correct (a censoring leader dropping honest
+    //    full nodes) ────────────────────────────────────────────────────────────
+    describe('R2-FN3 pass-list completeness', function () {
+        function seedRound(eng) {
+            const st = {
+                epoch: 7, challengeId: 'cidFN3', finalized: false,
+                eligible: new Set([V1, V2]),
+                claimants: new Set([P1, P2]),
+                answers: new Map([[P1, 'ANS'], [P2, 'ANS']]),   // both confirmed correct
+                myAnswer: 'ANS', target: 188, seed: SEED,
+                sigs: new Map(), passList: null, leadRank: 0,
+            };
+            eng.rounds.set(7, st);
+            return st;
+        }
+
+        it('refuses to sign a PASS list that omits a claimant it confirmed correct', async function () {
+            const hub = makeHub({ identity: makeIdentity(V2), fullnode: { GENESIS_VERIFIERS: [V1, V2] } });
+            const eng = new FullNodeChallengeRound(hub);
+            const st  = seedRound(eng);
+            const leader = eng._electedLeader(st);
+            // Leader's list drops P2 (which this node independently confirmed).
+            await eng._onSignReq({ epoch: 7, challengeId: 'cidFN3', sig_pubkey: leader, passList: [P1], sig: 'x' });
+            expect(st.sigs.has(V2)).to.equal(false);
+            const signed = hub._pm.broadcast.getCalls().find(c => c.args[0] === 'XNODE_SIGN');
+            expect(signed, 'must not sign an incomplete pass list').to.not.exist;
+        });
+
+        it('signs a complete PASS list', async function () {
+            const hub = makeHub({ identity: makeIdentity(V2), fullnode: { GENESIS_VERIFIERS: [V1, V2] } });
+            const eng = new FullNodeChallengeRound(hub);
+            const st  = seedRound(eng);
+            const leader = eng._electedLeader(st);
+            await eng._onSignReq({ epoch: 7, challengeId: 'cidFN3', sig_pubkey: leader, passList: [P1, P2], sig: 'x' });
+            const signed = hub._pm.broadcast.getCalls().find(c => c.args[0] === 'XNODE_SIGN');
+            expect(signed, 'signs when the pass list is complete').to.exist;
+        });
+    });
+
     // ── chain-anchored collection close (the keystone: all hubs close a round at
     //    the same chain height, so the leader has every answer regardless of when
     //    each hub locally detected the epoch) ──────────────────────────────────────

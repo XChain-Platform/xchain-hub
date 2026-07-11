@@ -74,8 +74,14 @@ class OracleConsensus extends EventEmitter {
         // arms one. Map<round, Timeout>.
         this.leaderTimers = new Map();
 
-        // Already finalized rounds (prevents double-store)
+        // Already finalized rounds (prevents double-store), bounded FIFO (L1):
+        // this set only ever grew (~1 entry per round), leaking for the process
+        // lifetime. Cap it with an insertion-order ring; rounds finalize in
+        // roughly ascending order so the oldest evicted round is far below the
+        // live round and will never be re-proposed.
         this.finalized = new Set();
+        this._finalizedOrder = [];
+        this.finalizedMax = parseInt(process.env.ORACLE_FINALIZED_MAX, 10) || 10000;
 
         // Early-arrival buffer (finding F7). A PREPARE/COMMIT can land while
         // _handlePropose is still awaiting the block-boundary snapshot, or
@@ -222,6 +228,19 @@ class OracleConsensus extends EventEmitter {
         for (let env of arr) {
             try { this._handleMessage(env); }
             catch (e) { console.error('Oracle: error replaying buffered message for round ' + round + ':', e.message); }
+        }
+    }
+
+    // Record a finalized round under the bounded FIFO ring (L1). Evicts the
+    // oldest round once the window is full so `finalized` cannot grow unbounded
+    // over the process lifetime.
+    _markFinalized(round) {
+        if (this.finalized.has(round)) return;
+        this.finalized.add(round);
+        this._finalizedOrder.push(round);
+        if (this._finalizedOrder.length > this.finalizedMax) {
+            let oldest = this._finalizedOrder.shift();
+            this.finalized.delete(oldest);
         }
     }
 
@@ -381,7 +400,7 @@ class OracleConsensus extends EventEmitter {
             // Mark the round finalized so the guard at the top of finalizeRound()
             // dedupes any subsequent call for this round (prevents a duplicate
             // snapshot store / PRICE v0 broadcast).
-            this.finalized.add(round);
+            this._markFinalized(round);
             let selfAddr = this.peerManager.validatorAddr;
             this.emit('round:finalized', {
                 round:          round,
@@ -962,7 +981,7 @@ class OracleConsensus extends EventEmitter {
 
             this._storeSnapshot(round, pending.prices, validatorCount, proof, pending.btcBlockHeight, pending.btcBlockTime)
                 .then(() => {
-                    this.finalized.add(round);
+                    this._markFinalized(round);
                     this.pendingRounds.delete(round);
                     this._clearRoundTracking(round);
                     console.log('Oracle: Round ' + round + ' finalized (' +
@@ -1214,7 +1233,7 @@ class OracleConsensus extends EventEmitter {
                 for (let row of rows) this.hub.hubDbBroadcaster.broadcastRow({ table: 'price_snapshots', row });
             } catch (e) { /* broadcast is best-effort */ }
         }
-        this.finalized.add(round);
+        this._markFinalized(round);
         this._clearRoundTracking(round);
         console.log('Oracle: Round ' + round + ' skipped (' + (reason || 'no submissions') + ')');
     }

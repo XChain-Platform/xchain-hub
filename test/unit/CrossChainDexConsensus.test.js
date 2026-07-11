@@ -476,4 +476,45 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
             data: { matchId: mid, view: 2, sig_pubkey: ldPk, sig: ldNode.identity.sign('XDEXNV|' + mid + '|2') } });
         expect(victim.consensus.pending.get(mid).view).to.equal(3);
     });
+
+    it('A-F3: NEW_VIEW does not advance the view without a local view-change quorum', async function () {
+        let bus = buildMesh(4);
+        await startAll(bus);
+        let mid = 'ac'.repeat(32), row = sampleRow(mid);
+        let victim = bus.nodes[0];
+        await victim.consensus.propose(mid, { row, snapshot: { validators: validatorsOf(bus), count: 4 } });
+        let p = victim.consensus.pending.get(mid);
+        let nextView = p.view + 1;
+        let ldPk   = leaderPubkey(bus, mid, nextView);
+        let ldNode = bus.nodes.find(nd => nd.pubkey === ldPk);
+        let nv = { type: 'XDEX_MATCH_NEW_VIEW', sender: ldPk,
+            data: { matchId: mid, view: nextView, sig_pubkey: ldPk,
+                    sig: ldNode.identity.sign('XDEXNV|' + mid + '|' + nextView) } };
+
+        // Valid leader signature but NO view-change votes collected locally: must
+        // not drag the view forward (this is the A-F3 griefing vector).
+        victim.consensus._handleMessage(nv);
+        expect(victim.consensus.pending.get(mid).view).to.equal(p.view);
+
+        // With a real 2f+1 view-change quorum present locally, the same NEW_VIEW
+        // legitimately advances.
+        let voters = new Set(bus.nodes.slice(0, 3).map(nd => nd.pubkey));
+        victim.consensus.pending.get(mid).viewChanges.set(nextView, voters);
+        victim.consensus._handleMessage(nv);
+        expect(victim.consensus.pending.get(mid).view).to.equal(nextView);
+    });
+
+    it('A-F5: _bufferEarlyMessage caps distinct ids (FIFO) and drops oversized envelopes', function () {
+        let bus = buildMesh(1);
+        let c = bus.nodes[0].consensus;
+        c.earlyMessageMaxDistinctIds = 4;
+        for (let i = 0; i < 10; i++) c._bufferEarlyMessage('id' + i, { type: 'X', data: { n: i } });
+        expect(c.earlyMessages.size).to.equal(4);
+        expect(c.earlyMessages.has('id0')).to.be.false;   // oldest distinct id evicted
+        expect(c.earlyMessages.has('id9')).to.be.true;    // newest retained
+
+        c.earlyMessageMaxBytes = 50;
+        c._bufferEarlyMessage('big', { type: 'X', data: { row: 'x'.repeat(500) } });
+        expect(c.earlyMessages.has('big')).to.be.false;   // oversized -> not buffered
+    });
 });

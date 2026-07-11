@@ -1307,4 +1307,28 @@ describe('OracleConsensus', function () {
             expect(oc.leaderTimers.has(5)).to.be.false;
         });
     });
+
+    // -----------------------------------------------------------------
+    // _markFinalized() bounded FIFO (L1)
+    // -----------------------------------------------------------------
+    describe('_markFinalized (bounded finalized set)', function () {
+
+        it('caps the finalized set at finalizedMax, evicting oldest rounds first', function () {
+            oc.finalizedMax = 4;
+            for (let r = 1; r <= 20; r++) oc._markFinalized(r);
+            expect(oc.finalized.size).to.equal(4);
+            expect(oc.finalized.has(1)).to.be.false;
+            expect(oc.finalized.has(16)).to.be.false;
+            expect(oc.finalized.has(17)).to.be.true;
+            expect(oc.finalized.has(20)).to.be.true;
+        });
+
+        it('is idempotent for a repeated round', function () {
+            oc.finalizedMax = 3;
+            oc._markFinalized(9);
+            oc._markFinalized(9);
+            expect(oc.finalized.size).to.equal(1);
+            expect(oc._finalizedOrder).to.deep.equal([9]);
+        });
+    });
 });

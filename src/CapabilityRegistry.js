@@ -320,7 +320,13 @@ class CapabilityRegistry {
         }
     }
 
-    // Count of validators with capability fully active (used for PBFT quorum sizing)
+    // Count of validators whose capability is fully active on THIS hub
+    // (qualified + self_test_ok + enabled). NOT for PBFT quorum sizing (S-F6):
+    // self_test_ok/enabled are per-hub-local, so this count differs between hubs
+    // and wiring it into a quorum denominator would fork the federation. The
+    // deterministic cross-hub source is CapabilitySnapshot.getSnapshot /
+    // getQuorum, which excludes the local-only flags on purpose. This method is
+    // for local status/diagnostics only.
     async getActiveCount(capability) {
         let conn = await this.db.getConnection();
         try {

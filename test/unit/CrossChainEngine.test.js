@@ -584,4 +584,31 @@ describe('CrossChainEngine', function () {
             if (pending.timer) clearTimeout(pending.timer);
         });
     });
+
+    // -----------------------------------------------------------------
+    // _markFinalized() bounded FIFO (R2-CCF4)
+    // -----------------------------------------------------------------
+    describe('_markFinalized (bounded finalized set)', function () {
+
+        it('caps the finalized set at finalizedMax, evicting oldest first', function () {
+            engine.finalizedMax = 5;
+            for (let i = 0; i < 20; i++) engine._markFinalized('att:' + i);
+            expect(engine.finalized.size).to.equal(5);
+            expect(engine._finalizedOrder.length).to.equal(5);
+            // Oldest evicted, newest 5 (att:15..att:19) retained.
+            expect(engine.finalized.has('att:0')).to.be.false;
+            expect(engine.finalized.has('att:14')).to.be.false;
+            expect(engine.finalized.has('att:15')).to.be.true;
+            expect(engine.finalized.has('att:19')).to.be.true;
+        });
+
+        it('is idempotent for a repeated id (no double-count, no double-evict)', function () {
+            engine.finalizedMax = 3;
+            engine._markFinalized('a');
+            engine._markFinalized('a');
+            engine._markFinalized('a');
+            expect(engine.finalized.size).to.equal(1);
+            expect(engine._finalizedOrder).to.deep.equal(['a']);
+        });
+    });
 });
