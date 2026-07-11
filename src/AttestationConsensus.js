@@ -116,6 +116,15 @@ class AttestationConsensus extends EventEmitter {
         this.earlyMessageTtl = new Map();
         this.earlyMessageTtlMs = 60 * 1000;
         this.earlyMessageMaxPerRid = 32;
+        // A-F5: early buffering happens BEFORE the round (and thus the responsible-set
+        // membership check) exists, so an attacker could (a) flood arbitrary requestIds
+        // to grow the map without bound (only per-rid was capped) and (b) buffer an
+        // envelope carrying an oversized body_b64 (the _maxBodyB64Length gate only runs
+        // once `pending` exists). Cap both: a distinct-rid ceiling with FIFO eviction,
+        // and a serialized-size gate on each buffered envelope. Mirrors the DEX half
+        // (CrossChainDexConsensus, A-F5).
+        this.earlyMessageMaxDistinctIds = parseInt(this.config.ATTESTATION_EARLY_MSG_MAX_IDS) || 512;
+        this.earlyMessageMaxBytes       = parseInt(this.config.ATTESTATION_EARLY_MSG_MAX_BYTES) || 131072;
 
         // Early-COMMIT buffer. A COMMIT can arrive after `pending` exists but
         // before a winner is established: the PROPOSE->agree() transition is
@@ -172,8 +181,22 @@ class AttestationConsensus extends EventEmitter {
     _bufferEarlyMessage(rid, envelope){
         let now = Date.now();
         this._pruneEarlyMessages(now);
+        // Size gate (A-F5): drop an oversized pre-round envelope rather than buffer
+        // it. The default ceiling clears the largest legitimate PROPOSE (64 KB
+        // max_response_bytes fallback x1.4 base64) with headroom; only abuse is cut.
+        let sz;
+        try { sz = JSON.stringify(envelope.data || '').length; }
+        catch(e){ return; }   // unserializable (cycle) -> never a real gossip message
+        if(sz > this.earlyMessageMaxBytes) return;
         let arr = this.earlyMessages.get(rid);
         if(!arr){
+            // Distinct-rid ceiling (A-F5): evict the OLDEST buffered rid (Map is
+            // insertion-ordered) before adding a new one, so an attacker flooding
+            // fresh requestIds cannot grow the buffer without bound within the TTL.
+            if(this.earlyMessages.size >= this.earlyMessageMaxDistinctIds){
+                let oldest = this.earlyMessages.keys().next().value;
+                if(oldest !== undefined){ this.earlyMessages.delete(oldest); this.earlyMessageTtl.delete(oldest); }
+            }
             arr = [];
             this.earlyMessages.set(rid, arr);
         }
@@ -400,6 +423,14 @@ class AttestationConsensus extends EventEmitter {
         // because the sig was just verified over a canonical that binds it.
         if(!pending.proposals.has(senderPubkey)){
             pending.proposals.set(senderPubkey, { body: body, meta: meta, sig: String(d.sig), status: String(d.status || 'ok') });
+            // A-F1 liveness: a judge_model leader PREPARE that arrived before this
+            // follower had collected `need` proposals was buffered (see
+            // _handlePrepare) so it could be hash-checked against real proposals
+            // instead of adopted on faith. Nothing else replays that buffer before
+            // a winner exists, so drain it here the moment the proposal count
+            // crosses the check threshold; a still-early replay just re-buffers.
+            let need = Math.min(pending.redundancy, pending.responsible.length);
+            if(!pending.winner && pending.proposals.size >= need) this._drainEarlyMessages(rid);
         }
 
         this._maybeAdvanceFromProposals(rid).catch(e =>
@@ -753,6 +784,65 @@ class AttestationConsensus extends EventEmitter {
             if(!ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
                 console.warn('AttestationConsensus: bad PREPARE sig from ' + senderPubkey.substring(0,16) + '...');
                 return;
+            }
+            let prepBodyHash = crypto.createHash('sha256').update(body).digest('hex');
+            if(providerDef && providerDef.consensus_strategy === 'judge_model'){
+                // A-F1: the leader's signature proves authorship, not honesty. agree()
+                // only ever SELECTS one of the collected proposals, so an honest
+                // leader's winner must hash-match a proposal this follower collected
+                // itself; a Byzantine per-request leader injecting a fabricated body
+                // (that no responsible validator proposed) must not be adopted and
+                // re-signed on faith. If we haven't collected enough proposals to
+                // check yet, buffer the PREPARE (replayed once proposals arrive via
+                // _handlePropose) instead of accepting blind.
+                let need = Math.min(pending.redundancy, pending.responsible.length);
+                if(pending.proposals.size < need){
+                    this._bufferEarlyMessage(rid, envelope);
+                    return;
+                }
+                let matchesProposal = false;
+                for(let p of pending.proposals.values()){
+                    if(crypto.createHash('sha256').update(p.body).digest('hex') === prepBodyHash && p.meta === meta){
+                        matchesProposal = true;
+                        break;
+                    }
+                }
+                if(!matchesProposal){
+                    console.warn('AttestationConsensus: leader PREPARE body matches no collected proposal from ' +
+                        senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected, A-F1)');
+                    return;
+                }
+            } else {
+                // A-F4: byte_equality winner adoption must not latch from a single
+                // foreign PREPARE. The strategy's whole safety argument is that every
+                // honest validator independently fetched identical bytes, so before
+                // adopting we require either (a) our OWN proposal to byte-match the
+                // announced winner, or (b) a second responsible signer corroborating
+                // the same body+meta+status. A lone Byzantine responsible peer racing
+                // its divergent body in first can otherwise wedge this hub's round
+                // (honest sigs then "don't verify over winner" and never count).
+                let ownMatches = false;
+                let myP = pending.proposals.get(pending.myPubkey);
+                if(myP && (myP.status || 'ok') === 'ok'){
+                    ownMatches = crypto.createHash('sha256').update(myP.body).digest('hex') === prepBodyHash
+                        && myP.meta === meta;
+                }
+                if(!ownMatches){
+                    if(!pending.prepareCandidates) pending.prepareCandidates = new Map();
+                    let key = prepBodyHash + '|' + meta + '|' + status;
+                    let cand = pending.prepareCandidates.get(key);
+                    if(!cand){ cand = new Map(); pending.prepareCandidates.set(key, cand); }
+                    cand.set(senderPubkey, String(d.sig));
+                    // Bounded: senders are membership-checked responsible validators,
+                    // deduped per body by pubkey, so entries <= responsible.length^2.
+                    if(cand.size < 2){
+                        pending.prepares.add(senderPubkey);
+                        return;   // hold: not corroborated yet, and our own body disagrees/is absent
+                    }
+                    // Corroborated by two distinct responsible signers: adopt, and
+                    // carry both already-verified sigs into the winner's sig set.
+                    for(let [pk, sg] of cand) pending.signatures.set(pk, sg);
+                }
             }
             pending.signatures.set(senderPubkey, String(d.sig));
             pending.winner = { body: body, meta: meta };

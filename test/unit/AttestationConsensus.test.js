@@ -684,6 +684,10 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         expect(pending.winner).to.equal(null);   // did not self-resolve
 
         let leaderBody = Buffer.from('leader-winning-body');
+        // The leader's PROPOSE always precedes its PREPARE on the wire; A-F1
+        // requires the follower to hold it so the winner can be hash-checked.
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, leaderBody));
+        await flush();
         c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, leaderBody));
         expect(pending.winner.body.toString()).to.equal('leader-winning-body');
         // Our own vote is re-signed over the agreed (leader) bytes.
@@ -710,6 +714,8 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         // PREPARE then replays and is verified over the CANONICAL WINNER, so its
         // signature (taken over a divergent body) cannot be credited.
         let leaderBody = Buffer.from('leader-winning-body');
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, leaderBody));   // PROPOSE precedes PREPARE (A-F1)
+        await flush();
         c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, leaderBody));
         await flush();
         expect(pending.winner.body.toString(), 'winner is the leader body').to.equal('leader-winning-body');
@@ -761,6 +767,10 @@ describe('AttestationConsensus: judge_model multi-hub PREPARE-quorum (#128e849)'
         await flush();
         // p2 also proposes (byte-divergent per judge_model convention)
         c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.from('p2-body')));
+        await flush();
+        // The leader's PROPOSE always precedes its PREPARE on the wire; A-F1
+        // requires the follower to hold it so the winner can be hash-checked.
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, P1_BODY));
         await flush();
         return c.pending.get(RID);
     }
@@ -1531,5 +1541,180 @@ describe('AttestationConsensus: non-ok outcomes (Phase 4)', function () {
         c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, EMPTY, '', 'provider_error'));
         await flush();
         expect(hub.slashDetector.recordAttestationDivergence.called).to.equal(false);
+    });
+});
+
+// ---- Validator-sec R2 hardening: A-F1 / A-F4 / A-F5 (attestation half) ----
+
+describe('AttestationConsensus: A-F1 leader PREPARE must hash-match a collected proposal', function () {
+
+    let me, p1, p2, hub, c;
+    beforeEach(() => {
+        me  = mkIdentity();
+        p1  = mkIdentity();
+        p2  = mkIdentity();
+        hub = createMockHub({ identity: me });
+        c   = new AttestationConsensus(hub, makeRealProviderRegistry(p => p[0], 'judge_model'));
+    });
+    afterEach(() => {
+        for (let [, p] of c.pending) if (p.timer) clearTimeout(p.timer);
+        sinon.restore();
+    });
+
+    const RID = 'c3'.repeat(16);
+
+    // Follower round: p1 is leader; everyone has proposed, so the A-F1 check runs.
+    async function seedFullProposals() {
+        let rs = roundState(me, [me, p1, p2], Buffer.from('my-body'), 'llm', 3);
+        rs.leaderPubkey = pub(p1); rs.role = 'follower';
+        await c.propose(RID, rs);
+        await flush();
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.from('p2-body')));
+        await flush();
+        return c.pending.get(RID);
+    }
+
+    it('rejects a leader PREPARE whose body matches NO collected proposal (fabricated winner)', async function () {
+        let pending = await seedFullProposals();
+        expect(pending.proposals.size).to.equal(3);
+
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.from('fabricated-never-proposed')));
+        await flush();
+        expect(pending.winner, 'a fabricated leader body must not be adopted').to.equal(null);
+        expect(pending.signatures.has(pub(me)), 'we must not re-sign it').to.equal(false);
+    });
+
+    it('rejects a leader PREPARE whose body matches a proposal but whose meta diverges', async function () {
+        let pending = await seedFullProposals();
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.from('p1-body'), 'tampered-meta'));
+        await flush();
+        expect(pending.winner).to.equal(null);
+    });
+
+    it('buffers a too-early leader PREPARE and adopts it once proposals catch up', async function () {
+        // Only OUR proposal is in (1 of 3 needed): the leader PREPARE cannot be
+        // hash-checked yet and must be buffered, not adopted on faith.
+        let rs = roundState(me, [me, p1, p2], Buffer.from('my-body'), 'llm', 3);
+        rs.leaderPubkey = pub(p1); rs.role = 'follower';
+        await c.propose(RID, rs);
+        await flush();
+        let pending = c.pending.get(RID);
+
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.from('p1-body')));
+        expect(pending.winner, 'not adopted before the proposal set can vouch').to.equal(null);
+        expect(c.earlyMessages.get(RID), 'held for replay').to.have.lengthOf(1);
+
+        // Remaining PROPOSEs land; the drain replays the buffered PREPARE, which
+        // now hash-matches p1's own proposal and is adopted.
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.from('p2-body')));
+        await flush();
+        expect(pending.winner).to.not.equal(null);
+        expect(pending.winner.body.toString()).to.equal('p1-body');
+        // And our vote was re-signed over the adopted canonical.
+        expect(pending.signatures.has(pub(me))).to.equal(true);
+    });
+});
+
+describe('AttestationConsensus: A-F4 byte_equality winner needs own-match or corroboration', function () {
+
+    let me, p1, p2, hub, c;
+    beforeEach(() => {
+        me  = mkIdentity();
+        p1  = mkIdentity();
+        p2  = mkIdentity();
+        hub = createMockHub({ identity: me });
+        c   = new AttestationConsensus(hub, makeRealProviderRegistry(p => p[0], 'byte_equality'));
+    });
+    afterEach(() => {
+        for (let [, p] of c.pending) if (p.timer) clearTimeout(p.timer);
+        sinon.restore();
+    });
+
+    const RID = 'f6'.repeat(16);
+
+    it('a single foreign PREPARE that diverges from our own body does NOT latch the winner', async function () {
+        await c.propose(RID, roundState(me, [me, p1, p2], Buffer.from('honest-body'), 'http_get', 3));
+        await flush();
+        let pending = c.pending.get(RID);
+
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, Buffer.from('byzantine-body')));
+        await flush();
+        expect(pending.winner, 'one uncorroborated divergent PREPARE must not wedge the round').to.equal(null);
+        expect(pending.signatures.has(pub(p1)), 'its sig is held as a candidate, not credited').to.equal(false);
+    });
+
+    it('two distinct responsible signers corroborating the same body DO latch it (and both sigs carry over)', async function () {
+        await c.propose(RID, roundState(me, [me, p1, p2], Buffer.from('my-divergent-body'), 'http_get', 3));
+        await flush();
+        let pending = c.pending.get(RID);
+        const BODY = Buffer.from('agreed-body');
+
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY));
+        expect(pending.winner).to.equal(null);
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, BODY));
+        await flush();
+
+        expect(pending.winner, 'corroborated by 2 responsible signers').to.not.equal(null);
+        expect(pending.winner.body.toString()).to.equal('agreed-body');
+        let canon = buildCanonical(RID, 'http_get', BODY, 'ok', '');
+        for (let pk of [pub(p1), pub(p2)]) {
+            expect(pending.signatures.has(pk), pk + ' sig credited on latch').to.equal(true);
+            expect(ValidatorIdentity.verify(canon.toString('utf8'), pending.signatures.get(pk), pk)).to.equal(true);
+        }
+        // Our own divergent body still abstains from co-signing.
+        expect(pending.signatures.has(pub(me))).to.equal(false);
+    });
+
+    it('an own-matching PREPARE still adopts immediately (no corroboration needed)', async function () {
+        const BODY = Buffer.from('shared-body');
+        await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
+        await flush();
+        let pending = c.pending.get(RID);
+
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, BODY));
+        await flush();
+        expect(pending.winner).to.not.equal(null);
+        expect(pending.winner.body.toString()).to.equal('shared-body');
+    });
+});
+
+describe('AttestationConsensus: A-F5 early-buffer bounds (attestation half)', function () {
+
+    let hub, c;
+    beforeEach(() => {
+        hub = createMockHub();
+        c   = new AttestationConsensus(hub, makeProviderRegistry());
+    });
+    afterEach(() => sinon.restore());
+
+    function env(rid, extra) {
+        return { type: 'ATTEST_PREPARE', data: Object.assign({ requestId: rid, body_b64: 'aGk=' }, extra || {}) };
+    }
+
+    it('caps the number of DISTINCT buffered requestIds with FIFO eviction', function () {
+        c.earlyMessageMaxDistinctIds = 3;
+        for (let i = 0; i < 4; i++) c._bufferEarlyMessage('rid' + i, env('rid' + i));
+        expect(c.earlyMessages.size).to.equal(3);
+        expect(c.earlyMessages.has('rid0'), 'oldest rid evicted').to.equal(false);
+        expect(c.earlyMessages.has('rid3'), 'newest rid kept').to.equal(true);
+        expect(c.earlyMessageTtl.has('rid0'), 'evicted rid TTL cleaned').to.equal(false);
+    });
+
+    it('drops an oversized envelope instead of buffering it', function () {
+        c.earlyMessageMaxBytes = 64;
+        c._bufferEarlyMessage('rid-big', env('rid-big', { body_b64: 'A'.repeat(1000) }));
+        expect(c.earlyMessages.has('rid-big')).to.equal(false);
+        // A normal-sized envelope still buffers.
+        c._bufferEarlyMessage('rid-ok', env('rid-ok'));
+        expect(c.earlyMessages.get('rid-ok')).to.have.lengthOf(1);
+    });
+
+    it('drops an unserializable (cyclic) envelope instead of throwing', function () {
+        let data = { requestId: 'rid-cycle' };
+        data.self = data;
+        expect(() => c._bufferEarlyMessage('rid-cycle', { type: 'ATTEST_PREPARE', data })).to.not.throw();
+        expect(c.earlyMessages.has('rid-cycle')).to.equal(false);
     });
 });
