@@ -77,7 +77,7 @@ class PriceAggregator extends EventEmitter {
     // snapshot at block_index, and the verified count must meet PBFT quorum.
     // Returns: { accepted, reason } where reason explains the rejection
     async receiveValidatedRound(sourceChain, roundData) {
-        if (!roundData || !roundData.round || !Array.isArray(roundData.pairs) || roundData.pairs.length < 1) {
+        if (!roundData || roundData.round === undefined || roundData.round === null || !Array.isArray(roundData.pairs) || roundData.pairs.length < 1) {
             return { accepted: false, reason: 'invalid roundData' };
         }
 

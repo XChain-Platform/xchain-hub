@@ -303,6 +303,13 @@ class OracleRound {
             consecutiveSkippedRounds: this.consecutiveSkippedRounds,
             oracle_fetch_failures:    this.fetchFailures,
             lastSuccessfulRoundTime:  this.lastSuccessfulRoundTime,
+            // Server-computed age of the last successful round. The dashboard
+            // prefers this over diffing lastSuccessfulRoundTime against its own
+            // clock (which folds host/hub skew into the stall thresholds).
+            // Mirrors the chainTipStalenessMs pattern below.
+            lastSuccessAgeMs:         this.lastSuccessfulRoundTime
+                ? (Date.now() - this.lastSuccessfulRoundTime)
+                : null,
             btcBlockHeight:           this.currentBtcBlockHeight != null ? this.currentBtcBlockHeight : null,
             usingFallback:            this.chainTipFallbackActive,
             chainTipFetchFailures:    this.chainTipFetchFailures,
