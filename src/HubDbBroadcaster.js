@@ -135,7 +135,12 @@ class HubDbBroadcaster {
         }
 
         try {
-            ws.send(JSON.stringify({ type: 'ready', max_ids: maxIds, watermark: Math.floor(Date.now() / 1000) }));
+            // watermark_interval_ms lets the consumer size its heartbeat watchdog from
+            // the hub's ACTUAL cadence instead of a locally-guessed env default, so an
+            // operator raising WS_WATERMARK_INTERVAL_MS on the hub can never make a
+            // consumer terminate a healthy socket (the two knobs used to be linked only
+            // by a prose comment). Additive: older consumers ignore the field.
+            ws.send(JSON.stringify({ type: 'ready', max_ids: maxIds, watermark: Math.floor(Date.now() / 1000), watermark_interval_ms: this.watermarkIntervalMs }));
         } catch (e) { /* ignore */ }
     }
 

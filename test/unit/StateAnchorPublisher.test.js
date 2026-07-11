@@ -2206,3 +2206,48 @@ describe('StateAnchorPublisher getAnchorStats balance', function () {
         expect(pub.getAnchorStats().dogeBalance).to.equal(5);   // not clobbered to null
     });
 });
+
+describe('StateAnchorPublisher: capability-snapshot archive sort is a spec-stable total order', function () {
+
+    // The archive JSON is crc32-bearing bytes verified byte-for-byte by
+    // follower co-signers, so the capability-snapshot ordering must be fully
+    // determined by the data (pubkey, then source), never by the engine's
+    // handling of an inconsistent (equal-returns-1) comparator. Equal pubkeys
+    // are legitimately possible in weighted snapshots: one row per
+    // (source, pubkey), and a key may be delegated by multiple sources.
+
+    function newPub() {
+        return new StateAnchorPublisher({ db: {}, p2pConfig: { DOGE_ADDRESS: 'Dpub1' } });
+    }
+    function capSnaps(pub, set) {
+        pub._resolveCapabilitySet = async () => set.map(r => Object.assign({}, r));
+        return pub._buildArchive('regtest', 1, [], 100, [], [])
+            .then(a => JSON.parse(a.json).capability_snapshots
+                .map(s => s.signing_pubkey + '|' + s.source));
+    }
+
+    it('orders equal-pubkey rows by source regardless of input order', async function () {
+        let scrambled = [
+            { pubkey: 'aa', amount: '1', source: 'srcB' },
+            { pubkey: 'bb', amount: '2', source: 'srcA' },
+            { pubkey: 'aa', amount: '1', source: 'srcA' }
+        ];
+        let out = await capSnaps(newPub(), scrambled);
+        expect(out).to.deep.equal(['aa|srcA', 'aa|srcB', 'bb|srcA']);
+    });
+
+    it('produces byte-identical ordering for two different input orders of equal pubkeys', async function () {
+        let orderA = [
+            { pubkey: 'aa', amount: '1', source: 'srcA' },
+            { pubkey: 'aa', amount: '1', source: 'srcB' }
+        ];
+        let orderB = [
+            { pubkey: 'aa', amount: '1', source: 'srcB' },
+            { pubkey: 'aa', amount: '1', source: 'srcA' }
+        ];
+        let outA = await capSnaps(newPub(), orderA);
+        let outB = await capSnaps(newPub(), orderB);
+        expect(outA).to.deep.equal(outB);
+        expect(outA).to.deep.equal(['aa|srcA', 'aa|srcB']);
+    });
+});

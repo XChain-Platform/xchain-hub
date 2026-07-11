@@ -1080,12 +1080,18 @@ class StateAnchorPublisher {
         if(wrapperSnapshotBlock != null)
             wants.push({ block: Number(wrapperSnapshotBlock), capability: 'oracle_publish' });
         let seen = new Set(), snaps = [];
-        for(let w of wants.sort((a, b) => a.block - b.block || (a.capability < b.capability ? -1 : 1))){
+        for(let w of wants.sort((a, b) => a.block - b.block || (a.capability < b.capability ? -1 : a.capability > b.capability ? 1 : 0))){
             let key = w.block + '|' + w.capability;
             if(seen.has(key)) continue;
             seen.add(key);
             let set = await this._resolveCapabilitySet(w.capability, w.block);
-            for(let v of set.slice().sort((a, b) => a.pubkey < b.pubkey ? -1 : 1))
+            // Total order: pubkey then source. Equal pubkeys are legitimately
+            // possible in weighted snapshots (one row per (source, pubkey), a key
+            // may be delegated by multiple sources); a two-branch comparator that
+            // returns 1 for both orderings of an equal pair is inconsistent and
+            // leaves relative order engine-defined, which can diverge the crc32
+            // archive bytes that follower co-signers verify byte-for-byte.
+            for(let v of set.slice().sort((a, b) => a.pubkey < b.pubkey ? -1 : a.pubkey > b.pubkey ? 1 : (a.source < b.source ? -1 : a.source > b.source ? 1 : 0)))
                 snaps.push({ snapshot_block: w.block, capability: w.capability,
                              signing_pubkey: v.pubkey, amount: v.amount,
                              source: String(v.source != null ? v.source : '') });

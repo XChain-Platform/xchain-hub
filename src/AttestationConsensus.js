@@ -988,6 +988,18 @@ class AttestationConsensus extends EventEmitter {
         if(pending.winner){
             this._drainEarlyCommits(rid);
             this._drainEarlyMessages(rid);
+            // A late PREPARE can carry the signature that crosses the commit
+            // quorum AFTER this node already broadcast its COMMIT. In that state
+            // _checkPrepareQuorum short-circuits on `_commitSent`, so the only
+            // finalization gate (_checkCommitQuorum) would otherwise never be
+            // re-run and a fully-quorate round would stall until round timeout
+            // (e.g. the peer's COMMIT was lost on best-effort gossip). Re-check,
+            // but ONLY once we have committed: before that, prepare quorum is the
+            // required gate, and signatures.size can already equal `needed` from
+            // the agree phase, so an unconditional call would finalize before
+            // prepare quorum is reached. Post-commit the call is idempotent
+            // (gated on signatures.size >= needed and the finalized flag).
+            if(pending._commitSent) this._checkCommitQuorum(rid);
         }
     }
 
