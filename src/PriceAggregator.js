@@ -34,6 +34,7 @@ const EventEmitter      = require('events');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const eq                = require('./equivocation_header.js');
 const { PRICE_MAX }     = require('./constants.js');
+const { bcgt }          = require('./bcmath.js');
 
 class PriceAggregator extends EventEmitter {
 
@@ -117,7 +118,10 @@ class PriceAggregator extends EventEmitter {
                 // ("the ingestion layer must reject anything at or above it"); every other
                 // price entry point already does, so the ingest/aggregate bounds cannot drift
                 // apart and a Byzantine round cannot smuggle an at/above-PRICE_MAX pair past
-                // ingest (item 9e6c0acd).
+                // ingest (item 9e6c0acd). The positive lower bound mirrors the
+                // governance-path check below: a quorum-signed zero (or all-zero)
+                // price must not pass ingest and finalize as a real price.
+                !(parseFloat(String(p.price)) > 0) ||
                 !(parseFloat(String(p.price)) < PRICE_MAX)) {
                 return { accepted: false, reason: 'invalid pairs' };
             }
@@ -294,8 +298,12 @@ class PriceAggregator extends EventEmitter {
             !(parseFloat(priceData.value) < PRICE_MAX)) {   // PRICE_MAX ceiling at ingest (item 9e6c0acd)
             return { accepted: false, reason: 'invalid value' };
         }
+        // FEE upper bound uses exact bcmath, not parseFloat: an unbounded-precision
+        // value like '1.0000000000000000001' rounds to exactly 1.0 under IEEE-754 and
+        // would slip past a parseFloat `> 1` gate while exact math treats it as > 1.
+        // Mirrors the indexer's price-action FEE validation (wire-format parity).
         if (priceData.fee !== undefined && priceData.fee !== null && priceData.fee !== '' &&
-            (!/^[0-9]+(\.[0-9]+)?$/.test(String(priceData.fee)) || parseFloat(priceData.fee) > 1)) {
+            (!/^[0-9]+(\.[0-9]{1,18})?$/.test(String(priceData.fee)) || bcgt(String(priceData.fee), '1'))) {
             return { accepted: false, reason: 'invalid fee' };
         }
 

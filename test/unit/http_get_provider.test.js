@@ -125,6 +125,40 @@ describe('http_get.agree: byte_equality', function () {
         expect(mismatch).to.be.null;
     });
 
+    // #1209: the grouping key domain-separates body from meta. The old form
+    // sha256(body || '|' || meta) let a byte shift across the single unframed
+    // delimiter collide distinct pairs, so a Byzantine proposer (meta is an
+    // attacker-chosen wire string) could inflate an honest group's count and
+    // manufacture a quorum winner where agree() should return null.
+    it('does NOT collide boundary-shifted (body, meta) pairs (#1209 delimiter ambiguity)', function () {
+        // body="A|",meta="B" and body="A",meta="|B" both hashed over "A||B" under
+        // the old unframed concat. They are genuinely distinct groups.
+        const a = httpGet.agree([p('A|', 'B'), p('A', '|B')]);
+        // N=2, quorum=2; two distinct groups each count=1 -> no majority -> null.
+        expect(a).to.be.null;
+    });
+
+    it('a crafted collision cannot forge a quorum winner out of a 1-1-1 split (#1209)', function () {
+        // Honest 3-way split: three distinct (body, meta) pairs, no majority.
+        // The middle proposal is the attacker boundary-shifting bytes to try to
+        // land in the first honest group. With domain separation it stays distinct.
+        const result = httpGet.agree([
+            p('A|', 'B'),    // honest group 1
+            p('A', '|B'),    // Byzantine attempt to collide with group 1
+            p('C', '500')    // honest group 2
+        ]);
+        // Three distinct groups, each count=1 < quorum=2 -> MUST be null.
+        expect(result).to.be.null;
+    });
+
+    it('still groups identical (body, meta) pairs together after domain separation (#1209)', function () {
+        const result = httpGet.agree([p('A|', 'B'), p('A|', 'B'), p('C', '500')]);
+        // Two identical proposals form the majority group at N=3 (quorum=2).
+        expect(result).to.not.be.null;
+        expect(result.body.toString()).to.equal('A|');
+        expect(result.meta).to.equal('B');
+    });
+
 });
 
 // ---- fetch() ---------------------------------------------------------------

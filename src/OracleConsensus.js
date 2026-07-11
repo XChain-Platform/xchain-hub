@@ -719,10 +719,10 @@ class OracleConsensus extends EventEmitter {
                     let absDiff = bcmath.bclt(diff, 0) ? bcmath.bcmul(diff, '-1', 18) : diff;
                     let deviation = bcmath.bcdiv(absDiff, local, 18);
                     if (bcmath.bcgt(deviation, String(devThreshold))) {
-                        let pct = bcmath.bcstr(bcmath.bcmul(deviation, '100', 4), 4);
+                        let pct = bcmath.bcformat(bcmath.bcmul(deviation, '100', 4), 4);
                         reject(p.coinPair, 'proposed ' + p.price + ' deviates ' + pct +
                             '% from local ' + local + ' (> ' + (devThreshold * 100) + '%)',
-                            { reason: 'deviation', proposed: String(p.price), local: String(local), deviation: bcmath.bcstr(deviation, 18) });
+                            { reason: 'deviation', proposed: String(p.price), local: String(local), deviation: bcmath.bcformat(deviation, 18) });
                         return;
                     }
                 } else {
@@ -740,10 +740,10 @@ class OracleConsensus extends EventEmitter {
                         // leader from injecting values that are orders of magnitude off.
                         let histThreshold = String(devThreshold * 5);
                         if (bcmath.bcgt(deviation, histThreshold)) {
-                            let pct = bcmath.bcstr(bcmath.bcmul(deviation, '100', 4), 4);
+                            let pct = bcmath.bcformat(bcmath.bcmul(deviation, '100', 4), 4);
                             reject(p.coinPair, 'proposed ' + p.price + ' deviates ' + pct +
                                 '% from last finalized ' + lastPrice + ' (no local submission, threshold ' + (devThreshold * 500) + '%)',
-                                { reason: 'historical-deviation', proposed: String(p.price), lastFinalized: String(lastPrice), deviation: bcmath.bcstr(deviation, 18) });
+                                { reason: 'historical-deviation', proposed: String(p.price), lastFinalized: String(lastPrice), deviation: bcmath.bcformat(deviation, 18) });
                             return;
                         }
                     }
@@ -775,7 +775,27 @@ class OracleConsensus extends EventEmitter {
         // at the round's block boundary (same snapshot the leader used in
         // finalizeRound) so PREPARE/COMMIT checks use the same N on every hub.
         if (!this.pendingRounds.has(round)) {
-            let blockHeight = btcBlockHeight || round;
+            // Fix (#1225): do NOT substitute the round id for a missing BTC block
+            // height on a federated hub. The leader locked the price snapshot at the
+            // real round block in finalizeRound; pinning the follower's snapshot at
+            // block_index = round (not a BTC boundary) locks a DIFFERENT (price, block)
+            // set/quorum than the leader for the same round, or degrades to the null
+            // path. Only reachable from a peer that omits the height (old peer mid
+            // rolling deploy, or a malformed envelope) -- current honest senders always
+            // populate it. Fail closed: drop the PROPOSE rather than pin to a fake block.
+            // A single-node / regtest hub (_getQuorum()===0) has no peer to split from,
+            // so it keeps the legacy round-as-anchor fallback for bootstrap.
+            let blockHeight = btcBlockHeight;
+            if (!Number.isInteger(blockHeight) || blockHeight <= 0) {
+                if (this._getQuorum() > 0) {
+                    console.warn('Oracle: dropping PROPOSE for round ' + round + ': no BTC block ' +
+                        'height in envelope on a federated hub; refusing to pin the price snapshot ' +
+                        'at the round id (not a BTC block boundary), which would diverge from the ' +
+                        'leader\'s snapshot for this round.');
+                    return;
+                }
+                blockHeight = round;
+            }
             // Same activation gate + weight snapshot the leader locked in finalizeRound,
             // so this follower tallies the round identically (weighted on stake or legacy
             // on count), keyed on the round's BTC block boundary + the hub's network.
@@ -788,6 +808,21 @@ class OracleConsensus extends EventEmitter {
             // Mirror the finalizeRound() fallback: if weighted but no validators in the
             // snapshot, degrade to count mode so the round can finalize normally.
             if (wt && (!snap || !Array.isArray(snap.validators) || snap.validators.length === 0)) {
+                // Federation-split guard (fail closed), mirroring the leader-side guard
+                // in finalizeRound (#1222). swq.isStakeWeightedQuorumActive is a pure
+                // function of (block, network) every honest hub computes identically, so
+                // degrading THIS follower to a count quorum on its own weight-snapshot
+                // reachability (e.g. a per-RPC getstakeweightsbycapability failure) forks
+                // the finalization THRESHOLD: peers tally summed stake while this hub
+                // tallies a count over the same N. Skip the round rather than diverge.
+                // A single-node / regtest hub (_getQuorum()===0) has no peer to split
+                // from, so it keeps the graceful count fallback below.
+                if (this._getQuorum() > 0) {
+                    console.warn('Oracle: dropping PROPOSE for round ' + round + ': weighted mode ' +
+                        'active but weight snapshot unavailable while federated; refusing to open a ' +
+                        'count-mode pending round this hub\'s peers are not using.');
+                    return;
+                }
                 wt   = false;
                 snap = this.hub.capabilitySnapshot
                     ? await this.hub.capabilitySnapshot.getSnapshot('price', blockHeight)
@@ -1115,9 +1150,9 @@ class OracleConsensus extends EventEmitter {
         // Compute median in bignumber (no float midpoint average / .toFixed artifact)
         let mid = Math.floor(values.length / 2);
         if (values.length % 2 === 0) {
-            return bcmath.bcstr(bcmath.bcdiv(bcmath.bcadd(values[mid - 1].s, values[mid].s, 8), '2', 8), 8);
+            return bcmath.bcformat(bcmath.bcdiv(bcmath.bcadd(values[mid - 1].s, values[mid].s, 8), '2', 8), 8);
         }
-        return bcmath.bcstr(values[mid].s, 8);
+        return bcmath.bcformat(values[mid].s, 8);
     }
 
     async _storeSnapshot(round, prices, validatorCount, proof, btcBlockHeight, btcBlockTime) {

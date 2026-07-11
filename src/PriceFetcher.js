@@ -375,13 +375,13 @@ class PriceFetcher {
     // done in bignumber so the submitted local price carries no float/.toFixed artifact).
     // Ordering uses a float compare (no consensus arithmetic).
     _median(values) {
-        if (values.length === 0) return bcmath.bcstr('0', 8);
+        if (values.length === 0) return bcmath.bcformat('0', 8);
         let sorted = [...values].sort((a, b) => a - b);
         let mid = Math.floor(sorted.length / 2);
         if (sorted.length % 2 === 0) {
-            return bcmath.bcstr(bcmath.bcdiv(bcmath.bcadd(String(sorted[mid - 1]), String(sorted[mid]), 8), '2', 8), 8);
+            return bcmath.bcformat(bcmath.bcdiv(bcmath.bcadd(String(sorted[mid - 1]), String(sorted[mid]), 8), '2', 8), 8);
         }
-        return bcmath.bcstr(String(sorted[mid]), 8);
+        return bcmath.bcformat(String(sorted[mid]), 8);
     }
 
     // Expose the supported pair list (used by OracleConsensus._storeSkippedRound and tests)

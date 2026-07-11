@@ -424,9 +424,17 @@ class AttestationRound {
             if(entry.error) failed++;
             else proposed++;
         }
+        // In-flight = seen but _startRound not yet resolved. Counted directly
+        // (seen keys with no rounds entry) rather than `seen.size - rounds.size`:
+        // the two maps evict on different windows (seen ~retryAfterMs, rounds
+        // roundsTtlMs), so the raw size difference can go negative.
+        let inFlight = 0;
+        for(let rid of this.seen.keys()){
+            if(!this.rounds.has(rid)) inFlight++;
+        }
         return {
             seen_count:      this.seen.size,
-            in_flight_count: this.seen.size - this.rounds.size,  // seen but _startRound not yet resolved
+            in_flight_count: inFlight,
             proposed_count:  proposed,
             failed_count:    failed
         };

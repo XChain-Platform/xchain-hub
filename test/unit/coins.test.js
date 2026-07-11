@@ -32,6 +32,29 @@ const GOLDEN_HASH = {
 
 describe('coins registry', () => {
 
+    // #1283: GENESIS_VERIFIERS lowercase normalization must run on EVERY network,
+    // not regtest-only. The early `if(network !== 'regtest') return out;` used to
+    // precede the normalization, so mainnet/testnet served verifier keys verbatim,
+    // contradicting the 'case-insensitive on the wire; normalize' contract.
+    describe('resolveFullnode GENESIS_VERIFIERS normalization (#1283)', () => {
+        const mixedCase = { GENESIS_VERIFIERS: ['ABcd12', 'EF00Ff'] };
+
+        it('lowercases GENESIS_VERIFIERS on mainnet', () => {
+            const out = coins.resolveFullnode(mixedCase, 'mainnet');
+            expect(out.GENESIS_VERIFIERS).to.deep.equal(['abcd12', 'ef00ff']);
+        });
+
+        it('lowercases GENESIS_VERIFIERS on testnet', () => {
+            const out = coins.resolveFullnode(mixedCase, 'testnet');
+            expect(out.GENESIS_VERIFIERS).to.deep.equal(['abcd12', 'ef00ff']);
+        });
+
+        it('lowercases GENESIS_VERIFIERS on regtest (unchanged behavior)', () => {
+            const out = coins.resolveFullnode(mixedCase, 'regtest');
+            expect(out.GENESIS_VERIFIERS).to.deep.equal(['abcd12', 'ef00ff']);
+        });
+    });
+
     it('exposes the three launch coins with full-name mappings', () => {
         expect(coins.ALLOWED_COINS).to.deep.equal(['BTC', 'LTC', 'DOGE']);
         expect(coins.COIN_FULL_NAME).to.deep.equal({ BTC: 'bitcoin', LTC: 'litecoin', DOGE: 'dogecoin' });

@@ -49,6 +49,10 @@ class CapabilitySnapshot {
         // Same throttle idiom as _authWarnAt so a sustained over-limit validator
         // set raises one warning per cacheTtlMs instead of one per quorum call.
         this._truncWarnAt = 0;
+        // Last time we alarmed on a block-echo mismatch (_blockEchoOk). Own
+        // field so echo-mismatch and auth-failure warnings never suppress each
+        // other's throttle window.
+        this._echoWarnAt = 0;
         // Last time we alarmed on a wired-but-unconfigured capability threshold.
         // Same throttle idiom; keyed per capability so each missing one warns.
         this._minStakeWarnAt = {};
@@ -95,13 +99,14 @@ class CapabilitySnapshot {
     // echoes the REQUESTED block on success, so a mismatch means the indexer
     // answered for a different height than asked. Locking a snapshot mislabeled
     // with `requested` would let two hubs compute quorum over different validator
-    // sets for the same round. Reject on mismatch (throttled log reuses the auth
-    // idiom). Returns true when the echoed block matches the request.
+    // sets for the same round. Reject on mismatch (throttled log follows the
+    // auth idiom with its own field, so echo and auth alarms never mask each
+    // other). Returns true when the echoed block matches the request.
     _blockEchoOk(method, result, requested) {
         if (Number(result.block_index) === Number(requested)) return true;
         let now = Date.now();
-        if (now - this._authWarnAt > this.cacheTtlMs) {
-            this._authWarnAt = now;
+        if (now - this._echoWarnAt > this.cacheTtlMs) {
+            this._echoWarnAt = now;
             console.error('CapabilitySnapshot: ' + method + ' returned block_index ' + result.block_index +
                 ' for requested block ' + requested + '; rejecting snapshot (freshness/echo mismatch, ' +
                 'possible indexer bug or misconfiguration).');

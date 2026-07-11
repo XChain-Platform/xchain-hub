@@ -127,7 +127,7 @@ class SlashDetector {
                 let deviation = bcmath.bcdiv(absDiff, String(finalPriceStr), 18);
 
                 if (bcmath.bcgt(deviation, String(this.deviationThreshold))) {
-                    let pct = bcmath.bcstr(bcmath.bcmul(deviation, '100', 4), 4);
+                    let pct = bcmath.bcformat(bcmath.bcmul(deviation, '100', 4), 4);
                     console.warn('Slash: Validator ' + pubkey.substring(0, 16) + '... deviated ' +
                         pct + '% on ' + p.coinPair + ' in round ' + round);
 

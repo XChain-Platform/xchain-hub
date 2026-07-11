@@ -84,9 +84,20 @@ function bclt(numA, numB){ return bcnum(numA).lt(bcnum(numB)); }
 function bcgte(numA, numB){ return bcnum(numA).gte(bcnum(numB)); }
 function bclte(numA, numB){ return bcnum(numA).lte(bcnum(numB)); }
 
-// Format a bignumber/string to a fixed-decimal string (for storage as VARCHAR).
-function bcstr(num, decimals = 64){
+// Zero-padded fixed-decimal string (e.g. bcformat('1.5', 8) -> '1.50000000').
+// Named bcformat to match xchain-indexer/src/utility.js, where the padded
+// helper is bcformat and bcstr is the minimal form below. Keeping the names
+// aligned makes the byte-equivalence claim in this file's header true.
+function bcformat(num, decimals = 64){
     return mathjs.format(bcnum(num), {notation: 'fixed', precision: parseInt(decimals)});
 }
 
-module.exports = { isNull, isNumeric, bcnum, bcsub, bcadd, bcmul, bcdiv, getPrice, bcgt, bclt, bcgte, bclte, bcstr };
+// Minimal-form string, byte-identical to the indexer's utility.js bcstr
+// (bcnum(num).toFixed(), no zero padding): bcstr('1.5') -> '1.5'. Use this
+// wherever output must byte-match indexer-produced amount strings (the SMT
+// canonicalAmount path); use bcformat when a fixed width is required.
+function bcstr(num){
+    return bcnum(num).toFixed();
+}
+
+module.exports = { isNull, isNumeric, bcnum, bcsub, bcadd, bcmul, bcdiv, getPrice, bcgt, bclt, bcgte, bclte, bcstr, bcformat };

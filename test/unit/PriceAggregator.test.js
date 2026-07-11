@@ -419,7 +419,9 @@ describe('PriceAggregator.receiveOraclePrice() validation + persistence', functi
     });
 
     it('rejects a malformed or out-of-range fee without touching the DB', async function () {
-        for (let fee of ['abc', '1.5', '-0.1']) {
+        // '1.0000000000000000001' rounds to 1.0 under parseFloat and slipped past the
+        // old `> 1` gate; exact bcmath now rejects it (parity with the indexer).
+        for (let fee of ['abc', '1.5', '-0.1', '1.0000000000000000001']) {
             let result = await agg.receiveOraclePrice('BTC', { ...VALID, fee });
             expect(result, 'fee=' + fee).to.deep.equal({ accepted: false, reason: 'invalid fee' });
         }
@@ -702,6 +704,48 @@ describe('PriceAggregator.receiveValidatedRound()', function () {
         expect(result).to.deep.equal({ accepted: true });
         expect(inserts).to.have.length(1); // one atomic multi-row INSERT
         expect(inserts[0][6]).to.equal(1); // validator_count (first row)
+    });
+
+    // Finding 1257: validated-round price ingest now rejects non-positive prices
+    // (the positive lower bound mirrors the governance-path check), so a
+    // quorum-signed zero or all-zero round cannot finalize as a real price. The
+    // rejection lands in the pairs loop before any DB access.
+    it('rejects a zero price without touching the DB (non-positive lower bound)', async function () {
+        let result = await agg.receiveValidatedRound('BTC', makeRound({
+            pairs: [{ pair: 'BTC/USD', price: '0' }]
+        }));
+        expect(result).to.deep.equal({ accepted: false, reason: 'invalid pairs' });
+        expect(hub.db.doQuery.called).to.equal(false);
+    });
+
+    it('rejects a negative price without touching the DB', async function () {
+        let result = await agg.receiveValidatedRound('BTC', makeRound({
+            pairs: [{ pair: 'BTC/USD', price: '-1' }]
+        }));
+        expect(result).to.deep.equal({ accepted: false, reason: 'invalid pairs' });
+        expect(hub.db.doQuery.called).to.equal(false);
+    });
+
+    it('accepts a small positive boundary price (0.00000001)', async function () {
+        let inserts = stubDb();
+        let smallPairs = [{ pair: 'BTC/USD', price: '0.00000001' }];
+        let payload = buildPriceV0Payload(5, 1700000000, smallPairs, BTC_HEIGHT);
+        let result = await agg.receiveValidatedRound('BTC', makeRound({
+            pairs: smallPairs,
+            sigs:  V.slice(0, 3).map(v => ({ pubkey: v.pubkey, sig: v.sign(payload) }))
+        }));
+        expect(result).to.deep.equal({ accepted: true });
+        expect(inserts).to.have.length(1);
+        expect(inserts[0][2]).to.equal('0.00000001');   // price persisted verbatim
+    });
+
+    it('still rejects a price at/above the PRICE_MAX upper bound (guard untouched)', async function () {
+        const { PRICE_MAX } = require('../../src/constants');
+        let result = await agg.receiveValidatedRound('BTC', makeRound({
+            pairs: [{ pair: 'BTC/USD', price: String(PRICE_MAX) }]
+        }));
+        expect(result).to.deep.equal({ accepted: false, reason: 'invalid pairs' });
+        expect(hub.db.doQuery.called).to.equal(false);
     });
 
     it('returns a db error if a snapshot INSERT throws', async function () {

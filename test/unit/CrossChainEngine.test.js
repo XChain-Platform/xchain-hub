@@ -16,6 +16,24 @@ const CrossChainEngine   = require('../../src/CrossChainEngine');
 const { createMockHub }  = require('../helpers/mockHub');
 const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7, makeValidator } = require('../helpers/fixtures');
 
+// #1223: _resolveQuorum now fails closed when federated with no deterministic
+// capability snapshot (the live-validator-set fallback forked N/quorum across
+// hubs). Federated flow tests must therefore wire a snapshot resolver. This one
+// mirrors the live set at call time (quorum is still frozen into pending at round
+// start, so the "locked quorum survives set changes" invariant is unaffected).
+function wireLiveMirrorSnapshot(engine, hub) {
+    hub._resolveBtcLatestBlock = async () => 900000;
+    hub.capabilitySnapshot = {
+        getSnapshot: async () => ({ validators: engine.validatorSet.slice() }),
+        getQuorum: (snap) => {
+            let N = snap.validators.length;
+            if (N <= 1) return 0;
+            let f = Math.floor((N - 1) / 3);
+            return Math.max(2 * f + 1, Math.ceil((N + 1) / 2));
+        }
+    };
+}
+
 describe('CrossChainEngine', function () {
 
     let hub, pm, engine;
@@ -101,6 +119,52 @@ describe('CrossChainEngine', function () {
         it('single validator → quorum 0', function () {
             engine.setValidatorSet([makeValidator(1)]);
             expect(engine._getQuorum()).to.equal(0);
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // _resolveQuorum() federation-split fail-closed guard (#1223)
+    // -----------------------------------------------------------------
+
+    describe('_resolveQuorum() fail-closed (#1223)', function () {
+        it('throws when federated but no deterministic snapshot resolves (indexer down)', async function () {
+            // Federated set (live quorum > 0), no capabilitySnapshot -> must NOT fall
+            // back to the local validator set (would fork N/quorum against healthy peers).
+            engine.setValidatorSet(VALIDATORS_4);
+            hub.capabilitySnapshot = null;
+            let threw = false;
+            try { await engine._resolveQuorum('BTC', 'LTC', 100); }
+            catch (e) { threw = true; expect(e.message).to.match(/deterministic cross_chain snapshot while federated/); }
+            expect(threw).to.equal(true);
+        });
+
+        it('single-node hub (live quorum 0) keeps the live fallback, no throw', async function () {
+            engine.setValidatorSet([makeValidator(1)]);   // N=1 -> _getQuorum()===0
+            hub.capabilitySnapshot = null;
+            let q = await engine._resolveQuorum('BTC', 'LTC', 100);
+            expect(q).to.equal(0);
+        });
+
+        it('returns the snapshot quorum when a deterministic snapshot resolves', async function () {
+            engine.setValidatorSet(VALIDATORS_4);
+            hub.capabilitySnapshot = {
+                getSnapshot: async () => ({ validators: [makeValidator(1), makeValidator(2), makeValidator(3)] }),
+                getQuorum:   () => 2
+            };
+            let q = await engine._resolveQuorum('BTC', 'LTC', 100);
+            expect(q).to.equal(2);
+        });
+
+        it('treats block height 0 as a real height (not absent) and resolves a snapshot', async function () {
+            engine.setValidatorSet(VALIDATORS_4);
+            let seenBlock = 'unset';
+            hub.capabilitySnapshot = {
+                getSnapshot: async (cap, block) => { seenBlock = block; return { validators: [makeValidator(1)] }; },
+                getQuorum:   () => 2
+            };
+            let q = await engine._resolveQuorum('BTC', 'LTC', 0);
+            expect(seenBlock).to.equal(0);
+            expect(q).to.equal(2);
         });
     });
 
@@ -204,6 +268,7 @@ describe('CrossChainEngine', function () {
 
         it('throws when not the leader in multi-node mode', async function () {
             engine.setValidatorSet(VALIDATORS_3);
+            wireLiveMirrorSnapshot(engine, hub);
             pm.validatorAddr = 'ws://not-in-set:10001';
 
             try {
@@ -224,6 +289,7 @@ describe('CrossChainEngine', function () {
         beforeEach(function () {
             // Use VALIDATORS_4 (quorum=3) to prevent auto-completion
             engine.setValidatorSet(VALIDATORS_4);
+            wireLiveMirrorSnapshot(engine, hub);
             pm.validatorAddr = VALIDATORS_4[0].addr;
         });
 
@@ -234,7 +300,7 @@ describe('CrossChainEngine', function () {
             await engine._handlePropose({
                 sender: VALIDATORS_4[1].addr,
                 data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
-                        destChain: 'LTC', confirmations: 3, digest }
+                        destChain: 'LTC', confirmations: 3, digest, btcBlockHeight: 900000 }
             });
 
             expect(engine.pendingAttestations.has(attestationId)).to.be.true;
@@ -424,6 +490,8 @@ describe('CrossChainEngine', function () {
 
     describe('quorum locking', function () {
 
+        beforeEach(function () { wireLiveMirrorSnapshot(engine, hub); });
+
         it('locks quorum into the pending object on the leader (PROPOSE) path', async function () {
             engine.setValidatorSet(VALIDATORS_4); // N=4 → quorum=3
             // seq increments to 1 → leader = VALIDATORS_4[1 % 4]
@@ -445,7 +513,7 @@ describe('CrossChainEngine', function () {
             await engine._handlePropose({
                 sender: VALIDATORS_4[1].addr,
                 data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
-                        destChain: 'LTC', confirmations: 3, digest }
+                        destChain: 'LTC', confirmations: 3, digest, btcBlockHeight: 900000 }
             });
 
             expect(engine.pendingAttestations.get(attestationId).quorum).to.equal(3);
@@ -462,7 +530,7 @@ describe('CrossChainEngine', function () {
             await engine._handlePropose({
                 sender: VALIDATORS_4[1].addr,
                 data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
-                        destChain: 'LTC', confirmations: 3, digest }
+                        destChain: 'LTC', confirmations: 3, digest, btcBlockHeight: 900000 }
             });
             // After PROPOSE: prepares = {self, sender} = 2; one PREPARE broadcast.
             pm.broadcast.resetHistory();
@@ -491,7 +559,7 @@ describe('CrossChainEngine', function () {
             await engine._handlePropose({
                 sender: VALIDATORS_7[1].addr,
                 data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
-                        destChain: 'LTC', confirmations: 3, digest }
+                        destChain: 'LTC', confirmations: 3, digest, btcBlockHeight: 900000 }
             });
             pm.broadcast.resetHistory();
 
@@ -524,6 +592,7 @@ describe('CrossChainEngine', function () {
         beforeEach(function () {
             engine._verifySourceAction.restore(); // exercise the real guard
             engine.setValidatorSet(VALIDATORS_4);
+            wireLiveMirrorSnapshot(engine, hub);
             pm.validatorAddr = VALIDATORS_4[0].addr;
         });
 
@@ -534,7 +603,7 @@ describe('CrossChainEngine', function () {
             return engine._handlePropose({
                 sender: VALIDATORS_4[1].addr,
                 data: Object.assign({ attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
-                                      destChain: 'LTC', confirmations, digest }, overrides.data)
+                                      destChain: 'LTC', confirmations, digest, btcBlockHeight: 900000 }, overrides.data)
             });
         }
 

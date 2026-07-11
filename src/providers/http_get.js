@@ -227,10 +227,26 @@ exports.agree = (proposals) => {
     let groups = new Map();  // contentHash -> { count, body, meta }
     for (let p of proposals) {
         if (!p || !Buffer.isBuffer(p.body)) continue;
+        // Domain-separate the grouping key so no byte can shift across the
+        // body/meta boundary. The prior form `sha256(body || '|' || meta)`
+        // used a single unframed delimiter, so distinct pairs collided
+        // whenever bytes moved across it: body="A|",meta="B" hashed identically
+        // to body="A",meta="|B". Since PROPOSE `meta` is an attacker-chosen
+        // wire string (AttestationConsensus ~392, sender-sig-verified only), a
+        // Byzantine proposer could craft a collision that inflated an honest
+        // group's count, manufacturing a quorum winner where agree() should
+        // return null and driving honest divergent proposals into the
+        // slash-candidate path. Hash each field separately (mirroring how the
+        // canonical signing string binds sha256(body) apart from meta): a
+        // byte shift now changes both per-field digests, so no collision.
+        // This key is a purely local tally artifact (never on the wire); honest
+        // distinct (body, meta) pairs group identically under old and new forms,
+        // so the change is safe to deploy per-node.
+        let bodyHash = crypto.createHash('sha256').update(p.body).digest();
+        let metaHash = crypto.createHash('sha256').update(String(p.meta || '')).digest();
         let h = crypto.createHash('sha256')
-            .update(p.body)
-            .update('|')
-            .update(String(p.meta || ''))
+            .update(bodyHash)
+            .update(metaHash)
             .digest('hex');
         let g = groups.get(h);
         if (g) g.count++;

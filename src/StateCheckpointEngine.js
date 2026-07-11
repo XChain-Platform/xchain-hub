@@ -234,13 +234,16 @@ class StateCheckpointEngine extends EventEmitter {
             // against any capability snapshot. (Single-operator regtest seeds a
             // local validator via XDEX_SEED_LOCAL_VALIDATOR, so it still runs.)
             if(pubkeys.length === 0) return;
-            if(pubkeys.length > 1){
-                if(!this.identity) return;
-                let me = this.identity.getPubkeyHex().toLowerCase();
-                let myRank = pubkeys.indexOf(me);
-                if(myRank < 0) return;                              // not an oracle_publish validator
-                if(myRank !== (btcBlock % pubkeys.length)) return;  // not our cadence (rotates next block)
-            }
+            // Membership + cadence run for EVERY set size: a size-1 set used to
+            // skip even the indexOf check, letting a hub whose identity is NOT
+            // the sole oracle_publish validator sign an unverifiable checkpoint.
+            // (Size-1 cadence is btcBlock % 1 === 0 === rank, so the sole
+            // validator still checkpoints every cadence block.)
+            if(!this.identity) return;
+            let me = this.identity.getPubkeyHex().toLowerCase();
+            let myRank = pubkeys.indexOf(me);
+            if(myRank < 0) return;                              // not an oracle_publish validator
+            if(myRank !== (btcBlock % pubkeys.length)) return;  // not our cadence (rotates next block)
 
             // We are the cadence leader (or a single-node set): one round per chain.
             // The latch advances even on per-chain failure; the next cadence retries.

@@ -43,6 +43,7 @@ const path      = require('path');
 const geoip     = require('geoip-lite');   // self-contained country/region DB; we read only country + region
 const { HUB_SCHEMA_VERSION } = require('./hub-schema-version');   // stamped on every mirror snapshot so a stale indexer rejects a mismatch
 const { buildOraclePricesSnapshotQuery } = require('./oraclePricesSnapshotQuery');   // page (indexer bootstrap) vs latest-per-feed (dashboard) query selection
+const { ORACLE_DEVIATION_THRESHOLD } = require('./constants');   // #1299: single source of truth for the co-sign/slash deviation band (no re-declared 0.05 literal)
 
 const HUB_PORT = process.env.HUB_PORT;
 const HUB_HOST = process.env.HUB_HOST || '0.0.0.0';
@@ -190,7 +191,7 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     ORACLE_ROUND_INTERVAL:  parseInt(process.env.ORACLE_ROUND_INTERVAL) || DEFAULT_ORACLE_ROUND_INTERVAL_MS,
     ORACLE_SUBMISSION_WINDOW: parseInt(process.env.ORACLE_SUBMISSION_WINDOW) || 180000,
     ORACLE_REWARD_PER_ROUND: process.env.ORACLE_REWARD_PER_ROUND || '10.00000000',
-    SLASH_DEVIATION_THRESHOLD: process.env.SLASH_DEVIATION_THRESHOLD || '0.05',
+    SLASH_DEVIATION_THRESHOLD: process.env.SLASH_DEVIATION_THRESHOLD || String(ORACLE_DEVIATION_THRESHOLD),
     SLASH_MISSED_ROUNDS_THRESHOLD: process.env.SLASH_MISSED_ROUNDS_THRESHOLD || '30',
     COINGECKO_API_KEY:      process.env.COINGECKO_API_KEY || '',
     COINMARKETCAP_API_KEY:  process.env.COINMARKETCAP_API_KEY || '',

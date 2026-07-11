@@ -107,13 +107,19 @@ function memDb() {
             params = params || [];
             if (sql.startsWith('SELECT sc.* FROM state_checkpoints sc JOIN')) {
                 let everyN = params[0] || 1;                       // ANCHOR_CHECKPOINT_EVERY_N
+                let net    = sql.includes('AND sc.network = ?') ? params[1] : null; // network scope (when configured)
                 let latest = {};
                 for (let r of checkpoints) {
                     if (r.checkpoint_seq % everyN !== 0) continue; // only anchor-eligible seqs
                     let k = r.chain + '|' + r.network;
                     if (!latest[k] || r.checkpoint_seq > latest[k].checkpoint_seq) latest[k] = r;
                 }
-                return Object.values(latest).filter(r => r.anchor_txid == null);
+                return Object.values(latest).filter(r => r.anchor_txid == null && (net == null || r.network === net));
+            }
+            if (sql.startsWith("SELECT * FROM state_checkpoints WHERE network = ? ORDER BY (chain = 'BTC') DESC")) {
+                let sorted = checkpoints.filter(r => r.network === params[0])
+                    .sort((x, y) => (y.chain === 'BTC') - (x.chain === 'BTC') || y.id - x.id);
+                return sorted.slice(0, 1);
             }
             if (sql.startsWith("SELECT * FROM state_checkpoints ORDER BY (chain = 'BTC') DESC")) {
                 let sorted = checkpoints.slice().sort((x, y) => (y.chain === 'BTC') - (x.chain === 'BTC') || y.id - x.id);
@@ -2058,6 +2064,117 @@ describe('StateAnchorPublisher', function () {
         dex.emit('match:finalized');                             // 2 >= batchSize → flush
         await sleep(20);
         expect(flushes, 'reaching batchSize triggers a flush').to.be.greaterThan(0);
+    });
+
+    // Finding 1205: the v0-publisher election rank/identity check now runs for a
+    // size-1 elected set too (the old `length > 1` guard skipped it, letting any
+    // CURRENT oracle_publish member impersonate the sole elected publisher and
+    // stamp/suppress the anchor + mirror the reward). Rejection is a silent
+    // return: anchor_txid stays null and no reward is mirrored.
+    describe('_handleV0Done size-1 elected set (finding 1205)', function () {
+        it('rejects a NON-elected current member when the elected set has exactly one member', async function () {
+            let bus = buildMesh(2);
+            let elected  = bus.nodes[0];             // the SOLE elected publisher (size-1 set)
+            let attacker = bus.nodes[1];             // a current oracle_publish member, but not elected
+            let receiver = bus.nodes[0];             // holds the checkpoint and processes the done
+            // Current membership (null arg) admits BOTH nodes so the attacker clears the
+            // membership gate; the snapshot_block election set is exactly [elected].
+            receiver.pub._getActiveOraclePublishPubkeys = async (blk) =>
+                (blk == null ? bus.nodes.map(nd => nd.pubkey) : [elected.pubkey]);
+
+            let d = { chain: CP_ROW.chain, network: CP_ROW.network, block_index: CP_ROW.block_index,
+                      checkpoint_seq: CP_ROW.checkpoint_seq, txid: 'aa'.repeat(32) };
+            d.sig_pubkey = attacker.pubkey;
+            d.sig = attacker.identity.sign(receiver.pub._v0DoneCanonical(d, d.txid));
+
+            await receiver.pub._handleV0Done({ type: 'XANC_V0_DONE', sender: attacker.pubkey, data: d });
+
+            expect(receiver.db.checkpoints[0].anchor_txid, 'non-elected member must not stamp (size-1 set)').to.equal(null);
+            expect(receiver.rewards.length, 'non-elected member must not mirror a reward').to.equal(0);
+        });
+
+        it("accepts the sole elected publisher's request when the elected set has exactly one member", async function () {
+            let bus = buildMesh(2);
+            let elected  = bus.nodes[0];             // the SOLE elected publisher (rank 0, always unlocked)
+            let receiver = bus.nodes[1];             // a peer that holds the checkpoint
+            receiver.pub._getActiveOraclePublishPubkeys = async (blk) =>
+                (blk == null ? bus.nodes.map(nd => nd.pubkey) : [elected.pubkey]);
+
+            let d = { chain: CP_ROW.chain, network: CP_ROW.network, block_index: CP_ROW.block_index,
+                      checkpoint_seq: CP_ROW.checkpoint_seq, txid: 'bb'.repeat(32) };
+            d.sig_pubkey = elected.pubkey;
+            d.sig = elected.identity.sign(receiver.pub._v0DoneCanonical(d, d.txid));
+
+            await receiver.pub._handleV0Done({ type: 'XANC_V0_DONE', sender: elected.pubkey, data: d });
+
+            expect(receiver.db.checkpoints[0].anchor_txid, 'sole elected publisher V0_DONE stamps').to.equal('bb'.repeat(32));
+            expect(receiver.rewards.filter(r => r.type === 'anchor_BTC').length,
+                'below flag-day the mirror records the reward').to.equal(1);
+        });
+    });
+
+    // Findings 1206 / 1207: with a configured hub network, the v0 pending-anchor
+    // selector and the archive wrapper-checkpoint selector are both scoped to
+    // this.network, so a leftover row from a prior-network deployment can never be
+    // re-anchored (1206) nor become the archive wrapper (1207).
+    describe('network-scoped checkpoint selection (findings 1206 / 1207)', function () {
+        // Isolate the network SCOPING from the stake-weighted quorum machinery:
+        // configuring a regtest network would otherwise flip weighted quorum on and
+        // pull in getWeightSnapshot wiring the mesh hub does not provide. Pin the
+        // regtest activation dormant so the flow uses the legacy count path.
+        const swqMod = require('../../src/stake_weighted_quorum.js');
+        let savedSwqRegtest;
+        beforeEach(function () {
+            savedSwqRegtest = swqMod.STAKE_WEIGHTED_QUORUM_ACTIVATION.regtest;
+            swqMod.STAKE_WEIGHTED_QUORUM_ACTIVATION.regtest = 999999999;
+        });
+        afterEach(function () {
+            swqMod.STAKE_WEIGHTED_QUORUM_ACTIVATION.regtest = savedSwqRegtest;
+        });
+
+        it('does NOT select an unanchored checkpoint on a DIFFERENT network for anchoring (1206)', async function () {
+            let bus = buildMesh(1);
+            let nd = bus.nodes[0];
+            nd.pub.network = 'regtest';                          // hub configured for regtest
+            // A leftover unanchored checkpoint from a dead 'mainnet' deployment.
+            nd.db.checkpoints.push(Object.assign({}, CP_ROW, {
+                id: 99, network: 'mainnet', block_index: 777, anchor_txid: null
+            }));
+            await startAll(bus);
+
+            let res = await nd.pub.flush();
+            await sleep(30);
+
+            expect(res.anchored.length, 'only the regtest checkpoint is anchored').to.equal(1);
+            expect(res.anchored[0]).to.include({ chain: 'BTC', network: 'regtest', block_index: 494 });
+            expect(res.anchored.some(a => a.network === 'mainnet'),
+                'the foreign-network row is never selected').to.equal(false);
+        });
+
+        it('selects only the matching-network wrapper checkpoint for the archive round (1207)', async function () {
+            let bus = buildMesh(1);
+            let nd = bus.nodes[0];
+            nd.pub.network = 'regtest';
+            // A foreign-network BTC checkpoint with a HIGHER id: the unscoped
+            // "ORDER BY (chain='BTC') DESC, id DESC" would prefer it as the wrapper.
+            nd.db.checkpoints.push(Object.assign({}, CP_ROW, {
+                id: 99, network: 'mainnet', block_index: 777, anchor_txid: null
+            }));
+            // Capture the network the archive is built for (arg 0 of _buildArchive).
+            let capturedNetwork = null;
+            let origBuild = nd.pub._buildArchive.bind(nd.pub);
+            nd.pub._buildArchive = async (network, ...rest) => {
+                capturedNetwork = network;
+                return origBuild(network, ...rest);
+            };
+            await startAll(bus);
+
+            let res = await nd.pub.flush();
+            await sleep(30);
+
+            expect(res.archive, 'archive round published').to.equal('published');
+            expect(capturedNetwork, 'wrapper checkpoint is network-scoped to regtest').to.equal('regtest');
+        });
     });
 });
 

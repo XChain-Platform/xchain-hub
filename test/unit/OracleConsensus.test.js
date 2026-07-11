@@ -14,6 +14,7 @@ const crypto           = require('crypto');
 const sinon            = require('sinon');
 const { expect }       = require('chai');
 const OracleConsensus  = require('../../src/OracleConsensus');
+const swq              = require('../../src/stake_weighted_quorum.js');
 const { createMockHub }       = require('../helpers/mockHub');
 const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7, VALIDATORS_10, VALIDATORS_13,
         buildSubmissions, buildUniformSubmissions, SAMPLE_PRICES } = require('../helpers/fixtures');
@@ -668,6 +669,57 @@ describe('OracleConsensus', function () {
     });
 
     // -----------------------------------------------------------------
+    // _handlePropose() follower fail-closed guards (#1222, #1225)
+    // -----------------------------------------------------------------
+
+    describe('_handlePropose() follower fail-closed guards', function () {
+
+        // Build a well-formed PROPOSE from the deterministic leader that passes the
+        // known-sender, digest, leadership, deviation and coverage gates, so the test
+        // reaches the pending-round creation block where the guards live.
+        function goodEnvelope(round, extra) {
+            oc.setValidatorSet(VALIDATORS_3);
+            pm.validatorPubkeys = new Set();   // size 0 -> _isKnownSender returns true
+            let leader = VALIDATORS_3[round % 3];
+            let prices = [{ coinPair: 'BTC/USD', price: '100000' }];
+            // Local submission (from a NON-leader validator) pricing the pair at the
+            // proposed value -> deviation 0 -> co-sign gate passes without a DB lookup.
+            oracleRound.getSubmissions.returns(buildSubmissions([
+                { sender: VALIDATORS_3[(round + 1) % 3].addr, prices: [{ coinPair: 'BTC/USD', price: '100000' }] }
+            ]));
+            return { type: 'ORACLE_PROPOSE', sender: leader.addr, data: Object.assign({
+                round, prices, digest: oc._digest(round, prices)
+            }, extra || {}) };
+        }
+
+        it('#1225: drops a PROPOSE carrying no BTC block height on a federated hub', async function () {
+            // No btcBlockHeight in the envelope -> must NOT pin the price snapshot at
+            // block_index = round (not a BTC boundary); federated hub drops the round.
+            await oc._handlePropose(goodEnvelope(0, { /* btcBlockHeight omitted */ }));
+            expect(oc.pendingRounds.has(0)).to.equal(false);
+        });
+
+        it('#1225: drops a PROPOSE carrying btcBlockHeight 0 on a federated hub', async function () {
+            await oc._handlePropose(goodEnvelope(0, { btcBlockHeight: 0 }));
+            expect(oc.pendingRounds.has(0)).to.equal(false);
+        });
+
+        it('#1222: drops a PROPOSE when weighted is active but the weight snapshot is empty (federated)', async function () {
+            sinon.stub(swq, 'isStakeWeightedQuorumActive').returns(true);
+            hub.capabilitySnapshot = {
+                getWeightSnapshot: sinon.stub().resolves({ validators: [] }),
+                getSnapshot:       sinon.stub().resolves({ validators: [] }),
+                getQuorum:         sinon.stub().returns(0)
+            };
+            // Real BTC height present, so the #1225 height guard passes; the #1222
+            // weighted-snapshot guard must then fire and drop rather than degrade to
+            // a count quorum this hub's peers are not using.
+            await oc._handlePropose(goodEnvelope(0, { btcBlockHeight: 900000 }));
+            expect(oc.pendingRounds.has(0)).to.equal(false);
+        });
+    });
+
+    // -----------------------------------------------------------------
     // PBFT message flow
     // -----------------------------------------------------------------
 
@@ -880,6 +932,7 @@ describe('OracleConsensus', function () {
                     round:          4,
                     prices,
                     digest,
+                    btcBlockHeight: 900000,   // honest PROPOSE always carries the round's BTC height (#1225)
                     submissionKeys: [VALIDATORS_4[2].addr, VALIDATORS_4[3].addr]
                 }
             });
@@ -1074,7 +1127,7 @@ describe('OracleConsensus', function () {
             let digest = oc._digest(4, prices);
             await oc._handlePropose({
                 sender: VALIDATORS_4[0].addr,
-                data: { round: 4, prices, digest }
+                data: { round: 4, prices, digest, btcBlockHeight: 900000 }
             });
             expect(oc.pendingRounds.has(4)).to.be.true;
             let proposeCalls = pm.broadcast.getCalls().filter(c => c.args[0] === 'ORACLE_PROPOSE').length;
@@ -1115,7 +1168,7 @@ describe('OracleConsensus', function () {
             clock.tick(oc.leaderTimeout);
             await oc._handlePropose({
                 sender: VALIDATORS_4[1].addr,
-                data: { round: 4, prices, digest }
+                data: { round: 4, prices, digest, btcBlockHeight: 900000 }
             });
             expect(oc.pendingRounds.has(4)).to.be.true;
             let [type] = pm.broadcast.getCall(0).args;

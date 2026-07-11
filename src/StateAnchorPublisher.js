@@ -388,13 +388,21 @@ class StateAnchorPublisher {
         // eligible seq rather than the absolute max means accumulated
         // non-multiple seqs never block: they simply stay off-chain. With N=1
         // (MOD(seq,1)=0 for all) this is identical to anchoring every checkpoint.
-        let rows = await this.db.doQuery(
+        // Scoped to this.network when one is configured (matching
+        // StateCheckpointEngine's latch loader): a hub DB carrying rows from a
+        // prior network deployment must never re-elect publishers for (or spend
+        // a real DOGE anchor on) a dead network's perpetually-unanchored
+        // checkpoints. A hub with no configured network keeps the legacy
+        // unscoped behavior rather than filtering everything out.
+        let pendingSql =
             'SELECT sc.* FROM state_checkpoints sc JOIN (' +
             '  SELECT chain, network, MAX(checkpoint_seq) AS max_seq FROM state_checkpoints' +
             '  WHERE MOD(checkpoint_seq, ?) = 0 GROUP BY chain, network' +
             ') t ON sc.chain = t.chain AND sc.network = t.network AND sc.checkpoint_seq = t.max_seq ' +
-            'WHERE sc.anchor_txid IS NULL',
-            [this.anchorEveryNCheckpoints]);
+            'WHERE sc.anchor_txid IS NULL';
+        let pendingParams = [this.anchorEveryNCheckpoints];
+        if(this.network){ pendingSql += ' AND sc.network = ?'; pendingParams.push(this.network); }
+        let rows = await this.db.doQuery(pendingSql, pendingParams);
         let anchored = [];
         for(let row of (rows || [])){
             try {
@@ -706,7 +714,10 @@ class StateAnchorPublisher {
         // binding security is the checkpoint + frozen-amount re-derivation below).
         let eligible = await this._getActiveOraclePublishPubkeys(Number(cp.snapshot_block));
         if(eligible.length === 0) return;
-        if(eligible.length > 1){
+        {
+            // Run the ladder check for EVERY set size: a single-member set must
+            // still bind sender === eligible[0] (rank 0), or any current member
+            // could impersonate the sole elected publisher.
             let order = StateAnchorPublisher.hashOrder(this._v0ElectionKey(cp), eligible);
             let myBtc = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
             let since = Number.isFinite(myBtc) ? myBtc - Number(cp.snapshot_block) : null;
@@ -809,8 +820,16 @@ class StateAnchorPublisher {
         // The checkpoint wrapper: latest checkpoint (prefer BTC; its height also
         // selects validator sets). Without any checkpoint there is nothing to bind
         // the archive's signatures to, so defer until the checkpoint engine has run.
-        let cps = await this.db.doQuery(
-            "SELECT * FROM state_checkpoints ORDER BY (chain = 'BTC') DESC, id DESC LIMIT 1");
+        // Scoped to this.network when one is configured, so a prior-network
+        // leftover row can never become the archive wrapper (same hazard the
+        // latch loader defends against); unconfigured-network hubs keep the
+        // legacy unscoped selection.
+        let cps = this.network
+            ? await this.db.doQuery(
+                "SELECT * FROM state_checkpoints WHERE network = ? ORDER BY (chain = 'BTC') DESC, id DESC LIMIT 1",
+                [this.network])
+            : await this.db.doQuery(
+                "SELECT * FROM state_checkpoints ORDER BY (chain = 'BTC') DESC, id DESC LIMIT 1");
         if(!cps || cps.length === 0){
             console.log('StateAnchorPublisher: no state checkpoint yet; archive deferred');
             return 'none';
@@ -820,7 +839,10 @@ class StateAnchorPublisher {
         let network  = String(cps[0].network);
         let batchSeq = await this._getNextBatchSeq();
 
-        if(electionPubkeys.length > 1){
+        {
+            // Unconditional (all set sizes): the membership check above already
+            // pins the size-1 identity, and a single-member ladder resolves to
+            // rank 0 (always unlocked), so this is uniform, not a behavior change.
             let order = StateAnchorPublisher.hashOrder(this._archiveElectionKey(cp, batchSeq), electionPubkeys);
             let since = Number.isFinite(electionBlock) ? electionBlock - Number(cp.snapshot_block) : null;
             if(!this._rankUnlocked(order, me, since)){
@@ -1017,6 +1039,23 @@ class StateAnchorPublisher {
                     return snap.validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), amount: String(v.amount != null ? v.amount : '0'), source: '' }));
             }
         }
+        // Local-table fallback is gated to seeded/regtest stacks with no live BTC
+        // resolution (#1224), matching the sibling resolvers
+        // (StateCheckpointEngine/CrossChainCallEngine/CrossChainDexEngine, which seed
+        // only when regtest). The local capability_snapshots table holds only rows a
+        // hub persisted while leading, so it is NOT the shared source: on mainnet/
+        // testnet a null snapshot means THIS hub's indexer is down/misconfigured
+        // (CapabilitySnapshot returns null on any fetch/auth/echo failure), and
+        // resolving from local rows while healthy peers resolve the on-chain snapshot
+        // forks the set bytes for the same (capability, block). Fail closed off
+        // regtest so a degraded round stalls (archive verification catches it) rather
+        // than building a divergent archive.
+        if(this.network !== 'regtest'){
+            throw new Error('StateAnchorPublisher: cannot resolve capability set for (' +
+                String(capability) + ', ' + Number(block) + '): deterministic snapshot unavailable ' +
+                'and the local capability_snapshots table is not a valid shared source off regtest ' +
+                '(indexer down/misconfigured); failing closed rather than building a divergent archive');
+        }
         let rows = await this.db.doQuery(
             "SELECT signing_pubkey, amount, source FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? ORDER BY signing_pubkey ASC",
             [Number(block), String(capability)]);
@@ -1197,7 +1236,12 @@ class StateAnchorPublisher {
         if(!ckptRows || ckptRows.length === 0) return;   // no local copy of the referenced checkpoint: cannot vet the election
         let electionSet = await this._getActiveOraclePublishPubkeys(Number(ckptRows[0].snapshot_block));
         if(electionSet.length === 0) return;             // fail closed: unresolved election set
-        if(electionSet.length > 1){
+        {
+            // Run the ladder check for EVERY set size. A size-1 set previously
+            // skipped it, so any CURRENT oracle_publish member (even one that
+            // joined after snapshot_block) could stamp the sole elected
+            // publisher's on-chain anchor with a V0_DONE naming itself and,
+            // pre-ANCHOR_REWARD flag-day, capture the mirrored reward.
             let order = StateAnchorPublisher.hashOrder(
                 this._v0ElectionKey({ chain: d.chain, network: d.network, checkpoint_seq: d.checkpoint_seq, snapshot_block: Number(ckptRows[0].snapshot_block) }),
                 electionSet);
@@ -1396,10 +1440,14 @@ class StateAnchorPublisher {
         let myBtc = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
         if(Number.isFinite(myBtc) && Math.abs(myBtc - electionBlock) > this.electionToleranceBlocks) return;
         let electionPubkeys = await this._getActiveOraclePublishPubkeys(electionBlock);
-        if(electionPubkeys.length > 1){
+        if(electionPubkeys.length > 0){
             // Same content-anchored key + failover ladder the leader used.
             // Accept any sender whose rank has unlocked, not just rank 0, or a
             // signer-less rank-0 hub stalls archiving federation-wide.
+            // Runs for a single-member set too (previously skipped), so the
+            // sole elected leader cannot be impersonated by a non-member;
+            // the empty-set (unresolvable election) path keeps its existing
+            // behavior of deferring to the DB byte-match below.
             let order = StateAnchorPublisher.hashOrder(this._archiveElectionKey(cp, Number(d.batch_seq)), electionPubkeys);
             let since = electionBlock - Number(cp.snapshot_block);
             if(!this._rankUnlocked(order, sender, since)) return;            // not unlocked on the failover ladder

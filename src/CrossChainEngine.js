@@ -355,7 +355,16 @@ class CrossChainEngine extends EventEmitter {
             // leader used (btcBlockHeight carried in the envelope) so every hub
             // freezes the same N for this round. Falls back to the live set when
             // the indexer is unreachable or the envelope predates this field.
-            let quorum = await this._resolveQuorum(sourceChain, destChain, btcBlockHeight);
+            let quorum;
+            try {
+                quorum = await this._resolveQuorum(sourceChain, destChain, btcBlockHeight);
+            } catch (err) {
+                // Fail closed (#1223): _resolveQuorum throws when federated but no
+                // deterministic snapshot resolved. Drop the PROPOSE (don't co-sign)
+                // rather than PREPARE over a locally-derived quorum peers aren't using.
+                console.warn('CrossChain: refusing to PREPARE ' + attestationId + ': ' + err.message);
+                return;
+            }
             // A follower must NEVER finalize over a quorum of 0. Unlike the leader's
             // single-operator fast path (requestAttestation, which self-signs only after
             // confirming no federation snapshot resolved), reaching _handlePropose means a
@@ -587,16 +596,29 @@ class CrossChainEngine extends EventEmitter {
     // of the cross_chain capability set (every hub queries the same blockIndex
     // on the BTC indexer and arrives at the same N, so two hubs processing the
     // same attestation at different wall-clock times lock the same quorum).
-    // Falls back to the live validator set when the indexer can't be reached or
-    // the envelope carries no block height (e.g. an old peer mid rolling deploy).
-    // Graceful degradation to the pre-snapshot behavior. Mirrors the
-    // getSnapshot/getQuorum pattern in OracleConsensus and Consensus.
+    // Federation-split guard (fail closed), mirroring Consensus.js:170-173 and
+    // OraclePublisher's retired live-registry fallback (#686/#925/#930). The prior
+    // form fell back to this hub's LOCAL live validator set (or, worse, open-peer
+    // count + 1 in _getQuorum) whenever the snapshot was unresolved -- so a hub with
+    // an unreachable BTC indexer locked a DIFFERENT N/quorum than a healthy peer for
+    // the same (cross_chain, block) round (#1223). When federated, refuse rather than
+    // split. Single-node / regtest hubs (no snapshot AND a live quorum of 0, i.e. no
+    // peers) have no peer to diverge from, so they keep the live fallback for
+    // bootstrap. btcBlockHeight is compared `!= null` (not truthiness) so a genuine
+    // block height of 0 still resolves a snapshot instead of being treated as absent.
     async _resolveQuorum(sourceChain, destChain, btcBlockHeight) {
-        let snapshot = (this.hub.capabilitySnapshot && btcBlockHeight)
+        let snapshot = (this.hub.capabilitySnapshot && btcBlockHeight != null)
             ? await this.hub.capabilitySnapshot.getSnapshot('cross_chain', btcBlockHeight)
             : null;
         if (snapshot) return this.hub.capabilitySnapshot.getQuorum(snapshot);
-        return this._getQuorum(sourceChain, destChain);
+        let live = this._getQuorum(sourceChain, destChain);
+        if (live > 0) {
+            throw new Error('CrossChain: refusing to resolve quorum without a deterministic ' +
+                'cross_chain snapshot while federated (block ' + btcBlockHeight + '); the indexer ' +
+                'capability snapshot is unavailable and falling back to the local validator set ' +
+                'would fork N/quorum against peers for this round');
+        }
+        return live;
     }
 
     _getQuorum(sourceChain, destChain) {

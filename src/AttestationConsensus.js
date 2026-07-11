@@ -52,6 +52,11 @@ const ATTEST_PREPARE = 'ATTEST_PREPARE';
 const ATTEST_COMMIT  = 'ATTEST_COMMIT';
 
 const DEFAULT_ROUND_TIMEOUT_MS = 120000;  // 2 minutes per request lifecycle
+// Cap for the inbound `meta` field on PROPOSE/PREPARE envelopes, mirroring the
+// body_b64 cap: meta is a short provider tag (HTTP status code, LLM model id),
+// so anything longer is adversarial padding that would otherwise be stored,
+// hashed into the canonical, and re-broadcast unbounded.
+const ATTEST_META_MAX_LENGTH   = 256;
 const PENDING_EVICT_MS         = 10000;   // hold finalized state ~10s for late-arriving duplicates, then evict
 
 class AttestationConsensus extends EventEmitter {
@@ -406,6 +411,10 @@ class AttestationConsensus extends EventEmitter {
             console.warn('AttestationConsensus: oversized PROPOSE body from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected pre-decode)');
             return;
         }
+        if(String(d.meta || '').length > ATTEST_META_MAX_LENGTH){
+            console.warn('AttestationConsensus: oversized PROPOSE meta from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
+            return;
+        }
 
         // Decode body and verify signature against canonical bytes
         let body;
@@ -682,6 +691,10 @@ class AttestationConsensus extends EventEmitter {
         // Reject oversized payloads before allocating a Buffer (see _handlePropose).
         if(String(d.body_b64 || '').length > this._maxBodyB64Length(pending.providerId)){
             console.warn('AttestationConsensus: oversized PREPARE body from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected pre-decode)');
+            return;
+        }
+        if(String(d.meta || '').length > ATTEST_META_MAX_LENGTH){
+            console.warn('AttestationConsensus: oversized PREPARE meta from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
             return;
         }
 

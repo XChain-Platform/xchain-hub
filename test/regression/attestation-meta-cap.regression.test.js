@@ -17,22 +17,21 @@ const ValidatorIdentity    = require('../../src/ValidatorIdentity');
 const { createMockHub }    = require('../helpers/mockHub');
 
 // -----------------------------------------------------------------
-// REG-ATT-001: Incoming PROPOSE/PREPARE body_b64 size cap
+// REG-ATT-002: Incoming PROPOSE/PREPARE meta size cap
 //
-// Peer-supplied body_b64 on ATTEST_PROPOSE / ATTEST_PREPARE must be
-// rejected before Buffer allocation when it exceeds the provider's
-// configured max_response_bytes (×1.4 base64 expansion). The only
-// transport gate is the ~1 MB WebSocket frame limit, far larger than
-// any legitimate provider response; so without this application-level
-// check a responsible peer could force multi-hundred-KB allocations per
-// message and sustain memory-amplification pressure on the hub.
+// Peer-supplied `meta` on ATTEST_PROPOSE / ATTEST_PREPARE must be
+// rejected before decode/verify when it exceeds ATTEST_META_MAX_LENGTH
+// (256 chars). meta is a short provider tag (HTTP status code, LLM model
+// id); anything longer is adversarial padding that would otherwise be
+// stored, hashed into the canonical, and re-broadcast unbounded. Mirrors
+// the body_b64 cap (REG-ATT-001).
 // -----------------------------------------------------------------
 
-describe('Regression: Attestation body_b64 size cap', function () {
+describe('Regression: Attestation meta size cap', function () {
 
     const PROVIDER_ID  = 'http_get';
     const MAX_RESP     = 32768;
-    const MAX_B64      = Math.ceil(MAX_RESP * 1.4);   // 45876
+    const META_MAX     = 256;                         // ATTEST_META_MAX_LENGTH
     const SENDER_PK    = 'cd'.repeat(32);
 
     let hub, consensus;
@@ -48,8 +47,8 @@ describe('Regression: Attestation body_b64 size cap', function () {
         // Inject an active round whose responsible set admits SENDER_PK.
         consensus.pending.set('rid', {
             requestId:   'rid',
-            request:     { block_index: 0 },
             providerId:  PROVIDER_ID,
+            request:     { block_index: 0 },
             responsible: [{ pubkey: SENDER_PK }],
             proposals:   new Map(),
             prepares:    new Set(),
@@ -64,14 +63,15 @@ describe('Regression: Attestation body_b64 size cap', function () {
         sinon.restore();
     });
 
-    function envelope(type, b64Len) {
+    // A legitimately-sized body so the meta guard is the only gate exercised.
+    function envelope(type, metaLen) {
         return {
             type,
             data: {
                 requestId:  'rid',
                 providerId: PROVIDER_ID,
-                body_b64:   'A'.repeat(b64Len),
-                meta:       '',
+                body_b64:   'A'.repeat(16),
+                meta:       'x'.repeat(metaLen),
                 status:     'ok',
                 sig_pubkey: SENDER_PK,
                 sig:        'ee'.repeat(64)
@@ -79,45 +79,34 @@ describe('Regression: Attestation body_b64 size cap', function () {
         };
     }
 
-    describe('_maxBodyB64Length()', function () {
-        it('derives the cap from max_response_bytes ×1.4 @regression-p1', function () {
-            expect(consensus._maxBodyB64Length(PROVIDER_ID)).to.equal(MAX_B64);
-        });
-
-        it('falls back to a 64 KB cap when the provider def is missing @regression-p1', function () {
-            consensus.providerRegistry.getDef.returns(null);
-            expect(consensus._maxBodyB64Length('unknown')).to.equal(Math.ceil(65536 * 1.4));
-        });
-    });
-
     describe('_handlePropose()', function () {
-        it('rejects an oversized body before decode/verify @regression-p0', function () {
+        it('rejects an oversized meta before decode/verify @regression-p0', function () {
             let verify = sinon.stub(ValidatorIdentity, 'verify');
-            consensus._handlePropose(envelope('ATTEST_PROPOSE', MAX_B64 + 1));
+            consensus._handlePropose(envelope('ATTEST_PROPOSE', META_MAX + 1));
             // Guard fires before signature verification and before storing.
             expect(verify.called).to.equal(false);
             expect(consensus.pending.get('rid').proposals.has(SENDER_PK)).to.equal(false);
         });
 
-        it('lets a legitimately-sized body through to verification @regression-p0', function () {
+        it('lets a normal-size meta through to verification @regression-p0', function () {
             let verify = sinon.stub(ValidatorIdentity, 'verify').returns(false);
-            consensus._handlePropose(envelope('ATTEST_PROPOSE', MAX_B64));
-            // Size gate passed → signature verification was reached.
+            consensus._handlePropose(envelope('ATTEST_PROPOSE', META_MAX));
+            // Meta gate passed → signature verification was reached.
             expect(verify.calledOnce).to.equal(true);
         });
     });
 
     describe('_handlePrepare()', function () {
-        it('rejects an oversized body before decode/verify @regression-p0', function () {
+        it('rejects an oversized meta before decode/verify @regression-p0', function () {
             let verify = sinon.stub(ValidatorIdentity, 'verify');
-            consensus._handlePrepare(envelope('ATTEST_PREPARE', MAX_B64 + 1));
+            consensus._handlePrepare(envelope('ATTEST_PREPARE', META_MAX + 1));
             expect(verify.called).to.equal(false);
             expect(consensus.pending.get('rid').prepares.has(SENDER_PK)).to.equal(false);
         });
 
-        it('lets a legitimately-sized body through to verification @regression-p0', function () {
+        it('lets a normal-size meta through to verification @regression-p0', function () {
             let verify = sinon.stub(ValidatorIdentity, 'verify').returns(false);
-            consensus._handlePrepare(envelope('ATTEST_PREPARE', MAX_B64));
+            consensus._handlePrepare(envelope('ATTEST_PREPARE', META_MAX));
             expect(verify.calledOnce).to.equal(true);
         });
     });
