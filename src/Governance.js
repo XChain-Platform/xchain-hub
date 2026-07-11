@@ -50,6 +50,21 @@ const COOLDOWN_DAYS        = 14;    // Days before re-proposing a rejected param
 
 const SLASHING_PARAMS = ['SLASH_DEVIATION_THRESHOLD', 'SLASH_MISSED_ROUNDS_THRESHOLD'];
 
+// R2-M2: snapshot-lock the electorate onto each proposal. Below the activation
+// height a hub still ATTACHES and PERSISTS a validator_snapshot (harmless,
+// additive) but tallies by the legacy live-set rule and accepts snapshotless
+// proposals; at/above it the snapshot is REQUIRED and is the tally denominator,
+// so validator-set churn between propose() and tally can no longer move the
+// quorum/approval goalposts. Same shape + BTC-anchored gating discipline as
+// STAKE_WEIGHTED_QUORUM_ACTIVATION. mainnet=null => not yet armed (gate OFF,
+// safe); set the height with the flag-day batch once the fleet is on this code.
+const GOV_SNAPSHOT_ACTIVATION = { mainnet: null, testnet: 0, regtest: 0 };
+
+// Bounds on a persisted/wire snapshot (DoS): a validator set is small, so a
+// snapshot far past these is adversarial padding, not a real electorate.
+const GOV_SNAPSHOT_MAX_VALIDATORS = 1000;
+const GOV_SNAPSHOT_MAX_BYTES      = 262144;   // 256 KB serialized
+
 // Minimum activation block for parameters that are block-anchored. Used on the
 // follower path to re-validate the proposer-supplied activation_block so a
 // dishonest peer cannot install an already-past (or too-soon) anchor.
@@ -101,6 +116,87 @@ class Governance extends EventEmitter {
 
     setValidatorSet(validators) {
         this.validatorSet = validators;
+    }
+
+    // True once the governance snapshot-lock is in effect for this hub: the
+    // configured network's activation height is set (armed) and this hub's best
+    // observed BTC block has reached it. Unset height (mainnet pre-arm) or no
+    // observed tip => OFF (safe: attach-but-legacy-tally). BTC-anchored so the
+    // hub and every peer flip together, exactly like STAKE_WEIGHTED_QUORUM.
+    _isSnapshotLockActive() {
+        let net       = this.hub && this.hub.network;
+        let threshold = GOV_SNAPSHOT_ACTIVATION[net];
+        if (threshold === null || threshold === undefined) return false;
+        let raw    = this.hub ? this.hub._latestBlockIndex : null;
+        let latest = (raw !== null && raw !== undefined) ? Number(raw) : null;
+        if (latest === null || !Number.isInteger(latest)) return false;
+        return latest >= threshold;
+    }
+
+    // Capture the current electorate as a pubkey-sorted array of {pubkey, addr}.
+    // Phase 1 is count-based over the locked set (stake-weighting deferred: the
+    // validators registry has no stake column and governance has no natural
+    // capability scope; see the R2-M2 design doc).
+    _buildValidatorSnapshot() {
+        return this.validatorSet
+            .map(v => ({ pubkey: String(v.pubkey).toLowerCase(), addr: v.addr }))
+            .sort((a, b) => (a.pubkey < b.pubkey ? -1 : a.pubkey > b.pubkey ? 1 : 0));
+    }
+
+    // Parse + shape-validate a wire/persisted snapshot. Returns a pubkey-sorted
+    // array on success, or null if absent/malformed/oversized/duplicated. A JSON
+    // string (DB column, wire field) and an already-parsed array are both accepted.
+    _parseSnapshot(raw) {
+        if (raw === null || raw === undefined) return null;
+        let arr;
+        if (typeof raw === 'string') {
+            if (raw.length > GOV_SNAPSHOT_MAX_BYTES) return null;
+            try { arr = JSON.parse(raw); } catch (_) { return null; }
+        } else {
+            arr = raw;
+        }
+        if (!Array.isArray(arr) || arr.length === 0 || arr.length > GOV_SNAPSHOT_MAX_VALIDATORS) return null;
+        let seen = new Set();
+        let out  = [];
+        for (let e of arr) {
+            if (!e || typeof e.pubkey !== 'string' || e.pubkey === '') return null;
+            let pk = e.pubkey.toLowerCase();
+            if (seen.has(pk)) return null;   // a duplicate collapses the denominator
+            seen.add(pk);
+            out.push({ pubkey: pk, addr: e.addr });
+        }
+        return out.sort((a, b) => (a.pubkey < b.pubkey ? -1 : a.pubkey > b.pubkey ? 1 : 0));
+    }
+
+    // Exact-set match between a parsed snapshot and this hub's current validator
+    // set (by pubkey). Fail-closed: a Byzantine proposer shipping a 1-member
+    // (self-only) snapshot, or one that omits a locally-known validator, is
+    // rejected. Honest proposals pass because every hub is fed the same
+    // `validators` table; a transient registration race just drops the proposal
+    // (warn log) and the proposer re-proposes. See the R2-M2 design doc.
+    _snapshotMatchesLocalSet(snap) {
+        let local = new Set(this.validatorSet.map(v => String(v.pubkey).toLowerCase()));
+        if (local.size !== snap.length) return false;
+        for (let e of snap) if (!local.has(e.pubkey)) return false;
+        return true;
+    }
+
+    // Pure tally over a resolved electorate. `electorate` is the locked snapshot
+    // (pubkey array) for a snapshot-locked proposal, or null for a legacy row
+    // (tallied against the live validator set, historical behaviour). Only votes
+    // from electorate members count when locked. Returns the full breakdown.
+    _computeTally(votes, electorate) {
+        let members = electorate ? new Set(electorate.map(e => e.pubkey)) : null;
+        let counted = members
+            ? votes.filter(v => members.has(String(v.voter_pubkey).toLowerCase()))
+            : votes;
+        let approvals  = counted.filter(v => v.vote === 'approve').length;
+        let rejections = counted.filter(v => v.vote === 'reject').length;
+        let totalVotes = counted.length;
+        let validatorCount = electorate ? electorate.length : Math.max(this.validatorSet.length, 1);
+        let quorumMet = totalVotes >= Math.ceil(validatorCount / 2);          // 50% participation
+        let approved  = quorumMet && approvals >= Math.ceil(validatorCount * 2 / 3); // 2/3+ approval
+        return { approvals, rejections, totalVotes, validatorCount, quorumMet, approved };
     }
 
     async start() {
@@ -204,18 +300,24 @@ class Governance extends EventEmitter {
         let now = new Date();
         let votingEnd = new Date(now.getTime() + this.votingPeriod);
 
+        // R2-M2: snapshot-lock the electorate at creation so the tally denominator
+        // (and vote-membership) cannot drift with a later setValidatorSet churn.
+        let snapshot     = this._buildValidatorSnapshot();
+        let snapshotJson = JSON.stringify(snapshot);
+
         await this.db.doQuery(
             `INSERT INTO governance_proposals
                 (proposal_id, proposer_pubkey, parameter, current_value, proposed_value,
-                 rationale, status, voting_start, voting_end, activation_block)
-             VALUES (?, ?, ?, ?, ?, ?, 'voting', ?, ?, ?)`,
+                 rationale, status, voting_start, voting_end, activation_block, validator_snapshot)
+             VALUES (?, ?, ?, ?, ?, ?, 'voting', ?, ?, ?, ?)`,
             [proposalId, proposerPubkey, parameter, currentValue, proposedValue,
-             rationale || '', now, votingEnd, activation]
+             rationale || '', now, votingEnd, activation, snapshotJson]
         );
 
         this.peerManager.broadcast(GOV_PROPOSE, {
             proposalId, parameter, currentValue, proposedValue, rationale,
-            proposerPubkey, votingEnd: votingEnd.toISOString(), activationBlock: activation
+            proposerPubkey, votingEnd: votingEnd.toISOString(), activationBlock: activation,
+            validatorSnapshot: snapshot
         });
 
         console.log('Governance: Proposal created: ' + proposalId + ' (' + parameter + ': ' + currentValue + ' -> ' + proposedValue + ')' +
@@ -243,6 +345,14 @@ class Governance extends EventEmitter {
         let proposal = proposals[0];
         if (new Date(proposal.voting_end).getTime() < Date.now())
             throw new Error('Voting period has ended');
+
+        // R2-M2: on a snapshot-locked proposal the electorate is the locked set,
+        // not whoever is a validator right now, so a validator registered AFTER
+        // the proposal was created cannot vote on it (and thus cannot dilute the
+        // fixed denominator). Legacy (NULL-snapshot) rows keep the live-set rule.
+        let electorate = this._parseSnapshot(proposal.validator_snapshot);
+        if (electorate && !electorate.some(e => e.pubkey === String(voterPubkey).toLowerCase()))
+            throw new Error('Voter is not in this proposal\'s locked validator set');
 
         let votePayload = JSON.stringify({ proposalId, vote: voteChoice, voter: voterPubkey });
         let signature = this.identity ? this.identity.sign(votePayload) : '';
@@ -440,13 +550,29 @@ class Governance extends EventEmitter {
         // in its early-result guard, so a forged future window blocks recovery too.
         let localVotingEnd = new Date(Date.now() + this.votingPeriod);
 
+        // R2-M2: re-validate the proposer's electorate snapshot against THIS hub's
+        // own set (never trust it blind -- a Byzantine proposer would ship a
+        // self-only snapshot to shrink the denominator to 1-of-1). Exact-set match
+        // required, mirroring the activation_block re-validation above. Once the
+        // snapshot-lock is active a proposal that omits a valid snapshot is dropped
+        // (never recorded), so no unlocked proposal enters the electorate; below
+        // activation an invalid/absent snapshot persists as NULL (legacy tally).
+        let snap        = this._parseSnapshot(envelope.data.validatorSnapshot);
+        let snapValid   = !!snap && this._snapshotMatchesLocalSet(snap);
+        if (this._isSnapshotLockActive() && !snapValid) {
+            console.warn('Governance: dropping inbound proposal ' + proposalId + ' (' + parameter +
+                '): snapshot-lock active but validator_snapshot is missing or does not match the local set');
+            return;
+        }
+        let snapshotJson = snapValid ? JSON.stringify(snap) : null;
+
         this.db.doQuery(
             `INSERT IGNORE INTO governance_proposals
                 (proposal_id, proposer_pubkey, parameter, current_value, proposed_value,
-                 rationale, status, voting_start, voting_end, activation_block)
-             VALUES (?, ?, ?, ?, ?, ?, 'voting', NOW(), ?, ?)`,
+                 rationale, status, voting_start, voting_end, activation_block, validator_snapshot)
+             VALUES (?, ?, ?, ?, ?, ?, 'voting', NOW(), ?, ?, ?)`,
             [proposalId, proposerPubkey || '', parameter, currentValue, proposedValue,
-             rationale || '', localVotingEnd, activation]
+             rationale || '', localVotingEnd, activation, snapshotJson]
         ).catch(e => console.error('Governance: failed to persist inbound proposal ' + proposalId + ':', e));
         // INSERT IGNORE already absorbs a duplicate proposal_id without raising, so the only
         // failures reaching here are real (dropped DB connection, deadlock, value-too-long,
@@ -485,13 +611,19 @@ class Governance extends EventEmitter {
         let prows;
         try {
             prows = await this.db.doQuery(
-                "SELECT voting_end FROM governance_proposals WHERE proposal_id = ? AND status = 'voting' LIMIT 1",
+                "SELECT voting_end, validator_snapshot FROM governance_proposals WHERE proposal_id = ? AND status = 'voting' LIMIT 1",
                 [proposalId]);
         } catch (e) {
             console.error('Governance: failed to look up proposal for inbound vote ' + proposalId + ':', e && e.message ? e.message : e);
             return;
         }
         if (!prows.length || new Date(prows[0].voting_end).getTime() < Date.now()) return;
+
+        // R2-M2: on a snapshot-locked proposal, only a member of the LOCKED set
+        // may be counted. The validatorSet gate above admits anyone registered
+        // now; a validator added after the proposal opened must not vote on it.
+        let electorate = this._parseSnapshot(prows[0].validator_snapshot);
+        if (electorate && !electorate.some(e => e.pubkey === pk)) return;
 
         this.db.doQuery(
             `INSERT INTO governance_votes (proposal_id, voter_pubkey, vote, signature)
@@ -541,9 +673,37 @@ class Governance extends EventEmitter {
         let prows;
         try {
             prows = await this.db.doQuery(
-                'SELECT voting_end FROM governance_proposals WHERE proposal_id = ? LIMIT 1', [proposalId]);
+                'SELECT voting_end, validator_snapshot FROM governance_proposals WHERE proposal_id = ? LIMIT 1', [proposalId]);
         } catch (e) { return; }
         if (!prows.length || new Date(prows[0].voting_end).getTime() > Date.now()) return;
+
+        // R2-H2: for a snapshot-locked proposal the wire `status` is a LIVENESS
+        // TRIGGER, not an oracle. A validator that grinds `proposalId` (it embeds
+        // Date.now()) to make itself the deterministic leader could otherwise
+        // broadcast 'passed' with zero approvals and every follower would record
+        // it. Instead: ingest the leader's authenticated vote evidence (recovers
+        // any GOV_VOTE gossip this follower missed), re-tally LOCALLY against the
+        // locked electorate, and apply the local result. Legacy (NULL-snapshot)
+        // rows keep the historical apply-wire-status behaviour (re-tallying them
+        // against a per-hub-divergent live set would itself fork; this is why
+        // R2-M2 gates R2-H2).
+        let electorate  = this._parseSnapshot(prows[0].validator_snapshot);
+        let applyStatus = status;
+        if (electorate) {
+            await this._ingestResultVotes(proposalId, envelope.data.votes, electorate);
+            let votes;
+            try {
+                votes = await this.db.doQuery(
+                    "SELECT voter_pubkey, vote FROM governance_votes WHERE proposal_id = ?", [proposalId]);
+            } catch (e) { return; }
+            let localResult = this._computeTally(votes, electorate).approved ? 'passed' : 'failed';
+            if (localResult !== status) {
+                console.warn('Governance: GOV_RESULT status mismatch from leader ' + envelope.sender +
+                    ' on ' + proposalId + ': wire=' + status + ' local=' + localResult +
+                    ' (applying local re-tally)');
+            }
+            applyStatus = localResult;
+        }
 
         // Update proposal status locally. Guard side effects on the status-transition (was 'voting')
         // so the tally leader's own loopback of this GOV_RESULT -- which already applied + emitted in
@@ -552,7 +712,7 @@ class Governance extends EventEmitter {
         try {
             res = await this.db.doQuery(
                 "UPDATE governance_proposals SET status = ?, applied_at = NOW() WHERE proposal_id = ? AND status = 'voting'",
-                [status, proposalId]
+                [applyStatus, proposalId]
             );
         } catch (e) { return; }
 
@@ -561,7 +721,7 @@ class Governance extends EventEmitter {
         // tally leader -- so without emitting here followers update the row yet never APPLY the
         // change, and capability thresholds (min_stake etc.) diverge federation-wide until restart.
         // Emit on the same transition + payload shape the leader uses in _tallyProposal.
-        if (status === 'passed' && res && res.affectedRows > 0) {
+        if (applyStatus === 'passed' && res && res.affectedRows > 0) {
             try {
                 let rows = await this.db.doQuery(
                     'SELECT parameter, current_value, proposed_value, activation_block FROM governance_proposals WHERE proposal_id = ? LIMIT 1',
@@ -577,6 +737,37 @@ class Governance extends EventEmitter {
                     });
                 }
             } catch (e) { /* best-effort: status already persisted */ }
+        }
+    }
+
+    // R2-H2: ingest the vote evidence carried on GOV_RESULT so a follower that
+    // missed some GOV_VOTE gossip can still reproduce the leader's tally. Each
+    // entry is self-authenticating and independently checked (never trusted
+    // because the leader relayed it): the voter must be in the locked electorate,
+    // and its ed25519 signature must verify over the exact canonical payload
+    // vote()/_handleVote sign. Upsert is idempotent, so the leader's own loopback
+    // and duplicate deliveries are harmless. A malformed/oversized `votes` array
+    // is skipped (the local re-tally still runs on whatever votes we already hold).
+    async _ingestResultVotes(proposalId, wireVotes, electorate) {
+        if (!Array.isArray(wireVotes) || wireVotes.length > GOV_SNAPSHOT_MAX_VALIDATORS) return;
+        let members = new Set(electorate.map(e => e.pubkey));
+        for (let v of wireVotes) {
+            if (!v || typeof v.voterPubkey !== 'string' || (v.vote !== 'approve' && v.vote !== 'reject')) continue;
+            let pk = v.voterPubkey.toLowerCase();
+            if (!members.has(pk)) continue;
+            let payload = JSON.stringify({ proposalId, vote: v.vote, voter: v.voterPubkey });
+            if (!ValidatorIdentity.verify(payload, String(v.signature || ''), v.voterPubkey)) continue;
+            try {
+                await this.db.doQuery(
+                    `INSERT INTO governance_votes (proposal_id, voter_pubkey, vote, signature)
+                     VALUES (?, ?, ?, ?)
+                     ON DUPLICATE KEY UPDATE vote = ?, signature = ?, created_at = NOW()`,
+                    [proposalId, v.voterPubkey, v.vote, String(v.signature || ''), v.vote, String(v.signature || '')]
+                );
+            } catch (e) {
+                console.error('Governance: failed to ingest GOV_RESULT vote evidence for ' + proposalId +
+                    ' from ' + v.voterPubkey + ':', e && e.message ? e.message : e);
+            }
         }
     }
 
@@ -630,21 +821,19 @@ class Governance extends EventEmitter {
     }
 
     async _tallyProposal(proposal) {
+        // R2-M2: include the signature so followers can re-verify each vote when
+        // they re-tally locally (R2-H2), not accept the leader's status blind.
         let votes = await this.db.doQuery(
-            "SELECT voter_pubkey, vote FROM governance_votes WHERE proposal_id = ?",
+            "SELECT voter_pubkey, vote, signature FROM governance_votes WHERE proposal_id = ?",
             [proposal.proposal_id]
         );
 
-        let approvals = votes.filter(v => v.vote === 'approve').length;
-        let rejections = votes.filter(v => v.vote === 'reject').length;
-        let totalVotes = votes.length;
-        let validatorCount = Math.max(this.validatorSet.length, 1);
-
-        // Check quorum (50% minimum participation)
-        let quorumMet = totalVotes >= Math.ceil(validatorCount / 2);
-
-        // Check 2/3+ approval
-        let approved = quorumMet && approvals >= Math.ceil(validatorCount * 2 / 3);
+        // R2-M2: tally against the proposal's LOCKED electorate (snapshot), not the
+        // live mutable validatorSet, so a set churn mid-vote cannot move the
+        // denominator. Legacy (NULL-snapshot) rows fall back to the live set.
+        let electorate = this._parseSnapshot(proposal.validator_snapshot);
+        let tally = this._computeTally(votes, electorate);
+        let { approvals, rejections, totalVotes, validatorCount, approved } = tally;
 
         let newStatus = approved ? 'passed' : 'failed';
 
@@ -663,7 +852,13 @@ class Governance extends EventEmitter {
         this.peerManager.broadcast(GOV_RESULT, {
             proposalId: proposal.proposal_id,
             status: newStatus,
-            approvals, rejections, totalVotes, validatorCount
+            approvals, rejections, totalVotes, validatorCount,
+            // R2-H2: carry the authenticated vote evidence so a follower that
+            // missed some GOV_VOTE gossip can reproduce this exact tally locally
+            // and NEVER apply the wire status on faith. Each entry re-verifies on
+            // the receive side (membership in the locked snapshot + ed25519 sig).
+            // Bounded by the snapshot cap. Old hubs ignore the extra field.
+            votes: votes.map(v => ({ voterPubkey: v.voter_pubkey, vote: v.vote, signature: v.signature }))
         });
 
         console.log('Governance: Proposal ' + proposal.proposal_id + ': ' + newStatus +

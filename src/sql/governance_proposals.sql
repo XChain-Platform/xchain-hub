@@ -16,6 +16,15 @@ CREATE TABLE governance_proposals (
     -- finalization is wall-clock (#3703). NULL for proposals that predate this column or
     -- carry no activation height. Added to existing tables by the startup drift-reconciler.
     activation_block BIGINT NULL DEFAULT NULL,
+    -- Snapshot-locked electorate (R2-M2): the validator set captured at proposal
+    -- creation, as a pubkey-sorted JSON array of {pubkey, addr}. The tally
+    -- denominator and vote-membership resolve against THIS set, not the live
+    -- mutable validator set, so a set churn between propose() and tally cannot
+    -- move the quorum/approval goalposts (and R2-H2's follower re-tally counts
+    -- against the identical locked denominator). NULL for proposals that predate
+    -- this column (tallied against the live set, legacy behaviour). Added to
+    -- existing tables by the startup drift-reconciler.
+    validator_snapshot MEDIUMTEXT NULL DEFAULT NULL,
     applied_at      TIMESTAMP NULL DEFAULT NULL,
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     KEY idx_parameter (parameter),
