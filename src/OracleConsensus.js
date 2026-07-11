@@ -331,6 +331,23 @@ class OracleConsensus extends EventEmitter {
         // skipped-round record. Falling back to count mode degrades gracefully and
         // keeps the round from stalling.
         if (weighted && (!snapshot || !Array.isArray(snapshot.validators) || snapshot.validators.length === 0)) {
+            // Federation-split guard (fail closed), mirroring Consensus.js's posture
+            // before its identical weighted->count flip. swq.isStakeWeightedQuorumActive
+            // is a pure function of (block, network) that every honest hub computes
+            // identically, so downgrading to a count quorum on THIS hub's weight-snapshot
+            // reachability forks the finalization THRESHOLD semantics: peers finalize on
+            // summed stake while this hub finalizes/stalls on a count quorum over the same
+            // N validators. In a real federation, skip the round rather than diverge.
+            // A single-node / regtest hub (no peers, _getQuorum()===0) has no peer to
+            // split from, so it keeps the graceful count fallback below.
+            if (this._getQuorum() > 0) {
+                console.warn('Oracle: Round ' + round + ' weighted mode active but weight snapshot ' +
+                    'unavailable while federated; skipping rather than downgrading to a count quorum ' +
+                    'this hub\'s peers are not using.');
+                await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime,
+                    'weighted quorum active but weight snapshot unavailable');
+                return;
+            }
             console.warn('Oracle: Round ' + round + ' weighted mode active but snapshot has no validators; falling back to count-based quorum');
             weighted = false;
             snapshot = this.hub.capabilitySnapshot
@@ -1184,6 +1201,18 @@ class OracleConsensus extends EventEmitter {
                  block_timestamp = IF(status = 'skipped', VALUES(block_timestamp), block_timestamp),
                  status = IF(status = 'skipped', 'skipped', status)`;
             await this.db.doQuery(query, params);
+        }
+        // Broadcast the skipped-round rows to hub-DB mirror subscribers, mirroring
+        // _storeSnapshot. Both insert paths into the mirrored price_snapshots table must
+        // feed HubDbBroadcaster or a live streaming mirror never receives the skipped
+        // rows (it gets them only on the next re-bootstrap), diverging from a
+        // freshly-bootstrapped mirror. Best-effort; never block finalize.
+        if (coinPairs.length && this.hub && this.hub.hubDbBroadcaster) {
+            try {
+                let rows = await this.db.doQuery(
+                    'SELECT * FROM price_snapshots WHERE round_number=? ORDER BY coin_pair', [round]);
+                for (let row of rows) this.hub.hubDbBroadcaster.broadcastRow({ table: 'price_snapshots', row });
+            } catch (e) { /* broadcast is best-effort */ }
         }
         this.finalized.add(round);
         this._clearRoundTracking(round);

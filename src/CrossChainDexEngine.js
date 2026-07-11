@@ -79,8 +79,13 @@ class CrossChainDexEngine extends EventEmitter {
         //  - XDEX_SEED_LOCAL_VALIDATOR seeds capability_snapshots with this hub's own
         //    validator pubkey (single-node regtest = the only validator).
         // Both are inert unless explicitly set, so production (BTC-anchored) is unchanged.
-        this._snapshotBlockOverride = parseInt(process.env.XDEX_SNAPSHOT_BLOCK || cfg.XDEX_SNAPSHOT_BLOCK);
-        this._seedLocalValidator    = (process.env.XDEX_SEED_LOCAL_VALIDATOR === '1' ||
+        // Honored ONLY on regtest; NaN/false everywhere else (fail closed to the real
+        // set) so a stray env var or configs-table row never reaches the SIGNED snapshot
+        // anchor or the seeded validator on mainnet/testnet. Mirrors StateCheckpointEngine.
+        this.network = (hub && hub.network) ? hub.network : '';
+        let _isRegtest = (this.network === 'regtest');
+        this._snapshotBlockOverride = _isRegtest ? parseInt(process.env.XDEX_SNAPSHOT_BLOCK || cfg.XDEX_SNAPSHOT_BLOCK) : NaN;
+        this._seedLocalValidator    = _isRegtest && (process.env.XDEX_SEED_LOCAL_VALIDATOR === '1' ||
                                        cfg.XDEX_SEED_LOCAL_VALIDATOR === '1' || cfg.XDEX_SEED_LOCAL_VALIDATOR === true);
 
         // Per-coin indexer JSON-RPC endpoints for the matching view (federation read
@@ -129,6 +134,23 @@ class CrossChainDexEngine extends EventEmitter {
     }
 
     async start(){
+        // Fill any indexer URL left empty at construction (configs-table-
+        // provisioned hubs carry no *_INDEXER_URL env var) via the hub's
+        // configs-aware resolver, then warn loudly for any chain still missing,
+        // so this engine cannot silently match nothing forever.
+        if(this.hub && typeof this.hub._resolveIndexerUrl === 'function'){
+            for(const coin of Object.keys(this.indexers || {})){
+                if(this.indexers[coin] && this.indexers[coin].url) continue;
+                try {
+                    const u = await this.hub._resolveIndexerUrl(coin);
+                    if(u){ this.indexers[coin] = this.indexers[coin] || {}; this.indexers[coin].url = u; }
+                } catch(_){}
+            }
+        }
+        for(const coin of Object.keys(this.indexers || {})){
+            if(!this.indexers[coin] || !this.indexers[coin].url)
+                console.warn('CrossChainDex: no indexer URL for chain ' + coin + ' (set ' + coin + '_INDEXER_API_URL / ' + coin + '_INDEXER_URL, or push it via xchain-node updateconfig); this chain is skipped every tick until configured');
+        }
         await this._rebuildCommitted();
         await this.consensus.start();           // subscribes to P2P; drives PBFT match rounds
         this._pollTimer = setInterval(() => {

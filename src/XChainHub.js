@@ -1280,18 +1280,30 @@ class XChainHub {
     //   3. Hub's own configs table (populated by xchain-node's updateconfig push)
     // Returns null when none yields a usable URL.
     async _resolveBtcIndexerUrl(){
-        if(process.env.BTC_INDEXER_API_URL) return process.env.BTC_INDEXER_API_URL;
-        if(process.env.BTC_INDEXER_URL) return process.env.BTC_INDEXER_URL;
+        return this._resolveIndexerUrl('BTC');
+    }
+
+    // Per-coin indexer JSON-RPC URL resolution: env <COIN>_INDEXER_API_URL ->
+    // env <COIN>_INDEXER_URL -> the hub's own configs table (xchain-node's
+    // updateconfig push). Generalizes the former BTC-only resolver so the hub
+    // engines can reach the indexer on a configs-table-provisioned hub (no env
+    // vars), instead of silently skipping every chain. Returns null when nothing
+    // is configured.
+    async _resolveIndexerUrl(coin){
+        coin = String(coin || '').toUpperCase();
+        if(process.env[coin + '_INDEXER_API_URL']) return process.env[coin + '_INDEXER_API_URL'];
+        if(process.env[coin + '_INDEXER_URL']) return process.env[coin + '_INDEXER_URL'];
         if(!this.db) return null;
         let configs;
         try { configs = await this.db.getAllConfigs(); }
-        catch (err) { console.error('XChainHub: failed to resolve BTC indexer URL from configs:', err); return null; }
-        let btc = configs && configs['bitcoin'];
-        if(!btc) return null;
+        catch (err) { console.error('XChainHub: failed to resolve ' + coin + ' indexer URL from configs:', err); return null; }
+        const COIN_CONFIG_KEY = { BTC: 'bitcoin', LTC: 'litecoin', DOGE: 'dogecoin' };
+        let cc = configs && configs[COIN_CONFIG_KEY[coin] || coin.toLowerCase()];
+        if(!cc) return null;
         // Prefer regtest > testnet > mainnet so dev loops Just Work. Production
-        // deployments should set BTC_INDEXER_API_URL explicitly.
+        // deployments should set <COIN>_INDEXER_API_URL explicitly.
         for(let net of ['regtest', 'testnet', 'mainnet']){
-            let netConfig = btc[net];
+            let netConfig = cc[net];
             if(!netConfig) continue;
             // xchain-node's updateconfig push uses nested {host, port, ...} under the module key
             let nested = netConfig['xchain-indexer'];

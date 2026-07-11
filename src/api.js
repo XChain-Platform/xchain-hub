@@ -710,6 +710,17 @@ async function startApi(){
             return { active: true, ...hub.stateAnchorPublisher.getAnchorStats() };
         },
 
+        // ORACLE (PRICE v0) publisher status (read, no auth): publish-rail health for
+        // the oracle-publish leader rotation/failover path - queue depth, lifetime
+        // published/abandoned (dead-letter) counts, last-published round + txid, and
+        // the last-observed DOGE publisher-wallet balance for runway monitoring.
+        // Mirrors getanchorstatus: always 200 so a poller can read it independent of
+        // overall hub health, {active:false} when no oracle publisher is running.
+        async getoraclepublisherstatus(){
+            if(!hub.oraclePublisher) return { active: false };
+            return { active: true, ...hub.oraclePublisher.getStats() };
+        },
+
         async getfeequote({action, chain}){
             if(!action) return {error: "action is required"};
             if(!chain) return {error: "chain is required"};
@@ -952,7 +963,8 @@ async function startApi(){
             );
             res.json({ table: 'price_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
         } catch (err) {
-            res.status(500).json({ error: err.message || 'snapshot error' });
+            console.error('hub snapshot endpoint error:', err);
+            res.status(500).json({ error: 'snapshot error' });
         }
     });
 
@@ -968,7 +980,8 @@ async function startApi(){
             );
             res.json({ table: 'oracle_prices', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
         } catch (err) {
-            res.status(500).json({ error: err.message || 'snapshot error' });
+            console.error('hub snapshot endpoint error:', err);
+            res.status(500).json({ error: 'snapshot error' });
         }
     });
 
@@ -990,7 +1003,8 @@ async function startApi(){
             );
             res.json({ table: 'cross_chain_matches', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
         } catch (err) {
-            res.status(500).json({ error: err.message || 'snapshot error' });
+            console.error('hub snapshot endpoint error:', err);
+            res.status(500).json({ error: 'snapshot error' });
         }
     });
 
@@ -1006,7 +1020,8 @@ async function startApi(){
             );
             res.json({ table: 'capability_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
         } catch (err) {
-            res.status(500).json({ error: err.message || 'snapshot error' });
+            console.error('hub snapshot endpoint error:', err);
+            res.status(500).json({ error: 'snapshot error' });
         }
     });
 
@@ -1035,7 +1050,8 @@ async function startApi(){
             );
             res.json({ table: 'cross_chain_calls', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
         } catch (err) {
-            res.status(500).json({ error: err.message || 'snapshot error' });
+            console.error('hub snapshot endpoint error:', err);
+            res.status(500).json({ error: 'snapshot error' });
         }
     });
 
@@ -1056,7 +1072,8 @@ async function startApi(){
             );
             res.json({ table: 'state_checkpoints', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
         } catch (err) {
-            res.status(500).json({ error: err.message || 'snapshot error' });
+            console.error('hub snapshot endpoint error:', err);
+            res.status(500).json({ error: 'snapshot error' });
         }
     });
 
@@ -1230,7 +1247,8 @@ async function startApi(){
                 }).sort((a, b) => a.coin.localeCompare(b.coin) || a.network.localeCompare(b.network) || a.module.localeCompare(b.module)),
             });
         } catch (err) {
-            res.status(500).json({ error: err.message || 'telemetry summary error' });
+            console.error('hub telemetry summary error:', err);
+            res.status(500).json({ error: 'telemetry summary error' });
         }
     });
 
@@ -1302,7 +1320,8 @@ async function startApi(){
 
             res.json({ enabled: true, window_days: days, operators });
         } catch (err) {
-            res.status(500).json({ error: err.message || 'telemetry operators error' });
+            console.error('hub telemetry operators error:', err);
+            res.status(500).json({ error: 'telemetry operators error' });
         }
     });
 

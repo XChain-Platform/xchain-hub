@@ -39,6 +39,7 @@ const METHODS = [
     ['getcheckpointstats', 'State-checkpoint health: last finalized block per chain and quorum-timeout counters.', []],
     ['anchorflush', 'Trigger an immediate ANCHOR checkpoint publish (election still applies).', [], { auth: true }],
     ['getanchorstatus', 'ANCHOR publisher status: cumulative publish counts plus the last-observed DOGE publisher wallet balance and low-balance threshold.', []],
+    ['getoraclepublisherstatus', 'ORACLE (PRICE v0) publisher status: queue depth, lifetime published/abandoned (dead-letter) counts, last-published round + txid, and the last-observed DOGE publisher wallet balance for runway monitoring.', []],
     ['propose', 'Submit a governance proposal.', ['proposal'], { auth: true }],
     ['vote', 'Vote on a governance proposal.', ['proposal_id', 'vote'], { auth: true }],
     ['getproposals', 'List governance proposals, optionally filtered by status and/or parameter name.', ['status', 'parameter', 'limit']],

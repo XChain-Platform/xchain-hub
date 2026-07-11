@@ -146,7 +146,7 @@ describe('OracleRound', function () {
             expect(or.lastSuccessfulRoundTime).to.be.null;
         });
 
-        it('resets consecutiveSkippedRounds and sets lastSuccessfulRoundTime on success', async function () {
+        it('does not clear the stall gauges on a successful local submission', async function () {
             // Simulate prior skips
             mockPriceFetcher.fetchPrices.rejects(new Error('API down'));
             await or._executeRound();
@@ -155,12 +155,25 @@ describe('OracleRound', function () {
             // Force idempotency guard to allow a second execution
             or.lastExecutedRound = -1;
 
-            // Now a successful round
+            // A successful local submission is NOT a finalized round: the gauges
+            // must stay put so a commit-quorum stall (fetch succeeds, nothing
+            // finalizes) remains visible.
             mockPriceFetcher.fetchPrices.resolves([
                 { coinPair: 'BTC/USD', price: '100000.00000000', sources: 2 }
             ]);
-            let before = Date.now();
             await or._executeRound();
+            expect(or.consecutiveSkippedRounds).to.equal(1);
+            expect(or.lastSuccessfulRoundTime).to.be.null;
+        });
+
+        it('resets consecutiveSkippedRounds and sets lastSuccessfulRoundTime on finalization', async function () {
+            mockPriceFetcher.fetchPrices.rejects(new Error('API down'));
+            await or._executeRound();
+            expect(or.consecutiveSkippedRounds).to.equal(1);
+
+            // markRoundFinalized() is wired to the consensus 'round:finalized' event.
+            let before = Date.now();
+            or.markRoundFinalized();
             let after = Date.now();
 
             expect(or.consecutiveSkippedRounds).to.equal(0);
@@ -233,6 +246,7 @@ describe('OracleRound', function () {
 
         it('includes consecutiveSkippedRounds and lastSuccessfulRoundTime', async function () {
             await or._executeRound();
+            or.markRoundFinalized();
             let info = await or.getSubmissionsInfo();
             expect(info).to.have.property('consecutiveSkippedRounds').that.equals(0);
             expect(info).to.have.property('lastSuccessfulRoundTime').that.is.a('number');

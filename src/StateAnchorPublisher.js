@@ -252,6 +252,19 @@ class StateAnchorPublisher {
 
     async start(){
         if(!this.enabled){ console.log('StateAnchorPublisher: disabled (ANCHOR_ENABLED=false)'); return; }
+        // Fill any indexer URL left empty at construction (configs-table-
+        // provisioned hubs carry no *_INDEXER_URL env var) via the hub's
+        // configs-aware resolver, so anchor on-chain verification reaches the
+        // indexer instead of returning 'no-indexer' on a standard hub.
+        if(this.hub && typeof this.hub._resolveIndexerUrl === 'function'){
+            for(const coin of Object.keys(this.indexers || {})){
+                if(this.indexers[coin] && this.indexers[coin].url) continue;
+                try {
+                    const u = await this.hub._resolveIndexerUrl(coin);
+                    if(u){ this.indexers[coin] = this.indexers[coin] || {}; this.indexers[coin].url = u; }
+                } catch(_){}
+            }
+        }
         if(this.peerManager){
             this._messageHandler = (env) => this._handleMessage(env);
             this.peerManager.on('message', this._messageHandler);
@@ -978,24 +991,31 @@ class StateAnchorPublisher {
         // carry the staking source recovery needs to dedupe weight; legacy set
         // below it (source=''). amount carries the source's weight when weighted.
         let weighted = swq.isStakeWeightedQuorumActive(Number(block), this.network);
+        // Gate on snapshot PRESENCE, not non-emptiness, matching the three sibling
+        // resolvers (CrossChainDexEngine/CrossChainCallEngine/StateCheckpointEngine)
+        // and the _coerceValidators contract: an actual array (even length 0) is a
+        // legitimate snapshot; only a malformed shape yields null. Gating on
+        // length > 0 conflated "legitimately empty at this block" with "indexer
+        // unavailable" and routed the former into the per-hub-local table, so two
+        // hubs could resolve different sets/N/quorum for the same (capability, block).
+        // A throw from the snapshot call propagates (like the siblings) rather than
+        // being swallowed into the divergent local-table fallback.
         if(this.capSnapshot){
-            try {
-                if(weighted){
-                    let snap = await this.capSnapshot.getWeightSnapshot(capability, Number(block));
-                    if(snap && Array.isArray(snap.validators) && snap.validators.length > 0){
-                        let set = snap.validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), amount: String(v.weight != null ? v.weight : '0'), source: String(v.source != null ? v.source : '') }));
-                        // Carry the truncation flag so the weighted quorum verdict fails closed
-                        // on an over-cap snapshot (SWQ-TRUNC parity: a truncated set under-counts
-                        // S, so a stake-evicted minority could otherwise clear the 2/3 bar).
-                        if(snap.truncated === true) set.truncated = true;
-                        return set;
-                    }
-                } else {
-                    let snap = await this.capSnapshot.getSnapshot(capability, Number(block));
-                    if(snap && Array.isArray(snap.validators) && snap.validators.length > 0)
-                        return snap.validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), amount: String(v.amount != null ? v.amount : '0'), source: '' }));
+            if(weighted){
+                let snap = await this.capSnapshot.getWeightSnapshot(capability, Number(block));
+                if(snap && Array.isArray(snap.validators)){
+                    let set = snap.validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), amount: String(v.weight != null ? v.weight : '0'), source: String(v.source != null ? v.source : '') }));
+                    // Carry the truncation flag so the weighted quorum verdict fails closed
+                    // on an over-cap snapshot (SWQ-TRUNC parity: a truncated set under-counts
+                    // S, so a stake-evicted minority could otherwise clear the 2/3 bar).
+                    if(snap.truncated === true) set.truncated = true;
+                    return set;
                 }
-            } catch(e){ /* fall through to the local table */ }
+            } else {
+                let snap = await this.capSnapshot.getSnapshot(capability, Number(block));
+                if(snap && Array.isArray(snap.validators))
+                    return snap.validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), amount: String(v.amount != null ? v.amount : '0'), source: '' }));
+            }
         }
         let rows = await this.db.doQuery(
             "SELECT signing_pubkey, amount, source FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? ORDER BY signing_pubkey ASC",
@@ -2129,13 +2149,30 @@ class StateAnchorPublisher {
 
     async _getActiveOraclePublishPubkeys(blockIndex){
         if(!this.hub) return [];
-        if(this.hub.capabilitySnapshot && blockIndex !== undefined && blockIndex !== null){
-            try {
-                let snap = await this.hub.capabilitySnapshot.getSnapshot('oracle_publish', blockIndex);
-                if(snap && Array.isArray(snap.validators))
-                    return snap.validators.map(v => String(v.pubkey).toLowerCase()).sort();
-            } catch(e){ /* fall through */ }
+        if(blockIndex !== undefined && blockIndex !== null){
+            // Block-PINNED election query. Fail CLOSED on a miss: the block-unpinned,
+            // self-test/enabled-filtered, gossip-driven capabilityRegistry set is
+            // per-hub, so substituting it here forks the election set across hubs
+            // (two hubs elect over different member lists -> double-anchor of real
+            // DOGE, stalled checkpoint, or an archive co-signature the indexer drops).
+            // An empty (unresolved) set means abstain, which the pinned election gates
+            // already fail-close on. Matches the accepted fix for #686/#925/#930.
+            if(this.hub.capabilitySnapshot){
+                try {
+                    let snap = await this.hub.capabilitySnapshot.getSnapshot('oracle_publish', blockIndex);
+                    if(snap && Array.isArray(snap.validators))
+                        return snap.validators.map(v => String(v.pubkey).toLowerCase()).sort();
+                } catch(e){ /* fail closed: fall through to [] */ }
+            }
+            return [];
         }
+        // Unpinned CURRENT-membership query (blockIndex null): the coarse V0_DONE /
+        // FINALIZED sender pre-filter, which wants "is this sender a current
+        // oracle_publish member" and NOT a block-pinned set. Every such caller
+        // re-checks the sender against the block-PINNED election / observed-leader
+        // set before acting, so the live registry is the correct source here and
+        // this path must NOT fail closed (that would reject every legitimate peer
+        // back-fill and force systematic re-anchoring).
         if(!this.hub.capabilityRegistry) return [];
         try {
             let pubkeys = await this.hub.capabilityRegistry.getActiveValidators('oracle_publish');

@@ -293,6 +293,38 @@ describe('AttestationRound', function () {
         });
     });
 
+    // ── responsible-set cross-service conformance ────────────────────────────
+    // CONSENSUS-CRITICAL: _computeResponsibleSet is implemented independently
+    // here and in xchain-indexer (actions/attest.js). They must produce
+    // identical ordered output or attestation quorum evaluation forks. This
+    // guard runs the canonical vectors from xchain-documentation against the
+    // hub copy; the indexer ships its own mirror guard over the SAME vector
+    // file. When the sibling xchain-documentation repo is not checked out
+    // (standalone deploy) the suite skips rather than fails, matching the
+    // ConsensusPrimitiveConformance convention.
+    describe('_computeResponsibleSet() canonical-vector conformance @regression', function () {
+        const path = require('path');
+        const DOCS_DIR = process.env.XCHAIN_DOCS_DIR
+            || path.join(__dirname, '..', '..', '..', 'xchain-documentation');
+        let vec = null;
+        try {
+            vec = require(path.join(DOCS_DIR, 'protocol', 'test-vectors', 'responsible_set.json'));
+        } catch (e) { /* sibling xchain-documentation absent */ }
+
+        before(function () { if (!vec) this.skip(); });
+
+        (vec ? vec.computeResponsibleSet : []).forEach(function (c) {
+            it(c.name, function () {
+                let hub = makeHub();
+                let ar  = new AttestationRound(hub, makeProviderRegistry());
+                let got = ar
+                    ._computeResponsibleSet(c.validators, c.requestId, c.redundancy, c.weighted)
+                    .map(v => v.pubkey);
+                expect(got).to.deep.equal(c.expected);
+            });
+        });
+    });
+
     // ── getStats ────────────────────────────────────────────────────────────
 
     describe('getStats()', function () {

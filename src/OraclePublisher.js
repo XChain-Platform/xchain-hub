@@ -21,10 +21,12 @@
  *
  * Active validators are sorted by signing_pubkey for stable ordering
  * across all nodes. If the leader misses their window (1 BTC block),
- * the next validator in rotation becomes eligible.
+ * the next validator in rotation becomes eligible. First valid PRICE tx
+ * on-chain for a given round wins (and earns the reward).
  *
- * Failover publishers batch missed rounds. First valid PRICE tx on-chain
- * for a given round wins (and earns the reward).
+ * A round that exhausts its broadcast attempts is written to an append-only
+ * dead-letter file (never silently dropped) so the finalized round can be
+ * inspected and replayed by hand rather than vanishing from the durable queue.
  *
  * This module handles:
  *   - Leader rotation calculation
@@ -59,6 +61,20 @@ class OraclePublisher {
         // Config (read from env or hub p2pConfig)
         let cfg = hub.p2pConfig || {};
         this.queuePath          = process.env.PUBLISHER_QUEUE_PATH || cfg.PUBLISHER_QUEUE_PATH || './data/publisher-queue.jsonl';
+        // Append-only sink for rounds that exhaust maxAttempts. Kept next to the
+        // queue so operators find both together; never truncated (open 'a').
+        this.deadLetterPath     = this.queuePath.replace(/\.jsonl$/, '') + '.deadletter.jsonl';
+        // Lifetime counter of rounds moved to the dead-letter file. Makes a
+        // give-up event countable instead of only a console.error.
+        this.abandonedCount     = 0;
+        // Lifetime published count + last-published markers + last-observed balance,
+        // surfaced via getStats() so an operator RPC can see the publish rail's
+        // health (a stalled rail is otherwise invisible: every price_snapshots row
+        // still reads finalized while nothing lands on-chain).
+        this.publishedCount     = 0;
+        this.lastPublishedRound = null;
+        this.lastPublishedTxid  = null;
+        this.lastObservedBalance = null;
         this.dogeAddress        = process.env.DOGE_ADDRESS || cfg.DOGE_ADDRESS || '';
         this.dogePubkeyHex      = process.env.DOGE_PUBKEY_HEX || cfg.DOGE_PUBKEY_HEX || '';
         this.lowBalanceThreshold = parseFloat(process.env.DOGE_LOW_BALANCE_THRESHOLD || cfg.DOGE_LOW_BALANCE_THRESHOLD || '10'); // DOGE
@@ -237,7 +253,7 @@ class OraclePublisher {
     // the given block boundary. Uses the on-chain snapshot (via CapabilitySnapshot)
     // so every hub that has processed identical on-chain data through blockIndex
     // returns the same array regardless of when gossip messages arrived.
-    // Falls back to the live local registry when the indexer is unreachable.
+    // Fails closed (returns []) when the block-pinned snapshot is unresolved.
     // Returns: array of 64-hex pubkey strings, sorted ascending.
     async _getActiveOraclePublishPubkeys(blockIndex) {
         if (!this.hub) return [];
@@ -251,20 +267,17 @@ class OraclePublisher {
                         .map(v => String(v.pubkey).toLowerCase())
                         .sort();
                 }
-            } catch (err) {
-                // fall through to live registry below
-            }
+            } catch (err) { /* fail closed: fall through to [] */ }
         }
 
-        // Fallback: live local registry (used when indexer is unreachable)
-        if (!this.hub.capabilityRegistry) return [];
-        try {
-            let pubkeys = await this.hub.capabilityRegistry.getActiveValidators('oracle_publish');
-            return pubkeys.map(p => String(p).toLowerCase()).sort();
-        } catch (err) {
-            console.error('OraclePublisher: failed to fetch active validators:', err);
-            return [];
-        }
+        // Fail closed on a pinned-block miss. The old live-registry fallback
+        // (capabilityRegistry.getActiveValidators) is block-unpinned and filtered on
+        // qualified/self_test_ok/enabled over gossip-driven rows, so it is a per-hub
+        // view of "now": two hubs would rank/size the round-robin over different sets
+        // (duplicate PRICE v0 broadcast + duplicate DOGE fee, or a dropped round). The
+        // caller already treats myRank === null as "not a publisher". Matches the
+        // accepted fix for #686/#925/#930.
+        return [];
     }
 
     // Fallback: build a single-validator signature locally if the round event didn't carry any.
@@ -334,6 +347,24 @@ class OraclePublisher {
         }
     }
 
+    // Append a give-up entry to the durable dead-letter file (never truncated).
+    // Best-effort: a write failure is logged but does not keep the entry looping
+    // forever on the main queue. Records the original entry plus when and why it
+    // was abandoned so an operator can replay the round manually.
+    _deadLetter(entry, reason) {
+        this.abandonedCount++;
+        let record = Object.assign({}, entry, { deadLetteredAt: Date.now(), reason: reason });
+        let line   = JSON.stringify(record) + '\n';
+        try {
+            let fd = fs.openSync(this.deadLetterPath, 'a');
+            fs.writeSync(fd, line);
+            fs.fsyncSync(fd);
+            fs.closeSync(fd);
+        } catch (e) {
+            console.error('OraclePublisher: failed to write dead-letter record for round ' + entry.round + ':', e);
+        }
+    }
+
     // Read all queue entries (used by _processQueue and on restart)
     _readQueue() {
         try {
@@ -369,9 +400,14 @@ class OraclePublisher {
 
         let remaining = [];
         for (let entry of entries) {
-            // Skip entries that have exceeded max attempts (failover publisher will pick them up)
+            // Entries that have exhausted their broadcast attempts are moved to the
+            // append-only dead-letter file rather than silently erased on the next
+            // queue rewrite. The finalized round stays recoverable for manual replay,
+            // and the give-up is counted (abandonedCount) instead of only logged.
             if (entry.attempts >= this.maxAttempts) {
-                console.error('OraclePublisher: round ' + entry.round + ' exceeded max attempts (' + this.maxAttempts + '), abandoning to failover');
+                console.error('OraclePublisher: round ' + entry.round + ' exceeded max attempts (' +
+                    this.maxAttempts + '), moving to dead-letter file ' + this.deadLetterPath);
+                this._deadLetter(entry, 'exceeded max attempts (' + this.maxAttempts + ')');
                 continue;
             }
 
@@ -390,6 +426,9 @@ class OraclePublisher {
                 }
                 let result = await broadcaster(payload);
                 console.log('OraclePublisher: published round ' + entry.round + ' (txid: ' + (result && result.txid) + ')');
+                this.publishedCount++;
+                this.lastPublishedRound = entry.round;
+                this.lastPublishedTxid  = (result && result.txid) || null;
                 // Successfully published. Drop from queue (do not add to remaining).
             } catch (err) {
                 entry.attempts++;
@@ -402,6 +441,24 @@ class OraclePublisher {
         }
 
         this._rewriteQueue(remaining);
+    }
+
+    // Snapshot of the publish rail's health for operator diagnostics. Intended to
+    // be surfaced through a JSON-RPC status method (e.g. getoraclepublisherstatus)
+    // alongside the sibling publishers' getStats accessors. All fields are cheap,
+    // in-memory reads; queueDepth touches the durable queue file.
+    getStats() {
+        let queueDepth = 0;
+        try { queueDepth = this._readQueue().length; } catch (e) { queueDepth = null; }
+        return {
+            queueDepth:          queueDepth,
+            published:           this.publishedCount,
+            abandoned:           this.abandonedCount,
+            lastPublishedRound:  this.lastPublishedRound,
+            lastPublishedTxid:   this.lastPublishedTxid,
+            lastObservedBalance: this.lastObservedBalance,
+            deadLetterPath:      this.deadLetterPath
+        };
     }
 
     // Check DOGE balance and log warnings if below threshold
@@ -434,6 +491,7 @@ class OraclePublisher {
             }
         }
 
+        this.lastObservedBalance = balance;
         if (balance !== null && balance !== undefined) {
             if (balance < this.lowBalanceThreshold) {
                 // Estimate rounds remaining at typical fee rate (~0.003 DOGE per tx)

@@ -372,6 +372,18 @@
       }
     },
     {
+      "name": "getoraclepublisherstatus",
+      "summary": "ORACLE (PRICE v0) publisher status: queue depth, lifetime published/abandoned (dead-letter) counts, last-published round + txid, and the last-observed DOGE publisher wallet balance for runway monitoring.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object"
+        }
+      }
+    },
+    {
       "name": "propose",
       "summary": "Submit a governance proposal.",
       "paramStructure": "by-name",

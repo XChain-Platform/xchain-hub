@@ -118,6 +118,19 @@ class CrossChainEngine extends EventEmitter {
 
     // Start listening for cross-chain attestation messages
     async start() {
+        // Fill any indexer URL left empty at construction (configs-table-
+        // provisioned hubs carry no *_INDEXER_URL env var) via the hub's
+        // configs-aware resolver, so a standard configs-provisioned hub reaches
+        // the indexer instead of falling through to the empty-URL guard.
+        if(this.hub && typeof this.hub._resolveIndexerUrl === 'function'){
+            for(const coin of Object.keys(this.indexers || {})){
+                if(this.indexers[coin] && this.indexers[coin].url) continue;
+                try {
+                    const u = await this.hub._resolveIndexerUrl(coin);
+                    if(u){ this.indexers[coin] = this.indexers[coin] || {}; this.indexers[coin].url = u; }
+                } catch(_){}
+            }
+        }
         this._messageHandler = (envelope) => this._handleMessage(envelope);
         this.peerManager.on('message', this._messageHandler);
         console.log('Cross-chain attestation engine started');

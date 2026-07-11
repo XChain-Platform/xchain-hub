@@ -107,6 +107,15 @@ class OracleRound {
         // this only ever grows, giving operators a real-time miss-rate signal.
         this.fetchFailures = 0;
 
+        // Count of oracle_submissions INSERTs that failed to persist (monotonic, like
+        // fetchFailures) plus the last round in which one failed and how many failed in
+        // it. A dropped submission narrows the durable audit trail / per-pair source
+        // count vs. the in-memory quorum view without ever over-reporting quorum, so this
+        // is surfaced as an operator signal rather than aborting the money-bearing round.
+        this.failedSubmissionPersists = 0;
+        this.lastSubmissionPersistFailureRound = null;
+        this.lastSubmissionPersistFailureCount = 0;
+
         // Wall-clock anchor for round numbering. All hubs must agree on this
         // timestamp so they compute the same round number from the same time.
         this.epochStart = parseInt(this.config.ORACLE_EPOCH_START);
@@ -128,6 +137,17 @@ class OracleRound {
         // Subscribe to gossip messages
         this._messageHandler = (envelope) => this._handleMessage(envelope);
         this.peerManager.on('message', this._messageHandler);
+
+        // Reset the stall gauges only when a round actually finalizes (reaches
+        // commit quorum), not merely when this hub broadcast its own submission.
+        // During a consensus/quorum stall the local price fetch keeps succeeding, so
+        // stamping freshness on submission would hide the stall from the dashboard's
+        // early-stall gauge. Finalization is the real success signal, and it matches
+        // the semantic _hydrateFreshnessCounters rebuilds from the durable record.
+        if (this.oracleConsensus && typeof this.oracleConsensus.on === 'function') {
+            this._finalizedHandler = () => this.markRoundFinalized();
+            this.oracleConsensus.on('round:finalized', this._finalizedHandler);
+        }
 
         // Start the round timer; it handles both the first run and the aligned cadence
         this._startRoundTimer();
@@ -180,6 +200,10 @@ class OracleRound {
             this.peerManager.removeListener('message', this._messageHandler);
             this._messageHandler = null;
         }
+        if (this._finalizedHandler && this.oracleConsensus && typeof this.oracleConsensus.removeListener === 'function') {
+            this.oracleConsensus.removeListener('round:finalized', this._finalizedHandler);
+            this._finalizedHandler = null;
+        }
         if (this.initialRoundTimer) {
             clearTimeout(this.initialRoundTimer);
             this.initialRoundTimer = null;
@@ -195,6 +219,17 @@ class OracleRound {
     // Get the current round number
     getCurrentRound() {
         return this.currentRound;
+    }
+
+    // Stamp the stall gauges on a genuine round finalization. This is the sole
+    // authoritative writer of both fields on the live path (wired to the consensus
+    // 'round:finalized' event in start()). consecutiveSkippedRounds is the trailing
+    // streak of non-finalized rounds; lastSuccessfulRoundTime is the wall-clock time
+    // of the last round this hub saw finalized (as leader or follower), which is the
+    // exact semantic _hydrateFreshnessCounters rebuilds from the durable record.
+    markRoundFinalized() {
+        this.consecutiveSkippedRounds = 0;
+        this.lastSuccessfulRoundTime  = Date.now();
     }
 
     // Get submissions for a given round
@@ -262,6 +297,9 @@ class OracleRound {
             skippedCount:             skippedRounds.length,
             droppedPairs:             droppedPairs,
             droppedPairCount:         droppedPairs.length,
+            failedSubmissionPersists:      this.failedSubmissionPersists,
+            lastSubmissionPersistFailureRound: this.lastSubmissionPersistFailureRound,
+            lastSubmissionPersistFailureCount: this.lastSubmissionPersistFailureCount,
             consecutiveSkippedRounds: this.consecutiveSkippedRounds,
             oracle_fetch_failures:    this.fetchFailures,
             lastSuccessfulRoundTime:  this.lastSuccessfulRoundTime,
@@ -458,13 +496,15 @@ class OracleRound {
             timestamp: Date.now()
         });
 
-        // Persist to DB (fire and forget)
-        this._persistSubmissions(this.currentRound, myAddr, prices);
+        // Persist to DB; await so a persistence failure is counted and observable
+        // (surfaced via getDiagnostics), not silently dropped. Does not throw.
+        await this._persistSubmissions(this.currentRound, myAddr, prices);
 
-        this.consecutiveSkippedRounds = 0;
-        this.lastSuccessfulRoundTime  = Date.now();
-
-        // Schedule finalization after the submission window closes
+        // The stall gauges (consecutiveSkippedRounds / lastSuccessfulRoundTime) are
+        // deliberately NOT stamped here: a successful local submission is not a
+        // finalized round. They are updated by markRoundFinalized() on the consensus
+        // 'round:finalized' event, so a commit-quorum stall (where the fetch keeps
+        // succeeding but no round finalizes) ages the gauge instead of masking it.
         this._scheduleFinalization(this.currentRound);
     }
 
@@ -589,11 +629,14 @@ class OracleRound {
                 ' (call syncvalidators to register the peer)');
             return;
         }
+        // Remote peer submission: _handleMessage is a synchronous message handler, so this
+        // stays fire-and-forget, but _persistSubmissions now counts its own failures
+        // internally (via allSettled) and never rejects, so the drop is still observable.
         this._persistSubmissions(round, envelope.sender, validPrices, validatorPubkey);
     }
 
     // Persist price submissions to the database
-    _persistSubmissions(round, sender, prices, validatorPubkey) {
+    async _persistSubmissions(round, sender, prices, validatorPubkey) {
         // Resolve pubkey for self
         if (!validatorPubkey && this.identity) {
             validatorPubkey = this.identity.getPubkeyHex();
@@ -602,14 +645,33 @@ class OracleRound {
             validatorPubkey = '0000000000000000000000000000000000000000000000000000000000000000';
         }
 
+        let inserts = [];
         for (let p of prices) {
             // INSERT IGNORE relies on the UNIQUE KEY (round, coin_pair, validator_pubkey)
             // so concurrent writes across hubs collapse silently instead of raising
             // ER_DUP_ENTRY (which db.doQuery would log before our catch could filter it).
             let query = `INSERT IGNORE INTO oracle_submissions (round_number, coin_pair, validator_pubkey, price, sources)
                          VALUES (?, ?, ?, ?, ?)`;
-            this.db.doQuery(query, [round, p.coinPair, validatorPubkey, p.price, p.sources])
-                .catch(e => console.error('Oracle: Error persisting submission:', e));
+            inserts.push(this.db.doQuery(query, [round, p.coinPair, validatorPubkey, p.price, p.sources]));
+        }
+
+        // Settle every insert before the round proceeds so a persistence failure is
+        // observable instead of fire-and-forget. Deliberately Promise.allSettled, NOT
+        // Promise.all, and NOT re-thrown: a dropped audit row must never stall a
+        // money-bearing consensus round (that would trade a benign audit gap for a
+        // liveness bug). Failures are counted and surfaced via getDiagnostics().
+        let results = await Promise.allSettled(inserts);
+        let failed = 0;
+        for (let r of results) {
+            if (r.status === 'rejected') {
+                failed++;
+                console.error('Oracle: Error persisting submission:', r.reason);
+            }
+        }
+        if (failed > 0) {
+            this.failedSubmissionPersists += failed;
+            this.lastSubmissionPersistFailureRound = round;
+            this.lastSubmissionPersistFailureCount = failed;
         }
     }
 

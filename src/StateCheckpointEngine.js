@@ -123,6 +123,23 @@ class StateCheckpointEngine extends EventEmitter {
 
     async start(){
         if(!this.enabled){ console.log('StateCheckpointEngine: disabled (CHECKPOINT_ENABLED=false)'); return; }
+        // Fill any indexer URL left empty at construction (a configs-table-
+        // provisioned hub carries no *_INDEXER_URL env var, and the p2pConfig
+        // fallback never holds one) via the hub's configs-aware resolver, so this
+        // engine reaches the indexer instead of silently producing zero checkpoints.
+        if(this.hub && typeof this.hub._resolveIndexerUrl === 'function'){
+            for(const coin of Object.keys(this.indexers || {})){
+                if(this.indexers[coin] && this.indexers[coin].url) continue;
+                try {
+                    const u = await this.hub._resolveIndexerUrl(coin);
+                    if(u){ this.indexers[coin] = this.indexers[coin] || {}; this.indexers[coin].url = u; }
+                } catch(_){}
+            }
+        }
+        for(const coin of (this.chains || [])){
+            if(!this.indexers[coin] || !this.indexers[coin].url)
+                console.warn('StateCheckpointEngine: no indexer URL for chain ' + coin + ' (set ' + coin + '_INDEXER_API_URL / ' + coin + '_INDEXER_URL, or push it via xchain-node updateconfig); this chain is skipped every tick until configured');
+        }
         // Restore the cadence latch from the last checkpoint we already produced.
         // Without this the latch starts null, so the FIRST tick after a restart
         // checkpoints immediately regardless of intervalBlocks, and every such

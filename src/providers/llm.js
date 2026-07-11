@@ -171,12 +171,21 @@ exports.fetch = async (payload, options) => {
     let maxTokens   = Math.min(Number(envelope.max_tokens) || MAX_TOKENS_DEFAULT, MAX_TOKENS_DEFAULT);
     let temperature = (typeof envelope.temperature === 'number') ? envelope.temperature : DEFAULT_TEMPERATURE;
 
+    // Envelope output format (spec §4). 'text' (default) leaves behavior unchanged;
+    // 'json_object' constrains the request per-vendor (OpenAI response_format, plus a
+    // JSON system instruction that also satisfies OpenAI's "json" keyword requirement
+    // and shapes the Anthropic/CLI paths, which have no hard response_format switch).
+    let format = (envelope.format === undefined) ? 'text' : String(envelope.format);
+    if (format !== 'text' && format !== 'json_object')
+        throw new Error('llm: envelope.format must be "text" or "json_object"');
+
     const text = await _runLlm({
         prompt:      envelope.prompt,
         system:      envelope.system,
         model,
         maxTokens,
         temperature,
+        format,
         timeoutMs:   options.timeoutMs
     });
 
@@ -314,10 +323,21 @@ exports.healthCheck = async (ctx) => {
 
 // Pick the model's vendor + configured transport and execute the LLM call.
 // Returns the response text (string). Throws on transport-level failure.
-async function _runLlm({ prompt, system, model, maxTokens, temperature, timeoutMs }) {
+async function _runLlm({ prompt, system, model, maxTokens, temperature, format, timeoutMs }) {
     const vendor = vendorOfModel(model);
     const auth   = resolveLlmVendorAuth(vendor);
     if (!auth.ok) throw new Error('llm: ' + (auth.detail || auth.reason || 'no credentials'));
+
+    // json_object mode: append a JSON instruction to the system prompt for every
+    // transport (prompt shaping for Anthropic/CLI which have no hard switch, and
+    // it also satisfies OpenAI's requirement that the word "json" appear in the
+    // messages when response_format=json_object is set). 'text'/undefined is a no-op.
+    const jsonMode = (format === 'json_object');
+    let sys = system;
+    if (jsonMode) {
+        let instr = 'Respond with a single valid JSON object and nothing else.';
+        sys = sys ? (sys + '\n\n' + instr) : instr;
+    }
 
     if (auth.transport === 'openai_api') {
         const reqBody = {
@@ -325,15 +345,38 @@ async function _runLlm({ prompt, system, model, maxTokens, temperature, timeoutM
             max_completion_tokens: maxTokens,
             messages: []
         };
-        if (system) reqBody.messages.push({ role: 'system', content: system });
+        if (jsonMode) reqBody.response_format = { type: 'json_object' };
+        if (sys) reqBody.messages.push({ role: 'system', content: sys });
         reqBody.messages.push({ role: 'user', content: prompt });
-        // Some OpenAI reasoning models reject explicit temperature; only send
-        // a caller-meaningful value and let the API default otherwise.
-        if (typeof temperature === 'number') reqBody.temperature = temperature;
+        // OpenAI o-series reasoning models reject any explicit temperature != 1 with
+        // HTTP 400 ("Unsupported value: 'temperature'"). fetch()/agree() always pass a
+        // numeric temperature (DEFAULT_TEMPERATURE=0), so a `typeof temperature` guard
+        // is always true and would hard-fail every reasoning-model round. Gate on the
+        // model id instead: omit temperature for o-series and let the API default,
+        // send it for chat models (gpt-*) that honor it.
+        const isReasoningModel = /^o[0-9]/.test(String(model));
+        if (!isReasoningModel && typeof temperature === 'number') reqBody.temperature = temperature;
         const result = await _callOpenAi('/v1/chat/completions', reqBody, auth.apiKey, { timeoutMs });
         let choice = Array.isArray(result.choices) ? result.choices[0] : null;
-        let text   = (choice && choice.message && typeof choice.message.content === 'string')
-            ? choice.message.content : '';
+        // A model refusal (choice.message.refusal populated, content null) or a
+        // content_filter stop is a MODEL-level outcome, not a transport failure.
+        // Surface it as a distinct error so it is recorded distinctly from an
+        // empty/transport error (the round still records provider_error; only the
+        // recorded error detail differs, verdict derivation is unchanged).
+        let msg = choice && choice.message ? choice.message : null;
+        if (msg && typeof msg.refusal === 'string' && msg.refusal.length > 0) {
+            let err = new Error('llm: OpenAI model refusal: ' + msg.refusal.substring(0, 200));
+            err.kind = 'refusal';
+            err.refusal = msg.refusal;
+            throw err;
+        }
+        if (choice && choice.finish_reason === 'content_filter') {
+            let err = new Error('llm: OpenAI content_filter stop');
+            err.kind = 'refusal';
+            err.refusal = (msg && typeof msg.refusal === 'string') ? msg.refusal : '';
+            throw err;
+        }
+        let text   = (msg && typeof msg.content === 'string') ? msg.content : '';
         return text;
     }
 
@@ -343,7 +386,7 @@ async function _runLlm({ prompt, system, model, maxTokens, temperature, timeoutM
         const { result } = await runClaudePrint({
             prompt,
             model,
-            systemPrompt: system,
+            systemPrompt: sys,
             timeoutMs:    timeoutMs || 60000
         });
         return result;
@@ -356,7 +399,7 @@ async function _runLlm({ prompt, system, model, maxTokens, temperature, timeoutM
             temperature,
             messages:    [{ role: 'user', content: prompt }]
         };
-        if (system) reqBody.system = system;
+        if (sys) reqBody.system = sys;
         const result = await _callAnthropic('/v1/messages', reqBody, auth.apiKey, { timeoutMs });
         let text = '';
         if (Array.isArray(result.content)) {
@@ -424,6 +467,16 @@ function _buildJudgePrompt(candidates) {
     return lines.join('\n');
 }
 
+// Classify an HTTP status / transport failure as transient (429 rate-limit,
+// 5xx overloaded/gateway, network timeout/reset) vs hard (4xx config/auth/bad
+// request). Recorded on the thrown error for observability only: AttestationRound
+// still maps ANY fetch failure to provider_error and there is NO in-round retry,
+// so round timing and verdict derivation are unchanged.
+function _isTransientStatus(status) {
+    let s = Number(status);
+    return s === 429 || (s >= 500 && s <= 599);
+}
+
 async function _callAnthropic(apiPath, body, apiKey, options) {
     let timeoutMs = Number(options && options.timeoutMs) || 30000;
     let data = JSON.stringify(body);
@@ -453,7 +506,10 @@ async function _callAnthropic(apiPath, body, apiKey, options) {
                     let json = JSON.parse(str);
                     if (json.type === 'error' || json.error) {
                         let msg = (json.error && json.error.message) ? json.error.message : JSON.stringify(json);
-                        safeReject(new Error('llm: Anthropic API: ' + msg));
+                        let err = new Error('llm: Anthropic API: ' + msg);
+                        err.httpStatus = res.statusCode;
+                        err.transient  = _isTransientStatus(res.statusCode);
+                        safeReject(err);
                         return;
                     }
                     if (json.usage) {
@@ -463,13 +519,19 @@ async function _callAnthropic(apiPath, body, apiKey, options) {
                     }
                     safeResolve(json);
                 } catch (e) {
-                    safeReject(new Error('llm: Anthropic API: malformed response (' + str.substring(0, 200) + ')'));
+                    // A 429/5xx from a gateway/proxy often carries a non-JSON (HTML)
+                    // body and lands here; classify by status so it is not misrecorded
+                    // as a hard malformed-response error.
+                    let err = new Error('llm: Anthropic API: malformed response (' + str.substring(0, 200) + ')');
+                    err.httpStatus = res.statusCode;
+                    err.transient  = _isTransientStatus(res.statusCode);
+                    safeReject(err);
                 }
             });
-            res.on('error', (e) => safeReject(new Error('llm: response error: ' + e.message)));
+            res.on('error', (e) => { let err = new Error('llm: response error: ' + e.message); err.transient = true; safeReject(err); });
         });
-        req.on('error',   (e) => safeReject(new Error('llm: request error: ' + e.message)));
-        req.on('timeout', ()  => { req.destroy(); safeReject(new Error('llm: timeout after ' + timeoutMs + 'ms')); });
+        req.on('error',   (e) => { let err = new Error('llm: request error: ' + e.message); err.transient = true; safeReject(err); });
+        req.on('timeout', ()  => { req.destroy(); let err = new Error('llm: timeout after ' + timeoutMs + 'ms'); err.transient = true; safeReject(err); });
         req.write(data);
         req.end();
     });
@@ -503,7 +565,10 @@ async function _callOpenAi(apiPath, body, apiKey, options) {
                     let json = JSON.parse(str);
                     if (json.error) {
                         let msg = (json.error && json.error.message) ? json.error.message : JSON.stringify(json);
-                        safeReject(new Error('llm: OpenAI API: ' + msg));
+                        let err = new Error('llm: OpenAI API: ' + msg);
+                        err.httpStatus = res.statusCode;
+                        err.transient  = _isTransientStatus(res.statusCode);
+                        safeReject(err);
                         return;
                     }
                     if (json.usage) {
@@ -513,13 +578,19 @@ async function _callOpenAi(apiPath, body, apiKey, options) {
                     }
                     safeResolve(json);
                 } catch (e) {
-                    safeReject(new Error('llm: OpenAI API: malformed response (' + str.substring(0, 200) + ')'));
+                    // A 429/5xx from a gateway/proxy often carries a non-JSON (HTML)
+                    // body and lands here; classify by status so it is not misrecorded
+                    // as a hard malformed-response error.
+                    let err = new Error('llm: OpenAI API: malformed response (' + str.substring(0, 200) + ')');
+                    err.httpStatus = res.statusCode;
+                    err.transient  = _isTransientStatus(res.statusCode);
+                    safeReject(err);
                 }
             });
-            res.on('error', (e) => safeReject(new Error('llm: response error: ' + e.message)));
+            res.on('error', (e) => { let err = new Error('llm: response error: ' + e.message); err.transient = true; safeReject(err); });
         });
-        req.on('error',   (e) => safeReject(new Error('llm: request error: ' + e.message)));
-        req.on('timeout', ()  => { req.destroy(); safeReject(new Error('llm: timeout after ' + timeoutMs + 'ms')); });
+        req.on('error',   (e) => { let err = new Error('llm: request error: ' + e.message); err.transient = true; safeReject(err); });
+        req.on('timeout', ()  => { req.destroy(); let err = new Error('llm: timeout after ' + timeoutMs + 'ms'); err.transient = true; safeReject(err); });
         req.write(data);
         req.end();
     });

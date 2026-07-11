@@ -325,33 +325,29 @@ describe('OraclePublisher', function () {
             expect(keys[1]).to.equal('cc'.repeat(32));
         });
 
-        it('falls back to capability registry when snapshot fails', async function () {
+        it('fails closed (empty) when the snapshot call throws, never the per-hub registry', async function () {
+            // The block-unpinned gossip-driven registry fallback was removed: two hubs
+            // resolving different election sets double-anchor / duplicate PRICE v0.
             let capSS = { getSnapshot: sinon.stub().rejects(new Error('indexer down')) };
             let capReg = { getActiveValidators: sinon.stub().resolves(['AA'.repeat(32)]) };
             let hub = makeHub({ capabilitySnapshot: capSS, capabilityRegistry: capReg });
             let pub = new OraclePublisher(hub);
             let keys = await pub._getActiveOraclePublishPubkeys(100);
-            expect(keys).to.include('aa'.repeat(32));
+            expect(keys).to.deep.equal([]);
+            expect(capReg.getActiveValidators.called).to.equal(false);
         });
 
-        it('falls back to capability registry when snapshot returns no validators', async function () {
+        it('fails closed (empty) when the snapshot resolves no validators, never the registry', async function () {
             let capSS = { getSnapshot: sinon.stub().resolves(null) };
             let capReg = { getActiveValidators: sinon.stub().resolves(['pk1']) };
             let hub = makeHub({ capabilitySnapshot: capSS, capabilityRegistry: capReg });
             let pub = new OraclePublisher(hub);
             let keys = await pub._getActiveOraclePublishPubkeys(100);
-            expect(keys).to.include('pk1');
-        });
-
-        it('returns empty array when registry fails', async function () {
-            let capReg = { getActiveValidators: sinon.stub().rejects(new Error('db down')) };
-            let hub = makeHub({ capabilityRegistry: capReg });
-            let pub = new OraclePublisher(hub);
-            let keys = await pub._getActiveOraclePublishPubkeys(100);
             expect(keys).to.deep.equal([]);
+            expect(capReg.getActiveValidators.called).to.equal(false);
         });
 
-        it('returns empty array when no snapshot and no registry', async function () {
+        it('fails closed (empty) with no snapshot configured', async function () {
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
             let keys = await pub._getActiveOraclePublishPubkeys(100);

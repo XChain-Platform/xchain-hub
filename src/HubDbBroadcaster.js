@@ -42,9 +42,14 @@ class HubDbBroadcaster {
         // indexer/sync instances (a bounded handful), so the default is generous but
         // finite: an unauthenticated /hub-db/subscribe (HUB_API_KEY unset) is otherwise
         // an unbounded fan-out where every connect runs several SELECT MAX(id) queries.
-        this.maxPerIp = parseInt(this.config.WS_MAX_PER_IP || 100);
-        this.maxSubscribers = parseInt(this.config.WS_MAX_SUBSCRIBERS || 1000);
-        this.maxBufferedMessages = parseInt(this.config.WS_BACKPRESSURE_LIMIT || 50);
+        // Resolution order env -> config -> default, matching the rest of the hub
+        // (e.g. api.js P2P_WS_PING_INTERVAL). p2pConfig carries no WS_* key and a
+        // standalone hub receives {}, so without the process.env arm these caps were
+        // permanently pinned to their defaults and the CHANGELOG's WS_BACKPRESSURE_LIMIT
+        // operator knob could never take effect.
+        this.maxPerIp = parseInt(process.env.WS_MAX_PER_IP || this.config.WS_MAX_PER_IP || 100);
+        this.maxSubscribers = parseInt(process.env.WS_MAX_SUBSCRIBERS || this.config.WS_MAX_SUBSCRIBERS || 1000);
+        this.maxBufferedMessages = parseInt(process.env.WS_BACKPRESSURE_LIMIT || this.config.WS_BACKPRESSURE_LIMIT || 50);
 
         // Stream-position watermark heartbeat. Every interval, tell subscribers
         // "you have received every row event produced up to ts". Row events are
@@ -52,7 +57,7 @@ class HubDbBroadcaster {
         // stream genuinely means no new rows exist, and the indexer's sync
         // barriers can distinguish "mirror is behind" from "the world is quiet"
         // (the row-content watermark deadlock: review items #1984/#1986).
-        this.watermarkIntervalMs = parseInt(this.config.WS_WATERMARK_INTERVAL_MS || 10000);
+        this.watermarkIntervalMs = parseInt(process.env.WS_WATERMARK_INTERVAL_MS || this.config.WS_WATERMARK_INTERVAL_MS || 10000);
         this._watermarkTimer = setInterval(() => this.broadcastWatermark(), this.watermarkIntervalMs);
         if (this._watermarkTimer.unref) this._watermarkTimer.unref();
     }

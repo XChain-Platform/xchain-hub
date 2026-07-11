@@ -24,6 +24,7 @@
  ********************************************************************/
 
 const { ORACLE_DEVIATION_THRESHOLD } = require('./constants');
+const bcmath = require('./bcmath.js');
 
 const MAX_DEVIATIONS_PER_VALIDATOR = 1000;
 
@@ -93,7 +94,7 @@ class SlashDetector {
 
         let finalizedMap = {};
         for (let fp of finalizedPrices) {
-            finalizedMap[fp.coinPair] = parseFloat(fp.price);
+            finalizedMap[fp.coinPair] = fp.price;
         }
 
         // Check each validator's submission against the finalized prices.
@@ -109,23 +110,32 @@ class SlashDetector {
 
             let deviatingPairs = [];
             for (let p of sub.prices) {
-                let finalPrice = finalizedMap[p.coinPair];
+                let finalPriceStr = finalizedMap[p.coinPair];
+                let finalPrice = parseFloat(finalPriceStr);
                 if (!finalPrice || finalPrice === 0) continue;
 
                 let submittedPrice = parseFloat(p.price);
                 if (isNaN(submittedPrice) || submittedPrice === 0) continue;
 
-                let deviation = Math.abs(submittedPrice - finalPrice) / finalPrice;
+                // Exact-decimal deviation, mirroring the co-sign admission band in
+                // OracleConsensus._handlePropose (bcsub/bcdiv/bcgt at scale 18). Float
+                // arithmetic here re-introduced ULP error at the +-band boundary, so an
+                // exactly-threshold submission was co-signed yet slashed. Both sides of
+                // the band must be decided by the same exact comparison.
+                let diff      = bcmath.bcsub(String(p.price), String(finalPriceStr), 18);
+                let absDiff   = bcmath.bclt(diff, 0) ? bcmath.bcmul(diff, '-1', 18) : diff;
+                let deviation = bcmath.bcdiv(absDiff, String(finalPriceStr), 18);
 
-                if (deviation > this.deviationThreshold) {
+                if (bcmath.bcgt(deviation, String(this.deviationThreshold))) {
+                    let pct = bcmath.bcstr(bcmath.bcmul(deviation, '100', 4), 4);
                     console.warn('Slash: Validator ' + pubkey.substring(0, 16) + '... deviated ' +
-                        (deviation * 100).toFixed(2) + '% on ' + p.coinPair + ' in round ' + round);
+                        pct + '% on ' + p.coinPair + ' in round ' + round);
 
                     deviatingPairs.push({
                         coinPair: p.coinPair,
                         submitted: submittedPrice,
                         finalized: finalPrice,
-                        deviation: (deviation * 100).toFixed(2) + '%'
+                        deviation: pct + '%'
                     });
                 }
             }
