@@ -75,6 +75,21 @@ class AttestationConsensus extends EventEmitter {
         // memory (a plain unbounded Set grew with lifetime request volume).
         // `_finalizedOrder` tracks insertion order for FIFO eviction while
         // `finalized` keeps O(1) Set semantics for the `.has(rid)` guards.
+        //
+        // SIZING INVARIANT: eviction is by COUNT, not age, so `finalizedMax`
+        // must stay larger than the number of requests this hub finalizes
+        // within the window a finalized rid still needs suppression, i.e. from
+        // an `ok` finalization until the indexer flips that request out of
+        // `getpendingattestation_requests` (roughly the BTC confirmation
+        // horizon that gates `_pollPending` -> `propose()`). If it is set too
+        // low on a busy hub a rid can be evicted while its request is still
+        // pending; the only remaining suppressor is `finalized.has(rid)` in
+        // `propose()`, so premature eviction turns double-publish suppression
+        // into a re-proposed, re-published round and a burned BTC fee per
+        // re-poll (the indexer still rejects it as already-fulfilled, so this
+        // is wasted fee, not a fork). The 10000 default clears this horizon by
+        // a wide margin at expected request volumes; do not lower it without
+        // re-deriving the floor from the confirmation horizon and poll cadence.
         this.finalized       = new Set();
         this._finalizedOrder = [];
         this.finalizedMax    = parseInt(this.config.ATTESTATION_FINALIZED_MAX) || 10000;
