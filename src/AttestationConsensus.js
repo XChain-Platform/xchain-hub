@@ -815,6 +815,12 @@ class AttestationConsensus extends EventEmitter {
                 }
                 let matchesProposal = false;
                 for(let p of pending.proposals.values()){
+                    // Only OK proposals can vouch: agree() selects among ok proposals
+                    // exclusively (_maybeAdvanceFromProposals filters), and a failed
+                    // fetch proposes provider_error with an EMPTY body - without this
+                    // filter a Byzantine leader could canonicalize an empty-body
+                    // 'ok' winner by hash-matching any peer's error proposal (AF1-R1).
+                    if((p.status || 'ok') !== 'ok') continue;
                     if(crypto.createHash('sha256').update(p.body).digest('hex') === prepBodyHash && p.meta === meta){
                         matchesProposal = true;
                         break;
@@ -843,11 +849,20 @@ class AttestationConsensus extends EventEmitter {
                 if(!ownMatches){
                     if(!pending.prepareCandidates) pending.prepareCandidates = new Map();
                     let key = prepBodyHash + '|' + meta + '|' + status;
+                    // One live candidate per sender (AF4-R1): a re-announce replaces the
+                    // sender's previous body rather than accumulating. Without this a
+                    // Byzantine responsible peer streaming distinct self-signed bodies
+                    // grows the map without bound for the round's lifetime; honest
+                    // validators only ever announce one body per round anyway.
+                    for(let [k, m] of pending.prepareCandidates){
+                        if(k !== key && m.delete(senderPubkey) && m.size === 0) pending.prepareCandidates.delete(k);
+                    }
                     let cand = pending.prepareCandidates.get(key);
                     if(!cand){ cand = new Map(); pending.prepareCandidates.set(key, cand); }
                     cand.set(senderPubkey, String(d.sig));
                     // Bounded: senders are membership-checked responsible validators,
-                    // deduped per body by pubkey, so entries <= responsible.length^2.
+                    // each holding at most one live candidate entry, so entries <=
+                    // responsible.length.
                     if(cand.size < 2){
                         pending.prepares.add(senderPubkey);
                         return;   // hold: not corroborated yet, and our own body disagrees/is absent

@@ -1615,6 +1615,26 @@ describe('AttestationConsensus: A-F1 leader PREPARE must hash-match a collected 
         // And our vote was re-signed over the adopted canonical.
         expect(pending.signatures.has(pub(me))).to.equal(true);
     });
+
+    it('rejects a leader PREPARE that only hash-matches a peer ERROR proposal (AF1-R1: empty-body ok-winner)', async function () {
+        // p2's fetch failed: provider_error with the canonical EMPTY body. A
+        // Byzantine leader then announces status='ok' with an empty body, which
+        // hash-matches that error proposal. Only OK proposals may vouch.
+        let rs = roundState(me, [me, p1, p2], Buffer.from('my-body'), 'llm', 3);
+        rs.leaderPubkey = pub(p1); rs.role = 'follower';
+        await c.propose(RID, rs);
+        await flush();
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.alloc(0), '', 'provider_error'));
+        await flush();
+        let pending = c.pending.get(RID);
+        expect(pending.proposals.size).to.equal(3);
+
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'llm', p1, Buffer.alloc(0)));
+        await flush();
+        expect(pending.winner, 'an empty-body ok winner vouched only by an error proposal must not latch').to.equal(null);
+        expect(pending.signatures.has(pub(me)), 'we must not re-sign it').to.equal(false);
+    });
 });
 
 describe('AttestationConsensus: A-F4 byte_equality winner needs own-match or corroboration', function () {
@@ -1677,6 +1697,33 @@ describe('AttestationConsensus: A-F4 byte_equality winner needs own-match or cor
         await flush();
         expect(pending.winner).to.not.equal(null);
         expect(pending.winner.body.toString()).to.equal('shared-body');
+    });
+
+    it('a sender re-announcing a different body REPLACES its previous candidate (AF4-R1: bounded per sender)', async function () {
+        await c.propose(RID, roundState(me, [me, p1, p2], Buffer.from('my-divergent-body'), 'http_get', 3));
+        await flush();
+        let pending = c.pending.get(RID);
+
+        // p1 streams three distinct bodies: only the LAST may remain live.
+        for (let i = 0; i < 3; i++) {
+            c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, Buffer.from('spam-body-' + i)));
+        }
+        await flush();
+        expect(pending.winner).to.equal(null);
+        expect(pending.prepareCandidates.size, 'one live candidate entry per sender').to.equal(1);
+
+        // The stale first body can no longer be corroborated into a winner:
+        // p2 matching p1's ABANDONED body finds no partner (p1 moved on), so
+        // it holds as p2's own single candidate instead of latching.
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, Buffer.from('spam-body-0')));
+        await flush();
+        expect(pending.winner, 'an abandoned body must not latch off one remaining signer').to.equal(null);
+
+        // Corroboration on a sender's CURRENT body still works.
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p2, Buffer.from('spam-body-2')));
+        await flush();
+        expect(pending.winner, 'both senders currently on the same body latches').to.not.equal(null);
+        expect(pending.winner.body.toString()).to.equal('spam-body-2');
     });
 });
 
