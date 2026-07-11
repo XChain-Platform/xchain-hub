@@ -42,6 +42,7 @@ const fs        = require('fs');
 const path      = require('path');
 const geoip     = require('geoip-lite');   // self-contained country/region DB; we read only country + region
 const { HUB_SCHEMA_VERSION } = require('./hub-schema-version');   // stamped on every mirror snapshot so a stale indexer rejects a mismatch
+const { buildOraclePricesSnapshotQuery } = require('./oraclePricesSnapshotQuery');   // page (indexer bootstrap) vs latest-per-feed (dashboard) query selection
 
 const HUB_PORT = process.env.HUB_PORT;
 const HUB_HOST = process.env.HUB_HOST || '0.0.0.0';
@@ -971,14 +972,18 @@ async function startApi(){
     app.get('/hub-db/snapshot/oracle_prices', async (req, res) => {
         try {
             if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
-            let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
             if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
-            let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
-            let rows = await hub.db.doQuery(
-                'SELECT * FROM oracle_prices WHERE id > ? ORDER BY id ASC LIMIT ?',
-                [since, limit]
-            );
-            res.json({ table: 'oracle_prices', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
+            // `latest=1` serves the dashboard's current-per-feed need (MAX(effective_at)
+            // per coin/tick/fiat); absent it, the default ascending since_id page-walk
+            // (indexer bootstrap) is unchanged. See oraclePricesSnapshotQuery.js.
+            let latest = req.query.latest === '1' || req.query.latest === 'true';
+            let { sql, params, mode } = buildOraclePricesSnapshotQuery({
+                latest,
+                since: req.query.since_id ? parseInt(req.query.since_id) : 0,
+                limit: req.query.limit ? parseInt(req.query.limit) : undefined,
+            });
+            let rows = await hub.db.doQuery(sql, params);
+            res.json({ table: 'oracle_prices', rows: rows, count: rows.length, mode: mode, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
