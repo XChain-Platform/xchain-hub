@@ -195,6 +195,7 @@ describe('Performance: Soak Test', function () {
             mockApi.reset();
             mockApi.mockCoinGeckoSuccess();
             mockApi.mockCmcSuccess();
+            mockApi.mockKrakenSuccess();
 
             let start = process.hrtime.bigint();
             try {

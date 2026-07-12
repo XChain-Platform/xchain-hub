@@ -64,7 +64,7 @@ describe('Performance: Database Stress', function () {
                 let { durationMs } = await measure(() =>
                     db.doQuery(
                         `INSERT INTO oracle_submissions
-                            (round, coin_pair, validator_pubkey, price, sources, submitted_at)
+                            (round_number, coin_pair, validator_pubkey, price, sources, submitted_at)
                          VALUES (?, ?, ?, ?, 2, NOW())`,
                         [Math.floor(i / 30) + 1, pair, v.pubkey, price]
                     )
@@ -100,8 +100,8 @@ describe('Performance: Database Stress', function () {
                     let pair = SAMPLE_PRICES[i % 3].coinPair;
                     return db.doQuery(
                         `INSERT INTO price_snapshots
-                            (round_number, coin_pair, price, sources, validator_count, consensus_proof, status, created_at)
-                         VALUES (?, ?, ?, 2, 3, '{}', 'finalized', NOW())`,
+                            (round_number, coin_pair, price, validator_count, consensus_proof, status, created_at)
+                         VALUES (?, ?, ?, 3, '{}', 'finalized', NOW())`,
                         [i + 1, pair, (100000 + i).toFixed(8)]
                     );
                 },
@@ -122,8 +122,8 @@ describe('Performance: Database Stress', function () {
                 for (let p of SAMPLE_PRICES) {
                     await db.doQuery(
                         `INSERT IGNORE INTO price_snapshots
-                            (round_number, coin_pair, price, sources, validator_count, consensus_proof, status, created_at)
-                         VALUES (?, ?, ?, 2, 3, '{}', 'finalized', NOW())`,
+                            (round_number, coin_pair, price, validator_count, consensus_proof, status, created_at)
+                         VALUES (?, ?, ?, 3, '{}', 'finalized', NOW())`,
                         [r, p.coinPair, p.price]
                     );
                 }

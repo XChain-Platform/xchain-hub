@@ -84,6 +84,11 @@ class PriceFetcher {
         this.coingeckoApiKey     = config.COINGECKO_API_KEY || '';
         this.coinmarketcapApiKey = config.COINMARKETCAP_API_KEY || '';
         this.timeout             = config.PRICE_FETCH_TIMEOUT || 10000;
+        // Upper bound of the random pre-fetch sleep that de-synchronizes hubs
+        // behind one NAT from a provider's per-IP rate limit. Overridable so
+        // tests (mocked providers, timing assertions) can set it to 0.
+        this.fetchJitterMs       = (config.PRICE_FETCH_JITTER_MS != null)
+            ? parseInt(config.PRICE_FETCH_JITTER_MS) : 3000;
 
         // Count of consecutive rounds where CMC returned HTTP 400. Resets on
         // any successful CMC fetch. A persistent 400 most likely means the
@@ -229,9 +234,10 @@ class PriceFetcher {
             headers['x-cg-demo-api-key'] = this.coingeckoApiKey;
         }
 
-        // Initial jitter (0-3000ms) so multiple hubs behind the same NAT don't
-        // collide on CoinGecko's per-second rate limit at the start of each round.
-        await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 3000)));
+        // Initial jitter (0-PRICE_FETCH_JITTER_MS) so multiple hubs behind the same
+        // NAT don't collide on CoinGecko's per-second rate limit at the start of each round.
+        if (this.fetchJitterMs > 0)
+            await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * this.fetchJitterMs)));
 
         let response;
         try {
@@ -270,10 +276,11 @@ class PriceFetcher {
         let pairCodes = Object.values(KRAKEN_PAIRS).join(',');
         let url       = 'https://api.kraken.com/0/public/Ticker?pair=' + pairCodes;
 
-        // Initial jitter (0-3000ms) so multiple hubs behind the same NAT don't
-        // collide on Kraken's per-IP rate limit at the start of each round
+        // Initial jitter (0-PRICE_FETCH_JITTER_MS) so multiple hubs behind the same
+        // NAT don't collide on Kraken's per-IP rate limit at the start of each round
         // (mirrors fetchFromCoinGecko).
-        await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 3000)));
+        if (this.fetchJitterMs > 0)
+            await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * this.fetchJitterMs)));
 
         let response;
         try {

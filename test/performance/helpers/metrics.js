@@ -118,6 +118,10 @@ class MemoryTracker {
      * Take a single memory snapshot.
      */
     snapshot() {
+        // Without a collection, heapUsed is dominated by transient garbage that
+        // V8 simply hasn't collected yet, so a growth assertion measures GC
+        // scheduling instead of retention. test:perf runs with --v8-expose-gc.
+        if (global.gc) global.gc();
         let mem = process.memoryUsage();
         this.snapshots.push({
             ts:          Date.now(),

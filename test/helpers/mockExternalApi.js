@@ -14,6 +14,7 @@ const nock = require('nock');
 
 const COINGECKO_BASE = 'https://api.coingecko.com';
 const CMC_BASE       = 'https://pro-api.coinmarketcap.com';
+const KRAKEN_BASE    = 'https://api.kraken.com';
 
 const DEFAULT_COINGECKO_RESPONSE = {
     bitcoin:  { usd: 100000 },
@@ -127,10 +128,36 @@ function mockCmcError(statusCode) {
         .reply(statusCode || 503);
 }
 
+// Kraken keyless public ticker (PriceFetcher.fetchFromKraken). Result keys use the
+// request altnames (one of the shapes the parser probes); 'c' is [lastPrice, lotVolume].
+const DEFAULT_KRAKEN_RESPONSE = {
+    error: [],
+    result: {
+        XBTUSD: { c: ['100100.0', '1.0'] },
+        LTCUSD: { c: ['85.5', '1.0'] },
+        XDGUSD: { c: ['0.152', '1.0'] }
+    }
+};
+
+function mockKrakenSuccess(prices) {
+    return nock(KRAKEN_BASE)
+        .get('/0/public/Ticker')
+        .query(true)
+        .reply(200, prices || DEFAULT_KRAKEN_RESPONSE);
+}
+
+function mockKrakenError(statusCode) {
+    return nock(KRAKEN_BASE)
+        .get('/0/public/Ticker')
+        .query(true)
+        .reply(statusCode || 503);
+}
+
 module.exports = {
     setup, teardown, reset,
     mockCoinGeckoSuccess, mockCoinGeckoError, mockCoinGeckoTimeout,
     mockCmcSuccess, mockCmcError,
-    DEFAULT_COINGECKO_RESPONSE, DEFAULT_CMC_RESPONSE,
+    mockKrakenSuccess, mockKrakenError,
+    DEFAULT_COINGECKO_RESPONSE, DEFAULT_CMC_RESPONSE, DEFAULT_KRAKEN_RESPONSE,
     FULL_COINGECKO_RESPONSE, FULL_CMC_RESPONSE
 };

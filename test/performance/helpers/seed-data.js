@@ -57,9 +57,9 @@ async function seedPriceSnapshots(db, rounds) {
             let price  = (parseFloat(p.price) * jitter).toFixed(8);
             await db.doQuery(
                 `INSERT IGNORE INTO price_snapshots
-                    (round_number, coin_pair, price, sources, validator_count, consensus_proof, status, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, 'finalized', ?)`,
-                [r, p.coinPair, price, p.sources, 3, '{}', ts]
+                    (round_number, coin_pair, price, validator_count, consensus_proof, status, created_at)
+                 VALUES (?, ?, ?, ?, ?, 'finalized', ?)`,
+                [r, p.coinPair, price, 3, '{}', ts]
             );
         }
     }
@@ -86,7 +86,7 @@ async function seedOracleSubmissions(db, rounds, validatorCount) {
                 let price  = (parseFloat(p.price) * jitter).toFixed(8);
                 await db.doQuery(
                     `INSERT IGNORE INTO oracle_submissions
-                        (round, coin_pair, validator_pubkey, price, sources, submitted_at)
+                        (round_number, coin_pair, validator_pubkey, price, sources, submitted_at)
                      VALUES (?, ?, ?, ?, ?, NOW())`,
                     [round, p.coinPair, val.pubkey, price, p.sources]
                 );
@@ -157,11 +157,11 @@ async function seedAttestations(db, count) {
 async function seedProposals(db, count) {
     count = count || 10;
     for (let i = 1; i <= count; i++) {
-        let status = i <= 3 ? 'active' : (i <= 7 ? 'approved' : 'rejected');
+        let status = i <= 3 ? 'voting' : (i <= 7 ? 'passed' : 'failed');
         await db.doQuery(
             `INSERT IGNORE INTO governance_proposals
-                (proposal_id, parameter, current_value, proposed_value, rationale, proposer_pubkey, status, voting_ends_at, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 7 DAY), NOW())`,
+                (proposal_id, parameter, current_value, proposed_value, rationale, proposer_pubkey, status, voting_start, voting_end, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), DATE_ADD(NOW(), INTERVAL 7 DAY), NOW())`,
             ['prop-' + i, 'param_' + i, String(i), String(i * 2), 'test rationale', makeValidator(1).pubkey, status]
         );
     }

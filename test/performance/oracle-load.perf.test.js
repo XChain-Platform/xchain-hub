@@ -72,6 +72,7 @@ describe('Performance: Oracle Round Under Load', function () {
         it('single oracle round completes within budget', async function () {
             mockApi.mockCoinGeckoSuccess();
             mockApi.mockCmcSuccess();
+            mockApi.mockKrakenSuccess();
 
             let { durationMs } = await measure(async () => {
                 await cluster.triggerOracleRound(0);
@@ -88,6 +89,7 @@ describe('Performance: Oracle Round Under Load', function () {
                 mockApi.reset();
                 mockApi.mockCoinGeckoSuccess();
                 mockApi.mockCmcSuccess();
+                mockApi.mockKrakenSuccess();
 
                 let { durationMs } = await measure(async () => {
                     await cluster.triggerOracleRound(0);
@@ -96,9 +98,11 @@ describe('Performance: Oracle Round Under Load', function () {
             }
 
             hist.report();
-            // Variance check: p99 should not be more than 5x the median
-            expect(hist.p99).to.be.below(hist.p50 * 5,
-                'oracle round p99 should be within 5x of median');
+            // Variance check: p99 should not be more than 5x the median. The 5ms
+            // floor keeps the assertion meaningful when rounds finish in the
+            // sub-millisecond range, where the ratio only measures scheduler noise.
+            expect(hist.p99).to.be.below(Math.max(hist.p50 * 5, 5),
+                'oracle round p99 should be within 5x of median (or under the 5ms floor)');
         });
     });
 
@@ -119,6 +123,7 @@ describe('Performance: Oracle Round Under Load', function () {
             mockApi.reset();
             mockApi.mockCoinGeckoSuccess();
             mockApi.mockCmcSuccess();
+            mockApi.mockKrakenSuccess();
 
             let queryHist = new Histogram('getprice-during-oracle');
             let oracleDone = false;
@@ -165,7 +170,7 @@ describe('Performance: Oracle Round Under Load', function () {
                     let jitter = 1 + (Math.random() - 0.5) * 0.02;
                     await db.doQuery(
                         `INSERT IGNORE INTO oracle_submissions
-                            (round, coin_pair, validator_pubkey, price, sources, submitted_at)
+                            (round_number, coin_pair, validator_pubkey, price, sources, submitted_at)
                          VALUES (?, ?, ?, ?, 2, NOW())`,
                         [round, pair, pubkey, (basePrice * jitter).toFixed(8)]
                     );
@@ -175,7 +180,7 @@ describe('Performance: Oracle Round Under Load', function () {
             // Measure querying these submissions (simulates aggregation read)
             let { durationMs } = await measure(async () => {
                 await db.doQuery(
-                    'SELECT * FROM oracle_submissions WHERE round = ?',
+                    'SELECT * FROM oracle_submissions WHERE round_number = ?',
                     [round]
                 );
             });
@@ -193,7 +198,8 @@ describe('Performance: Oracle Round Under Load', function () {
             let fetcher = new PriceFetcher({
                 COINGECKO_API_KEY:    '',
                 COINMARKETCAP_API_KEY: 'test-key',
-                PRICE_FETCH_TIMEOUT:   5000
+                PRICE_FETCH_TIMEOUT:   5000,
+                PRICE_FETCH_JITTER_MS: 0
             });
 
             let hist = new Histogram('price-fetch');
@@ -201,6 +207,7 @@ describe('Performance: Oracle Round Under Load', function () {
                 mockApi.reset();
                 mockApi.mockCoinGeckoSuccess();
                 mockApi.mockCmcSuccess();
+                mockApi.mockKrakenSuccess();
 
                 let { durationMs } = await measure(() => fetcher.fetchPrices());
                 hist.add(durationMs);
@@ -215,11 +222,13 @@ describe('Performance: Oracle Round Under Load', function () {
             let fetcher = new PriceFetcher({
                 COINGECKO_API_KEY:    '',
                 COINMARKETCAP_API_KEY: 'test-key',
-                PRICE_FETCH_TIMEOUT:   3000
+                PRICE_FETCH_TIMEOUT:   3000,
+                PRICE_FETCH_JITTER_MS: 0
             });
 
             mockApi.mockCoinGeckoTimeout(2500); // slow but within timeout
             mockApi.mockCmcSuccess();
+            mockApi.mockKrakenSuccess();
 
             let { result, durationMs } = await measure(() => fetcher.fetchPrices());
             console.log('    Slow-source fetch: %.2fms', durationMs);

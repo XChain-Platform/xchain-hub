@@ -336,6 +336,9 @@ function createCluster(nodeCount, overrides) {
                     COINGECKO_API_KEY:        '',
                     COINMARKETCAP_API_KEY:    overrides.COINMARKETCAP_API_KEY || '',
                     PRICE_FETCH_TIMEOUT:      5000,
+                    // Providers are nock-mocked in tests; the NAT-herd jitter sleep
+                    // (0-3s per source) only distorts timing assertions here.
+                    PRICE_FETCH_JITTER_MS:    (overrides.PRICE_FETCH_JITTER_MS != null) ? overrides.PRICE_FETCH_JITTER_MS : 0,
                     BTC_INDEXER_URL:          stubIndexerUrl,
                     LTC_INDEXER_URL:          stubIndexerUrl,
                     DOGE_INDEXER_URL:         stubIndexerUrl,

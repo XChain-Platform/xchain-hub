@@ -47,7 +47,8 @@ describe('Performance: Dependency Degradation', function () {
 
         cluster = createCluster(1, {
             COINMARKETCAP_API_KEY: 'test-key',
-            PRICE_FETCH_TIMEOUT: 3000
+            PRICE_FETCH_TIMEOUT: 3000,
+            PRICE_FETCH_JITTER_MS: 0
         });
         await cluster.start();
 
@@ -178,7 +179,8 @@ describe('Performance: Dependency Degradation', function () {
             let fetcher = new PriceFetcher({
                 COINGECKO_API_KEY:    '',
                 COINMARKETCAP_API_KEY: 'test-key',
-                PRICE_FETCH_TIMEOUT:   5000
+                PRICE_FETCH_TIMEOUT:   5000,
+                PRICE_FETCH_JITTER_MS: 0
             });
 
             let latencies = [0, 100, 500, 1000, 2000];

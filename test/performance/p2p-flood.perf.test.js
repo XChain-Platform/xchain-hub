@@ -190,36 +190,45 @@ describe('Performance: P2P Message Flood', function () {
                 P2P_HEARTBEAT_INTERVAL: 600000,
                 P2P_RECONNECT_BASE:     60000,
                 P2P_MSG_DEDUP_TTL:      60000,
-                P2P_MSG_RATE_LIMIT:     20   // low limit for testing
+                P2P_MSG_RATE_LIMIT:       20,  // low limit for testing
+                // The first verified message registers the connection as an
+                // established peer, which switches it to the known-peer ceiling
+                // (default 20x). Pin that ceiling too so the cap under test stays 20.
+                P2P_MSG_RATE_LIMIT_KNOWN: 20
             }, db);
 
             await pm.start();
-            let port = pm.httpServer.address().port;
+            let peerWs;
+            try {
+                let port = pm.httpServer.address().port;
 
-            let peerWs = new WebSocket('ws://127.0.0.1:' + port);
-            await new Promise((resolve, reject) => {
-                peerWs.on('open', resolve);
-                peerWs.on('error', reject);
-            });
+                peerWs = new WebSocket('ws://127.0.0.1:' + port);
+                await new Promise((resolve, reject) => {
+                    peerWs.on('open', resolve);
+                    peerWs.on('error', reject);
+                });
 
-            let received = 0;
-            pm.on('message', () => { received++; });
+                let received = 0;
+                pm.on('message', () => { received++; });
 
-            // Send 50 messages from same peer (limit is 20)
-            for (let i = 0; i < 50; i++) {
-                let env = buildEnvelope('RATE_TEST', { seq: i }, 'ws://rate-peer:10001');
-                sendEnvelope(peerWs, env);
+                // Send 50 messages from same peer (limit is 20)
+                for (let i = 0; i < 50; i++) {
+                    let env = buildEnvelope('RATE_TEST', { seq: i }, 'ws://rate-peer:10001');
+                    sendEnvelope(peerWs, env);
+                }
+
+                await new Promise(r => setTimeout(r, 1000));
+
+                console.log('    Sent 50 msgs (limit=20): %d received', received);
+                // Should receive approximately the rate limit, not all 50
+                expect(received).to.be.at.most(25, 'rate limiter should cap messages');
+                expect(received).to.be.at.least(15, 'should receive at least some messages');
+            } finally {
+                // Always release the listener (P2P_PORT falls back to 10001): a
+                // failed assertion must not leak the port into the next test.
+                if (peerWs) peerWs.close();
+                await pm.stop();
             }
-
-            await new Promise(r => setTimeout(r, 1000));
-
-            console.log('    Sent 50 msgs (limit=20): %d received', received);
-            // Should receive approximately the rate limit, not all 50
-            expect(received).to.be.at.most(25, 'rate limiter should cap messages');
-            expect(received).to.be.at.least(15, 'should receive at least some messages');
-
-            peerWs.close();
-            await pm.stop();
         });
     });
 
@@ -241,10 +250,11 @@ describe('Performance: P2P Message Flood', function () {
             }, db);
 
             await pm.start();
+            let peers = [];
+            try {
             let port = pm.httpServer.address().port;
 
             // Connect 5 peers
-            let peers = [];
             for (let i = 0; i < 5; i++) {
                 let ws = new WebSocket('ws://127.0.0.1:' + port);
                 await new Promise((resolve, reject) => {
@@ -281,9 +291,10 @@ describe('Performance: P2P Message Flood', function () {
             console.log('    5 peers x 5 msgs: %.2fms, %d received', totalMs, received);
 
             expect(received).to.equal(25);
-
-            for (let ws of peers) ws.close();
-            await pm.stop();
+            } finally {
+                for (let ws of peers) ws.close();
+                await pm.stop();
+            }
         });
     });
 });

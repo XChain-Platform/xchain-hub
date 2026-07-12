@@ -32,7 +32,7 @@
     "test:security": "mocha 'test/security/**/*.test.js' --timeout 5000 --recursive --exit",
     "test:e2e": "mocha 'test/e2e/**/*.e2e.test.js' --timeout 30000 --recursive --exit",
     "test:fuzz": "mocha 'test/fuzz/**/*.fuzz.test.js' --timeout 30000 --recursive",
-    "test:perf": "mocha 'test/performance/**/*.perf.test.js' --timeout 300000 --recursive",
+    "test:perf": "mocha 'test/performance/**/*.perf.test.js' --timeout 300000 --recursive --exit --v8-expose-gc",
     "test:regression": "mocha 'test/regression/**/*.regression.test.js' --timeout 5000 --recursive",
     "test:regression:p0": "mocha 'test/regression/**/*.regression.test.js' --timeout 5000 --recursive --grep '@regression-p0'",
     "test:regression:p0p1": "mocha 'test/regression/**/*.regression.test.js' --timeout 5000 --recursive --grep '@regression-p[01]'",
