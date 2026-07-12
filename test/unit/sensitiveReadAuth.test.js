@@ -171,6 +171,20 @@ describe('hub API-key tiers (writes + sensitive reads vs public reads)', functio
             expect(api.request('getallconfigs', undefined).nexted).to.equal(true);
             expect(api.request('updateconfig', undefined).res.statusCode).to.equal(401);
         });
+
+        it('boot warns loudly when the hatch is open on a keyed hub (AU-4)', async function () {
+            const warn = sinon.spy(console, 'warn');
+            await bootApi({ HUB_API_KEY: KEY, HUB_SENSITIVE_READ_AUTH: '0' });
+            expect(warn.getCalls().some((c) => /HUB_SENSITIVE_READ_AUTH=0.*getallconfigs/.test(String(c.args[0]))))
+                .to.equal(true, 'expected the AU-4 boot warning');
+        });
+
+        it('no AU-4 warning when sensitive-read auth is enforcing', async function () {
+            const warn = sinon.spy(console, 'warn');
+            await bootApi({ HUB_API_KEY: KEY });
+            expect(warn.getCalls().some((c) => /HUB_SENSITIVE_READ_AUTH=0/.test(String(c.args[0]))))
+                .to.equal(false, 'unexpected AU-4 warning with auth enforcing');
+        });
     });
 
     describe('no HUB_API_KEY (regtest/local default)', function () {

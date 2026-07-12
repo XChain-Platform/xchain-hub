@@ -150,6 +150,13 @@ if(!HUB_API_KEY){
     console.warn('WARNING: HUB_API_KEY is not set. Write methods and WebSocket subscriptions are UNAUTHENTICATED. Set a strong key for any shared or public-facing deployment.');
 }
 
+// The inverse hole is quieter and easier to miss: a keyed hub with the
+// sensitive-read escape hatch flipped serves getallconfigs (every service's
+// DB user/pass) to ANY caller while writes look locked down (AU-4).
+if(HUB_API_KEY && !SENSITIVE_READ_AUTH){
+    console.warn('WARNING: HUB_SENSITIVE_READ_AUTH=0 with HUB_API_KEY set: getallconfigs (returns DB credentials) is readable WITHOUT a key. This escape hatch is for staged rollout/rollback only; unset HUB_SENSITIVE_READ_AUTH to re-enforce.');
+}
+
 if (P2P_VALIDATOR_ADDR && !process.env.ORACLE_EPOCH_START) {
     console.error('Missing required environment variable: ORACLE_EPOCH_START (Unix ms timestamp anchoring oracle round numbering; all hubs must share the same value)');
     process.exit(1);
