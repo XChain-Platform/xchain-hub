@@ -27,7 +27,7 @@ SRC="$HERE/../src/coins"
 ROOT="$(cd "$HERE/../.." && pwd)"
 
 FILES="BTC.js LTC.js DOGE.js index.js consensus_pin.js"
-SERVICES="xchain-indexer xchain-explorer xchain-decoder xchain-encoder xchain-utxo-tracker xchain-sdk xchain-sync xchain-node"
+SERVICES="xchain-indexer xchain-explorer xchain-decoder xchain-encoder xchain-utxo-tracker xchain-sdk xchain-sync xchain-node xchain-e2e-test xchain-regtest-miner"
 
 CHECK=0
 ONLY=""
