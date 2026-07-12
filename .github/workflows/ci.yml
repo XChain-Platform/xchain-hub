@@ -69,3 +69,44 @@ jobs:
           # Keep the soak bounded so CI stays fast (suite default is 120s).
           SOAK_DURATION_MS: "15000"
         run: npm run test:perf
+
+  # Cross-repo drift guards (SD-1 / ), canonical side. The hub OWNS the
+  # canonical coin registry (consumers byte-compare against it in their own
+  # drift-guards jobs), so here the guard is the consensus-pin conformance of
+  # the canonical bundle itself, plus the one artifact the hub consumes from
+  # elsewhere: the served chain-registry snapshot, canonical in xchain-wallet.
+  # xchain-wallet is private pre-launch, so its checkout uses a read-only
+  # deploy key; drop the ssh-key line when the repos flip public at launch.
+  drift-guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: xchain-hub
+
+      - name: Check out the canonical chain descriptors (xchain-wallet)
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-wallet
+          ssh-key: ${{ secrets.XCHAIN_WALLET_DEPLOY_KEY }}
+          path: xchain-wallet
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Chain-registry snapshot vs canonical wallet descriptors
+        run: node xchain-wallet/bin/sync-chain-registry.mjs --check
+
+      - name: Coin consensus-pin conformance (canonical bundle)
+        working-directory: xchain-hub
+        run: |
+          node -e '
+            const coins = require("./src/coins");
+            for (const net of ["testnet", "regtest"]) {
+              const res = coins.verifyConsensusPin(net);
+              if (res && res.skipped) throw new Error("consensus pin unexpectedly unarmed for " + net);
+            }
+            console.log("consensus pin conformance OK (testnet, regtest)");
+          '

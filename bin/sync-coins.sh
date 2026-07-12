@@ -13,6 +13,11 @@
 #   sync-coins.sh           Copy canonical -> every service (overwrites vendored copies).
 #   sync-coins.sh --check   Verify every vendored copy is byte-identical; exit 1 on drift.
 #                           Use in CI so a drifted/forgotten vendored copy fails the build.
+#   sync-coins.sh --check --only <svc> [<svc> ...]
+#                           Scope the check to the named service(s). For a consumer
+#                           repo's own GitHub CI, where only that consumer and this
+#                           canonical checkout exist side by side (the full-fleet
+#                           check stays the default for the monorepo bin/ci-all.sh).
 #
 set -euo pipefail
 
@@ -25,7 +30,23 @@ FILES="BTC.js LTC.js DOGE.js index.js consensus_pin.js"
 SERVICES="xchain-indexer xchain-explorer xchain-decoder xchain-encoder xchain-utxo-tracker xchain-sdk xchain-sync xchain-node"
 
 CHECK=0
-[ "${1:-}" = "--check" ] && CHECK=1
+ONLY=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --check) CHECK=1; shift ;;
+        --only)  shift; ONLY="$*"; break ;;
+        *) echo "unknown arg: $1" >&2; exit 2 ;;
+    esac
+done
+if [ -n "$ONLY" ]; then
+    for svc in $ONLY; do
+        case " $SERVICES " in
+            *" $svc "*) ;;
+            *) echo "unknown service: $svc (not a coin-registry consumer)" >&2; exit 2 ;;
+        esac
+    done
+    SERVICES="$ONLY"
+fi
 
 drift=0
 for svc in $SERVICES; do
