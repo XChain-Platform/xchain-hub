@@ -63,6 +63,12 @@ const XCHK_FINALIZED = 'XCHK_FINALIZED';
 
 const ALLOWED_CHAINS = [...coins.ALLOWED_COINS];
 
+// Default follower co-sign freshness tolerance (BTC blocks) for the leader-
+// supplied snapshot_block. ~144 = roughly one day of BTC blocks, matching
+// CrossChainCallEngine's snapshot_block bound. See the constructor comment on
+// this.cosignToleranceBlocks for why this is deliberately NOT electionToleranceBlocks.
+const CHECKPOINT_COSIGN_TOLERANCE_BLOCKS = 144;
+
 class StateCheckpointEngine extends EventEmitter {
 
     constructor(hub){
@@ -84,6 +90,19 @@ class StateCheckpointEngine extends EventEmitter {
         this.confirmations  = parseInt(process.env.CHECKPOINT_CONFIRMATIONS  || cfg.CHECKPOINT_CONFIRMATIONS  || '6');
         this.pollMs         = parseInt(process.env.CHECKPOINT_POLL_MS        || cfg.CHECKPOINT_POLL_MS        || '60000');
         this.roundTimeoutMs = parseInt(process.env.CHECKPOINT_ROUND_TIMEOUT_MS || cfg.CHECKPOINT_ROUND_TIMEOUT_MS || '60000');
+
+        // Follower co-sign freshness bound on the leader-supplied snapshot_block.
+        // DEDICATED and separate from StateAnchorPublisher.electionToleranceBlocks
+        // (default 36) on purpose: that constant bounds an ELECTION block that
+        // advances every BTC block, so a tight window is correct there. The
+        // checkpoint snapshot_block instead selects the validator set AND every
+        // flag-day gate (stake-weighted quorum, equivocation-header, checkpoint-
+        // commitment); it moves on the slower checkpoint cadence, so it needs its
+        // own, wider tolerance. Mirrors CrossChainCallEngine's snapshot_block bound
+        // (a day of BTC blocks, ~144), the closest analog. Fail-closed: a SIGN_REQ
+        // whose snapshot_block deviates from our own BTC tip beyond this is declined.
+        this.cosignToleranceBlocks = parseInt(process.env.CHECKPOINT_COSIGN_TOLERANCE_BLOCKS
+            || cfg.CHECKPOINT_COSIGN_TOLERANCE_BLOCKS || String(CHECKPOINT_COSIGN_TOLERANCE_BLOCKS));
         this.chains = String(process.env.CHECKPOINT_CHAINS || cfg.CHECKPOINT_CHAINS || ALLOWED_CHAINS.join(','))
             .split(',').map(c => c.trim().toUpperCase()).filter(c => ALLOWED_CHAINS.includes(c));
 
@@ -360,6 +379,16 @@ class StateCheckpointEngine extends EventEmitter {
         let myPubkey = this.identity.getPubkeyHex().toLowerCase();
         let sender   = String(d.sig_pubkey || '').toLowerCase();
         if(sender === myPubkey) return;                            // our own broadcast
+
+        // Freshness guard (fail-closed): the leader-supplied snapshot_block selects
+        // the validator set AND every flag-day gate below, but is a wire field the
+        // proposer chose. Bound it against our OWN resolved BTC tip before it can
+        // reach leader-selection (grinding), the validator-set resolve, or the flag-
+        // day gates (regression). If we cannot resolve our own tip, we decline rather
+        // than co-sign blind. Mirrors StateAnchorPublisher.js:1467 / CrossChainCallEngine.js:536.
+        let myBtc = await this._resolveSnapshotBlock();
+        if(!Number.isFinite(myBtc)) return;                        // no own tip -> fail closed
+        if(Math.abs(myBtc - Number(cp.snapshot_block)) > this.cosignToleranceBlocks) return;
 
         let validators = await this._resolveCapabilityValidators('oracle_publish', cp.snapshot_block);
         let pubkeys    = validators.map(v => String(v.pubkey).toLowerCase()).sort();

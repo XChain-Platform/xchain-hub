@@ -391,4 +391,74 @@ describe('StateCheckpointEngine', function () {
             expect(swq.meetsStakeThreshold(validators, ['aa'])).to.be.true;
         });
     });
+
+    // ── Follower co-sign freshness bound (finding 1781) ─────────────────────
+    // The follower must decline to co-sign a SIGN_REQ whose leader-supplied
+    // snapshot_block deviates from its OWN resolved BTC tip beyond
+    // cosignToleranceBlocks. snapshot_block selects the validator set and every
+    // flag-day gate, so an unbounded stale value enables leader-grinding and
+    // flag-day regression. Fail-closed when we cannot resolve our own tip.
+    describe('co-sign freshness bound (finding 1781)', function () {
+
+        // Build a valid SIGN_REQ for `snapshotBlock`, signed by the cadence
+        // leader for that block, using the shared TIP block data.
+        function makeSignReq(bus, snapshotBlock) {
+            let leader = leaderNode(bus, snapshotBlock);
+            let cp = {
+                chain: 'BTC', network: TIP.network, block_index: TIP.block_index,
+                block_hash: TIP.block_hash, ledger_hash: TIP.ledger_hash,
+                actions_hash: TIP.actions_hash, contract_hash: TIP.contract_hash,
+                checkpoint_seq: 0, snapshot_block: snapshotBlock,
+                state_root: TIP.state_root, state_root_version: TIP.state_root_version,
+                block_merkle_root: TIP.block_merkle_root, block_merkle_version: TIP.block_merkle_version
+            };
+            let canonical = StateCheckpointEngine.canonicalCheckpoint(cp);
+            let sig = leader.identity.sign(canonical);
+            let env = { type: 'XCHK_SIGN_REQ', sender: leader.pubkey,
+                        data: { checkpoint: cp, sig_pubkey: leader.pubkey, sig } };
+            let follower = bus.nodes.find(nd => nd.pubkey !== leader.pubkey);
+            return { env, follower };
+        }
+
+        // Record XCHK_SIGN co-sign broadcasts from a follower.
+        function watchCosign(follower) {
+            let signs = [];
+            let pm = follower.engine.peerManager;
+            let orig = pm.broadcast.bind(pm);
+            pm.broadcast = (type, data) => { if (type === 'XCHK_SIGN') signs.push(data); return orig(type, data); };
+            return signs;
+        }
+
+        it('co-signs a SIGN_REQ whose snapshot_block matches our own BTC tip (fresh)', async function () {
+            let SNAP = 500;
+            let bus = buildMesh(2, { btcBlock: SNAP, confirmations: 0 });
+            let { env, follower } = makeSignReq(bus, SNAP);
+            follower.hub._resolveBtcLatestBlock = async () => SNAP;   // exactly fresh
+            let signs = watchCosign(follower);
+            await follower.engine._handleSignReq(env);
+            expect(signs.length, 'follower co-signed a fresh snapshot_block').to.equal(1);
+        });
+
+        it('declines to co-sign when snapshot_block is staler than the tolerance', async function () {
+            let SNAP = 500;
+            let bus = buildMesh(2, { btcBlock: SNAP, confirmations: 0 });
+            let { env, follower } = makeSignReq(bus, SNAP);
+            // Our tip has moved well past the proposed snapshot_block (> default 144).
+            follower.hub._resolveBtcLatestBlock = async () => SNAP + 200;
+            expect(200).to.be.greaterThan(follower.engine.cosignToleranceBlocks);
+            let signs = watchCosign(follower);
+            await follower.engine._handleSignReq(env);
+            expect(signs.length, 'stale snapshot_block declined').to.equal(0);
+        });
+
+        it('fails closed (declines) when it cannot resolve its own BTC tip', async function () {
+            let SNAP = 500;
+            let bus = buildMesh(2, { btcBlock: SNAP, confirmations: 0 });
+            let { env, follower } = makeSignReq(bus, SNAP);
+            follower.hub._resolveBtcLatestBlock = async () => null;   // no own tip
+            let signs = watchCosign(follower);
+            await follower.engine._handleSignReq(env);
+            expect(signs.length, 'missing own tip fails closed').to.equal(0);
+        });
+    });
 });
