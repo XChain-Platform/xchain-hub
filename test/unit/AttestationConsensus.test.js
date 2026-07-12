@@ -171,6 +171,21 @@ describe('AttestationConsensus', function () {
             }
             expect(consensus.earlyCommits.get(RID).length).to.equal(consensus.earlyCommitMaxPerRid);
         });
+
+        it('does NOT buffer an oversized early COMMIT (A-F5 size gate)', function () {
+            seedPendingNoWinner(RID, PEER);
+            let env = commitEnvelope(RID, PEER);
+            env.data.body_b64 = 'A'.repeat(consensus.earlyMessageMaxBytes + 1);
+            consensus._handleCommit(env);
+            expect(consensus.earlyCommits.has(RID)).to.equal(false);
+        });
+
+        it('does NOT buffer an early COMMIT from a non-responsible peer (A-F5 membership gate)', function () {
+            seedPendingNoWinner(RID, PEER);
+            const OUTSIDER = '99'.repeat(32);
+            consensus._handleCommit(commitEnvelope(RID, OUTSIDER));
+            expect(consensus.earlyCommits.has(RID)).to.equal(false);
+        });
     });
 
     describe('_handleCommit: COMMIT after winner is set', function () {
@@ -365,6 +380,25 @@ describe('AttestationConsensus: propose() guards', function () {
         expect(p.winner).to.equal(null);
         expect(p.proposals.size).to.equal(0);
         // Still broadcast a PROPOSE (with null sig_pubkey).
+        let propose = hub._peerManager.broadcast.getCalls().find(call => call.args[0] === 'ATTEST_PROPOSE');
+        expect(propose).to.exist;
+    });
+
+    it('skips an unfinalizable round when the responsible set is smaller than redundancy', async function () {
+        // redundancy=3 but only 1 responsible validator: needed=max(quorum,3)=3 > 1,
+        // so signatures can never reach the gate. propose() must skip admission
+        // (no pending, no PROPOSE broadcast) and let the request expire + refund.
+        await c.propose(RID, roundState(me, [me], Buffer.from('b'), 'http_get', 3));
+        expect(c.pending.has(RID)).to.equal(false);
+        let propose = hub._peerManager.broadcast.getCalls().find(call => call.args[0] === 'ATTEST_PROPOSE');
+        expect(propose).to.not.exist;
+    });
+
+    it('admits a round when the responsible set meets redundancy', async function () {
+        // Regression guard: a healthy set (responsible.length === redundancy)
+        // still starts the round normally.
+        await c.propose(RID, roundState(me, [me, mkIdentity(), mkIdentity()], Buffer.from('b'), 'http_get', 3));
+        expect(c.pending.has(RID)).to.equal(true);
         let propose = hub._peerManager.broadcast.getCalls().find(call => call.args[0] === 'ATTEST_PROPOSE');
         expect(propose).to.exist;
     });
@@ -670,7 +704,10 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
         await flush();
         expect(agreeSpy.called).to.equal(true);
-        expect(agreeSpy.firstCall.args[1]).to.deep.equal({ pinnedJudgeModel: 'claude-opus-4-7' });
+        // timeoutMs bounds the judge call to the round's fetch-timeout budget
+        // (ATTESTATION_FETCH_TIMEOUT, default 10000ms) so a slow-drip judge
+        // vendor cannot overrun the round window.
+        expect(agreeSpy.firstCall.args[1]).to.deep.equal({ pinnedJudgeModel: 'claude-opus-4-7', timeoutMs: 10000 });
     });
 
     it('a follower converges by adopting + re-signing the leader\'s winning body', async function () {
@@ -1520,7 +1557,10 @@ describe('AttestationConsensus: non-ok outcomes (Phase 4)', function () {
 
     it('rejects a non-ok PREPARE carrying a non-canonical (non-empty) body', async function () {
         c = new AttestationConsensus(hub, makeRealProviderRegistry(null, 'judge_model'));
-        let rs = errorRoundState(me, [p1, me], 3);
+        // redundancy matches the responsible-set size so propose() admits the
+        // round (a shrunken set below redundancy is now skipped as unfinalizable);
+        // this test exercises PREPARE-body rejection, not finalization.
+        let rs = errorRoundState(me, [p1, me], 2);
         rs.leaderPubkey = pub(p1);
         rs.role = 'follower';
         await c.propose(RID, rs);

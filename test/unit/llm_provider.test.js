@@ -667,9 +667,13 @@ describe('llm provider, agree judge_model paths', function () {
             { body: Buffer.from('B', 'utf8'), meta: 'claude-sonnet-4-6' }
         ];
 
+        // Hardened parse: the verdict must be the ENTIRE trimmed output as one
+        // JSON object. Conversational preamble ("Here is my answer:") no longer
+        // has its embedded {...} scraped out and trusted (that was the injection
+        // vector, since candidate bodies are attacker-chosen bytes). It fails
+        // closed to no_quorum, exactly as this test's title states.
         const result = await withApiKey(() => llm.agree(proposals));
-        expect(result).to.not.be.null;
-        expect(result.body.toString('utf8')).to.equal('B');  // canonical_index=2 → proposals[1]
+        expect(result).to.be.null;
     });
 
     it('returns null when judge returns no JSON object', async function () {
@@ -798,6 +802,79 @@ describe('llm provider, agree judge_model paths', function () {
         const result = await withApiKey(() => llm.agree(proposals));
         // canonical_index=1 → proposals[0], which has null body, returned as-is
         expect(result).to.not.be.null;
+    });
+
+    it('fails closed to no_quorum when the judge selects a truncated candidate', async function () {
+        // A candidate longer than MAX_JUDGE_CANDIDATE_CHARS (4096) is only
+        // partially shown to the judge; finalizing its full untruncated body
+        // would put bytes the judge never evaluated on-chain. agree() must
+        // return null instead of the long candidate.
+        const llm = _reloadProvider();
+        nock('https://api.anthropic.com')
+            .post('/v1/messages')
+            .reply(200, {
+                content: [{ type: 'text', text: '{"equivalent": true, "canonical_index": 1}' }],
+                usage:   { input_tokens: 50, output_tokens: 10 }
+            });
+
+        const longBody = 'A'.repeat(4096) + 'HIDDEN-TAIL-THE-JUDGE-NEVER-SAW';
+        const proposals = [
+            { body: Buffer.from(longBody, 'utf8'), meta: 'claude-sonnet-4-6' },
+            { body: Buffer.from('A'.repeat(10), 'utf8'), meta: 'claude-sonnet-4-6' }
+        ];
+
+        const result = await withApiKey(() => llm.agree(proposals));
+        expect(result).to.be.null;
+    });
+
+    it('still selects an at-cap (untruncated) candidate normally', async function () {
+        // A candidate exactly at MAX_JUDGE_CANDIDATE_CHARS is fully seen by the
+        // judge, so it stays selectable (regression guard for honest traffic).
+        const llm = _reloadProvider();
+        nock('https://api.anthropic.com')
+            .post('/v1/messages')
+            .reply(200, {
+                content: [{ type: 'text', text: '{"equivalent": true, "canonical_index": 1}' }],
+                usage:   { input_tokens: 50, output_tokens: 10 }
+            });
+
+        const atCap = 'A'.repeat(4096);
+        const proposals = [
+            { body: Buffer.from(atCap, 'utf8'), meta: 'claude-sonnet-4-6' },
+            { body: Buffer.from('A'.repeat(10), 'utf8'), meta: 'claude-sonnet-4-6' }
+        ];
+
+        const result = await withApiKey(() => llm.agree(proposals));
+        expect(result).to.not.be.null;
+        expect(result.body.toString('utf8')).to.equal(atCap);
+    });
+
+    it('carries the judge rubric and SECURITY framing in the system role, candidates only in the user turn', async function () {
+        const llm = _reloadProvider();
+        let capturedBody = null;
+        nock('https://api.anthropic.com')
+            .post('/v1/messages', (body) => { capturedBody = body; return true; })
+            .reply(200, {
+                content: [{ type: 'text', text: '{"equivalent": true, "canonical_index": 1}' }],
+                usage:   { input_tokens: 50, output_tokens: 10 }
+            });
+
+        const proposals = [
+            { body: Buffer.from('The capital is Paris.', 'utf8'), meta: 'claude-sonnet-4-6' },
+            { body: Buffer.from('Paris is the capital.', 'utf8'), meta: 'claude-sonnet-4-6' }
+        ];
+
+        await withApiKey(() => llm.agree(proposals));
+        expect(capturedBody).to.not.be.null;
+        // Trusted framing lives in system.
+        expect(capturedBody.system).to.include('You are an evaluator');
+        expect(capturedBody.system).to.include('SECURITY:');
+        expect(capturedBody.system).to.include('canonical_index');
+        // User turn carries only the fenced candidates, not the rubric.
+        const userMsg = capturedBody.messages[0].content;
+        expect(userMsg).to.include('<candidate');
+        expect(userMsg).to.include('The capital is Paris.');
+        expect(userMsg).to.not.include('You are an evaluator');
     });
 });
 

@@ -559,7 +559,13 @@ class CrossChainCallEngine extends EventEmitter {
                String(call.method)                 === String(row.method) &&
                String(call.params_json || '[]')    === String(row.params_json) &&
                Number(call.gas_limit)              === Number(row.gas_limit) &&
-               (Number(call.cross_hops) || 0)      === (Number(row.cross_hops) || 0);
+               (Number(call.cross_hops) || 0)      === (Number(row.cross_hops) || 0) &&
+               // Pin the source-reorg fence generation to the value our own source
+               // indexer reports for this call (mirrors the DEX validateProposedMatch
+               // per-leg pin). push_generation is stamped onto the row but never
+               // enters the signed canonical, so without this a Byzantine leader
+               // could inflate it and evade a later source-keyed retraction fence.
+               (Number(call.push_generation) || 0) === (Number(row.push_generation) || 0);
     }
 
     async _validateResult(row){
@@ -576,6 +582,17 @@ class CrossChainCallEngine extends EventEmitter {
         if(String(d[0].source_chain) !== String(row.source_chain) ||
            String(d[0].target_chain) !== String(row.target_chain) ||
            String(d[0].network)      !== String(row.network || '')) return false;
+        // Pin the dispatch-inherited reorg-fence metadata to our OWN dispatch row.
+        // source_action_index and push_generation are NOT in the signed result
+        // canonical, yet retractCallsForReorg selects by source_action_index and
+        // fences by push_generation. A Byzantine round leader could otherwise stamp
+        // a divergent value here; followers would co-sign and persist it, and a
+        // later source-chain reorg retraction could then miss the sibling result
+        // row while catching the dispatch (breaking the both-phases-retracted
+        // invariant). Reject any result row whose inherited metadata does not match
+        // the dispatch row we independently finalized.
+        if(Number(d[0].source_action_index)   !== Number(row.source_action_index) ||
+           Number(d[0].push_generation || 0)  !== Number(row.push_generation || 0)) return false;
 
         let res;
         try { res = await this._indexerCall(row.target_chain, 'getcrosschaincallresult', { call_id: String(row.call_id) }); }

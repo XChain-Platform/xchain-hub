@@ -201,6 +201,16 @@ exports.fetch = async (payload, options) => {
         });
         req.on('error',   (e) => safeReject(new Error('http_get: request error: ' + e.message)));
         req.on('timeout', ()  => { req.destroy(); safeReject(new Error('http_get: timeout after ' + timeoutMs + 'ms')); });
+        // Node's https `timeout` option arms an IDLE-socket timer only: it
+        // resets on every byte received, so a slow-drip endpoint can hold the
+        // request open past the intended budget. Arm a hard wall-clock
+        // deadline alongside it so timeoutMs is a TOTAL request budget.
+        let deadlineTimer = setTimeout(() => {
+            req.destroy();
+            safeReject(new Error('http_get: timeout after ' + timeoutMs + 'ms (wall-clock deadline)'));
+        }, timeoutMs);
+        if (deadlineTimer.unref) deadlineTimer.unref();
+        req.once('close', () => clearTimeout(deadlineTimer));
         req.end();
     });
 };

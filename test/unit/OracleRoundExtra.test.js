@@ -305,11 +305,17 @@ describe('OracleRound (extra coverage)', function () {
             or.chainTipFallbackActive = true;
             or.lastSuccessfulChainTipFetchAt = Date.now() - 10000; // 10s ago
             let finalizeStub = sinon.stub().resolves();
-            or.oracleConsensus = { finalizeRound: finalizeStub };
+            let storeSkippedStub = sinon.stub().resolves();
+            or.oracleConsensus = { finalizeRound: finalizeStub, _storeSkippedRound: storeSkippedStub };
+            or.consecutiveSkippedRounds = 0;
             or._scheduleFinalization(99);
             setTimeout(() => {
                 // finalizeRound should NOT have been called because fallback was active too long
                 expect(finalizeStub.called).to.be.false;
+                // The skip is recorded durably and counted, unlike a silent drop.
+                expect(storeSkippedStub.calledOnce).to.be.true;
+                expect(storeSkippedStub.firstCall.args[0]).to.equal(99);
+                expect(or.consecutiveSkippedRounds).to.equal(1);
                 done();
             }, 50);
         });

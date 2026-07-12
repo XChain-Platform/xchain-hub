@@ -531,6 +531,10 @@ class OracleRound {
                         console.error('Oracle: Skipping finalization for round ' + round +
                             '; chain-tip fallback active for >' + Math.round(this.roundInterval / 1000) +
                             's; btcBlockHeight anchor is unreliable, PRICE payload suppressed');
+                        this.oracleConsensus._storeSkippedRound(round, btcBlockHeight, btcBlockTime,
+                            'chain-tip fallback active, anchor unreliable').catch(err =>
+                            console.error('Oracle: Failed to store skipped round ' + round + ':', err.message));
+                        this.consecutiveSkippedRounds++;
                         return;
                     }
                 }

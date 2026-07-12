@@ -390,6 +390,26 @@ class Consensus {
         }
 
         if (!this.pendingProposals.has(seq)) {
+            // Fail closed on a missing/invalid BTC block height, mirroring the
+            // OracleConsensus PROPOSE guard (#1225). The leader stamped the block
+            // it locked its snapshot at into the PRE_PREPARE; if that height is
+            // absent or not a positive integer (old peer mid rolling deploy, or a
+            // malformed/Byzantine envelope), _lockSnapshot would silently resolve
+            // THIS follower's own BTC tip and lock a DIFFERENT validator/weight
+            // set (and possibly a different STAKE_WEIGHTED_QUORUM activation
+            // outcome) than the leader for the same seq. On a federated hub
+            // (minValidators > 1) decline to PREPARE rather than pin to a
+            // local-tip snapshot. A truthy garbage height is caught downstream by
+            // CapabilitySnapshot._blockEchoOk; only the null/omitted case reaches
+            // the own-tip fallback, so this closes that specific hole. Single-node
+            // / regtest hubs (minValidators <= 1) keep the local-tip fallback.
+            if (this.minValidators > 1 && (!Number.isInteger(btcBlockHeight) || btcBlockHeight <= 0)) {
+                console.warn('Consensus: declining to PREPARE for seq ' + seq +
+                    ' from ' + envelope.sender + ': PRE_PREPARE carries no valid btcBlockHeight ' +
+                    '(minValidators>1); refusing to pin the validator snapshot at the local BTC tip, ' +
+                    'which would diverge from the leader\'s snapshot for this seq.');
+                return;
+            }
             // Lock the federation validator-set snapshot at the SAME block
             // the leader snapshotted at (stamped into the PRE_PREPARE
             // envelope). Follower quorum-checks use proposal.quorum, so we

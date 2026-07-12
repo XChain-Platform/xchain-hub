@@ -105,6 +105,9 @@ describe('attestation_escalation: modelIndex', function () {
     it('is always 0 for single-model chains or degenerate spans', function () {
         expect(esc.modelIndex(120, 100, 3, 123, 1)).to.equal(0);
         expect(esc.modelIndex(120, 100, 3, 123, 0)).to.equal(0);
+        // Degenerate span (deadline <= serviceable start) is a deliberate
+        // fallback to the primary model (index 0), NOT the last model; do
+        // not "fix" this to n-1 without updating the modelIndex() comment.
         expect(esc.modelIndex(120, 100, 3, 90, 2)).to.equal(0);   // deadline before start
         expect(esc.modelIndex(120, 100, 3, NaN, 2)).to.equal(0);
     });

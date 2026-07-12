@@ -327,6 +327,46 @@ describe('Consensus (PBFT)', function () {
             expect(consensus.pendingProposals.size).to.equal(0);
         });
 
+        it('federated follower declines to PREPARE when btcBlockHeight is omitted (fail closed, no local-tip fallback)', async function () {
+            // #1791: with minValidators > 1, a PRE_PREPARE that omits btcBlockHeight
+            // must NOT resolve the follower's own BTC tip (which would lock a
+            // divergent validator snapshot vs the leader). It must be declined.
+            consensus.minValidators = 2;
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+            let config = { x: 1 };
+            let digest = consensus._digest(config);
+            await consensus._handlePrePrepare({
+                sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
+                data: { seq: 5, view: 0, configDigest: digest, config }  // no btcBlockHeight
+            });
+            expect(consensus.pendingProposals.has(5)).to.be.false;
+            expect(pm.broadcast.called).to.be.false;
+            // Critically, the own-tip resolver was never consulted for this message.
+            expect(hub._resolveBtcLatestBlock.called).to.be.false;
+        });
+
+        it('federated follower PREPAREs a PRE_PREPARE carrying a valid btcBlockHeight', async function () {
+            // Positive path: a well-formed height locks the leader-stamped snapshot
+            // and the follower proceeds normally.
+            consensus.minValidators = 2;
+            hub.capabilitySnapshot = {
+                getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000, validators: VALIDATORS_4 }),
+                getQuorum: sinon.stub().returns(3)
+            };
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(999);
+            let config = { x: 1 };
+            let digest = consensus._digest(config);
+            await consensus._handlePrePrepare({
+                sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
+                data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 800000 }
+            });
+            expect(consensus.pendingProposals.has(5)).to.be.true;
+            // Snapshot was locked at the leader-stamped height, not the local tip.
+            expect(hub._resolveBtcLatestBlock.called).to.be.false;
+            let proposal = consensus.pendingProposals.get(5);
+            if (proposal.timer) clearTimeout(proposal.timer);
+        });
+
         it('second PRE_PREPARE for an already-pending seq with a conflicting digest is dropped (no PREPARE)', async function () {
             // First PRE_PREPARE establishes a pending proposal at seq 5 with digest A.
             let configA = { x: 1 };

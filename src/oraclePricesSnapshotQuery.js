@@ -53,6 +53,12 @@ function buildOraclePricesSnapshotQuery(opts = {}) {
     const limit = clampLimit(opts.limit);
 
     if (opts.latest) {
+        // now gates the MAX(effective_at) subquery so a future-dated PRICE
+        // UPDATE (effective_at = block_time + 86400, during its 24h lock
+        // window) never wins the feed's "latest" slot ahead of the row that
+        // is actually in effect. Without this gate the currently-served
+        // price is hidden from the dashboard for the entire lock window.
+        const now = clampNow(opts.now);
         // Join each feed's MAX(effective_at) back to the full row. Ties at the
         // same effective_at (two operators, or two txs) return >1 row for that
         // feed; the client re-dedups per (coin,tick,fiat), so this is harmless
@@ -60,11 +66,11 @@ function buildOraclePricesSnapshotQuery(opts = {}) {
         const sql =
             'SELECT op.* FROM oracle_prices op ' +
             'JOIN (SELECT coin, tick, fiat, MAX(effective_at) AS max_eff ' +
-            '      FROM oracle_prices GROUP BY coin, tick, fiat) latest ' +
+            '      FROM oracle_prices WHERE effective_at <= ? GROUP BY coin, tick, fiat) latest ' +
             '  ON op.coin = latest.coin AND op.tick = latest.tick ' +
             ' AND op.fiat = latest.fiat AND op.effective_at = latest.max_eff ' +
             'ORDER BY op.id ASC LIMIT ?';
-        return { sql, params: [limit], mode: 'latest' };
+        return { sql, params: [now, limit], mode: 'latest' };
     }
 
     const since = clampSince(opts.since);
@@ -84,6 +90,12 @@ function clampLimit(limit) {
 function clampSince(since) {
     const n = parseInt(since, 10);
     if (!Number.isFinite(n) || n < 0) return 0;
+    return n;
+}
+
+function clampNow(now) {
+    const n = parseInt(now, 10);
+    if (!Number.isFinite(n) || n < 0) return Math.floor(Date.now() / 1000);
     return n;
 }
 

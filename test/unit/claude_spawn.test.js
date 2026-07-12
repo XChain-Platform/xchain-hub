@@ -23,12 +23,13 @@ const os         = require('os');
 function makeFakeChild(opts) {
     // opts: { exitCode, stdout, stderr, spawnError, stdinError }
     let child = new EventEmitter();
-    child.stdin  = {
-        write: opts && opts.stdinError
-            ? (d, cb) => { throw new Error('stdin write failed'); }
-            : sinon.stub(),
-        end:   sinon.stub()
-    };
+    // Real child stdin is a stream (has .on for the async 'error'/EPIPE event);
+    // model it as an EventEmitter so the production stdin error handler attaches.
+    child.stdin  = new EventEmitter();
+    child.stdin.write = opts && opts.stdinError === 'sync'
+        ? (d, cb) => { throw new Error('stdin write failed'); }
+        : sinon.stub();
+    child.stdin.end = sinon.stub();
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
 
@@ -36,6 +37,10 @@ function makeFakeChild(opts) {
     setImmediate(() => {
         if (opts && opts.spawnError) {
             child.emit('error', new Error(opts.spawnError));
+            return;
+        }
+        if (opts && opts.stdinError === 'async') {
+            child.stdin.emit('error', new Error('write EPIPE'));
             return;
         }
         if (opts && opts.stdout) child.stdout.emit('data', Buffer.from(opts.stdout));
@@ -171,6 +176,14 @@ describe('claude-spawn runClaudePrint()', function () {
         let threw = false;
         try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
         catch (e) { threw = true; expect(e.message).to.include('spawn error'); }
+        expect(threw).to.be.true;
+    });
+
+    it('rejects (rather than crashing the process) on an async stdin EPIPE', async function () {
+        let { runClaudePrint } = loadClaudeSpawn({ stdinError: 'async' });
+        let threw = false;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { threw = true; expect(e.message).to.include('stdin error'); }
         expect(threw).to.be.true;
     });
 

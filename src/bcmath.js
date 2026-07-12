@@ -88,8 +88,13 @@ function bclte(numA, numB){ return bcnum(numA).lte(bcnum(numB)); }
 // Named bcformat to match xchain-indexer/src/utility.js, where the padded
 // helper is bcformat and bcstr is the minimal form below. Keeping the names
 // aligned makes the byte-equivalence claim in this file's header true.
-function bcformat(num, decimals = 64){
-    return mathjs.format(bcnum(num), {notation: 'fixed', precision: parseInt(decimals)});
+function bcformat(num, decimals){
+    // Byte-equivalence contract with xchain-indexer/src/utility.js: an
+    // omitted/null `decimals` formats at 0 (integer), NOT a wide fixed width.
+    // Every current hub caller passes decimals explicitly (verified 2026-07);
+    // do not reintroduce a wide default without re-checking every call site.
+    let d = (!isNull(decimals)) ? parseInt(decimals) : 0;
+    return mathjs.format(bcnum(num), {notation: 'fixed', precision: d});
 }
 
 // Minimal-form string, byte-identical to the indexer's utility.js bcstr

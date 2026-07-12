@@ -79,7 +79,9 @@ function leaderIndex(step, responsibleCount){
 // Model slot for the current chain height: the request's serviceable span
 // [requestBlock + confirmations, deadlineBlock] divided into `modelCount`
 // equal segments, one per entry of the block-anchored approved_models list.
-// Height past the deadline (or a degenerate span) clamps to the last model.
+// A height past the deadline (with a valid span) clamps to the last model
+// (n - 1). A degenerate span (deadline <= serviceable start) falls back to
+// the primary model (index 0) instead; see the tested contract below.
 function modelIndex(latestBlock, requestBlock, confirmations, deadlineBlock, modelCount){
     let n = Number(modelCount);
     if(!Number.isFinite(n) || n <= 1) return 0;

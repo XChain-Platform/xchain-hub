@@ -654,6 +654,42 @@ describe('XChainHub', function () {
     });
 
     // -----------------------------------------------------------------
+    // _resolveBtcLatestBlock: pushed-tip freshness bound (#1795)
+    // -----------------------------------------------------------------
+
+    describe('_resolveBtcLatestBlock pushed-tip freshness', function () {
+        let hub;
+        beforeEach(function () {
+            hub = new XChainHub('h', 1, 'd', 'u', 'p', null);
+            hub.db = mockDb;
+            sinon.stub(hub, '_resolveBtcNetwork').resolves('regtest');
+        });
+
+        it('returns the pushed tip when its block_time is fresh', async function () {
+            let now = Math.floor(Date.now() / 1000);
+            mockDb.getChainTip = sinon.stub().resolves({ blockHeight: 800000, blockTime: now - 60 });
+            let direct = sinon.stub(hub, '_resolveBtcIndexerUrl').resolves(null);
+            expect(await hub._resolveBtcLatestBlock()).to.equal(800000);
+            // Fresh tip short-circuits path 1; the direct path is never consulted.
+            expect(direct.called).to.equal(false);
+        });
+
+        it('falls through to the direct path when the pushed tip is stale', async function () {
+            let now = Math.floor(Date.now() / 1000);
+            // 2 hours old, well past the default 2x round-interval (1200s) bound.
+            mockDb.getChainTip = sinon.stub().resolves({ blockHeight: 800000, blockTime: now - 7200 });
+            sinon.stub(hub, '_resolveBtcIndexerUrl').resolves(null);  // direct path unavailable → null
+            expect(await hub._resolveBtcLatestBlock()).to.equal(null);
+        });
+
+        it('falls through when the pushed tip has no block_time (unverifiable)', async function () {
+            mockDb.getChainTip = sinon.stub().resolves({ blockHeight: 800000, blockTime: 0 });
+            sinon.stub(hub, '_resolveBtcIndexerUrl').resolves(null);
+            expect(await hub._resolveBtcLatestBlock()).to.equal(null);
+        });
+    });
+
+    // -----------------------------------------------------------------
     // validator-set loaders
     // -----------------------------------------------------------------
 

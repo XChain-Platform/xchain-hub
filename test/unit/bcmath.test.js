@@ -20,6 +20,15 @@ describe('bcmath string formatting contract', function () {
         expect(bcmath.bcformat('0', 4)).to.equal('0.0000');
     });
 
+    it('bcformat defaults an omitted/null decimals to 0, matching indexer utility.js bcformat', function () {
+        // xchain-indexer/src/utility.js: `let d = (!this.isNull(decimals)) ? parseInt(decimals) : 0;`
+        // The hub port MUST stay byte-equivalent (see bcmath.js file header).
+        expect(bcmath.bcformat('1.5')).to.equal('2');
+        expect(bcmath.bcformat('1.5', null)).to.equal('2');
+        expect(bcmath.bcformat('1.5', undefined)).to.equal('2');
+        expect(bcmath.bcformat('1.5', '')).to.equal('2');
+    });
+
     it('bcstr emits minimal form, byte-matching the indexer utility.js bcstr', function () {
         // indexer bcstr = bcnum(num).toFixed(): no zero padding.
         expect(bcmath.bcstr('1.5')).to.equal('1.5');

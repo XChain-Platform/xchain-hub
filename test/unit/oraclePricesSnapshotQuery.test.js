@@ -47,7 +47,7 @@ describe('buildOraclePricesSnapshotQuery', function () {
     describe('latest mode - dashboard current-per-feed', function () {
 
         it('selects the MAX(effective_at) row per (coin,tick,fiat), not per id', function () {
-            const { sql, params, mode } = buildOraclePricesSnapshotQuery({ latest: true });
+            const { sql, params, mode } = buildOraclePricesSnapshotQuery({ latest: true, now: 1000 });
             expect(mode).to.equal('latest');
             expect(sql).to.match(/MAX\(effective_at\)/);
             expect(sql).to.match(/GROUP BY coin, tick, fiat/);
@@ -56,18 +56,30 @@ describe('buildOraclePricesSnapshotQuery', function () {
             // higher effective_at).
             expect(sql).to.not.match(/WHERE id > \?/);
             expect(sql).to.not.match(/MAX\(id\)/);
-            expect(params).to.deep.equal([MAX_SNAPSHOT_ROWS]);
+            expect(params).to.deep.equal([1000, MAX_SNAPSHOT_ROWS]);
+        });
+
+        it('gates the MAX(effective_at) subquery to now, hiding future-dated rows', function () {
+            const { sql } = buildOraclePricesSnapshotQuery({ latest: true, now: 1000 });
+            expect(sql).to.match(/WHERE effective_at <= \? GROUP BY coin, tick, fiat/);
         });
 
         it('ignores since_id in latest mode (no page cursor bound)', function () {
-            const { sql, params } = buildOraclePricesSnapshotQuery({ latest: true, since: 12345 });
-            expect(params).to.deep.equal([MAX_SNAPSHOT_ROWS]);
+            const { sql, params } = buildOraclePricesSnapshotQuery({ latest: true, since: 12345, now: 1000 });
+            expect(params).to.deep.equal([1000, MAX_SNAPSHOT_ROWS]);
             expect(sql).to.not.contain('12345');
         });
 
         it('still honours an explicit row cap', function () {
-            const { params } = buildOraclePricesSnapshotQuery({ latest: true, limit: 200 });
-            expect(params).to.deep.equal([200]);
+            const { params } = buildOraclePricesSnapshotQuery({ latest: true, now: 1000, limit: 200 });
+            expect(params).to.deep.equal([1000, 200]);
+        });
+
+        it('defaults now to the current time when omitted', function () {
+            const before = Math.floor(Date.now() / 1000);
+            const { params } = buildOraclePricesSnapshotQuery({ latest: true });
+            const after = Math.floor(Date.now() / 1000);
+            expect(params[0]).to.be.at.least(before).and.at.most(after);
         });
     });
 });

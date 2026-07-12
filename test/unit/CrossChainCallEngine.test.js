@@ -337,6 +337,8 @@ describe('CrossChainCallEngine', function () {
                 round_id: sha256('XCALLROUND|result|' + CALL_ID),
                 call_id: CALL_ID, phase: 'result', snapshot_block: 160, network: 'regtest',
                 source_chain: 'BTC', target_chain: 'DOGE',
+                // Dispatch-inherited reorg-fence metadata (must match the local dispatch row).
+                source_action_index: 41, push_generation: 0,
                 result_status: 'ok', return_payload_b64: 'cGF5bG9hZA',
                 effective_time: Math.floor(Date.now() / 1000)
             };
@@ -350,6 +352,41 @@ describe('CrossChainCallEngine', function () {
             // Unknown dispatch → never vouch for its result.
             db.rows.length = 0;
             expect(await engine.validateProposedMatch(resultRow)).to.equal(false);
+        });
+
+        it('refuses a result row whose inherited reorg-fence metadata diverges from the local dispatch row', async function () {
+            const { engine, db } = makeEngine();
+            db.rows.push(Object.assign(dispatchRow(), { status: 'finalized', source_action_index: 41, push_generation: 3 }));
+            const baseResult = {
+                round_id: sha256('XCALLROUND|result|' + CALL_ID),
+                call_id: CALL_ID, phase: 'result', snapshot_block: 160, network: 'regtest',
+                source_chain: 'BTC', target_chain: 'DOGE',
+                source_action_index: 41, push_generation: 3,
+                result_status: 'ok', return_payload_b64: 'cGF5bG9hZA',
+                effective_time: Math.floor(Date.now() / 1000)
+            };
+            sinon.stub(engine, '_indexerCall').resolves({
+                exists: true, latest_block_index: 600, executed_block_index: 500,
+                status: 'ok', return_payload_b64: 'cGF5bG9hZA'
+            });
+            // Honest inherited metadata is accepted.
+            expect(await engine.validateProposedMatch(baseResult)).to.equal(true);
+            // A forged source_action_index is rejected.
+            expect(await engine.validateProposedMatch(Object.assign({}, baseResult, { source_action_index: 42 }))).to.equal(false);
+            // An inflated push_generation is rejected.
+            expect(await engine.validateProposedMatch(Object.assign({}, baseResult, { push_generation: 9 }))).to.equal(false);
+        });
+
+        it('refuses a dispatch row whose push_generation diverges from the source indexer', async function () {
+            const { engine } = makeEngine();
+            sinon.stub(engine, '_indexerCall').resolves({
+                exists: true, network: 'regtest', latest_block_index: 200,
+                call: pendingCall({ push_generation: 4 })
+            });
+            // Matching generation passes.
+            expect(await engine.validateProposedMatch(dispatchRow({ push_generation: 4 }))).to.equal(true);
+            // A forged (inflated) generation is refused.
+            expect(await engine.validateProposedMatch(dispatchRow({ push_generation: 7 }))).to.equal(false);
         });
     });
 

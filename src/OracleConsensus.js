@@ -393,6 +393,17 @@ class OracleConsensus extends EventEmitter {
             : this._getQuorum();
         if (quorum === 0) {
             let aggregated = this._aggregateAll(submissions);
+            // Mirror the federated _proposeRound guard: _aggregateAll can
+            // legitimately return [] while submissions exist (every pair dropped
+            // by the price clamp or the 2-source deviation gate). Without this,
+            // _storeSnapshot early-returns on empty prices (no finalized AND no
+            // skipped row - a silent drop), yet _markFinalized still resets the
+            // stall gauges and round:finalized still emits an empty-pair PRICE v0
+            // on-chain. Store a durable skipped-round row and stop instead.
+            if (aggregated.length === 0) {
+                await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime, 'aggregation yielded no prices');
+                return;
+            }
             // Sign locally and embed in the proof so the publisher can include the sig in PRICE v0
             let mySig = this._signPriceV0(round, btcBlockTime, aggregated, btcBlockHeight);
             let sigsArray = mySig ? [{ pubkey: mySig.pubkey, sig: mySig.sig }] : [];
@@ -468,12 +479,17 @@ class OracleConsensus extends EventEmitter {
 
         // I'm the fallback. Grace period in case a real-leader PROPOSE is in flight;
         // if pendingRounds gets populated during the grace, abort.
-        setTimeout(() => {
+        let t = setTimeout(() => {
+            this.leaderTimers.delete(round);
             if (this.pendingRounds.has(round) || this.finalized.has(round)) return;
             let subs = this.oracleRound.getSubmissions(round);
             if (!subs || subs.size === 0) return;
             this._proposeRound(round, subs, true, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted);
         }, FALLBACK_GRACE_MS);
+        // Don't let this grace timer keep the process alive on its own; register
+        // it so stop() can cancel it, matching the sibling timer above.
+        if (t.unref) t.unref();
+        this.leaderTimers.set(round, t);
     }
 
     // Propose a round (used both by the real leader and the fallback proposer).
@@ -762,7 +778,7 @@ class OracleConsensus extends EventEmitter {
                         // Use a wider band than the live-submission check (5x) to allow for
                         // genuine price movement between rounds, while still bounding a Byzantine
                         // leader from injecting values that are orders of magnitude off.
-                        let histThreshold = String(devThreshold * 5);
+                        let histThreshold = bcmath.bcmul(String(devThreshold), '5', 18);
                         if (bcmath.bcgt(deviation, histThreshold)) {
                             let pct = bcmath.bcformat(bcmath.bcmul(deviation, '100', 4), 4);
                             reject(p.coinPair, 'proposed ' + p.price + ' deviates ' + pct +
@@ -1147,7 +1163,7 @@ class OracleConsensus extends EventEmitter {
                 for (let p of sub.prices) {
                     if (p.coinPair === coinPair && p.price) {
                         let val = parseFloat(p.price);
-                        if (isFinite(val) && val > 0 && val < PRICE_MAX) {
+                        if (Number.isFinite(val) && val > 0 && val < PRICE_MAX) {
                             values.push({ f: val, s: String(p.price) });
                             // Cap each sender at one data point per pair. A
                             // submission could contain N entries for the same

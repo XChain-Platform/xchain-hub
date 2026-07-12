@@ -1209,7 +1209,15 @@ class XChainHub {
         let network = await this._resolveBtcNetwork();
         try {
             let tip = await this.db.getChainTip('BTC', network);
-            if(tip && tip.blockHeight) return tip.blockHeight;
+            // Freshness bound on the indexer-pushed tip (path 1). If the co-located
+            // indexer halts, pushChainTip stops arriving and getChainTip keeps
+            // serving the SAME frozen row forever; without this check path 1 keeps
+            // succeeding and the lag-guarded direct path (path 2) below is never
+            // reached, so consensus snapshot locking / oracle rounds would anchor
+            // to an arbitrarily stale height indefinitely. Fall through to the
+            // lag-guarded path (which may return null so callers degrade) when the
+            // pushed tip is stale or its age is unverifiable.
+            if(tip && tip.blockHeight && this._btcPushedTipFresh(tip)) return tip.blockHeight;
         } catch (_) { /* hub db down? fall through */ }
         let url = await this._resolveBtcIndexerUrl();
         if(!url) return null;
@@ -1239,6 +1247,34 @@ class XChainHub {
             console.error('XChainHub: failed to resolve BTC latest block from indexer:', err);
             return null;
         }
+    }
+
+    // Freshness gate for the indexer-pushed BTC tip consumed by path 1 of
+    // _resolveBtcLatestBlock. setChainTip stores block_time alongside the height
+    // (db.js), so an age check is available without an extra round-trip. Returns
+    // false (fall through to the lag-guarded direct path) when the tip is older
+    // than MAX_TIP_AGE_S, or when its block_time is missing/zero (unverifiable,
+    // so not trusted blindly). Default bound mirrors OracleRound's
+    // chainTipStalenessThresholdS: 2x the oracle round interval.
+    _btcPushedTipFresh(tip){
+        let maxAge = Number(process.env.MAX_TIP_AGE_S);
+        if(!Number.isFinite(maxAge) || maxAge <= 0){
+            let roundIntervalMs = (this.p2pConfig && Number(this.p2pConfig.ORACLE_ROUND_INTERVAL)) || 600000;
+            maxAge = Math.floor((2 * roundIntervalMs) / 1000);
+        }
+        let blockTime = Number(tip.blockTime);
+        if(!Number.isFinite(blockTime) || blockTime <= 0){
+            console.warn('XChainHub: pushed BTC tip (height ' + tip.blockHeight +
+                ') has no stored block_time; treating as unverifiable and falling through to the direct indexer path');
+            return false;
+        }
+        let ageS = Math.floor(Date.now() / 1000) - blockTime;
+        if(ageS > maxAge){
+            console.warn('XChainHub: pushed BTC tip (height ' + tip.blockHeight + ') is ' + ageS +
+                's old, exceeds MAX_TIP_AGE_S (' + maxAge + '); falling through to the direct indexer path');
+            return false;
+        }
+        return true;
     }
 
     // Which BTC network does this hub talk to? Looks at the hub's own

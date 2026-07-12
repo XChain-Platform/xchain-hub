@@ -115,6 +115,18 @@ async function runClaudePrint(opts) {
             safeReject(new Error('claude-spawn: spawn error: ' + e.message));
         });
 
+        // stdin write failures on a child that exits early (bad flag, late
+        // binary-resolution failure, CLI startup crash) arrive asynchronously
+        // as an 'error' event (EPIPE), not as a synchronous throw from the
+        // write() below. Without a handler the unhandled stream error would
+        // propagate to the process and can take down the whole hub; reject the
+        // promise instead. The child.on('error') handler above covers spawn
+        // failures only, not pipe errors.
+        child.stdin.on('error', (e) => {
+            clearTimeout(timer);
+            safeReject(new Error('claude-spawn: stdin error: ' + e.message));
+        });
+
         child.on('close', (code) => {
             clearTimeout(timer);
             if (code !== 0) {

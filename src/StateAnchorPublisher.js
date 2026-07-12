@@ -474,8 +474,15 @@ class StateAnchorPublisher {
                                   '; treating as failed publish (row stays pending)');
                     continue;
                 }
+                // First-writer-wins, exactly like the peer path in _handleV0Done
+                // (`... AND anchor_txid IS NULL`). In the documented failover race
+                // (a late rank-0 and an early rank-1 both publish because the
+                // shared pending signal is `anchor_txid IS NULL`) a hub may have
+                // already stamped a peer's txid via V0_DONE; without this guard,
+                // completing our own in-flight publish would overwrite it and
+                // leave the fleet holding divergent anchor_txid bytes for the row.
                 await this.db.doQuery(
-                    'UPDATE state_checkpoints SET anchor_txid = ? WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ?',
+                    'UPDATE state_checkpoints SET anchor_txid = ? WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? AND anchor_txid IS NULL',
                     [txid, row.chain, row.network, row.block_index, row.checkpoint_seq]);
                 console.log('StateAnchorPublisher: anchored checkpoint ' + row.chain + '/' + row.network +
                             ' @ ' + row.block_index + ' (txid ' + txid + ')');
@@ -1275,7 +1282,7 @@ class StateAnchorPublisher {
         // never-mined txid, or pointing at a real anchor for a DIFFERENT checkpoint,
         // no longer stamps (the phantom stamp is what suppresses the real anchor via
         // the `anchor_txid IS NULL` selector).
-        let vOnChain = await this._verifyAnchorOnChain(ckptRows[0], { txid: String(d.txid) });
+        let vOnChain = await this._verifyAnchorOnChain(ckptRows[0], { txid: String(d.txid), rejectVersions: [1, 2] });
         if(vOnChain !== 'verified'){
             console.warn('StateAnchorPublisher: V0_DONE for ' + d.chain + '/' + d.network + ' @ ' +
                          d.block_index + '/' + d.checkpoint_seq + ' NOT on-chain verified (' + vOnChain +
@@ -1346,6 +1353,9 @@ class StateAnchorPublisher {
     //   expect.version - narrows to a specific ANCHOR version (the archive gate binds
     //                    the v1 head), since one checkpoint_seq carries both the v0/v3
     //                    checkpoint anchor and the v1 archive anchor.
+    //   expect.rejectVersions - a set of ANCHOR versions to REJECT when no single
+    //                    exact version is expected (the V0_DONE checkpoint path passes
+    //                    {1,2} so an archive anchor cannot pose as a checkpoint anchor).
     // Without `expect` this only proves "this checkpoint is anchored at depth".
     //
     // FAIL CLOSED against an un-upgraded indexer: one that predates the txid filter
@@ -1390,6 +1400,16 @@ class StateAnchorPublisher {
             if(String(res.txid).toLowerCase() !== wantTxid) return 'rejected:txid';
         }
         if(want.version != null && Number(res.version) !== Number(want.version)) return 'rejected:version';
+        // Reject a disallowed version even when no single exact version is
+        // expected. The V0_DONE path accepts any CHECKPOINT-anchor version
+        // ({0,3,4,5}) but must not accept an ARCHIVE anchor ({1,2}): one
+        // checkpoint_seq carries both, and the 4-core-hash byte-match below
+        // passes for a v1 archive whose wrapper is this same checkpoint, so
+        // without this a Byzantine v0 publisher could name a confirmed v1
+        // archive txid as proof of a v0 anchor (stamping the row fleet-wide and
+        // mirroring a reward it never earned).
+        if(Array.isArray(want.rejectVersions) &&
+           want.rejectVersions.map(Number).includes(Number(res.version))) return 'rejected:version';
         // Byte-match the decoded on-chain payload against our own checkpoint. The
         // four core hashes are present on every checkpoint version; state_root and
         // block_merkle_root are compared only when the on-chain anchor is a

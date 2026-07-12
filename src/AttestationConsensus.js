@@ -230,6 +230,15 @@ class AttestationConsensus extends EventEmitter {
     // Hold a COMMIT that arrived before this round established a winner. See
     // the earlyCommits note in the constructor for why these can't be dropped.
     _bufferEarlyCommit(rid, envelope){
+        // Size gate (A-F5 parity with _bufferEarlyMessage): drop an oversized
+        // pre-winner COMMIT rather than buffer it. Without this a peer could park
+        // up to earlyCommitMaxPerRid envelopes each bounded only by the ~1 MB
+        // WebSocket frame limit, a memory-amplification vector for the whole hub
+        // process. The default ceiling clears any legitimate COMMIT with headroom.
+        let sz;
+        try { sz = JSON.stringify(envelope.data || '').length; }
+        catch(e){ return; }   // unserializable (cycle) -> never a real gossip message
+        if(sz > this.earlyMessageMaxBytes) return;
         let arr = this.earlyCommits.get(rid);
         if(!arr){
             arr = [];
@@ -283,6 +292,26 @@ class AttestationConsensus extends EventEmitter {
             ? 0
             : Math.max(2 * Math.floor((responsible.length - 1) / 3) + 1,
                        Math.ceil((responsible.length + 1) / 2));
+
+        // Unfinalizable-round guard. The finalization gates require
+        // max(quorum, redundancy) VALID signatures, and signatures can only ever
+        // come from responsible-set members (_handleCommit rejects non-members).
+        // When the block-anchored snapshot or weighted source-dedup shrinks the
+        // responsible set below that threshold (AttestationRound._computeResponsibleSet
+        // slices to max(1, redundancy) and can return fewer), signatures.size can
+        // never reach `needed`: every PROPOSE/PREPARE/COMMIT cycle stalls to
+        // timeout, including the non-ok outcome paths. Do NOT lower the gates to
+        // responsible.length here: the indexer deterministically rejects any
+        // payload carrying fewer than `redundancy` valid signatures, so a relaxed
+        // gate would publish rows the indexer discards. Skip round admission
+        // instead and let the request reach its normal deadline expiry + refund.
+        let needed = Math.max(quorum, roundState.redundancy);
+        if(responsible.length < needed){
+            console.warn('AttestationConsensus: skipping unfinalizable round for ' + rid.substring(0,16) +
+                '... (responsible=' + responsible.length + ' < needed=' + needed +
+                '; quorum=' + quorum + ' redundancy=' + roundState.redundancy + ')');
+            return;
+        }
 
         let myPubkey  = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
         let myBody    = roundState.myProposal.body;
@@ -507,7 +536,13 @@ class AttestationConsensus extends EventEmitter {
         pending._agreeing = true;
         let winner;
         try {
-            winner = await Promise.resolve(providerModule.agree(proposalsArr, { pinnedJudgeModel: pending.pinnedJudgeModel || null }));
+            // Bound the judge call to the same fetch-timeout budget as a
+            // provider fetch, so a slow-drip judge vendor call cannot overrun
+            // the round window (see the wall-clock deadline guard in
+            // providers/llm.js's transports).
+            let judgeTimeoutMs = parseInt(this.config.ATTESTATION_FETCH_TIMEOUT) || 10000;
+            winner = await Promise.resolve(providerModule.agree(proposalsArr,
+                { pinnedJudgeModel: pending.pinnedJudgeModel || null, timeoutMs: judgeTimeoutMs }));
         } catch (e) {
             console.warn('AttestationConsensus: agree() threw for ' + rid.substring(0,16) + '...: ', e);
             winner = null;
@@ -518,7 +553,7 @@ class AttestationConsensus extends EventEmitter {
         if(!this.pending.has(rid) || pending.finalized) return;
 
         if(!winner){
-            console.log('AttestationConsensus: no consensus on ' + rid.substring(0,16) + '... (' + proposalsArr.length + ' proposals diverged)');
+            console.warn('AttestationConsensus: no consensus on ' + rid.substring(0,16) + '... (' + proposalsArr.length + ' proposals diverged)');
             // Phase 4: publish an explicit STATUS=no_quorum ATTEST v1 (audit
             // row; the request stays pending on the indexer so later retry
             // rounds can still fulfill it before the deadline).
@@ -636,7 +671,7 @@ class AttestationConsensus extends EventEmitter {
             if(reSig) pending.signatures.set(pending.myPubkey, reSig);
         }
 
-        console.log('AttestationConsensus: non-ok outcome status=' + status + ' for ' + rid.substring(0,16) +
+        console.warn('AttestationConsensus: non-ok outcome status=' + status + ' for ' + rid.substring(0,16) +
                     '... (' + pending.signatures.size + ' aligned sig(s))');
 
         let mySig = pending.signatures.get(pending.myPubkey) || null;
@@ -718,6 +753,17 @@ class AttestationConsensus extends EventEmitter {
                 console.warn('AttestationConsensus: non-ok PREPARE with non-canonical body/meta from ' + senderPubkey.substring(0,16) + '... (rejected)');
                 return;
             }
+            // Whitelist the adopted status to the exact set a hub can DERIVE
+            // (`_establishNonOkWinner` only ever emits these two). `status` is
+            // the raw wire value; without this gate a single Byzantine
+            // responsible sender could forge any other non-ok status (e.g. the
+            // indexer-terminal 'expired'), have honest peers whose own fetch
+            // failed co-sign it, and finalize a terminal ATTEST that kills an
+            // otherwise-retryable request and triggers a wrongful refund.
+            if(status !== 'provider_error' && status !== 'no_quorum'){
+                console.warn('AttestationConsensus: non-ok PREPARE with non-derivable status "' + status + '" from ' + senderPubkey.substring(0,16) + '... (rejected)');
+                return;
+            }
             let seenNonOk = this.nonOkPublished.get(rid);
             if(seenNonOk && seenNonOk.has(status)) return;  // this status already published; don't co-sign a duplicate
             if(!d.sig || !d.sig_pubkey){
@@ -743,7 +789,15 @@ class AttestationConsensus extends EventEmitter {
             //                    follower (only the leader runs the judge), so
             //                    participation is the strongest local check.
             let myProposal = pending.proposals.get(pending.myPubkey);
-            let mayCoSign  = !!myProposal && (status === 'no_quorum' || (myProposal.status || 'ok') !== 'ok');
+            // Require the claimed status to match the failure mode THIS hub
+            // itself observed, not merely that our own fetch failed. For
+            // provider_error that means our own proposal is provider_error too
+            // (a hub that saw a different failure mode must abstain rather than
+            // vouch for a status it did not derive).
+            let mayCoSign  = !!myProposal && (
+                status === 'no_quorum'
+                || (status === 'provider_error' && (myProposal.status || 'ok') === 'provider_error')
+            );
             if(mayCoSign && !pending.signatures.has(pending.myPubkey)){
                 let reSig = ValidatorIdentity.verify(canonical.toString('utf8'), String(myProposal.sig || ''), pending.myPubkey)
                     ? String(myProposal.sig)
@@ -1049,6 +1103,14 @@ class AttestationConsensus extends EventEmitter {
             // Winner not yet established (the PROPOSE->agree() transition is
             // async). Hold this COMMIT and replay it once the winner is set,
             // rather than dropping the peer's vote. See _drainEarlyCommits.
+            // Membership gate (A-F5 parity): pending.responsible is populated at
+            // round start, before the winner, so apply the same responsible-set
+            // check used post-winner (below) here too. This refuses to buffer
+            // COMMITs from non-responsible peers, closing an unauthenticated
+            // memory-amplification vector; buffered members are still re-checked
+            // for a valid signature on replay.
+            let earlySender = String(d.sig_pubkey || '').toLowerCase();
+            if(!pending.responsible.some(v => v.pubkey === earlySender)) return;
             this._bufferEarlyCommit(rid, envelope);
             return;
         }
