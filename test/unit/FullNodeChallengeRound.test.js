@@ -303,7 +303,7 @@ describe('FullNodeChallengeRound', function () {
             return eng;
         }
 
-        it('computes the challenge and broadcasts its own answer', async function () {
+        it('computes the challenge and broadcasts its own answer digest (never plaintext, R2-FN2)', async function () {
             const hub = makeHub();                     // identity V1
             const eng = await startEpoch(hub);
             const st = eng.rounds.get(288);
@@ -311,15 +311,17 @@ describe('FullNodeChallengeRound', function () {
             expect(st.myAnswer).to.equal(ANSWER);
             const ans = hub._pm.broadcast.getCalls().find(c => c.args[0] === 'XNODE_ANSWER');
             expect(ans, 'XNODE_ANSWER broadcast').to.exist;
-            expect(ans.args[1].answer).to.equal(ANSWER);
+            expect(ans.args[1].answer_digest).to.equal(eng._answerDigest(st.challengeId, V1, ANSWER));
+            expect(ans.args[1].answer, 'plaintext answer must never ride the wire').to.not.exist;
+            expect(JSON.stringify(ans.args[1])).to.not.include(ANSWER);
         });
 
         it('leader proposes the PASS list of claimants whose answer matches', async function () {
             const hub = makeHub();
             const eng = await startEpoch(hub);
             const st = eng.rounds.get(288);
-            // P1 (a claimant) submitted the CORRECT answer.
-            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer: ANSWER, sig_pubkey: P1, sig: 's' });
+            // P1 (a claimant) submitted the CORRECT pubkey-bound digest.
+            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
             await eng._closeCollection(288);
             // V1 is the only eligible verifier → it is leader → broadcasts a sign request
             const req = hub._pm.broadcast.getCalls().find(c => c.args[0] === 'XNODE_SIGN_REQ');
@@ -331,7 +333,7 @@ describe('FullNodeChallengeRound', function () {
             const hub = makeHub();                       // V1 = sole genesis verifier → quorum 1
             const eng = await startEpoch(hub);
             const st = eng.rounds.get(288);
-            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer: ANSWER, sig_pubkey: P1, sig: 's' });
+            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
             await eng._closeCollection(288);             // leader self-signs (V1) → quorum 1 met
             expect(eng.broadcastFn.calledOnce, 'verdict broadcast on-chain').to.equal(true);
             const wire = eng.broadcastFn.firstCall.args[0];
@@ -346,7 +348,7 @@ describe('FullNodeChallengeRound', function () {
             const hub = makeHub();                       // V1 = sole genesis verifier → quorum 1
             const eng = await startEpoch(hub);
             const st = eng.rounds.get(288);
-            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer: ANSWER, sig_pubkey: P1, sig: 's' });
+            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
             // Hold the verdict broadcast open so a second finalize can race the first's await.
             let release = null, calls = 0;
             eng.broadcastFn = () => { calls++; return new Promise(res => { release = () => res({ txid: 'TX' + calls }); }); };
@@ -364,7 +366,7 @@ describe('FullNodeChallengeRound', function () {
             const hub = makeHub({ identity: makeIdentity(V2), fullnode: { GENESIS_VERIFIERS: [V1, V2] } });
             const eng = await startEpoch(hub);
             const st = eng.rounds.get(288);
-            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer: ANSWER, sig_pubkey: P1, sig: 's' });
+            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
             await eng._closeCollection(288);
             // quorum is 2 (V=2) but only one self-sign so far → no finalize
             expect(eng.broadcastFn.called).to.equal(false);
@@ -381,6 +383,69 @@ describe('FullNodeChallengeRound', function () {
         });
     });
 
+    // ── R2-FN2: the possession answer is pubkey-bound; a light mirror copying
+    //    an honest claimant's gossiped value must never earn a PASS ─────────────
+    describe('R2-FN2 answer copy attack', function () {
+        const ANSWER = 'deadbeef';
+        const block = { tx: [{ vout: [{ scriptPubKey: { hex: ANSWER } }] }] };
+
+        async function startEpoch(hub) {
+            wireRpc({ ledgerHash: SEED, tip: 300, verifiers: [], block });
+            // Two claimants: P1 (honest full node) and P2 (light mirror).
+            hub.capabilitySnapshot.getSnapshot.resolves({ validators: [{ pubkey: P1 }, { pubkey: P2 }] });
+            const eng = new FullNodeChallengeRound(hub);
+            eng.broadcastFn = sinon.stub().resolves({ txid: 'TX' });
+            await eng._runEpoch(288, 300);
+            return eng;
+        }
+
+        it('a copied digest (another claimant\'s wire value) never earns a PASS', async function () {
+            const hub = makeHub();                        // identity V1 = sole verifier/leader
+            const eng = await startEpoch(hub);
+            const st  = eng.rounds.get(288);
+            const honest = eng._answerDigest(st.challengeId, P1, ANSWER);
+            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: honest, sig_pubkey: P1, sig: 's' });
+            // P2 copies P1's public gossip verbatim and re-signs it as its own.
+            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: honest, sig_pubkey: P2, sig: 's' });
+            await eng._closeCollection(288);
+            const req = hub._pm.broadcast.getCalls().find(c => c.args[0] === 'XNODE_SIGN_REQ');
+            expect(req, 'XNODE_SIGN_REQ broadcast').to.exist;
+            expect(req.args[1].passList).to.include(P1);
+            expect(req.args[1].passList, 'copier must not pass').to.not.include(P2);
+        });
+
+        it('a verifier refuses to sign a PASS list that includes a copier', async function () {
+            const hub = makeHub();                        // identity V1 (verifier)
+            const eng = await startEpoch(hub);
+            const st  = eng.rounds.get(288);
+            const honest = eng._answerDigest(st.challengeId, P1, ANSWER);
+            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: honest, sig_pubkey: P1, sig: 's' });
+            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: honest, sig_pubkey: P2, sig: 's' });
+            const leader = eng._electedLeader(st);
+            await eng._onSignReq({ epoch: 288, challengeId: st.challengeId, sig_pubkey: leader, passList: [P1, P2], sig: 'x' });
+            const signed = hub._pm.broadcast.getCalls().find(c => c.args[0] === 'XNODE_SIGN');
+            expect(signed, 'must not co-sign a pass list containing a copier').to.not.exist;
+        });
+
+        it('_onAnswer rejects a non-64-hex digest', async function () {
+            const hub = makeHub();
+            const eng = await startEpoch(hub);
+            const st  = eng.rounds.get(288);
+            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: ANSWER, sig_pubkey: P1, sig: 's' });
+            expect(st.answers.has(P1)).to.equal(false);
+        });
+
+        it('_answerDigest binds challenge, pubkey, and answer', function () {
+            const eng = new FullNodeChallengeRound(makeHub());
+            const d1 = eng._answerDigest('cid', P1, 'ans');
+            expect(d1).to.match(/^[0-9a-f]{64}$/);
+            expect(eng._answerDigest('cid', P2, 'ans')).to.not.equal(d1);   // pubkey-bound
+            expect(eng._answerDigest('cid2', P1, 'ans')).to.not.equal(d1);  // challenge-bound
+            expect(eng._answerDigest('cid', P1, 'ans2')).to.not.equal(d1);  // answer-bound
+            expect(eng._answerDigest('cid', P1.toUpperCase(), 'ans')).to.equal(d1); // case-normalized pubkey
+        });
+    });
+
     // ── R2-FN3: a verifier must refuse to sign a PASS list that OMITS a claimant
     //    it independently confirmed correct (a censoring leader dropping honest
     //    full nodes) ────────────────────────────────────────────────────────────
@@ -390,7 +455,11 @@ describe('FullNodeChallengeRound', function () {
                 epoch: 7, challengeId: 'cidFN3', finalized: false,
                 eligible: new Set([V1, V2]),
                 claimants: new Set([P1, P2]),
-                answers: new Map([[P1, 'ANS'], [P2, 'ANS']]),   // both confirmed correct
+                // Both confirmed correct: pubkey-bound digests of the same answer (R2-FN2).
+                answers: new Map([
+                    [P1, eng._answerDigest('cidFN3', P1, 'ANS')],
+                    [P2, eng._answerDigest('cidFN3', P2, 'ANS')],
+                ]),
                 myAnswer: 'ANS', target: 188, seed: SEED,
                 sigs: new Map(), passList: null, leadRank: 0,
             };

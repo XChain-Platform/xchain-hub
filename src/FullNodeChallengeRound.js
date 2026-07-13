@@ -30,9 +30,15 @@
  *                    block, provably absent from a synced mirror.
  *
  * Round protocol (request/sign, mirrors StateCheckpointEngine):
- *   1. XNODE_ANSWER:   every full_node claimant broadcasts its computed answer.
+ *   1. XNODE_ANSWER:   every full_node claimant broadcasts a PUBKEY-BOUND digest
+ *                      of its computed answer: SHA256(challenge_id|pubkey|answer)
+ *                      (R2-FN2). The plaintext answer never rides the wire, so a
+ *                      light mirror cannot copy an honest claimant's answer and
+ *                      rebroadcast it as its own possession proof; a verifier
+ *                      recomputes each claimant's expected digest from its OWN
+ *                      node's answer, so no reveal phase is needed.
  *   2. XNODE_SIGN_REQ: the elected leader proposes the PASS list (claimants
- *                      whose answer matches its own).
+ *                      whose digest matches the one derived from its own answer).
  *   3. XNODE_SIGN:     each eligible verifier recomputes the answer from ITS
  *                      OWN node, confirms every listed claimant, and signs.
  *   4. On quorum, the leader broadcasts the on-chain NODEPROOF v0 verdict and
@@ -238,10 +244,15 @@ class FullNodeChallengeRound {
             try {
                 state.myAnswer = await this._computeAnswer(target, seed);
                 if(amClaimant){
-                    state.answers.set(myPubkey, state.myAnswer);
-                    let sig = this.identity.sign(this._answerCanonical(challengeId, state.myAnswer));
+                    // R2-FN2: broadcast (and store) the pubkey-bound digest, never
+                    // the plaintext answer. `answers` holds digests for every
+                    // claimant including self, so the leader/verifier comparison
+                    // paths treat self and peers identically.
+                    let digest = this._answerDigest(challengeId, myPubkey, state.myAnswer);
+                    state.answers.set(myPubkey, digest);
+                    let sig = this.identity.sign(this._answerCanonical(challengeId, digest));
                     this.peerManager && this.peerManager.broadcast(XNODE_ANSWER, {
-                        epoch, challengeId, answer: state.myAnswer, sig_pubkey: myPubkey, sig
+                        epoch, challengeId, answer_digest: digest, sig_pubkey: myPubkey, sig
                     });
                 }
             } catch(e){
@@ -268,11 +279,12 @@ class FullNodeChallengeRound {
         // The PASS proposal below only applies while the round is still live.
         if(state.finalized) return;
 
-        // Leader proposes the PASS list (claimants whose answer matches ours).
+        // Leader proposes the PASS list: claimants whose pubkey-bound digest
+        // matches the digest derived from OUR OWN node's answer (R2-FN2).
         if(this._isLeader(state, myPubkey) && state.myAnswer && !state.passList){
             let pass = [];
             for(let pk of state.claimants){
-                if(state.answers.get(pk) === state.myAnswer) pass.push(pk);
+                if(state.answers.get(pk) === this._answerDigest(state.challengeId, pk, state.myAnswer)) pass.push(pk);
             }
             pass.sort();
             state.passList = pass;
@@ -306,9 +318,15 @@ class FullNodeChallengeRound {
         if(!pk || !state.claimants.has(pk)) return;            // only staked claimants count
         if(!/^[0-9a-fA-F]{64}$/.test(pk)) return;
         if(String(d.challengeId) !== state.challengeId) return;
-        let answer = String(d.answer || '');
-        if(!ValidatorIdentity.verify(this._answerCanonical(state.challengeId, answer), String(d.sig || ''), pk)) return;
-        if(!state.answers.has(pk)) state.answers.set(pk, answer);
+        // R2-FN2: the wire carries a pubkey-bound digest, not the answer. A
+        // 64-hex shape gate keeps junk out of the map; the digest itself is
+        // validated against this hub's own recomputation at compare time
+        // (_closeCollection / _onSignReq), so a copied digest from ANOTHER
+        // claimant can never match this sender's expected digest.
+        let digest = String(d.answer_digest || '').toLowerCase();
+        if(!/^[0-9a-f]{64}$/.test(digest)) return;
+        if(!ValidatorIdentity.verify(this._answerCanonical(state.challengeId, digest), String(d.sig || ''), pk)) return;
+        if(!state.answers.has(pk)) state.answers.set(pk, digest);
     }
 
     async _onSignReq(d){
@@ -339,7 +357,10 @@ class FullNodeChallengeRound {
         for(let pk of pass){
             if(!state.claimants.has(pk)) return;                // outsider in the list
             let a = state.answers.get(pk);
-            if(a === undefined || a !== state.myAnswer) return; // can't confirm: refuse to sign
+            // R2-FN2: confirm the claimant's pubkey-bound digest against the one
+            // derived from OUR OWN node's answer. A digest copied from another
+            // claimant hashes over the wrong pubkey and never matches.
+            if(a === undefined || a !== this._answerDigest(state.challengeId, pk, state.myAnswer)) return; // can't confirm: refuse to sign
         }
         // Completeness (R2-FN3): the leader could silently DROP an honest claimant
         // from the pass list (the loop above only validates listed entries, not
@@ -349,7 +370,7 @@ class FullNodeChallengeRound {
         // signature. (Answers still in flight are simply not yet in our set, so
         // this never forces a premature refusal; the round re-signs as they land.)
         for(let [pk, a] of state.answers){
-            if(state.claimants.has(pk) && a === state.myAnswer && !passSet.has(pk)) return;
+            if(state.claimants.has(pk) && a === this._answerDigest(state.challengeId, pk, state.myAnswer) && !passSet.has(pk)) return;
         }
         let sorted = pass.slice().sort();
         let sig = this.identity.sign(this._verdictCanonical(state.challengeId, state.epoch, sorted));
@@ -423,8 +444,22 @@ class FullNodeChallengeRound {
         return String(spk.hex).toLowerCase();
     }
 
-    _answerCanonical(challengeId, answer){
-        return 'XNODEANS|' + challengeId + '|' + String(answer);
+    // Signed canonical for an XNODE_ANSWER broadcast. Since R2-FN2 the second
+    // field is the pubkey-bound answer DIGEST, never the plaintext answer.
+    _answerCanonical(challengeId, answerDigest){
+        return 'XNODEANS|' + challengeId + '|' + String(answerDigest);
+    }
+
+    // R2-FN2: pubkey-bound possession digest. Binding the claimant's pubkey into
+    // the hash makes every claimant's expected wire value distinct for the same
+    // underlying answer, so knowledge of ANOTHER claimant's digest (public gossip)
+    // is useless without the answer preimage, which only a real full node can
+    // compute. Verifiers hold the preimage from their own node and recompute the
+    // expected digest per claimant, so no reveal phase is needed.
+    _answerDigest(challengeId, pubkey, answer){
+        return crypto.createHash('sha256')
+            .update('XNODEANSV1|' + challengeId + '|' + String(pubkey).toLowerCase() + '|' + String(answer))
+            .digest('hex');
     }
 
     // CONSENSUS-CRITICAL: must byte-match the indexer's nodeproof.js canonical.
