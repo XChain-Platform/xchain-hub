@@ -42,6 +42,7 @@ function _withEnv(extra, fn){
     const saved = {};
     const keys  = ['HUB_CLAUDE_CONFIG_DIR','CLAUDE_CONFIG_DIR',
                    'HUB_CLAUDE_CODE_OAUTH_TOKEN','CLAUDE_CODE_OAUTH_TOKEN',
+                   'HUB_CLAUDE_DEFAULT_CONFIG_DIR',
                    'ANTHROPIC_API_KEY','LLM_DEFAULT_MODEL',
                    'HUB_OPENAI_API_KEY','OPENAI_API_KEY'];
     for (const k of keys){ saved[k] = process.env[k]; }
@@ -54,6 +55,11 @@ function _withEnv(extra, fn){
     let result;
     try {
         for (const k of keys){ delete process.env[k]; }
+        // Hermetic default: neutralize the resolver's last-resort fallback to a
+        // populated ~/.claude-xchain on the host (real hub creds would otherwise
+        // leak into "no claude credentials" scenarios). Scenarios can still
+        // override it via `extra`.
+        process.env.HUB_CLAUDE_DEFAULT_CONFIG_DIR = '/nonexistent/hub-claude-test';
         for (const [k,v] of Object.entries(extra || {})) { process.env[k] = v; }
         result = fn();
     } catch (e) {

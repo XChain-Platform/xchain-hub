@@ -35,6 +35,9 @@
  *   5. ANTHROPIC_API_KEY        (direct API mode)
  *   6. Default ~/.claude-xchain if it's been pre-populated by
  *      `CLAUDE_CONFIG_DIR=~/.claude-xchain claude login`
+ *      (HUB_CLAUDE_DEFAULT_CONFIG_DIR overrides the default dir path;
+ *      point it at a nonexistent dir to disable this fallback, e.g. for
+ *      hermetic tests on a host that has a populated ~/.claude-xchain)
  *
  * The `_checkConfigDir` gate ensures empty or stale dir values fall through
  * cleanly to the next candidate. Token-only paths get paired with an
@@ -77,7 +80,8 @@ function _ensureIsolatedDir(dirPath) {
 //   ctx.defaultConfigDir : pin the "default isolated dir" (hermetic tests)
 function resolveHubLlmAuth(ctx) {
     const envSource = (ctx && ctx.env) || process.env;
-    const defaultDir = _trim(ctx && ctx.defaultConfigDir) || DEFAULT_HUB_CLAUDE_CONFIG_DIR;
+    const defaultDir = _trim(envSource.HUB_CLAUDE_DEFAULT_CONFIG_DIR)
+        || _trim(ctx && ctx.defaultConfigDir) || DEFAULT_HUB_CLAUDE_CONFIG_DIR;
 
     const hubDir   = _trim(envSource.HUB_CLAUDE_CONFIG_DIR);
     const cliDir   = _trim(envSource.CLAUDE_CONFIG_DIR);
