@@ -811,9 +811,24 @@ class StateAnchorPublisher {
         let calls = await this.db.doQuery(
             "SELECT * FROM cross_chain_calls WHERE batch_seq IS NULL OR archived_status <> status " +
             "ORDER BY call_id ASC, phase ASC LIMIT ?", [this.maxBatch]);
-        // Anchor-publish rewards are hub-pushed rows the BTC indexer can never
-        // re-derive from a chain parse; the archive is their recovery transport
-        // (oracle_round/attest_fee rows are indexer-derived and NEVER archived).
+        // Archive transport for the anchor_% reward rails. Read this before touching
+        // recovery dedup: the "indexer can never re-derive these" invariant is NOT
+        // uniformly true any more, and the difference matters because these rows land
+        // on the COLLECT-spendable ledger.
+        //   - anchor_archive, and anchor_<CHAIN> BELOW the anchor-reward flag-day:
+        //     genuinely hub-pushed. The chain carries no parse for them, so the archive
+        //     is their only recovery transport. The original invariant holds here.
+        //   - anchor_<CHAIN> AT/ABOVE the flag-day: the indexer DOES re-derive these
+        //     on-chain from the v4/v5 XANCPUB publisher attestation (anchor.js
+        //     createValidatorReward / reconcileAnchorRewardWinner), crediting the same
+        //     frozen ANCHOR_REWARD_AMOUNT. The hub still records the row locally
+        //     (RewardTracker isDerived path) and this selector still archives it, so the
+        //     archive redundantly transports a row the chain reproduces.
+        // That redundancy is safe ONLY because restore and derive both key on the UNIQUE
+        // (validator_pubkey, round_number, reward_type), so the two paths dedup and the
+        // amounts agree. Weaken that dedup and the archived anchor_<CHAIN> row becomes a
+        // genuine SECOND credit. Do not treat "archived" as proof of "not re-derivable".
+        // (oracle_round/attest_fee rows are indexer-derived and NEVER archived.)
         // Rows are immutable, so batch_seq IS NULL is the only pending test;
         // pre-upgrade rows without a deterministic block_index stay local.
         let rewards = await this.db.doQuery(
