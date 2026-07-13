@@ -500,7 +500,10 @@ class OracleRound {
         this.submissions.get(this.currentRound).set(myAddr, {
             prices:    prices,
             sources:   totalSources,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            // Own verified identity, matching the pubkey stamped on peer
+            // submissions so the snapshot membership filter treats self the same.
+            pubkey:    this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null
         });
 
         // Persist to DB; await so a persistence failure is counted and observable
@@ -593,6 +596,29 @@ class OracleRound {
         let roundSubs = this.submissions.get(round);
         if (roundSubs.has(envelope.sender)) return; // Already have a submission from this sender
 
+        // Resolve the sender's registered pubkey up front. PeerManager enforces the
+        // addr<->pubkey binding on every verified envelope, so this is the VERIFIED
+        // signing identity, not a claim. Dedup on it (Oracle M1): the registry is
+        // Map<addr, pubkey> and one key may be registered under several addrs, so a
+        // sender-keyed first-wins alone lets a single signing key submit once per
+        // addr, multiplying its weight in the trimmed median and the
+        // ORACLE_MIN_SUBMISSIONS diversity floor.
+        let senderPubkey = null;
+        if (this.peerManager.validatorPubkeys) {
+            let pk = this.peerManager.validatorPubkeys.get(envelope.sender);
+            if (pk) senderPubkey = String(pk).toLowerCase();
+        }
+        if (senderPubkey) {
+            for (let sub of roundSubs.values()) {
+                if (sub && sub.pubkey === senderPubkey) {
+                    console.warn('Oracle: dropping duplicate submission for round ' + round +
+                        ' from ' + envelope.sender + ': pubkey ' + senderPubkey.substring(0, 16) +
+                        '... already submitted under another sender');
+                    return;
+                }
+            }
+        }
+
         // Enforce max submissions per round
         if (roundSubs.size >= this.maxSubmissionsPerRound) {
             console.warn('Oracle: Max submissions per round reached for round ' + round + '; dropping from ' + envelope.sender);
@@ -622,7 +648,11 @@ class OracleRound {
         roundSubs.set(envelope.sender, {
             prices:    validPrices,
             sources:   sources || 0,
-            timestamp: envelope.timestamp
+            timestamp: envelope.timestamp,
+            // Verified registered pubkey (lowercase hex) or null during the
+            // empty-registry bootstrap window. OracleConsensus keys its snapshot
+            // membership filter on this.
+            pubkey:    senderPubkey
         });
 
         console.log('Oracle: Received submission from ' + envelope.sender +
