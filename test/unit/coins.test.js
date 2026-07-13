@@ -238,4 +238,67 @@ describe('coins registry', () => {
             expect(h.BTC).to.match(/^[0-9a-f]{64}$/);
         });
     });
+
+    //  / CF-1: on mainnet an XCHAIN_CONFIRMATIONS_<COIN> override may only
+    // raise the depth above the per-coin default, never lower it. A validator
+    // running a lowered depth would co-sign source actions the rest of the
+    // federation still considers reorg-able.
+    describe('resolveConfirmations mainnet floor ', () => {
+        const saved = {};
+        beforeEach(() => {
+            for(const tick of coins.ALLOWED_COINS){
+                const key = 'XCHAIN_CONFIRMATIONS_' + tick;
+                saved[key] = process.env[key];
+                delete process.env[key];
+            }
+        });
+        afterEach(() => {
+            for(const key of Object.keys(saved)){
+                if(saved[key] === undefined) delete process.env[key];
+                else process.env[key] = saved[key];
+            }
+        });
+
+        it('defaults everywhere when no override is set', () => {
+            for(const net of ['mainnet', 'testnet', 'regtest'])
+                expect(coins.resolveConfirmations({}, net)).to.deep.equal(coins.DEFAULT_CONFIRMATIONS);
+        });
+
+        it('clamps an env override below the default up to the floor on mainnet', () => {
+            process.env.XCHAIN_CONFIRMATIONS_BTC = '1';
+            const out = coins.resolveConfirmations({}, 'mainnet');
+            expect(out.BTC).to.equal(coins.DEFAULT_CONFIRMATIONS.BTC);
+        });
+
+        it('clamps a p2pConfig override below the default on mainnet', () => {
+            const out = coins.resolveConfirmations({ XCHAIN_CONFIRMATIONS_DOGE: '2' }, 'mainnet');
+            expect(out.DOGE).to.equal(coins.DEFAULT_CONFIRMATIONS.DOGE);
+        });
+
+        it('allows raising the depth above the default on mainnet', () => {
+            process.env.XCHAIN_CONFIRMATIONS_BTC = String(coins.DEFAULT_CONFIRMATIONS.BTC + 4);
+            const out = coins.resolveConfirmations({}, 'mainnet');
+            expect(out.BTC).to.equal(coins.DEFAULT_CONFIRMATIONS.BTC + 4);
+        });
+
+        it('allows lowering the depth on testnet and regtest (drill seam)', () => {
+            process.env.XCHAIN_CONFIRMATIONS_LTC = '1';
+            expect(coins.resolveConfirmations({}, 'testnet').LTC).to.equal(1);
+            expect(coins.resolveConfirmations({}, 'regtest').LTC).to.equal(1);
+        });
+
+        it('env override takes precedence over p2pConfig', () => {
+            process.env.XCHAIN_CONFIRMATIONS_BTC = '20';
+            const out = coins.resolveConfirmations({ XCHAIN_CONFIRMATIONS_BTC: '30' }, 'regtest');
+            expect(out.BTC).to.equal(20);
+        });
+
+        it('falls back to the default on a garbage or non-positive override', () => {
+            process.env.XCHAIN_CONFIRMATIONS_BTC = 'banana';
+            process.env.XCHAIN_CONFIRMATIONS_LTC = '-3';
+            const out = coins.resolveConfirmations({}, 'regtest');
+            expect(out.BTC).to.equal(coins.DEFAULT_CONFIRMATIONS.BTC);
+            expect(out.LTC).to.equal(coins.DEFAULT_CONFIRMATIONS.LTC);
+        });
+    });
 });

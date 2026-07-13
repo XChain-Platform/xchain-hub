@@ -42,19 +42,6 @@ const DEFAULT_CONFIRMATIONS = { ...coins.DEFAULT_CONFIRMATIONS };
 // Allowed chain names
 const ALLOWED_CHAINS = [...coins.ALLOWED_COINS];
 
-// Resolve per-chain confirmation thresholds with the hub's standard three-tier
-// idiom: env XCHAIN_CONFIRMATIONS_<COIN> → hub p2pConfig → Tier-B default
-// (mirrors AttestationPublisher / AttestationRound config resolution).
-function resolveConfirmations(cfg) {
-    cfg = cfg || {};
-    const out = {};
-    for (const coin of ALLOWED_CHAINS) {
-        const key = 'XCHAIN_CONFIRMATIONS_' + coin;
-        out[coin] = parseInt(process.env[key], 10) || parseInt(cfg[key], 10) || DEFAULT_CONFIRMATIONS[coin];
-    }
-    return out;
-}
-
 const DEFAULT_ATTESTATION_TIMEOUT = 60000; // 60 seconds
 
 class CrossChainEngine extends EventEmitter {
@@ -95,8 +82,9 @@ class CrossChainEngine extends EventEmitter {
         this.timeout = parseInt(process.env.ATTESTATION_TIMEOUT) || DEFAULT_ATTESTATION_TIMEOUT;
 
         // Per-chain cross-chain confirmation thresholds (env/p2pConfig overridable;
-        // see resolveConfirmations + the DEFAULT_CONFIRMATIONS note above).
-        this.confirmations = resolveConfirmations(this.hub && this.hub.p2pConfig);
+        // mainnet floor-clamped, see coins.resolveConfirmations - ).
+        this.confirmations = coins.resolveConfirmations(
+            this.hub && this.hub.p2pConfig, this.hub && this.hub.network);
 
         // Per-coin indexer JSON-RPC endpoints used to verify a proposed source
         // action against this hub's own view of the source chain (federation

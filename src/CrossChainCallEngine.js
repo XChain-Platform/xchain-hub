@@ -69,10 +69,9 @@ const ALLOWED_CHAINS  = [...coins.ALLOWED_COINS];
 const DEFAULT_POLL_MS = 15000;
 
 // Per-chain confirmation depth a source request (and a target execution) must
-// reach before the federation will sign its relay row. Shares the cross-chain
-// swap thresholds (XCHAIN_CONFIRMATIONS_<COIN> env / p2pConfig overridable).
-// See CrossChainEngine's DEFAULT_CONFIRMATIONS note for the rationale.
-const DEFAULT_CONFIRMATIONS = { ...coins.DEFAULT_CONFIRMATIONS };
+// reach before the federation will sign its relay row: shares the cross-chain
+// swap thresholds (coins.resolveConfirmations; XCHAIN_CONFIRMATIONS_<COIN> env
+// / p2pConfig overridable, mainnet floor-clamped).
 
 // Result statuses the federation will relay. Anything else from an indexer is
 // treated as 'error' (deterministic normalization happens indexer-side; this
@@ -137,11 +136,8 @@ class CrossChainCallEngine extends EventEmitter {
 
         // Confirmation thresholds (env -> p2pConfig -> default), shared with the
         // swap-attestation engine so operators tune ONE depth per chain.
-        this.confirmations = {};
-        for(let coin of ALLOWED_CHAINS){
-            let key = 'XCHAIN_CONFIRMATIONS_' + coin;
-            this.confirmations[coin] = parseInt(process.env[key], 10) || parseInt(cfg[key], 10) || DEFAULT_CONFIRMATIONS[coin];
-        }
+        // Mainnet floor-clamped, see coins.resolveConfirmations .
+        this.confirmations = coins.resolveConfirmations(cfg, hub && hub.network);
 
         // Relay margin in blocks (env -> p2pConfig -> default). Stamped onto every
         // relayed row's effective_time, sized by the gating chain's nominal block

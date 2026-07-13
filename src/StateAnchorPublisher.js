@@ -224,9 +224,9 @@ class StateAnchorPublisher {
         // Confirmation depth an ANCHOR must reach on DOGE before a peer's
         // announcement is trusted for stamp/reward (operator decision: reject
         // 0-conf, depth = XCHAIN_CONFIRMATIONS_DOGE). Same env -> p2pConfig ->
-        // per-coin default idiom the cross-chain engines use.
-        this.dogeConfirmations = parseInt(process.env.XCHAIN_CONFIRMATIONS_DOGE, 10) ||
-            parseInt(cfg.XCHAIN_CONFIRMATIONS_DOGE, 10) || coins.DEFAULT_CONFIRMATIONS.DOGE;
+        // per-coin default idiom the cross-chain engines use (mainnet
+        // floor-clamped, see coins.resolveConfirmations - ).
+        this.dogeConfirmations = coins.resolveConfirmations(cfg, this.network).DOGE;
     }
 
     setBroadcastHook(fn){ this.broadcastFn = fn; }
