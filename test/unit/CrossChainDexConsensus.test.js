@@ -451,6 +451,55 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         expect(victim.consensus.pending.get(mid).commits.size).to.equal(0);
     });
 
+    it('guard: a replayed PREPARE (valid canonical sig, no commit_sig) never counts as a COMMIT vote ', async function () {
+        // A-F6: PREPARE and COMMIT signatures were interchangeable (a COMMIT
+        // re-sends the prepare sig verbatim), so one Byzantine member could
+        // replay everyone's PREPAREs as COMMITs and finalize a round no honest
+        // peer had committed. The phase-bound commit_sig closes that: genuine
+        // canonical sigs without it collect as artifact signatures but must not
+        // tally as commit votes.
+        let bus = buildMesh(4, { drop: () => true });   // isolate: no real gossip
+        await startAll(bus);
+        let mid = 'c3'.repeat(32), row = sampleRow(mid);
+        let victim = bus.nodes[0];
+        await victim.consensus.propose(mid, { row, snapshot: { validators: validatorsOf(bus), count: 4 } });
+        let canon = canonicalMatch(row);
+        for (let nd of bus.nodes) {
+            if (nd === victim) continue;
+            let prepareSig = nd.identity.sign(canon);   // exactly what a PREPARE carries
+            victim.consensus._handleMessage({ type: 'XDEX_MATCH_COMMIT', sender: nd.pubkey,
+                data: { matchId: mid, view: 0, sig_pubkey: nd.pubkey, sig: prepareSig } });
+            // A commit_sig phase-tagged for a DIFFERENT engine (the XCALL relay
+            // twin) must not verify against this engine's COMMIT payload either.
+            victim.consensus._handleMessage({ type: 'XDEX_MATCH_COMMIT', sender: nd.pubkey,
+                data: { matchId: mid, view: 0, sig_pubkey: nd.pubkey, sig: prepareSig,
+                        commit_sig: nd.identity.sign('XCALL_RELAY_COMMIT|PHASEV1|' + canon) } });
+        }
+        await sleep(50);
+        expect(victim.finalized.length).to.equal(0);
+        let p = victim.consensus.pending.get(mid);
+        expect(p.commits.size).to.equal(0);                    // no replayed vote tallied
+        expect(p.signatures.size).to.be.at.least(3);           // artifact sigs still collected
+    });
+
+    it('phase-bound COMMIT votes with a verifying commit_sig finalize the round ', async function () {
+        let bus = buildMesh(4, { drop: () => true });   // isolate: no real gossip
+        await startAll(bus);
+        let mid = 'c4'.repeat(32), row = sampleRow(mid);
+        let victim = bus.nodes[0];
+        await victim.consensus.propose(mid, { row, snapshot: { validators: validatorsOf(bus), count: 4 } });
+        let canon = canonicalMatch(row);
+        for (let nd of bus.nodes) {
+            if (nd === victim) continue;
+            victim.consensus._handleMessage({ type: 'XDEX_MATCH_COMMIT', sender: nd.pubkey,
+                data: { matchId: mid, view: 0, sig_pubkey: nd.pubkey, sig: nd.identity.sign(canon),
+                        commit_sig: nd.identity.sign('XDEX_MATCH_COMMIT|PHASEV1|' + canon) } });
+        }
+        await sleep(50);
+        expect(victim.finalized.length).to.equal(1);
+        expect(victim.finalized[0].signatures.length).to.be.at.least(3);
+    });
+
     it('guard: NEW_VIEW from a non-leader, and view-rewind, are ignored', async function () {
         let bus = buildMesh(4);
         await startAll(bus);
