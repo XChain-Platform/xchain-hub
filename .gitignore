@@ -10,3 +10,5 @@ coverage/
 .__wt
 # Runtime attestation queue/log output - not source
 data/
+# Ad-hoc probes and PoC scripts (not source, never shipped)
+claude/scratch/
