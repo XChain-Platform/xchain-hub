@@ -316,13 +316,21 @@ class Consensus {
     // null-registry window) could otherwise inflate quorum from a single
     // connection. The registry is keyed by addr, the same value used as the
     // sender. A null registry fails closed (matches the vulnerability scenario);
-    // an empty registry stays lenient (genuine pre-bootstrap, where no peer
+    // an empty registry stays lenient ONLY until a chain-effective signer set exists (genuine pre-bootstrap, where no peer
     // votes should be arriving and the sig layer already rejects unknown
     // senders).
     _isKnownSender(sender) {
         let registry = this.peerManager && this.peerManager.validatorPubkeys;
         if (!registry) return false;
-        if (registry.size === 0) return true;
+        if (registry.size === 0) {
+            // Empty-registry leniency is for the genuine pre-bootstrap window ONLY
+            // (G-1/): once the on-chain snapshot has produced a non-empty
+            // effective signer set, an empty registry is a misconfiguration or
+            // wipe window, not bootstrap, and counting unattributable senders
+            // would reopen count-mode quorum forgery. Fail closed instead.
+            let signerSet = this.peerManager.effectiveSignerSet;
+            return !(signerSet && signerSet.size > 0);
+        }
         return registry.has(sender);
     }
 

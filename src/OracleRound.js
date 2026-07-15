@@ -552,11 +552,20 @@ class OracleRound {
     // Handle incoming gossip messages
     // A sender counts only if it maps to a registered validator pubkey. Mirrors
     // OracleConsensus._isKnownSender: a null registry fails closed; an empty
-    // registry is the permissive bootstrap window (before syncvalidators has run).
+    // registry is the permissive bootstrap window (before syncvalidators has run)
+    // only until a chain-effective signer set exists; then it fails closed.
     _isRegisteredSender(sender) {
         let registry = this.peerManager && this.peerManager.validatorPubkeys;
         if (!registry) return false;
-        if (registry.size === 0) return true;
+        if (registry.size === 0) {
+            // Empty-registry leniency is for the genuine pre-bootstrap window ONLY
+            // (G-1/): once the on-chain snapshot has produced a non-empty
+            // effective signer set, an empty registry is a misconfiguration or
+            // wipe window, not bootstrap, and counting unattributable senders
+            // would reopen count-mode quorum forgery. Fail closed instead.
+            let signerSet = this.peerManager.effectiveSignerSet;
+            return !(signerSet && signerSet.size > 0);
+        }
         return registry.has(sender);
     }
 
