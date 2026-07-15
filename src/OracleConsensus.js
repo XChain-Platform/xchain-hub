@@ -114,6 +114,15 @@ class OracleConsensus extends EventEmitter {
         // deployments set ORACLE_MIN_SUBMISSIONS=1 explicitly.
         this.minSubmissions      = parseInt(process.env.ORACLE_MIN_SUBMISSIONS) || 2;
         this.leaderTimeout       = parseInt(process.env.ORACLE_LEADER_TIMEOUT_MS) || DEFAULT_LEADER_TIMEOUT_MS;
+        // : a proposed pair this follower can verify against NOTHING (no live
+        // local aggregate AND no finalized history) used to fall through with only
+        // the (0, PRICE_MAX) clamp, letting a Byzantine leader who is the sole
+        // submitter for a brand-new pair get any value up to PRICE_MAX co-signed.
+        // Default is fail closed: withhold co-sign on unverifiable pairs, so
+        // finalization requires at least one follower that priced the pair itself.
+        // Escape hatch for deliberate single-host / bootstrap deployments where no
+        // second fetcher exists (regtest, ORACLE_MIN_SUBMISSIONS=1 setups).
+        this.allowUnverifiedPairs = String(process.env.ORACLE_ALLOW_UNVERIFIED_PAIRS || '') === 'true';
     }
 
     setValidatorSet(validators) {
@@ -962,6 +971,19 @@ class OracleConsensus extends EventEmitter {
                                 { reason: 'historical-deviation', proposed: String(p.price), lastFinalized: String(lastPrice), deviation: bcmath.bcformat(deviation, 18) });
                             return;
                         }
+                    } else if (!this.allowUnverifiedPairs) {
+                        // : no live local aggregate AND no finalized history means
+                        // this follower can verify the value against nothing; only the
+                        // (0, PRICE_MAX) clamp would apply. Withhold co-sign (same
+                        // fail-safe path as a deviation disagreement) so a Byzantine
+                        // leader who is the sole submitter for a brand-new pair cannot
+                        // get an arbitrary value quorum co-signed. The pair finalizes
+                        // once at least one co-signer prices it locally (next fetch
+                        // cycle); ORACLE_ALLOW_UNVERIFIED_PAIRS=true restores the old
+                        // clamp-only leniency for deliberate single-fetcher setups.
+                        reject(p.coinPair, 'proposed ' + p.price + ' is unverifiable: no local submission and no finalized history',
+                            { reason: 'unverifiable-new-pair', proposed: String(p.price) });
+                        return;
                     }
                 }
             }

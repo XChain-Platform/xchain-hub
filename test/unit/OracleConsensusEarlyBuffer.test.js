@@ -52,6 +52,9 @@ describe('OracleConsensus: early-message buffer for F7', function () {
         oracleRound = { getSubmissions: sinon.stub().returns(new Map()) };
         oc = new OracleConsensus(hub, oracleRound);
         oc.setValidatorSet(VALSET);
+        // Finalized history for the proposed pair so the  unverifiable-pair
+        // co-sign gate stays out of the way; buffering mechanics are under test.
+        oc._lastFinalizedPrices = new Map([['BTC/USD', '100.00000000']]);
     });
 
     afterEach(function () {
