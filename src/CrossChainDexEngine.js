@@ -114,7 +114,22 @@ class CrossChainDexEngine extends EventEmitter {
         // _insertMatchRow is INSERT IGNORE so a slipped duplicate is still harmless.
         this._inflight = new Set();
 
-        this.minConfirmations = parseInt(process.env.XDEX_MIN_CONFIRMATIONS || cfg.XDEX_MIN_CONFIRMATIONS || DEFAULT_MIN_CONFIRMATIONS);
+        // Per-coin confirmation-depth floor for a give-side escrow ( / XDEX-CONF-1).
+        // A 1-conf escrow that reorgs after the counter-leg settled on the other chain is
+        // a cross-chain value loss, worst on DOGE; the sibling CrossChainCallEngine already
+        // uses the per-chain defaults (BTC 6 / LTC 12 / DOGE 60) for the identical concern.
+        // Precedence per coin: XDEX_MIN_CONFIRMATIONS_<COIN> > flat XDEX_MIN_CONFIRMATIONS
+        // (legacy knob, e.g. regtest venues pinning 1) > coins.DEFAULT_CONFIRMATIONS[coin].
+        // A signing gate only, not signed content: no canonical/flag-day impact.
+        let flatMinConf = parseInt(process.env.XDEX_MIN_CONFIRMATIONS || cfg.XDEX_MIN_CONFIRMATIONS);
+        this.minConfirmations = {};
+        for(const tick of ALLOWED_CHAINS){
+            let perCoin = parseInt(process.env['XDEX_MIN_CONFIRMATIONS_' + tick] || cfg['XDEX_MIN_CONFIRMATIONS_' + tick]);
+            let val = Number.isFinite(perCoin) && perCoin > 0 ? perCoin
+                    : (Number.isFinite(flatMinConf) && flatMinConf > 0 ? flatMinConf
+                    : (coins.DEFAULT_CONFIRMATIONS[tick] || DEFAULT_MIN_CONFIRMATIONS));
+            this.minConfirmations[tick] = val;
+        }
 
         // PBFT consensus over each match. Single-node (quorum 0) collapses to an
         // immediate self-sign + finalize, so behavior with no federation is unchanged.
@@ -237,11 +252,11 @@ class CrossChainDexEngine extends EventEmitter {
                 // (quorum-0) fast path in CrossChainDexConsensus.propose self-signs + finalizes
                 // WITHOUT ever calling the follower check, so without this gate XDEX_MIN_CONFIRMATIONS
                 // is silently inert on a single operator and a match can settle against a
-                // reorg-able escrow. Deep-enough = (latest - block_index + 1) >= minConfirmations;
-                // an offer with no resolvable depth is kept (the default floor is 1, and an
-                // indexed order is already >= 1 deep, so this is a no-op at the default).
+                // reorg-able escrow. Deep-enough = (latest - block_index + 1) >= the offer's
+                // home-chain floor (per-coin defaults BTC 6 / LTC 12 / DOGE 60, ); an
+                // offer with no resolvable depth is kept (an indexed order is >= 1 deep).
                 let deepEnough = (o) => !(Number.isFinite(latest) && Number.isFinite(Number(o.block_index)) &&
-                                          (latest - Number(o.block_index) + 1) < this.minConfirmations);
+                                          (latest - Number(o.block_index) + 1) < this.minConfirmations[coin]);
                 offersByCoin[coin] = (res && res.orders && net)
                     ? res.orders.filter(deepEnough).map(o => Object.assign({ home_coin: coin, home_network: net }, o))
                     : [];
@@ -586,7 +601,7 @@ class CrossChainDexEngine extends EventEmitter {
         let o = res.orders.find(x => Number(x.action_index) === actionIndex);
         if(!o) return null;
         if(Number.isFinite(latest) && Number.isFinite(Number(o.block_index)) &&
-           (latest - Number(o.block_index) + 1) < this.minConfirmations) return null;   // not deep enough
+           (latest - Number(o.block_index) + 1) < this.minConfirmations[coin]) return null;   // not deep enough
         return Object.assign({ home_coin: coin, home_network: String(res.network) }, o);
     }
 

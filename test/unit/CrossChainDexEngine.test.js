@@ -803,7 +803,7 @@ describe('CrossChainDexEngine', function () {
     describe('_discoverAndMatch(): confirmation-depth floor', function () {
         it('drops offers shallower than minConfirmations on the discovery path', async function () {
             let eng = new CrossChainDexEngine(makeDexHub());
-            eng.minConfirmations = 6;
+            eng.minConfirmations = { BTC: 6, LTC: 6, DOGE: 6 }; // per-coin map 
             eng.indexers.BTC.url = 'http://btc';   // pass the per-coin URL guard
             // latest tip 20: block 11 is 10 deep (kept), block 19 is 2 deep (dropped at floor 6).
             sinon.stub(eng, '_indexerCall').resolves({
@@ -818,8 +818,9 @@ describe('CrossChainDexEngine', function () {
             expect(seen).to.not.include(2);
         });
 
-        it('keeps every offer at the default floor of 1 (no-op)', async function () {
-            let eng = new CrossChainDexEngine(makeDexHub());   // minConfirmations defaults to 1
+        it('keeps every offer at an explicit floor of 1 (regtest-style venue pin)', async function () {
+            let eng = new CrossChainDexEngine(makeDexHub());
+            eng.minConfirmations = { BTC: 1, LTC: 1, DOGE: 1 }; // XDEX_MIN_CONFIRMATIONS=1 venue pin (: defaults are now per-coin 6/12/60)
             eng.indexers.BTC.url = 'http://btc';
             sinon.stub(eng, '_indexerCall').resolves({
                 network: 'regtest', latest_block_index: 20,
@@ -829,6 +830,37 @@ describe('CrossChainDexEngine', function () {
             sinon.stub(eng, '_findMatches').callsFake((obc) => { captured = obc; return []; });
             await eng._discoverAndMatch();
             expect((captured.BTC || []).map(o => o.action_index)).to.have.members([1, 2]);
+        });
+    });
+
+    // ──  / XDEX-CONF-1: the confirmation floor is per-coin, defaulting to the
+    // chain-registry attestation depths the sibling CrossChainCallEngine already uses. ──
+    describe('minConfirmations per-coin resolution ', function () {
+        const CLEAR = ['XDEX_MIN_CONFIRMATIONS', 'XDEX_MIN_CONFIRMATIONS_BTC', 'XDEX_MIN_CONFIRMATIONS_DOGE'];
+        let saved = {};
+        beforeEach(function () { for (let k of CLEAR) { saved[k] = process.env[k]; delete process.env[k]; } });
+        afterEach(function () { for (let k of CLEAR) { if (saved[k] !== undefined) process.env[k] = saved[k]; else delete process.env[k]; } });
+
+        it('defaults to the per-chain registry depths (BTC 6 / LTC 12 / DOGE 60)', function () {
+            const coins = require('../../src/coins');
+            let eng = new CrossChainDexEngine(makeDexHub());
+            expect(eng.minConfirmations.BTC).to.equal(coins.DEFAULT_CONFIRMATIONS.BTC);
+            expect(eng.minConfirmations.LTC).to.equal(coins.DEFAULT_CONFIRMATIONS.LTC);
+            expect(eng.minConfirmations.DOGE).to.equal(coins.DEFAULT_CONFIRMATIONS.DOGE);
+        });
+
+        it('flat XDEX_MIN_CONFIRMATIONS pins every coin (regtest venue knob)', function () {
+            process.env.XDEX_MIN_CONFIRMATIONS = '1';
+            let eng = new CrossChainDexEngine(makeDexHub());
+            expect(eng.minConfirmations).to.deep.equal({ BTC: 1, LTC: 1, DOGE: 1 });
+        });
+
+        it('per-coin XDEX_MIN_CONFIRMATIONS_<COIN> beats the flat knob', function () {
+            process.env.XDEX_MIN_CONFIRMATIONS = '1';
+            process.env.XDEX_MIN_CONFIRMATIONS_DOGE = '30';
+            let eng = new CrossChainDexEngine(makeDexHub());
+            expect(eng.minConfirmations.DOGE).to.equal(30);
+            expect(eng.minConfirmations.BTC).to.equal(1);
         });
     });
 
