@@ -49,7 +49,7 @@ async function bootApi(env) {
     });
 
     const saved = {};
-    for (const k of ['HUB_API_KEY', 'HUB_SENSITIVE_READ_AUTH', 'HUB_DB_HOST', 'HUB_DB_PORT',
+    for (const k of ['HUB_API_KEY', 'HUB_REORG_API_KEY', 'HUB_SENSITIVE_READ_AUTH', 'HUB_DB_HOST', 'HUB_DB_PORT',
                      'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT', 'P2P_VALIDATOR_ADDR']) {
         saved[k] = process.env[k];
         delete process.env[k];
@@ -192,6 +192,49 @@ describe('hub API-key tiers (writes + sensitive reads vs public reads)', functio
             const api = await bootApi({});
             for (const m of ['getallconfigs', 'updateconfig', 'pushchaintip', 'getproposals'])
                 expect(api.request(m, undefined).nexted).to.equal(true, m);
+        });
+    });
+
+    //  interim credential scoping: with HUB_REORG_API_KEY set, the
+    // retraction rails (push*reorg) answer ONLY to it - the bulk key no longer
+    // authorizes them, and the reorg key authorizes nothing else - so a
+    // bulk-key compromise cannot fabricate reorg retractions.
+    describe('HUB_REORG_API_KEY set (retraction-rail tier)', function () {
+        const RKEY = 'test-reorg-key';
+        let api;
+        before(async function () { api = await bootApi({ HUB_API_KEY: KEY, HUB_REORG_API_KEY: RKEY }); });
+
+        it('push*reorg with the BULK key is 401 (bulk key demoted off the rail)', function () {
+            for (const m of ['pushpricereorg', 'pushxcallreorg', 'pushdexreorg'])
+                expect(api.request(m, KEY).res.statusCode).to.equal(401, m);
+        });
+
+        it('push*reorg with the reorg key passes', function () {
+            for (const m of ['pushpricereorg', 'pushxcallreorg', 'pushdexreorg'])
+                expect(api.request(m, RKEY).nexted).to.equal(true, m);
+        });
+
+        it('the reorg key authorizes nothing else (other writes stay bulk-keyed)', function () {
+            expect(api.request('pushchaintip', RKEY).res.statusCode).to.equal(401);
+            expect(api.request('pushchaintip', KEY).nexted).to.equal(true);
+        });
+
+        it('a batch mixing tiers cannot satisfy both with one key', function () {
+            expect(api.requestBatch(['pushpricereorg', 'pushchaintip'], RKEY).res.statusCode).to.equal(401);
+            expect(api.requestBatch(['pushpricereorg', 'pushchaintip'], KEY).res.statusCode).to.equal(401);
+        });
+
+        it('unset HUB_REORG_API_KEY keeps legacy bulk-key gating (rolling-deploy safe)', async function () {
+            const legacy = await bootApi({ HUB_API_KEY: KEY });
+            expect(legacy.request('pushpricereorg', KEY).nexted).to.equal(true);
+            expect(legacy.request('pushpricereorg', undefined).res.statusCode).to.equal(401);
+        });
+
+        it('reorg tier enforced even when the bulk key is unset', async function () {
+            const reorgOnly = await bootApi({ HUB_REORG_API_KEY: RKEY });
+            expect(reorgOnly.request('pushpricereorg', undefined).res.statusCode).to.equal(401);
+            expect(reorgOnly.request('pushpricereorg', RKEY).nexted).to.equal(true);
+            expect(reorgOnly.request('pushchaintip', undefined).nexted).to.equal(true);
         });
     });
 });

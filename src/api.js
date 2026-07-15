@@ -94,6 +94,17 @@ const WRITE_METHODS  = new Set([
     'pushdexreorg', 'anchorflush'
 ]);
 
+//  interim credential scoping: the reorg-retraction rails feed row:deleted
+// broadcasts that durably delete quorum-signed relay rows fleet-wide, a strictly
+// more destructive tier than the other writes sharing the bulk HUB_API_KEY. When
+// HUB_REORG_API_KEY is set, these three methods require THAT key and the bulk key
+// no longer authorizes them (and the reorg key authorizes nothing else), so a
+// bulk-key compromise cannot fabricate retractions. Unset = legacy behavior
+// (bulk-key gated), rolling-deploy safe. Full fix (2f+1 co-signed retractions)
+// rides the  flag-day set.
+const REORG_WRITE_METHODS = new Set(['pushpricereorg', 'pushxcallreorg', 'pushdexreorg']);
+const HUB_REORG_API_KEY   = process.env.HUB_REORG_API_KEY || '';
+
 // Read methods whose RESPONSE is mesh-internal, keyed like writes when
 // HUB_API_KEY is set: getallconfigs returns every service's connection
 // parameters including DB user/pass, so it must never be publicly readable.
@@ -283,7 +294,7 @@ async function startApi(){
     // above). Everything not in either set is the public read tier, protected
     // only by the per-IP rate limit.
     app.use((req, res, next) => {
-        if (!HUB_API_KEY) return next();
+        if (!HUB_API_KEY && !HUB_REORG_API_KEY) return next();
         // A JSON-RPC batch arrives as an array of call objects; a single call as
         // one object. express-json-rpc-router dispatches every element of an
         // array body, so the gate must inspect ALL of them: require a key if ANY
@@ -291,20 +302,39 @@ async function startApi(){
         // off an array leaves it undefined, which is how a batch previously smuggled
         // gated methods past the check unauthenticated.
         let calls = Array.isArray(req.body) ? req.body : [req.body];
-        let gated = calls.some(call => {
-            let method = call && call.method;
-            return method && (WRITE_METHODS.has(method.toLowerCase()) ||
-                (SENSITIVE_READ_AUTH && SENSITIVE_READ_METHODS.has(method.toLowerCase())));
+        let timingEqual = (provided, expected) => {
+            let a = Buffer.from(provided), b = Buffer.from(expected);
+            return a.length === b.length && crypto.timingSafeEqual(a, b);
+        };
+        let provided = req.headers['x-api-key'] || '';
+        let unauthorized = () => res.status(401).json({
+            jsonrpc: '2.0', id: (Array.isArray(req.body) ? null : (req.body && req.body.id)) || null,
+            error: { code: -32001, message: 'Unauthorized' }
         });
-        if (gated) {
-            let provided = req.headers['x-api-key'] || '';
-            let a = Buffer.from(provided), b = Buffer.from(HUB_API_KEY);
-            if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-                return res.status(401).json({
-                    jsonrpc: '2.0', id: (Array.isArray(req.body) ? null : (req.body && req.body.id)) || null,
-                    error: { code: -32001, message: 'Unauthorized' }
-                });
-            }
+        // : with HUB_REORG_API_KEY set, the retraction rails answer ONLY to
+        // it (a batch mixing reorg and non-reorg gated methods can never satisfy
+        // both tiers with the single x-api-key header a request carries; callers
+        // do not mix tiers). Unset, they stay in the bulk tier below.
+        if (HUB_REORG_API_KEY) {
+            let reorgGated = calls.some(call => {
+                let method = call && call.method;
+                return method && REORG_WRITE_METHODS.has(method.toLowerCase());
+            });
+            if (reorgGated && !timingEqual(provided, HUB_REORG_API_KEY)) return unauthorized();
+        }
+        if (HUB_API_KEY) {
+            let gated = calls.some(call => {
+                let method = call && call.method;
+                if (!method) return false;
+                let m = method.toLowerCase();
+                // Reorg methods moved to their own tier above; the reorg key
+                // must not authorize anything else, and the bulk key must no
+                // longer authorize retractions.
+                if (HUB_REORG_API_KEY && REORG_WRITE_METHODS.has(m)) return false;
+                return WRITE_METHODS.has(m) ||
+                    (SENSITIVE_READ_AUTH && SENSITIVE_READ_METHODS.has(m));
+            });
+            if (gated && !timingEqual(provided, HUB_API_KEY)) return unauthorized();
         }
         next();
     });
