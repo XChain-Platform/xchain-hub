@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Standard proprietary/AGPL license header on three unit test files that were missing it (`ConsensusPrimitiveConformance`, `StateAnchorPublisher.reward-crosscheck`, `jsonrpc-body-guard`), matching the rest of `test/unit`; test-only, no behavior change.
 - `HUB_CLAUDE_DEFAULT_CONFIG_DIR` env override for the credential resolver's last-resort `~/.claude-xchain` fallback, so hermetic tests and constrained deploys can disable it.
 - LLM attestation outage resilience (Phase 4): failed rounds publish throttled `provider_error`/`no_quorum` ATTEST v1 audit rows, the round leader rotates per `ATTESTATION_LEADER_ROTATION_BLOCKS`, and the llm provider goes multi-vendor (block-anchored `approved_models` fallback ladder, `openai_api` transport, judge fallback chain, `require_all_vendors` enforcement).
 - Armed the four BTC-anchored activation twins (checkpoint commitment, EQUIV header, stake-weighted quorum, anchor reward) at BTC 961000 (~2026-08-04), in lockstep with the indexer.
