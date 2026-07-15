@@ -48,6 +48,11 @@ class OracleRound {
         this.roundStartTime    = 0;
         this.roundTimer        = null;
         this.initialRoundTimer = null;
+        // Boundary-alignment setTimeout handle. Tracked so stop() can cancel it
+        // during the (up to a full roundInterval) window before it fires and
+        // installs roundTimer; an untracked handle leaks an interval across
+        // stop()/recreate and orphans the fresh roundTimer on stop()->start().
+        this.boundaryTimer     = null;
 
         // Submissions per round: Map<round, Map<sender, { prices, sources, timestamp }>>
         this.submissions = new Map();
@@ -69,6 +74,17 @@ class OracleRound {
         this.roundInterval          = this.config.ORACLE_ROUND_INTERVAL || 600000;     // 10 minutes
         this.submissionWindow       = this.config.ORACLE_SUBMISSION_WINDOW || 180000;   // 3 minutes
         this.maxSubmissionsPerRound  = parseInt(this.config.ORACLE_MAX_SUBMISSIONS_PER_ROUND) || 200;
+        // Retention window (in rounds) for the oracle_submissions audit table.
+        // oracle_submissions is a purely diagnostic per-validator trail: the
+        // finalized value lives durably in price_snapshots and dropped rows are
+        // explicitly tolerated (Promise.allSettled in _persistSubmissions). Without
+        // a bound the table appends validators x coin_pairs rows every round for the
+        // life of the deployment. Keep the most recent N rounds; 0 disables pruning.
+        // Default ~90 days at the 10-minute round default, mirroring telemetry_pings.
+        this.submissionsRetentionRounds = parseInt(this.config.ORACLE_SUBMISSIONS_RETENTION_ROUNDS);
+        if (!Number.isFinite(this.submissionsRetentionRounds) || this.submissionsRetentionRounds < 0) {
+            this.submissionsRetentionRounds = 12960;
+        }
         this.priceMax               = PRICE_MAX;
 
         // Canonical coin-pair whitelist. Submitted prices for any pair outside this
@@ -130,6 +146,13 @@ class OracleRound {
 
     // Start the oracle round system
     async start() {
+        // Idempotent: a second start() without an intervening stop() would install
+        // a duplicate round loop (and leak the first). If any scheduling timer is
+        // already live, this instance is running; do nothing.
+        if (this.initialRoundTimer || this.boundaryTimer || this.roundTimer) {
+            return;
+        }
+
         // Rehydrate freshness counters from the durable record before the timer
         // begins, so a restart reflects the real feed state instead of a clean slate.
         await this._hydrateFreshnessCounters();
@@ -207,6 +230,10 @@ class OracleRound {
         if (this.initialRoundTimer) {
             clearTimeout(this.initialRoundTimer);
             this.initialRoundTimer = null;
+        }
+        if (this.boundaryTimer) {
+            clearTimeout(this.boundaryTimer);
+            this.boundaryTimer = null;
         }
         if (this.roundTimer) {
             clearInterval(this.roundTimer);
@@ -363,8 +390,12 @@ class OracleRound {
             }, initialDelay);
         }
 
-        // Align to the next round boundary, then run on a steady interval
-        setTimeout(() => {
+        // Align to the next round boundary, then run on a steady interval.
+        // Capture the handle so stop() can cancel it before it fires; null it
+        // inside the callback so the idempotency guard in start() sees a clean
+        // slate once the interval has taken over.
+        this.boundaryTimer = setTimeout(() => {
+            this.boundaryTimer = null;
             runRound();
             this.roundTimer = setInterval(runRound, this.roundInterval);
         }, timeToNextRound);
@@ -452,6 +483,10 @@ class OracleRound {
 
         // Prune old submissions (keep current and previous round only)
         this._pruneSubmissions();
+        // Best-effort DB retention for the oracle_submissions audit table. Fire-and-
+        // forget: a retention failure must never stall or crash a money-bearing
+        // consensus round (same posture as the tolerated audit-row insert failures).
+        this._pruneSubmissionsDb().catch(() => {});
 
         // Initialize submission map for this round
         if (!this.submissions.has(this.currentRound)) {
@@ -731,6 +766,27 @@ class OracleRound {
             if (round < this.currentRound - 1) {
                 this.submissions.delete(round);
             }
+        }
+    }
+
+    // Bound the durable oracle_submissions audit table to the retention window.
+    // The in-memory _pruneSubmissions only trims the Map; without this the table
+    // grows monotonically. Keyed to round_number (indexed) so the DELETE is cheap
+    // and deterministic; keeps the most recent submissionsRetentionRounds rounds.
+    // oracle_submissions is diagnostic-only (finalized values live in
+    // price_snapshots), so dropping aged rows is safe and never consensus-visible.
+    async _pruneSubmissionsDb() {
+        if (!this.submissionsRetentionRounds || this.submissionsRetentionRounds <= 0) return;
+        let cutoff = this.currentRound - this.submissionsRetentionRounds;
+        if (cutoff <= 0) return;
+        let result = await this.db.doQuery(
+            'DELETE FROM oracle_submissions WHERE round_number < ?',
+            [cutoff]);
+        let deleted = result && result.affectedRows ? Number(result.affectedRows) : 0;
+        if (deleted > 0) {
+            console.log('Oracle submissions retention: pruned ' + deleted +
+                ' rows older than round ' + cutoff + ' (keep ' +
+                this.submissionsRetentionRounds + ' rounds)');
         }
     }
 }

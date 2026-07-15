@@ -2128,8 +2128,14 @@ class StateAnchorPublisher {
         for(let s of sigs){
             let pk = String(s.pubkey).toLowerCase();
             if(seen.has(pk) || !qualified.has(pk)) continue;
-            seen.add(pk);
-            if(ValidatorIdentity.verify(canonical, String(s.sig), pk)) validSigners.push(pk);
+            // Mark seen only AFTER a successful verify: marking on first
+            // encounter is an order-dependent quorum under-count (a garbage
+            // sig ahead of the same pubkey's valid sig would drop the signer),
+            // and diverges from the indexer recovery twin this must match.
+            if(ValidatorIdentity.verify(canonical, String(s.sig), pk)){
+                seen.add(pk);
+                validSigners.push(pk);
+            }
         }
         if(weighted){
             // source carries the staking source; weight (or amount, from

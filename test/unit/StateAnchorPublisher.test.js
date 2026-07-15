@@ -1383,6 +1383,25 @@ describe('StateAnchorPublisher', function () {
             expect(pub._quorumVerified(CANON, three, set, false)).to.equal(true);
         });
 
+        it('_quorumVerified: duplicate pubkey with garbage sig FIRST still counts the later valid sig ()', function () {
+            // seen-before-verify was an order-dependent under-count: the garbage
+            // entry consumed the pubkey's seen slot and the real signature was
+            // skipped, diverging from the indexer recovery twin (verify-first).
+            let pub = weightedPub();
+            let { ids, set } = stakeSet();
+            let valid = sigsFrom([ids[0], ids[1]]);                  // 70 + 10 = 80 of 100, clears stake bar
+            let poisoned = [{ pubkey: ids[0].getPubkeyHex().toLowerCase(), sig: '00'.repeat(64) }, ...valid];
+            expect(pub._quorumVerified(CANON, poisoned, set, true)).to.equal(true);
+        });
+
+        it('_quorumVerified: a pubkey with ONLY invalid sigs is not counted and blocks nothing', function () {
+            let pub = weightedPub();
+            let { ids, set } = stakeSet();
+            let garbageOnly = [{ pubkey: ids[0].getPubkeyHex().toLowerCase(), sig: '00'.repeat(64) },
+                               ...sigsFrom(ids.slice(1))];           // 3×10% real = stake-short
+            expect(pub._quorumVerified(CANON, garbageOnly, set, true)).to.equal(false);
+        });
+
         it('_checkArchiveQuorum: a count-met-but-stake-short round does NOT publish/dequeue', async function () {
             let pub = weightedPub();
             let { ids, set } = stakeSet();

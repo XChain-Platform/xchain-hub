@@ -49,6 +49,7 @@ describe('OracleRound (extra coverage)', function () {
         // Clean up any timers
         if (or.roundTimer)        { clearInterval(or.roundTimer); or.roundTimer = null; }
         if (or.initialRoundTimer) { clearTimeout(or.initialRoundTimer); or.initialRoundTimer = null; }
+        if (or.boundaryTimer)     { clearTimeout(or.boundaryTimer); or.boundaryTimer = null; }
         if (or.finalizationTimers) { for (let t of or.finalizationTimers.values()) clearTimeout(t); or.finalizationTimers.clear(); }
     });
 
@@ -81,6 +82,40 @@ describe('OracleRound (extra coverage)', function () {
             or.roundTimer = setInterval(() => {}, 100000);
             await or.stop();
             expect(or.roundTimer).to.be.null;
+        });
+
+        it('clears the untracked boundary timer so it cannot fire after stop()', async function () {
+            let clock = sinon.useFakeTimers({ now: or.epochStart + 1000 });
+            try {
+                let ran = sinon.stub(or, '_executeRound').resolves();
+                or._startRoundTimer();
+                // Boundary timer is now scheduled but not yet fired.
+                expect(or.boundaryTimer).to.not.be.null;
+                await or.stop();
+                expect(or.boundaryTimer).to.be.null;
+                // Advance well past the boundary: the cancelled timer must not fire
+                // a round or install a lingering interval.
+                clock.tick(or.roundInterval * 3);
+                expect(ran.called).to.be.false;
+                expect(or.roundTimer).to.be.null;
+            } finally {
+                clock.restore();
+            }
+        });
+    });
+
+    // ── start() idempotency ──────────────────────────────────────────────────
+
+    describe('start() idempotency', function () {
+        it('does not install a second round loop when already running', async function () {
+            sinon.stub(or, '_hydrateFreshnessCounters').resolves();
+            let spy = sinon.spy(or, '_startRoundTimer');
+            await or.start();
+            expect(spy.callCount).to.equal(1);
+            // Second start() with no intervening stop() is a no-op.
+            await or.start();
+            expect(spy.callCount).to.equal(1);
+            await or.stop();
         });
     });
 
@@ -382,6 +417,45 @@ describe('OracleRound (extra coverage)', function () {
             expect(or.submissions.has(3)).to.be.false;
             expect(or.submissions.has(4)).to.be.true;
             expect(or.submissions.has(5)).to.be.true;
+        });
+    });
+
+    // ── _pruneSubmissionsDb (durable retention) ──────────────────────────────
+
+    describe('_pruneSubmissionsDb()', function () {
+        it('deletes oracle_submissions rows older than the retention window', async function () {
+            or.submissionsRetentionRounds = 100;
+            or.currentRound = 1000;
+            let del = sinon.stub().resolves({ affectedRows: 7 });
+            hub.db.doQuery = del;
+            await or._pruneSubmissionsDb();
+            expect(del.calledOnce).to.be.true;
+            expect(del.firstCall.args[0]).to.match(/DELETE FROM oracle_submissions WHERE round_number < \?/);
+            expect(del.firstCall.args[1]).to.deep.equal([900]);
+        });
+
+        it('is a no-op when retention is disabled (0)', async function () {
+            or.submissionsRetentionRounds = 0;
+            or.currentRound = 1000;
+            let del = sinon.stub().resolves({});
+            hub.db.doQuery = del;
+            await or._pruneSubmissionsDb();
+            expect(del.called).to.be.false;
+        });
+
+        it('is a no-op before the deployment has run a full window of rounds', async function () {
+            or.submissionsRetentionRounds = 12960;
+            or.currentRound = 50;
+            let del = sinon.stub().resolves({});
+            hub.db.doQuery = del;
+            await or._pruneSubmissionsDb();
+            expect(del.called).to.be.false;
+        });
+
+        it('defaults to a bounded window (does not grow unbounded)', function () {
+            let fresh = new OracleRound(createMockHub({ p2pConfig: {} }));
+            expect(fresh.submissionsRetentionRounds).to.be.a('number');
+            expect(fresh.submissionsRetentionRounds).to.be.greaterThan(0);
         });
     });
 
