@@ -441,7 +441,11 @@ async function startApi(){
         // since that instant are returned, so a quiet poll transfers near-nothing
         // instead of the whole table. Callers that omit it get the full tree, so
         // the change is fully backward-compatible. The watermark is read before
-        // the rows so a write racing the two reads is re-delivered, never skipped.
+        // the rows, and the cursor second is INCLUSIVE on the next delta
+        // (db.getAllConfigs compares `>=`), so a write racing the two reads - or
+        // committed after them but stamped in the watermark's second - is
+        // re-delivered, never skipped. Consumers must merge idempotently: rows in
+        // the cursor second repeat on each poll until a newer write lands (#2265).
         async getallconfigs(params) {
             try {
                 let since     = params && params.since_updated_at;

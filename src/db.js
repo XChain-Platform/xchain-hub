@@ -560,17 +560,21 @@ class Database {
 
     // Returns: { coin: { network: { module: { param: value } } } }
     //
-    // Optional `sinceUpdatedAt` (epoch-seconds cursor from getConfigWatermark) returns only rows
-    // changed after that instant. The cursor is anchored on UNIX_TIMESTAMP(updated_at): a plain
-    // integer that survives JSON round-trips with no timezone ambiguity. Comparison is strict `>`;
-    // config writes are rare (governance-driven) and a consumer restart re-fetches in full, so the
-    // one-second granularity boundary is acceptable without a separate sequence column.
+    // Optional `sinceUpdatedAt` (epoch-seconds cursor from getConfigWatermark) returns rows
+    // changed at or after that instant. The cursor is anchored on UNIX_TIMESTAMP(updated_at): a
+    // plain integer that survives JSON round-trips with no timezone ambiguity. Comparison is
+    // INCLUSIVE `>=` (item #2265): both sides truncate to whole seconds, so a strict `>` dropped
+    // a write committed after the row read but stamped in the same second as the watermark - the
+    // client advanced its cursor to that second and the write was never delivered until a full
+    // re-fetch. The cost of `>=` is that rows in the cursor second are re-delivered each poll
+    // until a newer write lands; consumers merge idempotently, so redelivery is a no-op and the
+    // delta is genuinely loss-free without a separate sequence column.
     async getAllConfigs(sinceUpdatedAt){
         let query = "SELECT coin, network, module, param_name, param_value FROM configs";
         let args  = [];
         let since = Number(sinceUpdatedAt);
         if(Number.isFinite(since) && since > 0){
-            query += " WHERE UNIX_TIMESTAMP(updated_at) > ?";
+            query += " WHERE UNIX_TIMESTAMP(updated_at) >= ?";
             args.push(since);
         }
         query += " ORDER BY coin, network, module, param_name";
@@ -590,7 +594,10 @@ class Database {
 
     // High-water mark of the configs table as epoch seconds (newest updated_at, or 0 when empty).
     // Read BEFORE reading the rows: a racing write is excluded from the watermark but included in
-    // the rows, so it is re-delivered next poll (idempotent merge) rather than skipped.
+    // the rows. The cursor second itself is INCLUSIVE on the next poll (getAllConfigs uses `>=`),
+    // so a write stamped in the same second as the watermark - even one committed after the row
+    // read - is re-delivered next poll (idempotent merge) rather than skipped. That inclusive
+    // redelivery is what makes the delta loss-free at one-second granularity (item #2265).
     async getConfigWatermark(){
         let rows = await this.doQuery("SELECT UNIX_TIMESTAMP(MAX(updated_at)) AS watermark FROM configs");
         let w = rows && rows[0] ? rows[0].watermark : null;

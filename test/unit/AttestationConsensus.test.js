@@ -691,6 +691,36 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         expect(pending.winner).to.not.equal(null);
     });
 
+    it('a leader with its own ok body re-signs the canonical winner', async function () {
+        c = new AttestationConsensus(hub, makeRealProviderRegistry(proposals => proposals[0], 'judge_model'));
+        await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'llm', 2));
+        await flush();
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
+        await flush();
+        let pending = c.pending.get(RID);
+        expect(pending.winner).to.not.equal(null);
+        expect(pending.signatures.has(pub(me)), 'leader with genuine work must vouch for the winner').to.equal(true);
+    });
+
+    it('a leader whose own fetch FAILED does not re-sign the winner (#2235: symmetric to the follower abstention)', async function () {
+        c = new AttestationConsensus(hub, makeRealProviderRegistry(proposals => proposals[0], 'judge_model'));
+        // _startRound stores a failed fetch as an error proposal: empty body,
+        // status 'provider_error'. The leader still runs agree() over the
+        // followers' ok bodies, but it must NOT vouch for bytes it never
+        // fetched or evaluated - that improper vote is the one that would push
+        // signatures.size to REDUNDANCY with only REDUNDANCY-1 genuine attesters.
+        let rs = roundState(me, [me, p1, p2], Buffer.alloc(0), 'llm', 2);
+        rs.myProposal = { body: Buffer.alloc(0), meta: '', status: 'provider_error' };
+        await c.propose(RID, rs);
+        await flush();
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.from('p2-body')));
+        await flush();
+        let pending = c.pending.get(RID);
+        expect(pending.winner, 'agree() still runs over the follower ok bodies').to.not.equal(null);
+        expect(pending.signatures.has(pub(me)), 'leader must abstain from re-signing work it did not do').to.equal(false);
+    });
+
     it('threads the round-snapshotted pinnedJudgeModel into agree() (immune to module JUDGE_MODEL drift)', async function () {
         let agreeSpy = sinon.spy(proposals => proposals[0]);
         c = new AttestationConsensus(hub, makeRealProviderRegistry(agreeSpy, 'judge_model'));

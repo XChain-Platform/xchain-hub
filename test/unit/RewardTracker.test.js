@@ -280,6 +280,30 @@ describe('RewardTracker', function () {
             expect(post.calledOnce, 'pre-flag-day reward still pushed').to.be.true;
         });
 
+        it('gates on the THREADED reward network, not the hub network: an unscoped hub does not double-credit (#2236)', async function () {
+            // The build half (StateAnchorPublisher) gates the v4/v5 payload on the
+            // checkpoint ROW's network. An unscoped hub (network='') re-deriving
+            // the record-half gate from hub.network saw ''->inactive and credited
+            // the legacy amount AND pushed it, while every indexer ALSO derived
+            // the frozen on-chain amount: a spendable double-credit.
+            hub.network = '';                                              // legacy unscoped hub
+            rt.btcIndexerApiUrl = 'http://indexer:3000';
+            await rt.recordAnchorReward('anchor_DOGE', 8, hexPk(1), 100, 'regtest');   // row.network past flag-day
+            await new Promise(r => setImmediate(r));
+            expect(post.called, 'derived reward must not be pushed').to.be.false;
+            let ins = hub.db.doQuery.getCall(1).args;                      // getCall(0) is the dedup SELECT
+            expect(ins[0]).to.include('INSERT IGNORE INTO validator_rewards');
+            expect(ins[1][3], 'frozen consensus amount, not the legacy tunable').to.equal('10.00000000');
+        });
+
+        it('falls back to the hub network when no reward network is threaded (legacy callers unchanged)', async function () {
+            hub.network = 'regtest';
+            rt.btcIndexerApiUrl = 'http://indexer:3000';
+            await rt.recordAnchorReward('anchor_DOGE', 9, hexPk(1), 100);  // no network arg
+            await new Promise(r => setImmediate(r));
+            expect(post.called, 'derived reward is not pushed').to.be.false;
+        });
+
         it('records the FROZEN amount for a derived anchor_<chain> reward, ignoring an env override', async function () {
             // A non-default ANCHOR_REWARD_PER_PUBLISH must NOT reach the recorded/archived amount
             // for a derived reward: the indexer credits the frozen constant, so the archive (and

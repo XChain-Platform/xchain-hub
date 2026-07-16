@@ -510,7 +510,7 @@ class StateAnchorPublisher {
                 if(attested || !ar.isAnchorRewardActive(Number(row.snapshot_block), row.network)){
                     this._recordReward('anchor_' + row.chain, Number(row.checkpoint_seq),
                                        this.identity ? this.identity.getPubkeyHex() : null,
-                                       Number(row.snapshot_block));
+                                       Number(row.snapshot_block), row.network);
                 } else {
                     console.log('StateAnchorPublisher: degraded legacy anchor at/above the reward flag-day for ' +
                                 row.chain + '/' + row.network + ' @ ' + row.block_index +
@@ -542,11 +542,15 @@ class StateAnchorPublisher {
     // re-derivation. recordAnchorReward dedups all paths, including a failover
     // race that hands the same (round, type) to two different publisher pubkeys,
     // which it collapses to a single deterministic per-(round,type) winner.
-    _recordReward(rewardType, roundNumber, pubkey, blockIndex){
+    // `network` is the REWARD's network (the checkpoint row's), threaded through
+    // so RewardTracker's derive-vs-push flag-day gate reads the SAME source as
+    // this publisher's payload-build gate (#2236): re-deriving it from
+    // this.hub.network inside RewardTracker double-credited on an unscoped hub.
+    _recordReward(rewardType, roundNumber, pubkey, blockIndex, network){
         if(!this.hub.rewardTracker || typeof this.hub.rewardTracker.recordAnchorReward !== 'function') return;
         if(!pubkey) return;
         this.hub.rewardTracker
-            .recordAnchorReward(rewardType, roundNumber, String(pubkey).toLowerCase(), Number.isFinite(blockIndex) ? blockIndex : 0)
+            .recordAnchorReward(rewardType, roundNumber, String(pubkey).toLowerCase(), Number.isFinite(blockIndex) ? blockIndex : 0, network)
             .catch(e => console.warn('StateAnchorPublisher: reward record failed (' + rewardType + '/' + roundNumber + '): ' + (e && e.message)));
     }
 
@@ -1492,7 +1496,7 @@ class StateAnchorPublisher {
         // live + recovering indexers both derive the credit from the on-chain
         // attestation. Below the flag-day the mirror remains the only transport.
         if(cps && cps.length > 0 && !ar.isAnchorRewardActive(Number(cps[0].snapshot_block), String(d.network)))
-            this._recordReward('anchor_' + String(d.chain), Number(d.checkpoint_seq), sender, Number(cps[0].snapshot_block));
+            this._recordReward('anchor_' + String(d.chain), Number(d.checkpoint_seq), sender, Number(cps[0].snapshot_block), String(d.network));
     }
 
     _v0DoneCanonical(row, txid){
@@ -2055,7 +2059,7 @@ class StateAnchorPublisher {
             if(attested || !ar.isArchiveRewardActive(Number(round.cp.snapshot_block), round.cp.network)){
                 this._recordReward('anchor_archive', round.batchSeq,
                                    this.identity ? this.identity.getPubkeyHex() : null,
-                                   Number(round.cp.snapshot_block));
+                                   Number(round.cp.snapshot_block), round.cp.network);
             } else {
                 console.log('StateAnchorPublisher: degraded legacy v1 archive at/above the archive-reward ' +
                             'flag-day for batch ' + round.batchSeq + '; reward withheld (no live indexer derives it)');
@@ -2151,7 +2155,7 @@ class StateAnchorPublisher {
                     ? 'flag-day-derived (mirror retired, )'
                     : await this._verifyArchiveCheckpointOnChain(Number(d.batch_seq), String(d.txid));
                 if(archiveVerified === 'verified')
-                    this._recordReward('anchor_archive', Number(d.batch_seq), sender, Number(d.snapshot_block));
+                    this._recordReward('anchor_archive', Number(d.batch_seq), sender, Number(d.snapshot_block), this.network);
                 else
                     console.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') archive checkpoint ' +
                                  'not on-chain verified (' + archiveVerified + '); NOT mirroring the archive reward');

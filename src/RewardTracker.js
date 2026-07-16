@@ -94,7 +94,7 @@ class RewardTracker {
     // that has already ridden an on-chain archive (batch_seq IS NOT NULL) is
     // immutable and is never displaced. Retries / re-flushes / multi-hub recording
     // of the SAME pubkey remain idempotent (UNIQUE KEY + the existence check below).
-    async recordAnchorReward(rewardType, roundNumber, pubkey, blockIndex) {
+    async recordAnchorReward(rewardType, roundNumber, pubkey, blockIndex, rewardNetwork) {
         if (typeof pubkey !== 'string' || !/^[0-9a-fA-F]{64}$/.test(pubkey)) return;
         let lcPubkey = pubkey.toLowerCase();
 
@@ -107,7 +107,18 @@ class RewardTracker {
         // rule to `anchor_archive` at/above its own ARCHIVE_REWARD flag-day (derived from the
         // ANCHOR v6 publisher attestation with the frozen ARCHIVE_REWARD_AMOUNT). Below each
         // flag-day the legacy operator-tunable amount stands.
-        let network   = (this.hub && this.hub.network) ? this.hub.network : '';
+        // Gate on the REWARD's network (the checkpoint row's, threaded from the
+        // publisher), falling back to the hub's own network only for callers that
+        // do not pass one. The build half (StateAnchorPublisher's v4/v5 payload
+        // gate) keys on row.network; re-deriving from this.hub.network here
+        // diverged on a legacy-unscoped hub (network===''): a post-flag-day
+        // mainnet checkpoint was built derivable (indexer credits the frozen
+        // amount on-chain) while this half saw ''->inactive and ALSO credited +
+        // pushed the legacy amount - a double-credit on the COLLECT-spendable
+        // rail (#2236, the #5311 vector).
+        let network   = (rewardNetwork !== undefined && rewardNetwork !== null)
+                      ? String(rewardNetwork)
+                      : ((this.hub && this.hub.network) ? this.hub.network : '');
         let isDerivedChain   = /^anchor_(BTC|LTC|DOGE)$/.test(String(rewardType)) &&
                                ar.isAnchorRewardActive(Number(blockIndex), network);
         let isDerivedArchive = String(rewardType) === 'anchor_archive' &&

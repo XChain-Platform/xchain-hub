@@ -950,7 +950,15 @@ class Consensus {
                 this.lastAppliedSeq = this.seq;
             }
         } catch (e) {
+            // Fail CLOSED, mirroring _saveSeq: a swallowed read fault left
+            // this.seq/lastAppliedSeq at their constructor 0, so the stale-seq
+            // replay guard in _handlePrePrepare (`seq <= this.lastAppliedSeq`)
+            // no longer rejected an already-applied seq and the node could not
+            // tell a genuine fresh install from an unreadable persisted seq.
+            // Rethrow so start() aborts rather than participate with the guard
+            // reset to 0. A true fresh install reads zero rows, not an error.
             console.error('Error loading consensus sequence:', e);
+            throw e;
         }
     }
 

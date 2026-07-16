@@ -623,7 +623,10 @@ describe('Database: extended coverage', function () {
             mockConn.query.resolves([]);
             await db.getAllConfigs(1718000000);
             const [sql, args] = mockConn.query.getCall(0).args;
-            expect(sql).to.include('WHERE UNIX_TIMESTAMP(updated_at) > ?');
+            // Inclusive >= boundary (#2265): a strict > dropped a write committed
+            // in the same second as the watermark; consumers merge idempotently,
+            // so re-delivering the cursor second is a no-op.
+            expect(sql).to.include('WHERE UNIX_TIMESTAMP(updated_at) >= ?');
             expect(args).to.deep.equal([1718000000]);
         });
 

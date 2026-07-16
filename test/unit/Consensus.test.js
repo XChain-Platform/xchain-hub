@@ -676,10 +676,21 @@ describe('Consensus (PBFT)', function () {
             expect(consensus.seq).to.equal(42);
         });
 
-        it('_loadSeq defaults to 0 on empty result', async function () {
+        it('_loadSeq defaults to 0 on empty result (genuine fresh install)', async function () {
             hub.db.doQuery.resolves([]);
             await consensus._loadSeq();
             expect(consensus.seq).to.equal(0);
+        });
+
+        it('_loadSeq fails CLOSED on a read fault, not open at 0 (#970c0586)', async function () {
+            // A swallowed read fault would leave seq/lastAppliedSeq at 0 and
+            // reopen the stale-seq replay guard. Mirror _saveSeq: rethrow.
+            consensus.lastAppliedSeq = 5;
+            hub.db.doQuery.rejects(new Error('injected DB read fault'));
+            let threw = false;
+            try { await consensus._loadSeq(); } catch (e) { threw = true; }
+            expect(threw, 'read fault must propagate out of _loadSeq').to.be.true;
+            expect(consensus.lastAppliedSeq, 'guard baseline must not reset to 0').to.equal(5);
         });
 
         it('_saveSeq writes to DB', async function () {
@@ -698,10 +709,13 @@ describe('Consensus (PBFT)', function () {
             expect(threw, '_saveSeq must reject so _checkCommitQuorum does not mark the proposal applied while the seq write was lost').to.be.true;
         });
 
-        it('_loadSeq swallows DB errors and leaves seq at 0', async function () {
+        it('_loadSeq rethrows a DB read fault so startup fails closed (#970c0586)', async function () {
+            // Was: swallowed the error and left seq at 0, silently reopening the
+            // stale-seq replay guard. Now mirrors _saveSeq and rethrows.
             hub.db.doQuery.rejects(new Error('db down'));
-            await consensus._loadSeq();
-            expect(consensus.seq).to.equal(0);
+            let threw = false;
+            try { await consensus._loadSeq(); } catch (e) { threw = true; }
+            expect(threw).to.be.true;
         });
     });
 

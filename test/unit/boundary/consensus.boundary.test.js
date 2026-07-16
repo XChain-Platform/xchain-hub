@@ -128,10 +128,15 @@ describe('Boundary: Consensus (PBFT)', function () {
             expect(consensus.seq).to.equal(Number.MAX_SAFE_INTEGER);
         });
 
-        it('_loadSeq handles DB error gracefully', async function () {
+        it('_loadSeq rethrows a DB read fault (fail closed, #2244)', async function () {
+            // A swallowed read fault used to reset seq to 0, silently reopening
+            // the stale-seq replay guard; _loadSeq now fails closed like its
+            // sibling _saveSeq.
             hub.db.doQuery.rejects(new Error('DB down'));
-            await consensus._loadSeq(); // Should not throw
-            expect(consensus.seq).to.equal(0);
+            let threw = null;
+            try { await consensus._loadSeq(); } catch (e) { threw = e; }
+            expect(threw, 'a DB read fault must propagate out of _loadSeq').to.not.equal(null);
+            expect(threw.message).to.equal('DB down');
         });
 
         it('_saveSeq converts number to string', async function () {

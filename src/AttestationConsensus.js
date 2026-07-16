@@ -609,9 +609,25 @@ class AttestationConsensus extends EventEmitter {
         // REDUNDANCY signatures over the single canonical body). Re-sign the
         // canonical winner here so THIS validator vouches for the agreed bytes.
         // Only validators that actually produced a proposal (did the work) sign.
+        // "Did the work" means a non-empty ok body, NOT merely having an entry in
+        // pending.proposals: a failed own fetch also lands there as an error
+        // proposal ({body: empty, status: 'provider_error'}). Without this guard a
+        // judge_model leader whose own fetch failed would re-sign a winner body it
+        // never fetched or evaluated, and that improper vote is exactly the one
+        // that pushes signatures.size to REDUNDANCY, finalizing 'ok' with only
+        // REDUNDANCY-1 genuine attestations. Mirrors the follower abstention in
+        // _onPrepare (no own non-empty body -> do not co-sign); fails safe (the
+        // round times out / retries) rather than open.
         if(strategy === 'judge_model' && pending.myPubkey && pending.proposals.has(pending.myPubkey)){
-            let reSig = this._signCanonical(rid, pending.providerId, winner.body, pending.status, winner.meta, Number(pending.request.block_index));
-            if(reSig) pending.signatures.set(pending.myPubkey, reSig);
+            let myP = pending.proposals.get(pending.myPubkey);
+            let myBodyOk = myP && myP.body && myP.body.length > 0 && (myP.status || 'ok') === 'ok';
+            if(myBodyOk){
+                let reSig = this._signCanonical(rid, pending.providerId, winner.body, pending.status, winner.meta, Number(pending.request.block_index));
+                if(reSig) pending.signatures.set(pending.myPubkey, reSig);
+            } else {
+                console.warn('AttestationConsensus: leader abstaining from judge_model re-sign for ' + rid +
+                    ' (no own non-empty ok body fetched; will not vouch for a winner it never evaluated)');
+            }
         }
 
         // Broadcast PREPARE so other followers can verify and contribute their sigs

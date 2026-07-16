@@ -46,11 +46,16 @@ describe('buildOraclePricesSnapshotQuery', function () {
 
     describe('latest mode - dashboard current-per-feed', function () {
 
-        it('selects the MAX(effective_at) row per (coin,tick,fiat), not per id', function () {
+        it('selects the MAX(effective_at) row per (source_address,coin,tick,fiat), not per id', function () {
             const { sql, params, mode } = buildOraclePricesSnapshotQuery({ latest: true, now: 1000 });
             expect(mode).to.equal('latest');
             expect(sql).to.match(/MAX\(effective_at\)/);
-            expect(sql).to.match(/GROUP BY coin, tick, fiat/);
+            // Feed identity includes the operator: grouping without
+            // source_address returns only the freshest operator's row for a
+            // (coin,tick,fiat) pair, hiding an abandoned operator's stale feed
+            // while dispensers pinned to that ORACLE_ADDRESS keep settling.
+            expect(sql).to.match(/GROUP BY source_address, coin, tick, fiat/);
+            expect(sql).to.match(/ON op\.source_address = latest\.source_address/);
             // latest is defined by effective_at, so it must NOT reduce to a plain
             // max-id / since_id page (a future-dated UPDATE has a lower id but a
             // higher effective_at).
@@ -61,7 +66,7 @@ describe('buildOraclePricesSnapshotQuery', function () {
 
         it('gates the MAX(effective_at) subquery to now, hiding future-dated rows', function () {
             const { sql } = buildOraclePricesSnapshotQuery({ latest: true, now: 1000 });
-            expect(sql).to.match(/WHERE effective_at <= \? GROUP BY coin, tick, fiat/);
+            expect(sql).to.match(/WHERE effective_at <= \? GROUP BY source_address, coin, tick, fiat/);
         });
 
         it('ignores since_id in latest mode (no page cursor bound)', function () {

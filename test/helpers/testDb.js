@@ -21,9 +21,9 @@ const DB_PASS = process.env.TEST_DB_PASS || '';
 
 const ALL_TABLES = [
     'attestations', 'configs', 'consensus_state', 'governance_proposals',
-    'governance_votes', 'oracle_submissions', 'p2p_peers', 'price_snapshots',
-    'reorg_attestations', 'slash_proposals', 'swap_records', 'validator_rewards',
-    'validators'
+    'governance_votes', 'oracle_prices', 'oracle_submissions', 'p2p_peers',
+    'price_snapshots', 'reorg_attestations', 'slash_proposals', 'swap_records',
+    'validator_rewards', 'validators'
 ];
 
 let db        = null;

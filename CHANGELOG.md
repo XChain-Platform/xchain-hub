@@ -25,6 +25,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/openrpc.build.js` regains the three methods that were only hand-added to `openrpc.json`, so regenerating the spec no longer drops them.
 - Correct the `/health` config-fetch counter comment: the `config_fetch` counts are body-only telemetry, deliberately not wired to the `healthy`/503 status (a config-fetch error must not pull a healthy hub out of federation rotation); an alerting probe compares `config_fetch.errors` across scrapes.
 
+## [2.2.17] - 2026-07-16
+
+### Fixed
+- Anchor-reward flag-day gate reads the reward's own network, threaded through all 4 _recordReward call sites into recordAnchorReward ().
+- Consensus._loadSeq rethrows on DB read fault instead of resetting seq to 0 (fail closed, like _saveSeq); stale boundary test rewritten to pin the rethrow ().
+- AttestationConsensus leader now requires its own non-empty ok proposal before re-signing, mirroring follower abstention ().
+- Config-delta cursor boundary made inclusive (>=) with the idempotent-merge contract documented at all comment sites; integration tests executed green against real MariaDB ().
+- Oracle latest-mode snapshot query keys feeds by (source_address, coin, tick, fiat): GROUP BY and join ON gained source_address; new integration test ().
+
+
 ## [2.2.16] - 2026-06-20
 
 ### Added
