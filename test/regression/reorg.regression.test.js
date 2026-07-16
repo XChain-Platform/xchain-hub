@@ -163,13 +163,27 @@ describe('Regression: ReorgHandler', function () {
     // -----------------------------------------------------------------
 
     describe('REG-REORG-004: Attestations rolled back below reorg height', function () {
-        it('DELETE FROM attestations executed @regression-p0', async function () {
-            await rh._executeRollback('BTC', 500000, 1700000000000, 'reorg-1', 3, '[]');
+        it('DELETE FROM attestations executed with an in-window bound @regression-p0', async function () {
+            let ts = Date.now() - 60000; // within the lookback window: used as-is
+            await rh._executeRollback('BTC', 500000, ts, 'reorg-1', 3, '[]');
 
             let deleteCall = hub.db.doQuery.getCall(0);
             expect(deleteCall.args[0]).to.include('DELETE FROM attestations');
             expect(deleteCall.args[1][0]).to.equal('BTC');
-            expect(deleteCall.args[1][1]).to.equal(1700000000000);
+            expect(deleteCall.args[1][1]).to.equal(ts);
+        });
+
+        it('a far-past reported timestamp is clamped to the lookback floor @regression-p0', async function () {
+            // The rollback bound is clamped to Date.now() - maxLookbackMs so a
+            // fabricated deep "reorg" cannot grief-delete attestations further
+            // back than the documented blast-radius bound.
+            let before = Date.now();
+            await rh._executeRollback('BTC', 500000, 1700000000000, 'reorg-1', 3, '[]');
+            let after = Date.now();
+
+            let bound = hub.db.doQuery.getCall(0).args[1][1];
+            expect(bound).to.be.at.least(before - rh.maxLookbackMs);
+            expect(bound).to.be.at.most(after - rh.maxLookbackMs);
         });
     });
 

@@ -39,15 +39,25 @@ describe('Regression: Oracle Pipeline', function () {
             it('returns median of two sources @regression-p0', async function () {
                 pf = new PriceFetcher({ COINMARKETCAP_API_KEY: 'key' });
 
-                axiosStub.get.onFirstCall().resolves({
-                    data: { bitcoin: { usd: 100000 }, litecoin: { usd: 80 }, dogecoin: { usd: 0.14 } }
-                });
-                axiosStub.get.onSecondCall().resolves({
-                    data: { data: {
-                        BTC: { quote: { USD: { price: 100010 } } },
-                        LTC: { quote: { USD: { price: 82 } } },
-                        DOGE: { quote: { USD: { price: 0.16 } } }
-                    }}
+                // Stub by URL, not call order: CoinGecko fetches carry a random
+                // jitter delay and additional keyless upstreams (Kraken) exist,
+                // so positional stubs no longer line up.
+                axiosStub.get.callsFake(function (url) {
+                    if (url.includes('api.coingecko.com')) {
+                        return Promise.resolve({
+                            data: { bitcoin: { usd: 100000 }, litecoin: { usd: 80 }, dogecoin: { usd: 0.14 } }
+                        });
+                    }
+                    if (url.includes('coinmarketcap.com')) {
+                        return Promise.resolve({
+                            data: { data: {
+                                BTC: { quote: { USD: { price: 100010 } } },
+                                LTC: { quote: { USD: { price: 82 } } },
+                                DOGE: { quote: { USD: { price: 0.16 } } }
+                            }}
+                        });
+                    }
+                    return Promise.reject(new Error('unexpected URL: ' + url));
                 });
 
                 let prices = await pf.fetchPrices();
@@ -75,10 +85,14 @@ describe('Regression: Oracle Pipeline', function () {
             it('returns prices from remaining source @regression-p1', async function () {
                 pf = new PriceFetcher({ COINMARKETCAP_API_KEY: 'key' });
 
-                axiosStub.get.onFirstCall().resolves({
-                    data: { bitcoin: { usd: 99000 }, litecoin: { usd: 78 }, dogecoin: { usd: 0.13 } }
+                axiosStub.get.callsFake(function (url) {
+                    if (url.includes('api.coingecko.com')) {
+                        return Promise.resolve({
+                            data: { bitcoin: { usd: 99000 }, litecoin: { usd: 78 }, dogecoin: { usd: 0.13 } }
+                        });
+                    }
+                    return Promise.reject(new Error('CMC down'));
                 });
-                axiosStub.get.onSecondCall().rejects(new Error('CMC down'));
 
                 let prices = await pf.fetchPrices();
                 expect(prices).to.have.lengthOf(3);
@@ -221,7 +235,8 @@ describe('Regression: Oracle Pipeline', function () {
                     prices, digest,
                     prepares: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr]),
                     commits: new Set(),
-                    finalized: false, timer: null
+                    finalized: false, timer: null,
+                    signatures: new Map()
                 });
 
                 oc._handlePrepare({
@@ -243,7 +258,8 @@ describe('Regression: Oracle Pipeline', function () {
                     prices, digest,
                     prepares: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr, VALIDATORS_4[2].addr]),
                     commits:  new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr]),
-                    finalized: false, timer: null, _commitSent: true
+                    finalized: false, timer: null, _commitSent: true,
+                    signatures: new Map()
                 });
 
                 let emitted = null;
@@ -268,7 +284,8 @@ describe('Regression: Oracle Pipeline', function () {
 
                 oc.pendingRounds.set(1, {
                     prices, digest, prepares: new Set(), commits: new Set(),
-                    finalized: false, timer: null
+                    finalized: false, timer: null,
+                    signatures: new Map()
                 });
 
                 oc._handlePrepare({
@@ -285,7 +302,8 @@ describe('Regression: Oracle Pipeline', function () {
 
                 oc.pendingRounds.set(1, {
                     prices, digest, prepares: new Set(), commits: new Set(),
-                    finalized: false, timer: null
+                    finalized: false, timer: null,
+                    signatures: new Map()
                 });
 
                 oc._handlePrepare({ sender: VALIDATORS_4[1].addr, data: { round: 1, digest } });
@@ -300,6 +318,9 @@ describe('Regression: Oracle Pipeline', function () {
             it('single-node stores snapshot and emits event @regression-p1', async function () {
                 oc.setValidatorSet([]);
                 pm.getPeerStatus.returns([]);
+                // minSubmissions defaults to a 2-hub diversity floor; a true
+                // single-node deployment runs with ORACLE_MIN_SUBMISSIONS=1.
+                oc.minSubmissions = 1;
 
                 let entries = [
                     { sender: pm.validatorAddr, prices: [{ coinPair: 'BTC/USD', price: '100000' }] }
@@ -363,9 +384,11 @@ describe('Regression: Oracle Pipeline', function () {
 
         // Quorum math
         describe('Oracle quorum math', function () {
+            // Formula: max(2f+1, ceil((N+1)/2)); the majority floor keeps N=3
+            // from degenerating to quorum=1 (single validator finalizing alone).
             let cases = [
                 { N: 1,  expected: 0 },
-                { N: 3,  expected: 1 },
+                { N: 3,  expected: 2 },
                 { N: 4,  expected: 3 },
                 { N: 7,  expected: 5 },
                 { N: 10, expected: 7 },

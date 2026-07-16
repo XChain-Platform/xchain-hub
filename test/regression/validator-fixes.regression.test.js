@@ -37,20 +37,22 @@ const proxyquire   = require('proxyquire');
 describe('Regression: validator setup/run fixes', function () {
 
     // -----------------------------------------------------------------
-    // REG-VAL-001 (F1): mariadb stays on a CommonJS-loadable version.
-    // The 3.5.x line is ESM-only; require('mariadb') throws ERR_REQUIRE_ESM
-    // there, which broke every fresh `require`-based build (hub/node/indexer/…).
+    // REG-VAL-001 (F1): require('mariadb') must load. The 3.5.x line is
+    // ESM-only, and the platform now pins it deliberately: the invariant
+    // moved from "stay below 3.5" to "run on Node >= 22, where require()
+    // can load ESM". On Node 18 this require throws ERR_REQUIRE_ESM, which
+    // is exactly the F1 crash on a fresh build under the wrong runtime.
     // -----------------------------------------------------------------
-    describe('REG-VAL-001: mariadb is CommonJS-loadable (not ESM-only 3.5.x)', function () {
+    describe('REG-VAL-001: mariadb is require()-loadable on the supported runtime', function () {
         it('require("mariadb") loads without ERR_REQUIRE_ESM @regression-p0', function () {
             expect(() => require('mariadb')).to.not.throw();
         });
 
-        it('installed mariadb is < 3.5.0 (the ESM cutover) @regression-p0', function () {
-            const v = require('mariadb/package.json').version;
-            const [maj, min] = v.split('.').map((n) => parseInt(n, 10));
-            expect(maj, `mariadb ${v}`).to.equal(3);
-            expect(min, `mariadb ${v} is ESM-only; re-pin to ~3.4.x`).to.be.below(5);
+        it('engines pins Node >= 22 (require(esm) support for the ESM-only mariadb) @regression-p0', function () {
+            const engines = require('../../package.json').engines;
+            expect(engines && engines.node, 'package.json engines.node missing').to.be.a('string');
+            const min = parseInt((String(engines.node).match(/\d+/) || ['0'])[0], 10);
+            expect(min, `engines.node "${engines.node}" must require Node >= 22`).to.be.at.least(22);
         });
 
         it('src/db.js (which require()s mariadb) loads under CommonJS @regression-p0', function () {

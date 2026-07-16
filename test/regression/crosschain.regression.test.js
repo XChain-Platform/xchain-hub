@@ -64,10 +64,24 @@ describe('Regression: CrossChain & SwapTracker', function () {
                 let attestationId = 'BTC:1:LTC';
                 let digest = engine._digest(attestationId, 3);
 
+                // A follower now refuses to PREPARE unless the source action
+                // verifies against its own local indexer AND a deterministic
+                // block-boundary cross_chain snapshot resolves (federation-split
+                // guard). Both guards have their own coverage (unit/
+                // CrossChainEngine, security suite); satisfy them so this test
+                // stays about the PBFT flow.
+                sinon.stub(engine, '_verifySourceAction').resolves(true);
+                hub.capabilitySnapshot = {
+                    getSnapshot: async () => ({ validators: VALIDATORS_4.slice() }),
+                    getQuorum:   () => 3
+                };
+
+                // btcBlockHeight is the leader-stamped snapshot block; without
+                // it the follower resolves no snapshot and fails closed.
                 await engine._handlePropose({
                     sender: VALIDATORS_4[1].addr,
                     data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
-                            destChain: 'LTC', confirmations: 3, digest }
+                            destChain: 'LTC', confirmations: 3, digest, btcBlockHeight: 900000 }
                 });
 
                 expect(engine.pendingAttestations.has(attestationId)).to.be.true;
@@ -151,18 +165,20 @@ describe('Regression: CrossChain & SwapTracker', function () {
 
         // REG-XCH-003
         describe('REG-XCH-003: Confirmation thresholds per chain', function () {
-            it('BTC=3, LTC=3, DOGE=6 @regression-p0', async function () {
+            // Defaults come from the canonical coin registry (src/coins/<TICK>.js
+            // `confirmations`): BTC=6, LTC=12, DOGE=60.
+            it('BTC=6, LTC=12, DOGE=60 @regression-p0', async function () {
                 engine.setValidatorSet([]);
                 pm.getPeerStatus.returns([]);
 
                 let btc = await engine.requestAttestation('BTC', 1, 'LTC');
-                expect(btc.confirmations).to.equal(3);
+                expect(btc.confirmations).to.equal(6);
 
                 let ltc = await engine.requestAttestation('LTC', 1, 'BTC');
-                expect(ltc.confirmations).to.equal(3);
+                expect(ltc.confirmations).to.equal(12);
 
                 let doge = await engine.requestAttestation('DOGE', 1, 'BTC');
-                expect(doge.confirmations).to.equal(6);
+                expect(doge.confirmations).to.equal(60);
             });
         });
 

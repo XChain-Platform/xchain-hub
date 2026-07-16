@@ -70,6 +70,29 @@ jobs:
           SOAK_DURATION_MS: "15000"
         run: npm run test:perf
 
+  # Consensus/governance/reorg/oracle regression suite . Fully mocked
+  # (no DB, no network), so it runs as a plain job; kept out of the shared
+  # reusable workflow so the other ~8 callers don't inherit a suite only the
+  # hub has.
+  regression:
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Run regression suite
+        run: npm run test:regression -- --exit
+
   # Cross-repo drift guards (SD-1 / ), canonical side. The hub OWNS the
   # canonical coin registry (consumers byte-compare against it in their own
   # drift-guards jobs), so here the guard is the consensus-pin conformance of

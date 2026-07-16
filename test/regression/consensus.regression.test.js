@@ -80,7 +80,9 @@ describe('Regression: Consensus (PBFT)', function () {
 
             // Step 1: PRE_PREPARE from leader creates proposal
             // (seq 5, view 0 → (5+0)%4 = 1 → VALIDATORS_4[1] is the rotation leader)
-            consensus._handlePrePrepare({
+            // _handlePrePrepare is async (locks the federation snapshot before
+            // broadcasting PREPARE), so the flow must be awaited.
+            await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
                 data: { seq: 5, view: 0, configDigest: digest, config }
             });
@@ -127,7 +129,7 @@ describe('Regression: Consensus (PBFT)', function () {
     // -----------------------------------------------------------------
 
     describe('REG-CON-003: Config not applied without PREPARE quorum', function () {
-        it('insufficient prepares do not trigger COMMIT @regression-p0', function () {
+        it('insufficient prepares do not trigger COMMIT @regression-p0', async function () {
             consensus.setValidatorSet(VALIDATORS_4); // quorum=3
             pm.validatorAddr = VALIDATORS_4[0].addr;
 
@@ -135,7 +137,7 @@ describe('Regression: Consensus (PBFT)', function () {
             let digest = consensus._digest(config);
 
             // Only 1 prepare (from PRE_PREPARE sender) + self = 2, need 3
-            consensus._handlePrePrepare({
+            await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
                 data: { seq: 5, view: 0, configDigest: digest, config }
             });
@@ -339,9 +341,12 @@ describe('Regression: Consensus (PBFT)', function () {
     // -----------------------------------------------------------------
 
     describe('Quorum math regression guard', function () {
+        // Formula: max(2f+1, ceil((N+1)/2)). The majority floor keeps N=3
+        // (f=0) from degenerating to quorum=1, where a single validator
+        // could finalize alone.
         let cases = [
             { N: 1,  expected: 0 },
-            { N: 3,  expected: 1 },
+            { N: 3,  expected: 2 },
             { N: 4,  expected: 3 },
             { N: 7,  expected: 5 },
             { N: 10, expected: 7 },

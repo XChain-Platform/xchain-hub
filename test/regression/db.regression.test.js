@@ -207,11 +207,17 @@ describe('Regression: Database', function () {
             expect(result).to.deep.equal([]);
         });
 
-        it('returns empty array on query error @regression-p1', async function () {
+        it('rethrows on query error and still releases the connection @regression-p1', async function () {
+            // doQuery deliberately rethrows: swallowing errors returned [] to
+            // callers writing consensus/coordination rows, so a failed
+            // INSERT/UPDATE read as success. An empty result must mean a
+            // genuinely empty SELECT, never a failed query.
             let db = new Database('localhost', 3306, 'test_db', 'user', 'pass');
             mockConn.query.rejects(new Error('syntax error'));
-            let result = await db.doQuery('BAD SQL');
-            expect(result).to.deep.equal([]);
+            let thrown = null;
+            try { await db.doQuery('BAD SQL'); } catch (err) { thrown = err; }
+            expect(thrown).to.be.an('error');
+            expect(thrown.message).to.equal('syntax error');
             expect(mockConn.release.calledOnce).to.be.true;
         });
     });

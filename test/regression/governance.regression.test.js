@@ -13,6 +13,7 @@
 const sinon        = require('sinon');
 const { expect }   = require('chai');
 const Governance   = require('../../src/Governance');
+const ValidatorIdentity = require('../../src/ValidatorIdentity');
 const { createMockHub }   = require('../helpers/mockHub');
 const { VALIDATORS_3 }    = require('../helpers/fixtures');
 
@@ -126,7 +127,9 @@ describe('Regression: Governance', function () {
                 { voter_pubkey: VALIDATORS_3[1].pubkey, vote: 'approve' },
                 { voter_pubkey: VALIDATORS_3[2].pubkey, vote: 'reject' }
             ]);
-            hub.db.doQuery.onSecondCall().resolves();
+            // The status UPDATE must report affectedRows: the tally gates its
+            // broadcast + emit on the transition landing (double-tally guard).
+            hub.db.doQuery.onSecondCall().resolves({ affectedRows: 1 });
 
             let emitted = null;
             gov.on('proposal:finalized', (d) => { emitted = d; });
@@ -252,7 +255,7 @@ describe('Regression: Governance', function () {
                 { voter_pubkey: VALIDATORS_3[0].pubkey, vote: 'approve' },
                 { voter_pubkey: VALIDATORS_3[1].pubkey, vote: 'approve' }
             ]);
-            hub.db.doQuery.onSecondCall().resolves();
+            hub.db.doQuery.onSecondCall().resolves({ affectedRows: 1 });
 
             await gov._tallyProposal({ proposal_id: 'gov:P:1', parameter: 'P' });
 
@@ -307,12 +310,30 @@ describe('Regression: Governance', function () {
             expect(hub.db.doQuery.getCall(0).args[0]).to.include('INSERT IGNORE');
         });
 
-        it('_handleVote stores vote locally @regression-p2', function () {
-            gov._handleVote({
+        it('_handleVote drops a forged vote and stores an authenticated one @regression-p2', async function () {
+            // Votes are consensus-tally-affecting, so the gossip path now
+            // authenticates them: voterPubkey must be a registered validator
+            // and the ed25519 signature must verify over the canonical vote
+            // payload, and the proposal must be open locally. A forged vote
+            // must never reach the DB.
+            await gov._handleVote({
                 sender: 'peer', type: 'GOV_VOTE',
                 data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: 'abc', signature: 'sig' }
             });
-            expect(hub.db.doQuery.called).to.be.true;
+            expect(hub.db.doQuery.called, 'forged vote must not be stored').to.be.false;
+
+            let kp  = ValidatorIdentity.generate();
+            let idn = new ValidatorIdentity(kp.privkeyHex);
+            gov.setValidatorSet([...VALIDATORS_3, { pubkey: kp.pubkeyHex, addr: 'ws://voter:1' }]);
+            hub.db.doQuery.withArgs(sinon.match(/SELECT voting_end.*FROM governance_proposals/))
+                .resolves([{ voting_end: new Date(Date.now() + 86400000) }]);
+            let sig = idn.sign(JSON.stringify({ proposalId: 'gov:P:1', vote: 'approve', voter: kp.pubkeyHex }));
+            await gov._handleVote({
+                sender: 'peer', type: 'GOV_VOTE',
+                data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: kp.pubkeyHex, signature: sig }
+            });
+            expect(hub.db.doQuery.calledWithMatch(sinon.match(/INSERT INTO governance_votes/)),
+                'the authenticated vote row is inserted').to.be.true;
         });
 
         it('ignores messages with missing fields @regression-p2', function () {

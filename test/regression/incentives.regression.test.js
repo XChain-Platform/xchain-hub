@@ -256,12 +256,32 @@ describe('Regression: Incentives & Slashing', function () {
                 expect(sd.missedRounds.get(VALIDATORS_3[0].pubkey)).to.equal(0);
             });
 
-            it('31st miss does NOT trigger again (only on exact threshold) @regression-p1', async function () {
+            it('31st miss does NOT trigger again while the latch is set @regression-p1', async function () {
+                // The trigger is `>=` threshold plus a per-validator latch (set
+                // once the 30th-miss proposal row persists), not an exact-count
+                // match: an exact `===` could never retry a DB write that
+                // failed at the threshold. One proposal per streak still holds.
                 sd.missedRounds.set(VALIDATORS_3[0].pubkey, 30);
+                sd.nonParticipationFired.set(VALIDATORS_3[0].pubkey, true);
                 hub.db.doQuery.resetHistory();
 
                 await sd._checkParticipation(31, [], VALIDATORS_3);
                 expect(hub.db.doQuery.called).to.be.false;
+            });
+
+            it('a failed proposal write at the threshold re-arms and retries next round @regression-p1', async function () {
+                sd.missedRounds.set(VALIDATORS_3[0].pubkey, 29);
+                hub.db.doQuery.rejects(new Error('db down'));
+
+                await sd._checkParticipation(30, [], VALIDATORS_3);
+                expect(sd.nonParticipationFired.get(VALIDATORS_3[0].pubkey),
+                    'latch re-armed after failed write').to.be.false;
+
+                hub.db.doQuery.resetBehavior();
+                hub.db.doQuery.resolves([]);
+                hub.db.doQuery.resetHistory();
+                await sd._checkParticipation(31, [], VALIDATORS_3);
+                expect(hub.db.doQuery.called, 'retried past the threshold').to.be.true;
             });
         });
 
