@@ -456,9 +456,9 @@ class OracleConsensus extends EventEmitter {
             return;
         }
 
-        let leader   = this._getLeader(round);
+        let leader   = this._getLeader(round, memberPubkeys);
         let myAddr   = this.peerManager.validatorAddr;
-        let isLeader = leader && leader.addr === myAddr;
+        let isLeader = this._isLeaderIdentity(leader, myAddr, this._resolveSenderPubkey(myAddr));
 
         if (isLeader) {
             this._proposeRound(round, submissions, false, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys);
@@ -470,7 +470,8 @@ class OracleConsensus extends EventEmitter {
         // window every other hub does.
         this._markRoundReady(round);
 
-        let leaderSubmitted = leader && submissions.has(leader.addr);
+        let leaderSubAddr   = this._leaderSubmissionAddr(submissions, leader);
+        let leaderSubmitted = leaderSubAddr != null;
         if (leaderSubmitted) {
             // The leader has a submission on record and is expected to broadcast
             // ORACLE_PROPOSE. But a leader can gossip its submission and then
@@ -480,7 +481,7 @@ class OracleConsensus extends EventEmitter {
             // the (presumed-dead) leader takes over as fallback proposer. Only the
             // elected fallback arms a timer; a live leader proposes immediately, so
             // by the time this fires the round is already taken and we abort.
-            let fb = [...submissions.keys()].filter(a => !leader || a !== leader.addr).sort()[0];
+            let fb = [...submissions.keys()].filter(a => a !== leaderSubAddr).sort()[0];
             if (fb === myAddr) {
                 let t = setTimeout(() => {
                     this.leaderTimers.delete(round);
@@ -492,7 +493,7 @@ class OracleConsensus extends EventEmitter {
                     if (!subs || subs.size === 0) return;
                     // Re-elect against the (possibly grown) submission set in case
                     // gossip delivered more submitters during the grace.
-                    let fb2 = [...subs.keys()].filter(a => !leader || a !== leader.addr).sort()[0];
+                    let fb2 = [...subs.keys()].filter(a => a !== this._leaderSubmissionAddr(subs, leader)).sort()[0];
                     if (fb2 !== myAddr) return;
                     this._proposeRound(round, subs, true, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys);
                 }, this.leaderTimeout + FALLBACK_GRACE_MS);
@@ -642,7 +643,7 @@ class OracleConsensus extends EventEmitter {
     // falls back to the local identity for hubs not present in their own registry.
     _resolveSenderPubkey(sender) {
         let registry = this.peerManager && this.peerManager.validatorPubkeys;
-        let pk = registry ? registry.get(sender) : null;
+        let pk = (registry && typeof registry.get === 'function') ? registry.get(sender) : null;
         if (!pk && sender === this.peerManager.validatorAddr) {
             let identity = this.hub && this.hub.getIdentity ? this.hub.getIdentity() : null;
             if (identity) pk = identity.getPubkeyHex();
@@ -813,9 +814,9 @@ class OracleConsensus extends EventEmitter {
         // failed but other hubs have prices. The local submission view is
         // filtered to snapshot members (Oracle M1) so the election and the
         // deviation reference only see qualified validators.
-        let leader       = this._getLeader(round);
+        let leader       = this._getLeader(round, memberPubkeys);
         let submissions  = this._filterSubmissionsToSnapshot(this.oracleRound.getSubmissions(round), memberPubkeys);
-        let isRealLeader = leader && leader.addr === envelope.sender;
+        let isRealLeader = this._isLeaderIdentity(leader, envelope.sender, this._resolveSenderPubkey(envelope.sender));
         let isFallback   = false;
 
         if (!isRealLeader) {
@@ -836,7 +837,8 @@ class OracleConsensus extends EventEmitter {
             // not trusting a peer-supplied set for a price-oracle integrity gate.
             let keys = submissions ? [...submissions.keys()] : [];
             if (keys.length > 0) {
-                let leaderSubmitted = leader && keys.includes(leader.addr);
+                let leaderSubAddr   = this._leaderSubmissionAddr(submissions, leader);
+                let leaderSubmitted = leaderSubAddr != null;
                 if (!leaderSubmitted) {
                     let fallbackAddr = keys.sort()[0];
                     if (fallbackAddr === envelope.sender) isFallback = true;
@@ -853,7 +855,7 @@ class OracleConsensus extends EventEmitter {
                     // above), preserving the price-integrity gate.
                     let readyAt = this.roundReadyAt.get(round);
                     if (readyAt && (Date.now() - readyAt) >= this.leaderTimeout) {
-                        let fallbackAddr = keys.filter(a => !leader || a !== leader.addr).sort()[0];
+                        let fallbackAddr = keys.filter(a => a !== leaderSubAddr).sort()[0];
                         if (fallbackAddr === envelope.sender) isFallback = true;
                     }
                 }
@@ -1617,9 +1619,74 @@ class OracleConsensus extends EventEmitter {
         }
     }
 
-    _getLeader(round) {
+    //  (Hub F3): when the round has a block-locked snapshot, the leader
+    // is derived from the snapshot's member pubkeys (sorted, round % N), NOT
+    // the live registered validatorSet. The live set drifts with registration
+    // churn mid-round, so live-set indexing lets two hubs elect different
+    // leaders for the same round and reject each other's legitimate PROPOSE
+    // (liveness stall until fallback/timeout). The snapshot is already the
+    // federation-deterministic set every hub locks at the round's block
+    // boundary, so deriving the leader from it keeps the election identical
+    // everywhere. Without a usable snapshot (memberPubkeys null), legacy
+    // live-set rotation is preserved (graceful-degradation path).
+    _getLeader(round, memberPubkeys) {
+        if (memberPubkeys && memberPubkeys.size > 0) {
+            let keys = [...memberPubkeys].sort();
+            let pubkey = keys[round % keys.length];
+            return { addr: this._addrForPubkey(pubkey), pubkey: pubkey };
+        }
         if (this.validatorSet.length === 0) return null;
         return this.validatorSet[round % this.validatorSet.length];
+    }
+
+    // Resolve a (lowercase) signing pubkey to its P2P addr: the loaded
+    // validator set first, then the peer registry (lowest addr wins so a key
+    // bound to several addrs resolves identically on every hub), then own
+    // identity. Null when unknown; leader-addr comparisons then fail and the
+    // fallback-proposer election salvages the round.
+    _addrForPubkey(pubkey) {
+        for (let v of this.validatorSet) {
+            if (v && v.pubkey && String(v.pubkey).toLowerCase() === pubkey) return v.addr;
+        }
+        let registry = this.peerManager && this.peerManager.validatorPubkeys;
+        if (registry && typeof registry.get === 'function') {
+            let matches = [];
+            for (let [addr, pk] of registry) {
+                if (pk && String(pk).toLowerCase() === pubkey) matches.push(addr);
+            }
+            if (matches.length > 0) return matches.sort()[0];
+        }
+        let identity = this.hub && this.hub.getIdentity ? this.hub.getIdentity() : null;
+        if (identity && String(identity.getPubkeyHex()).toLowerCase() === pubkey) {
+            return this.peerManager.validatorAddr;
+        }
+        return null;
+    }
+
+    // True when `addr` (with verified pubkey `pubkey`, may be null) is the
+    // round leader. Matches on addr OR verified pubkey so a snapshot-derived
+    // leader is still recognized when this hub's addr binding for that key
+    // differs from the one _addrForPubkey picked.
+    _isLeaderIdentity(leader, addr, pubkey) {
+        if (!leader) return false;
+        if (leader.addr && leader.addr === addr) return true;
+        let lpk = leader.pubkey ? String(leader.pubkey).toLowerCase() : null;
+        return !!(lpk && pubkey && lpk === pubkey);
+    }
+
+    // Addr under which the leader's submission is recorded in a
+    // snapshot-filtered submission map (keys are addrs, values carry the
+    // verified pubkey), or null when the leader has not submitted.
+    _leaderSubmissionAddr(submissions, leader) {
+        if (!leader || !submissions) return null;
+        if (leader.addr && submissions.has(leader.addr)) return leader.addr;
+        let lpk = leader.pubkey ? String(leader.pubkey).toLowerCase() : null;
+        if (!lpk) return null;
+        for (let [addr, sub] of submissions) {
+            let pk = (sub && sub.pubkey) ? sub.pubkey : this._resolveSenderPubkey(addr);
+            if (pk === lpk) return addr;
+        }
+        return null;
     }
 
     _getQuorum() {

@@ -41,7 +41,9 @@ function snapshotOf(validators, blockIndex) {
 
 describe('OracleConsensus: snapshot membership gate (Oracle M1)', function () {
     let hub, pm, oc, oracleRound;
-    const ROUND = 3; // _getLeader(3) over VALIDATORS_3 = validator-1 (this hub)
+    // : the leader now derives from the locked snapshot (validators 1+2),
+    // so round 2 -> sorted-pubkeys[2 % 2] = validator-1 (this hub).
+    const ROUND = 2;
 
     beforeEach(function () {
         hub = createMockHub();
