@@ -196,6 +196,15 @@ class HubDbBroadcaster {
                 payload.to_action_index = event.to_action_index;
             if (event.retraction_generation !== undefined && event.retraction_generation !== null)
                 payload.retraction_generation = event.retraction_generation;
+            //  signed retraction: the RetractionConsensus round stamps the
+            // BTC-anchored snapshot_block that selects the validator set plus the
+            // 2f+1 cross_chain co-signature set over the XRETRACTV1 canonical.
+            // Mirrors past the RETRACTION_SIGNING flag-day refuse quorum-class
+            // deletions without them. Absent (legacy / sub-gate) => prior wire shape.
+            if (event.snapshot_block !== undefined && event.snapshot_block !== null)
+                payload.snapshot_block = event.snapshot_block;
+            if (Array.isArray(event.retraction_signatures) && event.retraction_signatures.length > 0)
+                payload.retraction_signatures = event.retraction_signatures;
             message = JSON.stringify(payload, bigIntReplacer);
         } catch (e) {
             console.error('HubDbBroadcaster: serialization error:', e);

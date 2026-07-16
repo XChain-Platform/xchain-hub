@@ -33,6 +33,7 @@ const CrossChainDexEngine  = require('./CrossChainDexEngine.js');
 const CrossChainCallEngine = require('./CrossChainCallEngine.js');
 const StateCheckpointEngine = require('./StateCheckpointEngine.js');
 const StateAnchorPublisher  = require('./StateAnchorPublisher.js');
+const RetractionConsensus   = require('./RetractionConsensus.js');
 const ReorgHandler       = require('./ReorgHandler.js');
 const SwapTracker        = require('./SwapTracker.js');
 const Governance         = require('./Governance.js');
@@ -407,6 +408,13 @@ class XChainHub {
         // hub-DB mirror so explorers/wallets can verify indexer state.
         this.stateCheckpoints = new StateCheckpointEngine(this);
         await this.stateCheckpoints.start();
+
+        // Signed retractions ( full fix): collects 2f+1 cross_chain
+        // co-signatures over quorum-class reorg-retraction broadcasts before they
+        // reach the mirror stream. The engines route their retract-path deletions
+        // through it; below the flag-day / without an identity it falls through
+        // to the legacy unsigned broadcast.
+        this.retractionConsensus = new RetractionConsensus(this);
 
         // ANCHOR publisher: commits the latest checkpoints (v0) and the
         // cross-chain match archive (v1/v2) on DOGE, making all federation state
@@ -1590,6 +1598,7 @@ class XChainHub {
         if(this.governance)       await this.governance.stop();
         if(this.reorgHandler)     await this.reorgHandler.stop();
         if(this.stateAnchorPublisher) await this.stateAnchorPublisher.stop();
+        if(this.retractionConsensus) this.retractionConsensus.stop();
         if(this.stateCheckpoints) await this.stateCheckpoints.stop();
         if(this.crossChainCalls)  await this.crossChainCalls.stop();
         if(this.crossChainDex)    await this.crossChainDex.stop();

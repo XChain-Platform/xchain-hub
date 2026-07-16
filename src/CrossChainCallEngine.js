@@ -737,7 +737,14 @@ class CrossChainCallEngine extends EventEmitter {
             let evt = { table: 'cross_chain_calls', source_chain: chain, from_action_index: fromActionIndex };
             if(bounded) evt.to_action_index = to;
             if(fenced) evt.retraction_generation = gen;
-            this.broadcaster.broadcastDeletion(evt);
+            // : quorum-class deletions ride the retraction-signing round when
+            // active (2f+1 co-signatures before mirrors will delete); legacy unsigned
+            // broadcast otherwise. submitLocal always records the local intent so this
+            // hub can co-sign peers' rounds for the same reorg.
+            if(this.hub && this.hub.retractionConsensus)
+                this.hub.retractionConsensus.submitLocal(evt).catch(e => console.error('CrossChainCall: retraction submit error: ' + (e && e.message)));
+            else
+                this.broadcaster.broadcastDeletion(evt);
         }
         console.warn('CrossChainCall: retracted ' + rows.length + ' relay row(s) for ' + chain +
                      ' reorg below action ' + fromActionIndex + (bounded ? ' (bounded <= ' + to + ')' : '') +

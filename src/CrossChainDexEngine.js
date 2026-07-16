@@ -768,7 +768,12 @@ class CrossChainDexEngine extends EventEmitter {
                 let evt = { table: 'cross_chain_matches', source_chain: chain, from_action_index: fromActionIndex };
                 if(bounded) evt.to_action_index = to;
                 if(fenced) evt.retraction_generation = gen;
-                this.broadcaster.broadcastDeletion(evt);
+                // : ride the retraction-signing round when active (the round
+                // dedups the per-row repeats by canonical); legacy unsigned otherwise.
+                if(this.hub && this.hub.retractionConsensus)
+                    this.hub.retractionConsensus.submitLocal(evt).catch(e => console.error('CrossChainDex: retraction submit error: ' + (e && e.message)));
+                else
+                    this.broadcaster.broadcastDeletion(evt);
             }
         }
     }
