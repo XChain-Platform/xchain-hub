@@ -1053,6 +1053,9 @@ class XChainHub {
         let parsed = JSON.parse(fs.readFileSync(configFilePath, 'utf8'));
         if(!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
             throw new Error('capability config must be a JSON object');
+        // Validate BEFORE merging so a divergent file is refused whole: on the
+        // hot-reload path the running hub keeps its previous (validated) config.
+        if('CAPABILITIES' in parsed) this._assertCanonicalMinStakes(parsed.CAPABILITIES);
         if(!this.p2pConfig) this.p2pConfig = {};
         const KEYS = ['CAPABILITIES', 'DISABLED_CAPABILITIES', 'price', 'cross_chain',
                       'oracle_publish', 'attestation', 'CAPABILITY_RECHECK_MS', 'STAKE_POLL_MS'];
@@ -1071,6 +1074,79 @@ class XChainHub {
             ' (thresholds: ' + Object.keys(this.p2pConfig.CAPABILITIES || {}).join(', ') + ')');
     }
 
+    // : assert operator MIN_STAKE thresholds against the canonical coins
+    // registry (src/coins/BTC.js STAKING.CAPABILITIES, byte-identity-gated across
+    // the fleet). The value configured here is what every CapabilitySnapshot query
+    // sends the indexer as the qualifying floor, so a hub whose capabilities.json
+    // diverges from the federation-uniform constant computes a DIFFERENT qualified
+    // set / quorum N than its peers: a consensus fork, not a local preference.
+    // (xchain-node's ValidatorService historically defaulted cross_chain to 1000
+    // vs the canonical 5000, which is exactly this footgun.)
+    //
+    // mainnet/testnet: a mismatch refuses the config (throws, code
+    // MIN_STAKE_MISMATCH; startCapabilities rethrows so boot halts fail-closed).
+    // regtest/standalone: warn only, so test venues can run deliberately low
+    // floors. XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT=1 is a loud one-off bypass.
+    // A capability with no MIN_STAKE key seeds a genesis floor of '0'
+    // (CapabilityRegistry._seedGenesisHistory), so a missing key on a canonical
+    // capability counts as a mismatch, never a pass.
+    _assertCanonicalMinStakes(caps){
+        if(!caps || typeof caps !== 'object' || Array.isArray(caps)) return;
+        if(process.env.XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT === '1'){
+            console.warn('XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT=1: skipping canonical MIN_STAKE ' +
+                'assertion . Divergent thresholds fork the qualified validator set; ' +
+                'only bypass on a venue where every hub runs the SAME override.');
+            return;
+        }
+        // STAKING is network-independent in the registry (no per-network overrides),
+        // but resolve through the same getCoinConfig path consumers use. Staking is
+        // BTC-anchored, so BTC is the only chain whose floors gate quorum.
+        let network = this.network || 'mainnet';
+        let canonicalCaps;
+        try {
+            let cfg = coins.getCoinConfig('BTC', network);
+            canonicalCaps = (cfg.STAKING && cfg.STAKING.CAPABILITIES) ? cfg.STAKING.CAPABILITIES : null;
+        } catch(e){
+            console.warn('Canonical MIN_STAKE assertion skipped: could not resolve BTC coin config for network "' +
+                network + '": ' + e.message);
+            return;
+        }
+        if(!canonicalCaps) return;
+        let mismatches = [];
+        for(let [cap, entry] of Object.entries(caps)){
+            let canonical = canonicalCaps[cap];
+            if(!canonical){
+                // Unknown to the canonical registry: nothing to assert against. The
+                // registry/self-test layers already surface unusable capabilities.
+                console.warn('Capability "' + cap + '" is not in the canonical coins registry; ' +
+                    'MIN_STAKE not asserted.');
+                continue;
+            }
+            let configured = Number((entry && entry.MIN_STAKE !== undefined) ? entry.MIN_STAKE : 0);
+            let expected   = Number(canonical.MIN_STAKE);
+            if(!Number.isFinite(configured) || configured !== expected){
+                mismatches.push(cap + ': configured ' +
+                    ((entry && entry.MIN_STAKE !== undefined) ? entry.MIN_STAKE : '(missing -> 0)') +
+                    ' vs canonical ' + canonical.MIN_STAKE);
+            }
+        }
+        if(mismatches.length === 0) return;
+        let detail = 'capability MIN_STAKE diverges from the canonical coins registry ' +
+            '(src/coins/BTC.js STAKING.CAPABILITIES): ' + mismatches.join('; ') +
+            '. Every hub must query the indexer with the SAME floor or the qualified ' +
+            'validator set / quorum N forks across the federation. Fix capabilities.json ' +
+            'to the canonical values (XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT=1 to bypass on a ' +
+            'coordinated test venue).';
+        // Strict only on a declared consensus network: standalone ('' - no
+        // consensus runs) and regtest venues warn instead of refusing.
+        if(this.network === 'mainnet' || this.network === 'testnet'){
+            let err = new Error(detail);
+            err.code = 'MIN_STAKE_MISMATCH';
+            throw err;
+        }
+        console.warn('MIN_STAKE mismatch (non-strict on ' + (this.network || 'standalone') + '): ' + detail);
+    }
+
     async startCapabilities(configFilePath){
         // Load operator-supplied capability config (MIN_STAKE thresholds + the
         // per-capability self-test config blocks) BEFORE constructing the registry,
@@ -1081,6 +1157,11 @@ class XChainHub {
             try {
                 this._loadCapabilityConfigFile(configFilePath);
             } catch(e){
+                // A canonical MIN_STAKE mismatch is a consensus-fork misconfig, not a
+                // degraded mode: halt boot fail-closed . Read/parse problems
+                // keep the legacy warn-and-degrade behavior (self-tests then fail
+                // "config missing" and this hub simply doesn't serve capabilities).
+                if(e && e.code === 'MIN_STAKE_MISMATCH') throw e;
                 console.warn('Could not load capability config from ' + configFilePath + ': ', e);
             }
         }
