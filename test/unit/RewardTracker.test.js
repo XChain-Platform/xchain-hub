@@ -255,13 +255,21 @@ describe('RewardTracker', function () {
             expect(post.called, 'derived reward is not pushed').to.be.false;
         });
 
-        it('STILL pushes anchor_archive post-flag-day (the indexer cannot derive it from v4/v5)', async function () {
-            hub.network = 'regtest';
+        it('STILL pushes anchor_archive below the ARCHIVE_REWARD flag-day (legacy rail stands)', async function () {
+            hub.network = 'mainnet';                                       // archive flag-day = 983000 placeholder
             rt.btcIndexerApiUrl = 'http://indexer:3000';
-            await rt.recordAnchorReward('anchor_archive', 3, hexPk(1), 100);
+            await rt.recordAnchorReward('anchor_archive', 3, hexPk(1), 100);   // 100 < flag-day
             await new Promise(r => setImmediate(r));
-            expect(post.calledOnce, 'archive reward still pushed').to.be.true;
+            expect(post.calledOnce, 'pre-flag-day archive reward still pushed').to.be.true;
             expect(post.getCall(0).args[1].params.reward_type).to.equal('anchor_archive');
+        });
+
+        it('does NOT push anchor_archive once the ARCHIVE_REWARD flag-day is active (indexer derives it from v6, )', async function () {
+            hub.network = 'regtest';                                       // archive flag-day = genesis
+            rt.btcIndexerApiUrl = 'http://indexer:3000';
+            await rt.recordAnchorReward('anchor_archive', 3, hexPk(2), 100);
+            await new Promise(r => setImmediate(r));
+            expect(post.called, 'derived archive reward is not pushed').to.be.false;
         });
 
         it('STILL pushes anchor_<chain> below the flag-day (legacy push path stands)', async function () {
@@ -285,18 +293,31 @@ describe('RewardTracker', function () {
             expect(ins[1][3], 'frozen amount, not the 2.5 env override').to.equal('10.00000000');
         });
 
-        it('still honors the env amount below the flag-day and for anchor_archive', async function () {
+        it('still honors the env amount below each flag-day', async function () {
             let h = createMockHub({ p2pConfig: { ANCHOR_REWARD_PER_PUBLISH: '2.5' } });
             h.network = 'mainnet';                                         // per-chain dormant @ block 100
             let rt2 = new RewardTracker(h);
             await rt2.recordAnchorReward('anchor_BTC', 1, hexPk(1), 100);  // below flag-day
             expect(h.db.doQuery.getCall(1).args[1][3]).to.equal('2.50000000');
-            // anchor_archive is never derived from v4/v5, so it keeps the env amount even on regtest.
+            // anchor_archive keeps the env amount below ITS flag-day (mainnet placeholder).
             let h2 = createMockHub({ p2pConfig: { ANCHOR_REWARD_PER_PUBLISH: '2.5' } });
-            h2.network = 'regtest';
+            h2.network = 'mainnet';
             let rt3 = new RewardTracker(h2);
             await rt3.recordAnchorReward('anchor_archive', 2, hexPk(1), 100);
             expect(h2.db.doQuery.getCall(1).args[1][3]).to.equal('2.50000000');
+        });
+
+        it('records the FROZEN archive amount for a derived anchor_archive reward, ignoring an env override ', async function () {
+            // Same divergence argument as the per-chain frozen amount: the indexer credits
+            // the frozen ARCHIVE_REWARD_AMOUNT from the on-chain v6, so the hub's recorded
+            // (and therefore archived) amount has to match or recovery forks the COLLECT rail.
+            let h = createMockHub({ p2pConfig: { ANCHOR_REWARD_PER_PUBLISH: '2.5' } });
+            h.network = 'regtest';                                         // archive flag-day = genesis
+            let rt2 = new RewardTracker(h);
+            await rt2.recordAnchorReward('anchor_archive', 9, hexPk(1), 100);
+            let ins = h.db.doQuery.getCall(1).args;                        // getCall(0) is the dedup SELECT
+            expect(ins[0]).to.include('INSERT IGNORE INTO validator_rewards');
+            expect(ins[1][3], 'frozen archive amount, not the 2.5 env override').to.equal('10.00000000');
         });
     });
 

@@ -103,12 +103,18 @@ class RewardTracker {
         // consensus constant (`ANCHOR_REWARD_AMOUNT`, never the wire). The hub must record (and
         // therefore archive) that SAME frozen amount, or a recovered node (which restores the
         // archived amount) would diverge from a live node (which derives the frozen amount) when
-        // an operator has overridden `ANCHOR_REWARD_PER_PUBLISH`. Below the flag-day, and for
-        // `anchor_archive` (not derived from v4/v5), the legacy operator-tunable amount stands.
+        // an operator has overridden `ANCHOR_REWARD_PER_PUBLISH`.  extends the same
+        // rule to `anchor_archive` at/above its own ARCHIVE_REWARD flag-day (derived from the
+        // ANCHOR v6 publisher attestation with the frozen ARCHIVE_REWARD_AMOUNT). Below each
+        // flag-day the legacy operator-tunable amount stands.
         let network   = (this.hub && this.hub.network) ? this.hub.network : '';
-        let isDerived = /^anchor_(BTC|LTC|DOGE)$/.test(String(rewardType)) &&
-                        ar.isAnchorRewardActive(Number(blockIndex), network);
-        let amount = parseFloat(isDerived ? ar.ANCHOR_REWARD_AMOUNT : this.anchorReward);
+        let isDerivedChain   = /^anchor_(BTC|LTC|DOGE)$/.test(String(rewardType)) &&
+                               ar.isAnchorRewardActive(Number(blockIndex), network);
+        let isDerivedArchive = String(rewardType) === 'anchor_archive' &&
+                               ar.isArchiveRewardActive(Number(blockIndex), network);
+        let isDerived = isDerivedChain || isDerivedArchive;
+        let amount = parseFloat(isDerivedChain ? ar.ANCHOR_REWARD_AMOUNT
+                              : isDerivedArchive ? ar.ARCHIVE_REWARD_AMOUNT : this.anchorReward);
         if (!Number.isFinite(amount) || amount <= 0) return;
         let amountStr = amount.toFixed(8);
 
@@ -144,10 +150,10 @@ class RewardTracker {
 
         console.log('Rewards: ' + rewardType + ' #' + roundNumber + ': ' + amountStr + ' XCHAIN to ' + lcPubkey.substring(0, 16) + '…');
 
-        // A derived reward (per-chain, at/above the flag-day) is credited on-chain by every
-        // indexer, so the unauthenticated, forgeable `pushvalidatorrewards` write is retired for
-        // it (the #5311 vector). The push survives below the flag-day and for `anchor_archive`
-        // (which the indexer does not derive); `oracle_round` never pushes here.
+        // A derived reward (per-chain at/above the anchor-reward flag-day, anchor_archive
+        // at/above the archive-reward flag-day) is credited on-chain by every indexer, so the
+        // forgeable `pushvalidatorrewards` write is retired for it (#5311 / ). The push
+        // survives below each flag-day; `oracle_round` never pushes here.
         if(!isDerived)
             this._pushRewardsToBtcIndexer(roundNumber, [lcPubkey], amountStr, blockIndex || roundNumber, rewardType)
                 .catch(e => console.warn('Rewards: failed to push anchor reward to BTC indexer:', e));

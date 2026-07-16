@@ -225,13 +225,16 @@ describe('StateAnchorPublisher', function () {
     // federation fallback). Pin the regtest flag-day DORMANT here so the producer keeps
     // emitting v0/v3; the nested 'publisher-attestation round (v4/v5)' suite below
     // re-activates it. save/restore keeps the toggle isolation-safe regardless of order.
-    let savedRegtestFlagDay;
+    let savedRegtestFlagDay, savedArchiveRegtestFlagDay;
     beforeEach(function () {
-        savedRegtestFlagDay = arMod.ANCHOR_REWARD_ACTIVATION.regtest;
-        arMod.ANCHOR_REWARD_ACTIVATION.regtest = 999999999;
+        savedRegtestFlagDay        = arMod.ANCHOR_REWARD_ACTIVATION.regtest;
+        savedArchiveRegtestFlagDay = arMod.ARCHIVE_REWARD_ACTIVATION.regtest;
+        arMod.ANCHOR_REWARD_ACTIVATION.regtest  = 999999999;
+        arMod.ARCHIVE_REWARD_ACTIVATION.regtest = 999999999;
     });
     afterEach(function () {
-        arMod.ANCHOR_REWARD_ACTIVATION.regtest = savedRegtestFlagDay;
+        arMod.ANCHOR_REWARD_ACTIVATION.regtest  = savedRegtestFlagDay;
+        arMod.ARCHIVE_REWARD_ACTIVATION.regtest = savedArchiveRegtestFlagDay;
     });
 
     // n publishers over a shared gossip bus. Every node shares identical DB
@@ -555,6 +558,129 @@ describe('StateAnchorPublisher', function () {
             });
             await sleep(60);
             expect(impostor.pub._attestRound.signatures.size, 'only the impostor self-sig').to.equal(1);
+        });
+    });
+
+    // Archive publisher-attestation round (v6, ): at/above the archive-reward
+    // flag-day the elected archive leader emits ANCHOR v6 (the v1 archive anchor + the
+    // publisher tail) carrying a 2f+1 oracle_publish attestation over the archive XANCPUB
+    // canonical, so the indexer DERIVES the anchor_archive reward and the last
+    // key-authenticated push rail is retired. This suite RE-ACTIVATES the archive
+    // regtest flag-day only (the checkpoint side stays legacy v0, isolating the leg).
+    describe('archive publisher-attestation round (v6)', function () {
+
+        beforeEach(function () { arMod.ARCHIVE_REWARD_ACTIVATION.regtest = 0; });   // active at genesis
+
+        // Independent reimplementation of the indexer's Anchor._rewardCanonical (FORMAT 6):
+        // the hub's _archiveAttestationCanonical MUST be byte-identical to this.
+        function archiveRewardCanonical(cp, batchSeq, publisher) {
+            let base = ['XANCPUB', 'anchor_archive', String(batchSeq),
+                        String(cp.snapshot_block), String(publisher).toLowerCase(),
+                        arMod.ARCHIVE_REWARD_AMOUNT].join('|');
+            if (eq.isEquivHeaderActive(cp.snapshot_block, cp.network)) {
+                let roundId = 'XANCPUB|archive|' + cp.network + '|' + batchSeq + '|' + cp.snapshot_block;
+                return eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT, roundId, 0, base);
+            }
+            return base;
+        }
+
+        it('_archiveAttestationCanonical is byte-identical to the indexer archive reward canonical (EQUIV-wrapped)', function () {
+            let bus = buildMesh(1);
+            let pub = bus.nodes[0].pub;
+            let cp  = pub._cpFromRow(Object.assign({}, CP_ROW));
+            let publisher = bus.nodes[0].pubkey;
+            let expected = archiveRewardCanonical(cp, 0, publisher);
+            // Sanity: the wrapped form is what the federation signs at/above the EQUIV
+            // flag-day, with the 'archive' round-id family disjoint from every per-chain one.
+            expect(expected).to.equal(
+                'EQUIV|XCHECKPOINT|XANCPUB|archive|regtest|0|100|0||XANCPUB|anchor_archive|0|100|' +
+                publisher + '|10.00000000');
+            expect(pub._archiveAttestationCanonical(cp, 0, publisher)).to.equal(expected);
+        });
+
+        it('single-node: flush emits ANCHOR v6 with a self-attestation the indexer can verify', async function () {
+            let bus = buildMesh(1);
+            let nd  = bus.nodes[0];
+            await startAll(bus);
+            await nd.pub.flush();
+            await sleep(30);
+
+            let v6 = nd.published.find(p => p.split('|')[1] === '6');
+            expect(v6, 'a v6 archive anchor was published').to.be.a('string');
+            let parts = v6.split('|');
+            expect(parts[11], 'MATCH_BATCH_SEQ').to.equal('0');
+            expect(parts[14], 'TOTAL_CHUNKS').to.equal('1');
+            let sigCount = Number(parts[16]);                              // wrapper SIG_COUNT (v1 sigBase)
+            let pubBase  = 17 + 2 * sigCount;
+            expect(parts[pubBase], 'PUBLISHER').to.equal(nd.pubkey);
+            expect(Number(parts[pubBase + 1]), 'ATTEST_SIG_COUNT').to.equal(1);
+            let aPub = parts[pubBase + 2], aSig = parts[pubBase + 3];
+            expect(aPub).to.equal(nd.pubkey);
+            let cp = nd.pub._cpFromRow(nd.db.checkpoints[0]);
+            expect(ValidatorIdentity.verify(archiveRewardCanonical(cp, 0, nd.pubkey), aSig, aPub)).to.be.true;
+
+            // The wrapper signature still verifies over the UNCHANGED v1 archive canonical.
+            let canonical = nd.pub._archiveCanonical(cp, 0, 1, parts[13], 1);
+            expect(ValidatorIdentity.verify(canonical, parts[18], parts[17])).to.be.true;
+
+            // The archive lands, rows back-fill, and the anchor_archive reward is recorded.
+            expect(nd.db.matches[0].batch_seq).to.equal(0);
+            expect(nd.rewards.filter(r => r.type === 'anchor_archive').length).to.equal(1);
+        });
+
+        it('N=4: the elected archive leader collects a 2f+1 archive attestation quorum and emits v6', async function () {
+            let bus = buildMesh(4, { btcBlock: 100 });
+            await startAll(bus);
+            for (let nd of bus.nodes) await nd.pub.flush();
+            await sleep(200);
+
+            let leader = bus.nodes.find(nd => nd.published.some(p => p.split('|')[1] === '6'));
+            expect(leader, 'an elected leader emitted a v6').to.exist;
+            let parts = leader.published.find(p => p.split('|')[1] === '6').split('|');
+            let sigCount = Number(parts[16]);
+            let pubBase  = 17 + 2 * sigCount;
+            expect(parts[pubBase], 'PUBLISHER is the leader').to.equal(leader.pubkey);
+            let attestCount = Number(parts[pubBase + 1]);
+            expect(attestCount, '2f+1 attestation quorum').to.be.at.least(3);
+
+            let cp = leader.pub._cpFromRow(leader.db.checkpoints[0]);
+            let canonical = archiveRewardCanonical(cp, Number(parts[11]), leader.pubkey);
+            let setPubkeys = new Set(bus.nodes.map(n => n.pubkey));
+            let signers = [];
+            for (let i = 0; i < attestCount; i++) {
+                let aPub = parts[pubBase + 2 + 2 * i], aSig = parts[pubBase + 2 + 2 * i + 1];
+                expect(setPubkeys.has(aPub), 'attester in oracle_publish set').to.be.true;
+                expect(ValidatorIdentity.verify(canonical, aSig, aPub)).to.be.true;
+                signers.push(aPub);
+            }
+            expect(signers).to.include(leader.pubkey);
+        });
+
+        it('liveness fallback: a leader that cannot reach attestation quorum emits legacy v1 and withholds the reward', async function () {
+            // Degraded federation: the elected archive leader is the ONLY started node
+            // in a 4-member snapshot, so no peer co-signs the archive XANCPUB. The
+            // bounded round times out, the leader FALLS BACK to a legacy v1 (the archive
+            // must always land), and the anchor_archive reward is withheld: at/above the
+            // flag-day no live indexer derives a reward from a v1, so recording one would
+            // strand it in hub/archive bookkeeping and fork a recovered ledger.
+            let bus = buildMesh(4, { btcBlock: 100, cfg: { ANCHOR_ROUND_TIMEOUT_MS: '40' } });
+            await startAll(bus);
+            // Sever ONLY the archive-attestation gossip: the archive SIGNING round must
+            // still reach quorum (or no archive head publishes at all), but no attest
+            // co-sign ever arrives, so the attestation round times out.
+            for (let nd of bus.nodes) {
+                let orig = nd.handler;
+                nd.handler = (env) => { if (String(env.type).startsWith('XANCARCHPUB')) return; orig(env); };
+            }
+            for (let nd of bus.nodes) await nd.pub.flush();
+            await sleep(200);
+
+            let archiveHeads = bus.nodes.flatMap(nd => nd.published.filter(p => ['1', '6'].includes(p.split('|')[1])));
+            expect(archiveHeads.length, 'an archive head was still published').to.be.at.least(1);
+            expect(archiveHeads.every(p => p.split('|')[1] === '1'), 'fell back to legacy v1, no v6').to.be.true;
+            let leader = bus.nodes.find(nd => nd.published.some(p => p.split('|')[1] === '1'));
+            expect(leader.rewards.filter(r => r.type === 'anchor_archive').length,
+                'no anchor_archive reward on a degraded legacy fallback').to.equal(0);
         });
     });
 
