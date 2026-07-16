@@ -33,7 +33,8 @@
 const EventEmitter      = require('events');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const eq                = require('./equivocation_header.js');
-const { PRICE_MAX }     = require('./constants.js');
+const { PRICE_MAX, PRICE_V1_COINS, PRICE_V1_FIATS,
+        MAX_TICK_LENGTH, MAX_MEMO_LENGTH } = require('./constants.js');
 const { bcgt }          = require('./bcmath.js');
 
 class PriceAggregator extends EventEmitter {
@@ -294,6 +295,25 @@ class PriceAggregator extends EventEmitter {
         // hub cannot re-check that cryptographically; the gates here are the
         // authenticated push channel, strict field validation (mirroring the
         // indexer's wire-format rules), and the uniform 24h effective_at delay.
+        // : bound coin/tick/fiat/memo to the indexer's PRICE v1 wire-format
+        // rules (actions/price.js parse_v1). The indexer already rejects these
+        // on-chain, so anything outside them here is a malformed or Byzantine
+        // push; without the bounds an attacker on the push channel could write
+        // arbitrary-size or bogus-key rows into oracle_prices.
+        if (typeof priceData.coin !== 'string' || !PRICE_V1_COINS.includes(priceData.coin)) {
+            return { accepted: false, reason: 'invalid coin' };
+        }
+        if (typeof priceData.tick !== 'string' || priceData.tick.length === 0 || priceData.tick.length > MAX_TICK_LENGTH) {
+            return { accepted: false, reason: 'invalid tick' };
+        }
+        if (typeof priceData.fiat !== 'string' || !PRICE_V1_FIATS.includes(priceData.fiat)) {
+            return { accepted: false, reason: 'invalid fiat' };
+        }
+        if (priceData.memo !== undefined && priceData.memo !== null &&
+            (typeof priceData.memo !== 'string' || priceData.memo.length > MAX_MEMO_LENGTH)) {
+            return { accepted: false, reason: 'invalid memo' };
+        }
+
         if (!/^[0-9]+(\.[0-9]{1,8})?$/.test(String(priceData.value)) || parseFloat(priceData.value) <= 0 ||
             !(parseFloat(priceData.value) < PRICE_MAX)) {   // PRICE_MAX ceiling at ingest (item 9e6c0acd)
             return { accepted: false, reason: 'invalid value' };

@@ -236,7 +236,7 @@ describe('PriceAggregator.receiveOraclePrice() uniform 24h effective_at delay', 
         let getInsert = stubDb();
 
         let result = await agg.receiveOraclePrice('LTC', {
-            source_address: 'addr1', coin: 'XCP', tick: 'GOLD', fiat: 'USD',
+            source_address: 'addr1', coin: 'BTC', tick: 'GOLD', fiat: 'USD',
             value: '1.23', block_time: 1700000000, action_index: 7
         });
 
@@ -250,7 +250,7 @@ describe('PriceAggregator.receiveOraclePrice() uniform 24h effective_at delay', 
         let getInsert = stubDb();
 
         let result = await agg.receiveOraclePrice('LTC', {
-            source_address: 'addr1', coin: 'XCP', tick: 'GOLD', fiat: 'USD',
+            source_address: 'addr1', coin: 'BTC', tick: 'GOLD', fiat: 'USD',
             value: '1.50', block_time: 1700000000, action_index: 8
         });
 
@@ -273,7 +273,7 @@ describe('PriceAggregator.receiveOraclePrice() validation + persistence', functi
     });
 
     const VALID = {
-        source_address: 'addr1', coin: 'XCP', tick: 'GOLD', fiat: 'USD',
+        source_address: 'addr1', coin: 'BTC', tick: 'GOLD', fiat: 'USD',
         value: '1.23', block_time: 1700000000, action_index: 7
     };
 
@@ -324,7 +324,7 @@ describe('PriceAggregator.receiveOraclePrice() validation + persistence', functi
         agg.on('row:inserted', e => events.push(e));
 
         let result = await agg.receiveOraclePrice('BTC', {
-            source_address: 'addr1', coin: 'XCP', tick: 'GOLD', fiat: 'USD',
+            source_address: 'addr1', coin: 'BTC', tick: 'GOLD', fiat: 'USD',
             value: '1.23', fee: '0.01', memo: 'hi', block_time: 1700000000, action_index: 7,
             push_generation: 4
         });
@@ -333,13 +333,13 @@ describe('PriceAggregator.receiveOraclePrice() validation + persistence', functi
         // Uniform 24h delay applies to every publish, first included. push_generation (item 5308)
         // is the 12th column, stamped from the push payload.
         expect(insertArgs).to.deep.equal([
-            'addr1', 'BTC', 'XCP', 'GOLD', 'USD', '1.23', '0.01', 'hi',
+            'addr1', 'BTC', 'BTC', 'GOLD', 'USD', '1.23', '0.01', 'hi',
             1700000000, 1700086400, 7, 4
         ]);
         expect(events).to.have.length(1);
         expect(events[0].table).to.equal('oracle_prices');
         expect(events[0].row).to.include({
-            source_address: 'addr1', source_chain: 'BTC', coin: 'XCP',
+            source_address: 'addr1', source_chain: 'BTC', coin: 'BTC',
             tick: 'GOLD', fiat: 'USD', value: '1.23', fee: '0.01', memo: 'hi',
             block_time: 1700000000, effective_at: 1700086400, action_index: 7, push_generation: 4
         });
@@ -352,7 +352,7 @@ describe('PriceAggregator.receiveOraclePrice() validation + persistence', functi
             return [];
         });
         await agg.receiveOraclePrice('BTC', {
-            source_address: 'addr1', coin: 'XCP', tick: 'GOLD', fiat: 'USD',
+            source_address: 'addr1', coin: 'BTC', tick: 'GOLD', fiat: 'USD',
             value: '1.23', block_time: 1700000000, action_index: 7
         });
         expect(insertArgs[11]).to.equal(0);     // push_generation defaults to 0
@@ -428,6 +428,67 @@ describe('PriceAggregator.receiveOraclePrice() validation + persistence', functi
         expect(hub.db.doQuery.called).to.equal(false);
     });
 
+    // : coin/tick/fiat/memo bounds mirroring the indexer's PRICE v1
+    // wire-format rules (actions/price.js parse_v1).
+    it('rejects an unsupported or non-string coin without touching the DB', async function () {
+        for (let coin of ['XCP', 'btc', 'ETH', 42, { x: 1 }, 'B'.repeat(300)]) {
+            let result = await agg.receiveOraclePrice('BTC', { ...VALID, coin });
+            expect(result, 'coin=' + JSON.stringify(coin)).to.deep.equal({ accepted: false, reason: 'invalid coin' });
+        }
+        expect(hub.db.doQuery.called).to.equal(false);
+    });
+
+    it('rejects an over-length or non-string tick without touching the DB', async function () {
+        for (let tick of ['T'.repeat(251), 42, ['GOLD']]) {
+            let result = await agg.receiveOraclePrice('BTC', { ...VALID, tick });
+            expect(result, 'tick=' + JSON.stringify(tick)).to.deep.equal({ accepted: false, reason: 'invalid tick' });
+        }
+        expect(hub.db.doQuery.called).to.equal(false);
+    });
+
+    it('accepts a tick at exactly the 250-char boundary', async function () {
+        hub.db.doQuery.callsFake(async (sql) => (/^INSERT/.test(sql) ? {} : []));
+        let result = await agg.receiveOraclePrice('BTC', { ...VALID, tick: 'T'.repeat(250) });
+        expect(result).to.deep.equal({ accepted: true });
+    });
+
+    it('rejects an unsupported or non-string fiat without touching the DB', async function () {
+        for (let fiat of ['usd', 'XYZ', 7, 'U'.repeat(300)]) {
+            let result = await agg.receiveOraclePrice('BTC', { ...VALID, fiat });
+            expect(result, 'fiat=' + JSON.stringify(fiat)).to.deep.equal({ accepted: false, reason: 'invalid fiat' });
+        }
+        expect(hub.db.doQuery.called).to.equal(false);
+    });
+
+    it('rejects an over-length or non-string memo without touching the DB', async function () {
+        for (let memo of ['M'.repeat(251), 42, { note: 'x' }]) {
+            let result = await agg.receiveOraclePrice('BTC', { ...VALID, memo });
+            expect(result, 'memo=' + JSON.stringify(memo)).to.deep.equal({ accepted: false, reason: 'invalid memo' });
+        }
+        expect(hub.db.doQuery.called).to.equal(false);
+    });
+
+    it('accepts a memo at exactly the 250-char boundary (and null/omitted memo)', async function () {
+        hub.db.doQuery.callsFake(async (sql) => (/^INSERT/.test(sql) ? {} : []));
+        let result = await agg.receiveOraclePrice('BTC', { ...VALID, memo: 'M'.repeat(250) });
+        expect(result).to.deep.equal({ accepted: true });
+        result = await agg.receiveOraclePrice('BTC', { ...VALID, memo: null, action_index: 8 });
+        expect(result).to.deep.equal({ accepted: true });
+    });
+
+    it('accepts every supported coin and fiat', async function () {
+        hub.db.doQuery.callsFake(async (sql) => (/^INSERT/.test(sql) ? {} : []));
+        let i = 100;
+        for (let coin of ['BTC', 'LTC', 'DOGE']) {
+            let result = await agg.receiveOraclePrice('BTC', { ...VALID, coin, action_index: i++ });
+            expect(result, 'coin=' + coin).to.deep.equal({ accepted: true });
+        }
+        for (let fiat of ['USD', 'CAD', 'AUD', 'MXN', 'GBP', 'JPY', 'CNY', 'CHF', 'BRL', 'INR', 'EUR', 'KRW']) {
+            let result = await agg.receiveOraclePrice('BTC', { ...VALID, fiat, action_index: i++ });
+            expect(result, 'fiat=' + fiat).to.deep.equal({ accepted: true });
+        }
+    });
+
     it('defaults fee/memo to null, action_index to 0, and source_chain to "" when omitted', async function () {
         let insertArgs = null;
         hub.db.doQuery.callsFake(async (sql, params) => {
@@ -435,7 +496,7 @@ describe('PriceAggregator.receiveOraclePrice() validation + persistence', functi
             return [];
         });
         await agg.receiveOraclePrice(null, {
-            source_address: 'addr1', coin: 'XCP', tick: 'GOLD', fiat: 'USD', value: '1.23'
+            source_address: 'addr1', coin: 'BTC', tick: 'GOLD', fiat: 'USD', value: '1.23'
         });
         // [addr, chain, coin, tick, fiat, value, fee, memo, block_time, effective_at, action_index]
         expect(insertArgs[1]).to.equal('');     // source_chain

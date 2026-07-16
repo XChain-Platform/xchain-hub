@@ -29,7 +29,7 @@ const crypto            = require('crypto');
 const EventEmitter      = require('events');
 const PriceFetcher      = require('./PriceFetcher.js');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
-const { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD } = require('./constants.js');
+const { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD, ORACLE_MAX_CHANGE_PER_ROUND } = require('./constants.js');
 const swq               = require('./stake_weighted_quorum.js');
 const eq                = require('./equivocation_header.js');
 const bcmath            = require('./bcmath.js');
@@ -61,6 +61,12 @@ class OracleConsensus extends EventEmitter {
 
         // Pending rounds: Map<round, { prices, digest, prepares: Set, commits: Set, finalized: bool, timer }>
         this.pendingRounds = new Map();
+
+        // Rounds evicted on finalization timeout (leader and follower seats alike),
+        // mirroring StateCheckpointEngine._roundTimeouts. Exposed as round_timeouts
+        // through OracleRound.getSubmissionsInfo (the getoraclesubmissions RPC) so
+        // the dashboard can alert on quorum-loss frequency (reviews 1468/1469).
+        this._roundTimeouts = 0;
 
         // When each round became ready to finalize (Date.now() at finalizeRound's
         // follower path). The receiver-side leader-timeout grace in _handlePropose
@@ -584,7 +590,17 @@ class OracleConsensus extends EventEmitter {
 
         pending.timer = setTimeout(() => {
             if (!pending.finalized) {
-                console.warn('Oracle: Finalization timeout for round ' + round);
+                // Count leader-seat quorum loss symmetrically with the follower-side
+                // PROPOSE-round timeout in _handlePropose (review 1469): before this,
+                // the eviction left no countable trace, so a leader repeatedly stuck
+                // below commit quorum was invisible to the dashboard's oracle stall
+                // ladder until lastSuccessAge aged past its warn band. Deliberately
+                // NOT a _storeSkippedRound: that marks the round finalized locally
+                // and would refuse a late-arriving quorum, unlike the follower path.
+                this._roundTimeouts = (this._roundTimeouts || 0) + 1;
+                console.warn('Oracle: Finalization timeout for round ' + round + ' ('
+                    + pending.prepares.size + ' prepares, '
+                    + pending.commits.size + ' commits, quorum ' + pending.quorum + ')');
                 this.pendingRounds.delete(round);
             }
         }, this.finalizationTimeout);
@@ -1386,10 +1402,46 @@ class OracleConsensus extends EventEmitter {
 
         // Compute median in bignumber (no float midpoint average / .toFixed artifact)
         let mid = Math.floor(values.length / 2);
+        let median;
         if (values.length % 2 === 0) {
-            return bcmath.bcformat(bcmath.bcdiv(bcmath.bcadd(values[mid - 1].s, values[mid].s, 8), '2', 8), 8);
+            median = bcmath.bcformat(bcmath.bcdiv(bcmath.bcadd(values[mid - 1].s, values[mid].s, 8), '2', 8), 8);
+        } else {
+            median = bcmath.bcformat(values[mid].s, 8);
         }
-        return bcmath.bcformat(values[mid].s, 8);
+        return this._clampToLastFinalized(coinPair, median);
+    }
+
+    // Per-pair bounded-change clamp . The trim + median above bound what a
+    // MINORITY of bad feeds can do; nothing bounds the aggregate itself, so a real
+    // fat-tail print (or a majority of correlated bad sources) still lands in one
+    // round and immediately drives USD-pegged fee math. Bound the finalized price's
+    // per-round movement to ORACLE_MAX_CHANGE_PER_ROUND relative to the pair's last
+    // FINALIZED snapshot: a genuine sustained move walks to the new level over a few
+    // rounds (cache updates each finalized round), a one-round spike is absorbed.
+    // Deterministic federation-wide: every hub's _lastFinalizedPrices holds the same
+    // finalized history (DB-seeded on start), so followers re-deriving the aggregate
+    // clamp identically. No history (brand-new pair, cold standalone cache) means no
+    // clamp; the  unverifiable-pair gate covers that case on the co-sign side.
+    // CONSENSUS-CRITICAL: deploy fleet-wide atomically.
+    _clampToLastFinalized(coinPair, price) {
+        let last = this._getLastFinalizedPrice(coinPair);
+        if (last === null || !bcmath.bcgt(last, '0')) return price;
+        let maxDelta = bcmath.bcmul(last, String(ORACLE_MAX_CHANGE_PER_ROUND), 8);
+        let hi = bcmath.bcadd(last, maxDelta, 8);
+        let lo = bcmath.bcsub(last, maxDelta, 8);
+        if (bcmath.bcgt(price, hi)) {
+            console.warn('Oracle: clamping ' + coinPair + ' aggregate ' + price + ' to ' +
+                bcmath.bcformat(hi, 8) + ' (last finalized ' + last + ', max +' +
+                (ORACLE_MAX_CHANGE_PER_ROUND * 100) + '%/round)');
+            return bcmath.bcformat(hi, 8);
+        }
+        if (bcmath.bclt(price, lo)) {
+            console.warn('Oracle: clamping ' + coinPair + ' aggregate ' + price + ' to ' +
+                bcmath.bcformat(lo, 8) + ' (last finalized ' + last + ', max -' +
+                (ORACLE_MAX_CHANGE_PER_ROUND * 100) + '%/round)');
+            return bcmath.bcformat(lo, 8);
+        }
+        return price;
     }
 
     async _storeSnapshot(round, prices, validatorCount, proof, btcBlockHeight, btcBlockTime) {

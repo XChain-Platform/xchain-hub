@@ -509,4 +509,22 @@ describe('OracleRound (extra coverage)', function () {
             expect(info.droppedPairCount).to.equal(1);
         });
     });
+
+    // ── getSubmissionsInfo: PBFT round-timeout counter (reviews 1468/1469) ───
+
+    describe('getSubmissionsInfo(): round_timeouts', function () {
+        it('surfaces the consensus _roundTimeouts counter', async function () {
+            or.setConsensus({ _roundTimeouts: 3 });
+            let info = await or.getSubmissionsInfo();
+            expect(info.round_timeouts).to.equal(3);
+        });
+
+        it('defaults to 0 when no consensus is wired or the counter is unset', async function () {
+            let info = await or.getSubmissionsInfo();
+            expect(info.round_timeouts).to.equal(0);
+            or.setConsensus({});
+            info = await or.getSubmissionsInfo();
+            expect(info.round_timeouts).to.equal(0);
+        });
+    });
 });

@@ -328,6 +328,12 @@ class OracleRound {
             lastSubmissionPersistFailureRound: this.lastSubmissionPersistFailureRound,
             lastSubmissionPersistFailureCount: this.lastSubmissionPersistFailureCount,
             consecutiveSkippedRounds: this.consecutiveSkippedRounds,
+            // PBFT finalization-timeout evictions (leader and follower seats),
+            // mirroring StateCheckpointEngine getStats().round_timeouts so the
+            // dashboard can alert on quorum-loss frequency (reviews 1468/1469).
+            round_timeouts:           this.oracleConsensus
+                ? (this.oracleConsensus._roundTimeouts || 0)
+                : 0,
             oracle_fetch_failures:    this.fetchFailures,
             lastSuccessfulRoundTime:  this.lastSuccessfulRoundTime,
             // Server-computed age of the last successful round. The dashboard

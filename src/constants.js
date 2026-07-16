@@ -54,4 +54,28 @@ const XCALL_MAX_HOPS = 2;
 // never drift between hubs. 0.05 = 5%.
 const ORACLE_DEVIATION_THRESHOLD = 0.05;
 
-module.exports = { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD, XCALL_MAX_HOPS };
+// Per-pair bounded-change clamp for the aggregation step : a round's
+// trimmed-median aggregate may move at most this fraction from the pair's last
+// FINALIZED price per round. A fat-tail spike (or a coordinated set of
+// manipulated feeds that survives the trim) walks toward the new level at
+// 25%/round instead of landing in one round, so USD-pegged fee math never sees
+// a single absurd print. MUST be federation-uniform (hubs re-derive each
+// other's aggregates before co-signing, so a divergent bound forks the
+// federation on the boundary). Kept at 5x ORACLE_DEVIATION_THRESHOLD so a
+// clamped aggregate always passes the follower propose-gate's historical band
+// (which uses the same 5x multiplier). CONSENSUS-CRITICAL: deploy fleet-wide.
+const ORACLE_MAX_CHANGE_PER_ROUND = 0.25;
+
+// PRICE v1 wire-format bounds . Mirror xchain-indexer/src/config.js
+// (COINS, FIATS, MAX_TICK_LENGTH, MAX_MEMO_LENGTH) and actions/price.js
+// parse_v1: the indexer rejects these on-chain, so any push carrying a value
+// outside them is malformed or Byzantine and must not reach oracle_prices
+// (getLatestPrice / fee validation / the hub-db mirror stream read it).
+// Keep in lockstep with the indexer when new coins or fiats are added.
+const PRICE_V1_COINS  = ['BTC', 'LTC', 'DOGE'];
+const PRICE_V1_FIATS  = ['USD', 'CAD', 'AUD', 'MXN', 'GBP', 'JPY', 'CNY', 'CHF', 'BRL', 'INR', 'EUR', 'KRW'];
+const MAX_TICK_LENGTH = 250;
+const MAX_MEMO_LENGTH = 250;
+
+module.exports = { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD, ORACLE_MAX_CHANGE_PER_ROUND, XCALL_MAX_HOPS,
+                   PRICE_V1_COINS, PRICE_V1_FIATS, MAX_TICK_LENGTH, MAX_MEMO_LENGTH };
