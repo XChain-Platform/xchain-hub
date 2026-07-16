@@ -494,8 +494,13 @@ describe('ReorgHandler', function () {
             rh.network = 'regtest';
         });
 
-        function stubIndexer(tip, at) {
+        // Default reorg history: OLD_HASH was orphaned at height 500 (the honest
+        // case). Individual tests override `hist` to exercise the oldHash gate.
+        function stubIndexer(tip, at, hist) {
+            if (hist === undefined)
+                hist = { events: [{ id: 1, blocks: [{ block_index: 500, block_hash: OLD_HASH }] }], count: 1, matched: true };
             return sinon.stub(rh, '_indexerCall').callsFake(async (coin, method, params) => {
+                if (method === 'getreorghistory') return hist;
                 if (params && params.block_index != null) return at;
                 return tip;
             });
@@ -552,10 +557,69 @@ describe('ReorgHandler', function () {
             expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
         });
 
-        it('reuses the tip response when reorgHeight IS the tip (single RPC)', async function () {
+        it('reuses the tip response when reorgHeight IS the tip (single getblockhashes RPC)', async function () {
             let ic = stubIndexer({ block_index: 500, block_hash: NEW_HASH, network: 'regtest' }, null);
             expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.ok;
-            expect(ic.callCount).to.equal(1);
+            expect(ic.getCalls().filter(c => c.args[1] === 'getblockhashes').length).to.equal(1);
+        });
+
+        // REORG-OLDHASH-UNVERIFIED-1 : the "before" half of the reorg.
+        it('abstains when reorg history has no event orphaning oldHash at reorgHeight (fabricated oldHash)', async function () {
+            stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
+                        { block_index: 500, block_hash: NEW_HASH, network: 'regtest' },
+                        { events: [], count: 0, matched: false });
+            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+        });
+
+        it('abstains when a reorg at that height orphaned a DIFFERENT hash', async function () {
+            stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
+                        { block_index: 500, block_hash: NEW_HASH, network: 'regtest' },
+                        { events: [{ id: 1, blocks: [{ block_index: 500, block_hash: 'c'.repeat(64) }] }], count: 1 });
+            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+        });
+
+        it('abstains when the orphaned-hash match is at a DIFFERENT height in the same event', async function () {
+            stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
+                        { block_index: 500, block_hash: NEW_HASH, network: 'regtest' },
+                        { events: [{ id: 1, blocks: [{ block_index: 501, block_hash: OLD_HASH }] }], count: 1 });
+            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+        });
+
+        it('accepts a legacy REORG event at that height whose hash is unrecorded (null)', async function () {
+            stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
+                        { block_index: 500, block_hash: NEW_HASH, network: 'regtest' },
+                        { events: [{ id: 1, blocks: [{ block_index: 500, block_hash: null }] }], count: 1 });
+            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.ok;
+        });
+
+        it('matches an uppercase recorded orphaned hash case-insensitively', async function () {
+            stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
+                        { block_index: 500, block_hash: NEW_HASH, network: 'regtest' },
+                        { events: [{ id: 1, blocks: [{ block_index: 500, block_hash: OLD_HASH.toUpperCase() }] }], count: 1 });
+            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.ok;
+        });
+
+        it('abstains (never throws) when getreorghistory errors or is unsupported', async function () {
+            // App-level error shape ({error}) from an indexer without a ready decoder DB.
+            stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
+                        { block_index: 500, block_hash: NEW_HASH, network: 'regtest' },
+                        { error: 'decoder database not ready' });
+            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+
+            // RPC rejection (e.g. an indexer predating getreorghistory).
+            sinon.restore();
+            sinon.stub(rh, '_indexerCall').callsFake(async (coin, method) => {
+                if (method === 'getreorghistory') throw new Error('indexer RPC error: method not found');
+                return { block_index: 500, block_hash: NEW_HASH, network: 'regtest' };
+            });
+            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+        });
+
+        it('skips the reorg-history probe entirely when the served hash already mismatches', async function () {
+            let ic = stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
+                                 { block_index: 500, block_hash: OLD_HASH, network: 'regtest' });
+            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+            expect(ic.getCalls().some(c => c.args[1] === 'getreorghistory')).to.be.false;
         });
 
         it('_verifyReorgAgainstOwnNode maps an RPC error to abstain (false), never a throw', async function () {

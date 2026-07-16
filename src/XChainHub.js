@@ -249,6 +249,18 @@ class XChainHub {
 
                 await this.rewardTracker.distributeRewards(event.round, participantPubkeys, event.btcBlockHeight);
 
+                // SLASH-STATIC-VSET-1: re-load the validator set per finalized round.
+                // The set captured at startOracle() goes stale, so validators
+                // added or rotated in after startup escaped participation
+                // slashing (and removed validators kept accruing misses). On a
+                // transient load failure (_loadValidatorSet returns []) fall
+                // back to the last-known-good set rather than skipping the
+                // participation check for the round.
+                let currentValidators = await this._loadValidatorSet();
+                if(currentValidators.length > 0){
+                    validators = currentValidators;
+                }
+
                 await this.slashDetector.checkRound(
                     event.round, event.submissions, event.prices,
                     participantPubkeys, validators

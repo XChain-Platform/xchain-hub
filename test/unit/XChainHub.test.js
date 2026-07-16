@@ -829,6 +829,82 @@ describe('XChainHub', function () {
     // startAttestation(): operator signer wiring
     // -----------------------------------------------------------------
 
+    // -----------------------------------------------------------------
+    // round:finalized validator-set freshness (SLASH-STATIC-VSET-1)
+    // -----------------------------------------------------------------
+
+    describe('round:finalized validator-set freshness (SLASH-STATIC-VSET-1)', function () {
+
+        function makeOracleStubs() {
+            const handlers = {};
+            const oracleConsensus = {
+                setValidatorSet: sinon.stub(),
+                on:    (evt, fn) => { handlers[evt] = fn; },
+                start: sinon.stub().resolves()
+            };
+            const slashDetector = { checkRound: sinon.stub().resolves() };
+            return {
+                handlers, oracleConsensus, slashDetector,
+                modules: {
+                    './db':                  function () { return mockDb; },
+                    './OracleConsensus.js':  function () { return oracleConsensus; },
+                    './OracleRound.js':      function () { return { setConsensus: sinon.stub(), start: sinon.stub().resolves() }; },
+                    './RewardTracker.js':    function () { return { distributeRewards: sinon.stub().resolves() }; },
+                    './SlashDetector.js':    function () { return slashDetector; },
+                    './OraclePublisher.js':  function () { return { start: sinon.stub().resolves() }; },
+                    './lib/signer-loader.js': { loadSignerHooks: () => null, applySignerHooks: () => {} }
+                }
+            };
+        }
+
+        function finalizedEvent(round) {
+            return { round, submissions: new Map(), prices: [], participants: [], btcBlockHeight: 1 };
+        }
+
+        it('re-loads the validator set per finalized round so rotated-in validators are slashable', async function () {
+            this.timeout(30000);
+            const stubs = makeOracleStubs();
+            const Hub = proxyquire('../../src/XChainHub', stubs.modules);
+            let hub = new Hub('h', 1, 'd', 'u', 'p', { P2P_PORT: 10001 });
+            hub.peerManager = { validatorPubkeys: new Map() };
+
+            const stale = [{ pubkey: 'pk1', addr: 'a1' }];
+            const fresh = [{ pubkey: 'pk1', addr: 'a1' }, { pubkey: 'pk2', addr: 'a2' }];
+            const load = sinon.stub(hub, '_loadValidatorSet');
+            load.resolves(fresh);          // per-round reloads see the current set
+            load.onFirstCall().resolves(stale); // startOracle() sees the boot-time set
+
+            await hub.startOracle();
+            await stubs.handlers['round:finalized'](finalizedEvent(7));
+
+            // Slashing must be evaluated against the freshly loaded set, not
+            // the set captured at startOracle() time.
+            expect(stubs.slashDetector.checkRound.calledOnce).to.be.true;
+            expect(stubs.slashDetector.checkRound.getCall(0).args[4]).to.deep.equal(fresh);
+        });
+
+        it('falls back to the last-known-good set when the per-round reload fails', async function () {
+            this.timeout(30000);
+            const stubs = makeOracleStubs();
+            const Hub = proxyquire('../../src/XChainHub', stubs.modules);
+            let hub = new Hub('h', 1, 'd', 'u', 'p', { P2P_PORT: 10001 });
+            hub.peerManager = { validatorPubkeys: new Map() };
+
+            const fresh = [{ pubkey: 'pk1', addr: 'a1' }, { pubkey: 'pk2', addr: 'a2' }];
+            const load = sinon.stub(hub, '_loadValidatorSet');
+            load.onFirstCall().resolves([{ pubkey: 'pk1', addr: 'a1' }]); // startOracle()
+            load.onSecondCall().resolves(fresh);                          // round 1 reload
+            load.onThirdCall().resolves([]);                              // round 2 reload fails (DB error path returns [])
+
+            await hub.startOracle();
+            await stubs.handlers['round:finalized'](finalizedEvent(1));
+            await stubs.handlers['round:finalized'](finalizedEvent(2));
+
+            expect(stubs.slashDetector.checkRound.callCount).to.equal(2);
+            expect(stubs.slashDetector.checkRound.getCall(1).args[4]).to.deep.equal(fresh);
+        });
+    });
+
     describe('startAttestation() signer wiring', function () {
 
         function makeAttestationStubs() {

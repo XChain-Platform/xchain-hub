@@ -23,8 +23,10 @@
  * Quorum requires 2f+1 INDEPENDENT observations of the same reorg: the
  * ALERT/PREPARE wire format carries the reporter's observed `oldHash` /
  * `newHash` at `reorgHeight`, both bound into the PBFT digest, and every
- * hub verifies against its OWN indexer (getblockhashes) that the node now
- * serves `newHash` before co-signing. A hub that cannot confirm (lagging
+ * hub verifies against its OWN indexer that the node now serves `newHash`
+ * (getblockhashes) AND that `oldHash` was the canonical-then-orphaned hash
+ * at that height (getreorghistory, backed by the decoder's REORG events)
+ * before co-signing. A hub that cannot confirm (lagging
  * node, no indexer endpoint, network mismatch, height out of bounds)
  * ABSTAINS: it neither co-signs nor blocks others, so a fabricated reorg
  * no honest indexer serves can never reach quorum, while a real reorg
@@ -641,7 +643,8 @@ class ReorgHandler extends EventEmitter {
     // Verify a claimed reorg against our OWN indexer. Returns a truthy
     // `{ blockTimeMs }` object only on positive confirmation: the node serves
     // `newHash` at `reorgHeight`, the height is within [tip - maxReorgDepth, tip],
-    // and the response names the federation network. blockTimeMs is the served
+    // the response names the federation network, and the node's reorg history
+    // shows `oldHash` was actually orphaned at that height. blockTimeMs is the served
     // block's block_time in ms (the rollback anchor; null when the indexer carries
     // no block_time). Anything else (no endpoint, RPC error, lagging node still on
     // oldHash, network mismatch) returns false, which callers treat as ABSTAIN,
@@ -683,12 +686,53 @@ class ReorgHandler extends EventEmitter {
 
         let served = String(bh.block_hash).toLowerCase();
         if (served !== newHash || newHash === oldHash) return false;
+
+        // The "before" half (REORG-OLDHASH-UNVERIFIED-1): serving newHash at
+        // reorgHeight is trivially true on the honest chain, so on its own it
+        // lets a single Byzantine reporter pair the real canonical hash with a
+        // fabricated oldHash and reach full honest quorum over a reorg that
+        // never happened. Require our OWN node's reorg evidence (the decoder's
+        // REORG events, surfaced by the indexer's getreorghistory) to confirm
+        // oldHash was the canonical-then-orphaned hash at reorgHeight; abstain
+        // otherwise. Liveness holds: an indexer that serves newHash at that
+        // height necessarily processed the reorg, so its decoder recorded the
+        // orphaned hashes in the same pass.
+        if (!(await this._confirmOldHashOrphaned(chain, reorgHeight, oldHash))) return false;
+
         // block_time (unix seconds) of OUR OWN node's block at reorgHeight: the
         // consensus-uniform rollback anchor (every hub reads its own copy of the
         // same quorum-verified block). Nullable: an indexer predating block_time
         // yields the legacy reporter-timestamp bound.
         let blockTimeMs = (Number(bh.block_time) > 0) ? Number(bh.block_time) * 1000 : null;
         return { blockTimeMs };
+    }
+
+    // Whether our own indexer's reorg history shows `oldHash` was orphaned at
+    // `reorgHeight`. Queries by height only and matches the hash locally, so a
+    // legacy REORG event (recorded before the decoder stored hashes; block_hash
+    // null) at that exact height is accepted as evidence a real reorg orphaned
+    // a block there, while a recorded-but-different hash is refused. Any error
+    // shape (RPC error, indexer predating getreorghistory, malformed response)
+    // is an abstain, never a throw.
+    async _confirmOldHashOrphaned(chain, reorgHeight, oldHash) {
+        let hist;
+        try {
+            hist = await this._indexerCall(chain, 'getreorghistory', { block_index: reorgHeight });
+        } catch (err) {
+            console.warn('Reorg: getreorghistory probe failed for ' + chain + ':' + reorgHeight + ':',
+                err && err.message);
+            return false;
+        }
+        if (!hist || hist.error || !Array.isArray(hist.events)) return false;
+        for (let ev of hist.events) {
+            if (!ev || !Array.isArray(ev.blocks)) continue;
+            for (let b of ev.blocks) {
+                if (!b || Number(b.block_index) !== Number(reorgHeight)) continue;
+                if (b.block_hash === null || b.block_hash === undefined) return true;  // legacy: hash unrecorded
+                if (String(b.block_hash).toLowerCase() === oldHash) return true;
+            }
+        }
+        return false;
     }
 
     async _indexerCall(coin, method, params) {
