@@ -1494,8 +1494,12 @@ async function startApi(){
                 if (deleted > 0) console.log('Telemetry retention: pruned ' + deleted + ' rows older than ' + TELEMETRY_RETENTION_DAYS + ' days');
             } catch (e) { /* best-effort; never crash the hub over retention */ }
         };
-        setTimeout(pruneTelemetry, 60 * 1000);
+        // unref so these best-effort retention timers never keep the event loop
+        // alive on their own (the listening socket does that in production); this
+        // also lets test processes that proxyquire this module exit cleanly.
+        setTimeout(pruneTelemetry, 60 * 1000).unref();
         telemetryCleanupInterval = setInterval(pruneTelemetry, 24 * 60 * 60 * 1000);
+        telemetryCleanupInterval.unref();
     }
 
     const pingInterval = setInterval(() => {
@@ -1509,6 +1513,9 @@ async function startApi(){
             }
         }
     }, HUB_DB_KEEPALIVE_INTERVAL);
+    // Keep-alive ping must not by itself hold the loop open (the listening socket
+    // does that in production); prevents proxyquired test instances from hanging.
+    pingInterval.unref();
 
     server.listen(HUB_PORT, HUB_HOST, () => {
         console.log('Hub API listening on ' + HUB_HOST + ':' + HUB_PORT);
@@ -1549,8 +1556,16 @@ async function startApi(){
             // Stop accepting HTTP connections; force-close lingering keep-alives so
             // server.close() resolves promptly (Node >= 18.2).
             await new Promise((resolve) => {
-                server.close(resolve);
-                if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
+                // server is an http.Server in production, but unit tests proxyquire
+                // this module with a mock `http` whose createServer returns a stub
+                // that has no close(). Guard so a signal-triggered shutdown drains
+                // the DB pool via hub.close() below instead of throwing here.
+                if (typeof server.close === 'function') {
+                    server.close(resolve);
+                    if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
+                } else {
+                    resolve();
+                }
             });
 
             // Release hub-owned resources: P2P, consensus/oracle timers, capability +

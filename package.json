@@ -22,7 +22,7 @@
   },
   "scripts": {
     "api": "node ./src/api.js",
-    "test": "mocha 'test/unit/**/*.test.js' --timeout 5000 --recursive",
+    "test": "mocha 'test/unit/**/*.test.js' --timeout 5000 --recursive --exit",
     "coverage": "c8 --reporter=text --reporter=html --include 'src/**/*.js' mocha 'test/unit/**/*.test.js' --timeout 5000 --recursive --exit",
     "ci": "mocha 'test/unit/**/*.test.js' --timeout 5000 --recursive --exit && npm run ci:security",
     "ci:security": "mocha 'test/security/**/*.test.js' --timeout 5000 --recursive --exit",
