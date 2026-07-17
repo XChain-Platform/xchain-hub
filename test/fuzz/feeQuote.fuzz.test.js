@@ -15,20 +15,19 @@ const { expect } = require('chai');
 const fc         = require('fast-check');
 const proxyquire = require('proxyquire');
 const gen        = require('./generators');
+const coins      = require('../../src/coins');
 
 describe('Fuzz: XChainHub.getFeeQuote()', function () {
 
     let XChainHub, hub, dbStub;
 
-    // Known actions in the gas schedule
-    const KNOWN_ACTIONS = [
-        'ISSUE', 'ISSUE_SUBTOKEN', 'EXPIRATION_PER_DAY', 'OWNERSHIP_ESCROW',
-        'AIRDROP_PER_RECIPIENT', 'DIVIDEND_PER_RECIPIENT',
-        'VM_EXECUTE_BASE', 'VM_DEPLOY_BASE', 'VM_DEPLOY_PER_BYTE',
-        'VM_STATE_READ', 'VM_STATE_WRITE', 'VM_STATE_DELETE',
-        'VM_ORACLE_READ', 'VM_CROSSCHAIN_READ', 'VM_ATTEST_REQUEST',
-        'VM_EMISSION', 'VM_COMPUTATION'
-    ];
+    // Known actions = the canonical GAS_SCHEDULE keys, sourced from the coin
+    // registry (getFeeQuote now serves the schedule from the same bundle). Deriving
+    // this here rather than hardcoding keeps the known/unknown split in step with a
+    // schedule repin, so a new metered action can't silently pass the "unknown
+    // action" filter below (this list previously drifted, omitting VM_XCALL_REQUEST /
+    // VM_XCALL_CALLBACK / VM_GUARD_GAS_CEILING).
+    const KNOWN_ACTIONS = Object.keys(coins.getCoinConfig('BTC', 'mainnet').GAS_SCHEDULE);
 
     beforeEach(function () {
         // Stub the Database class to avoid real MariaDB connections

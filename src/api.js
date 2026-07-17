@@ -1116,8 +1116,13 @@ async function startApi(){
     });
 
     // GET /hub-db/snapshot/state_checkpoints: full snapshot of state_checkpoints table.
-    // Explicit column list: anchor_txid is hub-side audit metadata and is NOT mirrored
-    // (the indexer mirror schema has no such column).
+    // Explicit column list: the four SPV root columns (state_root, state_root_version,
+    // block_merkle_root, block_merkle_version) are mirror-consumed and MUST be included,
+    // or a REST-bootstrapped mirror holds NULL roots while a streamed mirror (WS SELECT *)
+    // holds them, and the XCHECKPOINT canonical rebuilt from the bootstrapped row drops
+    // the root suffix and fails 2f+1 signature verification post CHECKPOINT_COMMITMENT
+    // flag-day. anchor_txid stays excluded: it is hub-side audit metadata and is NOT
+    // mirrored (the indexer mirror schema has no such column).
     app.get('/hub-db/snapshot/state_checkpoints', async (req, res) => {
         try {
             if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
@@ -1126,7 +1131,8 @@ async function startApi(){
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
             let rows = await hub.db.doQuery(
                 'SELECT id, chain, network, block_index, block_hash, ledger_hash, actions_hash, ' +
-                'contract_hash, checkpoint_seq, snapshot_block, validator_signatures, created_at ' +
+                'contract_hash, checkpoint_seq, snapshot_block, state_root, state_root_version, ' +
+                'block_merkle_root, block_merkle_version, validator_signatures, created_at ' +
                 'FROM state_checkpoints WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );

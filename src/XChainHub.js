@@ -983,41 +983,33 @@ class XChainHub {
     }
 
     async getFeeQuote(action, chain) {
-        // Default gas schedule: mirrors the canonical per-chain fee schedule. BTC
-        // carries the full set; the VM_ATTEST_REQUEST entry is only metered on
-        // chains where the attestation framework is active. Every other entry
-        // shares identical gas values across chains. Overridden by the GAS_SCHEDULE
-        // config blob when present, so the schedule stays in sync with the indexer.
-        let gasSchedule = {
-            ISSUE:                  100000,
-            ISSUE_SUBTOKEN:         50000,
-            EXPIRATION_PER_DAY:     550,
-            OWNERSHIP_ESCROW:       50000,
-            AIRDROP_PER_RECIPIENT:  100,
-            DIVIDEND_PER_RECIPIENT: 100,
-            VM_EXECUTE_BASE:        1000,
-            VM_DEPLOY_BASE:         100000,
-            VM_DEPLOY_PER_BYTE:     10,
-            VM_STATE_READ:          100,
-            VM_STATE_WRITE:         200,
-            VM_STATE_DELETE:        100,
-            VM_ORACLE_READ:         100,
-            VM_CROSSCHAIN_READ:     100,
-            VM_ATTEST_REQUEST:      5000,
-            VM_EMISSION:            500,
-            VM_COMPUTATION:         1
-        };
-
         // Use the hub's deployment network (mainnet|testnet|regtest) so a testnet
         // or regtest hub reads the right config rows instead of always reading mainnet.
         let network = this.network || 'mainnet';
 
-        // Gas price (XCHAIN per gas unit). Read from the hub's own network config
-        // so testnet/regtest hubs pick up their own overrides, not mainnet values.
-        // GAS_SCHEDULE blob, when present, overrides the hardcoded schedule above.
-        let gasPrice = '0.00001';
+        // Default gas schedule + price: source from the canonical per-chain coin
+        // bundle rather than an inline literal, so a coordinated schedule/price repin
+        // cannot silently diverge from what the indexer meters off the same bundle
+        // (same reason _registryOracleMaxAge reads the registry, never a hardcoded
+        // literal). The prior inline copy had already drifted, omitting VM_XCALL_REQUEST
+        // / VM_XCALL_CALLBACK / VM_GUARD_GAS_CEILING so those actions quoted as
+        // 'unknown action'. The GAS_SCHEDULE / GAS_PRICE config blob, when present,
+        // still overrides these as the per-hub operator layer.
+        let gasSchedule = {};
+        let gasPrice    = '0.00001';
         try {
-            let chainCfg = await this.db.getConfig(chain, network, 'chain');
+            let bundle = coins.getCoinConfig(chain, network);
+            if (bundle && bundle.GAS_SCHEDULE) gasSchedule = Object.assign({}, bundle.GAS_SCHEDULE);
+            if (bundle && bundle.GAS_PRICE)    gasPrice    = String(bundle.GAS_PRICE);
+        } catch (_) { /* unknown chain (the public path is gated by validateChain); serve no schedule */ }
+
+        // Operator override layer. The hub configs tree keys coins by FULL name
+        // (bitcoin/litecoin/dogecoin), not ticker (see db.js normalizeCoin), and
+        // db.getConfig does NOT normalize, so the ticker must be mapped to the full
+        // name here or the override rows never match and both arms below are dead code.
+        let overrideKey = coins.COIN_FULL_NAME[chain] || chain;
+        try {
+            let chainCfg = await this.db.getConfig(overrideKey, network, 'chain');
             if (chainCfg && chainCfg.GAS_PRICE) {
                 let parsed = parseFloat(chainCfg.GAS_PRICE);
                 if (parsed > 0) gasPrice = chainCfg.GAS_PRICE;
