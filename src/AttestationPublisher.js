@@ -99,6 +99,18 @@ class AttestationPublisher {
         // so operators can detect persistent broadcast failures without log-grepping.
         this._broadcastSucceeded = 0;
         this._broadcastFailed    = 0;
+
+        // In-process at-most-once guard. Request ids broadcast this process lifetime
+        // are recorded here the instant broadcaster(...) succeeds. If the post-broadcast
+        // queue rewrite fails (disk full, permissions, transient I/O), the just-published
+        // entry stays on the durable queue file; without this set the next _processQueue
+        // sweep would re-read and RE-BROADCAST it, spending a real BTC fee twice for the
+        // same request. Consulted before every (re-)broadcast so a failed rewrite can
+        // never become a duplicate on-chain ATTEST. Cleared once the durable queue is
+        // confirmed rewritten (mirrors OraclePublisher._publishedRounds). In-process
+        // only: a restart before the queue is repaired can still replay, the same
+        // documented residual the sibling publisher carries.
+        this._publishedRequests = new Set();
     }
 
     // Operator-facing stats for the /health response and status tooling.
@@ -243,10 +255,19 @@ class AttestationPublisher {
             console.warn('AttestationPublisher: no broadcast hook configured for ' + rid.substring(0,16) + '...; entry queued for later replay');
             return;
         }
+        // At-most-once guard: a re-finalized event for a request already broadcast
+        // this process lifetime (whose prior dequeue rewrite failed, leaving it on the
+        // durable queue) must not spend a second BTC fee. The stale queue entry is
+        // dropped by the sweep's matching guard.
+        if (this._publishedRequests.has(rid)){
+            console.warn('AttestationPublisher: ' + rid.substring(0,16) + '... already broadcast this process lifetime; skipping duplicate live broadcast');
+            return;
+        }
         try {
             let result = await broadcaster(payload, event);
             console.log('AttestationPublisher: broadcast ' + rid.substring(0,16) + '... txid=' + (result && result.txid ? result.txid : '?'));
             this._broadcastSucceeded++;
+            this._publishedRequests.add(rid);
             this._removeFromQueue(new Set([rid]));
         } catch (e) {
             this._broadcastFailed++;
@@ -280,6 +301,9 @@ class AttestationPublisher {
         }
     }
 
+    // Truncate-and-rewrite the durable queue. Returns true on a confirmed fsync'd
+    // write, false on failure, so the dequeue path can tell whether a just-published
+    // entry is still on disk (mirrors OraclePublisher._rewriteQueue).
     _rewriteQueue(entries){
         let lines = entries.map(e => JSON.stringify(e)).join('\n') + (entries.length > 0 ? '\n' : '');
         try {
@@ -287,18 +311,35 @@ class AttestationPublisher {
             fs.writeSync(fd, lines);
             fs.fsyncSync(fd);
             fs.closeSync(fd);
+            return true;
         } catch (e) {
             console.error('AttestationPublisher: failed to rewrite queue:', e);
+            return false;
         }
     }
 
     // Remove the given request IDs from the queue. Re-reads the queue fresh so a
     // concurrently-appended entry (from a live onRequestFinalized that fired
-    // mid-sweep) is never clobbered.
+    // mid-sweep) is never clobbered. Returns the rewrite outcome so the at-most-once
+    // guard is only reset when the durable queue is proven to no longer hold any
+    // published entry.
     _removeFromQueue(dropSet){
-        if (!dropSet || dropSet.size === 0) return;
+        if (!dropSet || dropSet.size === 0) return true;
         let remaining = this._readQueue().filter(e => !dropSet.has(String(e.requestId).toLowerCase()));
-        this._rewriteQueue(remaining);
+        let rewritten = this._rewriteQueue(remaining);
+        if (rewritten){
+            // The durable queue now equals `remaining`, which holds no just-dropped
+            // (published) request, so no published entry can still be on disk and the
+            // dedup guard can be reset to bound its growth.
+            this._publishedRequests.clear();
+        } else {
+            console.error('AttestationPublisher: CRITICAL - queue rewrite failed after broadcast; ' +
+                'published entries remain on the durable queue at ' + this.queuePath + '. The in-process ' +
+                'dedup guard prevents re-broadcast for this process lifetime, but a restart before the ' +
+                'queue file is repaired would re-broadcast already-landed attestations (duplicate BTC fee spend). ' +
+                'Fix the queue file writability now.');
+        }
+        return rewritten;
     }
 
     // Choose the active broadcaster, or null when none is configured.
@@ -403,6 +444,16 @@ class AttestationPublisher {
         for (let entry of entries){
             let rid = String(entry.requestId).toLowerCase();
 
+            // At-most-once guard: if this request was already broadcast this process
+            // lifetime, it is only still on the queue because a prior tick's rewrite
+            // failed to truncate it. Re-broadcasting would spend a BTC fee twice, so
+            // drop the stale entry without re-sending (mirrors OraclePublisher).
+            if (this._publishedRequests.has(rid)){
+                console.warn('AttestationPublisher: ' + rid.substring(0,16) + '... already broadcast this process lifetime; dropping stale queue entry without re-broadcast (a prior queue rewrite must have failed)');
+                drop.add(rid);
+                continue;
+            }
+
             if (!pendingIds.has(rid)){
                 // Already resolved on-chain; clear it out.
                 drop.add(rid);
@@ -441,6 +492,9 @@ class AttestationPublisher {
 
             try {
                 let result = await broadcaster(entry.wire, { requestId: entry.requestId });
+                // Arm the at-most-once guard the instant the fee is spent, so a failed
+                // dequeue rewrite below cannot let the next sweep re-broadcast this rid.
+                this._publishedRequests.add(rid);
                 replayed++;
                 drop.add(rid);
                 console.log('AttestationPublisher: ' + (rank === 0 ? 're-broadcast leader' : 'stepped in (rank ' + rank + ')') +
