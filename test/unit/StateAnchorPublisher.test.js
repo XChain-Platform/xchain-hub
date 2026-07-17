@@ -241,7 +241,7 @@ describe('StateAnchorPublisher', function () {
     // contents unless opts.mutate(self) tweaks its copy (divergence tests).
     function buildMesh(n, opts) {
         opts = opts || {};
-        let bus = { nodes: [] };
+        let bus = { nodes: [], onchain: [] };   // onchain = mined checkpoint anchors ( existence gate)
         let identities = [];
         for (let i = 0; i < n; i++) identities.push(new ValidatorIdentity(String(10 + i).repeat(32).slice(0, 64)));
         let validators = identities.map(id => ({ pubkey: id.getPubkeyHex().toLowerCase(), amount: '1' }));
@@ -330,6 +330,21 @@ describe('StateAnchorPublisher', function () {
             // txid (forge), checkpoint_anchored, or no txid at all (stale indexer).
             self.pub._indexerCall = async (coin, method, params) => {
                 if (method !== 'getanchoraction') return null;
+                // A real DOGE indexer only knows MINED anchors. The 
+                // pre-broadcast existence check is the only txid-LESS caller
+                // (receiver verification always binds an announced txid), so gate
+                // txid-less lookups on a checkpoint anchor having actually been
+                // broadcast on the mesh (bus.onchain, recorded by the broadcast
+                // hook below); otherwise every fresh checkpoint would look
+                // already-anchored and no publish test could run. txid-bound
+                // lookups keep the honest-echo model (tests inject V0_DONE for
+                // anchors that "landed" without a mesh broadcast).
+                if (!params.txid) {
+                    let mined = bus.onchain.some(a => a.chain === String(params.chain) &&
+                        a.network === String(params.network) &&
+                        Number(a.block_index) === Number(params.block_index));
+                    if (!mined) return { exists: false, checkpoint_anchored: false, confirmations: 0 };
+                }
                 let r = db.checkpoints.find(c => c.chain === params.chain && c.network === params.network &&
                     Number(c.block_index) === Number(params.block_index));
                 if (!r) return { exists: false, checkpoint_anchored: false, confirmations: 0 };
@@ -345,6 +360,12 @@ describe('StateAnchorPublisher', function () {
             };
             self.pub.setBroadcastHook(async (payload) => {
                 self.published.push(payload);
+                // Model mining: a broadcast CHECKPOINT anchor (v0/v3/v4/v5) becomes
+                // visible to every node's getanchoraction stub (bus.onchain).
+                let f = String(payload).split('|');
+                if (f[0] === 'ANCHOR' && ['0', '3', '4', '5'].includes(f[1])) {
+                    bus.onchain.push({ chain: f[2], network: f[3], block_index: Number(f[4]) });
+                }
                 return { txid: 'txid' + self.published.length };
             });
             bus.nodes.push(self);

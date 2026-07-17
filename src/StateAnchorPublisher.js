@@ -149,6 +149,10 @@ class StateAnchorPublisher {
         this.chunkMaxBytes = parseInt(process.env.ANCHOR_CHUNK_MAX_BYTES  || cfg.ANCHOR_CHUNK_MAX_BYTES  || '6000');
         this.roundTimeoutMs = parseInt(process.env.ANCHOR_ROUND_TIMEOUT_MS || cfg.ANCHOR_ROUND_TIMEOUT_MS || '120000');
         this.chunkRetryDelayMs = parseInt(process.env.ANCHOR_CHUNK_RETRY_MS || cfg.ANCHOR_CHUNK_RETRY_MS || '2500');
+        //  ambiguous-send existence poll: how long to wait for a maybe-
+        // accepted anchor to reach the indexer's mined view before deferring.
+        this.ambiguousPollAttempts = parseInt(process.env.ANCHOR_AMBIGUOUS_POLL_ATTEMPTS || cfg.ANCHOR_AMBIGUOUS_POLL_ATTEMPTS || '3');
+        this.ambiguousPollDelayMs  = parseInt(process.env.ANCHOR_AMBIGUOUS_POLL_MS       || cfg.ANCHOR_AMBIGUOUS_POLL_MS       || '5000');
         this.electionToleranceBlocks = parseInt(process.env.ANCHOR_ELECTION_TOLERANCE_BLOCKS || cfg.ANCHOR_ELECTION_TOLERANCE_BLOCKS || '36');
         this.lowBalanceThreshold = parseFloat(process.env.DOGE_LOW_BALANCE_THRESHOLD || cfg.DOGE_LOW_BALANCE_THRESHOLD || '10');
         // Decouple on-chain anchoring from checkpoint production: checkpoints are
@@ -467,7 +471,11 @@ class StateAnchorPublisher {
                 // wallet; without the retry, every cycle lands only the first
                 // and the rest stagger one chain per 30-min flush (live prod
                 // finding, first post-deploy cycle).
-                let result = await this._broadcastWithRetry(broadcaster, payload);
+                // : the existence check makes a lost ACK (this flush OR a
+                // previous one) adopt the already-mined anchor instead of paying
+                // for a second one.
+                let result = await this._broadcastWithRetry(broadcaster, payload, undefined,
+                    () => this._findExistingCheckpointAnchor(row));
                 let txid = result && result.txid ? result.txid : null;
                 if(!txid){
                     // A confirmed DOGE broadcast always returns a txid; a null txid
@@ -507,7 +515,15 @@ class StateAnchorPublisher {
                 // COLLECT-spendable ledger live-vs-recovered. Record only when the
                 // published payload actually carries the attestation, or below the
                 // flag-day (where the legacy push path credits live indexers).
-                if(attested || !ar.isAnchorRewardActive(Number(row.snapshot_block), row.network)){
+                if(result && result.exists){
+                    //  adoption path: we did not pay for THIS anchor in this
+                    // call (a prior lost-ACK broadcast or a peer did). The on-chain
+                    // payload, not the one we just built, names the earner; a v4/v5
+                    // is derived by the indexer, and a legacy push here could
+                    // credit the wrong pubkey. Stamp + announce, but never push.
+                    console.log('StateAnchorPublisher: adopted existing anchor for ' + row.chain + '/' +
+                                row.network + ' @ ' + row.block_index + '; reward push skipped');
+                } else if(attested || !ar.isAnchorRewardActive(Number(row.snapshot_block), row.network)){
                     this._recordReward('anchor_' + row.chain, Number(row.checkpoint_seq),
                                        this.identity ? this.identity.getPubkeyHex() : null,
                                        Number(row.snapshot_block), row.network);
@@ -2505,15 +2521,88 @@ class StateAnchorPublisher {
     // (txn-mempool-conflict), so every anchor broadcast retries with a pause
     // for the previous spend to become visible. Throws the last error once
     // attempts are exhausted.
-    async _broadcastWithRetry(broadcaster, payload, attempts){
+    // Broadcast with retry, WITHOUT double-spending on a lost ACK .
+    //
+    // Each attempt intentionally rebuilds a FRESH PSBT from fresh UTXOs (conflict
+    // avoidance for back-to-back multi-chain anchors), which is exactly why a
+    // retry after an AMBIGUOUS send failure (the DOGE node may have accepted the
+    // tx but the ACK was lost in transport) would double-broadcast and burn the
+    // fee twice: the rebuilt tx spends different UTXOs, so both can confirm.
+    // Mirrors AttestationPublisher's authoritative pre-replay existence check
+    // (_fetchPendingRequestIds): when the caller can answer "did this anchor
+    // already land?" it passes `existsCheck`, consulted BEFORE every attempt
+    // (attempt 0 too, closing the lost-ACK-from-a-previous-flush window) and
+    // POLLED after an ambiguous send error before giving up.
+    //
+    // existsCheck() contract: resolves { exists: true, txid } when a matching
+    // anchor is already on-chain (any depth), a falsy value when definitively
+    // absent from the mined view, and THROWS when it cannot determine (indexer
+    // unreachable / not wired).
+    //
+    // Rules:
+    //   - existsCheck says exists        -> adopt it; never re-broadcast.
+    //   - definitive pre-send/reject err -> safe: retry with a fresh PSBT.
+    //   - ambiguous send err (tagged `anchorAmbiguousSend` by _defaultBroadcast)
+    //     -> the tx may sit in the DOGE mempool where the indexer cannot see it
+    //     yet; poll existsCheck briefly, then DEFER (throw) instead of
+    //     re-broadcasting. The row stays pending; the next flush's pre-broadcast
+    //     existence check settles it once mined (adopt) or confirms absence
+    //     (safe re-broadcast). Same defer-over-risk choice AttestationPublisher
+    //     makes when its indexer is unreachable.
+    async _broadcastWithRetry(broadcaster, payload, attempts, existsCheck){
         attempts = attempts || 5;
         let lastErr = null;
         for(let attempt = 0; attempt < attempts; attempt++){
             if(attempt > 0) await new Promise(r => setTimeout(r, this.chunkRetryDelayMs));
+            if(existsCheck){
+                let found;
+                try { found = await existsCheck(); }
+                catch(e){ found = undefined; }   // undetermined
+                if(found && found.exists){
+                    console.log('StateAnchorPublisher: anchor already on-chain (txid ' +
+                                (found.txid || '?') + '); adopting instead of re-broadcasting');
+                    return found;
+                }
+                // Undetermined + a send may already have gone out: never risk it.
+                if(found === undefined && lastErr && lastErr.anchorAmbiguousSend) throw lastErr;
+            }
             try { return await broadcaster(payload); }
-            catch(e){ lastErr = e; }
+            catch(e){
+                lastErr = e;
+                if(e && e.anchorAmbiguousSend){
+                    // The send may have been accepted; give the anchor a bounded
+                    // window to reach the indexer's mined view, then defer.
+                    if(existsCheck){
+                        for(let p = 0; p < this.ambiguousPollAttempts; p++){
+                            await new Promise(r => setTimeout(r, this.ambiguousPollDelayMs));
+                            let found = null;
+                            try { found = await existsCheck(); } catch(_e){ found = null; }
+                            if(found && found.exists){
+                                console.log('StateAnchorPublisher: ambiguous send confirmed on-chain (txid ' +
+                                            (found.txid || '?') + '); adopting');
+                                return found;
+                            }
+                        }
+                    }
+                    throw e;   // defer to a later flush; never rebuild+re-broadcast
+                }
+            }
         }
         throw lastErr || new Error('broadcast failed');
+    }
+
+    // Classify a broadcast_tx failure: could the transaction have reached the
+    // DOGE node despite the error? Definitive rejections (the encoder answered
+    // with an RPC error, or an HTTP 4xx auth/rate-limit refusal) and
+    // never-connected transport errors are safe to retry. Everything else
+    // (timeout, reset mid-flight, 5xx after the request went out) is ambiguous.
+    _isAmbiguousSendError(e){
+        if(!e) return false;
+        if(/^Encoder RPC error/.test(String(e.message || ''))) return false;          // node/encoder rejected the tx
+        if(e.response && Number(e.response.status) < 500) return false;               // refused before processing
+        let code = String(e.code || '');
+        if(code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'EAI_AGAIN') return false;  // never sent
+        return true;
     }
 
     async _defaultBroadcast(payload, signer){
@@ -2529,7 +2618,42 @@ class StateAnchorPublisher {
         if(!psbtResult || !psbtResult.psbt) throw new Error('encoder returned no PSBT');
         let txHex = await signer.walletSignFn(psbtResult.psbt);
         if(!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
-        return (await signer.encoder.broadcastTx(txHex)) || { txid: null };
+        // Everything above is pre-send (building/signing; no money has moved).
+        // Only broadcast_tx has a side effect, so only ITS failures get the
+        // ambiguity classification _broadcastWithRetry keys the no-double-
+        // broadcast guard on .
+        try {
+            return (await signer.encoder.broadcastTx(txHex)) || { txid: null };
+        } catch(e){
+            if(this._isAmbiguousSendError(e)) e.anchorAmbiguousSend = true;
+            throw e;
+        }
+    }
+
+    //  existence check for a CHECKPOINT anchor (v0/v3/v4/v5): asks our own
+    // DOGE indexer whether this checkpoint already has a mined, non-invalid
+    // anchor. Returns { exists: true, txid } / null (definitively absent);
+    // THROWS when undetermined (no indexer wired, unreachable, error reply), so
+    // _broadcastWithRetry can distinguish "absent" from "can't tell". Any depth
+    // counts: even a 1-conf anchor spent our DOGE, so re-broadcasting would
+    // double-spend regardless of whether it is deep enough to 'verify' yet.
+    // (getanchoraction serves CHECKPOINT_VERSIONS only, so a v1/v2 archive
+    // anchor can never satisfy this check; the archive path has no such query
+    // surface and relies on the ambiguous-error defer alone.)
+    async _findExistingCheckpointAnchor(row){
+        let ix = this.indexers && this.indexers.DOGE;
+        if(!ix || !ix.url) throw new Error('no DOGE indexer wired');
+        let res = await this._indexerCall('DOGE', 'getanchoraction', {
+            chain: String(row.chain), network: String(row.network),
+            block_index: Number(row.block_index), checkpoint_seq: Number(row.checkpoint_seq)
+        });
+        if(!res || res.error) throw new Error('getanchoraction failed: ' + (res && res.error));
+        if(!res.exists) return null;
+        // A decoded-invalid row never anchored the checkpoint; treat as absent
+        // (our own payloads are built from the quorum row, so this is a peer's
+        // malformed tx, not our lost ACK).
+        if(/^invalid/i.test(String(res.status || ''))) return null;
+        return { exists: true, txid: res.txid || null };
     }
 
     async _checkBalance(signer){
