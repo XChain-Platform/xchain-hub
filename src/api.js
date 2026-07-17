@@ -89,7 +89,7 @@ const COIN_CONSENSUS_HASHES = {};
 for(const net of coins.NETWORKS) COIN_CONSENSUS_HASHES[net] = coins.consensusHashes(net);
 const WRITE_METHODS  = new Set([
     'updateconfig', 'registervalidator', 'rotatevalidator', 'deregistervalidator', 'syncvalidators',
-    'propose', 'vote', 'requestattestation', 'reportreorg', 'initiateswap',
+    'propose', 'proposeslashpenalty', 'vote', 'requestattestation', 'reportreorg', 'initiateswap',
     'pushchaintip', 'pushpriceround', 'pushoracleprice', 'pushpricereorg', 'pushxcallreorg',
     'pushdexreorg', 'anchorflush'
 ]);
@@ -804,6 +804,19 @@ async function startApi(){
                 return await hub.propose(parameter, current_value || '', proposed_value, rationale);
             } catch (err) {
                 return {error: err.message || "error creating proposal"};
+            }
+        },
+
+        // : create a SLASH_PENALTY governance proposal over a validator's
+        // pending slash_proposals evidence. penalty: 'suspend' | 'dismiss'. The
+        // evidence hash is computed hub-side; the vote executes the penalty.
+        async proposeslashpenalty({validator_pubkey, penalty, rationale}){
+            if(!validator_pubkey || !penalty)
+                return {error: "validator_pubkey and penalty (suspend/dismiss) are required"};
+            try {
+                return await hub.proposeSlashPenalty(validator_pubkey, penalty, rationale);
+            } catch (err) {
+                return {error: err.message || "error creating slash penalty proposal"};
             }
         },
 

@@ -409,6 +409,53 @@
       "x-auth": "x-api-key header, when HUB_API_KEY is configured"
     },
     {
+      "name": "proposeslashpenalty",
+      "summary": "Create a SLASH_PENALTY governance proposal over a validator's pending slash_proposals evidence; a passed vote executes the penalty (suspend or dismiss).",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "validator_pubkey",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "penalty",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "rationale",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object"
+        }
+      },
+      "x-auth": "x-api-key header, when HUB_API_KEY is configured"
+    },
+    {
       "name": "vote",
       "summary": "Vote on a governance proposal.",
       "paramStructure": "by-name",

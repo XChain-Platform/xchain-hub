@@ -37,6 +37,7 @@ const RetractionConsensus   = require('./RetractionConsensus.js');
 const ReorgHandler       = require('./ReorgHandler.js');
 const SwapTracker        = require('./SwapTracker.js');
 const Governance         = require('./Governance.js');
+const SlashGovernance    = require('./SlashGovernance.js');
 const PriceAggregator    = require('./PriceAggregator.js');
 const OraclePublisher    = require('./OraclePublisher.js');
 const { loadSignerHooks, applySignerHooks } = require('./lib/signer-loader.js');
@@ -81,6 +82,7 @@ class XChainHub {
         this.reorgHandler     = null;
         this.swapTracker      = null;
         this.governance       = null;
+        this.slashGovernance  = null;
         this.priceAggregator  = null;
         this.oraclePublisher  = null;
         this.hubDbBroadcaster = null;
@@ -468,6 +470,24 @@ class XChainHub {
         let validators = await this._loadValidatorSet();
         this.governance.setValidatorSet(validators);
         await this.governance.start();
+
+        // : governance-mediated penalty execution over slash_proposals.
+        // 'proposal:finalized' fires on the tally leader AND on every follower's
+        // local re-tally of GOV_RESULT, so a passed SLASH_PENALTY:* proposal
+        // executes the penalty federation-wide with no new wire message.
+        this.slashGovernance = new SlashGovernance(this);
+        this.governance.on('proposal:finalized', (ev) => {
+            this.slashGovernance.applyFinalized(ev).catch(e =>
+                console.error('SlashGovernance: penalty execution failed for ' +
+                    (ev && ev.proposalId) + ':', e && e.message ? e.message : e));
+        });
+    }
+
+    // Create a SLASH_PENALTY governance proposal over a validator's pending
+    // slash_proposals evidence . penalty: 'suspend' | 'dismiss'.
+    async proposeSlashPenalty(validatorPubkey, penalty, rationale){
+        if(!this.slashGovernance) throw new Error('Governance not active');
+        return await this.slashGovernance.proposeSlashPenalty(validatorPubkey, penalty, rationale);
     }
 
     async propose(parameter, currentValue, proposedValue, rationale){

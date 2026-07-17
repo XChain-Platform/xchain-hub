@@ -41,6 +41,7 @@ const METHODS = [
     ['getanchorstatus', 'ANCHOR publisher status: cumulative publish counts plus the last-observed DOGE publisher wallet balance and low-balance threshold.', []],
     ['getoraclepublisherstatus', 'ORACLE (PRICE v0) publisher status: queue depth, lifetime published/abandoned (dead-letter) counts, last-published round + txid, and the last-observed DOGE publisher wallet balance for runway monitoring.', []],
     ['propose', 'Submit a governance proposal.', ['proposal'], { auth: true }],
+    ['proposeslashpenalty', 'Create a SLASH_PENALTY governance proposal over a validator\'s pending slash_proposals evidence; a passed vote executes the penalty (suspend or dismiss).', ['validator_pubkey', 'penalty', 'rationale'], { auth: true }],
     ['vote', 'Vote on a governance proposal.', ['proposal_id', 'vote'], { auth: true }],
     ['getproposals', 'List governance proposals, optionally filtered by status and/or parameter name.', ['status', 'parameter', 'limit']],
     ['getproposal', 'One governance proposal with votes.', ['proposal_id']],

@@ -256,7 +256,7 @@ describe('RewardTracker', function () {
         });
 
         it('STILL pushes anchor_archive below the ARCHIVE_REWARD flag-day (legacy rail stands)', async function () {
-            hub.network = 'mainnet';                                       // archive flag-day = 983000 placeholder
+            hub.network = 'mainnet';                                       // archive flag-day = 969500 (armed 07-16)
             rt.btcIndexerApiUrl = 'http://indexer:3000';
             await rt.recordAnchorReward('anchor_archive', 3, hexPk(1), 100);   // 100 < flag-day
             await new Promise(r => setImmediate(r));

@@ -98,7 +98,7 @@ describe('RetractionConsensus ( signed retractions) @regression @tier1', functio
     it('below the flag-day era the broadcast stays legacy-unsigned', async function () {
         let id  = makeIdentity();
         let pk  = id.getPubkeyHex().toLowerCase();
-        // mainnet threshold 983000 > snapshot 5000 -> gate off
+        // mainnet threshold 969500 > snapshot 5000 -> gate off
         let hub = makeHub({ identity: id, network: 'mainnet', validators: [{ pubkey: pk, source: 'srcA', weight: '100' }] });
         let rc  = new RetractionConsensus(hub);
         await rc.submitLocal({ table: 'cross_chain_calls', source_chain: 'DOGE', from_action_index: 42, retraction_generation: 7 });

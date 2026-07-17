@@ -1061,6 +1061,11 @@ describe('Governance: R2-M2 snapshot-lock + R2-H2 re-tally', function () {
         hub._latestBlockIndex = 5;
         expect(gov._isSnapshotLockActive(), 'regtest activates at 0').to.equal(true);
         hub.network = 'mainnet';
-        expect(gov._isSnapshotLockActive(), 'mainnet height unset -> off').to.equal(false);
+        hub._latestBlockIndex = 969499;
+        expect(gov._isSnapshotLockActive(), 'mainnet below 969500 -> off').to.equal(false);
+        hub._latestBlockIndex = 969500;
+        expect(gov._isSnapshotLockActive(), 'mainnet at 969500 -> on').to.equal(true);
+        hub._latestBlockIndex = null;
+        expect(gov._isSnapshotLockActive(), 'mainnet no observed tip -> off').to.equal(false);
     });
 });

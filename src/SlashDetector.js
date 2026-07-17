@@ -19,7 +19,10 @@
  * - Repeated deviation (3+ rounds in 24 hours)
  * - Non-participation (consecutive missed rounds)
  *
- * Detection only; actual stake slashing happens in the indexer.
+ * Detection only: rows land as status 'pending' evidence. Enforcement is
+ * governance-mediated : SlashGovernance turns a validator's pending
+ * rows into a SLASH_PENALTY governance proposal and a passed vote executes
+ * the penalty. On-chain stake slashing stays in the indexer (WI-2).
  *
  ********************************************************************/
 
