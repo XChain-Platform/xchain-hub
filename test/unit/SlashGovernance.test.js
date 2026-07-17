@@ -176,7 +176,8 @@ describe('SlashGovernance ', function () {
 
             let markCall = hub.db.doQuery.getCall(1);
             expect(markCall.args[0]).to.include("UPDATE slash_proposals SET status = ?");
-            expect(markCall.args[1]).to.deep.equal(['approved', PK]);
+            expect(markCall.args[0]).to.include("AND id IN (");
+            expect(markCall.args[1]).to.deep.equal(['approved', PK, 1]);
 
             let suspendCall = hub.db.doQuery.getCall(2);
             expect(suspendCall.args[0]).to.include("SET status = 'suspended'");
@@ -194,24 +195,69 @@ describe('SlashGovernance ', function () {
             let res = await sg.applyFinalized(finalizedEvent('dismiss', rows));
 
             expect(res).to.deep.equal({ validatorPubkey: PK, penalty: 'dismiss', evidenceRowsUpdated: 1, suspended: false });
-            expect(hub.db.doQuery.getCall(1).args[1]).to.deep.equal(['rejected', PK]);
+            expect(hub.db.doQuery.getCall(1).args[1]).to.deep.equal(['rejected', PK, 1]);
             // No validators UPDATE, no set propagation on dismiss
             expect(hub.db.doQuery.callCount).to.equal(2);
             expect(hub._propagateValidatorSet.called).to.equal(false);
         });
 
-        it('executes the voted penalty even when local evidence drifted (logs, does not block)', async function () {
+        it(': rows added after propose are NOT swept (dismiss only rejects the voted subset)', async function () {
+            let votedRows = [evidenceRow(), evidenceRow({ id: 2, round_number: 43 })];
+            // A new offense detected mid-vote (higher id) sits alongside them.
+            let midVoteRow = evidenceRow({ id: 7, offense_type: 'non_participation', round_number: 90, evidence: '{"missedRounds":31}' });
+            hub.db.doQuery.onCall(0).resolves(votedRows.concat([midVoteRow]));
+            hub.db.doQuery.onCall(1).resolves({ affectedRows: 2 });
+            let warn = sinon.stub(console, 'warn');
+
+            let res = await sg.applyFinalized(finalizedEvent('dismiss', votedRows));
+
+            expect(res.evidenceRowsUpdated).to.equal(2);
+            let markCall = hub.db.doQuery.getCall(1);
+            // Only the voted rows' ids appear in the UPDATE; id 7 stays pending.
+            expect(markCall.args[1]).to.deep.equal(['rejected', PK, 1, 2]);
+            expect(warn.getCalls().some(c => String(c.args[0]).includes('detected after proposal'))).to.equal(true);
+        });
+
+        it(': dismiss fails closed when no local subset matches the voted evidence hash', async function () {
             let votedRows = [evidenceRow()];
             let driftedRows = [evidenceRow({ evidence: '{"different":true}' })];
             hub.db.doQuery.onCall(0).resolves(driftedRows);
-            hub.db.doQuery.onCall(1).resolves({ affectedRows: 1 });
-            hub.db.doQuery.onCall(2).resolves({ affectedRows: 1 });
+            let warn = sinon.stub(console, 'warn');
+
+            let res = await sg.applyFinalized(finalizedEvent('dismiss', votedRows));
+
+            expect(res).to.deep.equal({ validatorPubkey: PK, penalty: 'dismiss', evidenceRowsUpdated: 0, suspended: false });
+            // Only the pending-rows SELECT ran; no status UPDATE was issued.
+            expect(hub.db.doQuery.callCount).to.equal(1);
+            expect(warn.getCalls().some(c => String(c.args[0]).includes('no local pending-evidence subset'))).to.equal(true);
+        });
+
+        it(': suspend on evidence mismatch still suspends the validator but leaves rows pending', async function () {
+            let votedRows = [evidenceRow()];
+            let driftedRows = [evidenceRow({ evidence: '{"different":true}' })];
+            hub.db.doQuery.onCall(0).resolves(driftedRows);
+            hub.db.doQuery.onCall(1).resolves({ affectedRows: 1 }); // validators UPDATE
             let warn = sinon.stub(console, 'warn');
 
             let res = await sg.applyFinalized(finalizedEvent('suspend', votedRows));
 
-            expect(res.suspended).to.equal(true);
-            expect(warn.getCalls().some(c => String(c.args[0]).includes('differs from voted'))).to.equal(true);
+            expect(res).to.deep.equal({ validatorPubkey: PK, penalty: 'suspend', evidenceRowsUpdated: 0, suspended: true });
+            // Call 1 is the validators UPDATE, not an evidence sweep.
+            expect(hub.db.doQuery.callCount).to.equal(2);
+            expect(hub.db.doQuery.getCall(1).args[0]).to.include("SET status = 'suspended'");
+            expect(hub._propagateValidatorSet.calledOnce).to.equal(true);
+            expect(warn.getCalls().some(c => String(c.args[0]).includes('no local pending-evidence subset'))).to.equal(true);
+        });
+
+        it(': fails closed (executes nothing) when the pending-evidence read errors', async function () {
+            hub.db.doQuery.onCall(0).rejects(new Error('db down'));
+            let err = sinon.stub(console, 'error');
+
+            let res = await sg.applyFinalized(finalizedEvent('suspend', [evidenceRow()]));
+
+            expect(res).to.equal(null);
+            expect(hub.db.doQuery.callCount).to.equal(1);
+            expect(err.getCalls().some(c => String(c.args[0]).includes('refusing to execute'))).to.equal(true);
         });
 
         it('suspend on an already-suspended validator reports suspended=false', async function () {

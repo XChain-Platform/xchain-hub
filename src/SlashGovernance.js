@@ -29,14 +29,17 @@
  *     SLASH_PENALTY:<validator_pubkey 64hex>:<evidence_hash 64hex>
  *
  * proposed_value is the penalty action:
- *   - 'suspend': mark the validator's pending slash_proposals rows
- *     'approved', set validators.status='suspended', and propagate the
+ *   - 'suspend': mark the validator's VOTED pending slash_proposals rows
+ *     'approved' (: only rows that are members of the content-hashed
+ *     evidence set the electorate approved; rows detected mid-vote stay
+ *     pending), set validators.status='suspended', and propagate the
  *     shrunken active set to every running consensus engine. This is the
  *     hub-layer penalty tier: exclusion from the transport registry and
  *     every PBFT round. On-chain stake is untouched (that is the
  *     indexer's WI-2 rail for provable equivocation).
- *   - 'dismiss': mark the validator's pending rows 'rejected' (the
- *     federation reviewed the evidence and cleared it).
+ *   - 'dismiss': mark the validator's VOTED pending rows 'rejected' (the
+ *     federation reviewed the evidence and cleared it). Fails closed when
+ *     local evidence does not contain the voted set .
  *
  * Execution runs on EVERY hub via the same 'proposal:finalized' event
  * the capability/provider governance appliers use: the leader emits it
@@ -137,6 +140,24 @@ class SlashGovernance {
         });
     }
 
+    // : resolve which local pending rows are MEMBERS of the voted
+    // evidence set. SlashDetector keeps inserting pending rows during the
+    // 7-day vote window, so "all pending rows" can be a strict superset of
+    // what the electorate audited; sweeping the superset would let a single
+    // proposer launder a fresh offense through an honest 'dismiss' quorum
+    // (forward-only detection never re-files a 'rejected' offense).
+    // Rows are appended with monotonically increasing ids and the evidence
+    // hash is row-order independent, so the voted set (if this hub holds it)
+    // is exactly an id-ASC prefix of the current pending rows. Returns the
+    // matching subset, or null when no prefix hashes to the voted hash
+    // (genuine cross-hub evidence drift).
+    _matchVotedRows(rows, votedHash) {
+        for (let k = rows.length; k >= 1; k--) {
+            if (computeEvidenceHash(rows.slice(0, k)) === votedHash) return rows.slice(0, k);
+        }
+        return null;
+    }
+
     // Execution lever: consume a finalized (passed) governance proposal and
     // apply the penalty. Wired to Governance's 'proposal:finalized' event,
     // which only fires for PASSED proposals, on the tally leader and (via the
@@ -157,27 +178,53 @@ class SlashGovernance {
 
         let pk = parsed.validatorPubkey;
 
-        // Audit note: if this hub's local pending evidence no longer hashes to
-        // the voted evidence_hash (rows detected before/after the proposal, or
-        // per-hub detection skew), the penalty STILL executes - the authority
-        // is the 2/3 electorate approval, not local row equality - but the
-        // mismatch is logged so operators can reconcile evidence drift.
+        //  evidence-set gate: the electorate approved a CONTENT-hashed
+        // evidence set, so only rows that are members of that set may be
+        // status-swept. Rows SlashDetector added mid-vote stay 'pending' and
+        // remain eligible for a future proposal; without this gate a 'dismiss'
+        // would silently mark them 'rejected' (evidence laundering, since
+        // forward-only detection never re-files). This load-bearing read is
+        // fail-closed: if it errors we execute nothing against evidence rows.
+        let rows;
         try {
-            let rows = await this._pendingRows(pk);
-            let localHash = computeEvidenceHash(rows);
-            if (localHash !== parsed.evidenceHash) {
-                console.warn('SlashGovernance: local evidence hash ' + localHash + ' differs from voted ' +
-                    parsed.evidenceHash + ' for validator ' + pk.substring(0, 16) +
-                    '... (executing the voted penalty; evidence sets drifted across hubs)');
-            }
-        } catch (e) { /* audit-only; execution proceeds */ }
+            rows = await this._pendingRows(pk);
+        } catch (e) {
+            console.error('SlashGovernance: could not read pending evidence for validator ' +
+                pk.substring(0, 16) + '...; refusing to execute finalized ' + ev.proposalId +
+                ' against evidence rows (' + e.message + ')');
+            return null;
+        }
+        let voted = this._matchVotedRows(rows, parsed.evidenceHash);
 
+        let marked = 0;
         let newStatus = penalty === 'suspend' ? 'approved' : 'rejected';
-        let res = await this.db.doQuery(
-            "UPDATE slash_proposals SET status = ? WHERE validator_pubkey = ? AND status = 'pending'",
-            [newStatus, pk]
-        );
-        let marked = (res && res.affectedRows != null) ? res.affectedRows : 0;
+        if (voted) {
+            if (voted.length < rows.length) {
+                console.warn('SlashGovernance: ' + (rows.length - voted.length) + ' pending row(s) for validator ' +
+                    pk.substring(0, 16) + '... were detected after proposal ' + ev.proposalId +
+                    ' was created; leaving them pending (not covered by the voted evidence set)');
+            }
+            let res = await this.db.doQuery(
+                "UPDATE slash_proposals SET status = ? WHERE validator_pubkey = ? AND status = 'pending' " +
+                "AND id IN (" + voted.map(() => '?').join(',') + ")",
+                [newStatus, pk].concat(voted.map(r => r.id))
+            );
+            marked = (res && res.affectedRows != null) ? res.affectedRows : 0;
+        } else {
+            // No local subset hashes to the voted evidence set: this hub's
+            // evidence drifted from what the electorate audited. Fail closed
+            // on the evidence rows - they stay 'pending' for operator
+            // reconciliation / a fresh proposal - instead of blessing an
+            // unaudited sweep. For 'dismiss' that means nothing executes.
+            console.warn('SlashGovernance: no local pending-evidence subset matches voted hash ' +
+                parsed.evidenceHash + ' for validator ' + pk.substring(0, 16) +
+                '... (proposal ' + ev.proposalId + '); leaving all ' + rows.length +
+                ' pending row(s) untouched' +
+                (penalty === 'suspend' ? ' (validator suspension still executes on electorate authority)' : ''));
+            if (penalty === 'dismiss') {
+                return { validatorPubkey: pk, penalty, evidenceRowsUpdated: 0, suspended: false };
+            }
+        }
 
         let suspended = false;
         if (penalty === 'suspend') {
