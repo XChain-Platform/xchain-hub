@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Read-only JSON-RPC methods `getvotes` and `getvalidatorcapabilities`, plus optional `parameter`/`limit` filters on `getproposals`, so explorers can serve governance and capability pages over RPC instead of a co-located hub DB.
 
 ### Fixed
+- `OraclePublisher` at-most-once guard is now durable across restarts: a new `oracle_published_rounds` table records a broadcast-intent row before each PRICE v0 send and a sent marker after, so a restart with the round still on the durable queue can no longer re-broadcast an already-published round (duplicate DOGE spend). Startup hydrates the guard from confirmed markers and quarantines any intent-only (unconfirmed) rounds for manual replay instead of auto-rebroadcasting; the send path fails closed if the marker cannot be read or recorded.
 - `db.doQuery` rethrows query errors instead of returning an empty result on non-transactional failures, so a failed coordination/mirror write can no longer read as success (and its pooled connection is released in a `finally`).
 - Async timer and event entry points that reach the DB (round rewards, swap tracking, governance results, oracle rounds, hub-DB subscribe, keepalive ping) now catch and log instead of risking a process-killing unhandled rejection.
 - The ANCHOR v1 archive back-fill now re-broadcasts stamped `cross_chain_matches` rows on the hub-DB mirror feed, so streamed mirrors converge on `anchor_txid` instead of reading NULL until their next bootstrap.
