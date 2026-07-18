@@ -17,7 +17,7 @@
  * Monitors validator behavior and records slash proposals for:
  * - Price deviation > threshold from consensus
  * - Repeated deviation (3+ rounds in 24 hours)
- * - Non-participation (consecutive missed rounds)
+ * - Non-participation (missed-rounds rate over a sliding round window)
  *
  * Detection only: rows land as status 'pending' evidence. Enforcement is
  * governance-mediated : SlashGovernance turns a validator's pending
@@ -63,8 +63,23 @@ class SlashDetector {
         }
         this.missedRoundsThreshold = parseInt(hub.p2pConfig.SLASH_MISSED_ROUNDS_THRESHOLD || '30');     // 30 rounds
 
-        // Track consecutive missed rounds per validator: Map<pubkey, count>
-        this.missedRounds = new Map();
+        // Sliding window (in rounds) over which missed rounds are counted.
+        // A consecutive-miss counter reset to 0 on ANY participation let a
+        // validator at 1-in-30 participation evade forever (S-F4 / );
+        // counting misses over the last N rounds catches sustained low-rate
+        // participation while a fully consecutive streak still fires at the
+        // same round it used to. The window must be at least the threshold or
+        // the offense could never fire, so a smaller override fails fast.
+        this.participationWindowSize = parseInt(hub.p2pConfig.SLASH_PARTICIPATION_WINDOW || String(this.missedRoundsThreshold * 2));
+        if (this.participationWindowSize < this.missedRoundsThreshold) {
+            throw new Error('SLASH_PARTICIPATION_WINDOW (' + this.participationWindowSize +
+                ') is below SLASH_MISSED_ROUNDS_THRESHOLD (' + this.missedRoundsThreshold +
+                '): the non-participation offense could never fire. Set it >= the threshold.');
+        }
+
+        // Per-validator participation history over the sliding window:
+        // Map<pubkey, { history: boolean[] (true = missed, newest last), missed: count }>
+        this.participation = new Map();
 
         // Track deviations in 24h window: Map<pubkey, [{ round, timestamp }]>
         this.recentDeviations = new Map();
@@ -75,10 +90,12 @@ class SlashDetector {
         this.repeatedDeviationFired = new Map();
 
         // Latch per validator so non_participation fires once per crossing of
-        // the missed-rounds threshold. It is set only after the proposal row
-        // persists, so a failed DB write leaves the offense un-latched and it
-        // retries on the next missed round instead of being lost. Re-arms when
-        // the validator participates again: Map<pubkey, bool>
+        // the windowed missed-rounds threshold. It is set only after the
+        // proposal row persists, so a failed DB write leaves the offense
+        // un-latched and it retries on the next missed round instead of being
+        // lost. Re-arms only when the windowed miss count falls back below the
+        // threshold (i.e. participation genuinely recovers), never on a single
+        // token participation: Map<pubkey, bool>
         this.nonParticipationFired = new Map();
     }
 
@@ -163,36 +180,56 @@ class SlashDetector {
         let participantSet = new Set(participants);
 
         for (let v of allValidators) {
-            if (participantSet.has(v.pubkey)) {
-                this.missedRounds.set(v.pubkey, 0);
-                // Re-arm the latch so a fresh miss-streak can be reported again.
+            let entry = this.participation.get(v.pubkey);
+            if (!entry) {
+                entry = { history: [], missed: 0 };
+                this.participation.set(v.pubkey, entry);
+            }
+
+            // Record this round's outcome in the sliding window (true = missed).
+            let missedThisRound = !participantSet.has(v.pubkey);
+            entry.history.push(missedThisRound);
+            if (missedThisRound) entry.missed++;
+            if (entry.history.length > this.participationWindowSize) {
+                if (entry.history.shift()) entry.missed--;
+            }
+
+            if (entry.missed < this.missedRoundsThreshold) {
+                // Windowed miss count is back under the threshold: the validator
+                // is genuinely participating again, so re-arm the latch. A single
+                // token participation while the window stays saturated does NOT
+                // reach here (that reset was the S-F4 evasion).
                 this.nonParticipationFired.set(v.pubkey, false);
-            } else {
-                let missed = (this.missedRounds.get(v.pubkey) || 0) + 1;
-                this.missedRounds.set(v.pubkey, missed);
+                continue;
+            }
 
-                // Fire once per streak at or past the threshold. `>=` plus the
-                // latch keeps a single proposal per crossing while staying
-                // retry-safe: an exact `===` fired only at the precise count, so
-                // a DB write that failed at the threshold (errors are swallowed
-                // in _recordSlashProposal) could never be retried and the offense
-                // was lost. The latch is set only after the row persists.
-                if (missed >= this.missedRoundsThreshold && !this.nonParticipationFired.get(v.pubkey)) {
-                    console.warn('Slash: Validator ' + v.pubkey.substring(0, 16) +
-                        '... missed ' + missed + ' consecutive rounds');
+            // Fire once per crossing at or past the threshold. `>=` plus the
+            // latch keeps a single proposal per crossing while staying
+            // retry-safe: an exact `===` fired only at the precise count, so
+            // a DB write that failed at the threshold (errors are swallowed
+            // in _recordSlashProposal) could never be retried and the offense
+            // was lost. The latch is set only after the row persists.
+            if (!this.nonParticipationFired.get(v.pubkey)) {
+                let rate = ((entry.history.length - entry.missed) / entry.history.length).toFixed(4);
+                console.warn('Slash: Validator ' + v.pubkey.substring(0, 16) +
+                    '... missed ' + entry.missed + ' of the last ' + entry.history.length +
+                    ' rounds (participation rate ' + rate + ')');
 
-                    // Latch optimistically BEFORE the await, then re-arm if the write
-                    // failed. checkRound is driven by the un-serialized round:finalized
-                    // listener, so two overlapping finalizations could both read the
-                    // latch as false during the first call's DB round-trip and record a
-                    // duplicate proposal. Setting the latch first closes that TOCTOU
-                    // window while a failed write still re-arms for a retry next round.
-                    this.nonParticipationFired.set(v.pubkey, true);
-                    let recorded = await this._recordSlashProposal(v.pubkey, 'non_participation', round,
-                        JSON.stringify({ missedRounds: missed })
-                    );
-                    if (!recorded) this.nonParticipationFired.set(v.pubkey, false);
-                }
+                // Latch optimistically BEFORE the await, then re-arm if the write
+                // failed. checkRound is driven by the un-serialized round:finalized
+                // listener, so two overlapping finalizations could both read the
+                // latch as false during the first call's DB round-trip and record a
+                // duplicate proposal. Setting the latch first closes that TOCTOU
+                // window while a failed write still re-arms for a retry next round.
+                this.nonParticipationFired.set(v.pubkey, true);
+                let recorded = await this._recordSlashProposal(v.pubkey, 'non_participation', round,
+                    JSON.stringify({
+                        missedRounds: entry.missed,
+                        windowRounds: entry.history.length,
+                        participationRate: rate
+                    })
+                );
+                if (!recorded) this.nonParticipationFired.set(v.pubkey, false);
             }
         }
     }

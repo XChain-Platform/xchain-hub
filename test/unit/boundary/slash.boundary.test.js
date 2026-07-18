@@ -181,20 +181,29 @@ describe('Boundary: SlashDetector', function () {
             expect(slashCalls()).to.have.length(1);
         });
 
-        it('reset after participation then re-accumulate to 30 → YES slash again', async function () {
+        it('recovery below the windowed threshold then re-accumulate to 30 → YES slash again ', async function () {
             await simulateMisses(30);
             expect(slashCalls()).to.have.length(1);
 
-            // Validator participates, resets counter to 0
+            // A single participation does NOT re-arm: the window is still
+            // saturated with misses (the old consecutive counter reset here,
+            // which let 1-in-30 participation evade forever, S-F4).
             await sd._checkParticipation(31, [VALIDATORS_3[0].pubkey], [VALIDATORS_3[0]]);
-            expect(slashCalls()).to.have.length(1); // no new slash
+            await sd._checkParticipation(32, [], [VALIDATORS_3[0]]);
+            expect(slashCalls()).to.have.length(1); // latched, no new slash
 
-            // Miss another 30 rounds
-            for (let i = 32; i <= 61; i++) {
+            // Sustained participation until the old misses age out of the
+            // window (window = 60 rounds) re-arms the latch.
+            for (let i = 33; i <= 92; i++) {
+                await sd._checkParticipation(i, [VALIDATORS_3[0].pubkey], [VALIDATORS_3[0]]);
+            }
+            expect(sd.nonParticipationFired.get(VALIDATORS_3[0].pubkey)).to.equal(false);
+
+            // A fresh 30-miss accumulation fires again.
+            for (let i = 93; i <= 122; i++) {
                 await sd._checkParticipation(i, [], [VALIDATORS_3[0]]);
             }
-
-            expect(slashCalls()).to.have.length(2); // fired again at the 30th consecutive miss
+            expect(slashCalls()).to.have.length(2);
         });
 
         it('multiple validators: one participates, one misses (per-validator tracking)', async function () {

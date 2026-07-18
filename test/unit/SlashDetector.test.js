@@ -293,55 +293,143 @@ describe('SlashDetector', function () {
     // Non-participation detection
     // -----------------------------------------------------------------
 
-    describe('non-participation', function () {
+    describe('non-participation (windowed rate, )', function () {
 
-        it('29 consecutive misses does NOT trigger slash', async function () {
-            sd.missedRounds.set(VALIDATORS_3[0].pubkey, 28);
+        // Seed a validator's sliding window with `misses` missed rounds
+        // (newest last), as if _checkParticipation had run that many times.
+        function seedMisses(pubkey, misses) {
+            sd.participation.set(pubkey, {
+                history: new Array(misses).fill(true),
+                missed:  misses
+            });
+        }
+
+        // Drive `n` rounds through _checkParticipation with the given participants.
+        async function runRounds(n, participants, startRound) {
+            for (let i = 0; i < n; i++) {
+                await sd._checkParticipation((startRound || 1) + i, participants, VALIDATORS_3);
+            }
+        }
+
+        it('window defaults to 2x the missed-rounds threshold', function () {
+            expect(sd.participationWindowSize).to.equal(60);
+        });
+
+        it('honors a SLASH_PARTICIPATION_WINDOW override', function () {
+            let hub2 = createMockHub({ p2pConfig: { SLASH_PARTICIPATION_WINDOW: '90' } });
+            expect(new SlashDetector(hub2).participationWindowSize).to.equal(90);
+        });
+
+        it('fail-fasts on a window smaller than the missed-rounds threshold', function () {
+            let hub2 = createMockHub({ p2pConfig: { SLASH_PARTICIPATION_WINDOW: '10' } });
+            expect(() => new SlashDetector(hub2))
+                .to.throw(/SLASH_PARTICIPATION_WINDOW/);
+        });
+
+        it('29 misses in the window does NOT trigger slash', async function () {
+            seedMisses(VALIDATORS_3[0].pubkey, 28);
 
             await sd._checkParticipation(29, [], VALIDATORS_3);
-            expect(sd.missedRounds.get(VALIDATORS_3[0].pubkey)).to.equal(29);
+            expect(sd.participation.get(VALIDATORS_3[0].pubkey).missed).to.equal(29);
             expect(hub.db.doQuery.called).to.be.false;
         });
 
-        it('30 consecutive misses triggers non_participation slash and latches', async function () {
-            sd.missedRounds.set(VALIDATORS_3[0].pubkey, 29);
+        it('30 misses in the window triggers non_participation slash and latches', async function () {
+            seedMisses(VALIDATORS_3[0].pubkey, 29);
 
             await sd._checkParticipation(30, [], VALIDATORS_3);
-            expect(sd.missedRounds.get(VALIDATORS_3[0].pubkey)).to.equal(30);
+            expect(sd.participation.get(VALIDATORS_3[0].pubkey).missed).to.equal(30);
             expect(hub.db.doQuery.called).to.be.true;
             let args = hub.db.doQuery.getCall(0).args;
             expect(args[1][1]).to.equal('non_participation');
+            let evidence = JSON.parse(args[1][3]);
+            expect(evidence.missedRounds).to.equal(30);
+            expect(evidence.windowRounds).to.equal(30);
+            expect(evidence.participationRate).to.equal('0.0000');
             // Latched after the row persisted, so it won't re-fire next round.
             expect(sd.nonParticipationFired.get(VALIDATORS_3[0].pubkey)).to.be.true;
         });
 
-        it('participation resets the missed counter to 0 and re-arms the latch', async function () {
-            sd.missedRounds.set(VALIDATORS_3[0].pubkey, 25);
-            sd.nonParticipationFired.set(VALIDATORS_3[0].pubkey, true);
+        it('a single participation does NOT reset the window (S-F4: 1-in-30 no longer evades)', async function () {
+            // 29 misses, one participation, then more misses. The old consecutive
+            // counter reset to 0 on the participation and never fired.
+            seedMisses(VALIDATORS_3[0].pubkey, 29);
+            await sd._checkParticipation(30, [VALIDATORS_3[0].pubkey], VALIDATORS_3);
+            expect(hub.db.doQuery.called).to.be.false;
 
-            // Validator 0 participates
-            await sd._checkParticipation(26, [VALIDATORS_3[0].pubkey], VALIDATORS_3);
-            expect(sd.missedRounds.get(VALIDATORS_3[0].pubkey)).to.equal(0);
-            expect(sd.nonParticipationFired.get(VALIDATORS_3[0].pubkey)).to.be.false;
+            // One more miss: 30 misses in the last 31 rounds → fires.
+            await sd._checkParticipation(31, [], VALIDATORS_3);
+            expect(hub.db.doQuery.called).to.be.true;
+            let evidence = JSON.parse(hub.db.doQuery.getCall(0).args[1][3]);
+            expect(evidence.missedRounds).to.equal(30);
+            expect(evidence.windowRounds).to.equal(31);
         });
 
-        it('does not re-fire once latched (one proposal per miss-streak)', async function () {
-            // Cross the threshold at 30 (fires + latches), then miss again at 31.
-            sd.missedRounds.set(VALIDATORS_3[0].pubkey, 29);
+        it('a sustained 1-in-30 participation pattern fires within one window', async function () {
+            // 29 misses + 1 participation, repeated: fires by round 31.
+            for (let cycle = 0; cycle < 2; cycle++) {
+                for (let r = 0; r < 29; r++) {
+                    await sd._checkParticipation(cycle * 30 + r + 1, [], VALIDATORS_3);
+                }
+                await sd._checkParticipation(cycle * 30 + 30, [VALIDATORS_3[0].pubkey], VALIDATORS_3);
+            }
+            expect(hub.db.doQuery.called).to.be.true;
+            expect(hub.db.doQuery.getCall(0).args[1][1]).to.equal('non_participation');
+        });
+
+        it('a fully participating validator never triggers', async function () {
+            await runRounds(120, [VALIDATORS_3[0].pubkey, VALIDATORS_3[1].pubkey, VALIDATORS_3[2].pubkey]);
+            expect(hub.db.doQuery.called).to.be.false;
+        });
+
+        it('old misses age out of the window', async function () {
+            // 29 misses, then full participation: the misses slide out and the
+            // count decrements back toward 0 instead of firing.
+            seedMisses(VALIDATORS_3[0].pubkey, 29);
+            await runRounds(60, VALIDATORS_3.map(v => v.pubkey), 30);
+            expect(sd.participation.get(VALIDATORS_3[0].pubkey).missed).to.equal(0);
+            expect(sd.participation.get(VALIDATORS_3[0].pubkey).history.length).to.equal(60);
+            expect(hub.db.doQuery.called).to.be.false;
+        });
+
+        it('re-arms the latch only when the windowed miss count recovers below the threshold', async function () {
+            seedMisses(VALIDATORS_3[0].pubkey, 29);
+            await sd._checkParticipation(30, [], VALIDATORS_3); // fires + latches
+            expect(hub.db.doQuery.callCount).to.equal(1);
+            hub.db.doQuery.resetHistory();
+
+            // One participation while the window stays saturated: still latched.
+            await sd._checkParticipation(31, [VALIDATORS_3[0].pubkey], VALIDATORS_3);
+            expect(sd.nonParticipationFired.get(VALIDATORS_3[0].pubkey)).to.be.true;
+            await sd._checkParticipation(32, [], VALIDATORS_3);
+            expect(hub.db.doQuery.called).to.be.false;
+
+            // Sustained participation until misses drop below the threshold:
+            // window fills with participations and the old misses age out.
+            await runRounds(60, [VALIDATORS_3[0].pubkey], 33);
+            expect(sd.nonParticipationFired.get(VALIDATORS_3[0].pubkey)).to.be.false;
+
+            // A fresh 30-miss run fires again.
+            await runRounds(30, [], 93);
+            expect(hub.db.doQuery.called).to.be.true;
+        });
+
+        it('does not re-fire while latched and the window stays saturated', async function () {
+            seedMisses(VALIDATORS_3[0].pubkey, 29);
             await sd._checkParticipation(30, [], VALIDATORS_3);
             hub.db.doQuery.resetHistory();
 
             await sd._checkParticipation(31, [], VALIDATORS_3);
-            expect(sd.missedRounds.get(VALIDATORS_3[0].pubkey)).to.equal(31);
-            // Latch is set, so no second proposal for the same streak.
+            expect(sd.participation.get(VALIDATORS_3[0].pubkey).missed).to.equal(31);
+            // Latch is set, so no second proposal for the same offense.
             expect(hub.db.doQuery.called).to.be.false;
         });
 
         it('re-fires past the threshold while un-latched (retry after a lost record)', async function () {
-            // Streak already past the threshold but never recorded (e.g. a prior
+            // Window already past the threshold but never recorded (e.g. a prior
             // DB write failed, so the offense is un-latched). The next miss must
             // still record it rather than lose the offense forever.
-            sd.missedRounds.set(VALIDATORS_3[0].pubkey, 30);
+            seedMisses(VALIDATORS_3[0].pubkey, 30);
             sd.nonParticipationFired.set(VALIDATORS_3[0].pubkey, false);
             hub.db.doQuery.resetHistory();
 
@@ -352,7 +440,7 @@ describe('SlashDetector', function () {
         });
 
         it('a failed record leaves the offense un-latched so it retries next round', async function () {
-            sd.missedRounds.set(VALIDATORS_3[0].pubkey, 29);
+            seedMisses(VALIDATORS_3[0].pubkey, 29);
             hub.db.doQuery.rejects(new Error('db down'));
 
             await sd._checkParticipation(30, [], VALIDATORS_3);
@@ -366,6 +454,11 @@ describe('SlashDetector', function () {
             expect(hub.db.doQuery.called).to.be.true;
             expect(hub.db.doQuery.getCall(0).args[1][1]).to.equal('non_participation');
             expect(sd.nonParticipationFired.get(VALIDATORS_3[0].pubkey)).to.be.true;
+        });
+
+        it('bounds the history to the window size', async function () {
+            await runRounds(75, []);
+            expect(sd.participation.get(VALIDATORS_3[0].pubkey).history.length).to.equal(60);
         });
 
         it('handles empty allValidators gracefully', async function () {

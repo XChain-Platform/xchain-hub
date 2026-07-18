@@ -230,18 +230,27 @@ describe('Regression: Incentives & Slashing', function () {
             });
         });
 
-        // REG-INC-005
-        describe('REG-INC-005: 30+ consecutive missed rounds triggers non_participation', function () {
+        // REG-INC-005 (: windowed rate, not a consecutive counter)
+        describe('REG-INC-005: 30+ missed rounds in the sliding window triggers non_participation', function () {
+
+            // Seed the sliding window with `misses` missed rounds (newest last).
+            function seedMisses(pubkey, misses) {
+                sd.participation.set(pubkey, {
+                    history: new Array(misses).fill(true),
+                    missed:  misses
+                });
+            }
+
             it('29 misses does NOT trigger @regression-p1', async function () {
-                sd.missedRounds.set(VALIDATORS_3[0].pubkey, 28);
+                seedMisses(VALIDATORS_3[0].pubkey, 28);
 
                 await sd._checkParticipation(29, [], VALIDATORS_3);
-                expect(sd.missedRounds.get(VALIDATORS_3[0].pubkey)).to.equal(29);
+                expect(sd.participation.get(VALIDATORS_3[0].pubkey).missed).to.equal(29);
                 expect(hub.db.doQuery.called).to.be.false;
             });
 
             it('30 misses triggers non_participation slash @regression-p1', async function () {
-                sd.missedRounds.set(VALIDATORS_3[0].pubkey, 29);
+                seedMisses(VALIDATORS_3[0].pubkey, 29);
 
                 await sd._checkParticipation(30, [], VALIDATORS_3);
                 expect(hub.db.doQuery.called).to.be.true;
@@ -249,19 +258,24 @@ describe('Regression: Incentives & Slashing', function () {
                 expect(args[1][1]).to.equal('non_participation');
             });
 
-            it('participation resets counter to 0 @regression-p1', async function () {
-                sd.missedRounds.set(VALIDATORS_3[0].pubkey, 25);
+            it('a single participation does NOT reset the window (S-F4) @regression-p1', async function () {
+                // 29 misses + 1 participation + 1 more miss = 30 misses in the
+                // window → fires. The old consecutive counter reset to 0 here.
+                seedMisses(VALIDATORS_3[0].pubkey, 29);
 
-                await sd._checkParticipation(26, [VALIDATORS_3[0].pubkey], VALIDATORS_3);
-                expect(sd.missedRounds.get(VALIDATORS_3[0].pubkey)).to.equal(0);
+                await sd._checkParticipation(30, [VALIDATORS_3[0].pubkey], VALIDATORS_3);
+                expect(hub.db.doQuery.called).to.be.false;
+                await sd._checkParticipation(31, [], VALIDATORS_3);
+                expect(hub.db.doQuery.called).to.be.true;
+                expect(hub.db.doQuery.getCall(0).args[1][1]).to.equal('non_participation');
             });
 
             it('31st miss does NOT trigger again while the latch is set @regression-p1', async function () {
                 // The trigger is `>=` threshold plus a per-validator latch (set
                 // once the 30th-miss proposal row persists), not an exact-count
                 // match: an exact `===` could never retry a DB write that
-                // failed at the threshold. One proposal per streak still holds.
-                sd.missedRounds.set(VALIDATORS_3[0].pubkey, 30);
+                // failed at the threshold. One proposal per offense still holds.
+                seedMisses(VALIDATORS_3[0].pubkey, 30);
                 sd.nonParticipationFired.set(VALIDATORS_3[0].pubkey, true);
                 hub.db.doQuery.resetHistory();
 
@@ -270,7 +284,7 @@ describe('Regression: Incentives & Slashing', function () {
             });
 
             it('a failed proposal write at the threshold re-arms and retries next round @regression-p1', async function () {
-                sd.missedRounds.set(VALIDATORS_3[0].pubkey, 29);
+                seedMisses(VALIDATORS_3[0].pubkey, 29);
                 hub.db.doQuery.rejects(new Error('db down'));
 
                 await sd._checkParticipation(30, [], VALIDATORS_3);
