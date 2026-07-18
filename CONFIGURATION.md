@@ -213,6 +213,57 @@ precedence override.
 | `XCHAIN_CONFIRMATIONS_<COIN>` | No | per-coin | Cross-chain attestation/swap confirmation depth for `<COIN>` (e.g. `XCHAIN_CONFIRMATIONS_BTC`). Consensus-affecting: read by `CrossChainEngine` / `CrossChainCallEngine`. |
 | `CHECKPOINT_CONFIRMATIONS` | No | `6` | State-checkpoint confirmation depth (`StateCheckpointEngine`). Consensus-affecting. |
 
+## State checkpoints (`StateCheckpointEngine`)
+
+Quorum-signed per-chain ledger/actions/contract hash checkpoints, written to
+`state_checkpoints` and streamed over the hub-DB mirror. Each variable also
+resolves from `p2pConfig`; the env var is the highest-precedence override.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `CHECKPOINT_ENABLED` | No | `true` | Enable the checkpoint engine. Set `false` to disable. |
+| `CHECKPOINT_INTERVAL_BLOCKS` | No | `6` | BTC blocks between checkpoint cycles. |
+| `CHECKPOINT_CHAINS` | No | all coins | Comma-separated chains to checkpoint (subset of the bundled coin list, e.g. `BTC,LTC`). Unknown chains are dropped. |
+| `CHECKPOINT_POLL_MS` | No | `60000` | Poll interval (ms) for the checkpoint cycle timer. |
+| `CHECKPOINT_ROUND_TIMEOUT_MS` | No | `60000` | Signing-round timeout (ms) before a checkpoint round is abandoned. |
+| `CHECKPOINT_COSIGN_TOLERANCE_BLOCKS` | No | `144` | How many blocks behind a checkpoint's `snapshot_block` a follower's own indexer may lag and still co-sign. |
+
+## State-anchor publisher (`StateAnchorPublisher`)
+
+ANCHOR v0/v1/v2 on-chain publishing of finalized checkpoints (published on
+DOGE; wallet/encoder settings are in the DOGE oracle publisher section). Each
+variable also resolves from `p2pConfig`; the env var wins.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `ANCHOR_ENABLED` | No | `true` | Enable on-chain anchoring. Set `false` to disable. |
+| `ANCHOR_INTERVAL_MS` | No | `86400000` (24h) | Anchor cycle interval (ms). |
+| `ANCHOR_CHECKPOINT_EVERY_N` | No | `1` | Anchor only every Nth `checkpoint_seq` (each v0 anchor spends real DOGE; recovery only needs the latest anchored checkpoint). `1` anchors every checkpoint. Deterministic fleet-wide (`seq % N`). |
+| `ANCHOR_MATCH_BATCH_SIZE` | No | `200` | Rows per archive-batch query page. |
+| `ANCHOR_MAX_BATCH` | No | `1000` | Max rows per archive (v1) anchor batch. |
+| `ANCHOR_CHUNK_MAX_BYTES` | No | `6000` | Max payload bytes per on-chain anchor chunk. |
+| `ANCHOR_CHUNK_RETRY_MS` | No | `2500` | Delay (ms) between chunk broadcast retries. |
+| `ANCHOR_ROUND_TIMEOUT_MS` | No | `120000` | Quorum signing-round timeout (ms). |
+| `ANCHOR_AMBIGUOUS_POLL_ATTEMPTS` | No | `3` |  ambiguous-send existence poll: attempts to find a maybe-accepted anchor in the indexer's mined view before deferring. |
+| `ANCHOR_AMBIGUOUS_POLL_MS` | No | `5000` | Delay (ms) between ambiguous-send poll attempts. |
+| `ANCHOR_ELECTION_TOLERANCE_BLOCKS` | No | `36` | Failover ladder: BTC blocks of elected-publisher silence before the next-ranked validator's publish slot unlocks. |
+| `ANCHOR_REWARD_PER_PUBLISH` | No | `10.00000000` | XCHAIN reward recorded per anchor publish (`RewardTracker`). |
+
+## Cross-chain DEX / XCALL relay (`CrossChainDexEngine`)
+
+Match discovery over the chain-specific indexer DBs plus PBFT finalization.
+The confirmation-depth variables are **consensus-affecting** (they gate when an
+offer/call is eligible for matching). Each variable also resolves from
+`p2pConfig`; the env var wins.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `XDEX_POLL_MS` | No | `15000` | Poll interval (ms) for match/relay discovery. |
+| `XDEX_MIN_CONFIRMATIONS` | No | per-coin | Flat confirmation-depth override applied to every coin. Consensus-affecting. |
+| `XDEX_MIN_CONFIRMATIONS_<COIN>` | No | per-coin (BTC `6`, LTC `12`, DOGE `60`) | Per-coin confirmation depth (e.g. `XDEX_MIN_CONFIRMATIONS_DOGE`). Takes precedence over the flat variable. Consensus-affecting. |
+| `XDEX_SEED_LOCAL_VALIDATOR` | Regtest only | `false` | `1`/`true` seeds `capability_snapshots` with this hub's own identity so single-node regtest stacks can finalize without an indexer-backed snapshot. Ignored off regtest. |
+| `XDEX_SNAPSHOT_BLOCK` | Regtest only | _unset_ | Fixed deterministic snapshot-block anchor for regtest drills (also read by `StateCheckpointEngine` / `CrossChainCallEngine`). Ignored off regtest. |
+
 ## Genesis / regtest binding
 
 Regtest-only genesis overrides (ignored on mainnet/testnet, which use the frozen
@@ -239,6 +290,9 @@ env var, else the bundled per-coin `FULLNODE` block.
 |---|---|---|---|
 | `FULLNODE_ENABLED` | No | `true` | Enable the full-node challenge round. |
 | `FULLNODE_CHALLENGE_INTERVAL_BLOCKS` | No | `144` | Blocks between challenge rounds. |
+| `FULLNODE_POLL_MS` | No | `30000` | Poll interval (ms) for the challenge-round timer. |
+| `FULLNODE_COLLECT_MS` | No | `20000` | Answer-collection window (ms) after a challenge is issued. |
+| `FULLNODE_COLLECT_DEPTH_BLOCKS` | No | `3` | Blocks after the challenge block at which answer collection closes. |
 | `FULLNODE_CONFIRM_DEPTH` | No | per-coin | Confirmation depth for challenge proofs. |
 | `FULLNODE_PROOF_WINDOW_BLOCKS` | No | per-coin | Blocks a challenged node has to submit a proof. |
 | `FULLNODE_VERDICT_ACCEPT_WINDOW_BLOCKS` | No | per-coin | Blocks to accept a verdict. |
