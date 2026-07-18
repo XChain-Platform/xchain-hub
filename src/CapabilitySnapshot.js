@@ -42,6 +42,19 @@ class CapabilitySnapshot {
         this.cache = new Map();
         // How long to keep a snapshot. 60s default, enough to span a PBFT round.
         this.cacheTtlMs = 60 * 1000;
+        // Reorg-depth buffer (#S-F7 / ): every snapshot resolves at
+        // (requested block - buffer), clamped at 0, instead of at the requested
+        // height itself. Callers pass a tip-derived height, and stake state at
+        // the tip is not reorg-safe: a shallow BTC reorg can rewrite the stake
+        // set of the last few blocks, so a snapshot locked AT tip can serve a
+        // pre-reorg validator set for up to the cache TTL. Resolving a few
+        // blocks below the tip pins the set to a buried, reorg-stable height.
+        // CONSENSUS-CRITICAL: the buffer is part of what every hub folds into
+        // the same round height, so it must be identical federation-wide (same
+        // tier as ORACLE_EPOCH_START). Override via HUB_SNAPSHOT_REORG_BUFFER
+        // only as a coordinated fleet change. Default 6 = the BTC confirmation
+        // depth the platform already treats as buried (XCHAIN_CONFIRMATIONS_BTC).
+        this.reorgBufferBlocks = this._resolveReorgBuffer();
         // Last time we logged an indexer auth (401/403) failure (throttles the
         // warning so a persistent key mismatch doesn't spam the poll loop).
         this._authWarnAt = 0;
@@ -119,7 +132,8 @@ class CapabilitySnapshot {
     //   { validators: [{pubkey, amount}, ...], count, blockIndex, capability }
     // Returns null when the indexer can't be reached or returns an error.
     async getSnapshot(capability, blockIndex) {
-        if (blockIndex === undefined || blockIndex === null) return null;
+        blockIndex = this._buriedBlockIndex(blockIndex);
+        if (blockIndex === null) return null;
 
         // The hub is the authoritative source of the MIN_STAKE threshold for its
         // own federation queries: passing it here makes the validator set depend
@@ -189,7 +203,8 @@ class CapabilitySnapshot {
     // aggregate stake), so the quorum tally can dedupe by source. Cache key is
     // disjoint from the count snapshot ('w:' prefix). Returns null on indexer error.
     async getWeightSnapshot(capability, blockIndex) {
-        if (blockIndex === undefined || blockIndex === null) return null;
+        blockIndex = this._buriedBlockIndex(blockIndex);
+        if (blockIndex === null) return null;
 
         // min_stake rides in the cache key for the same reason as getSnapshot:
         // it determines the qualifying set, so a governance threshold change must
@@ -246,7 +261,8 @@ class CapabilitySnapshot {
     // where quorum is over all stakers, not a capability subset. Cache key is
     // disjoint from capability snapshots (capability='*').
     async getActiveValidatorSnapshot(blockIndex) {
-        if (blockIndex === undefined || blockIndex === null) return null;
+        blockIndex = this._buriedBlockIndex(blockIndex);
+        if (blockIndex === null) return null;
         let key = '*:' + blockIndex;
         let cached = this.cache.get(key);
         let now = Date.now();
@@ -289,7 +305,8 @@ class CapabilitySnapshot {
     // used by Consensus (config-change PBFT) to weight quorum by stake. Cache key is
     // disjoint ('wa:' prefix). Returns null on indexer error.
     async getActiveWeightSnapshot(blockIndex) {
-        if (blockIndex === undefined || blockIndex === null) return null;
+        blockIndex = this._buriedBlockIndex(blockIndex);
+        if (blockIndex === null) return null;
         let key = 'wa:' + blockIndex;
         let cached = this.cache.get(key);
         let now = Date.now();
@@ -442,6 +459,37 @@ class CapabilitySnapshot {
             }
         }
         return removed;
+    }
+
+    // Resolve the reorg-depth buffer from HUB_SNAPSHOT_REORG_BUFFER (default 6).
+    // Only a non-negative integer is accepted; anything else warns loudly and
+    // falls back to the default rather than silently forking the federation on
+    // a typo'd env value.
+    _resolveReorgBuffer() {
+        let raw = process.env.HUB_SNAPSHOT_REORG_BUFFER;
+        if (raw === undefined || raw === '') return 6;
+        let n = Number(raw);
+        if (!Number.isInteger(n) || n < 0) {
+            console.error('CapabilitySnapshot: HUB_SNAPSHOT_REORG_BUFFER "' + raw + '" is not a ' +
+                'non-negative integer; using the default (6). This value is CONSENSUS-CRITICAL and ' +
+                'must match across the federation.');
+            return 6;
+        }
+        return n;
+    }
+
+    // Map a caller-supplied (tip-derived) height to the buried height every
+    // snapshot actually resolves at: max(0, blockIndex - reorgBufferBlocks).
+    // Returns null for a null/undefined/non-numeric input (the fetchers'
+    // existing "no height" sentinel), so callers still degrade gracefully.
+    // The buried height feeds the cache key, the indexer RPC and the echo
+    // guard alike, so the snapshot is labeled with the height it truly
+    // represents.
+    _buriedBlockIndex(blockIndex) {
+        if (blockIndex === undefined || blockIndex === null) return null;
+        let n = Number(blockIndex);
+        if (!Number.isFinite(n)) return null;
+        return Math.max(0, Math.floor(n) - this.reorgBufferBlocks);
     }
 
     _prune(now) {

@@ -82,7 +82,7 @@ describe('CapabilitySnapshot (extra coverage)', function () {
     describe('getSnapshot() – returns null when indexer URL unavailable', function () {
         it('returns null when hub has no indexer URL', async function () {
             let snap = new CapabilitySnapshot(makeHub({ indexerUrl: null }));
-            expect(await snap.getSnapshot('attestation', 100)).to.be.null;
+            expect(await snap.getSnapshot('attestation', 106)).to.be.null;
         });
     });
 
@@ -93,9 +93,9 @@ describe('CapabilitySnapshot (extra coverage)', function () {
             snap.cacheTtlMs = 60000;
 
             // First fetch: populates cache
-            await snap.getSnapshot('attestation', 100);
+            await snap.getSnapshot('attestation', 106);
             // Second fetch: should use cache
-            await snap.getSnapshot('attestation', 100);
+            await snap.getSnapshot('attestation', 106);
 
             expect(axiosStub.post.callCount).to.equal(1);
         });
@@ -105,19 +105,19 @@ describe('CapabilitySnapshot (extra coverage)', function () {
         it('returns null when axios throws', async function () {
             axiosStub.post.rejects(new Error('network error'));
             let snap = new CapabilitySnapshot(makeHub());
-            expect(await snap.getSnapshot('attestation', 100)).to.be.null;
+            expect(await snap.getSnapshot('attestation', 106)).to.be.null;
         });
 
         it('returns null when result contains an error field', async function () {
             axiosStub.post.resolves({ data: { result: { error: 'not found' } } });
             let snap = new CapabilitySnapshot(makeHub());
-            expect(await snap.getSnapshot('attestation', 100)).to.be.null;
+            expect(await snap.getSnapshot('attestation', 106)).to.be.null;
         });
 
         it('returns null when result is null', async function () {
             axiosStub.post.resolves({ data: { result: null } });
             let snap = new CapabilitySnapshot(makeHub());
-            expect(await snap.getSnapshot('attestation', 100)).to.be.null;
+            expect(await snap.getSnapshot('attestation', 106)).to.be.null;
         });
     });
 
@@ -125,7 +125,7 @@ describe('CapabilitySnapshot (extra coverage)', function () {
         it('returns snapshot with validators and count', async function () {
             axiosStub.post.resolves(okResult());
             let snap = new CapabilitySnapshot(makeHub());
-            let result = await snap.getSnapshot('attestation', 100);
+            let result = await snap.getSnapshot('attestation', 106);
             expect(result).to.not.be.null;
             expect(result.validators).to.have.length(2);
             expect(result.count).to.equal(2);
@@ -141,7 +141,7 @@ describe('CapabilitySnapshot (extra coverage)', function () {
                 data: { result: { capability: 'attestation', block_index: 100, count: 0 } }
             });
             let snap = new CapabilitySnapshot(makeHub());
-            let result = await snap.getSnapshot('attestation', 100);
+            let result = await snap.getSnapshot('attestation', 106);
             expect(result).to.equal(null);
         });
 
@@ -150,7 +150,7 @@ describe('CapabilitySnapshot (extra coverage)', function () {
                 data: { result: { capability: 'attestation', block_index: 100, count: 0, validators: [] } }
             });
             let snap = new CapabilitySnapshot(makeHub());
-            let result = await snap.getSnapshot('attestation', 100);
+            let result = await snap.getSnapshot('attestation', 106);
             expect(result).to.not.equal(null);
             expect(result.validators).to.deep.equal([]);
         });
@@ -179,7 +179,7 @@ describe('CapabilitySnapshot (extra coverage)', function () {
                 }
             });
             let snap = new CapabilitySnapshot(makeHub());
-            let result = await snap.getActiveValidatorSnapshot(200);
+            let result = await snap.getActiveValidatorSnapshot(206);
             expect(result).to.not.be.null;
             expect(result.capability).to.equal('*');
             let body = axiosStub.post.firstCall.args[1];
@@ -190,13 +190,13 @@ describe('CapabilitySnapshot (extra coverage)', function () {
         it('returns null when result has error', async function () {
             axiosStub.post.resolves({ data: { result: { error: 'fail' } } });
             let snap = new CapabilitySnapshot(makeHub());
-            expect(await snap.getActiveValidatorSnapshot(200)).to.be.null;
+            expect(await snap.getActiveValidatorSnapshot(206)).to.be.null;
         });
 
         it('returns null on axios error', async function () {
             axiosStub.post.rejects(new Error('timeout'));
             let snap = new CapabilitySnapshot(makeHub());
-            expect(await snap.getActiveValidatorSnapshot(200)).to.be.null;
+            expect(await snap.getActiveValidatorSnapshot(206)).to.be.null;
         });
 
         it('caches the result on the second call', async function () {
@@ -205,8 +205,8 @@ describe('CapabilitySnapshot (extra coverage)', function () {
             });
             let snap = new CapabilitySnapshot(makeHub());
             snap.cacheTtlMs = 60000;
-            await snap.getActiveValidatorSnapshot(200);
-            await snap.getActiveValidatorSnapshot(200);
+            await snap.getActiveValidatorSnapshot(206);
+            await snap.getActiveValidatorSnapshot(206);
             expect(axiosStub.post.callCount).to.equal(1);
         });
     });

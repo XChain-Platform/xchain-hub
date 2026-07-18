@@ -73,7 +73,7 @@ describe('CapabilitySnapshot', function () {
             let registry = { getMinStake: sinon.stub().returns('25000') };
             let snap = new CapabilitySnapshot(makeHub(registry));
 
-            await snap.getSnapshot('attestation', 100);
+            await snap.getSnapshot('attestation', 106);
 
             expect(axiosStub.post.calledOnce).to.equal(true);
             let body = axiosStub.post.firstCall.args[1];
@@ -99,7 +99,7 @@ describe('CapabilitySnapshot', function () {
             let registry = { getMinStake: sinon.stub().returns('25000') };
             let snap = new CapabilitySnapshot(makeHub(registry));
 
-            let result = await snap.getSnapshot('attestation', 100);
+            let result = await snap.getSnapshot('attestation', 106);
             expect(result).to.equal(null);
         });
 
@@ -108,7 +108,7 @@ describe('CapabilitySnapshot', function () {
             let registry = { getMinStake: sinon.stub().returns(25000) };
             let snap = new CapabilitySnapshot(makeHub(registry));
 
-            await snap.getSnapshot('attestation', 100);
+            await snap.getSnapshot('attestation', 106);
 
             expect(axiosStub.post.firstCall.args[1].params.min_stake).to.equal('25000');
         });
@@ -117,7 +117,7 @@ describe('CapabilitySnapshot', function () {
             axiosStub.post.resolves(okResult());
             let snap = new CapabilitySnapshot(makeHub(null));
 
-            await snap.getSnapshot('attestation', 100);
+            await snap.getSnapshot('attestation', 106);
 
             let body = axiosStub.post.firstCall.args[1];
             expect(Object.prototype.hasOwnProperty.call(body.params, 'min_stake')).to.equal(false);
@@ -133,7 +133,7 @@ describe('CapabilitySnapshot', function () {
             let snap = new CapabilitySnapshot(makeHub(registry));
             let errStub = sinon.stub(console, 'error');
 
-            let result = await snap.getSnapshot('attestation', 100);
+            let result = await snap.getSnapshot('attestation', 106);
 
             expect(result).to.equal(null);
             expect(axiosStub.post.called).to.equal(false);
@@ -146,7 +146,7 @@ describe('CapabilitySnapshot', function () {
             let snap = new CapabilitySnapshot(makeHub(registry));
             sinon.stub(console, 'error');
 
-            let result = await snap.getWeightSnapshot('attestation', 100);
+            let result = await snap.getWeightSnapshot('attestation', 106);
 
             expect(result).to.equal(null);
             expect(axiosStub.post.called).to.equal(false);
@@ -175,13 +175,13 @@ describe('CapabilitySnapshot', function () {
             axiosStub.post.onFirstCall().resolves(resultWith([{ pubkey: 'old', amount: '30000' }]));
             axiosStub.post.onSecondCall().resolves(resultWith([{ pubkey: 'new', amount: '60000' }]));
 
-            let first = await snap.getSnapshot('attestation', 100);
+            let first = await snap.getSnapshot('attestation', 106);
             expect(first.validators[0].pubkey).to.equal('old');
 
             // Governance raises the threshold; the cache key now differs, so the
             // stale entry is unreachable and a fresh indexer query runs.
             threshold = '50000';
-            let second = await snap.getSnapshot('attestation', 100);
+            let second = await snap.getSnapshot('attestation', 106);
 
             expect(axiosStub.post.calledTwice).to.equal(true);
             expect(second.validators[0].pubkey).to.equal('new');
@@ -192,10 +192,10 @@ describe('CapabilitySnapshot', function () {
             let snap = new CapabilitySnapshot(makeHub(registry));
 
             axiosStub.post.resolves(resultWith([{ pubkey: 'old', amount: '30000' }]));
-            await snap.getSnapshot('attestation', 100);
-            await snap.getWeightSnapshot('attestation', 100);
+            await snap.getSnapshot('attestation', 106);
+            await snap.getWeightSnapshot('attestation', 106);
             // A different capability's entry must survive the flush.
-            await snap.getSnapshot('price', 100);
+            await snap.getSnapshot('price', 106);
             expect(snap.cache.size).to.equal(3);
 
             let removed = snap.flushCapability('attestation');
@@ -204,7 +204,7 @@ describe('CapabilitySnapshot', function () {
 
             // Next read for the flushed capability hits the indexer again, not cache.
             axiosStub.post.resetHistory();
-            await snap.getSnapshot('attestation', 100);
+            await snap.getSnapshot('attestation', 106);
             expect(axiosStub.post.calledOnce).to.equal(true);
         });
 
@@ -218,7 +218,7 @@ describe('CapabilitySnapshot', function () {
             axiosStub.post.onSecondCall().resolves(resultWith([{ pubkey: 'new', amount: '60000' }]));
 
             // (a) prime the cache under the old threshold
-            let before = await snap.getSnapshot('attestation', 100);
+            let before = await snap.getSnapshot('attestation', 106);
             expect(before.validators[0].pubkey).to.equal('old');
 
             // (b) governance MIN_STAKE change lands: registry updates, hub flushes
@@ -227,7 +227,7 @@ describe('CapabilitySnapshot', function () {
             snap.flushCapability('attestation');
 
             // (c) the next read reflects the new validator set
-            let after = await snap.getSnapshot('attestation', 100);
+            let after = await snap.getSnapshot('attestation', 106);
             expect(after.validators[0].pubkey).to.equal('new');
         });
     });
@@ -249,7 +249,7 @@ describe('CapabilitySnapshot', function () {
             let spy = sinon.spy(console, 'error');
             let snap = new CapabilitySnapshot(makeHub(null));
 
-            let result = await snap.getSnapshot('attestation', 100);
+            let result = await snap.getSnapshot('attestation', 106);
 
             expect(result).to.equal(null);
             expect(spy.calledOnce).to.equal(true);
@@ -265,7 +265,7 @@ describe('CapabilitySnapshot', function () {
             let snap = new CapabilitySnapshot(makeHub(null));
 
             // Distinct keys/methods so the 60s snapshot cache never short-circuits the call.
-            await snap.getSnapshot('attestation', 100);
+            await snap.getSnapshot('attestation', 106);
             await snap.getWeightSnapshot('attestation', 101);
             await snap.getActiveValidatorSnapshot(102);
 
@@ -277,7 +277,7 @@ describe('CapabilitySnapshot', function () {
             let spy = sinon.spy(console, 'error');
             let snap = new CapabilitySnapshot(makeHub(null));
 
-            let result = await snap.getSnapshot('attestation', 100);
+            let result = await snap.getSnapshot('attestation', 106);
 
             expect(result).to.equal(null);                     // still falls back
             expect(spy.called).to.equal(false);                // but not flagged as auth
@@ -301,10 +301,10 @@ describe('CapabilitySnapshot', function () {
 
         // Each fetch method paired with a base valid result for its RPC.
         let methods = [
-            { name: 'getSnapshot',                 call: (s) => s.getSnapshot('attestation', 100),    base: { capability: 'attestation', block_index: 100, count: 1 } },
-            { name: 'getWeightSnapshot',           call: (s) => s.getWeightSnapshot('attestation', 100), base: { capability: 'attestation', block_index: 100, count: 1, source_count: 1 } },
-            { name: 'getActiveValidatorSnapshot',  call: (s) => s.getActiveValidatorSnapshot(100),     base: { block_index: 100, count: 1 } },
-            { name: 'getActiveWeightSnapshot',     call: (s) => s.getActiveWeightSnapshot(100),        base: { block_index: 100, count: 1, source_count: 1 } }
+            { name: 'getSnapshot',                 call: (s) => s.getSnapshot('attestation', 106),    base: { capability: 'attestation', block_index: 100, count: 1 } },
+            { name: 'getWeightSnapshot',           call: (s) => s.getWeightSnapshot('attestation', 106), base: { capability: 'attestation', block_index: 100, count: 1, source_count: 1 } },
+            { name: 'getActiveValidatorSnapshot',  call: (s) => s.getActiveValidatorSnapshot(106),     base: { block_index: 100, count: 1 } },
+            { name: 'getActiveWeightSnapshot',     call: (s) => s.getActiveWeightSnapshot(106),        base: { block_index: 100, count: 1, source_count: 1 } }
         ];
 
         // (d) malformed shapes return null on every fetch path.
@@ -347,5 +347,119 @@ describe('CapabilitySnapshot', function () {
                 expect(out.validators).to.be.an('array').with.lengthOf(0);
             });
         }
+    });
+
+    // -----------------------------------------------------------------
+    // Reorg-depth buffer (#S-F7 / )
+    //
+    // Callers pass a tip-derived height, but stake state AT tip is not
+    // reorg-safe: a shallow reorg can rewrite it while the 60s cache keeps
+    // serving the pre-reorg set. Every getter must therefore resolve the
+    // snapshot at (requested - buffer), clamped at 0, and label the snapshot
+    // with the buried height it truly represents.
+    // -----------------------------------------------------------------
+
+    describe('reorg-depth buffer (#S-F7)', function () {
+
+        function echoingIndexer() {
+            // Indexer stub that echoes back whatever block was requested, like
+            // the real one does on success.
+            axiosStub.post.callsFake(async (url, body) => ({
+                data: { result: {
+                    capability:  body.params.capability || '*',
+                    block_index: body.params.block_index,
+                    count:       1,
+                    validators:  [{ pubkey: 'ab', amount: '50000' }]
+                } }
+            }));
+        }
+
+        afterEach(function () {
+            delete process.env.HUB_SNAPSHOT_REORG_BUFFER;
+        });
+
+        it('defaults to a 6-block buffer', function () {
+            let snap = new CapabilitySnapshot(makeHub(null));
+            expect(snap.reorgBufferBlocks).to.equal(6);
+        });
+
+        it('resolves getSnapshot at (tip - buffer), not at tip', async function () {
+            echoingIndexer();
+            let snap = new CapabilitySnapshot(makeHub(null));
+            let out = await snap.getSnapshot('attestation', 100);
+            expect(axiosStub.post.firstCall.args[1].params.block_index).to.equal(94);
+            expect(out.blockIndex).to.equal(94);
+        });
+
+        it('applies the buffer on every getter (weight, active, active-weight)', async function () {
+            echoingIndexer();
+            let snap = new CapabilitySnapshot(makeHub(null));
+            await snap.getWeightSnapshot('attestation', 100);
+            await snap.getActiveValidatorSnapshot(100);
+            await snap.getActiveWeightSnapshot(100);
+            for (let call of axiosStub.post.getCalls()) {
+                expect(call.args[1].params.block_index).to.equal(94);
+            }
+        });
+
+        it('clamps the buried height at 0 near genesis', async function () {
+            echoingIndexer();
+            let snap = new CapabilitySnapshot(makeHub(null));
+            await snap.getSnapshot('attestation', 3);
+            expect(axiosStub.post.firstCall.args[1].params.block_index).to.equal(0);
+        });
+
+        it('honors a HUB_SNAPSHOT_REORG_BUFFER override', async function () {
+            process.env.HUB_SNAPSHOT_REORG_BUFFER = '12';
+            echoingIndexer();
+            let snap = new CapabilitySnapshot(makeHub(null));
+            expect(snap.reorgBufferBlocks).to.equal(12);
+            await snap.getSnapshot('attestation', 100);
+            expect(axiosStub.post.firstCall.args[1].params.block_index).to.equal(88);
+        });
+
+        it('allows a 0 buffer (regtest opt-out)', async function () {
+            process.env.HUB_SNAPSHOT_REORG_BUFFER = '0';
+            echoingIndexer();
+            let snap = new CapabilitySnapshot(makeHub(null));
+            await snap.getSnapshot('attestation', 100);
+            expect(axiosStub.post.firstCall.args[1].params.block_index).to.equal(100);
+        });
+
+        it('rejects a malformed override loudly and falls back to the default', function () {
+            process.env.HUB_SNAPSHOT_REORG_BUFFER = 'lots';
+            let errStub = sinon.stub(console, 'error');
+            let snap = new CapabilitySnapshot(makeHub(null));
+            expect(snap.reorgBufferBlocks).to.equal(6);
+            expect(errStub.calledWithMatch(/HUB_SNAPSHOT_REORG_BUFFER/)).to.equal(true);
+        });
+
+        it('rejects a negative override', function () {
+            process.env.HUB_SNAPSHOT_REORG_BUFFER = '-3';
+            sinon.stub(console, 'error');
+            let snap = new CapabilitySnapshot(makeHub(null));
+            expect(snap.reorgBufferBlocks).to.equal(6);
+        });
+
+        it('still returns null for a null/undefined/non-numeric height', async function () {
+            let snap = new CapabilitySnapshot(makeHub(null));
+            expect(await snap.getSnapshot('attestation', null)).to.equal(null);
+            expect(await snap.getSnapshot('attestation', undefined)).to.equal(null);
+            expect(await snap.getSnapshot('attestation', 'tip')).to.equal(null);
+            expect(axiosStub.post.called).to.equal(false);
+        });
+
+        it('two tip heights burying to the same block share one cache entry', async function () {
+            // The cache is keyed on the BURIED height, so distinct tip reads that
+            // resolve to the same buried block must not double-fetch.
+            echoingIndexer();
+            process.env.HUB_SNAPSHOT_REORG_BUFFER = '6';
+            let snap = new CapabilitySnapshot(makeHub(null));
+            let a = await snap.getSnapshot('attestation', 100.4); // floors to 100 -> 94
+            let b = await snap.getSnapshot('attestation', 100);   // -> 94
+            expect(axiosStub.post.callCount).to.equal(1);
+            expect(a.blockIndex).to.equal(94);
+            expect(b.blockIndex).to.equal(94);
+        });
     });
 });
