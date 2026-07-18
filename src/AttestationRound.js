@@ -432,12 +432,21 @@ class AttestationRound {
         for(let rid of this.seen.keys()){
             if(!this.rounds.has(rid)) inFlight++;
         }
-        return {
+        let stats = {
             seen_count:      this.seen.size,
             in_flight_count: inFlight,
             proposed_count:  proposed,
             failed_count:    failed
         };
+        // : expose the non-ok publication-throttle ring health so an
+        // undersized ATTESTATION_NONOK_PUBLISHED_MAX (evictions of entries
+        // whose requests are still pending) is operator-visible.
+        if(this.consensus){
+            stats.nonok_published_count               = this.consensus.nonOkPublished.size;
+            stats.nonok_published_max                 = this.consensus.nonOkPublishedMax;
+            stats.nonok_evicted_while_pending_count   = this.consensus.nonOkEvictedWhilePendingCount;
+        }
+        return stats;
     }
 
     async _resolveBtcIndexerUrl(){

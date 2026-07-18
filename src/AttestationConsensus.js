@@ -52,6 +52,12 @@ const ATTEST_PREPARE = 'ATTEST_PREPARE';
 const ATTEST_COMMIT  = 'ATTEST_COMMIT';
 
 const DEFAULT_ROUND_TIMEOUT_MS = 120000;  // 2 minutes per request lifecycle
+// Default cap for the nonOkPublished throttle ring . Floor derives
+// from the LONGEST provider deadline window (deadline_window_blocks, currently
+// 100 BTC blocks for http_get), not the ok/BTC-confirmation horizon that sizes
+// `finalizedMax`: non-ok entries must survive until deadline expiry. 40000
+// clears 100 blocks even at ~400 non-ok finalizations per block.
+const DEFAULT_NONOK_PUBLISHED_MAX = 40000;
 // Cap for the inbound `meta` field on PROPOSE/PREPARE envelopes, mirroring the
 // body_b64 cap: meta is a short provider tag (HTTP status code, LLM model id),
 // so anything longer is adversarial padding that would otherwise be stored,
@@ -105,10 +111,32 @@ class AttestationConsensus extends EventEmitter {
         // the same provider_error/no_quorum response again, burning a BTC tx
         // per poll cycle for no new information. One publication per
         // (request_id, status) is the audit trail; the deadline-expiry path
-        // remains the terminal backstop. Ring-bounded like `finalized`.
+        // remains the terminal backstop. Ring-bounded like `finalized`, but
+        // with its OWN cap : a finalized-ok rid only needs suppression
+        // until the indexer flips it out of the pending poll (the short BTC
+        // confirmation horizon), while a non-ok rid stays RETRYABLE until its
+        // provider deadline expires, a much longer window (the widest
+        // deadline_window_blocks across provider defs; 100 BTC blocks for
+        // http_get, ~17h). Capping this ring with `finalizedMax` sized it from
+        // the wrong horizon: under load a still-pending non-ok entry could be
+        // evicted while retry rounds keep running, and every later retry would
+        // re-quorum-sign and re-broadcast the same failure status, burning a
+        // BTC tx per poll cycle.
+        //
+        // SIZING FLOOR: ATTESTATION_NONOK_PUBLISHED_MAX must exceed the number
+        // of requests this hub finalizes non-ok within the LONGEST provider
+        // deadline window (max deadline_window_blocks x expected non-ok
+        // request throughput per block). The default clears the current 100-
+        // block http_get ceiling by a wide margin; re-derive before lowering.
+        // Eviction of a rid that never reached a terminal ok finalization is
+        // counted (`nonOkEvictedWhilePendingCount`) and warned on, since it
+        // re-opens the duplicate-publication path this throttle exists to
+        // close.
         // Map<rid, Set<status>>
         this.nonOkPublished       = new Map();
         this._nonOkPublishedOrder = [];
+        this.nonOkPublishedMax    = parseInt(this.config.ATTESTATION_NONOK_PUBLISHED_MAX) || DEFAULT_NONOK_PUBLISHED_MAX;
+        this.nonOkEvictedWhilePendingCount = 0;
 
         // Early-arrival buffer. With staggered hub polls, the first proposer's
         // PROPOSE often reaches peers before they start their own round.
@@ -710,16 +738,32 @@ class AttestationConsensus extends EventEmitter {
     }
 
     // Record that a non-ok status has been published for a request, bounding
-    // the map with the same FIFO ring discipline as `finalized`.
+    // the map with the same FIFO ring discipline as `finalized` but under the
+    // deadline-window-derived `nonOkPublishedMax` cap , NOT
+    // `finalizedMax`: non-ok entries stay retry-suppression-relevant until
+    // their provider deadline, a far longer horizon than an ok finalization.
     _recordNonOkPublished(rid, status){
         let set = this.nonOkPublished.get(rid);
         if(!set){
             set = new Set();
             this.nonOkPublished.set(rid, set);
             this._nonOkPublishedOrder.push(rid);
-            if(this._nonOkPublishedOrder.length > this.finalizedMax){
+            if(this._nonOkPublishedOrder.length > this.nonOkPublishedMax){
                 let oldest = this._nonOkPublishedOrder.shift();
                 this.nonOkPublished.delete(oldest);
+                // Evict-while-pending detection: a rid that never reached a
+                // terminal ok finalization is (as far as this hub can tell)
+                // still pending and retryable on the indexer, so evicting its
+                // throttle record re-opens duplicate non-ok publications
+                // (re-quorum-sign + re-broadcast, one burned BTC tx per retry
+                // poll). Warn + count so operators can raise the cap.
+                if(!this.finalized.has(oldest)){
+                    this.nonOkEvictedWhilePendingCount++;
+                    console.warn('AttestationConsensus: evicted non-ok throttle entry for still-pending request ' +
+                                oldest.substring(0,16) + '... (ring full at ' + this.nonOkPublishedMax +
+                                '; raise ATTESTATION_NONOK_PUBLISHED_MAX; evictions_while_pending=' +
+                                this.nonOkEvictedWhilePendingCount + ')');
+                }
             }
         }
         set.add(status);

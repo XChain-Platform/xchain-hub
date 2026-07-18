@@ -314,6 +314,66 @@ describe('AttestationConsensus: _markFinalized ring buffer', function () {
     });
 });
 
+describe('AttestationConsensus: nonOkPublished ring buffer ', function () {
+
+    afterEach(() => sinon.restore());
+
+    it('defaults nonOkPublishedMax independently of finalizedMax and reads the knob', function () {
+        let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
+        expect(c.nonOkPublishedMax).to.equal(40000);
+        expect(c.nonOkPublishedMax).to.be.greaterThan(c.finalizedMax);
+
+        let hub = createMockHub();
+        hub.p2pConfig = Object.assign({}, hub.p2pConfig, { ATTESTATION_NONOK_PUBLISHED_MAX: '123' });
+        let c2 = new AttestationConsensus(hub, makeProviderRegistry());
+        expect(c2.nonOkPublishedMax).to.equal(123);
+    });
+
+    it('caps the ring by nonOkPublishedMax, not finalizedMax', function () {
+        let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
+        c.finalizedMax      = 1;   // would evict immediately under the old sizing
+        c.nonOkPublishedMax = 3;
+        c._recordNonOkPublished('a', 'provider_error');
+        c._recordNonOkPublished('b', 'no_quorum');
+        c._recordNonOkPublished('c', 'provider_error');
+        expect(c.nonOkPublished.size).to.equal(3);   // finalizedMax=1 no longer evicts
+        c._recordNonOkPublished('d', 'provider_error');
+        expect(c.nonOkPublished.has('a')).to.equal(false);
+        expect(c.nonOkPublished.has('d')).to.equal(true);
+        expect(c._nonOkPublishedOrder).to.deep.equal(['b', 'c', 'd']);
+    });
+
+    it('accumulates statuses per rid without growing the ring', function () {
+        let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
+        c._recordNonOkPublished('a', 'provider_error');
+        c._recordNonOkPublished('a', 'no_quorum');
+        expect(c._nonOkPublishedOrder).to.deep.equal(['a']);
+        expect(c.nonOkPublished.get('a').has('provider_error')).to.equal(true);
+        expect(c.nonOkPublished.get('a').has('no_quorum')).to.equal(true);
+    });
+
+    it('warns and counts when a still-pending (never ok-finalized) entry is evicted', function () {
+        let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
+        let warn = sinon.stub(console, 'warn');
+        c.nonOkPublishedMax = 1;
+        c._recordNonOkPublished('a', 'provider_error');
+        c._recordNonOkPublished('b', 'provider_error');   // evicts 'a', still pending
+        expect(c.nonOkEvictedWhilePendingCount).to.equal(1);
+        expect(warn.getCalls().some(call => /still-pending request a/.test(call.args[0]))).to.equal(true);
+        expect(warn.getCalls().some(call => /ATTESTATION_NONOK_PUBLISHED_MAX/.test(call.args[0]))).to.equal(true);
+    });
+
+    it('does not count eviction of an entry whose request later finalized ok', function () {
+        let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
+        sinon.stub(console, 'warn');
+        c.nonOkPublishedMax = 1;
+        c._recordNonOkPublished('a', 'provider_error');
+        c._markFinalized('a');                            // retry round later succeeded
+        c._recordNonOkPublished('b', 'provider_error');   // evicts 'a', now terminal
+        expect(c.nonOkEvictedWhilePendingCount).to.equal(0);
+    });
+});
+
 describe('AttestationConsensus: early-message buffer', function () {
 
     let c;
