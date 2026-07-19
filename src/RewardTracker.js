@@ -176,8 +176,28 @@ class RewardTracker {
     // followers re-resolve it before co-signing. Block-scoped, so every hub gets
     // the same answer regardless of when it asks. Returns the address string or
     // null (unreachable indexer / unknown pubkey).
+    // Resolve the BTC indexer endpoint through the hub's shared resolver (env alias
+    // -> configs table) at call time, mirroring XChainHub._pollOwnStake, so a
+    // configs-table-provisioned hub (no BTC_INDEXER_API_URL exported) resolves the
+    // same URL every other hub component does. resolveSourceByPubkey gates a
+    // consensus co-sign decision, so an env-only resolution here made two hubs with
+    // identical DB config disagree on archive contents. Falls back to the
+    // constructor-captured env value if the hub/resolver is unavailable. #2652.
+    async _getBtcIndexerUrl() {
+        if (this.hub && typeof this.hub._resolveBtcIndexerUrl === 'function') {
+            try {
+                let url = await this.hub._resolveBtcIndexerUrl();
+                if (url) return String(url);
+            } catch (err) {
+                console.warn('Rewards: BTC indexer URL resolution via hub failed:', err && err.message);
+            }
+        }
+        return this.btcIndexerApiUrl || '';
+    }
+
     async resolveSourceByPubkey(pubkey, blockIndex) {
-        if (!this.btcIndexerApiUrl) return null;
+        let indexerUrl = await this._getBtcIndexerUrl();
+        if (!indexerUrl) return null;
         let body = {
             jsonrpc: '2.0',
             id:      Date.now(),
@@ -187,7 +207,7 @@ class RewardTracker {
         let headers = { 'Content-Type': 'application/json' };
         if (this.btcIndexerApiKey) headers['x-api-key'] = this.btcIndexerApiKey;
         try {
-            let res = await axios.post(this.btcIndexerApiUrl, body, { headers: headers, timeout: 5000 });
+            let res = await axios.post(indexerUrl, body, { headers: headers, timeout: 5000 });
             let result = res && res.data ? res.data.result : null;
             return (result && result.source) ? String(result.source) : null;
         } catch (err) {
@@ -199,7 +219,8 @@ class RewardTracker {
     // Push validator rewards to the BTC indexer's local DB via JSON-RPC
     // Called fire-and-forget; failures are logged but never block the consensus path
     async _pushRewardsToBtcIndexer(round, pubkeys, amount, blockIndex, rewardType) {
-        if (!this.btcIndexerApiUrl) return;
+        let indexerUrl = await this._getBtcIndexerUrl();
+        if (!indexerUrl) return;
         let rewards = pubkeys.map(pk => ({ pubkey: pk, amount: amount }));
         let body = {
             jsonrpc: '2.0',
@@ -215,7 +236,7 @@ class RewardTracker {
         let headers = { 'Content-Type': 'application/json' };
         if (this.btcIndexerApiKey) headers['x-api-key'] = this.btcIndexerApiKey;
         try {
-            await axios.post(this.btcIndexerApiUrl, body, { headers: headers, timeout: 5000 });
+            await axios.post(indexerUrl, body, { headers: headers, timeout: 5000 });
         } catch (err) {
             console.warn('Rewards: BTC indexer push failed:', err);
         }

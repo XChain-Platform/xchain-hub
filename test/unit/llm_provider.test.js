@@ -297,6 +297,127 @@ describe('llm provider, fetch via claude_spawn', function () {
         expect(err).to.exist;
         expect(err.message).to.match(/empty text/);
     });
+
+    // item 2679: the per-call spend budget must actually reach runClaudePrint.
+    it('threads LLM_MAX_BUDGET_USD into runClaudePrint as maxBudgetUsd', async function () {
+        const { llm, stub } = reloadWithSpawnStub({ result: 'ok' });
+        process.env.LLM_MAX_BUDGET_USD = '0.50';
+        try {
+            await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {}));
+        } finally { delete process.env.LLM_MAX_BUDGET_USD; }
+        expect(stub.calledOnce).to.equal(true);
+        expect(stub.firstCall.args[0].maxBudgetUsd).to.equal(0.5);
+    });
+
+    it('omits maxBudgetUsd when no budget is configured (behavior unchanged)', async function () {
+        const savedBudget = process.env.LLM_MAX_BUDGET_USD;
+        delete process.env.LLM_MAX_BUDGET_USD;
+        const { llm, stub } = reloadWithSpawnStub({ result: 'ok' });
+        try {
+            await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {}));
+        } finally { if (savedBudget !== undefined) process.env.LLM_MAX_BUDGET_USD = savedBudget; }
+        expect(stub.calledOnce).to.equal(true);
+        expect(stub.firstCall.args[0]).to.not.have.property('maxBudgetUsd');
+    });
+
+    it('omits maxBudgetUsd for a non-numeric / non-positive budget', async function () {
+        const { llm, stub } = reloadWithSpawnStub({ result: 'ok' });
+        process.env.LLM_MAX_BUDGET_USD = 'not-a-number';
+        try {
+            await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {}));
+        } finally { delete process.env.LLM_MAX_BUDGET_USD; }
+        expect(stub.firstCall.args[0]).to.not.have.property('maxBudgetUsd');
+    });
+
+    // item 2680: a paused provider must not dial the spawn transport at all.
+    it('does not call runClaudePrint while paused', async function () {
+        const { llm, stub } = reloadWithSpawnStub({ result: 'ok' });
+        process.env.LLM_PROVIDER_ENABLED = 'false';
+        let err;
+        try {
+            await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {}));
+        } catch (e) { err = e; } finally { delete process.env.LLM_PROVIDER_ENABLED; }
+        expect(err).to.exist;
+        expect(err.paused).to.equal(true);
+        expect(stub.called).to.equal(false);
+    });
+});
+
+// ---- item 2680 kill switch + item 2679 budget resolution ------------------
+
+describe('llm provider, kill switch + budget (items 2680 / 2679)', function () {
+
+    afterEach(function () {
+        delete process.env.LLM_PROVIDER_ENABLED;
+        delete process.env.LLM_MAX_BUDGET_USD;
+    });
+
+    it('healthCheck reports paused, distinct from a credential failure', async function () {
+        const llm = _reloadProvider();
+        process.env.LLM_PROVIDER_ENABLED = 'false';
+        const h = await llm.healthCheck({ defaultConfigDir: HERMETIC_DEFAULT_DIR });
+        expect(h.ok).to.equal(false);
+        expect(h.paused).to.equal(true);
+        expect(h.error).to.match(/paused/);
+    });
+
+    it('fetch refuses with a distinct paused error', async function () {
+        const llm = _reloadProvider();
+        process.env.LLM_PROVIDER_ENABLED = 'false';
+        let err;
+        try { await llm.fetch(JSON.stringify({ prompt: 'hi' }), {}); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.paused).to.equal(true);
+    });
+
+    it('agree returns null + inconclusive(provider_paused) for a multi-proposal round while paused', async function () {
+        const llm = _reloadProvider();
+        process.env.LLM_PROVIDER_ENABLED = 'false';
+        const outcome = {};
+        const r = await llm.agree([
+            { body: Buffer.from('A', 'utf8'), meta: 'claude-sonnet-4-6' },
+            { body: Buffer.from('B', 'utf8'), meta: 'claude-sonnet-4-6' },
+            { body: Buffer.from('C', 'utf8'), meta: 'claude-sonnet-4-6' }
+        ], { outcome });
+        expect(r).to.be.null;
+        expect(outcome.inconclusive).to.equal(true);
+        expect(outcome.reason).to.equal('provider_paused');
+    });
+
+    it('a single proposal still resolves while paused (returns no billed call)', async function () {
+        const llm = _reloadProvider();
+        process.env.LLM_PROVIDER_ENABLED = 'false';
+        const r = await llm.agree([{ body: Buffer.from('solo', 'utf8'), meta: 'claude-sonnet-4-6' }]);
+        expect(r).to.not.be.null;
+        expect(r.body.toString('utf8')).to.equal('solo');
+    });
+
+    it('governance additional_config.enabled=false also pauses', async function () {
+        const llm = _reloadProvider();
+        llm._setConfig({ additional_config: { enabled: false } });
+        let err;
+        try { await llm.fetch(JSON.stringify({ prompt: 'hi' }), {}); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.paused).to.equal(true);
+    });
+
+    it('_setConfig max_budget_usd feeds _resolveMaxBudgetUsd; 0 clears it', function () {
+        delete process.env.LLM_MAX_BUDGET_USD;
+        const llm = _reloadProvider();
+        llm._setConfig({ additional_config: { max_budget_usd: 1.25 } });
+        expect(llm._resolveMaxBudgetUsd()).to.equal(1.25);
+        llm._setConfig({ additional_config: { max_budget_usd: 0 } });
+        expect(llm._resolveMaxBudgetUsd()).to.equal(undefined);
+    });
+
+    it('LLM_MAX_BUDGET_USD env overrides the governance budget', function () {
+        const llm = _reloadProvider();
+        llm._setConfig({ additional_config: { max_budget_usd: 1.25 } });
+        process.env.LLM_MAX_BUDGET_USD = '0.10';
+        expect(llm._resolveMaxBudgetUsd()).to.equal(0.10);
+    });
 });
 
 // ---- fetch() via anthropic_api transport (nock) ---------------------------
@@ -1139,6 +1260,35 @@ describe('llm provider, fetch via openai_api', function () {
             expect(err.message).to.match(/OpenAI API: rate limited/);
         });
     });
+
+    // #2488: fetch() must enforce options.maxResponseBytes like http_get does, so an
+    // over-cap body fails loudly here instead of being silently dropped by every
+    // peer's PROPOSE/PREPARE gate (unattributable quorum loss).
+    it('rejects a response exceeding options.maxResponseBytes', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            const big = 'x'.repeat(200);
+            nock('https://api.openai.com')
+                .post('/v1/chat/completions')
+                .reply(200, { choices: [{ message: { content: big } }] });
+            let err;
+            try { await llm.fetch(JSON.stringify({ prompt: 'q' }), { pinnedModel: 'gpt-5-mini', maxResponseBytes: 64 }); }
+            catch (e) { err = e; }
+            expect(err).to.exist;
+            expect(err.message).to.match(/exceeds maxResponseBytes/);
+        });
+    });
+
+    it('serves a response at/under maxResponseBytes normally', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            nock('https://api.openai.com')
+                .post('/v1/chat/completions')
+                .reply(200, { choices: [{ message: { content: 'world' } }] });
+            const res = await llm.fetch(JSON.stringify({ prompt: 'q' }), { pinnedModel: 'gpt-5-mini', maxResponseBytes: 64 });
+            expect(res.body.toString('utf8')).to.equal('world');
+        });
+    });
 });
 
 describe('llm provider, requester fallback policy', function () {
@@ -1242,6 +1392,126 @@ describe('llm provider, judge fallback chain', function () {
             // No openai mock: reaching for gpt-5-mini would throw a nock error.
             const winner = await llm.agree(PROPOSALS, { pinnedJudgeModel: 'claude-haiku-4-5' });
             expect(winner).to.equal(null);
+        });
+    });
+
+    it('skips an early o-series pinned judge (cannot carry a system role) and falls back to a capable model', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            llm._setConfig({ additional_config: { judge_fallback_models: ['gpt-5-mini'] } });
+            nock('https://api.openai.com')
+                .post('/v1/chat/completions', (body) => body.model === 'gpt-5-mini')
+                .reply(200, { choices: [{ message: { content: '{"equivalent": true, "canonical_index": 1}' } }] });
+            // o1-mini cannot carry the trusted judge framing in a system/developer
+            // turn; it must be filtered out of the chain rather than silently
+            // collapsing the SECURITY framing into the user turn.
+            const winner = await llm.agree(PROPOSALS, { pinnedJudgeModel: 'o1-mini' });
+            expect(winner).to.exist;
+            expect(winner.body.toString('utf8')).to.equal('answer A');
+        });
+    });
+
+    it('marks options.outcome as inconclusive (not a real verdict) when the whole judge chain is unreachable', async function () {
+        await _withEnv({}, async () => {
+            const llm = _reloadProvider();
+            llm._setConfig({ additional_config: { judge_fallback_models: ['gpt-5-mini'] } });
+            const outcome = {};
+            const winner = await llm.agree(PROPOSALS, { pinnedJudgeModel: 'claude-haiku-4-5', outcome });
+            expect(winner).to.equal(null);
+            expect(outcome.inconclusive).to.equal(true);
+            expect(outcome.reason).to.equal('unreachable');
+        });
+    });
+
+    it('marks options.outcome as inconclusive on a truncated-candidate fail-closed pick', async function () {
+        await _withEnv({ ANTHROPIC_API_KEY: 'sk-test' }, async () => {
+            const llm = _reloadProvider();
+            nock('https://api.anthropic.com')
+                .post('/v1/messages')
+                .reply(200, {
+                    content: [{ type: 'text', text: '{"equivalent": true, "canonical_index": 1}' }],
+                    usage:   { input_tokens: 50, output_tokens: 10 }
+                });
+            const longBody = 'A'.repeat(4096) + 'HIDDEN-TAIL-THE-JUDGE-NEVER-SAW';
+            const proposals = [
+                { body: Buffer.from(longBody, 'utf8'), meta: 'claude-sonnet-4-6' },
+                { body: Buffer.from('A'.repeat(10), 'utf8'), meta: 'claude-sonnet-4-6' }
+            ];
+            const outcome = {};
+            const winner = await llm.agree(proposals, { outcome });
+            expect(winner).to.equal(null);
+            expect(outcome.inconclusive).to.equal(true);
+            expect(outcome.reason).to.equal('truncated_pick');
+        });
+    });
+
+    // #2489: a reasoning-family judge (gpt-5/o-series) bills reasoning against
+    // max_completion_tokens, so the 256 pin starved the verdict. Reasoning judges
+    // now get JUDGE_MAX_TOKENS_REASONING (2048) while chat judges keep 256.
+    it('sends a raised max_completion_tokens for a reasoning-family judge', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            let seenBudget;
+            nock('https://api.openai.com')
+                .post('/v1/chat/completions', (body) => { seenBudget = body.max_completion_tokens; return body.model === 'gpt-5-mini'; })
+                .reply(200, { choices: [{ message: { content: '{"equivalent": true, "canonical_index": 1}' } }] });
+            const winner = await llm.agree(PROPOSALS, { pinnedJudgeModel: 'gpt-5-mini' });
+            expect(winner).to.exist;
+            expect(seenBudget).to.equal(2048);
+        });
+    });
+
+    // #2489: a finish_reason 'length' with empty content is budget exhaustion, a
+    // reached-judge outcome. It must be classified (not returned as an empty
+    // verdict), defer to no_quorum, and NOT advance the chain to a fallback model.
+    it('classifies a truncated (finish_reason length, empty content) judge outcome and does not advance the chain', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            llm._setConfig({ additional_config: { judge_fallback_models: ['gpt-5-nano'] } });
+            // Pinned judge returns a length-truncated empty verdict. No mock for the
+            // fallback gpt-5-nano: if the chain advanced, nock would throw.
+            nock('https://api.openai.com')
+                .post('/v1/chat/completions', (body) => body.model === 'gpt-5-mini')
+                .reply(200, { choices: [{ finish_reason: 'length', message: { content: '' } }] });
+            const outcome = {};
+            const winner = await llm.agree(PROPOSALS, { pinnedJudgeModel: 'gpt-5-mini', outcome });
+            expect(winner).to.equal(null);
+            expect(outcome.inconclusive).to.equal(true);
+            expect(outcome.reason).to.equal('judge_truncation');
+        });
+    });
+
+    // #2746: the judge budget is a single deadline shared across the whole fallback
+    // chain, not a per-attempt allowance. With no budget left, the chain must stop
+    // advancing rather than fire another full-budget attempt (k+1 x timeoutMs).
+    it('stops advancing the judge chain once the shared budget is exhausted', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            llm._setConfig({ additional_config: { judge_fallback_models: ['gpt-5-nano'] } });
+            // A 1ms budget is below the remaining-budget floor by the time the loop
+            // body runs, so NO judge call is dialed (nock scope stays pending).
+            const scope = nock('https://api.openai.com')
+                .post('/v1/chat/completions')
+                .reply(200, { choices: [{ message: { content: '{"equivalent": true, "canonical_index": 1}' } }] });
+            const winner = await llm.agree(PROPOSALS, { pinnedJudgeModel: 'gpt-5-mini', timeoutMs: 1 });
+            expect(winner).to.equal(null);
+            expect(scope.isDone(), 'no judge call should be dialed with an exhausted budget').to.equal(false);
+            nock.cleanAll();
+        });
+    });
+
+    it('does NOT mark options.outcome as inconclusive when the judge genuinely finds the candidates not equivalent', async function () {
+        await _withEnv({ ANTHROPIC_API_KEY: 'sk-test' }, async () => {
+            const llm = _reloadProvider();
+            nock('https://api.anthropic.com')
+                .post('/v1/messages')
+                .reply(200, { content: [{ type: 'text', text: '{"equivalent": false}' }] });
+            const outcome = {};
+            const winner = await llm.agree(PROPOSALS, { outcome });
+            expect(winner).to.equal(null);
+            // A genuine not-equivalent verdict is a real judgment, not an
+            // inconclusive could-not-judge outcome.
+            expect(outcome.inconclusive).to.not.equal(true);
         });
     });
 });

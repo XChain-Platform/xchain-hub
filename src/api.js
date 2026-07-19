@@ -79,6 +79,7 @@ const TELEMETRY_IP_SALT        = process.env.TELEMETRY_IP_SALT || '';
 const TELEMETRY_ADMIN_KEY      = process.env.TELEMETRY_ADMIN_KEY || '';
 
 const coins          = require('./coins');
+const SpendGuard     = require('./lib/spend_guard.js');   // : per-capability effector-spend pause registry
 const ALLOWED_CHAINS = new Set(coins.ALLOWED_COINS);
 
 // Per-network { coin -> consensusHash } of the bundled canonical coin files,
@@ -91,7 +92,7 @@ const WRITE_METHODS  = new Set([
     'updateconfig', 'registervalidator', 'rotatevalidator', 'deregistervalidator', 'syncvalidators',
     'propose', 'proposeslashpenalty', 'vote', 'requestattestation', 'reportreorg', 'initiateswap',
     'pushchaintip', 'pushpriceround', 'pushoracleprice', 'pushpricereorg', 'pushxcallreorg',
-    'pushdexreorg', 'anchorflush'
+    'pushdexreorg', 'anchorflush', 'pauseeffectorspend', 'resumeeffectorspend'
 ]);
 
 //  interim credential scoping: the reorg-retraction rails feed row:deleted
@@ -518,8 +519,14 @@ async function startApi(){
                 return {error: "block_height is required"};
             if(block_time === undefined || block_time === null)
                 return {error: "block_time is required"};
+            let height = parseInt(block_height, 10);
+            if (!Number.isFinite(height) || height < 0)
+                return {error: "invalid block_height"};
+            let time = parseInt(block_time, 10);
+            if (!Number.isFinite(time) || time < 0)
+                return {error: "invalid block_time"};
             try {
-                await hub.db.setChainTip(coin, network, parseInt(block_height), parseInt(block_time));
+                await hub.db.setChainTip(coin, network, height, time);
                 return {status: "success"};
             } catch (err) {
                 return {error: err.message || "error pushing chain tip"};
@@ -809,6 +816,31 @@ async function startApi(){
         async getoraclepublisherstatus(){
             if(!hub.oraclePublisher) return { active: false };
             return { active: true, ...hub.oraclePublisher.getStats() };
+        },
+
+        //  effector-spend control surface. Read: every registered SpendGuard
+        // (one per on-chain effector: oracle-publish, attest, anchor, full-node) with
+        // its pause state, balance floor, and rolling per-window spend ceiling (clamped
+        // at the $2000 review admission ceiling). Read-only, always 200.
+        async geteffectorspendstatus(){
+            return { effectors: SpendGuard.list() };
+        },
+
+        //  per-capability runtime pause (write, auth-gated). Halts a single
+        // effector's on-chain spend immediately, INCLUDING its primary/leader path,
+        // without a restart. `label` is the guard label (e.g. 'OraclePublisher',
+        // 'AttestationPublisher', 'StateAnchorPublisher', 'FullNodeChallengeRound').
+        async pauseeffectorspend({label, reason}){
+            if(!label) return {error: "label is required"};
+            if(!SpendGuard.pauseCapability(label, reason || 'operator pause via RPC'))
+                return {error: "no effector registered with label '" + label + "'"};
+            return {status: "paused", label};
+        },
+        async resumeeffectorspend({label}){
+            if(!label) return {error: "label is required"};
+            if(!SpendGuard.resumeCapability(label))
+                return {error: "no effector registered with label '" + label + "'"};
+            return {status: "resumed", label};
         },
 
         async getfeequote({action, chain}){

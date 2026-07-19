@@ -500,6 +500,79 @@
       }
     },
     {
+      "name": "geteffectorspendstatus",
+      "summary": "Effector-spend policy status: each on-chain effector (oracle-publish, attest, anchor, full-node) with its runtime pause state, balance floor, and rolling per-window spend ceiling clamped at the $2000 review admission ceiling.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "name": "pauseeffectorspend",
+      "summary": "Runtime pause of one effector's on-chain spend by capability label (halts its primary/leader path immediately, no restart).",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "label",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "reason",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object"
+        }
+      },
+      "x-auth": "x-api-key header, when HUB_API_KEY is configured"
+    },
+    {
+      "name": "resumeeffectorspend",
+      "summary": "Resume a paused effector's on-chain spend by capability label.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "label",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object"
+        }
+      },
+      "x-auth": "x-api-key header, when HUB_API_KEY is configured"
+    },
+    {
       "name": "propose",
       "summary": "Submit a governance proposal.",
       "paramStructure": "by-name",

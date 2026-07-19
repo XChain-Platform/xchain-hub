@@ -797,7 +797,9 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         // timeoutMs bounds the judge call to the round's fetch-timeout budget
         // (ATTESTATION_FETCH_TIMEOUT, default 10000ms) so a slow-drip judge
         // vendor cannot overrun the round window.
-        expect(agreeSpy.firstCall.args[1]).to.deep.equal({ pinnedJudgeModel: 'claude-opus-4-7', timeoutMs: 10000 });
+        // expectedN pins the majority denominator to the responsible-set bound
+        // need = min(redundancy=2, responsible.length=3) = 2 (item 2642).
+        expect(agreeSpy.firstCall.args[1]).to.deep.equal({ pinnedJudgeModel: 'claude-opus-4-7', timeoutMs: 10000, expectedN: 2 });
     });
 
     it('a follower converges by adopting + re-signing the leader\'s winning body', async function () {
@@ -1893,5 +1895,100 @@ describe('AttestationConsensus: A-F5 early-buffer bounds (attestation half)', fu
         data.self = data;
         expect(() => c._bufferEarlyMessage('rid-cycle', { type: 'ATTEST_PREPARE', data })).to.not.throw();
         expect(c.earlyMessages.has('rid-cycle')).to.equal(false);
+    });
+});
+
+// ---- byte_equality no_quorum hardening + replay guards (items 2640/2641/2579/2642) ----
+
+describe('AttestationConsensus: byte_equality no_quorum + replay hardening', function () {
+
+    const httpAgree = require('../../src/providers/http_get').agree;
+    const RID   = 'c4'.repeat(16);
+    const BODY  = Buffer.from('replicated-body');
+    const EMPTY = Buffer.alloc(0);
+
+    let me, p1, p2, hub, c;
+    beforeEach(() => {
+        me  = mkIdentity();
+        p1  = mkIdentity();
+        p2  = mkIdentity();
+        hub = createMockHub({ identity: me });
+        // Real http_get.agree so the expectedN denominator is exercised end-to-end.
+        c   = new AttestationConsensus(hub, makeRealProviderRegistry(httpAgree, 'byte_equality'));
+    });
+    afterEach(() => {
+        for (let [, p] of (c ? c.pending : [])) if (p.timer) clearTimeout(p.timer);
+        sinon.restore();
+    });
+
+    // item 2642: the majority denominator is the responsible-set size, not the
+    // surviving ok-proposal count, so a lone unreplicated body cannot win.
+    it('a minority-ok byte_equality round yields no_quorum, not a lone-body winner (2642)', async function () {
+        await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
+        await flush();
+        // Two of three fetches failed; only this hub holds an ok body.
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, EMPTY, '', 'provider_error'));
+        await flush();
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, EMPTY, '', 'provider_error'));
+        await flush();
+        let pending = c.pending.get(RID);
+        // With N pinned to redundancy=3, agree([1 ok]) needs ceil(4/2)=2 and
+        // returns null; the round establishes the deterministic no_quorum row
+        // instead of seating the lone body as winner.
+        expect(pending.winner).to.not.equal(null);
+        expect(pending.status).to.equal('no_quorum');
+        expect(pending.winner.body.length).to.equal(0);
+    });
+
+    // item 2641 / 2579: a hub holding an ok body must not co-sign a lone
+    // no_quorum PREPARE it cannot itself derive; it buffers pending derivation.
+    it('does not co-sign a lone no_quorum PREPARE while holding an ok body (2641/2579)', async function () {
+        await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
+        await flush();
+        let pending = c.pending.get(RID);
+        // A single responsible validator races a signed no_quorum PREPARE before
+        // this hub has collected `need` proposals.
+        c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, EMPTY, '', 'no_quorum'));
+        await flush();
+        expect(pending.winner).to.equal(null);
+        expect(pending.signatures.has(pub(me))).to.equal(false);
+        // Held for local derivation, not adopted on faith.
+        expect(c.earlyMessages.has(RID)).to.equal(true);
+    });
+
+    // item 2641 liveness: a genuinely split round (no byte majority) still
+    // converges on no_quorum once this hub derives it itself.
+    it('a genuinely split byte_equality round still records no_quorum (2641 liveness)', async function () {
+        await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
+        await flush();
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, Buffer.from('body-b')));
+        await flush();
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, Buffer.from('body-c')));
+        await flush();
+        expect(c.pending.get(RID).status).to.equal('no_quorum');
+    });
+
+    // item 2640: a torn-down rid drops (not parks) late envelopes, and a fresh
+    // round reopening clears the mark so its own early messages buffer again.
+    it('suppresses buffering for a torn-down rid until a fresh round reopens (2640)', async function () {
+        c._markTornDown(RID);
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
+        expect(c.earlyMessages.has(RID)).to.equal(false);  // dropped, not parked
+        await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'http_get', 3));
+        await flush();
+        expect(c.tornDown.has(RID)).to.equal(false);
+    });
+
+    // item 2640: the non-ok finalization teardown (which does NOT enter
+    // this.finalized) clears the early-message buffer and marks the rid torn
+    // down, closing the post-teardown replay window.
+    it('clears earlyMessages and marks tornDown on non-ok finalization (2640)', async function () {
+        let rs = roundState(me, [me], EMPTY, 'http_get', 1);
+        rs.myProposal = { body: EMPTY, meta: '', status: 'provider_error' };
+        await c.propose(RID, rs);
+        await flush();
+        expect(c.finalized.has(RID)).to.equal(false);   // stays retryable
+        expect(c.tornDown.has(RID)).to.equal(true);
+        expect(c.earlyMessages.has(RID)).to.equal(false);
     });
 });

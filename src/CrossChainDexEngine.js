@@ -529,8 +529,35 @@ class CrossChainDexEngine extends EventEmitter {
         // against capability_snapshots in whichever hub DB they mirror, and a
         // follower's DB may be the only one they read. Deterministic from BTC
         // stakes + idempotent (INSERT IGNORE), so all hubs write identical rows.
-        try { await this._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network); }
-        catch(e){ console.warn('CrossChainDex: snapshot persist on finalize failed: ' + (e && e.message)); }
+        //
+        // FAIL CLOSED (item 2385): the match row + committed-ledger fill below depend
+        // on this snapshot existing, so the persist is a precondition, not a best-effort
+        // side-write. A swallowed DB throw, OR a silent zero-row persist (the sentinel
+        // CapabilitySnapshot degrades to [] on an indexer RPC error / 401-403, so the
+        // INSERT loop never runs, never throws, never warns), would leave a finalized,
+        // mirrored, ledger-applied match whose validator_signatures no mirror can verify
+        // against capability_snapshots: exactly the condition the ordering above exists
+        // to prevent. On either failure we skip the insert/commit, drop the in-flight
+        // reservation, and forget the finalized round id so the next poll re-proposes the
+        // match cleanly (same defer-and-retry posture retractMatchesForReorg uses).
+        let persistedRows = 0;
+        try {
+            persistedRows = await this._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network);
+        } catch(e){
+            console.error('CrossChainDex: snapshot persist on finalize FAILED (fail-closed; deferring match ' +
+                          String(row.match_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
+            this._inflight.delete(row.match_id);
+            if(this.consensus && typeof this.consensus.forgetFinalized === 'function') this.consensus.forgetFinalized(row.match_id);
+            return;
+        }
+        if(!persistedRows){
+            console.error('CrossChainDex: snapshot persist wrote ZERO capability rows for snapshot_block ' +
+                          row.snapshot_block + ' (degraded/empty validator set; fail-closed, deferring match ' +
+                          String(row.match_id).substring(0, 16) + '... to a later round)');
+            this._inflight.delete(row.match_id);
+            if(this.consensus && typeof this.consensus.forgetFinalized === 'function') this.consensus.forgetFinalized(row.match_id);
+            return;
+        }
         let inserted = await this._insertMatchRow(row);
         if(inserted) this._applyCommit(row, +1);
         this._inflight.delete(row.match_id);
@@ -716,6 +743,12 @@ class CrossChainDexEngine extends EventEmitter {
     // capability_snapshots (idempotent), and mirror each row to indexers. Writes the
     // source-keyed weight (amount column) + the source discriminator so non-BTC
     // indexers + recovery can dedupe quorum weight by staking address.
+    // Returns the number of capability rows resolved (and persisted) for this
+    // (capability, block). A return of 0 means the snapshot degraded to an empty
+    // set (indexer RPC error / auth mismatch surfaces as a null snapshot, which
+    // _resolveCapabilityValidators normalizes to []), so callers on the money path
+    // can fail closed rather than committing a match whose signatures no mirror can
+    // verify against capability_snapshots.
     async _persistCapabilitySnapshot(capability, block, network){
         let validators = await this._resolveCapabilityValidators(capability, block, network);
         for(let v of validators){
@@ -732,6 +765,7 @@ class CrossChainDexEngine extends EventEmitter {
                 if(r.length) this.broadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
             }
         }
+        return validators.length;
     }
 
     // Mark matches referencing a rolled-back source order as retracted and broadcast a

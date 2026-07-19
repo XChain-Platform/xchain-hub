@@ -949,8 +949,21 @@ class OracleConsensus extends EventEmitter {
             // view) self-validates at deviation 0, letting it inject any (0, PRICE_MAX)
             // price for pairs we did not independently fetch. Excluding it makes such a
             // pair fall through to the historical-snapshot bound below.
+            // Resolve the proposer's verified pubkey and exclude EVERY addr bound to
+            // it, not just envelope.sender: the registry may bind one key to several
+            // addrs (see _addrForPubkey / _leaderSubmissionAddr), so a leader can gossip
+            // its submission from addr A and PROPOSE from addr B. An addr-only exclusion
+            // would leave A's price in the reference and let the pair self-validate at
+            // deviation 0. Mirror _leaderSubmissionAddr's pubkey resolution; keep the
+            // raw-addr guard as a belt-and-suspenders fallback for unknown-pubkey addrs.
             let refSubs = new Map();
-            if (submissions) for (let [addr, sub] of submissions) if (addr !== envelope.sender) refSubs.set(addr, sub);
+            let proposerPk = this._resolveSenderPubkey(envelope.sender);
+            if (submissions) for (let [addr, sub] of submissions) {
+                if (addr === envelope.sender) continue;
+                let pk = (sub && sub.pubkey) ? String(sub.pubkey).toLowerCase() : this._resolveSenderPubkey(addr);
+                if (proposerPk && pk === proposerPk) continue;
+                refSubs.set(addr, sub);
+            }
             let localByPair  = new Map((this._aggregateAll(refSubs) || []).map(a => [a.coinPair, a.price]));
             // Federation-uniform deviation band (shared constant, not per-hub config) so
             // every hub's accept/withhold boundary is identical; deviation is computed in
@@ -1017,14 +1030,18 @@ class OracleConsensus extends EventEmitter {
                         let diff      = bcmath.bcsub(p.price, lastPrice, 18);
                         let absDiff   = bcmath.bclt(diff, 0) ? bcmath.bcmul(diff, '-1', 18) : diff;
                         let deviation = bcmath.bcdiv(absDiff, lastPrice, 18);
-                        // Use a wider band than the live-submission check (5x) to allow for
+                        // Use a wider band than the live-submission check to allow for
                         // genuine price movement between rounds, while still bounding a Byzantine
-                        // leader from injecting values that are orders of magnitude off.
-                        let histThreshold = bcmath.bcmul(String(devThreshold), '5', 18);
+                        // leader from injecting values that are orders of magnitude off. The band
+                        // is ORACLE_MAX_CHANGE_PER_ROUND, the same constant the aggregation clamp
+                        // (_clampToLastFinalized) emits, so a maximally-clamped aggregate always
+                        // passes this gate. Deriving both sides from one constant keeps them from
+                        // drifting apart (constants.js states this as a federation-uniform contract).
+                        let histThreshold = String(ORACLE_MAX_CHANGE_PER_ROUND);
                         if (bcmath.bcgt(deviation, histThreshold)) {
                             let pct = bcmath.bcformat(bcmath.bcmul(deviation, '100', 4), 4);
                             reject(p.coinPair, 'proposed ' + p.price + ' deviates ' + pct +
-                                '% from last finalized ' + lastPrice + ' (no local submission, threshold ' + (devThreshold * 500) + '%)',
+                                '% from last finalized ' + lastPrice + ' (no local submission, threshold ' + (ORACLE_MAX_CHANGE_PER_ROUND * 100) + '%)',
                                 { reason: 'historical-deviation', proposed: String(p.price), lastFinalized: String(lastPrice), deviation: bcmath.bcformat(deviation, 18) });
                             return;
                         }

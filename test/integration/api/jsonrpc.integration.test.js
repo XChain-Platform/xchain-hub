@@ -203,6 +203,37 @@ describe('Integration: JSON-RPC API (SC-8.x)', function () {
         });
     });
 
+    // pushchaintip: input validation on network-supplied block_height/block_time
+    describe('pushchaintip: block_height/block_time validation', function () {
+        it('rejects a non-numeric block_height without writing a poisoned chain_tips row', async function () {
+            let res = await callRpc('pushchaintip', {
+                coin: 'BTC', network: 'mainnet', block_height: 'abc', block_time: Date.now()
+            });
+            expect(res.result.error).to.include('invalid block_height');
+        });
+
+        it('rejects a non-numeric block_time', async function () {
+            let res = await callRpc('pushchaintip', {
+                coin: 'BTC', network: 'mainnet', block_height: 800000, block_time: 'not-a-time'
+            });
+            expect(res.result.error).to.include('invalid block_time');
+        });
+
+        it('rejects a negative block_height', async function () {
+            let res = await callRpc('pushchaintip', {
+                coin: 'BTC', network: 'mainnet', block_height: -5, block_time: Date.now()
+            });
+            expect(res.result.error).to.include('invalid block_height');
+        });
+
+        it('accepts a valid numeric block_height/block_time', async function () {
+            let res = await callRpc('pushchaintip', {
+                coin: 'BTC', network: 'mainnet', block_height: 800000, block_time: Date.now()
+            });
+            expect(res.result.status).to.equal('success');
+        });
+    });
+
     // SC-8.2: Config round-trip via API
     describe('SC-8.2: Config via API', function () {
         it('updates and retrieves config', async function () {

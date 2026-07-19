@@ -50,6 +50,8 @@ const crypto            = require('crypto');
 const axios             = require('axios');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const EncoderClient      = require('./EncoderClient.js');
+const SpendGuard         = require('./lib/spend_guard.js');
+const { isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
 const eq                = require('./equivocation_header.js');
 
 const XNODE_ANSWER   = 'XNODE_ANSWER';
@@ -102,6 +104,15 @@ class FullNodeChallengeRound {
         this.broadcastFn  = null;   // fn(wirePayload) -> Promise<{txid}>
         this.walletSignFn = null;   // fn(psbtHex) -> Promise<txHex>
         this.btcAddress   = process.env.BTC_ADDRESS || cfg.BTC_ADDRESS || '';
+
+        //  - shared SpendGuard for the on-chain NODEPROOF verdict spend. Adds a
+        // per-window spend ceiling (count + $2000-clamped USD budget, default-ON) and a
+        // per-capability runtime pause so an operator can halt verdict BTC spend at
+        // runtime; gated at _maybeFinalize before the leader broadcasts. Config reads
+        // env first (FULLNODE_* keys), then top-level p2pConfig, matching the sibling
+        // publishers (the nested cfg.FULLNODE block stays the source for FullNode's own
+        // knobs; the guard's knobs are the FULLNODE_*-prefixed ones).
+        this.spendGuard = new SpendGuard('FULLNODE', cfg, 'FullNodeChallengeRound');
 
         this.rounds   = new Map();  // epoch -> round state
         this._timer   = null;
@@ -216,6 +227,13 @@ class FullNodeChallengeRound {
             return;
         }
         let claimants = await this._claimantSet(epoch);
+        // Unresolved claimant set (capability-snapshot failure): ABSTAIN for this
+        // epoch alongside the eligible-set gate above, rather than lock an empty
+        // (full_node, epoch) universe that diverges from hubs whose snapshot resolved.
+        if(claimants === null){
+            console.warn('FullNodeChallengeRound: epoch=' + epoch + ' skipped (claimant set unresolved; abstaining rather than locking an empty full_node set)');
+            return;
+        }
         let myPubkey = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
 
         let state = {
@@ -408,6 +426,15 @@ class FullNodeChallengeRound {
         let quorum = Math.floor((2 * state.eligible.size) / 3) + 1;
         if(state.sigs.size < quorum) return;
 
+        //  - shared SpendGuard gate on the PRIMARY (leader) verdict spend path.
+        // A runtime pause (per-capability) or an exhausted per-window spend ceiling
+        // DEFERS finalization (return without claiming the round) so a later tick
+        // retries once resumed/budget frees. Checked BEFORE the finalize lock so a
+        // paused publisher never claims-then-reverts, and never spends on the leader
+        // path (the enabled kill-switch only gated start(), not this send).
+        let g = this.spendGuard.check();
+        if(!g.ok){ console.warn('FullNodeChallengeRound: ' + g.reason + ' (epoch ' + epoch + '); deferring verdict broadcast'); return; }
+
         // Optimistic finalize lock: _maybeFinalize runs on EVERY incoming XNODE_SIGN
         // (and from _closeCollection), so without claiming the round BEFORE the async
         // broadcast, two sigs that cross quorum within the broadcast's await window both
@@ -418,13 +445,26 @@ class FullNodeChallengeRound {
         let wire = this._buildVerdictWire(state);
         try {
             let res = await this._broadcastVerdict(wire);
+            this.spendGuard.record();   // : a fresh verdict tx spent a BTC fee
             state.txid = res && res.txid ? res.txid : null;
             this.peerManager && this.peerManager.broadcast(XNODE_DONE, { epoch, challengeId: state.challengeId, txid: state.txid });
             console.log('FullNodeChallengeRound: verdict broadcast epoch=' + epoch + ' pass=' + state.passList.length +
                         ' sigs=' + state.sigs.size + '/' + quorum + (state.txid ? ' txid=' + state.txid : ''));
         } catch(e){
-            state.finalized = false;   // broadcast failed; unlock so a later sig/tick retries
-            console.warn('FullNodeChallengeRound: verdict broadcast failed (epoch ' + epoch + '):', e && e.message ? e.message : e);
+            //  - never blind-retry an AMBIGUOUS send. A timeout / reset / 5xx
+            // after the request left the wire may mean the BTC node accepted the
+            // verdict tx; reverting the finalize lock would let a later tick
+            // re-broadcast and double-spend the fee (same-challenge NODEPROOF replay).
+            // Keep the round claimed (no retry); an operator verifies on-chain, and a
+            // fresh epoch re-challenges if it truly never landed. Only a DEFINITIVE
+            // pre-send/reject failure unlocks for retry.
+            if(isAmbiguousSendError(e)){
+                console.warn('FullNodeChallengeRound: AMBIGUOUS verdict send (epoch ' + epoch +
+                             '); NOT re-broadcasting to avoid a double spend:', e && e.message ? e.message : e);
+            } else {
+                state.finalized = false;   // definitive failure; unlock so a later sig/tick retries
+                console.warn('FullNodeChallengeRound: verdict broadcast failed (epoch ' + epoch + '):', e && e.message ? e.message : e);
+            }
         }
     }
 
@@ -550,21 +590,39 @@ class FullNodeChallengeRound {
 
     // Claimant universe = validators holding the full_node capability at the
     // epoch block (the block-boundary snapshot every hub locks identically).
+    //
+    // CONSENSUS-CRITICAL: mirrors _eligibleVerifiers. capabilitySnapshot.getSnapshot
+    // signals every UNRESOLVED state (transport error, 401/403, malformed shape,
+    // block-echo mismatch, unconfigured MIN_STAKE against a live registry) by
+    // returning null, never by throwing, so the catch below is a backstop, not the
+    // primary path. On an unresolved snapshot this returns null so the caller
+    // ABSTAINS (skips the epoch) rather than degrading to an EMPTY claimant set:
+    // an empty set would let two honest hubs lock different (full_node, epoch)
+    // universes (leader broadcasts no XNODE_SIGN_REQ / verifier rejects the
+    // legitimate list as outsiders), the exact divergence this lock exists to
+    // prevent. A legitimately empty snapshot is distinguished by a real validators
+    // array (_coerceValidators guarantees one on the SUCCESS branch) and still
+    // yields a real, empty Set. This fails CLOSED, trading liveness on a prolonged
+    // snapshot outage for cross-hub safety.
     async _claimantSet(epoch){
         let set = new Set();
         try {
             let snap = await this.capabilitySnapshot.getSnapshot('full_node', epoch);
-            let list = (snap && (snap.validators || snap)) || [];
-            for(let v of list){
+            if(!snap || !Array.isArray(snap.validators)){
+                console.warn('FullNodeChallengeRound: _claimantSet: capability snapshot unresolved for full_node at epoch=' + epoch + '; ABSTAINING (skip epoch), NOT degrading to an empty claimant set');
+                return null;
+            }
+            for(let v of snap.validators){
                 let pk = String(v.pubkey || v).toLowerCase();
                 if(/^[0-9a-f]{64}$/.test(pk)) set.add(pk);
             }
         } catch(err){
             let status = err && err.response && err.response.status;
             if (status === 401)
-                console.warn('FullNodeChallengeRound: _claimantSet: 401 Unauthorized from capability snapshot (misconfigured API key?); claimant set empty');
+                console.warn('FullNodeChallengeRound: _claimantSet: 401 Unauthorized from capability snapshot (misconfigured API key?); ABSTAINING (skip epoch)');
             else
-                console.warn('FullNodeChallengeRound: _claimantSet: snapshot error (' + (err && err.message) + '); claimant set empty');
+                console.warn('FullNodeChallengeRound: _claimantSet: snapshot error (' + (err && err.message) + '); ABSTAINING (skip epoch)');
+            return null;
         }
         return set;
     }

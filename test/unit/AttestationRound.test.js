@@ -734,4 +734,63 @@ describe('AttestationRound', function () {
             expect(ATTEST_PROPOSE).to.equal('ATTEST_PROPOSE');
         });
     });
+
+    // ── retry-window floor + live-round fetch gate (item 2358) ────────────────
+
+    describe('retry window vs consensus round timeout (2358)', function () {
+        it('floors retryAfterMs above the consensus round timeout', function () {
+            // pollMs 5s -> 5*5=25s configured window, floored to 120s+5s.
+            let hub = makeHub({ p2pConfig: { ATTESTATION_POLL_MS: '5000' } });
+            let ar  = new AttestationRound(hub, makeProviderRegistry());
+            expect(ar.retryAfterMs).to.equal(125000);
+        });
+
+        it('keeps an operator retry window that already clears the floor', function () {
+            let hub = makeHub({ p2pConfig: {
+                ATTESTATION_RETRY_AFTER_MS: '500000',
+                ATTESTATION_ROUND_TIMEOUT_MS: '120000'
+            } });
+            let ar  = new AttestationRound(hub, makeProviderRegistry());
+            expect(ar.retryAfterMs).to.equal(500000);
+        });
+
+        it('skips the paid fetch when a consensus round for the rid is already active', async function () {
+            let myPubkey = 'aa'.repeat(32);
+            let capSS = { getSnapshot: sinon.stub().resolves({ validators: [{ pubkey: myPubkey }] }) };
+            let hub   = makeHub({ capabilitySnapshot: capSS });
+            hub.getIdentity = () => makeIdentity(myPubkey);
+            let fetchStub = sinon.stub().resolves({ body: Buffer.from('ok'), meta: '200' });
+            let reg = makeProviderRegistry({
+                getModule: sinon.stub().returns({ fetch: fetchStub }),
+                getDef:    sinon.stub().returns({ max_response_bytes: 32768 })
+            });
+            let ar = new AttestationRound(hub, reg);
+            sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: myPubkey, hash: '00' }]);
+            ar.setConsensus({ isRoundActive: sinon.stub().returns(true) });
+            await ar._startRound({
+                request_id: 'rid0001', provider_id: 'http_get', redundancy: 1,
+                block_index: 100, action_index: 1, payload: 'https://example.com/'
+            });
+            expect(fetchStub.called).to.be.false;
+        });
+    });
+
+    // ── poll self-overlap guard (item 2591) ───────────────────────────────────
+
+    describe('_pollPending in-flight guard (2591)', function () {
+        it('does not stack a second concurrent poll while one is in flight', async function () {
+            let resolvePost;
+            axiosStub.post.returns(new Promise(r => { resolvePost = r; }));
+            let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
+            let ar  = new AttestationRound(hub, makeProviderRegistry());
+            let first  = ar._pollPending();     // enters, sets _pollRunning, awaits axios
+            let second = ar._pollPending();     // must short-circuit on _pollRunning
+            // Let the first poll advance past its awaited URL resolve to axios.post.
+            await new Promise(r => setImmediate(r));
+            expect(axiosStub.post.calledOnce).to.be.true;
+            resolvePost({ data: { result: null } });
+            await Promise.all([first, second]);
+            expect(ar._pollRunning).to.be.false; // flag cleared in finally
+        });
+    });
 });

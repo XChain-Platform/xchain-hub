@@ -44,6 +44,8 @@
 const fs            = require('fs');
 const path          = require('path');
 const EncoderClient = require('./EncoderClient.js');
+const SpendGuard    = require('./lib/spend_guard.js');
+const { AtMostOnce, isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
 
 // PRICE v0 wire ceiling. Must equal MAX_DATA_BYTES in xchain-encoder/src/validator.js
 // (mirrors ATTEST_WIRE_MAX_BYTES in AttestationPublisher.js): an oversized wire is
@@ -67,6 +69,13 @@ class OraclePublisher {
         // Lifetime counter of rounds moved to the dead-letter file. Makes a
         // give-up event countable instead of only a console.error.
         this.abandonedCount     = 0;
+        // Lifetime count of finalized rounds dropped pre-enqueue because their encoded
+        // PRICE v0 wire exceeded PRICE_WIRE_MAX_BYTES. Kept separate from abandonedCount
+        // so operators can tell an oversized drop apart from an attempts-exhausted abandon.
+        this.oversizedDrops     = 0;
+        // Transition-only guard so a persistent capability-snapshot resolution failure
+        // (which darks the publisher) is logged once per dark spell, not every round.
+        this._snapshotDark      = false;
         // Lifetime published count + last-published markers + last-observed balance,
         // surfaced via getStats() so an operator RPC can see the publish rail's
         // health (a stalled rail is otherwise invisible: every price_snapshots row
@@ -82,12 +91,29 @@ class OraclePublisher {
         // DOGE twice for the same round. Consulted before every broadcast so a failed
         // rewrite can never turn into a duplicate on-chain PRICE. Cleared once the
         // durable queue is confirmed rewritten (no published round can still be on it).
-        this._publishedRounds   = new Set();
+        this._publishedRounds   = new AtMostOnce();
         this.lastObservedBalance = null;
         this.dogeAddress        = process.env.DOGE_ADDRESS || cfg.DOGE_ADDRESS || '';
         this.dogePubkeyHex      = process.env.DOGE_PUBKEY_HEX || cfg.DOGE_PUBKEY_HEX || '';
         this.lowBalanceThreshold = parseFloat(process.env.DOGE_LOW_BALANCE_THRESHOLD || cfg.DOGE_LOW_BALANCE_THRESHOLD || '10'); // DOGE
         this.maxAttempts        = parseInt(process.env.PUBLISHER_MAX_ATTEMPTS || cfg.PUBLISHER_MAX_ATTEMPTS || '5');
+
+        // item 2677 - operator kill switch. Mirrors StateAnchorPublisher's
+        // ANCHOR_ENABLED gate: a first-class lever to halt outbound DOGE spend
+        // during an incident (bad price feed, runaway fees, compromised signer)
+        // without tearing down the broadcast pipeline config. Default: enabled.
+        this.enabled = String(process.env.ORACLE_PUBLISH_ENABLED || cfg.ORACLE_PUBLISH_ENABLED || 'true') !== 'false';
+
+        //  - shared SpendGuard (supersedes the old per-publisher SpendCeiling).
+        // Composes the per-window spend ceiling (count + a $2000-clamped USD-cents
+        // budget, default-ON), the wallet balance floor, and a per-capability runtime
+        // pause. Folding the pause into allow() is what lets an operator halt this
+        // publisher's PRIMARY (leader) DOGE spend at runtime, not just its sweep.
+        this.spendGuard = new SpendGuard('ORACLE_PUBLISH', cfg, 'OraclePublisher');
+        // Keep the guard's balance floor in step with the publisher's existing
+        // DOGE_LOW_BALANCE_THRESHOLD so guard stats read the same floor the
+        // pre-loop balance gate enforces.
+        this.spendGuard.minBalance = this.lowBalanceThreshold;
 
         // Per-round state
         this.failoverWindowBlocks = 1; // 1 BTC block before failover triggers
@@ -162,9 +188,25 @@ class OraclePublisher {
             throw new Error('wallet sign hook returned invalid tx hex');
         }
 
-        // 4. Broadcast the signed transaction
-        let broadcastResult = await this.encoder.broadcastTx(txHex);
-        return broadcastResult || { txid: null };
+        // 4. Broadcast the signed transaction.
+        // Everything above is pre-send (build/sign; no money has moved). Only
+        // broadcast_tx has a side effect, so only ITS failures are classified for
+        // ambiguity (item 2675): a timeout / mid-flight reset / 5xx AFTER the
+        // request left the wire may mean the DOGE node actually accepted the tx,
+        // so a blind retry would spend a second fee and double-anchor the round.
+        try {
+            let broadcastResult = await this.encoder.broadcastTx(txHex);
+            return broadcastResult || { txid: null };
+        } catch (e) {
+            if (this._isAmbiguousSendError(e)) e.oracleAmbiguousSend = true;
+            throw e;
+        }
+    }
+
+    // Classify a broadcast failure (: delegates to the shared classifier so
+    // all four hub effectors answer "could this send have landed?" identically).
+    _isAmbiguousSendError(e){
+        return isAmbiguousSendError(e);
     }
 
     // Initialize the publisher: ensure queue directory exists, load any pending rounds
@@ -198,6 +240,13 @@ class OraclePublisher {
 
     // Called when a round is finalized. Enqueue if this node is the leader.
     async onRoundFinalized(event) {
+        // item 2677 kill switch: when disabled, do not enqueue or broadcast.
+        // Skip rather than queue-for-later so a disabled publisher does not silently
+        // build a backlog that floods on-chain the moment it is re-enabled.
+        if (!this.enabled) {
+            console.log('OraclePublisher: disabled (ORACLE_PUBLISH_ENABLED=false); skipping round ' + event.round);
+            return;
+        }
         let round = event.round;
         let myRank = await this._getMyRank(event.btcBlockHeight);
         if (myRank === null) return; // not an active oracle_publish validator (capability not active)
@@ -228,6 +277,19 @@ class OraclePublisher {
             console.error('OraclePublisher: PRICE v0 wire for round ' + round +
                 ' is ' + wireBytes + ' bytes, exceeds encoder limit of ' + PRICE_WIRE_MAX_BYTES +
                 '; dropping broadcast. Too many pairs or signatures for a single round.');
+            this.oversizedDrops++;
+            // Route the dropped round through the append-only dead-letter sink so it
+            // stays countable (getStats) and replayable like every other abandoned
+            // round, instead of vanishing with only a console.error. NOT enqueued: the
+            // drop must stay pre-enqueue so the failover sweep never retries an
+            // unencodable payload forever.
+            this._deadLetter({
+                round:          round,
+                btcBlockHeight: event.btcBlockHeight,
+                btcBlockTime:   event.btcBlockTime,
+                prices:         event.prices,
+                sigs:           sigs
+            }, 'PRICE v0 wire ' + wireBytes + ' bytes exceeds encoder limit of ' + PRICE_WIRE_MAX_BYTES);
             return;
         }
 
@@ -252,6 +314,18 @@ class OraclePublisher {
         return idx >= 0 ? idx : null;
     }
 
+    // Transition-only warn for the capability-snapshot fail-closed paths. Called
+    // once per finalized round, so a persistent fault would otherwise log every
+    // round; emit only on the transition INTO dark and reset on the next successful
+    // resolution. The fail-closed [] return itself is never changed by this.
+    _logSnapshotDark(detail, err) {
+        if (this._snapshotDark) return;
+        this._snapshotDark = true;
+        let suffix = err ? (': ' + (err && err.message ? err.message : err)) : '';
+        console.warn('OraclePublisher: oracle_publish capability snapshot ' + detail +
+            '; failing closed, this hub will not publish until it resolves' + suffix);
+    }
+
     // Get the count of active oracle_publish validators
     async _getActiveOraclePublishCount(blockIndex) {
         let pubkeys = await this._getActiveOraclePublishPubkeys(blockIndex);
@@ -272,11 +346,24 @@ class OraclePublisher {
             try {
                 let snapshot = await this.hub.capabilitySnapshot.getSnapshot('oracle_publish', blockIndex);
                 if (snapshot && Array.isArray(snapshot.validators)) {
+                    this._snapshotDark = false;
                     return snapshot.validators
                         .map(v => String(v.pubkey).toLowerCase())
                         .sort();
                 }
-            } catch (err) { /* fail closed: fall through to [] */ }
+                // Snapshot resolved to null. This is the dominant dark path:
+                // CapabilitySnapshot.getSnapshot returns null (does NOT throw) when the
+                // indexer is unreachable, the result is an error, or the echoed block
+                // mismatches, so it never reaches the catch below. Left silent, the
+                // publisher stops publishing with no trace. Log the transition so a dark
+                // publisher is distinguishable in the hub log from a hub that legitimately
+                // is not an oracle_publish validator. The [] return is unchanged.
+                this._logSnapshotDark('resolved to null at block ' + blockIndex, null);
+            } catch (err) {
+                // Fail closed: fall through to []. Log the transition (once per dark
+                // spell) so a persistent throw leaves a trace instead of failing silent.
+                this._logSnapshotDark('threw at block ' + blockIndex, err);
+            }
         }
 
         // Fail closed on a pinned-block miss. The old live-registry fallback
@@ -407,11 +494,40 @@ class OraclePublisher {
 
     // Process pending rounds in the queue: build payload, check balance, broadcast
     async _processQueue() {
+        // item 2677 kill switch: suppress the replay/sweep too, not just the live
+        // path, so a disabled publisher spends nothing. Entries stay on the durable
+        // queue untouched and resume only when re-enabled and re-swept.
+        if (!this.enabled) {
+            console.log('OraclePublisher: disabled (ORACLE_PUBLISH_ENABLED=false); skipping queue processing');
+            return;
+        }
+
         let entries = this._readQueue();
         if (entries.length === 0) return;
 
-        // Check DOGE balance before attempting any publish
+        // item 2676 - hard balance floor gate (was: balance read then only WARNed,
+        // publishing continued regardless). A null/unreadable balance is fail-closed:
+        // skip the whole publish pass rather than spend blind. Below the floor, skip
+        // too; entries stay queued and retry once the wallet is topped up. This bounds
+        // total drain to the floor no matter which failure mode is driving the spend.
         let balance = await this._checkBalance();
+        // Only enforce when a balance source is actually wired (a getBalanceFn hook,
+        // or an encoder + address to sum UTXOs). With no source, balance is always
+        // null and there is nothing to enforce, so preserve prior behavior rather
+        // than disable publishing outright.
+        let hasBalanceSource = !!(this.getBalanceFn || (this.encoder && this.dogeAddress));
+        if (hasBalanceSource) {
+            if (balance === null) {
+                console.warn('OraclePublisher: DOGE balance unreadable; skipping publish this pass (fail-closed), ' +
+                    entries.length + ' round(s) remain queued');
+                return;
+            }
+            if (balance < this.lowBalanceThreshold) {
+                console.warn('OraclePublisher: DOGE balance ' + balance.toFixed(4) + ' below floor ' +
+                    this.lowBalanceThreshold + '; skipping publish (fail-closed), ' + entries.length + ' round(s) remain queued');
+                return;
+            }
+        }
 
         let remaining = [];
         for (let entry of entries) {
@@ -441,6 +557,16 @@ class OraclePublisher {
             let broadcaster = this.broadcastFn || ((p) => this._defaultBroadcast(p));
             let canBroadcast = this.broadcastFn || (this.encoder && this.walletSignFn);
 
+            // item 2676 - per-window spend ceiling. A tripped ceiling is not a
+            // failure: keep the round queued (no attempts++) and skip the broadcast
+            // so it publishes in a later window. Checked before the send so no fee
+            // is spent once the budget is exhausted.
+            if (!this.spendGuard.allow()) {
+                console.warn(this.spendGuard.noteBlocked() + ' (round ' + entry.round + ')');
+                remaining.push(entry);
+                continue;
+            }
+
             try {
                 if (!canBroadcast) {
                     console.warn('OraclePublisher: no broadcast pipeline configured (set DOGE_ENCODER_URL + setWalletSignHook, or setBroadcastHook), round ' + entry.round + ' will remain queued');
@@ -452,13 +578,29 @@ class OraclePublisher {
                 // Record the round as published BEFORE the queue rewrite. This is the
                 // at-most-once anchor: even if the rewrite below fails and leaves this
                 // round on the durable queue, the next tick's guard will skip it.
-                this._publishedRounds.add(entry.round);
+                this._publishedRounds.mark(entry.round);
+                this.spendGuard.record();   // count the fee against the window budget
                 console.log('OraclePublisher: published round ' + entry.round + ' (txid: ' + (result && result.txid) + ')');
                 this.publishedCount++;
                 this.lastPublishedRound = entry.round;
                 this.lastPublishedTxid  = (result && result.txid) || null;
                 // Successfully published. Drop from queue (do not add to remaining).
             } catch (err) {
+                // item 2675 - NEVER blind-retry an ambiguous send. A timeout / reset /
+                // 5xx after the request left the wire may mean the DOGE node accepted
+                // the tx; re-broadcasting would spend DOGE twice and double-anchor the
+                // round. OraclePublisher has no on-chain existence check to adopt the
+                // possibly-landed tx, so the fail-safe action is to stop auto-retrying:
+                // move the round to the durable, recoverable dead-letter file (counted,
+                // never silently dropped) for manual inspection/replay. Only definitive
+                // pre-send errors keep the existing attempts-and-requeue retry.
+                if (this._isAmbiguousSendError(err) || (err && err.oracleAmbiguousSend)) {
+                    console.error('OraclePublisher: AMBIGUOUS send failure for round ' + entry.round +
+                        ' (tx may have reached the DOGE node); NOT re-broadcasting to avoid a double spend. ' +
+                        'Moving to dead-letter file ' + this.deadLetterPath + ' for manual verify/replay: ', err);
+                    this._deadLetter(entry, 'ambiguous send failure (possible double-spend risk); verify on-chain before replay');
+                    continue;   // do not push to remaining; no auto re-broadcast
+                }
                 entry.attempts++;
                 console.error('OraclePublisher: publish failed for round ' + entry.round + ' (attempt ' + entry.attempts + '/' + this.maxAttempts + '): ', err);
                 if (balance !== null && balance < 0.01) {
@@ -498,10 +640,13 @@ class OraclePublisher {
             queueDepth:          queueDepth,
             published:           this.publishedCount,
             abandoned:           this.abandonedCount,
+            oversizedDrops:      this.oversizedDrops,
             lastPublishedRound:  this.lastPublishedRound,
             lastPublishedTxid:   this.lastPublishedTxid,
             lastObservedBalance: this.lastObservedBalance,
-            deadLetterPath:      this.deadLetterPath
+            deadLetterPath:      this.deadLetterPath,
+            enabled:             this.enabled,
+            spendGuard:          this.spendGuard.stats()
         };
     }
 

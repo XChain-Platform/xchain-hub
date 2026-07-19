@@ -281,6 +281,45 @@ describe('FullNodeChallengeRound', function () {
             expect([...set].sort()).to.deep.equal([P1, P2].sort());
             expect(hub.capabilitySnapshot.getSnapshot.calledWith('full_node', 288)).to.equal(true);
         });
+        it('_claimantSet returns null (fail closed) when the snapshot is unresolved (null)', async function () {
+            // #2646: getSnapshot signals every failure mode by returning null, so an
+            // unresolved snapshot must abstain, not degrade to an empty claimant set.
+            const hub = makeHub();
+            hub.capabilitySnapshot.getSnapshot.resolves(null);
+            const eng = new FullNodeChallengeRound(hub);
+            expect(await eng._claimantSet(288)).to.equal(null);
+        });
+        it('_claimantSet returns null when the snapshot shape is malformed (validators not an array)', async function () {
+            const hub = makeHub();
+            hub.capabilitySnapshot.getSnapshot.resolves({ validators: 'nope' });
+            const eng = new FullNodeChallengeRound(hub);
+            expect(await eng._claimantSet(288)).to.equal(null);
+        });
+        it('_claimantSet returns a real empty Set for a legitimately empty snapshot', async function () {
+            // A genuinely empty validators array is distinct from unresolved and
+            // must NOT abstain (it yields a real, empty claimant set).
+            const hub = makeHub();
+            hub.capabilitySnapshot.getSnapshot.resolves({ validators: [] });
+            const eng = new FullNodeChallengeRound(hub);
+            const set = await eng._claimantSet(288);
+            expect(set).to.be.instanceOf(Set);
+            expect(set.size).to.equal(0);
+        });
+        it('_runEpoch abstains (no round, no verdict) when the claimant snapshot is unresolved', async function () {
+            // #2646: eligible set resolves, but the full_node capability snapshot is
+            // null. The hub must abstain rather than lock an empty claimant set that
+            // diverges from hubs whose snapshot resolved.
+            wireRpc({ ledgerHash: SEED, tip: 300, verifiers: [], block: { tx: [{ vout: [{ scriptPubKey: { hex: 'deadbeef' } }] }] } });
+            const hub = makeHub();
+            hub.capabilitySnapshot.getSnapshot.resolves(null);
+            const eng = new FullNodeChallengeRound(hub);
+            eng.broadcastFn = sinon.stub().resolves({ txid: 'TX' });
+            await eng._runEpoch(288, 300);
+            expect(eng.rounds.has(288), 'no round state created on claimant abstain').to.equal(false);
+            expect(eng.broadcastFn.called, 'no verdict broadcast on claimant abstain').to.equal(false);
+            const req = hub._pm.broadcast.getCalls().find(c => c.args[0] === 'XNODE_SIGN_REQ');
+            expect(req, 'no sign request on claimant abstain').to.not.exist;
+        });
     });
 
     // ── round flow: answer → sign-req → sign → finalize ────────────────────────

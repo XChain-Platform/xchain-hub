@@ -71,6 +71,18 @@ class CapabilitySnapshot {
         this._minStakeWarnAt = {};
     }
 
+    // Network qualifier folded into every cache key. HUB_NETWORK is read once at
+    // process start, validated, and frozen onto the hub (XChainHub.js), so it is
+    // invariant across every entry today and this prefix changes nothing for a
+    // single-network process. It is bound explicitly so the network-safety of the
+    // key is stated by construction rather than inferred: a future change that lets
+    // one CapabilitySnapshot instance straddle networks (multi-network reader, a
+    // test harness swapping hub.network, reuse across two indexer targets) can no
+    // longer serve a mainnet snapshot for a testnet (capability, blockIndex) query.
+    _netKey() {
+        return (this.hub && this.hub.network) || '';
+    }
+
     // Classify a federation-read failure and return null (the fetch helpers'
     // "indexer unavailable" sentinel). A 401/403 is NOT "indexer down": it means
     // the hub's x-api-key (BTC_INDEXER_API_KEY) does not match the indexer's
@@ -157,7 +169,7 @@ class CapabilitySnapshot {
             this._warnMinStakeMissing(capability);
             return null;
         }
-        let key = capability + ':' + blockIndex + ':' + (minStake === null ? '' : minStake);
+        let key = this._netKey() + ':' + capability + ':' + blockIndex + ':' + (minStake === null ? '' : minStake);
         let cached = this.cache.get(key);
         let now = Date.now();
         if (cached && cached.expiresAt > now) return cached;
@@ -216,7 +228,7 @@ class CapabilitySnapshot {
             this._warnMinStakeMissing(capability);
             return null;
         }
-        let key = 'w:' + capability + ':' + blockIndex + ':' + (minStake === null ? '' : minStake);
+        let key = 'w:' + this._netKey() + ':' + capability + ':' + blockIndex + ':' + (minStake === null ? '' : minStake);
         let cached = this.cache.get(key);
         let now = Date.now();
         if (cached && cached.expiresAt > now) return cached;
@@ -263,7 +275,7 @@ class CapabilitySnapshot {
     async getActiveValidatorSnapshot(blockIndex) {
         blockIndex = this._buriedBlockIndex(blockIndex);
         if (blockIndex === null) return null;
-        let key = '*:' + blockIndex;
+        let key = '*:' + this._netKey() + ':' + blockIndex;
         let cached = this.cache.get(key);
         let now = Date.now();
         if (cached && cached.expiresAt > now) return cached;
@@ -307,7 +319,7 @@ class CapabilitySnapshot {
     async getActiveWeightSnapshot(blockIndex) {
         blockIndex = this._buriedBlockIndex(blockIndex);
         if (blockIndex === null) return null;
-        let key = 'wa:' + blockIndex;
+        let key = 'wa:' + this._netKey() + ':' + blockIndex;
         let cached = this.cache.get(key);
         let now = Date.now();
         if (cached && cached.expiresAt > now) return cached;
@@ -442,16 +454,18 @@ class CapabilitySnapshot {
     }
 
     // Drop every cached snapshot for a capability: both the count-keyed
-    // (capability:...) and the weight-keyed (w:capability:...) entries. Called
-    // when a governance MIN_STAKE change lands so the next consensus read
+    // (net:capability:...) and the weight-keyed (w:net:capability:...) entries.
+    // Called when a governance MIN_STAKE change lands so the next consensus read
     // re-queries the indexer under the new threshold. With min_stake folded into
     // the cache key the stale entries are already unreachable; this reclaims them
-    // immediately instead of waiting for the TTL to prune them. Returns the count
-    // of entries removed. The '*'-keyed whole-federation snapshots carry no
-    // capability filter and are intentionally left untouched.
+    // immediately instead of waiting for the TTL to prune them. The network
+    // qualifier rides in the key ahead of the capability, so the prefixes carry it
+    // too. Returns the count of entries removed. The '*'-keyed whole-federation
+    // snapshots carry no capability filter and are intentionally left untouched.
     flushCapability(capability) {
         if (!capability) return 0;
-        let prefixes = [capability + ':', 'w:' + capability + ':'];
+        let net = this._netKey();
+        let prefixes = [net + ':' + capability + ':', 'w:' + net + ':' + capability + ':'];
         let removed = 0;
         for (let k of this.cache.keys()) {
             for (let p of prefixes) {

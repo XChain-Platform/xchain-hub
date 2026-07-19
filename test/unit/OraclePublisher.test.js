@@ -744,4 +744,186 @@ describe('OraclePublisher', function () {
             catch (e) { expect(e.message).to.include('disk full'); }
         });
     });
+
+    // ── item 2677: operator kill switch ────────────────────────────────────────
+    describe('ORACLE_PUBLISH_ENABLED kill switch (item 2677)', function () {
+        afterEach(function () { delete process.env.ORACLE_PUBLISH_ENABLED; });
+
+        it('defaults to enabled', function () {
+            expect(new OraclePublisher(makeHub()).enabled).to.be.true;
+        });
+
+        it('onRoundFinalized enqueues nothing when disabled', async function () {
+            process.env.ORACLE_PUBLISH_ENABLED = 'false';
+            let pub = new OraclePublisher(makeHub());
+            let enqueue = sinon.stub(pub, '_enqueue');
+            let proc    = sinon.stub(pub, '_processQueue');
+            await pub.onRoundFinalized({ round: 1, btcBlockHeight: 100, btcBlockTime: 0, prices: [] });
+            expect(enqueue.called).to.be.false;
+            expect(proc.called).to.be.false;
+        });
+
+        it('_processQueue broadcasts nothing when disabled', async function () {
+            process.env.ORACLE_PUBLISH_ENABLED = 'false';
+            let entry = { round: 5, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
+            fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');
+            let pub = new OraclePublisher(makeHub());
+            let broadcastStub = sinon.stub().resolves({ txid: 'x' });
+            pub.broadcastFn  = broadcastStub;
+            pub.getBalanceFn = sinon.stub().resolves(50);
+            await pub._processQueue();
+            expect(broadcastStub.called).to.be.false;
+        });
+    });
+
+    // ── item 2676: hard balance floor gate + per-window spend ceiling ──────────
+    describe('spend gating (item 2676)', function () {
+        afterEach(function () {
+            delete process.env.ORACLE_PUBLISH_MAX_PUBLISHES_PER_WINDOW;
+            delete process.env.ORACLE_PUBLISH_SPEND_WINDOW_MS;
+        });
+
+        it('skips the whole publish pass when balance is below the floor', async function () {
+            let entry = { round: 5, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
+            fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');
+            let pub = new OraclePublisher(makeHub());
+            let broadcastStub = sinon.stub().resolves({ txid: 'x' });
+            pub.broadcastFn  = broadcastStub;
+            pub.getBalanceFn = sinon.stub().resolves(3);   // below default floor 10
+            await pub._processQueue();
+            expect(broadcastStub.called).to.be.false;
+        });
+
+        it('skips the whole publish pass when balance is unreadable (fail-closed)', async function () {
+            let entry = { round: 5, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
+            fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');
+            let pub = new OraclePublisher(makeHub());
+            let broadcastStub = sinon.stub().resolves({ txid: 'x' });
+            pub.broadcastFn  = broadcastStub;
+            pub.getBalanceFn = sinon.stub().rejects(new Error('rpc down'));  // -> null
+            await pub._processQueue();
+            expect(broadcastStub.called).to.be.false;
+        });
+
+        it('stops broadcasting once the per-window ceiling is reached, keeping rounds queued', async function () {
+            process.env.ORACLE_PUBLISH_MAX_PUBLISHES_PER_WINDOW = '1';
+            let e1 = { round: 1, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
+            let e2 = { round: 2, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
+            fsMock.readFileSync.returns(JSON.stringify(e1) + '\n' + JSON.stringify(e2) + '\n');
+            let pub = new OraclePublisher(makeHub());
+            let broadcastStub = sinon.stub().resolves({ txid: 'x' });
+            pub.broadcastFn  = broadcastStub;
+            pub.getBalanceFn = sinon.stub().resolves(50);
+            await pub._processQueue();
+            expect(broadcastStub.calledOnce).to.be.true;   // only round 1 sent
+            // round 2 stays on the durable queue for the next window
+            let rewritten = fsMock.writeSync.getCall(fsMock.writeSync.callCount - 1).args[1];
+            expect(rewritten).to.include('"round":2');
+            expect(rewritten).to.not.include('"round":1');
+        });
+    });
+
+    // ── item 2675: ambiguous send is never blind-retried ───────────────────────
+    describe('ambiguous send handling (item 2675)', function () {
+        it('dead-letters an ambiguous send instead of re-queuing it for re-broadcast', async function () {
+            let entry = { round: 9, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
+            fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');
+            let pub = new OraclePublisher(makeHub());
+            let timeout = new Error('socket hang up'); timeout.code = 'ETIMEDOUT';
+            let broadcastStub = sinon.stub().rejects(timeout);
+            pub.broadcastFn  = broadcastStub;
+            pub.getBalanceFn = sinon.stub().resolves(50);
+            let dead = sinon.stub(pub, '_deadLetter');
+            await pub._processQueue();
+            expect(broadcastStub.calledOnce).to.be.true;
+            expect(dead.calledOnce, 'ambiguous send must be dead-lettered').to.be.true;
+            // the round must NOT remain on the live queue (no auto re-broadcast)
+            let rewritten = fsMock.writeSync.getCall(fsMock.writeSync.callCount - 1).args[1];
+            expect(rewritten).to.not.include('"round":9');
+        });
+
+        it('still retries a definitive (never-sent) error normally', async function () {
+            let entry = { round: 9, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
+            fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');
+            let pub = new OraclePublisher(makeHub());
+            let refused = new Error('connect ECONNREFUSED'); refused.code = 'ECONNREFUSED';
+            pub.broadcastFn  = sinon.stub().rejects(refused);
+            pub.getBalanceFn = sinon.stub().resolves(50);
+            let dead = sinon.stub(pub, '_deadLetter');
+            await pub._processQueue();
+            expect(dead.called, 'definitive error must not dead-letter').to.be.false;
+            // round retained with attempts incremented
+            let rewritten = fsMock.writeSync.getCall(fsMock.writeSync.callCount - 1).args[1];
+            expect(rewritten).to.include('"round":9');
+        });
+    });
+
+    // ── snapshot dark-path logging (item 2391) ─────────────────────────────────
+    describe('capability-snapshot dark logging (item 2391)', function () {
+        it('logs a warn when the snapshot resolves to null (silent dark path)', async function () {
+            let warn = sinon.stub(console, 'warn');
+            let capSS = { getSnapshot: sinon.stub().resolves(null) };
+            let pub = new OraclePublisher(makeHub({ capabilitySnapshot: capSS }));
+            let keys = await pub._getActiveOraclePublishPubkeys(100);
+            expect(keys).to.deep.equal([]);          // fail-closed unchanged
+            expect(warn.called).to.be.true;
+            expect(pub._snapshotDark).to.be.true;
+        });
+
+        it('logs a warn when the snapshot call throws', async function () {
+            let warn = sinon.stub(console, 'warn');
+            let capSS = { getSnapshot: sinon.stub().rejects(new Error('indexer down')) };
+            let pub = new OraclePublisher(makeHub({ capabilitySnapshot: capSS }));
+            await pub._getActiveOraclePublishPubkeys(100);
+            expect(warn.calledWithMatch(/indexer down/)).to.be.true;
+        });
+
+        it('is transition-only: a persistent fault logs once, then resets on recovery', async function () {
+            let warn = sinon.stub(console, 'warn');
+            let capSS = { getSnapshot: sinon.stub().resolves(null) };
+            let pub = new OraclePublisher(makeHub({ capabilitySnapshot: capSS }));
+            await pub._getActiveOraclePublishPubkeys(100);
+            await pub._getActiveOraclePublishPubkeys(100);
+            expect(warn.callCount).to.equal(1);       // second dark round is quiet
+            // Recovery clears the guard so a subsequent dark spell logs again.
+            capSS.getSnapshot.resolves({ validators: [{ pubkey: 'aa'.repeat(32) }] });
+            await pub._getActiveOraclePublishPubkeys(100);
+            expect(pub._snapshotDark).to.be.false;
+            capSS.getSnapshot.resolves(null);
+            await pub._getActiveOraclePublishPubkeys(100);
+            expect(warn.callCount).to.equal(2);
+        });
+    });
+
+    // ── oversized-wire drop observability (item 2402) ──────────────────────────
+    describe('oversized PRICE v0 wire drop (item 2402)', function () {
+        function bigPrices() {
+            // Enough pairs to push the encoded wire past PRICE_WIRE_MAX_BYTES (8189).
+            let out = [];
+            for (let i = 0; i < 800; i++) out.push({ coinPair: 'PAIR' + i + '/USD', price: '123456' });
+            return out;
+        }
+
+        it('counts the drop, dead-letters it, and does not enqueue', async function () {
+            sinon.stub(console, 'error');
+            let pub = new OraclePublisher(makeHub());
+            sinon.stub(pub, '_getMyRank').resolves(0);
+            sinon.stub(pub, '_getActiveOraclePublishCount').resolves(3);
+            let enqueueSpy = sinon.spy(pub, '_enqueue');
+            let dead = sinon.stub(pub, '_deadLetter');
+            await pub.onRoundFinalized({ round: 3, btcBlockHeight: 100, btcBlockTime: 0,
+                prices: bigPrices(), signatures: [{ pubkey: 'pk', sig: 'sig' }] });
+            expect(pub.oversizedDrops).to.equal(1);
+            expect(dead.calledOnce).to.be.true;
+            expect(dead.firstCall.args[0]).to.include({ round: 3 });
+            expect(dead.firstCall.args[1]).to.match(/exceeds encoder limit/);
+            expect(enqueueSpy.called).to.be.false;
+        });
+
+        it('surfaces oversizedDrops via getStats()', function () {
+            let pub = new OraclePublisher(makeHub());
+            pub.oversizedDrops = 2;
+            expect(pub.getStats().oversizedDrops).to.equal(2);
+        });
+    });
 });

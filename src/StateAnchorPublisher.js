@@ -77,6 +77,8 @@ const crypto            = require('crypto');
 const axios             = require('axios');
 const coins             = require('./coins');
 const EncoderClient     = require('./EncoderClient.js');
+const SpendGuard        = require('./lib/spend_guard.js');
+const { isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const StateCheckpointEngine = require('./StateCheckpointEngine.js');
 const swq                   = require('./stake_weighted_quorum.js');
@@ -155,13 +157,24 @@ class StateAnchorPublisher {
         this.ambiguousPollDelayMs  = parseInt(process.env.ANCHOR_AMBIGUOUS_POLL_MS       || cfg.ANCHOR_AMBIGUOUS_POLL_MS       || '5000');
         this.electionToleranceBlocks = parseInt(process.env.ANCHOR_ELECTION_TOLERANCE_BLOCKS || cfg.ANCHOR_ELECTION_TOLERANCE_BLOCKS || '36');
         this.lowBalanceThreshold = parseFloat(process.env.DOGE_LOW_BALANCE_THRESHOLD || cfg.DOGE_LOW_BALANCE_THRESHOLD || '10');
+        //  - shared SpendGuard for the on-chain anchor spend path. Adds the
+        // per-window spend ceiling (count + $2000-clamped USD budget, default-ON) and
+        // a per-capability runtime pause on top of the existing balance floor, so an
+        // operator can halt anchor DOGE spend at runtime and a fee-runaway is bounded.
+        // Its balance floor mirrors lowBalanceThreshold (the flush already gates on it).
+        this.spendGuard = new SpendGuard('ANCHOR', cfg, 'StateAnchorPublisher');
+        this.spendGuard.minBalance = this.lowBalanceThreshold;
         // Decouple on-chain anchoring from checkpoint production: checkpoints are
         // free (off-chain hub-DB mirror, good for light-client verify) but each
-        // on-chain v0 anchor spends real DOGE on 3 chains. Only anchor every Nth
-        // checkpoint_seq (recovery needs just the LATEST anchored checkpoint per
-        // chain, so the skipped non-multiple seqs stay off-chain). N=1 keeps the
-        // original anchor-every-checkpoint behaviour. checkpoint_seq is consensus
-        // data (identical on every hub) so `seq % N` is deterministic fleet-wide.
+        // on-chain v0 anchor spends real DOGE on 3 chains. Only anchor checkpoints
+        // whose checkpoint_seq is a multiple of N (recovery needs just the LATEST
+        // anchored checkpoint per chain, so the skipped seqs stay off-chain). N=1
+        // keeps the original anchor-every-checkpoint behaviour. : checkpoint_seq
+        // is now the round's BTC snapshot_block (deriveCheckpointSeq), still consensus
+        // data (identical on every hub) so `seq % N` stays deterministic fleet-wide;
+        // with the default N=1 (MOD(seq,1)=0 for all) this is unchanged, and an
+        // operator setting N>1 now sub-samples by snapshot_block divisibility rather
+        // than by a dense per-chain counter.
         this.anchorEveryNCheckpoints = Math.max(1,
             parseInt(process.env.ANCHOR_CHECKPOINT_EVERY_N || cfg.ANCHOR_CHECKPOINT_EVERY_N || '1') || 1);
 
@@ -260,7 +273,8 @@ class StateAnchorPublisher {
             dogeAddress:        this.dogeAddress || null,
             dogeBalance:        this._lastBalance,
             dogeBalanceAt:      this._lastBalanceAt,
-            lowBalanceThreshold: this.lowBalanceThreshold
+            lowBalanceThreshold: this.lowBalanceThreshold,
+            spendGuard:         this.spendGuard.stats()   // 
         };
     }
 
@@ -329,6 +343,13 @@ class StateAnchorPublisher {
         if(this._attestRound && !this._attestRound.done && this._attestRound.resolve)
             this._attestRound.resolve({ met: false, sigs: [] });   // unblock any awaiting publish
         this._attestRound = null;
+        // Mirror the _attestRound teardown for its archive twin: _runArchiveAttestationRound
+        // is an awaited promise settled only by an unref'd timer, so without this a stop()
+        // mid-round leaves _publishArchive hung during shutdown.
+        if(this._archiveAttestRound && this._archiveAttestRound.timer) clearTimeout(this._archiveAttestRound.timer);
+        if(this._archiveAttestRound && !this._archiveAttestRound.done && this._archiveAttestRound.resolve)
+            this._archiveAttestRound.resolve({ met: false, sigs: [] });   // unblock any awaiting _publishArchive
+        this._archiveAttestRound = null;
     }
 
     // Flush: publish pending v0 checkpoints + the pending archive batch.
@@ -349,7 +370,44 @@ class StateAnchorPublisher {
                 }
                 return { anchored: [], archive: 'none', skipped: 'no_pipeline' };
             }
-            await this._checkBalance(signer);
+            // item 2676 - hard pre-send balance gate. Previously the return value was
+            // discarded and a low balance only WARNed, so a fee-estimation bug or a
+            // stuck-tx retry loop could drain the wallet with nothing but a log line.
+            // Now a balance below the floor, or an unreadable balance (null; fail-closed),
+            // skips this flush's publishing. The scheduler keeps running and retries on
+            // the next flush once the wallet is topped up / the balance source recovers.
+            let balance = await this._checkBalance(signer);
+            // The gate is only meaningful when a balance source is actually wired
+            // (a getBalanceFn hook, or an encoder + address to sum UTXOs). With no
+            // source, balance is always null and there is nothing to enforce, so we
+            // preserve prior behavior rather than disable publishing outright.
+            let hasBalanceSource = !!(signer.getBalanceFn || (signer.encoder && this.dogeAddress));
+            if(hasBalanceSource){
+                if(balance === null){
+                    console.warn('StateAnchorPublisher: DOGE balance unreadable; skipping this flush (fail-closed)');
+                    return { anchored: [], archive: 'none', skipped: 'balance_unreadable' };
+                }
+                if(balance < this.lowBalanceThreshold){
+                    console.warn('StateAnchorPublisher: DOGE balance ' + Number(balance).toFixed(4) + ' below floor ' +
+                                 this.lowBalanceThreshold + '; skipping publish this flush (fail-closed)');
+                    return { anchored: [], archive: 'none', skipped: 'below_balance_floor' };
+                }
+            }
+
+            //  - shared SpendGuard gate on the PRIMARY anchor path. A runtime
+            // pause (per-capability) or an exhausted per-window spend ceiling skips
+            // this flush's on-chain publishing entirely; the scheduler retries next
+            // flush. Placed after the balance gate so a paused publisher never spends
+            // on the leader path (the fe3aedbf kill-switch was inert on the primary
+            // path; this closes it).
+            if(this.spendGuard.isPaused()){
+                console.warn(this.spendGuard.noteBlocked() + '; skipping this flush');
+                return { anchored: [], archive: 'none', skipped: 'paused' };
+            }
+            if(!this.spendGuard.allow()){
+                console.warn(this.spendGuard.noteBlocked() + '; skipping this flush');
+                return { anchored: [], archive: 'none', skipped: 'spend_ceiling' };
+            }
 
             let anchored = await this._publishPendingCheckpoints(signer, btcBlock);
             let archive  = await this._startArchiveRound(signer, btcBlock);
@@ -773,7 +831,12 @@ class StateAnchorPublisher {
             [cp.chain, cp.network, Number(cp.block_index)]);
         if(!local || local.length === 0) return;
         let mine = this._cpFromRow(local[0]);
-        if(StateCheckpointEngine.canonicalCheckpoint(mine) !== StateCheckpointEngine.canonicalCheckpoint(cp)) return;
+        // Compare the ROOTLESS canonical deliberately: the attestation canonical this
+        // path signs carries no SPV root suffix, and _cpFromRow omits the root fields,
+        // so both operands are rootless today. Using _rawCanonicalCheckpoint pins that
+        // intent so a future root-bearing operand on one side can't flip this guard
+        // fail-closed post-flag-day. #2462.
+        if(StateCheckpointEngine._rawCanonicalCheckpoint(mine) !== StateCheckpointEngine._rawCanonicalCheckpoint(cp)) return;
 
         let canonical = this._attestationCanonical(cp, publisher);
         if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender)) return;   // proposer's own sig
@@ -1698,7 +1761,11 @@ class StateAnchorPublisher {
             [cp.chain, cp.network, Number(cp.block_index)]);
         if(!local || local.length === 0) return;
         let mine = this._cpFromRow(local[0]);
-        if(StateCheckpointEngine.canonicalCheckpoint(mine) !== StateCheckpointEngine.canonicalCheckpoint(cp)) return;
+        // Rootless compare, deliberately (see #2462): _archiveCanonical nests
+        // _rawCanonicalCheckpoint by construction and _cpFromRow omits the SPV root
+        // fields, so this guard binds identity fields only. Pinning to
+        // _rawCanonicalCheckpoint keeps it immune to the presence-gated root suffix.
+        if(StateCheckpointEngine._rawCanonicalCheckpoint(mine) !== StateCheckpointEngine._rawCanonicalCheckpoint(cp)) return;
 
         // 2. The archive must decompress, CRC-match, and byte-match our own rows.
         let json;
@@ -2167,11 +2234,20 @@ class StateAnchorPublisher {
                 // the leader's publish carried it (a degraded v1 earns nothing), so
                 // mirroring here could credit a reward no live indexer derives (fork on
                 // recovery). Below the flag-day the mirror remains the only peer rail.
-                let archiveVerified = ar.isArchiveRewardActive(Number(d.snapshot_block), this.network)
+                // #2236/: gate and record on the CHECKPOINT's network, never
+                // this.network. The XANCFIN wire carries no network, so resolve it from
+                // the locally stashed identity; re-deriving from the hub's own network
+                // double-credited on an unscoped hub (network===''), forking the
+                // COLLECT-spendable rail live-vs-recovered. When no local identity is
+                // stashed, _verifyArchiveCheckpointOnChain returns 'no-checkpoint-id'
+                // and nothing is recorded, so the fallback only feeds the flag-day gate.
+                let cpId  = this._observedArchiveCheckpoint(Number(d.batch_seq));
+                let cpNet = cpId ? String(cpId.network) : this.network;
+                let archiveVerified = ar.isArchiveRewardActive(Number(d.snapshot_block), cpNet)
                     ? 'flag-day-derived (mirror retired, )'
                     : await this._verifyArchiveCheckpointOnChain(Number(d.batch_seq), String(d.txid));
                 if(archiveVerified === 'verified')
-                    this._recordReward('anchor_archive', Number(d.batch_seq), sender, Number(d.snapshot_block), this.network);
+                    this._recordReward('anchor_archive', Number(d.batch_seq), sender, Number(d.snapshot_block), cpNet);
                 else
                     console.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') archive checkpoint ' +
                                  'not on-chain verified (' + archiveVerified + '); NOT mirroring the archive reward');
@@ -2442,6 +2518,11 @@ class StateAnchorPublisher {
         return (r && r.length > 0) ? Number(r[0].next_seq) : 0;
     }
 
+    // Maps a state_checkpoints row to the 9 identity fields only; deliberately OMITS
+    // state_root / state_root_version / block_merkle_root / block_merkle_version (#2462).
+    // The co-sign guards that consume this compare via _rawCanonicalCheckpoint, so the
+    // omission is safe; adding the root fields to only one operand of a guard would flip
+    // it fail-closed post-flag-day. Never carry roots here one-sided.
     _cpFromRow(row){
         return {
             chain: String(row.chain), network: String(row.network), block_index: Number(row.block_index),
@@ -2566,7 +2647,14 @@ class StateAnchorPublisher {
                 // Undetermined + a send may already have gone out: never risk it.
                 if(found === undefined && lastErr && lastErr.anchorAmbiguousSend) throw lastErr;
             }
-            try { return await broadcaster(payload); }
+            try {
+                let sent = await broadcaster(payload);
+                //  - a fresh broadcast actually spent a fee; charge the window
+                // budget. The adopt paths above (existsCheck hit) return an already
+                // on-chain tx and deliberately do NOT record (no new spend).
+                this.spendGuard.record();
+                return sent;
+            }
             catch(e){
                 lastErr = e;
                 if(e && e.anchorAmbiguousSend){
@@ -2596,13 +2684,9 @@ class StateAnchorPublisher {
     // with an RPC error, or an HTTP 4xx auth/rate-limit refusal) and
     // never-connected transport errors are safe to retry. Everything else
     // (timeout, reset mid-flight, 5xx after the request went out) is ambiguous.
+    // : delegates to the shared classifier so all four hub effectors agree.
     _isAmbiguousSendError(e){
-        if(!e) return false;
-        if(/^Encoder RPC error/.test(String(e.message || ''))) return false;          // node/encoder rejected the tx
-        if(e.response && Number(e.response.status) < 500) return false;               // refused before processing
-        let code = String(e.code || '');
-        if(code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'EAI_AGAIN') return false;  // never sent
-        return true;
+        return isAmbiguousSendError(e);
     }
 
     async _defaultBroadcast(payload, signer){

@@ -231,7 +231,7 @@ exports.fetch = async (payload, options) => {
 // Rounds that cannot collect enough matching signatures expire rather than
 // finalize incorrectly. Do NOT relax the AttestationConsensus signature floor
 // without a coordinated consensus-breaking fleet deploy.
-exports.agree = (proposals) => {
+exports.agree = (proposals, options) => {
     if (!Array.isArray(proposals) || proposals.length === 0) return null;
 
     let groups = new Map();  // contentHash -> { count, body, meta }
@@ -263,7 +263,13 @@ exports.agree = (proposals) => {
         else   groups.set(h, { count: 1, body: p.body, meta: p.meta });
     }
 
-    let N      = proposals.length;
+    // The majority denominator is the responsible-set size (expectedN), not the
+    // count of surviving ok proposals handed in: failed fetches shrink the array
+    // (the caller passes only ok proposals), and a bare proposals.length lets a
+    // lone unreplicated body clear ceil((N+1)/2) with N=1 (item 2642). Falling
+    // back to proposals.length when expectedN is absent preserves the 1-of-1
+    // single-validator behaviour and every caller that passes no options.
+    let N      = Math.max(proposals.length, (options && options.expectedN) || 0);
     let quorum = Math.ceil((N + 1) / 2);
     let winner = null;
     let best   = 0;

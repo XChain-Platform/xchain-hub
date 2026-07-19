@@ -38,4 +38,16 @@ describe('oracle band constants conformance (#1299)', () => {
     it('api.js default binds to the constant (String(ORACLE_DEVIATION_THRESHOLD) === "0.05")', () => {
         expect(String(constants.ORACLE_DEVIATION_THRESHOLD)).to.equal('0.05');
     });
+
+    // #2490: ORACLE_MAX_CHANGE_PER_ROUND is a frozen 0.25 literal whose comment
+    // (constants.js) documents the invariant that it is kept at 5x
+    // ORACLE_DEVIATION_THRESHOLD so a clamped aggregate always passes the follower
+    // propose-gate's historical band (OracleConsensus derives that band live as
+    // 5 x ORACLE_DEVIATION_THRESHOLD). OracleConsensus.test.js already asserts the
+    // one-sided `<= 5x` bound (the liveness-breaking direction). Pin strict equality
+    // here so raise-direction drift of either constant, coordinated across tests and
+    // docs, cannot silently strand the clamp above (or below) the band multiplier.
+    it('ORACLE_MAX_CHANGE_PER_ROUND equals 5x ORACLE_DEVIATION_THRESHOLD (documented coupling)', () => {
+        expect(constants.ORACLE_MAX_CHANGE_PER_ROUND).to.equal(5 * constants.ORACLE_DEVIATION_THRESHOLD);
+    });
 });

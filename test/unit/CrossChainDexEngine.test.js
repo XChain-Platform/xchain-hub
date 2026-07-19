@@ -774,7 +774,7 @@ describe('CrossChainDexEngine', function () {
             let hub = makeDexHub();
             hub.db.doQuery = sinon.stub().resolves({ affectedRows: 1 });
             let eng = new CrossChainDexEngine(hub);
-            let persist = sinon.stub(eng, '_persistCapabilitySnapshot').resolves();
+            let persist = sinon.stub(eng, '_persistCapabilitySnapshot').resolves(1);
             let row = {
                 match_id: 'm'.repeat(64), snapshot_block: 150, network: 'regtest',
                 a_chain: 'LTC', a_action_index: 1, a_kind: 'swap', a_tick: 'XCH', a_amount: '100',
@@ -793,8 +793,80 @@ describe('CrossChainDexEngine', function () {
             let eng = new CrossChainDexEngine(hub);
             eng._seedLocalValidator = false;
             eng.capSnapshot = { getSnapshot: sinon.stub().resolves({ validators: [] }) };
-            await eng._persistCapabilitySnapshot('cross_chain', 100);
+            let n = await eng._persistCapabilitySnapshot('cross_chain', 100);
             expect(hub.db.doQuery.called).to.be.false;
+            expect(n).to.equal(0);
+        });
+    });
+
+    // ── item 2385: _writeFinalizedMatch must fail closed on a snapshot-persist
+    // failure so no finalized/mirrored/ledger-applied match can outlive a snapshot
+    // its signatures cannot be verified against. ────────────────────────────────
+    describe('_writeFinalizedMatch(): fail-closed snapshot persist', function () {
+        function finalizeRow() {
+            return {
+                match_id: 'f'.repeat(64), snapshot_block: 150, network: 'regtest',
+                a_chain: 'LTC', a_action_index: 1, a_kind: 'swap', a_tick: 'XCH', a_amount: '100',
+                a_filled_before: '0', a_ownership: 0, a_payout_addr: 'La',
+                b_chain: 'DOGE', b_action_index: 2, b_kind: 'swap', b_tick: 'XCH', b_amount: '500',
+                b_filled_before: '0', b_ownership: 0, b_payout_addr: 'Db',
+                effective_time: 1700000000
+            };
+        }
+
+        it('skips insert/commit and defers when the snapshot persist throws', async function () {
+            let hub = makeDexHub();
+            hub.db.doQuery = sinon.stub().resolves({ affectedRows: 1 });
+            let eng = new CrossChainDexEngine(hub);
+            sinon.stub(eng, '_persistCapabilitySnapshot').rejects(new Error('db down'));
+            let insert  = sinon.stub(eng, '_insertMatchRow').resolves(true);
+            let commit  = sinon.stub(eng, '_applyCommit');
+            let forget  = sinon.stub(eng.consensus, 'forgetFinalized');
+            let row = finalizeRow();
+            eng._inflight.add(row.match_id);
+
+            await eng._writeFinalizedMatch({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
+
+            expect(insert.called, 'must NOT insert the match row').to.be.false;
+            expect(commit.called, 'must NOT apply the committed-ledger fill').to.be.false;
+            expect(forget.calledWith(row.match_id), 'must forget the finalized id for re-propose').to.be.true;
+            expect(eng._inflight.has(row.match_id), 'must clear the in-flight reservation').to.be.false;
+        });
+
+        it('skips insert/commit and defers when the snapshot persist writes zero rows', async function () {
+            let hub = makeDexHub();
+            hub.db.doQuery = sinon.stub().resolves({ affectedRows: 1 });
+            let eng = new CrossChainDexEngine(hub);
+            // Degraded/null snapshot => zero validators resolved => zero rows persisted.
+            sinon.stub(eng, '_persistCapabilitySnapshot').resolves(0);
+            let insert  = sinon.stub(eng, '_insertMatchRow').resolves(true);
+            let commit  = sinon.stub(eng, '_applyCommit');
+            let forget  = sinon.stub(eng.consensus, 'forgetFinalized');
+            let row = finalizeRow();
+            eng._inflight.add(row.match_id);
+
+            await eng._writeFinalizedMatch({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
+
+            expect(insert.called, 'must NOT insert the match row').to.be.false;
+            expect(commit.called, 'must NOT apply the committed-ledger fill').to.be.false;
+            expect(forget.calledWith(row.match_id), 'must forget the finalized id for re-propose').to.be.true;
+            expect(eng._inflight.has(row.match_id)).to.be.false;
+        });
+
+        it('inserts + commits when the snapshot persisted at least one row', async function () {
+            let hub = makeDexHub();
+            hub.db.doQuery = sinon.stub().resolves({ affectedRows: 1 });
+            let eng = new CrossChainDexEngine(hub);
+            sinon.stub(eng, '_persistCapabilitySnapshot').resolves(3);
+            let insert  = sinon.stub(eng, '_insertMatchRow').resolves(true);
+            let commit  = sinon.stub(eng, '_applyCommit');
+            let row = finalizeRow();
+            eng._inflight.add(row.match_id);
+
+            await eng._writeFinalizedMatch({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
+
+            expect(insert.calledOnce, 'must insert the match row').to.be.true;
+            expect(commit.calledWith(row, +1), 'must apply the committed-ledger fill').to.be.true;
         });
     });
 
@@ -1005,7 +1077,7 @@ describe('CrossChainDexEngine', function () {
             let eng = new CrossChainDexEngine(hub);
             eng._snapshotBlockOverride = 100;
             eng._seedLocalValidator = true;
-            sinon.stub(eng, '_persistCapabilitySnapshot').resolves();
+            sinon.stub(eng, '_persistCapabilitySnapshot').resolves(1);
 
             let { a, b } = makeOrderPair();
             let desc = eng._tryMatch(a, b);

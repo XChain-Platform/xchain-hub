@@ -172,6 +172,25 @@ class AttestationConsensus extends EventEmitter {
         this.earlyCommits = new Map();
         this.earlyCommitMaxPerRid = 32;
 
+        // Torn-down round guard (item 2640). A round destroyed WITHOUT entering
+        // `this.finalized` (the timeout handler and the non-ok finalization path,
+        // which keeps the rid RETRYABLE) leaves the top-of-handler
+        // `if(this.finalized.has(rid)) return` guards inert, so a PROPOSE/PREPARE/
+        // COMMIT that arrives for that rid after teardown falls into
+        // _bufferEarlyMessage and is parked for the full earlyMessageTtlMs. When a
+        // retry round for the same rid opens within that window, _drainEarlyMessages
+        // replays those prior-attempt envelopes; the attestation canonical carries
+        // no attempt discriminator, so their sigs still verify and a stale body can
+        // win the first-wins proposal slot ahead of a peer's fresh vote. The
+        // write-time TTL check bounds buffer AGE, not attempt boundaries, so it does
+        // not close this. Track torn-down rids and drop (not park) their envelopes
+        // in _bufferEarlyMessage; propose() clears the mark when it installs a fresh
+        // round so a legitimate retry can buffer again. Ring-bounded FIFO like
+        // `finalized` so it cannot leak under requestId flooding.
+        this.tornDown       = new Set();
+        this._tornDownOrder = [];
+        this.tornDownMax    = parseInt(this.config.ATTESTATION_TORNDOWN_MAX) || 10000;
+
         this._messageHandler = null;
         this.roundTimeoutMs  = parseInt(this.config.ATTESTATION_ROUND_TIMEOUT_MS) || DEFAULT_ROUND_TIMEOUT_MS;
     }
@@ -200,6 +219,29 @@ class AttestationConsensus extends EventEmitter {
         this.earlyCommits.clear();
         this.nonOkPublished.clear();
         this._nonOkPublishedOrder = [];
+        this.tornDown.clear();
+        this._tornDownOrder = [];
+    }
+
+    // Mark a round id as torn down without finalization (timeout / non-ok
+    // finalization) so _bufferEarlyMessage drops rather than parks its late
+    // envelopes. Ring-bounded FIFO, mirroring _markFinalized (item 2640).
+    _markTornDown(rid){
+        if(this.tornDown.has(rid)) return;
+        this.tornDown.add(rid);
+        this._tornDownOrder.push(rid);
+        if(this._tornDownOrder.length > this.tornDownMax){
+            let oldest = this._tornDownOrder.shift();
+            this.tornDown.delete(oldest);
+        }
+    }
+
+    // True while a consensus round for `rid` is live (pending, not yet
+    // finalized/expired). AttestationRound consults this before issuing a paid
+    // provider fetch so a re-poll of a still-running round short-circuits ahead
+    // of the vendor call instead of after it (item 2358).
+    isRoundActive(rid){
+        return this.pending.has(String(rid).toLowerCase());
     }
 
     _pruneEarlyMessages(now){
@@ -212,6 +254,10 @@ class AttestationConsensus extends EventEmitter {
     }
 
     _bufferEarlyMessage(rid, envelope){
+        // Drop envelopes for a round torn down without finalization rather than
+        // parking them for a later retry-round drain (item 2640). Parking them
+        // would replay prior-attempt PBFT votes into the fresh round.
+        if(this.tornDown.has(rid)) return;
         let now = Date.now();
         this._pruneEarlyMessages(now);
         // Size gate (A-F5): drop an oversized pre-round envelope rather than buffer
@@ -390,9 +436,18 @@ class AttestationConsensus extends EventEmitter {
                 console.warn('AttestationConsensus: round timeout for ' + rid.substring(0,16) + '...');
                 this.pending.delete(rid);
                 this.earlyCommits.delete(rid);
+                // Clear the early-message buffer and suppress post-teardown
+                // buffering so a retry round cannot replay this attempt's stale
+                // PBFT envelopes (item 2640).
+                this.earlyMessages.delete(rid);
+                this.earlyMessageTtl.delete(rid);
+                this._markTornDown(rid);
             }
         }, this.roundTimeoutMs);
 
+        // A fresh round for this rid is opening; allow its envelopes to buffer
+        // again after any prior torn-down attempt (item 2640).
+        this.tornDown.delete(rid);
         this.pending.set(rid, pending);
 
         if(this.peerManager){
@@ -569,8 +624,15 @@ class AttestationConsensus extends EventEmitter {
             // the round window (see the wall-clock deadline guard in
             // providers/llm.js's transports).
             let judgeTimeoutMs = parseInt(this.config.ATTESTATION_FETCH_TIMEOUT) || 10000;
+            // expectedN pins the majority denominator to the responsible-set size,
+            // not the surviving ok-proposal count (item 2642). Without it, failed
+            // fetches shrink `proposals.length` and a lone unreplicated body clears
+            // ceil((N+1)/2) with N=1, becoming the round winner and suppressing the
+            // deterministic no_quorum audit row (byte_equality's independent-fetch
+            // premise goes unexercised). byte_equality honours it; judge_model
+            // ignores it. `need` is the responsible-set bound computed above.
             winner = await Promise.resolve(providerModule.agree(proposalsArr,
-                { pinnedJudgeModel: pending.pinnedJudgeModel || null, timeoutMs: judgeTimeoutMs }));
+                { pinnedJudgeModel: pending.pinnedJudgeModel || null, timeoutMs: judgeTimeoutMs, expectedN: need }));
         } catch (e) {
             console.warn('AttestationConsensus: agree() threw for ' + rid.substring(0,16) + '...: ', e);
             winner = null;
@@ -834,6 +896,42 @@ class AttestationConsensus extends EventEmitter {
             if(!ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
                 console.warn('AttestationConsensus: bad non-ok PREPARE sig from ' + senderPubkey.substring(0,16) + '...');
                 return;
+            }
+            // Self-derivation gate (items 2641, 2579). For byte_equality a
+            // no_quorum verdict is LOCALLY DERIVABLE: agree() is a deterministic
+            // byte tally over collected proposals, so this hub must not adopt or
+            // co-sign a no_quorum PREPARE it cannot itself derive. Without this a
+            // single Byzantine responsible sender racing a signed no_quorum PREPARE
+            // ahead of proposal collection makes every honest hub (each of which
+            // always holds its own proposal) co-sign on faith, forcing the round to
+            // no_quorum even though all honest bodies are byte-identical - stalling
+            // the request to deadline. Buffer until `need` proposals are in hand
+            // (the same threshold _maybeAdvanceFromProposals uses), then adopt only
+            // if our own agree() over the ok proposals yields no winner. judge_model
+            // is deliberately exempt: only the leader runs the judge, so a follower
+            // genuinely cannot re-derive the verdict (the seam note below), and its
+            // adoption stays participation-gated by the co-sign policy.
+            let nonOkDef = this.providerRegistry.getDef(pending.providerId);
+            if(status === 'no_quorum' && nonOkDef && nonOkDef.consensus_strategy === 'byte_equality'){
+                let needNq = Math.min(pending.redundancy, pending.responsible.length);
+                if(pending.proposals.size < needNq){
+                    this._bufferEarlyMessage(rid, envelope);
+                    return;
+                }
+                let nonOkModule = this.providerRegistry.getModule(pending.providerId);
+                let okForVerdict = [...pending.proposals.values()].filter(p => (p.status || 'ok') === 'ok');
+                let derivedWinner = null;
+                try {
+                    if(nonOkModule && typeof nonOkModule.agree === 'function')
+                        derivedWinner = nonOkModule.agree(okForVerdict, { expectedN: needNq });
+                } catch (_) { derivedWinner = null; }
+                if(derivedWinner){
+                    console.warn('AttestationConsensus: refusing no_quorum PREPARE from ' + senderPubkey.substring(0,16) +
+                        '... for ' + rid.substring(0,16) + '... (own agree() derives an ok winner; not co-signing)');
+                    return;
+                }
+                // derivedWinner === null: this hub independently derives no_quorum,
+                // so adopting and co-signing below is self-evidenced.
             }
             pending.signatures.set(senderPubkey, String(d.sig));
             pending.winner = { body: body, meta: meta };
@@ -1123,10 +1221,14 @@ class AttestationConsensus extends EventEmitter {
         if(pending._commitSent) return;
 
         let quorum = pending.quorum;
-        // For very small federations (e.g. N=1) quorum can be 0 from
-        // getQuorum; collapse to REDUNDANCY in that case. Given the
-        // quorum <= redundancy invariant (see propose()), this max() always
-        // resolves to redundancy: the effective gate is redundancy-of-redundancy.
+        // `pending.quorum` is the PBFT quorum computed INLINE in propose() over
+        // responsible.length (the redundancy-sized responsible set), NOT
+        // CapabilitySnapshot.getQuorum() (which is scoped to the full snapshot
+        // count and is deliberately not the source here). For very small
+        // federations (e.g. responsible.length <= 1) that inline value is 0;
+        // collapse to REDUNDANCY in that case. Given the quorum <= redundancy
+        // invariant documented in propose(), this max() always resolves to
+        // redundancy: the effective gate is redundancy-of-redundancy.
         let needed = Math.max(quorum, pending.redundancy);
 
         if(pending.prepares.size >= needed){
@@ -1215,6 +1317,12 @@ class AttestationConsensus extends EventEmitter {
             // could ever start. Record the publication instead so retries stop
             // re-publishing the same failure (once per request_id + status).
             this._recordNonOkPublished(rid, pending.status);
+            // This teardown path does not enter `this.finalized`, so clear the
+            // early-message buffer and suppress post-teardown buffering to stop a
+            // retry round replaying this attempt's stale PBFT votes (item 2640).
+            this.earlyMessages.delete(rid);
+            this.earlyMessageTtl.delete(rid);
+            this._markTornDown(rid);
         }
         if(pending.timer) clearTimeout(pending.timer);
 

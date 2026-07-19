@@ -431,6 +431,37 @@ describe('AttestationSpotChecker: non-ok finalizations (Phase 4)', function () {
         expect(checker._failuresFor('bb'.repeat(32))).to.have.length(1);
         expect(checker.isSpotCheck(rid)).to.equal(false);
     });
+
+    it('treats an inconclusive judge verdict (agree() populates options.outcome) as neutral: no failures recorded', async function () {
+        const hub = { p2pConfig: {}, attestationConsensus: null, slashDetector: null };
+        // Mirrors llm.js's inconclusive-null contract: agree() resolves null
+        // and populates the caller-supplied options.outcome rather than
+        // leaving the spot-checker unable to distinguish "could not judge"
+        // from "judged not equivalent".
+        const registry = {
+            getModule: sinon.stub().returns({
+                agree: sinon.stub().callsFake((proposals, options) => {
+                    if (options && options.outcome) {
+                        options.outcome.inconclusive = true;
+                        options.outcome.reason = 'unreachable';
+                    }
+                    return Promise.resolve(null);
+                })
+            })
+        };
+        const checker = new AttestationSpotChecker(hub, registry);
+        const rid = 'ef'.repeat(32);
+        checker.register(rid, 'llm', 'expected answer');
+        await checker.onRequestFinalized({
+            requestId:    rid,
+            providerId:   'llm',
+            responseBody: Buffer.from('some answer'),
+            meta:         'o1-mini',
+            status:       'ok',
+            signatures:   [{ pubkey: 'cc'.repeat(32), sig: '00'.repeat(64) }]
+        });
+        expect(checker._failuresFor('cc'.repeat(32))).to.have.length(0);
+    });
 });
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -76,6 +76,12 @@ class AttestationRound {
         this.consensus = null;
 
         this._pollTimer      = null;
+        // In-flight guard for the interval-driven poll (item 2591). Matches the
+        // house convention (XChainIndexer _hubConfigPollRunning, XChainDecoder
+        // mempoolBusy, HubPushQueue draining): a poll that outruns pollMs under a
+        // slow/partitioned indexer or a tightened ATTESTATION_POLL_MS must not
+        // stack a second concurrent _pollPending that races this.pollCursor.
+        this._pollRunning    = false;
 
         this.pollMs         = parseInt(this.config.ATTESTATION_POLL_MS)        || DEFAULT_POLL_MS;
         this.confirmations  = parseInt(this.config.ATTESTATION_CONFIRMATIONS)  || DEFAULT_CONFIRMATIONS;
@@ -87,7 +93,22 @@ class AttestationRound {
         // How long a request stays in `seen` before it can be re-evaluated.
         // Defaults to 5 poll cycles so transient skips clear quickly while
         // still suppressing the steady-state re-poll of confirmed work.
-        this.retryAfterMs   = parseInt(this.config.ATTESTATION_RETRY_AFTER_MS) || (5 * this.pollMs);
+        //
+        // Floor it above the consensus round timeout (item 2358). The seen window
+        // must never nest inside a LIVE consensus round: if it evicts first, the
+        // next poll re-`_startRound`s a request whose round is still pending and
+        // issues another paid provider fetch that consensus.propose() then discards
+        // on its `pending.has(rid)` guard. At stock defaults 5*15s=75s is already
+        // shorter than the 120s round timeout, and lowering ATTESTATION_POLL_MS
+        // widens the gap silently. Sourcing the round timeout from the same config
+        // key AttestationConsensus reads keeps the two windows coupled. The paid
+        // fetch is also short-circuited directly in _startRound via
+        // consensus.isRoundActive(), but flooring closes the nesting at its root.
+        let roundTimeoutMs  = parseInt(this.config.ATTESTATION_ROUND_TIMEOUT_MS) || 120000;
+        this.retryAfterMs   = Math.max(
+            parseInt(this.config.ATTESTATION_RETRY_AFTER_MS) || (5 * this.pollMs),
+            roundTimeoutMs + this.pollMs
+        );
         // How long a `rounds` entry is retained before lazy eviction. A round's
         // active lifecycle is ~2 min (consensus round timeout), so the 1-hour
         // default leaves a wide safety margin while bounding memory. Without
@@ -121,10 +142,17 @@ class AttestationRound {
         this.rounds.clear();
         this.seen.clear();
         this.pollCursor = null;
+        this._pollRunning = false;
     }
 
     async _pollPending(){
         if(!this.identity) return;  // observer-only hub; nothing to propose
+        // In-flight guard (item 2591): if a prior poll is still awaiting the
+        // indexer, skip this tick rather than stack a concurrent run that races
+        // this.pollCursor. The finally clears the flag across every early return.
+        if(this._pollRunning) return;
+        this._pollRunning = true;
+        try {
         let url = await this._resolveBtcIndexerUrl();
         if(!url) return;
 
@@ -199,6 +227,9 @@ class AttestationRound {
         if(requests.length < POLL_LIMIT){
             if(this.pollCursor) console.log('AttestationRound: reached end of pending queue; restarting sweep next poll');
             this.pollCursor = null;
+        }
+        } finally {
+            this._pollRunning = false;
         }
     }
 
@@ -329,6 +360,18 @@ class AttestationRound {
         // silent: it becomes a status='provider_error' proposal (empty body,
         // empty meta) so the round can quorum-sign an explicit non-ok ATTEST v1
         // (Phase 4) instead of stalling every peer until deadline expiry.
+        // Short-circuit the paid provider call if a consensus round for this rid
+        // is already live (item 2358). A re-poll of a still-running round would
+        // otherwise pay for a fetch that consensus.propose() immediately discards
+        // on its `pending.has(rid)` guard. Checking here moves that existing guard
+        // ahead of the vendor call instead of after it. Worst blast radius is
+        // providers/llm, where the wasted call burns vendor quota on precisely the
+        // degraded rounds already running long.
+        if(this.consensus && typeof this.consensus.isRoundActive === 'function' && this.consensus.isRoundActive(rid)){
+            console.log('AttestationRound: skipping fetch for ' + rid.substring(0,16) + '... (consensus round already active)');
+            return;
+        }
+
         let fetched   = null;
         let myStatus  = 'ok';
         try {
@@ -387,12 +430,16 @@ class AttestationRound {
     // source's delegated keys can't occupy multiple responsible slots; keep each
     // source's lowest-hash key (iterate in hash order).
     //
-    // CONSENSUS-CRITICAL: the indexer (actions/attest.js) must apply the
-    // identical rule or validation forks. The two implementations are currently
-    // behaviorally identical (hash-order sort, source===null keep branch,
-    // redundancy slice), but no cross-service test feeds the same validators +
-    // requestId through both and asserts identical output. Any silent change to
-    // either copy is a fork surface; always update both files together.
+    // CONSENSUS-CRITICAL: this rule exists in THREE copies that must apply it
+    // identically or validation forks (item 2643):
+    //   1. here (AttestationRound._computeResponsibleSet)
+    //   2. the indexer, xchain-indexer/src/actions/attest.js
+    //   3. AttestationPublisher._computeResponsible (failover-rank derivation)
+    // All three are behaviorally identical (hash-order sort, source===null keep
+    // branch, redundancy slice with the SAME Math.max(1, Number(redundancy) || 1)
+    // normalization). No cross-service test yet feeds the same validators +
+    // requestId through all three and asserts identical output. Any silent change
+    // to one copy is a fork surface; always update all three together.
     _computeResponsibleSet(validators, requestId, redundancy, weighted){
         let withHash = validators.map(v => {
             let pk = String(v.pubkey).toLowerCase();

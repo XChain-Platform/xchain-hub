@@ -453,6 +453,40 @@ describe('StateAnchorPublisher', function () {
             expect(nd.rewards.filter(r => r.type === 'anchor_BTC').length).to.equal(1);
         });
 
+        // item 2676: the balance check is a hard pre-send gate, not an advisory WARN.
+        it('skips the flush when a wired DOGE balance is below the floor (item 2676)', async function () {
+            let bus = buildMesh(1);
+            let nd  = bus.nodes[0];
+            nd.pub.setBalanceHook(async () => nd.pub.lowBalanceThreshold - 1);   // below floor
+            await startAll(bus);
+            let before = nd.published.length;
+            let res = await nd.pub.flush();
+            expect(res.skipped).to.equal('below_balance_floor');
+            expect(nd.published.length).to.equal(before);   // nothing broadcast
+        });
+
+        it('skips the flush when a wired DOGE balance is unreadable (fail-closed, item 2676)', async function () {
+            let bus = buildMesh(1);
+            let nd  = bus.nodes[0];
+            nd.pub.setBalanceHook(async () => { throw new Error('rpc down'); });  // -> null
+            await startAll(bus);
+            let before = nd.published.length;
+            let res = await nd.pub.flush();
+            expect(res.skipped).to.equal('balance_unreadable');
+            expect(nd.published.length).to.equal(before);
+        });
+
+        it('publishes normally when the wired balance is above the floor (item 2676)', async function () {
+            let bus = buildMesh(1);
+            let nd  = bus.nodes[0];
+            nd.pub.setBalanceHook(async () => nd.pub.lowBalanceThreshold + 100);
+            await startAll(bus);
+            let res = await nd.pub.flush();
+            await sleep(30);
+            expect(res.skipped).to.be.undefined;
+            expect(nd.published.length).to.be.greaterThan(0);
+        });
+
         it('root-bearing checkpoint emits v5 (v3 shape + publisher tail)', async function () {
             let bus = buildMesh(1, {
                 mutate: (self, db) => {
@@ -1700,6 +1734,34 @@ describe('StateAnchorPublisher', function () {
             'back-fill still applies (rows re-archive on a fresh seq if the checkpoint later confirms)').to.equal(9);
     });
 
+    it('archive mirror gates on the CHECKPOINT network, not this.network, so an unscoped hub retires the push at/above the flag-day (#2359)', async function () {
+        // #2236/ (archive leg): on an unscoped hub (this.network===''),
+        // ARCHIVE_REWARD_ACTIVATION[''] is undefined so isArchiveRewardActive('') is
+        // false and the OLD code failed to retire the mirror even for a checkpoint
+        // whose OWN network is at/above the archive flag-day, push-mirroring a reward
+        // the indexer independently derives from v6 (a COLLECT-spendable double-credit).
+        // The fix reads the checkpoint's network from the stashed identity, so the
+        // mirror correctly retires. Here the checkpoint is regtest AT the flag-day
+        // while the hub is unscoped.
+        arMod.ARCHIVE_REWARD_ACTIVATION.regtest = 0;             // regtest checkpoint IS at/above its archive flag-day
+        let bus = buildMesh(2);
+        let follower = bus.nodes[0];
+        let leader   = bus.nodes[1];
+        expect(follower.pub.network).to.equal('');              // unscoped hub: the drift precondition
+        // Observe the leader AND stash the batch's checkpoint identity (regtest), the
+        // same way _handleSignReq would. The checkpoint verifies on-chain via the
+        // default honest oracle, so the ONLY thing keeping the mirror from firing is
+        // the corrected flag-day gate reading the checkpoint's network.
+        follower.pub._recordObservedArchiveLeader(3, leader.pubkey, CP_ROW);
+        let cMatches = [matchRow('m1', 'finalized')];
+        await follower.pub._handleFinalized({ data: {
+            batch_seq: 3, txid: 'dogetx_scoped', snapshot_block: 100, matches: cMatches, calls: [], rewards: [],
+            sig_pubkey: leader.pubkey, sig: leader.identity.sign(follower.pub._finalizedCanonical(3, 'dogetx_scoped', cMatches.length))
+        }});
+        expect(follower.rewards.some(r => r.type === 'anchor_archive'),
+            'unscoped hub retires the mirror for a checkpoint at/above its OWN archive flag-day').to.equal(false);
+    });
+
     // ── XANC-ELECTED-FORGE-1 (archive half): bind the v1 archive txid ────────────
     // Proving the CHECKPOINT is anchored is not enough: an elected leader could
     // reference a real-but-different anchored checkpoint and still mirror itself the
@@ -2415,5 +2477,74 @@ describe('StateAnchorPublisher: capability-snapshot archive sort is a spec-stabl
         let outB = await capSnaps(newPub(), orderB);
         expect(outA).to.deep.equal(outB);
         expect(outA).to.deep.equal(['aa|srcA', 'aa|srcB']);
+    });
+});
+
+// stop() must settle the archive-attestation round's awaited promise, mirroring
+// the v4/v5 _attestRound teardown (#2360). Without it a stop() mid-round leaves
+// _publishArchive hung on a promise only an unref'd timer could ever settle.
+describe('StateAnchorPublisher stop() archive-attestation teardown (#2360)', function () {
+    function barePub() {
+        return new StateAnchorPublisher({ db: {}, p2pConfig: { DOGE_ADDRESS: 'Dpub1' } });
+    }
+
+    it('resolves a pending _archiveAttestRound with { met:false, sigs:[] } and nulls the field', async function () {
+        let pub = barePub();
+        let settled = null;
+        let timer = setTimeout(() => {}, 1e6);
+        if (timer.unref) timer.unref();
+        pub._archiveAttestRound = { done: false, timer: timer, resolve: (v) => { settled = v; } };
+        await pub.stop();
+        expect(settled, 'awaiting _publishArchive is unblocked on shutdown').to.deep.equal({ met: false, sigs: [] });
+        expect(pub._archiveAttestRound, 'field nulled').to.equal(null);
+    });
+
+    it('is a no-op when the round is already done (no double-resolve)', async function () {
+        let pub = barePub();
+        let calls = 0;
+        pub._archiveAttestRound = { done: true, timer: null, resolve: () => { calls++; } };
+        await pub.stop();
+        expect(calls, 'a completed round is not re-resolved').to.equal(0);
+        expect(pub._archiveAttestRound).to.equal(null);
+    });
+});
+
+// _cpFromRow intentionally omits the SPV roots, and the co-sign guards compare via
+// _rawCanonicalCheckpoint so the presence-gated root suffix can never flip them
+// fail-closed post-flag-day (#2462).
+describe('StateAnchorPublisher checkpoint co-sign guard uses the rootless canonical (#2462)', function () {
+    const ckptMod = require('../../src/checkpoint_commitment_activation.js');
+    let savedRegtest;
+    beforeEach(function () {
+        savedRegtest = ckptMod.CHECKPOINT_COMMITMENT_ACTIVATION.regtest;
+        ckptMod.CHECKPOINT_COMMITMENT_ACTIVATION.regtest = 0;   // roots committed at genesis on regtest
+    });
+    afterEach(function () {
+        ckptMod.CHECKPOINT_COMMITMENT_ACTIVATION.regtest = savedRegtest;
+    });
+
+    it('_rawCanonicalCheckpoint matches across the rootless and root-bearing shapes while canonicalCheckpoint differs', function () {
+        let row = {
+            chain: 'BTC', network: 'regtest', block_index: 494,
+            block_hash: 'c0'.repeat(32), ledger_hash: 'a1'.repeat(32),
+            actions_hash: 'b2'.repeat(32), contract_hash: 'c3'.repeat(32),
+            checkpoint_seq: 7, snapshot_block: 100,
+            state_root: 'd4'.repeat(32), state_root_version: 1,
+            block_merkle_root: 'e5'.repeat(32), block_merkle_version: 1
+        };
+        let rootless = StateAnchorPublisher.prototype._cpFromRow(row);
+        expect(rootless).to.not.have.property('state_root');    // _cpFromRow drops the roots by design
+        let rootBearing = Object.assign({}, rootless, {
+            state_root: row.state_root, state_root_version: row.state_root_version,
+            block_merkle_root: row.block_merkle_root, block_merkle_version: row.block_merkle_version
+        });
+        // The guard (via _rawCanonicalCheckpoint) still binds identity fields and
+        // passes even when exactly one operand carries roots.
+        expect(StateCheckpointEngine._rawCanonicalCheckpoint(rootless))
+            .to.equal(StateCheckpointEngine._rawCanonicalCheckpoint(rootBearing));
+        // Whereas canonicalCheckpoint would DIFFER on the presence-gated suffix,
+        // which is exactly why the guards must not use it.
+        expect(StateCheckpointEngine.canonicalCheckpoint(rootless))
+            .to.not.equal(StateCheckpointEngine.canonicalCheckpoint(rootBearing));
     });
 });

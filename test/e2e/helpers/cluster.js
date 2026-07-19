@@ -376,8 +376,28 @@ function createCluster(nodeCount, overrides) {
                         pm._connectToPeer('127.0.0.1:' + nodes[j].p2pPort);
                     }
                 }
-                // Wait for connections to establish
-                await new Promise(r => setTimeout(r, 1000));
+                // Wait for connections to establish: poll actual peer
+                // WebSocket readiness instead of a fixed sleep, so setup
+                // proceeds as soon as the mesh is up. Best-effort: if the
+                // poll times out we still proceed, preserving the prior
+                // non-fatal behavior (WebSocket.OPEN === 1).
+                await (async () => {
+                    let elapsed = 0, delay = 25, timeout = 3000;
+                    let meshReady = () => nodes.every(n => {
+                        let pm = n.hub.getPeerManager();
+                        if (!pm || !pm.peers) return false;
+                        let open = 0;
+                        for (let [, peer] of pm.peers)
+                            if (peer.ws && peer.ws.readyState === 1) open++;
+                        return open >= (nodeCount - 1);
+                    });
+                    while (elapsed < timeout) {
+                        if (meshReady()) return;
+                        await new Promise(r => setTimeout(r, delay));
+                        elapsed += delay;
+                        delay = Math.min(delay * 2, 250);
+                    }
+                })();
             }
 
             // Phase 4: Register validators in the shared DB (once is enough since shared DB)

@@ -90,6 +90,62 @@ let MAX_TOKENS_DEFAULT  = 1024;
 let DEFAULT_TEMPERATURE = 0;
 let PROMPT_ENVELOPE_VERSION = 1;
 
+// Judge-call token budgets. A reasoning-family judge (gpt-5 / o-series) bills
+// reasoning tokens against max_completion_tokens, so the ~20-token verdict JSON
+// is routinely starved by internal reasoning at the 256 budget and returns
+// finish_reason 'length' with empty content, which agree() maps to no_quorum:
+// the cross-vendor judge fallback then fails exactly when it is needed. Give
+// reasoning judges headroom while keeping the tight bound for chat-family judges.
+const JUDGE_MAX_TOKENS = 256;
+const JUDGE_MAX_TOKENS_REASONING = 2048;
+
+// True for OpenAI reasoning-family models (o-series and gpt-5*), which reject an
+// explicit temperature and bill reasoning tokens against max_completion_tokens.
+// Shared by the OpenAI transport gate and the judge-budget selection in agree().
+function _isReasoningModel(model) {
+    return /^o[0-9]/.test(String(model)) || /^gpt-5/.test(String(model));
+}
+
+// item 2680 - operator kill switch for this paid provider. The only pre-existing
+// lever was failing healthCheck (which the hub penalizes: the validator is still
+// counted in N, so unserved rounds expire and accrue missed_count), i.e. a failure
+// mode, not a control. This is a first-class pause that stops fetch()/agree() from
+// dialing any billed vendor. Two sources, either can pause:
+//   - LLM_PROVIDER_ENABLED=false : operator-local env kill (mirrors the publisher
+//     *_ENABLED idiom, e.g. StateAnchorPublisher ANCHOR_ENABLED). Authoritative and
+//     immediate for the operator; survives a governance hotReload.
+//   - additional_config.enabled=false : governance-driven, federation-wide pause.
+// Default (both unset): enabled, so behavior is unchanged.
+let LLM_ENABLED_CONFIG = true;   // governance additional_config.enabled (default on)
+function _llmEnabled() {
+    if (String(process.env.LLM_PROVIDER_ENABLED || 'true') === 'false') return false;
+    return LLM_ENABLED_CONFIG !== false;
+}
+function _pausedError() {
+    let src = (String(process.env.LLM_PROVIDER_ENABLED || 'true') === 'false')
+        ? 'LLM_PROVIDER_ENABLED=false' : 'additional_config.enabled=false';
+    let err = new Error('llm: provider paused (' + src + '); no paid API call issued');
+    err.paused = true;   // distinct, non-transient marker so callers/health can tell
+    return err;          // a deliberate pause from a real vendor/transport failure
+}
+exports._llmEnabled = _llmEnabled;
+
+// item 2679 - per-call spend ceiling for the claude_spawn transport. The callee
+// (lib/claude-spawn.js) fully plumbs --max-budget-usd but no caller ever supplied
+// it, so the guard was dead. Resolve a positive number from env or governance;
+// anything unset / non-numeric / non-positive means "no budget" (unchanged today).
+//   - LLM_MAX_BUDGET_USD (env)          : operator-local per-call cap
+//   - additional_config.max_budget_usd  : governance per-call cap
+// Env wins when both are set and positive.
+let MAX_BUDGET_USD_CONFIG = null;   // governance additional_config.max_budget_usd
+function _resolveMaxBudgetUsd() {
+    let envVal = parseFloat(process.env.LLM_MAX_BUDGET_USD);
+    if (Number.isFinite(envVal) && envVal > 0) return envVal;
+    if (Number.isFinite(MAX_BUDGET_USD_CONFIG) && MAX_BUDGET_USD_CONFIG > 0) return MAX_BUDGET_USD_CONFIG;
+    return undefined;
+}
+exports._resolveMaxBudgetUsd = _resolveMaxBudgetUsd;
+
 // Map a model id to its vendor. Explicit MODEL_VENDORS overrides win, then
 // id-prefix inference. Unknown ids throw at call time (never guess a vendor:
 // sending a prompt to the wrong API leaks it to an unintended third party).
@@ -120,6 +176,12 @@ exports._setConfig = (def) => {
     if (Number(ac.max_completion_tokens))  MAX_TOKENS_DEFAULT  = Number(ac.max_completion_tokens);
     if (typeof ac.default_temperature === 'number') DEFAULT_TEMPERATURE = ac.default_temperature;
     if (Number(ac.prompt_envelope_version)) PROMPT_ENVELOPE_VERSION = Number(ac.prompt_envelope_version);
+    // Governance kill switch (item 2680) and per-call spend cap (item 2679).
+    if (typeof ac.enabled === 'boolean') LLM_ENABLED_CONFIG = ac.enabled;
+    if (ac.max_budget_usd !== undefined) {
+        let b = parseFloat(ac.max_budget_usd);
+        MAX_BUDGET_USD_CONFIG = (Number.isFinite(b) && b > 0) ? b : null;
+    }
 };
 
 // Issue an LLM call against the user-supplied prompt envelope.
@@ -131,6 +193,8 @@ exports._setConfig = (def) => {
 //     envelope_version?: number }
 exports.fetch = async (payload, options) => {
     options = options || {};
+    // item 2680: kill switch. Refuse to dial any billed vendor while paused.
+    if (!_llmEnabled()) throw _pausedError();
     let envelope;
     try { envelope = JSON.parse(payload); }
     catch (_) { throw new Error('llm: payload must be a JSON envelope'); }
@@ -190,8 +254,20 @@ exports.fetch = async (payload, options) => {
     });
 
     if (!text || text.length === 0) throw new Error('llm: returned empty text');
+
+    // Enforce the caller's response-size cap the same way http_get does. Every
+    // peer's PROPOSE/PREPARE gate silently drops a body over the provider def's
+    // max_response_bytes (AttestationConsensus._maxBodyB64Length), so an over-cap
+    // body fetched here would cost this validator's proposal (or quorum) with no
+    // diagnostic attributable to the provider. Fail loudly at the point of fetch
+    // instead. Do NOT truncate: a clipped LLM response is semantically invalid and
+    // would still poison the attestation, just visibly.
+    let body = Buffer.from(text, 'utf8');
+    let maxBytes = Number(options.maxResponseBytes) || 0;
+    if (maxBytes > 0 && body.length > maxBytes)
+        throw new Error('llm: response ' + body.length + ' bytes exceeds maxResponseBytes cap ' + maxBytes);
     return {
-        body: Buffer.from(text, 'utf8'),
+        body: body,
         meta: model
     };
 };
@@ -203,11 +279,50 @@ exports.fetch = async (payload, options) => {
 // candidate responses, run JUDGE_MODEL at temperature=0, parse JSON
 // verdict { equivalent, canonical_index } and return the canonical
 // proposal (or null on no_quorum).
+// When a caller supplies options.outcome, agree() populates it before every
+// inconclusive (could-not-judge) `return null` so the caller can distinguish
+// "judged not equivalent" from "could not judge" without changing the return
+// contract. Callers that ignore options.outcome keep today's null-only
+// semantics (e.g. byte_equality-style providers where null genuinely means
+// "bytes differ").
+// Single source of truth for "can this OpenAI-vendor model carry the trusted
+// judge framing in a real system/developer turn". Early o-series ids
+// (o1-mini/o1-preview) reject a system-role message outright, so _runLlm
+// falls back to concatenating it into the user turn, collapsing the
+// instruction-hierarchy boundary _buildJudgePrompt relies on. Mirrors the
+// isEarlyOSeries test in _runLlm; keep the two in lockstep.
+function _modelCarriesSystemRole(model){
+    return !/^o1-(mini|preview)/.test(String(model));
+}
+exports._modelCarriesSystemRole = _modelCarriesSystemRole;
+
+function _markInconclusive(options, reason){
+    if (options && options.outcome && typeof options.outcome === 'object') {
+        options.outcome.inconclusive = true;
+        options.outcome.reason = reason;
+    }
+}
+
 exports.agree = async (proposals, options) => {
     options = options || {};
-    if (!Array.isArray(proposals) || proposals.length === 0) return null;
+    // item 2680: kill switch. A single proposal is returned without any billed
+    // judge call, so only gate the paths that would actually dial a vendor (the
+    // multi-proposal judge fan-out below). Guarded again just before _runLlm.
+    let paused = !_llmEnabled();
+    if (!Array.isArray(proposals) || proposals.length === 0) {
+        _markInconclusive(options, 'no_proposals');
+        return null;
+    }
     if (proposals.length === 1) {
         return { body: proposals[0].body, meta: proposals[0].meta };
+    }
+
+    // item 2680: the multi-proposal path below issues a billed judge call. When the
+    // provider is paused, do not dial: mark the round inconclusive (could-not-judge)
+    // and return null, the same contract a judge-transport outage already produces.
+    if (paused) {
+        _markInconclusive(options, 'provider_paused');
+        return null;
     }
 
     // The judge model is supplied by the leader as options.pinnedJudgeModel,
@@ -226,27 +341,55 @@ exports.agree = async (proposals, options) => {
     // unparseable, is a judgment outcome and must not be re-asked of a
     // different model. Leader-local: followers adopt the leader's winner and
     // never re-judge, so this needs no cross-hub determinism.
-    let judgeChain = [judgeModel, ...JUDGE_FALLBACK_MODELS.filter(m => m && m !== judgeModel)];
+    // Only carry models that can receive the trusted judge framing in a real
+    // system/developer turn (see _modelCarriesSystemRole). A model that
+    // cannot is skipped rather than silently flattening the SECURITY
+    // data-vs-instruction boundary into the same user turn as the
+    // nonce-fenced untrusted candidates; if that drops the chain to empty,
+    // the existing !reached -> no_quorum path below still applies.
+    let judgeChain = [judgeModel, ...JUDGE_FALLBACK_MODELS.filter(m => m && m !== judgeModel)]
+        .filter(m => {
+            if (_modelCarriesSystemRole(m)) return true;
+            console.warn('llm: judge model ' + m + ' cannot carry a system/developer role; skipping from judge chain');
+            return false;
+        });
     let judgeText  = null;
     let reached    = false;
+    // Single deadline shared across the whole fallback chain. The caller's
+    // timeoutMs is the round budget (see AttestationConsensus._checkAgree), so a
+    // slow-drip vendor that times out per attempt must not let the chain consume
+    // (chain length) x timeoutMs and overrun the attestation round window. Each
+    // attempt gets the REMAINING budget, and the chain stops advancing once the
+    // budget is exhausted. When no budget is supplied the chain runs on the
+    // transport default per attempt, as before.
+    let deadlineAt = Number(options.timeoutMs) > 0 ? Date.now() + Number(options.timeoutMs) : null;
+    const REMAINING_FLOOR_MS = 250;
     for (let jm of judgeChain) {
+        let attemptTimeoutMs = options.timeoutMs;
+        if (deadlineAt !== null) {
+            let remaining = deadlineAt - Date.now();
+            if (remaining < REMAINING_FLOOR_MS) {
+                console.warn('llm: judge budget exhausted before reaching model ' + jm + '; stopping fallback chain');
+                break;
+            }
+            attemptTimeoutMs = remaining;
+        }
         try {
             judgeText = await _runLlm({
                 prompt:      judgePrompt,
                 system:      judgeSystem,
                 model:       jm,
-                maxTokens:   256,
+                // Reasoning-family judges need headroom past the reasoning-token
+                // spend or the verdict returns truncated/empty; chat-family judges
+                // keep the tight 256 bound.
+                maxTokens:   _isReasoningModel(jm) ? JUDGE_MAX_TOKENS_REASONING : JUDGE_MAX_TOKENS,
                 temperature: 0,
                 // Use the existing json_object machinery (OpenAI response_format
                 // + a JSON-only system instruction for Anthropic/CLI) so the
                 // verdict parse below can require a single JSON object rather
                 // than scraping the first {...} out of free-form prose.
                 format:      'json_object',
-                // Bound the judge call to the caller's round budget (see
-                // AttestationConsensus._checkAgree) rather than the transport's
-                // bare default, so a slow-drip judge vendor cannot overrun the
-                // attestation round window.
-                timeoutMs:   options.timeoutMs
+                timeoutMs:   attemptTimeoutMs
             });
             reached = true;
             if (jm !== judgeModel)
@@ -254,13 +397,14 @@ exports.agree = async (proposals, options) => {
             break;
         } catch (e) {
             // Transport-only invariant: a REACHED judge's outcome (a model
-            // refusal, or a hard non-transient API error) is a judgment
-            // outcome, not a transport failure, and must NOT be re-asked of a
-            // different fallback model. Only transport failures (transient
+            // refusal, a truncation, or a hard non-transient API error) is a
+            // judgment outcome, not a transport failure, and must NOT be re-asked
+            // of a different fallback model. Only transport failures (transient
             // errors, credential/endpoint resolution) may advance the chain.
             if (e && (e.kind === 'refusal' || e.transient === false)) {
                 console.warn('llm: judge ' + jm + ' returned a non-transport outcome (' +
                     (e.kind || 'hard_error') + '); deferring to no_quorum without advancing chain');
+                _markInconclusive(options, e.kind === 'truncation' ? 'judge_truncation' : 'judge_refusal');
                 return null;
             }
             console.warn('llm: judge model ' + jm + ' unreachable: ' + (e && e.message ? e.message : e));
@@ -269,10 +413,14 @@ exports.agree = async (proposals, options) => {
     if (!reached) {
         // Whole judge chain unreachable: defer to no_quorum. Validators will
         // retry on the next round. (Spec §6.4 ack residual risk.)
+        _markInconclusive(options, 'unreachable');
         return null;
     }
 
-    if (!judgeText) return null;
+    if (!judgeText) {
+        _markInconclusive(options, 'empty_verdict');
+        return null;
+    }
 
     // Require the ENTIRE trimmed output to parse as one JSON object (the judge
     // prompt demands exactly that, and json_object mode above biases every
@@ -290,8 +438,12 @@ exports.agree = async (proposals, options) => {
             cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
         }
         judgement = JSON.parse(cleaned);
-        if (!judgement || typeof judgement !== 'object' || Array.isArray(judgement)) return null;
+        if (!judgement || typeof judgement !== 'object' || Array.isArray(judgement)) {
+            _markInconclusive(options, 'unparseable');
+            return null;
+        }
     } catch (_) {
+        _markInconclusive(options, 'unparseable');
         return null;
     }
 
@@ -307,11 +459,16 @@ exports.agree = async (proposals, options) => {
             if (truncated[idx]) {
                 console.warn('llm: judge selected a truncated candidate (index ' + (idx + 1) +
                     '); failing to no_quorum to avoid finalizing bytes the judge never evaluated');
+                _markInconclusive(options, 'truncated_pick');
                 return null;
             }
             return { body: proposals[idx].body, meta: proposals[idx].meta };
         }
     }
+    // Reached the end without a valid equivalent+canonical_index verdict: the
+    // judge genuinely judged the candidates not equivalent (or gave an
+    // out-of-range index). This IS a real verdict, not an inconclusive
+    // could-not-judge outcome, so options.outcome is left as-is.
     return null;
 };
 
@@ -327,6 +484,15 @@ exports.agree = async (proposals, options) => {
 // a failed self-test makes this validator skip llm rounds while still being
 // counted in N, so unserved rounds expire and accrue missed_count against it.
 exports.healthCheck = async (ctx) => {
+    // item 2680: report a deliberate operator/governance pause as its own state,
+    // distinct from a credential/transport failure, so operators can tell a kill
+    // switch from a real outage in the logs. Carries paused:true for callers that
+    // want to treat a pause differently from an ordinary ok:false.
+    if (!_llmEnabled()) {
+        let src = (String(process.env.LLM_PROVIDER_ENABLED || 'true') === 'false')
+            ? 'LLM_PROVIDER_ENABLED=false' : 'additional_config.enabled=false';
+        return { ok: false, paused: true, error: 'llm: provider paused (' + src + ')' };
+    }
     let chainModels = [...APPROVED_MODELS, JUDGE_MODEL, ...JUDGE_FALLBACK_MODELS].filter(Boolean);
     let vendors = [];
     for (let m of chainModels) {
@@ -392,7 +558,7 @@ async function _runLlm({ prompt, system, model, maxTokens, temperature, format, 
         // Early o-series ids (o1-mini/o1-preview) reject a system-role message
         // outright (400). Other o-series models accept the instruction only via
         // the 'developer' role alias. gpt-* (incl. gpt-5) keeps plain 'system'.
-        const isEarlyOSeries = /^o1-(mini|preview)/.test(String(model));
+        const isEarlyOSeries = !_modelCarriesSystemRole(model);
         const isOSeries = /^o[0-9]/.test(String(model));
         let userContent = prompt;
         if (sys) {
@@ -411,7 +577,7 @@ async function _runLlm({ prompt, system, model, maxTokens, temperature, format, 
         // reasoning-model round. Gate on the model id instead: omit temperature for
         // o-series/gpt-5 and let the API default, send it for other chat models
         // (gpt-*) that honor it.
-        const isReasoningModel = /^o[0-9]/.test(String(model)) || /^gpt-5/.test(String(model));
+        const isReasoningModel = _isReasoningModel(model);
         if (!isReasoningModel && typeof temperature === 'number') reqBody.temperature = temperature;
         const result = await _callOpenAi('/v1/chat/completions', reqBody, auth.apiKey, { timeoutMs });
         let choice = Array.isArray(result.choices) ? result.choices[0] : null;
@@ -434,18 +600,37 @@ async function _runLlm({ prompt, system, model, maxTokens, temperature, format, 
             throw err;
         }
         let text   = (msg && typeof msg.content === 'string') ? msg.content : '';
+        // A 'length' stop with empty content is a budget-exhaustion outcome (for
+        // reasoning models, the max_completion_tokens cap was consumed by internal
+        // reasoning before any verdict was emitted). Surface it as a distinct
+        // classified error rather than returning an empty string, which is
+        // indistinguishable from a genuine empty verdict and silently maps to
+        // no_quorum. transient=false so the judge chain does not re-ask a
+        // different model for what is a reached-judge outcome.
+        if (choice && choice.finish_reason === 'length' && text.length === 0) {
+            let err = new Error('llm: OpenAI response truncated (finish_reason=length) with empty content; max_completion_tokens too low');
+            err.kind = 'truncation';
+            err.transient = false;
+            throw err;
+        }
         return text;
     }
 
     if (auth.transport === 'claude_spawn') {
         // The CLI doesn't expose temperature or a hard max-tokens cap;
         // redundancy>=3's judge_model step is what converges spreads.
-        const { result } = await runClaudePrint({
+        // item 2679: thread the resolved per-call budget so --max-budget-usd is
+        // actually emitted (claude-spawn.js only appends the flag for a positive
+        // number, so an undefined budget preserves today's uncapped behavior).
+        const budget = _resolveMaxBudgetUsd();
+        const spawnOpts = {
             prompt,
             model,
             systemPrompt: sys,
             timeoutMs:    timeoutMs || 60000
-        });
+        };
+        if (budget !== undefined) spawnOpts.maxBudgetUsd = budget;
+        const { result } = await runClaudePrint(spawnOpts);
         return result;
     }
 

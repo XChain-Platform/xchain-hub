@@ -32,6 +32,9 @@ function makeFakeChild(opts) {
     child.stdin.end = sinon.stub();
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
+    // Timeout path calls child.kill(); make it a no-op so the internal timer's
+    // rejection can settle the promise.
+    child.kill = sinon.stub();
 
     // Schedule the lifecycle events
     setImmediate(() => {
@@ -43,6 +46,8 @@ function makeFakeChild(opts) {
             child.stdin.emit('error', new Error('write EPIPE'));
             return;
         }
+        // noClose: never emit 'close', so the internal timeout fires instead.
+        if (opts && opts.noClose) return;
         if (opts && opts.stdout) child.stdout.emit('data', Buffer.from(opts.stdout));
         if (opts && opts.stderr) child.stderr.emit('data', Buffer.from(opts.stderr));
         child.emit('close', opts && opts.exitCode !== undefined ? opts.exitCode : 0);
@@ -185,6 +190,60 @@ describe('claude-spawn runClaudePrint()', function () {
         try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
         catch (e) { threw = true; expect(e.message).to.include('stdin error'); }
         expect(threw).to.be.true;
+    });
+
+    // ── #2487: kind/transient classification on rejections ───────────────────
+    // agree()'s judge fallback chain gates on err.kind/err.transient. A reached-CLI
+    // hard outcome (transient=false) must NOT advance the chain; a transport failure
+    // (transient=true) may. Pin each rejection path's classification.
+
+    it('classifies a non-zero exit as a reached-CLI hard outcome (transient=false)', async function () {
+        let { runClaudePrint } = loadClaudeSpawn({ exitCode: 1, stderr: 'api 400' });
+        let err;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.transient).to.equal(false);
+    });
+
+    it('classifies unparseable JSON as transient=false', async function () {
+        let { runClaudePrint } = loadClaudeSpawn({ exitCode: 0, stdout: 'NOT JSON' });
+        let err;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.transient).to.equal(false);
+    });
+
+    it('classifies an empty-result refusal (is_error) as kind=refusal, transient=false', async function () {
+        let jsonOut = JSON.stringify({ is_error: true, subtype: 'refusal', result: '' });
+        let { runClaudePrint } = loadClaudeSpawn({ exitCode: 0, stdout: jsonOut });
+        let err;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.transient).to.equal(false);
+        expect(err.kind).to.equal('refusal');
+    });
+
+    it('classifies a timeout as a transport failure (transient=true)', async function () {
+        // Never emit close: let the internal timeout fire.
+        let { runClaudePrint } = loadClaudeSpawn({ noClose: true });
+        let err;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6', timeoutMs: 20 }); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.message).to.include('timeout');
+        expect(err.transient).to.equal(true);
+    });
+
+    it('classifies a spawn error as a transport failure (transient=true)', async function () {
+        let { runClaudePrint } = loadClaudeSpawn({ spawnError: 'ENOENT' });
+        let err;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.transient).to.equal(true);
     });
 
     // ── CLAUDE_BIN export ────────────────────────────────────────────────────

@@ -99,6 +99,28 @@ describe('OracleConsensus: follower price validation / minSubmissions / broadcas
         expect(oc.pendingRounds.has(ROUND)).to.be.true;
     });
 
+    // #2401: the historical (no-local-submission) band is derived from
+    // ORACLE_MAX_CHANGE_PER_ROUND, the SAME constant the aggregation clamp emits, so a
+    // maximally-clamped aggregate always passes. Boundary is exactly that constant.
+    it('#2401 historical band boundary equals ORACLE_MAX_CHANGE_PER_ROUND', async function () {
+        const { ORACLE_MAX_CHANGE_PER_ROUND } = require('../../src/constants.js');
+        oracleRound.getSubmissions.returns(new Map()); // no local aggregate: historical band applies
+        oc._lastFinalizedPrices = new Map([['BTC/USD', '100000']]);
+        // Exactly at the band (bcgt is strict >) -> co-signs.
+        let atEdge = String(100000 * (1 + ORACLE_MAX_CHANGE_PER_ROUND));
+        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: atEdge }]));
+        expect(oc.pendingRounds.has(ROUND), 'clamped-max move must pass').to.be.true;
+
+        oc.pendingRounds.delete(ROUND);
+        // Just beyond the band -> withheld.
+        let overEdge = String(100000 * (1 + ORACLE_MAX_CHANGE_PER_ROUND) + 1);
+        let events = [];
+        oc.on('oracle:propose-rejected', e => events.push(e));
+        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: overEdge }]));
+        expect(oc.pendingRounds.has(ROUND), 'beyond the band must withhold').to.be.false;
+        expect(events.map(e => e.reason)).to.include('historical-deviation');
+    });
+
     it('minSubmissions defaults to a 2-hub diversity floor', function () {
         let saved = process.env.ORACLE_MIN_SUBMISSIONS;
         delete process.env.ORACLE_MIN_SUBMISSIONS;
@@ -239,5 +261,49 @@ describe('OracleConsensus: follower price validation / minSubmissions / broadcas
         expect(events[0].reason).to.equal('deviation');
         expect(events[0].coinPair).to.equal('BTC/USD');
         expect(events[0].round).to.equal(ROUND);
+    });
+
+    // #2399: the deviation reference must exclude the proposer by VERIFIED PUBKEY, not
+    // just by addr. One pubkey can be bound to several addrs (the registry models this),
+    // so a leader can gossip its submission from addr A and PROPOSE from addr B. An
+    // addr-only exclusion leaves A's price in the reference and lets a pair only the
+    // leader priced self-validate at deviation 0, injecting an arbitrary value.
+    describe('#2399 proposer excluded from deviation reference by pubkey', function () {
+        const ALT_ADDR = 'ws://leader-alt:10001';   // second addr bound to the leader's pubkey
+        const PAIR     = 'BTC/XAU';                  // canonical, leader-only, no finalized history
+
+        beforeEach(function () {
+            pm.validatorPubkeys = new Map([
+                [leader.addr, leader.pubkey],
+                [ALT_ADDR,    leader.pubkey]
+            ]);
+            oracleRound.canonicalPairs = new Set([PAIR]);
+            // The only local submission for PAIR is the leader's own, recorded under its
+            // alternate addr (first-arrival dedup keys it there). No honest hub priced it.
+            oracleRound.getSubmissions.returns(buildSubmissions([
+                { sender: ALT_ADDR, prices: [{ coinPair: PAIR, price: '123' }] }
+            ]));
+        });
+
+        it('withholds co-sign for a leader-only pair proposed from a sibling addr', async function () {
+            let events = [];
+            oc.on('oracle:propose-rejected', e => events.push(e));
+            await oc._handlePropose(proposeEnvelope([{ coinPair: PAIR, price: '123' }]));
+            expect(oc.pendingRounds.has(ROUND)).to.be.false;   // NOT self-validated at deviation 0
+            expect(events.map(e => e.reason)).to.include('unverifiable-new-pair');
+        });
+
+        it('still co-signs when an HONEST distinct hub priced the pair (control)', async function () {
+            // A distinct validator (different pubkey) submits the same pair; it survives the
+            // pubkey exclusion, so the reference carries an independent local aggregate.
+            let honest = VALIDATORS_3.find(v => v.pubkey !== leader.pubkey && v.addr !== pm.validatorAddr);
+            pm.validatorPubkeys.set(honest.addr, honest.pubkey);
+            oracleRound.getSubmissions.returns(buildSubmissions([
+                { sender: ALT_ADDR,    prices: [{ coinPair: PAIR, price: '123' }] },
+                { sender: honest.addr, prices: [{ coinPair: PAIR, price: '123' }] }
+            ]));
+            await oc._handlePropose(proposeEnvelope([{ coinPair: PAIR, price: '123' }]));
+            expect(oc.pendingRounds.has(ROUND)).to.be.true;
+        });
     });
 });

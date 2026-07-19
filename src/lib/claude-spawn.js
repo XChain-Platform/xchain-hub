@@ -101,10 +101,21 @@ async function runClaudePrint(opts) {
             env: { ...process.env, ...auth.env }
         });
 
+        // Classification contract shared with the HTTP transports (providers/llm.js):
+        // err.transient=true marks a TRANSPORT failure the judge fallback chain may
+        // retry on a different model; err.transient=false marks a REACHED-CLI outcome
+        // (the process ran and produced a verdict/error) that must NOT trigger
+        // re-judging, and err.kind='refusal' marks a model refusal, mirroring the
+        // anthropic_api/openai_api paths so refusal reporting is symmetric across
+        // vendors. Without this every bare-Error rejection fell through agree()'s
+        // gate and wrongly advanced the chain past a reached-judge outcome.
+        const rejectTransient = (msg) => { let err = new Error(msg); err.transient = true; safeReject(err); };
+        const rejectHard = (msg, kind) => { let err = new Error(msg); err.transient = false; if (kind) err.kind = kind; safeReject(err); };
+
         const timer = setTimeout(() => {
             try { child.kill('SIGTERM'); } catch {}
             setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 2000);
-            safeReject(new Error('claude-spawn: timeout after ' + timeoutMs + 'ms'));
+            rejectTransient('claude-spawn: timeout after ' + timeoutMs + 'ms');
         }, timeoutMs);
 
         child.stdout.on('data', (chunk) => { stdout += chunk.toString('utf8'); });
@@ -112,7 +123,7 @@ async function runClaudePrint(opts) {
 
         child.on('error', (e) => {
             clearTimeout(timer);
-            safeReject(new Error('claude-spawn: spawn error: ' + e.message));
+            rejectTransient('claude-spawn: spawn error: ' + e.message);
         });
 
         // stdin write failures on a child that exits early (bad flag, late
@@ -124,24 +135,33 @@ async function runClaudePrint(opts) {
         // failures only, not pipe errors.
         child.stdin.on('error', (e) => {
             clearTimeout(timer);
-            safeReject(new Error('claude-spawn: stdin error: ' + e.message));
+            rejectTransient('claude-spawn: stdin error: ' + e.message);
         });
 
         child.on('close', (code) => {
             clearTimeout(timer);
             if (code !== 0) {
-                safeReject(new Error('claude-spawn: exit ' + code + (stderr ? ': ' + stderr.trim().slice(0, 400) : '')));
+                // Non-zero exit is how a CLI-side API 4xx or model-level hard
+                // failure surfaces: the process was reached, so this is not a
+                // transport failure and must not advance the judge chain.
+                rejectHard('claude-spawn: exit ' + code + (stderr ? ': ' + stderr.trim().slice(0, 400) : ''));
                 return;
             }
             let json;
             try { json = JSON.parse(stdout); }
             catch (e) {
-                safeReject(new Error('claude-spawn: unparseable JSON from CLI: ' + stdout.slice(0, 200)));
+                rejectHard('claude-spawn: unparseable JSON from CLI: ' + stdout.slice(0, 200));
                 return;
             }
             const result = (json && typeof json.result === 'string') ? json.result : '';
             if (!result) {
-                safeReject(new Error('claude-spawn: CLI returned no result text'));
+                // Empty result text on a clean exit is how a refusal-with-no-text
+                // manifests on this path. Classify it as a refusal when the CLI
+                // JSON flags an error, otherwise as a reached-CLI hard outcome;
+                // either way it is non-transient and must not re-judge.
+                let isRefusal = !!(json && (json.is_error === true ||
+                    /refus|declin|blocked|error/i.test(String(json.subtype || ''))));
+                rejectHard('claude-spawn: CLI returned no result text', isRefusal ? 'refusal' : undefined);
                 return;
             }
             safeResolve({ result, json, stderr });
@@ -152,7 +172,7 @@ async function runClaudePrint(opts) {
             child.stdin.end();
         } catch (e) {
             clearTimeout(timer);
-            safeReject(new Error('claude-spawn: stdin write failed: ' + e.message));
+            rejectTransient('claude-spawn: stdin write failed: ' + e.message);
         }
     });
 }

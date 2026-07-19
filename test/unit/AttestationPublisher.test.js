@@ -569,12 +569,18 @@ describe('AttestationPublisher: queue I/O', function () {
         expect(pub._readQueue()).to.have.length(1);
     });
 
-    it('_enqueue warns (does not throw) when queue path is unwritable', function () {
-        const warnStub = sinon.stub(console, 'warn');
+    it('_enqueue logs critical + returns false (does not throw) when queue path is unwritable (item 2681)', function () {
+        const errStub = sinon.stub(console, 'error');
         pub.queuePath = '/nonexistent-root/cannot-write.jsonl';
-        pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
-        expect(warnStub.called).to.equal(true);
-        warnStub.restore();
+        let ok = pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' });
+        expect(ok).to.equal(false);
+        expect(errStub.called).to.equal(true);
+        expect(pub._enqueueFailures).to.equal(1);
+        errStub.restore();
+    });
+
+    it('_enqueue returns true on a durable write (item 2681)', function () {
+        expect(pub._enqueue({ ts: 1, requestId: 'aa'.repeat(32), wire: 'W1' })).to.equal(true);
     });
 
     it('_rewriteQueue logs error (does not throw) on unwritable path', function () {
@@ -1108,12 +1114,17 @@ describe('AttestationPublisher: onRequestFinalized edge cases', function () {
         try { fs.unlinkSync(pub.queuePath); } catch (_) {}
     });
 
-    it('uses event.signatures.length as redundancy fallback when request.redundancy is absent', async function () {
+    it('normalizes redundancy to 1 (not signatures.length) when request.redundancy is absent (item 2643)', async function () {
+        // Canonical rule shared with AttestationRound and the indexer:
+        // Math.max(1, Number(redundancy) || 1). The prior signatures.length
+        // fallback produced a responsible list of a different LENGTH than
+        // consensus derived, mis-ranking failover step-in.
         const pub = makePublisher(MY_PUB);
         pub.queuePath = path.join(os.tmpdir(), 'attest-redfallback-' + process.pid + '.jsonl');
         fs.writeFileSync(pub.queuePath, '');
         const bcast = sinon.stub().resolves({ txid: 'tx1' });
         pub.setBroadcastHook(bcast);
+        const computeStub = sinon.stub(pub, '_computeResponsible').resolves([MY_PUB]);
 
         await pub.onRequestFinalized({
             requestId:    '66'.repeat(32),
@@ -1121,12 +1132,17 @@ describe('AttestationPublisher: onRequestFinalized edge cases', function () {
             responseBody: Buffer.from('ok'),
             status:       'ok',
             meta:         '',
-            signatures:   [{ pubkey: MY_PUB, sig: 'ee'.repeat(64) }],
-            leaderPubkey: MY_PUB
-            // no request field, redundancy falls back to signatures.length
+            // three signers, but request carries a block and NO redundancy:
+            signatures:   [{ pubkey: MY_PUB, sig: 'ee'.repeat(64) },
+                           { pubkey: LEADER_PUB, sig: 'ff'.repeat(64) },
+                           { pubkey: 'cc'.repeat(32), sig: 'dd'.repeat(64) }],
+            leaderPubkey: MY_PUB,
+            request:      { block_index: 100 }
         });
 
-        expect(bcast.calledOnce).to.equal(true);
+        expect(computeStub.calledOnce).to.equal(true);
+        // redundancy arg is 1 (canonical), NOT 3 (signatures.length).
+        expect(computeStub.firstCall.args[2]).to.equal(1);
         try { fs.unlinkSync(pub.queuePath); } catch (_) {}
     });
 
@@ -1356,7 +1372,10 @@ describe('AttestationPublisher: _processQueue (no broadcaster + replay error)', 
     it('logs an error and retains entry when replay broadcast throws', async function () {
         const pub = makePublisher(MY_PUB);
         pub.queuePath = queueFile;
-        const bcast = sinon.stub().rejects(new Error('network flap'));
+        // Definitive (never-sent) error so this exercises the plain-retry path, not
+        // the ambiguous-defer path (item 2674), which has its own tests below.
+        const refused = new Error('connect ECONNREFUSED'); refused.code = 'ECONNREFUSED';
+        const bcast = sinon.stub().rejects(refused);
         pub.setBroadcastHook(bcast);
         sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set(['bb'.repeat(32)]));
         const errStub = sinon.stub(console, 'error');
@@ -1504,5 +1523,161 @@ describe('AttestationPublisher: _defaultBroadcast', function () {
         const createTxArgs = encoder.createTx.args[0][0];
         expect(createTxArgs.data).to.equal('wire-payload');
         expect(createTxArgs.encoding).to.equal('P2SH');
+    });
+});
+
+// ---------- items 2674 / 2676 / 2678 / 2681: effector-safety guards ----------
+
+describe('AttestationPublisher: effector-safety guards', function () {
+
+    const wireFor = (rid) => 'ATTEST|1|' + rid + '|http_get|Zm9v|ok||1|' + MY_PUB + '|' + 'ee'.repeat(64);
+
+    afterEach(function () {
+        sinon.restore();
+        delete process.env.ATTEST_ENABLED;
+        delete process.env.ATTEST_MAX_PUBLISHES_PER_WINDOW;
+        delete process.env.ATTEST_SPEND_WINDOW_MS;
+    });
+
+    // ── item 2678 kill switch ──
+    it('defaults to enabled', function () {
+        expect(makePublisher(MY_PUB).enabled).to.equal(true);
+    });
+
+    it('disabled: onRequestFinalized enqueues and broadcasts nothing (item 2678)', async function () {
+        process.env.ATTEST_ENABLED = 'false';
+        const pub = makePublisher(MY_PUB);
+        fs.writeFileSync(pub.queuePath, '');
+        const bcast = sinon.stub().resolves({ txid: 'x' });
+        pub.setBroadcastHook(bcast);
+        await pub.onRequestFinalized({
+            requestId: '33'.repeat(32), providerId: 'http_get', responseBody: Buffer.from('ok'),
+            status: 'ok', meta: '', signatures: [{ pubkey: MY_PUB, sig: 'ee'.repeat(64) }], leaderPubkey: MY_PUB
+        });
+        expect(bcast.called).to.equal(false);
+        expect(readQueue(pub.queuePath).length).to.equal(0);
+    });
+
+    it('disabled: _processQueue does not query the indexer or broadcast (item 2678)', async function () {
+        process.env.ATTEST_ENABLED = 'false';
+        const pub = makePublisher(MY_PUB);
+        const fetchStub = sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set());
+        const bcast = sinon.stub().resolves({ txid: 'x' });
+        pub.setBroadcastHook(bcast);
+        writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: '33'.repeat(32),
+            wire: wireFor('33'.repeat(32)), responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
+        await pub._processQueue();
+        expect(fetchStub.called).to.equal(false);
+        expect(bcast.called).to.equal(false);
+    });
+
+    // ── item 2681 enqueue-gate: no spend without a durable record ──
+    it('leader skips broadcast when the durable enqueue fails (item 2681)', async function () {
+        const pub = makePublisher(MY_PUB);
+        pub.queuePath = '/nonexistent-root/cannot-write.jsonl';
+        const bcast = sinon.stub().resolves({ txid: 'x' });
+        pub.setBroadcastHook(bcast);
+        const errStub = sinon.stub(console, 'error');
+        await pub.onRequestFinalized({
+            requestId: '77'.repeat(32), providerId: 'http_get', responseBody: Buffer.from('ok'),
+            status: 'ok', meta: '', signatures: [{ pubkey: MY_PUB, sig: 'ee'.repeat(64) }], leaderPubkey: MY_PUB
+        });
+        expect(bcast.called, 'must not spend a BTC fee without a durable record').to.equal(false);
+        expect(pub._enqueueFailures).to.equal(1);
+        errStub.restore();
+    });
+
+    // ── item 2681 durable spend-audit record ──
+    it('writes an append-only spend-audit record on a successful broadcast (item 2681)', async function () {
+        const pub = makePublisher(MY_PUB);
+        pub.spendLogPath = path.join(os.tmpdir(), 'attest-spend-' + process.pid + '-' + Math.floor(Math.random() * 1e9) + '.jsonl');
+        const rid = 'ab'.repeat(32);
+        pub.setBroadcastHook(sinon.stub().resolves({ txid: 'txid-123' }));
+        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set([rid]));
+        writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: rid, wire: wireFor(rid),
+            responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
+        await pub._processQueue();
+        const recs = readQueue(pub.spendLogPath);
+        expect(recs.length).to.equal(1);
+        expect(recs[0].txid).to.equal('txid-123');
+        expect(recs[0].requestId).to.equal(rid);
+        try { fs.unlinkSync(pub.spendLogPath); } catch (_) {}
+    });
+
+    // ── item 2676 per-window BTC spend ceiling ──
+    it('sweep stops at the per-window ceiling, retaining the rest (item 2676)', async function () {
+        process.env.ATTEST_MAX_PUBLISHES_PER_WINDOW = '1';
+        const pub = makePublisher(MY_PUB);
+        const rid1 = '88'.repeat(32), rid2 = '99'.repeat(32);
+        pub.setBroadcastHook(sinon.stub().resolves({ txid: 'x' }));
+        const bcast = pub.broadcastFn;
+        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set([rid1, rid2]));
+        writeQueue(pub.queuePath, [
+            { ts: Date.now() - 10 * 60000, requestId: rid1, wire: wireFor(rid1), responsible: [MY_PUB], leaderPubkey: MY_PUB },
+            { ts: Date.now() - 10 * 60000, requestId: rid2, wire: wireFor(rid2), responsible: [MY_PUB], leaderPubkey: MY_PUB }
+        ]);
+        await pub._processQueue();
+        expect(bcast.calledOnce).to.equal(true);
+        expect(readQueue(pub.queuePath).length).to.equal(1);
+    });
+
+    // ── item 2674 ambiguous send: never blind re-broadcast ──
+    it('marks an ambiguous live-broadcast failure and retains the entry (item 2674)', async function () {
+        const pub = makePublisher(MY_PUB);
+        fs.writeFileSync(pub.queuePath, '');
+        const timeout = new Error('socket timeout'); timeout.code = 'ETIMEDOUT';
+        pub.setBroadcastHook(sinon.stub().rejects(timeout));
+        const rid = '33'.repeat(32);
+        await pub.onRequestFinalized({
+            requestId: rid, providerId: 'http_get', responseBody: Buffer.from('ok'),
+            status: 'ok', meta: '', signatures: [{ pubkey: MY_PUB, sig: 'ee'.repeat(64) }], leaderPubkey: MY_PUB
+        });
+        expect(pub._ambiguousSends.has(rid)).to.equal(true);
+        expect(pub._publishedRequests.has(rid)).to.equal(false);
+        expect(readQueue(pub.queuePath).length).to.equal(1);   // retained for the sweep
+    });
+
+    it('sweep DEFERS re-broadcast of a recently-ambiguous, still-pending request (item 2674)', async function () {
+        const pub = makePublisher(MY_PUB);
+        const rid = '44'.repeat(32);
+        pub._ambiguousSends.set(rid, Date.now());   // just now, within cooldown
+        const bcast = sinon.stub().resolves({ txid: 'x' });
+        pub.setBroadcastHook(bcast);
+        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set([rid]));
+        writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: rid, wire: wireFor(rid),
+            responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
+        await pub._processQueue();
+        expect(bcast.called, 'must not re-broadcast within the ambiguous cooldown').to.equal(false);
+        expect(readQueue(pub.queuePath).length).to.equal(1);
+    });
+
+    it('sweep re-broadcasts once the ambiguous cooldown passes and it is still pending (item 2674)', async function () {
+        const pub = makePublisher(MY_PUB);
+        const rid = '55'.repeat(32);
+        pub.ambiguousCooldownMs = 1000;
+        pub._ambiguousSends.set(rid, Date.now() - 5000);   // older than cooldown
+        const bcast = sinon.stub().resolves({ txid: 'x' });
+        pub.setBroadcastHook(bcast);
+        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set([rid]));
+        writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: rid, wire: wireFor(rid),
+            responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
+        await pub._processQueue();
+        expect(bcast.calledOnce).to.equal(true);
+        expect(pub._ambiguousSends.has(rid)).to.equal(false);
+    });
+
+    it('sweep drops an ambiguous request that has LEFT the pending set, without re-broadcast (item 2674)', async function () {
+        const pub = makePublisher(MY_PUB);
+        const rid = '66'.repeat(32);
+        pub._ambiguousSends.set(rid, Date.now());
+        const bcast = sinon.stub().resolves({ txid: 'x' });
+        pub.setBroadcastHook(bcast);
+        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set());   // landed/expired
+        writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: rid, wire: wireFor(rid),
+            responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
+        await pub._processQueue();
+        expect(bcast.called).to.equal(false);
+        expect(pub._ambiguousSends.has(rid)).to.equal(false);
+        expect(readQueue(pub.queuePath).length).to.equal(0);
     });
 });

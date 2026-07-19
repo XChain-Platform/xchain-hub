@@ -393,6 +393,50 @@ describe('RewardTracker', function () {
     });
 
     // -----------------------------------------------------------------
+    // Indexer URL resolution via the hub resolver (#2652)
+    // -----------------------------------------------------------------
+
+    describe('BTC indexer URL resolution (#2652)', function () {
+
+        it('resolves the endpoint through hub._resolveBtcIndexerUrl when the env field is empty (configs-table hub)', async function () {
+            // No BTC_INDEXER_API_URL exported: the constructor field is ''.
+            rt.btcIndexerApiUrl = '';
+            hub._resolveBtcIndexerUrl = sinon.stub().resolves('http://configs-table-indexer:3000');
+            let post = sinon.stub(axios, 'post').resolves({ data: { result: { source: 'bc1qsrc' } } });
+            let result = await rt.resolveSourceByPubkey(hexPk(1), 953190);
+            expect(hub._resolveBtcIndexerUrl.calledOnce).to.be.true;
+            expect(result).to.equal('bc1qsrc');
+            expect(post.getCall(0).args[0]).to.equal('http://configs-table-indexer:3000');
+        });
+
+        it('pushes rewards to the hub-resolved endpoint when the env field is empty', async function () {
+            rt.btcIndexerApiUrl = '';
+            hub._resolveBtcIndexerUrl = sinon.stub().resolves('http://configs-table-indexer:3000');
+            let post = sinon.stub(axios, 'post').resolves({});
+            await rt._pushRewardsToBtcIndexer(7, [hexPk(1)], '5.00000000', 800000, 'anchor_archive');
+            expect(post.getCall(0).args[0]).to.equal('http://configs-table-indexer:3000');
+        });
+
+        it('still fails closed (null / no push) when neither env nor the hub resolver yields a URL', async function () {
+            rt.btcIndexerApiUrl = '';
+            hub._resolveBtcIndexerUrl = sinon.stub().resolves('');
+            let post = sinon.stub(axios, 'post').resolves({});
+            let result = await rt.resolveSourceByPubkey(hexPk(1), 1);
+            expect(result).to.equal(null);
+            await rt._pushRewardsToBtcIndexer(1, [hexPk(1)], '1.00000000', 1);
+            expect(post.called).to.be.false;
+        });
+
+        it('falls back to the env-captured field when the hub exposes no resolver', async function () {
+            rt.btcIndexerApiUrl = 'http://env-indexer:3000';
+            expect(typeof hub._resolveBtcIndexerUrl).to.not.equal('function');
+            let post = sinon.stub(axios, 'post').resolves({ data: { result: { source: 's' } } });
+            await rt.resolveSourceByPubkey(hexPk(1), 1);
+            expect(post.getCall(0).args[0]).to.equal('http://env-indexer:3000');
+        });
+    });
+
+    // -----------------------------------------------------------------
     // getUnclaimedRewards()
     // -----------------------------------------------------------------
 

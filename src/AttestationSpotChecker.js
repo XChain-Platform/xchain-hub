@@ -310,13 +310,26 @@ class AttestationSpotChecker {
         let expectedBody  = Buffer.from(String(entry.expectedPattern || ''), 'utf8');
 
         let verdict;
+        let outcome = {};
         try {
             verdict = await Promise.resolve(provider.agree([
                 { body: publishedBody, meta: String(event.meta || '') },
                 { body: expectedBody,  meta: String(event.meta || '') }
-            ]));
+            ], { outcome }));
         } catch (e) {
             console.warn('AttestationSpotChecker: judge call threw for ' + rid.substring(0, 16) + '...: ', e);
+            return;
+        }
+
+        if (!verdict && outcome.inconclusive) {
+            // The judge could not reach a verdict (unreachable chain, refusal,
+            // unparseable output, or a truncated-candidate fail-closed pick).
+            // That is neutral, not a failure: it must not accrue slash
+            // evidence against the signers, matching every other inconclusive
+            // branch in this method (lines above: non-ok finalization,
+            // provider mismatch, judge call threw).
+            console.warn('AttestationSpotChecker: inconclusive judge verdict on ' + rid.substring(0, 16) +
+                         '... (reason=' + outcome.reason + '); no evidence recorded');
             return;
         }
 
