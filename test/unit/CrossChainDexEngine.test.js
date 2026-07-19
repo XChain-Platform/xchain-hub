@@ -833,6 +833,84 @@ describe('CrossChainDexEngine', function () {
         });
     });
 
+    // ── XCC-2: the discovery path must page the whole open book via the keyset cursor,
+    // not a one-shot limit:500, or a chain with >500 open cross-chain offers silently
+    // drops the newest (never discovered, never matched). ──
+    describe('_fetchOpenOffers(): keyset cursor paging (XCC-2)', function () {
+        it('follows next_cursor across truncated pages and accumulates the full book', async function () {
+            let eng = new CrossChainDexEngine(makeDexHub());
+            let call = sinon.stub(eng, '_indexerCall');
+            // Page 1: truncated, next_cursor 2. Page 2: truncated, next_cursor 4. Page 3: tail.
+            call.onCall(0).resolves({ network: 'regtest', latest_block_index: 100, truncated: true,  next_cursor: 2,
+                                      orders: [{ action_index: 1, block_index: 1 }, { action_index: 2, block_index: 1 }] });
+            call.onCall(1).resolves({ network: 'regtest', latest_block_index: 101, truncated: true,  next_cursor: 4,
+                                      orders: [{ action_index: 3, block_index: 1 }, { action_index: 4, block_index: 1 }] });
+            call.onCall(2).resolves({ network: 'regtest', latest_block_index: 102, truncated: false, next_cursor: 5,
+                                      orders: [{ action_index: 5, block_index: 1 }] });
+            let res = await eng._fetchOpenOffers('BTC', { limit: 2 });
+            expect(res.orders.map(o => o.action_index)).to.deep.equal([1, 2, 3, 4, 5]);
+            // network + latest pinned to the FIRST page for a consistent confirmation-depth tip.
+            expect(res.network).to.equal('regtest');
+            expect(res.latest_block_index).to.equal(100);
+            expect(call.callCount).to.equal(3);
+            // The cursor is threaded from each page's next_cursor.
+            expect(call.getCall(1).args[2]).to.deep.equal({ limit: 2, after_action_index: 2 });
+            expect(call.getCall(2).args[2]).to.deep.equal({ limit: 2, after_action_index: 4 });
+        });
+
+        it('makes a single call when the first page is not truncated (backward compatible)', async function () {
+            let eng = new CrossChainDexEngine(makeDexHub());
+            let call = sinon.stub(eng, '_indexerCall').resolves({
+                network: 'regtest', latest_block_index: 20,
+                orders: [{ action_index: 1, block_index: 11 }]   // no `truncated` field = pre-XCC-2 indexer
+            });
+            let res = await eng._fetchOpenOffers('BTC', { limit: 500 });
+            expect(call.callCount).to.equal(1);
+            expect(res.orders.map(o => o.action_index)).to.deep.equal([1]);
+        });
+
+        it('falls back to the batch max action_index when the indexer omits next_cursor', async function () {
+            let eng = new CrossChainDexEngine(makeDexHub());
+            let call = sinon.stub(eng, '_indexerCall');
+            call.onCall(0).resolves({ network: 'regtest', latest_block_index: 9, truncated: true,
+                                      orders: [{ action_index: 3, block_index: 1 }, { action_index: 8, block_index: 1 }] });
+            call.onCall(1).resolves({ network: 'regtest', latest_block_index: 9, truncated: false,
+                                      orders: [{ action_index: 12, block_index: 1 }] });
+            let res = await eng._fetchOpenOffers('BTC', { limit: 2 });
+            expect(res.orders.map(o => o.action_index)).to.deep.equal([3, 8, 12]);
+            expect(call.getCall(1).args[2]).to.deep.equal({ limit: 2, after_action_index: 8 });
+        });
+
+        it('breaks (never spins) when a truncated page fails to advance the cursor', async function () {
+            let eng = new CrossChainDexEngine(makeDexHub());
+            // Always truncated with a non-advancing cursor: the guard must stop after page 2.
+            let call = sinon.stub(eng, '_indexerCall').resolves({
+                network: 'regtest', latest_block_index: 5, truncated: true, next_cursor: 4,
+                orders: [{ action_index: 4, block_index: 1 }]
+            });
+            let res = await eng._fetchOpenOffers('BTC', { limit: 1 });
+            // page 0 sets after=4; page 1 returns next_cursor 4 (<= 4) → break. Two calls, no spin.
+            expect(call.callCount).to.equal(2);
+            expect(res.orders.length).to.be.greaterThan(0);
+        });
+
+        it('_discoverAndMatch pages the book and matches an offer beyond the first page', async function () {
+            let eng = new CrossChainDexEngine(makeDexHub());
+            eng.minConfirmations = { BTC: 1, LTC: 1, DOGE: 1 };
+            eng.indexers.BTC.url = 'http://btc';
+            let call = sinon.stub(eng, '_indexerCall');
+            call.onCall(0).resolves({ network: 'regtest', latest_block_index: 50, truncated: true, next_cursor: 1,
+                                      orders: [{ action_index: 1, block_index: 10 }] });
+            call.onCall(1).resolves({ network: 'regtest', latest_block_index: 55, truncated: false, next_cursor: 2,
+                                      orders: [{ action_index: 2, block_index: 10 }] });
+            let captured;
+            sinon.stub(eng, '_findMatches').callsFake((obc) => { captured = obc; return []; });
+            await eng._discoverAndMatch();
+            // Both pages' offers reach the matcher; the confirmation-depth tip is the first page's.
+            expect((captured.BTC || []).map(o => o.action_index)).to.have.members([1, 2]);
+        });
+    });
+
     // ──  / XDEX-CONF-1: the confirmation floor is per-coin, defaulting to the
     // chain-registry attestation depths the sibling CrossChainCallEngine already uses. ──
     describe('minConfirmations per-coin resolution ', function () {

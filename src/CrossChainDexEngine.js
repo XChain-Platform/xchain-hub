@@ -241,7 +241,13 @@ class CrossChainDexEngine extends EventEmitter {
         await Promise.all(ALLOWED_CHAINS.map(async (coin) => {
             if(!this.indexers[coin].url){ offersByCoin[coin] = []; return; }
             try {
-                let res = await this._indexerCall(coin, 'getopencrosschainorders', { limit: 500 });
+                // Page the full open book via the keyset cursor rather than a one-shot
+                // limit:500 (XCC-2): a chain holding >500 simultaneously-open cross-chain
+                // offers would otherwise silently drop the newest, which are never discovered
+                // or matched. _fetchOpenOffers loops until the indexer reports the book is no
+                // longer truncated (bounded by a hard page cap so a misbehaving indexer that
+                // keeps flagging truncated can't spin forever).
+                let res = await this._fetchOpenOffers(coin, { limit: 500 });
                 // Tag every offer with its home indexer's network (authoritative). An offer
                 // with no network (pre-network-scoping indexer) is unsafe to match, so we drop
                 // the whole coin's book rather than risk a network-agnostic match.
@@ -594,7 +600,9 @@ class CrossChainDexEngine extends EventEmitter {
     async _findOpenOffer(coin, actionIndex){
         if(!this.indexers[coin] || !this.indexers[coin].url) return null;
         let res;
-        try { res = await this._indexerCall(coin, 'getopencrosschainorders', { limit: 500 }); }
+        // Page the full book (XCC-2): a one-shot limit:500 silently fails to re-confirm any
+        // offer whose action_index sits past the cap, which would wrongly reject a valid match.
+        try { res = await this._fetchOpenOffers(coin, { limit: 500 }); }
         catch(e){ return null; }
         if(!res || !Array.isArray(res.orders) || !res.network) return null;
         let latest = Number(res.latest_block_index);
@@ -776,6 +784,47 @@ class CrossChainDexEngine extends EventEmitter {
                     this.broadcaster.broadcastDeletion(evt);
             }
         }
+    }
+
+    // Fetch a chain's ENTIRE open cross-chain book, paging the indexer's keyset cursor until
+    // it reports the book is no longer truncated (XCC-2). Returns { network, latest_block_index,
+    // orders } shaped like a single getopencrosschainorders response, with orders accumulated
+    // across pages. network + latest_block_index are pinned to the FIRST page so the caller's
+    // confirmation-depth floor uses one consistent tip across the whole book. Bounded by a hard
+    // page cap (defense against an indexer that keeps flagging truncated without advancing) and
+    // by requiring the cursor to strictly advance each page. Older indexers that don't return a
+    // next_cursor fall back to the max action_index in the batch; ones that never set truncated
+    // (pre-XCC-2) resolve in a single page, unchanged.
+    async _fetchOpenOffers(coin, opts){
+        const MAX_PAGES = 40;                 // >= 20k offers at limit 500; a hard anti-spin bound
+        let limit   = (opts && Number.isFinite(Number(opts.limit))) ? Number(opts.limit) : 500;
+        let orders  = [];
+        let network = '';
+        let latest  = undefined;
+        let after   = undefined;
+        for(let page = 0; page < MAX_PAGES; page++){
+            let params = { limit };
+            if(after !== undefined) params.after_action_index = after;
+            let res = await this._indexerCall(coin, 'getopencrosschainorders', params);
+            if(!res) break;
+            if(page === 0){
+                network = res.network ? String(res.network) : '';
+                latest  = res.latest_block_index;
+            }
+            let batch = Array.isArray(res.orders) ? res.orders : [];
+            if(batch.length) orders = orders.concat(batch);
+            if(res.truncated !== true) break;         // reached the tail of the book
+            // Advance the keyset cursor: prefer the server-provided next_cursor, else the max
+            // action_index in this batch. Stop if it can't strictly advance (empty batch or a
+            // non-advancing/absent cursor) so a buggy indexer can never loop forever.
+            let nextCursor = (res.next_cursor != null)
+                ? Number(res.next_cursor)
+                : batch.reduce((m, o) => Math.max(m, Number(o.action_index) || 0), Number.NEGATIVE_INFINITY);
+            if(!Number.isFinite(nextCursor)) break;
+            if(after !== undefined && nextCursor <= Number(after)) break;
+            after = nextCursor;
+        }
+        return { network, latest_block_index: latest, orders };
     }
 
     async _indexerCall(coin, method, params){

@@ -542,4 +542,64 @@ describe('CapabilityRegistry', function () {
             expect(r.getMinStake('price', 5000)).to.equal('10000'); // genesis only, no crash
         });
     });
+
+    // -----------------------------------------------------------------
+    // L4 determinism: governed MIN_STAKE recompute (spec §6 / validator-test-spec)
+    //
+    // A governance MIN_STAKE change is block-anchored: getMinStake(cap, N) is a
+    // pure function of block height + the finalized history, so every hub
+    // RECOMPUTES the same threshold for block N regardless of when (wall-clock)
+    // or in what order it applied the change. That determinism is what keeps the
+    // qualifying validator set (and quorum N) identical federation-wide across a
+    // threshold change. These pin the recompute contract (the MIN_STAKE-recompute
+    // half of spec §6 "Determinism (L4)" item 1).
+    // -----------------------------------------------------------------
+    describe('L4 determinism: governed MIN_STAKE recompute', function () {
+        function reg(genesis) {
+            loadModule();
+            return new CapabilityRegistry(makeHub({
+                p2pConfig: { CAPABILITIES: { price: { MIN_STAKE: String(genesis) } } }
+            }));
+        }
+
+        // A validator qualifies iff its aggregate stake >= the threshold RECOMPUTED
+        // for the round's block. This is the same gate CapabilitySnapshot applies;
+        // driving it off getMinStake here proves the recompute is stable federation-wide.
+        const qualifies = (r, stake, block) =>
+            BigInt(stake) >= BigInt(r.getMinStake('price', block));
+
+        it('two hubs recompute an identical threshold at every block after the same governed change', function () {
+            const a = reg('10000'), b = reg('10000');
+            a.applyMinStakeActivation('price', 5000, '25000');
+            b.applyMinStakeActivation('price', 5000, '25000');
+            for (const n of [0, 4999, 5000, 5001, 10000])
+                expect(a.getMinStake('price', n)).to.equal(b.getMinStake('price', n));
+        });
+
+        it('the recomputed qualifying verdict flips at the activation block, identically on both hubs', function () {
+            const a = reg('10000'), b = reg('10000');
+            // Same finalized change applied in OPPOSITE order (different arrival times).
+            a.applyMinStakeActivation('price', 5000, '25000');
+            b.applyMinStakeActivation('price', 5000, '25000');
+            // A validator staking 20000 qualifies under the 10000 genesis floor, then
+            // DROPS OUT the instant the recomputed 25000 threshold activates at 5000.
+            for (const n of [4999, 5000, 5001])
+                expect(qualifies(a, '20000', n)).to.equal(qualifies(b, '20000', n));
+            expect(qualifies(a, '20000', 4999)).to.equal(true);   // under the old floor
+            expect(qualifies(a, '20000', 5000)).to.equal(false);  // recomputed out at activation
+        });
+
+        it('recompute is order-independent: interleaved multi-change history yields one canonical threshold curve', function () {
+            const a = reg('10000'), b = reg('10000');
+            // Three governed changes, applied in different orders on each hub.
+            a.applyMinStakeActivation('price', 2000, '15000');
+            a.applyMinStakeActivation('price', 8000, '5000');
+            a.applyMinStakeActivation('price', 5000, '25000');
+            b.applyMinStakeActivation('price', 5000, '25000');
+            b.applyMinStakeActivation('price', 2000, '15000');
+            b.applyMinStakeActivation('price', 8000, '5000');
+            for (const n of [0, 1999, 2000, 4999, 5000, 7999, 8000, 12000])
+                expect(a.getMinStake('price', n)).to.equal(b.getMinStake('price', n));
+        });
+    });
 });

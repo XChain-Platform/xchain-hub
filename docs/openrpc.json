@@ -335,6 +335,122 @@
       }
     },
     {
+      "name": "getcrosschaincall",
+      "summary": "One XCALL relay lifecycle by call_id: {call_id, dispatch, result} (both phases from the hub's cross_chain_calls table).",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "call_id",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "name": "getxcall",
+      "summary": "One XCALL relay lifecycle by call_id (shorter alias of getcrosschaincall).",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "call_id",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "name": "listxcall",
+      "summary": "List XCALL relay rows, newest first, with optional source_chain/target_chain/status/phase filters.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "source_chain",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "target_chain",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "status",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "phase",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object"
+        }
+      }
+    },
+    {
       "name": "getcheckpointstats",
       "summary": "State-checkpoint health: last finalized block per chain and quorum-timeout counters.",
       "paramStructure": "by-name",

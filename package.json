@@ -38,7 +38,8 @@
     "test:regression:p0p1": "mocha 'test/regression/**/*.regression.test.js' --timeout 5000 --recursive --grep '@regression-p[01]'",
     "test:chaos": "mocha 'test/chaos/**/*.chaos.test.js' --timeout 30000 --recursive",
     "test:mutate": "stryker run",
-    "test:mutate:pilot": "stryker run stryker.config.phase1.json"
+    "test:mutate:pilot": "stryker run stryker.config.phase1.json",
+    "test:boundary": "mocha 'test/boundary/**/*.boundary.test.js' --timeout 5000 --recursive"
   },
   "devDependencies": {
     "@stryker-mutator/core": "^8.7.1",

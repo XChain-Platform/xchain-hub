@@ -91,6 +91,20 @@ describe('coins registry', () => {
         }
     });
 
+    it('exposes a per-coin wireFormat family that stays out of the consensus hash', () => {
+        const expected = { BTC: 'default', LTC: 'mweb', DOGE: 'auxpow' };
+        for(const tick of coins.ALLOWED_COINS){
+            expect(coins.WIRE_FORMAT[tick], `${tick} WIRE_FORMAT map`).to.equal(expected[tick]);
+            for(const net of coins.NETWORKS){
+                const before = coins.consensusHash(tick, net);
+                expect(coins.getCoinConfig(tick, net).wireFormat, `${tick}/${net} resolved`).to.equal(expected[tick]);
+                // wireFormat is not folded into the pinned subset, so it cannot shift the hash.
+                expect(coins.consensusSubset(tick, net)).to.not.have.property('wireFormat');
+                expect(coins.consensusHash(tick, net)).to.equal(before);
+            }
+        }
+    });
+
     it('excludes display-only fields from the consensus subset', () => {
         const subset = coins.consensusSubset('BTC', 'mainnet');
         expect(subset.addresses).to.not.have.property('EXPLORER');
@@ -113,6 +127,7 @@ describe('coins registry', () => {
         'firstBlock',                              // node-local scan start, not validity-gating
         'genesis',                                 // deliberately excluded: genesis.js fail-closes on its own hashes
         'FEE_PAYMENT_MODE',                        // informational only; not read at runtime (see coin files)
+        'wireFormat',                              // block/tx parse family (decoder/utxo-tracker); not hashed, mirrors the pre-existing decoder-local constant
     ]);
 
     it('covers every non-display top-level coin key in the consensus subset (completeness guard)', () => {

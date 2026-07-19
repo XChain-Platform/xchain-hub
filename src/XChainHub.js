@@ -541,6 +541,19 @@ class XChainHub {
         return await this.swapTracker.getSwaps(status, limit);
     }
 
+    // : surface XCALL hub relay rows. getCrossChainCall returns one call's
+    // full lifecycle (both phases) by call_id; listCrossChainCalls lists rows with
+    // optional filters. Both read the hub's own cross_chain_calls table (read-only).
+    async getCrossChainCall(callId){
+        if(!this.crossChainCalls) return null;
+        return await this.crossChainCalls.getCall(callId);
+    }
+
+    async listCrossChainCalls(filters){
+        if(!this.crossChainCalls) return [];
+        return await this.crossChainCalls.listCalls(filters);
+    }
+
     // Update config: routes through consensus if active, otherwise writes directly
     async addParametersFromJson(json){
         if(this.consensus){

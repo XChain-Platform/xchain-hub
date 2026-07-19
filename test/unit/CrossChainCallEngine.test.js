@@ -95,6 +95,23 @@ function memDb() {
                         r.status = 'retracted';
                 return [];
             }
+            //  getCall: explicit-column SELECT by call_id, both phases.
+            if (sql.includes('FROM cross_chain_calls WHERE call_id = ? ORDER BY phase')) {
+                return rows.filter(r => r.call_id === params[0])
+                           .sort((a, b) => String(a.phase).localeCompare(String(b.phase)));
+            }
+            //  listCalls: explicit-column SELECT with optional filters, id DESC.
+            if (sql.startsWith('SELECT id, call_id, phase, snapshot_block, network, source_chain') && sql.includes('ORDER BY id DESC')) {
+                let out = rows.slice();
+                let pi = 0;
+                if (sql.includes('source_chain = ?')) { let v = params[pi++]; out = out.filter(r => r.source_chain === v); }
+                if (sql.includes('target_chain = ?')) { let v = params[pi++]; out = out.filter(r => r.target_chain === v); }
+                if (sql.includes('status = ?'))       { let v = params[pi++]; out = out.filter(r => r.status === v); }
+                if (sql.includes('phase = ?'))         { let v = params[pi++]; out = out.filter(r => r.phase === v); }
+                let limit = params[pi];
+                out.sort((a, b) => (b.id || 0) - (a.id || 0));
+                return out.slice(0, limit);
+            }
             return [];
         }
     };
@@ -570,6 +587,69 @@ describe('CrossChainCallEngine', function () {
             const { engine } = makeEngine();
             const vals = await engine._resolveCapabilityValidators('cross_chain', 100, 'regtest');
             expect(vals.truncated).to.not.equal(true);
+        });
+    });
+
+    // : read-only relay-row surfacing for the explorer/dashboard.
+    describe('getCall / listCalls (relay-row surfacing)', function () {
+
+        function seed(db) {
+            db.rows.push(
+                { id: 1, call_id: 'a'.repeat(64), phase: 'dispatch', status: 'finalized', source_chain: 'BTC', target_chain: 'DOGE', result_status: null },
+                { id: 2, call_id: 'a'.repeat(64), phase: 'result',   status: 'finalized', source_chain: 'BTC', target_chain: 'DOGE', result_status: 'ok' },
+                { id: 3, call_id: 'b'.repeat(64), phase: 'dispatch', status: 'finalized', source_chain: 'LTC', target_chain: 'BTC', result_status: null },
+                { id: 4, call_id: 'c'.repeat(64), phase: 'dispatch', status: 'retracted', source_chain: 'BTC', target_chain: 'LTC', result_status: null }
+            );
+        }
+
+        it('getCall returns both phases of one call keyed as {call_id, dispatch, result}', async function () {
+            const { engine, db } = makeEngine();
+            seed(db);
+            const call = await engine.getCall('a'.repeat(64));
+            expect(call.call_id).to.equal('a'.repeat(64));
+            expect(call.dispatch.phase).to.equal('dispatch');
+            expect(call.result.phase).to.equal('result');
+            expect(call.result.result_status).to.equal('ok');
+        });
+
+        it('getCall returns null when the call_id is unknown or missing', async function () {
+            const { engine, db } = makeEngine();
+            seed(db);
+            expect(await engine.getCall('z'.repeat(64))).to.equal(null);
+            expect(await engine.getCall('')).to.equal(null);
+        });
+
+        it('getCall leaves the missing phase null (dispatched, not yet relayed back)', async function () {
+            const { engine, db } = makeEngine();
+            seed(db);
+            const call = await engine.getCall('b'.repeat(64));
+            expect(call.dispatch.phase).to.equal('dispatch');
+            expect(call.result).to.equal(null);
+        });
+
+        it('listCalls returns rows newest-first, unfiltered', async function () {
+            const { engine, db } = makeEngine();
+            seed(db);
+            const rows = await engine.listCalls();
+            expect(rows.map(r => r.id)).to.deep.equal([4, 3, 2, 1]);
+        });
+
+        it('listCalls filters by source_chain, target_chain, status, and phase', async function () {
+            const { engine, db } = makeEngine();
+            seed(db);
+            expect((await engine.listCalls({ sourceChain: 'BTC' })).map(r => r.id)).to.deep.equal([4, 2, 1]);
+            expect((await engine.listCalls({ targetChain: 'BTC' })).map(r => r.id)).to.deep.equal([3]);
+            expect((await engine.listCalls({ status: 'retracted' })).map(r => r.id)).to.deep.equal([4]);
+            expect((await engine.listCalls({ phase: 'result' })).map(r => r.id)).to.deep.equal([2]);
+            expect((await engine.listCalls({ sourceChain: 'BTC', phase: 'dispatch' })).map(r => r.id)).to.deep.equal([4, 1]);
+        });
+
+        it('listCalls clamps a non-positive or oversized limit into range', async function () {
+            const { engine, db } = makeEngine();
+            for (let i = 1; i <= 60; i++) db.rows.push({ id: i, call_id: String(i), phase: 'dispatch', status: 'finalized', source_chain: 'BTC', target_chain: 'DOGE' });
+            expect((await engine.listCalls({ limit: 0 })).length).to.equal(50);   // default 50
+            expect((await engine.listCalls({ limit: 5 })).length).to.equal(5);
+            expect((await engine.listCalls({ limit: 999999 })).length).to.equal(60); // clamp, not error
         });
     });
 });

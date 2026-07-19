@@ -1,0 +1,58 @@
+//  doctrine test-coverage program: boundary coverage for the two
+// consensus flag-day gates checkpoint_commitment_activation.js and
+// retraction_signing_activation.js. Both gate a change to a SIGNED consensus
+// preimage, so their threshold arithmetic and fail-closed handling of
+// malformed input decide whether federation quorum verification forks. This
+// exercises the edges: exactly at the height, one below, zero/negative,
+// non-numeric input, and an unknown network (which must be off, never on).
+
+const assert = require('assert');
+const {
+    CHECKPOINT_COMMITMENT_ACTIVATION, isCheckpointCommitmentActive,
+} = require('../../src/checkpoint_commitment_activation.js');
+const {
+    RETRACTION_SIGNING_ACTIVATION, isRetractionSigningActive,
+} = require('../../src/retraction_signing_activation.js');
+
+const cases = [
+    ['checkpoint_commitment', isCheckpointCommitmentActive, CHECKPOINT_COMMITMENT_ACTIVATION],
+    ['retraction_signing', isRetractionSigningActive, RETRACTION_SIGNING_ACTIVATION],
+];
+
+for (const [name, isActive, MAP] of cases) {
+    describe(`${name} activation gate (boundary)`, function () {
+        const threshold = MAP.mainnet;
+
+        it('is inclusive at exactly the activation height', function () {
+            assert.strictEqual(isActive(threshold, 'mainnet'), true);
+        });
+
+        it('is off one block below the activation height', function () {
+            assert.strictEqual(isActive(threshold - 1, 'mainnet'), false);
+        });
+
+        it('regtest and testnet are armed from genesis (threshold 0)', function () {
+            assert.strictEqual(MAP.regtest, 0);
+            assert.strictEqual(isActive(0, 'regtest'), true);
+            assert.strictEqual(isActive(0, 'testnet'), true);
+        });
+
+        it('fails closed on non-numeric / NaN input', function () {
+            assert.strictEqual(isActive('not-a-number', 'mainnet'), false);
+            assert.strictEqual(isActive(NaN, 'mainnet'), false);
+            assert.strictEqual(isActive(undefined, 'mainnet'), false);
+        });
+
+        it('fails closed on a negative height', function () {
+            assert.strictEqual(isActive(-1, 'mainnet'), false);
+        });
+
+        it('fails closed (off) on an unknown network', function () {
+            assert.strictEqual(isActive(threshold, 'nonsense-net'), false);
+        });
+
+        it('parseInt tolerates a trailing-garbage numeric string at/above threshold', function () {
+            assert.strictEqual(isActive(String(threshold) + 'abc', 'mainnet'), true);
+        });
+    });
+}

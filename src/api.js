@@ -717,6 +717,53 @@ async function startApi(){
             }
         },
 
+        // : surface individual XCALL relay rows (the hub's own cross_chain_calls
+        // table), the read companion to getcrosschaincallstats' aggregate counters.
+        // getcrosschaincall returns one call's full lifecycle by call_id as
+        // {call_id, dispatch, result}; getxcall is a shorter alias (mirrors the
+        // explorer's getXcall naming). Read-only, public read tier.
+        async getcrosschaincall({call_id}){
+            if(!call_id) return {error: "call_id is required"};
+            if(!hub.crossChainCalls) return {error: "cross-chain call engine not active"};
+            try {
+                let call = await hub.getCrossChainCall(call_id);
+                return call || {error: "cross-chain call not found"};
+            } catch (err) {
+                return {error: "error fetching cross-chain call"};
+            }
+        },
+
+        async getxcall({call_id}){
+            if(!call_id) return {error: "call_id is required"};
+            if(!hub.crossChainCalls) return {error: "cross-chain call engine not active"};
+            try {
+                let call = await hub.getCrossChainCall(call_id);
+                return call || {error: "cross-chain call not found"};
+            } catch (err) {
+                return {error: "error fetching cross-chain call"};
+            }
+        },
+
+        // List XCALL relay rows, newest first, with optional source_chain/target_chain
+        // (validated against BTC/LTC/DOGE), status, and phase (dispatch/result) filters.
+        async listxcall({source_chain, target_chain, status, phase, limit}){
+            let limErr = validateLimit(limit);
+            if (limErr) return limErr;
+            if(source_chain){ let e = validateChain(source_chain); if(e) return e; }
+            if(target_chain){ let e = validateChain(target_chain); if(e) return e; }
+            if(phase && phase !== 'dispatch' && phase !== 'result')
+                return {error: "phase must be 'dispatch' or 'result'"};
+            if(!hub.crossChainCalls) return {error: "cross-chain call engine not active"};
+            try {
+                return await hub.listCrossChainCalls({
+                    sourceChain: source_chain, targetChain: target_chain,
+                    status, phase, limit
+                });
+            } catch (err) {
+                return {error: "error fetching cross-chain calls"};
+            }
+        },
+
         // Get state-checkpoint health: last finalized block per chain and a
         // process-lifetime count of rounds that timed out below quorum.
         // Mirrors getattestationstats / getcrosschaincallstats.

@@ -432,3 +432,284 @@ describe('AttestationSpotChecker: non-ok finalizations (Phase 4)', function () {
         expect(checker.isSpotCheck(rid)).to.equal(false);
     });
 });
+
+// ────────────────────────────────────────────────────────────────────────────
+// : reorg-safe stats persistence + rollback
+// ────────────────────────────────────────────────────────────────────────────
+
+// Minimal in-memory stand-in for the hub DB. Models the ON DUPLICATE KEY on
+// (validator_pubkey, request_id), the block_index > ? delete, and the
+// COUNT/SUM aggregate that statsFor() runs.
+function makeFakeDb() {
+    const rows = [];
+    return {
+        rows,
+        async doQuery(sql, args) {
+            const s = String(sql).trim().toUpperCase();
+            if (s.startsWith('INSERT')) {
+                const [pk, provider, rid, blk, passed] = args;
+                const existing = rows.find(r => r.validator_pubkey === pk && r.request_id === rid);
+                if (existing) {
+                    existing.passed = passed; existing.provider_id = provider; existing.block_index = blk;
+                } else {
+                    rows.push({ validator_pubkey: pk, provider_id: provider, request_id: rid, block_index: blk, passed });
+                }
+                return { affectedRows: 1 };
+            }
+            if (s.startsWith('DELETE')) {
+                const h = Number(args[0]);
+                let removed = 0;
+                for (let i = rows.length - 1; i >= 0; i--) {
+                    if (Number(rows[i].block_index) > h) { rows.splice(i, 1); removed++; }
+                }
+                return { affectedRows: removed };
+            }
+            if (s.startsWith('SELECT')) {
+                const pk = args[0];
+                const mine = rows.filter(r => r.validator_pubkey === pk);
+                return [{ total: mine.length, failed: mine.filter(r => Number(r.passed) === 0).length }];
+            }
+            return [];
+        }
+    };
+}
+
+function okEvent(rid, blockIndex, signers) {
+    return {
+        requestId:    rid,
+        providerId:   'http_get',
+        responseBody: Buffer.from('resp', 'utf8'),
+        status:       'ok',
+        meta:         '200',
+        request:      { block_index: blockIndex },
+        signatures:   (signers || ['pubkey1']).map(pk => ({ pubkey: pk }))
+    };
+}
+
+describe('AttestationSpotChecker: reorg-safe stats ', function () {
+
+    afterEach(function () { sinon.restore(); });
+
+    it('persists a passing spot-check as a row (passed=1) keyed by block_index', async function () {
+        const db  = makeFakeDb();
+        const hub = makeHub({ db });
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry(true));
+        sc.register('r1', 'http_get', 'expected');
+        await sc.onRequestFinalized(okEvent('r1', 500, ['aa'.repeat(32)]));
+        expect(db.rows).to.have.length(1);
+        expect(db.rows[0].passed).to.equal(1);
+        expect(db.rows[0].block_index).to.equal(500);
+        expect(db.rows[0].validator_pubkey).to.equal('aa'.repeat(32));
+    });
+
+    it('persists a failing spot-check as a row (passed=0) for every signer', async function () {
+        const db  = makeFakeDb();
+        const hub = makeHub({ db });
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry(false));
+        sc.register('r2', 'http_get', 'expected');
+        await sc.onRequestFinalized(okEvent('r2', 600, ['aa'.repeat(32), 'bb'.repeat(32)]));
+        expect(db.rows).to.have.length(2);
+        expect(db.rows.every(r => r.passed === 0)).to.be.true;
+    });
+
+    it('statsFor aggregates total/failed/passed from persisted rows', async function () {
+        const db  = makeFakeDb();
+        const hub = makeHub({ db });
+        const scFail = new AttestationSpotChecker(hub, makeProviderRegistry(false));
+        const pk = 'cc'.repeat(32);
+        scFail.register('rf', 'http_get', 'e');
+        await scFail.onRequestFinalized(okEvent('rf', 10, [pk]));
+        const scPass = new AttestationSpotChecker(hub, makeProviderRegistry(true));
+        scPass.register('rp', 'http_get', 'e');
+        await scPass.onRequestFinalized(okEvent('rp', 11, [pk]));
+        const stats = await scFail.statsFor(pk);
+        expect(stats).to.deep.equal({ total: 2, failed: 1, passed: 1 });
+    });
+
+    it('rollback deletes rows above the reorg height and clears in-memory failures', async function () {
+        const db  = makeFakeDb();
+        const hub = makeHub({ db });
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry(false));
+        sc.register('low',  'http_get', 'e');
+        sc.register('high', 'http_get', 'e');
+        await sc.onRequestFinalized(okEvent('low',  100, ['dd'.repeat(32)]));
+        await sc.onRequestFinalized(okEvent('high', 200, ['dd'.repeat(32)]));
+        expect(db.rows).to.have.length(2);
+        expect(sc._failuresFor('dd'.repeat(32))).to.have.length(2);
+
+        const removed = await sc.rollback(150);
+        expect(removed).to.equal(1);                 // only the block-200 row
+        expect(db.rows).to.have.length(1);
+        expect(db.rows[0].block_index).to.equal(100);
+        expect(sc._failuresFor('dd'.repeat(32))).to.have.length(0);  // window cleared
+    });
+
+    it('persist is a no-op (no throw) when the hub has no DB', async function () {
+        const hub = makeHub();               // no db
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry(true));
+        sc.register('r', 'http_get', 'e');
+        await sc.onRequestFinalized(okEvent('r', 5, ['ee'.repeat(32)]));  // must not throw
+        expect(await sc.statsFor('ee'.repeat(32))).to.deep.equal({ total: 0, failed: 0, passed: 0 });
+    });
+
+    it('rollback is a safe no-op (returns 0) with no DB but still clears the window', async function () {
+        const hub = makeHub();
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry(false));
+        sc._recordFailure('ff'.repeat(32), 'x');
+        expect(sc._failuresFor('ff'.repeat(32))).to.have.length(1);
+        const removed = await sc.rollback(10);
+        expect(removed).to.equal(0);
+        expect(sc._failuresFor('ff'.repeat(32))).to.have.length(0);
+    });
+
+    it('start() wires reorg:confirmed to rollback and stop() unwires it', async function () {
+        const db    = makeFakeDb();
+        const reorg = new EventEmitter();
+        const hub   = makeHub({ db, reorgHandler: reorg });
+        const sc    = new AttestationSpotChecker(hub, makeProviderRegistry(false));
+        sc.register('a', 'http_get', 'e');
+        await sc.onRequestFinalized(okEvent('a', 300, ['ab'.repeat(32)]));
+        await sc.start();
+        expect(reorg.listenerCount('reorg:confirmed')).to.equal(1);
+
+        reorg.emit('reorg:confirmed', { reorgHeight: 250 });
+        await new Promise(r => setImmediate(r));
+        expect(db.rows).to.have.length(0);           // block-300 row rolled back
+
+        await sc.stop();
+        expect(reorg.listenerCount('reorg:confirmed')).to.equal(0);
+    });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// : injection scheduler
+// ────────────────────────────────────────────────────────────────────────────
+
+describe('AttestationSpotChecker: injection scheduler ', function () {
+
+    afterEach(function () { sinon.restore(); });
+
+    const CORPUS = [
+        { providerId: 'http_get', prompt: 'q1', expectedPattern: 'a1' },
+        { providerId: 'llm',      prompt: 'q2', expectedPattern: 'a2' }
+    ];
+
+    it('_isTruthy accepts common truthy spellings only', function () {
+        const sc = new AttestationSpotChecker(makeHub(), makeProviderRegistry());
+        ['1', 'true', 'TRUE', 'yes', 'on', true].forEach(v => expect(sc._isTruthy(v)).to.be.true);
+        ['0', 'false', '', 'off', undefined, null].forEach(v => expect(sc._isTruthy(v)).to.be.false);
+    });
+
+    it('parses a corpus from a JSON string and from an array, dropping malformed entries', function () {
+        const sc = new AttestationSpotChecker(makeHub(), makeProviderRegistry());
+        const parsed = sc._parseCorpus(JSON.stringify([
+            { provider_id: 'http_get', prompt: 'p', expected: 'x' },  // snake_case aliases
+            { prompt: 'no provider' },                                // dropped
+            { providerId: 'llm' },                                    // dropped (no prompt)
+            'garbage'                                                 // dropped
+        ]));
+        expect(parsed).to.deep.equal([{ providerId: 'http_get', prompt: 'p', expectedPattern: 'x' }]);
+        expect(sc._parseCorpus('not json')).to.deep.equal([]);
+        expect(sc._parseCorpus(null)).to.deep.equal([]);
+    });
+
+    it('scheduler stays idle when SPOT_CHECK_ENABLED is unset', async function () {
+        const injector = sinon.stub().resolves({ requestId: 'z' });
+        const hub = makeHub({ spotCheckInjector: injector, p2pConfig: { SPOT_CHECK_CORPUS: JSON.stringify(CORPUS) } });
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
+        await sc.start();
+        expect(sc._scheduler).to.equal(null);
+        await sc.stop();
+    });
+
+    it('scheduler stays idle when enabled but no injector is wired', async function () {
+        const hub = makeHub({ p2pConfig: { SPOT_CHECK_ENABLED: '1', SPOT_CHECK_CORPUS: JSON.stringify(CORPUS) } });
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
+        await sc.start();
+        expect(sc._scheduler).to.equal(null);
+        await sc.stop();
+    });
+
+    it('scheduler stays idle when enabled with an injector but an empty corpus', async function () {
+        const injector = sinon.stub().resolves({ requestId: 'z' });
+        const hub = makeHub({ spotCheckInjector: injector, p2pConfig: { SPOT_CHECK_ENABLED: 'true' } });
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
+        await sc.start();
+        expect(sc._scheduler).to.equal(null);
+        await sc.stop();
+    });
+
+    it('starts a scheduler interval when enabled + injector + corpus, and stop() clears it', async function () {
+        const injector = sinon.stub().resolves({ requestId: 'z' });
+        const hub = makeHub({ spotCheckInjector: injector, p2pConfig: {
+            SPOT_CHECK_ENABLED: '1', SPOT_CHECK_INTERVAL_MS: '999999', SPOT_CHECK_CORPUS: JSON.stringify(CORPUS) } });
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
+        await sc.start();
+        expect(sc._scheduler).to.not.equal(null);
+        await sc.stop();
+        expect(sc._scheduler).to.equal(null);
+    });
+
+    it('_schedulerTick injects via the injector and registers the returned request_id', async function () {
+        const injector = sinon.stub()
+            .onFirstCall().resolves({ requestId: 'SYNTH1' })
+            .onSecondCall().resolves('SYNTH2');   // bare-string return also accepted
+        const hub = makeHub({ spotCheckInjector: injector, p2pConfig: {
+            SPOT_CHECK_ENABLED: '1', SPOT_CHECK_MAX_PER_TICK: '2', SPOT_CHECK_CORPUS: JSON.stringify(CORPUS) } });
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
+        const n = await sc._schedulerTick();
+        expect(n).to.equal(2);
+        expect(injector.callCount).to.equal(2);
+        expect(sc.isSpotCheck('SYNTH1')).to.be.true;
+        expect(sc.isSpotCheck('SYNTH2')).to.be.true;
+        // Corpus round-robins: first entry is http_get, second is llm.
+        expect(injector.firstCall.args[0].providerId).to.equal('http_get');
+        expect(injector.secondCall.args[0].providerId).to.equal('llm');
+    });
+
+    it('round-robins the corpus cursor across ticks', async function () {
+        const injector = sinon.stub().callsFake(() => Promise.resolve({ requestId: 'rid' + Math.random() }));
+        const hub = makeHub({ spotCheckInjector: injector, p2pConfig: {
+            SPOT_CHECK_ENABLED: '1', SPOT_CHECK_CORPUS: JSON.stringify(CORPUS) } });  // maxPerTick default 1
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
+        await sc._schedulerTick();
+        await sc._schedulerTick();
+        await sc._schedulerTick();
+        expect(injector.getCall(0).args[0].prompt).to.equal('q1');
+        expect(injector.getCall(1).args[0].prompt).to.equal('q2');
+        expect(injector.getCall(2).args[0].prompt).to.equal('q1');  // wrapped
+    });
+
+    it('a throwing injector does not abort the batch or throw out of the tick', async function () {
+        const injector = sinon.stub()
+            .onFirstCall().rejects(new Error('encoder down'))
+            .onSecondCall().resolves({ requestId: 'OK2' });
+        const hub = makeHub({ spotCheckInjector: injector, p2pConfig: {
+            SPOT_CHECK_ENABLED: '1', SPOT_CHECK_MAX_PER_TICK: '2', SPOT_CHECK_CORPUS: JSON.stringify(CORPUS) } });
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
+        const n = await sc._schedulerTick();     // must not throw
+        expect(n).to.equal(1);
+        expect(sc.isSpotCheck('OK2')).to.be.true;
+    });
+
+    it('does not register when the injector returns no request_id', async function () {
+        const injector = sinon.stub().resolves({ notARequestId: true });
+        const hub = makeHub({ spotCheckInjector: injector, p2pConfig: {
+            SPOT_CHECK_ENABLED: '1', SPOT_CHECK_CORPUS: JSON.stringify(CORPUS) } });
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
+        const n = await sc._schedulerTick();
+        expect(n).to.equal(0);
+        expect(sc._queueSize()).to.equal(0);
+    });
+
+    it('skips the tick under queue backpressure (near capacity)', async function () {
+        const injector = sinon.stub().resolves({ requestId: 'z' });
+        const hub = makeHub({ spotCheckInjector: injector, p2pConfig: {
+            SPOT_CHECK_ENABLED: '1', SPOT_CHECK_CORPUS: JSON.stringify(CORPUS) } });
+        const sc  = new AttestationSpotChecker(hub, makeProviderRegistry());
+        for (let i = 0; i < 1000; i++) sc.register('q' + i, 'http_get', 'e');  // >= 90% of 1024
+        const n = await sc._schedulerTick();
+        expect(n).to.equal(0);
+        expect(injector.called).to.be.false;
+    });
+});

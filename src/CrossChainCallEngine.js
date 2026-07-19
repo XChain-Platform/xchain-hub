@@ -120,6 +120,19 @@ const RESULT_BACKOFF_MAX_MS     = 60 * 60 * 1000;   // exponential backoff ceili
 const RESULT_BACKOFF_EXCLUDE_MAX = 500;             // max parked call_ids excluded per query (bounds query size)
 const RESULT_BACKOFF_MAP_MAX    = 10000;            // parked-map cap; FIFO evict just retries an entry sooner (safe)
 
+// Read-only surface column list for the relay-row API (: getCall/listCalls).
+// Excludes the heavy validator_signatures blob, the hub-side-only ANCHOR audit
+// columns (batch_seq/archived_status/anchor_txid), and the mirror-internal
+// consensus fences (finalizing_view/push_generation): those serve signature
+// verification and reorg fencing, not operator/explorer display.
+const CALL_SURFACE_COLS = 'id, call_id, phase, snapshot_block, network, source_chain, ' +
+    'source_action_index, source_contract_index, target_chain, target_contract_index, ' +
+    'method, params_json, gas_limit, cross_hops, effective_time, status, result_status, ' +
+    'return_payload_b64, created_at';
+
+// Bound on listCalls rows (mirrors the api-side validateLimit ceiling).
+const CALL_LIST_MAX = 10000;
+
 class CrossChainCallEngine extends EventEmitter {
 
     constructor(hub){
@@ -266,6 +279,44 @@ class CrossChainCallEngine extends EventEmitter {
             pending_by_chain:         pending_by_chain,
             result_attempt_failures:  this._resultAttemptFailures
         };
+    }
+
+    // : surface one XCALL relay lifecycle for the explorer/dashboard. Reads
+    // the hub's OWN cross_chain_calls table and returns both phases keyed by call_id
+    // as { call_id, dispatch, result }. dispatch/result are null when absent (e.g. a
+    // dispatched call whose target execution has not been relayed back yet). Includes
+    // retracted rows so a caller can see a reorged-away call's last-known state; the
+    // row's own `status` field distinguishes finalized from retracted. Read-only.
+    async getCall(callId){
+        if(!callId) return null;
+        let rows = await this.db.doQuery(
+            'SELECT ' + CALL_SURFACE_COLS + " FROM cross_chain_calls WHERE call_id = ? ORDER BY phase",
+            [String(callId)]);
+        if(!rows || rows.length === 0) return null;
+        return {
+            call_id:  String(callId),
+            dispatch: rows.find(r => r.phase === 'dispatch') || null,
+            result:   rows.find(r => r.phase === 'result')   || null
+        };
+    }
+
+    // : list XCALL relay rows for the explorer/dashboard, newest first,
+    // with optional source_chain/target_chain/status/phase filters. Read-only.
+    async listCalls({sourceChain, targetChain, status, phase, limit} = {}){
+        let where = [];
+        let args  = [];
+        if(sourceChain){ where.push('source_chain = ?'); args.push(String(sourceChain)); }
+        if(targetChain){ where.push('target_chain = ?'); args.push(String(targetChain)); }
+        if(status){ where.push('status = ?'); args.push(String(status)); }
+        if(phase){ where.push('phase = ?'); args.push(String(phase)); }
+        let sql = 'SELECT ' + CALL_SURFACE_COLS + ' FROM cross_chain_calls';
+        if(where.length) sql += ' WHERE ' + where.join(' AND ');
+        sql += ' ORDER BY id DESC LIMIT ?';
+        let n = parseInt(limit);
+        if(!Number.isInteger(n) || n <= 0) n = 50;
+        if(n > CALL_LIST_MAX) n = CALL_LIST_MAX;
+        args.push(n);
+        return await this.db.doQuery(sql, args);
     }
 
     async _poll(){

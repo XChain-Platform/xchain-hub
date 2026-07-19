@@ -232,6 +232,81 @@ describe('CapabilitySnapshot', function () {
         });
     });
 
+    // -----------------------------------------------------------------
+    // L4 determinism: capability validator set (spec §6 / validator-test-spec)
+    //
+    // The validator-specific risk is quiet divergence: two hubs resolving the
+    // SAME (capability, block_index) with the SAME governed MIN_STAKE must lock
+    // the SAME qualified validator set (members AND order) and derive the SAME
+    // quorum N, or their PBFT rounds fork. getcapabilityvalidators is the
+    // federation source of truth for that set; these pin the contract across two
+    // independently-constructed CapabilitySnapshot instances (the capability-set
+    // half of spec §6 "Determinism (L4)" item 1).
+    // -----------------------------------------------------------------
+    describe('L4 determinism: capability validator set', function () {
+
+        // A fixed, ordered qualified set. Both hubs query the same deterministic
+        // indexer, modelling identical on-chain stake state at the block boundary.
+        const QUALIFIED = [
+            { pubkey: 'aa', amount: '90000' },
+            { pubkey: 'bb', amount: '60000' },
+            { pubkey: 'cc', amount: '30000' }
+        ];
+
+        function deterministicIndexer() {
+            // Echoes the requested (buried) block and returns the same ordered set
+            // on every call, with FRESH copies so matching output proves content
+            // determinism, not a shared object reference.
+            axiosStub.post.callsFake(async (url, body) => ({
+                data: { result: {
+                    capability:  body.params.capability,
+                    block_index: body.params.block_index,
+                    count:       QUALIFIED.length,
+                    validators:  QUALIFIED.map(v => ({ ...v }))
+                } }
+            }));
+        }
+
+        it('two independent hubs at the same block lock an identical qualified set and quorum N', async function () {
+            deterministicIndexer();
+            const registry = { getMinStake: () => '25000' };
+            const a = new CapabilitySnapshot(makeHub(registry));
+            const b = new CapabilitySnapshot(makeHub(registry));
+
+            const sa = await a.getSnapshot('attestation', 200);
+            const sb = await b.getSnapshot('attestation', 200);
+
+            expect(sa.validators).to.deep.equal(sb.validators);   // same members AND order
+            expect(sa.blockIndex).to.equal(sb.blockIndex);        // same buried height
+            expect(a.getQuorum(sa)).to.equal(b.getQuorum(sb));    // same 2f+1
+            expect(a.getQuorum(sa)).to.equal(2);                  // N=3: max(2*floor(2/3)+1, ceil(4/2)) = max(1,2)
+        });
+
+        it('quorum N over the locked set is order-independent (depends only on |set|)', async function () {
+            deterministicIndexer();
+            const registry = { getMinStake: () => '25000' };
+            const snap = new CapabilitySnapshot(makeHub(registry));
+            const s = await snap.getSnapshot('attestation', 200);
+            // Reversing the very same members must not change N: quorum is a
+            // function of the set SIZE, so a divergent order can never fork N.
+            const reversed = Object.assign({}, s, { validators: s.validators.slice().reverse() });
+            expect(snap.getQuorum(reversed)).to.equal(snap.getQuorum(s));
+        });
+
+        it('the qualified set is driven by the hub-governed MIN_STAKE, not the indexer local config', async function () {
+            deterministicIndexer();
+            // Two hubs whose registries resolve the SAME governed threshold send the
+            // SAME min_stake param, so the indexer can never be the divergence point.
+            const a = new CapabilitySnapshot(makeHub({ getMinStake: () => '25000' }));
+            const b = new CapabilitySnapshot(makeHub({ getMinStake: () => '25000' }));
+            await a.getSnapshot('attestation', 200);
+            await b.getSnapshot('attestation', 200);
+            expect(axiosStub.post.getCall(0).args[1].params.min_stake)
+                .to.equal(axiosStub.post.getCall(1).args[1].params.min_stake);
+            expect(axiosStub.post.getCall(0).args[1].params.min_stake).to.equal('25000');
+        });
+    });
+
     // Finding #4136/#4220: a 401 (hub BTC_INDEXER_API_KEY != indexer
     // INDEXER_API_KEY) must NOT be swallowed as an anonymous null snapshot; that
     // makes an auth misconfig indistinguishable from a dead indexer and silently
