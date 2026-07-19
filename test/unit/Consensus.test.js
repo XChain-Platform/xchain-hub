@@ -455,7 +455,11 @@ describe('Consensus (PBFT)', function () {
             expect(hub.applyConfig.calledOnce).to.be.true;
             expect(hub.applyConfig.calledWith(config)).to.be.true;
             expect(resolved).to.be.true;
-            expect(consensus.applied.has(digest)).to.be.true;
+            // Applied exactly once and cleared: the seq advanced and the round is
+            // no longer pending (double-apply is guarded by lastAppliedSeq /
+            // proposal.applied / _applying, not by a digest set).
+            expect(consensus.lastAppliedSeq).to.equal(5);
+            expect(consensus.pendingProposals.has(5)).to.be.false;
         });
 
         it('does NOT apply config twice under a re-entrant COMMIT while the apply is in flight', async function () {
@@ -481,7 +485,8 @@ describe('Consensus (PBFT)', function () {
 
             release();
             await new Promise(r => setTimeout(r, 20));
-            expect(consensus.applied.has(digest)).to.be.true; // still applies exactly once
+            expect(hub.applyConfig.calledOnce).to.be.true;       // still applies exactly once
+            expect(consensus.pendingProposals.has(6)).to.be.false; // applied and cleared
         });
     });
 
@@ -1138,7 +1143,7 @@ describe('Consensus (PBFT)', function () {
             consensus._handleCommit({ sender: VALIDATORS_4[2].addr, data: { seq: 5, configDigest: digest } });
             await new Promise(r => setTimeout(r, 20));
             expect(hub.applyConfig.calledOnce).to.be.true;
-            expect(consensus.applied.has(digest)).to.be.true;
+            expect(consensus.pendingProposals.has(5)).to.be.false; // applied and cleared
         });
 
         it('follower apply error (no reject handler): swallows, keeps proposal pending for retry, applied stays false', async function () {

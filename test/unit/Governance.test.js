@@ -552,8 +552,8 @@ describe('Governance', function () {
     // -----------------------------------------------------------------
 
     describe('P2P message handlers', function () {
-        it('_handlePropose stores proposal locally', function () {
-            gov._handlePropose({
+        it('_handlePropose stores proposal locally', async function () {
+            await gov._handlePropose({
                 sender: 'peer', type: 'GOV_PROPOSE',
                 data: {
                     proposalId: 'gov:P:1', parameter: 'P',
@@ -562,15 +562,14 @@ describe('Governance', function () {
                     votingEnd: new Date().toISOString()
                 }
             });
-            expect(hub.db.doQuery.called).to.be.true;
-            expect(hub.db.doQuery.getCall(0).args[0]).to.include('INSERT IGNORE');
+            expect(hub.db.doQuery.calledWithMatch(sinon.match(/INSERT IGNORE/))).to.be.true;
         });
 
-        it('_handlePropose IGNORES a far-future wire votingEnd and recomputes voting_end locally (GOV-VOTINGEND-FORGE-1)', function () {
+        it('_handlePropose IGNORES a far-future wire votingEnd and recomputes voting_end locally (GOV-VOTINGEND-FORGE-1)', async function () {
             // A single Byzantine validator sets votingEnd to year 3000: if trusted, the row's
             // voting_end never reaches NOW(), so it is never tallied, never leaves 'voting', and
             // propose() then refuses every honest proposal for 'P' forever (permanent censorship).
-            gov._handlePropose({
+            await gov._handlePropose({
                 sender: 'peer', type: 'GOV_PROPOSE',
                 data: {
                     proposalId: 'gov:P:1', parameter: 'P',
@@ -579,8 +578,9 @@ describe('Governance', function () {
                     votingEnd: '3000-01-01T00:00:00Z'
                 }
             });
-            expect(hub.db.doQuery.getCall(0).args[0]).to.include('INSERT IGNORE');
-            let persistedVotingEnd = new Date(hub.db.doQuery.getCall(0).args[1][6]).getTime();
+            let insert = hub.db.doQuery.getCalls().find(c => /INSERT IGNORE/.test(c.args[0]));
+            expect(insert, 'INSERT IGNORE issued').to.not.be.undefined;
+            let persistedVotingEnd = new Date(insert.args[1][6]).getTime();
             let expected = Date.now() + gov.votingPeriod;
             // Locally recomputed to ~now + votingPeriod, NOT the year-3000 wire value.
             expect(Math.abs(persistedVotingEnd - expected)).to.be.lessThan(10000);
@@ -616,10 +616,10 @@ describe('Governance', function () {
             expect(hub.db.doQuery.called).to.be.false;
         });
 
-        it('_handlePropose persists an inbound non-numeric proposal (bounds guard is a no-op there)', function () {
+        it('_handlePropose persists an inbound non-numeric proposal (bounds guard is a no-op there)', async function () {
             // The bounds check only applies to numeric parameters; a non-numeric
             // change must still be recorded so it can be voted on.
-            gov._handlePropose({
+            await gov._handlePropose({
                 sender: 'peer', type: 'GOV_PROPOSE',
                 data: {
                     proposalId: 'gov:MODE:1', parameter: 'MODE',
@@ -628,8 +628,61 @@ describe('Governance', function () {
                     votingEnd: new Date().toISOString()
                 }
             });
-            expect(hub.db.doQuery.called).to.be.true;
-            expect(hub.db.doQuery.getCall(0).args[0]).to.include('INSERT IGNORE');
+            expect(hub.db.doQuery.calledWithMatch(sinon.match(/INSERT IGNORE/))).to.be.true;
+        });
+
+        it('_handlePropose DROPS an inbound proposal for a parameter still in re-proposal cooldown (#12)', async function () {
+            // A Byzantine validator skips propose() (which enforces the cooldown) and
+            // broadcasts a raw GOV_PROPOSE for a parameter whose last proposal FAILED
+            // 1 day ago (cooldown is 14 days). The follower must re-enforce the cooldown
+            // and never record it, matching the leader-side propose() guard.
+            hub.db.doQuery.withArgs(sinon.match(/status = 'failed'/))
+                .resolves([{ voting_end: new Date(Date.now() - 86400000) }]); // 1 day ago
+            await gov._handlePropose({
+                sender: 'peer', type: 'GOV_PROPOSE',
+                data: {
+                    proposalId: 'gov:P:1', parameter: 'P',
+                    currentValue: '100', proposedValue: '120',
+                    rationale: 're-spam', proposerPubkey: 'abc',
+                    votingEnd: new Date().toISOString()
+                }
+            });
+            expect(hub.db.doQuery.calledWithMatch(sinon.match(/INSERT IGNORE/)),
+                'no proposal recorded while parameter is in cooldown').to.be.false;
+        });
+
+        it('_handlePropose ADMITS an inbound proposal once the re-proposal cooldown has expired (#12)', async function () {
+            // Last failure was 15 days ago (> 14-day cooldown): the proposal is admitted.
+            hub.db.doQuery.withArgs(sinon.match(/status = 'failed'/))
+                .resolves([{ voting_end: new Date(Date.now() - 15 * 86400000) }]);
+            await gov._handlePropose({
+                sender: 'peer', type: 'GOV_PROPOSE',
+                data: {
+                    proposalId: 'gov:P:1', parameter: 'P',
+                    currentValue: '100', proposedValue: '120',
+                    rationale: 'legit re-propose', proposerPubkey: 'abc',
+                    votingEnd: new Date().toISOString()
+                }
+            });
+            expect(hub.db.doQuery.calledWithMatch(sinon.match(/INSERT IGNORE/)),
+                'proposal recorded after cooldown expiry').to.be.true;
+        });
+
+        it('_handlePropose proceeds (fail-open) when the cooldown re-check DB read errors (#12)', async function () {
+            // A transient DB error on the cooldown SELECT must not drop an otherwise
+            // valid honest proposal; fail open and still record it.
+            hub.db.doQuery.withArgs(sinon.match(/status = 'failed'/)).rejects(new Error('db down'));
+            await gov._handlePropose({
+                sender: 'peer', type: 'GOV_PROPOSE',
+                data: {
+                    proposalId: 'gov:P:1', parameter: 'P',
+                    currentValue: '100', proposedValue: '120',
+                    rationale: 'legit', proposerPubkey: 'abc',
+                    votingEnd: new Date().toISOString()
+                }
+            });
+            expect(hub.db.doQuery.calledWithMatch(sinon.match(/INSERT IGNORE/)),
+                'proposal recorded despite cooldown-read failure').to.be.true;
         });
 
         it('_handleVote persists a registered validator vote with a valid signature (proposal still open)', async function () {
@@ -702,8 +755,8 @@ describe('Governance', function () {
             expect(hub.db.doQuery.called).to.be.false;
         });
 
-        it('_handlePropose defaults a missing proposerPubkey and rationale to empty strings', function () {
-            gov._handlePropose({
+        it('_handlePropose defaults a missing proposerPubkey and rationale to empty strings', async function () {
+            await gov._handlePropose({
                 sender: 'peer', type: 'GOV_PROPOSE',
                 data: {
                     proposalId: 'gov:P:1', parameter: 'P',
@@ -711,7 +764,9 @@ describe('Governance', function () {
                     votingEnd: new Date().toISOString()
                 }
             });
-            let args = hub.db.doQuery.getCall(0).args[1];
+            let insert = hub.db.doQuery.getCalls().find(c => /INSERT IGNORE/.test(c.args[0]));
+            expect(insert, 'INSERT IGNORE issued').to.not.be.undefined;
+            let args = insert.args[1];
             expect(args[1]).to.equal(''); // proposer_pubkey
             expect(args[5]).to.equal(''); // rationale
         });
@@ -926,6 +981,49 @@ describe('Governance: R2-M2 snapshot-lock + R2-H2 re-tally', function () {
         expect(gov._snapshotMatchesLocalSet(superset)).to.equal(false);
     });
 
+    // ---- GOV-TALLY-DENOM-1: legacy tally re-filters the numerator by membership ----
+
+    it('_computeTally (legacy, null electorate) excludes votes from validators no longer in the set (GOV-TALLY-DENOM-1)', function () {
+        // A vote from a current member (kps[0]) and one from a departed validator
+        // (not in the live set) are both recorded. The legacy path must count only
+        // the current member so the numerator matches the current-set denominator;
+        // otherwise an ex-member's stale vote inflates approvals against a
+        // denominator that no longer includes them.
+        let departed = 'cd'.repeat(32);
+        let votes = [
+            { voter_pubkey: kps[0].pubkey, vote: 'approve' },
+            { voter_pubkey: departed,      vote: 'approve' }
+        ];
+        let tally = gov._computeTally(votes, null);
+        expect(tally.approvals).to.equal(1);
+        expect(tally.totalVotes).to.equal(1);
+        expect(tally.validatorCount).to.equal(3);
+    });
+
+    // ---- GOV-PROPOSER-SPOOF-1: proposerPubkey must bind to the sender ----
+
+    it('_handlePropose drops a proposal whose proposerPubkey does not bind to the sender (GOV-PROPOSER-SPOOF-1)', async function () {
+        // ws://v0:1 is registered to kps[0], but the proposal attributes itself to
+        // kps[1] (attribution spoof). An authoritative registry drops it.
+        hub._peerManager.validatorPubkeys = new Map(valset.map(v => [v.addr, v.pubkey]));
+        let insert = hub.db.doQuery.withArgs(sinon.match(/INSERT IGNORE INTO governance_proposals/)).resolves();
+        gov._handlePropose({ sender: 'ws://v0:1', data: {
+            proposalId: 'gov:P:9', parameter: 'SOME_PARAM', currentValue: '100', proposedValue: '150',
+            proposerPubkey: kps[1].pubkey } });
+        await new Promise(r => setImmediate(r));
+        expect(insert.callCount).to.equal(0);
+    });
+
+    it('_handlePropose records a proposal correctly attributed to its sender (GOV-PROPOSER-SPOOF-1 negative)', async function () {
+        hub._peerManager.validatorPubkeys = new Map(valset.map(v => [v.addr, v.pubkey]));
+        let insert = hub.db.doQuery.withArgs(sinon.match(/INSERT IGNORE INTO governance_proposals/)).resolves();
+        gov._handlePropose({ sender: 'ws://v0:1', data: {
+            proposalId: 'gov:P:10', parameter: 'SOME_PARAM', currentValue: '100', proposedValue: '150',
+            proposerPubkey: kps[0].pubkey } });
+        await new Promise(r => setImmediate(r));
+        expect(insert.callCount).to.equal(1);
+    });
+
     // ---- R2-M2 tally uses the locked denominator, immune to set churn ----
 
     it('_tallyProposal counts against the LOCKED snapshot, not a churned live set', async function () {
@@ -1045,7 +1143,9 @@ describe('Governance: R2-M2 snapshot-lock + R2-H2 re-tally', function () {
 
     it('_handlePropose persists NULL snapshot below activation even if the wire snapshot is absent', async function () {
         // regtest network default is off here (hub.network undefined -> gate OFF).
-        hub._peerManager.validatorPubkeys = new Map([['peer', true]]);
+        // Map the sender to the declared proposer key so the proposer-binding guard
+        // (GOV-PROPOSER-SPOOF-1) treats this as a legitimately-attributed proposal.
+        hub._peerManager.validatorPubkeys = new Map([['peer', kps[0].pubkey]]);
         let insert = hub.db.doQuery.withArgs(sinon.match(/INSERT IGNORE INTO governance_proposals/)).resolves();
         gov._handlePropose({ sender: 'peer', data: {
             proposalId: 'gov:P:1', parameter: 'SOME_PARAM', currentValue: '100', proposedValue: '150', proposerPubkey: kps[0].pubkey } });

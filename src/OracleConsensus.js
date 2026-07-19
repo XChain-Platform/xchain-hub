@@ -89,6 +89,23 @@ class OracleConsensus extends EventEmitter {
         this._finalizedOrder = [];
         this.finalizedMax = parseInt(process.env.ORACLE_FINALIZED_MAX, 10) || 10000;
 
+        // Rounds this hub stored as 'skipped' for a LOCAL reason (its gossip lagged
+        // below minSubmissions at the block boundary, or its own aggregate was
+        // empty), NOT because the whole federation skipped (stress-sweep #7). These
+        // are kept separate from `finalized` so a legitimate later PROPOSE from the
+        // federation still processes: without this, a locally-skipped round landed
+        // in `finalized`, _handlePropose dropped the real PROPOSE, and _handlePrepare
+        // /_handleCommit refused to buffer, so the hub permanently held a NULL
+        // price_snapshot for a round the rest of the federation finalized. When the
+        // round does reach commit quorum here, _storeSnapshot's ON DUPLICATE KEY
+        // UPDATE upgrades the 'skipped' rows to 'finalized' and _markFinalized moves
+        // the round out of this set. Bounded by the same insertion-order ring as
+        // `finalized` (round is not attacker-chosen here -- only this hub's own
+        // finalizeRound writes it -- but the ring keeps it from growing for the
+        // process lifetime).
+        this.locallySkipped = new Set();
+        this._locallySkippedOrder = [];
+
         // Early-arrival buffer (finding F7). A PREPARE/COMMIT can land while
         // _handlePropose is still awaiting the block-boundary snapshot, or
         // before the PROPOSE itself arrives. The whole PBFT burst completes in
@@ -250,12 +267,34 @@ class OracleConsensus extends EventEmitter {
     // oldest round once the window is full so `finalized` cannot grow unbounded
     // over the process lifetime.
     _markFinalized(round) {
+        // A round that genuinely finalizes supersedes any local skip marker for it
+        // (the 'skipped' price_snapshots rows were upgraded to 'finalized' by
+        // _storeSnapshot), so clear it from locallySkipped (stress-sweep #7).
+        if (this.locallySkipped.delete(round)) {
+            let i = this._locallySkippedOrder.indexOf(round);
+            if (i !== -1) this._locallySkippedOrder.splice(i, 1);
+        }
         if (this.finalized.has(round)) return;
         this.finalized.add(round);
         this._finalizedOrder.push(round);
         if (this._finalizedOrder.length > this.finalizedMax) {
             let oldest = this._finalizedOrder.shift();
             this.finalized.delete(oldest);
+        }
+    }
+
+    // Record a round this hub stored as 'skipped' for a local reason (stress-sweep
+    // #7). Unlike _markFinalized this does NOT block a later federation PROPOSE from
+    // processing; it only prevents this hub from re-skipping the same round and lets
+    // getSubmissionsInfo/health distinguish a local skip from a true finalize.
+    // Bounded by the same insertion-order ring as `finalized`.
+    _markLocallySkipped(round) {
+        if (this.finalized.has(round) || this.locallySkipped.has(round)) return;
+        this.locallySkipped.add(round);
+        this._locallySkippedOrder.push(round);
+        if (this._locallySkippedOrder.length > this.finalizedMax) {
+            let oldest = this._locallySkippedOrder.shift();
+            this.locallySkipped.delete(oldest);
         }
     }
 
@@ -1557,7 +1596,10 @@ class OracleConsensus extends EventEmitter {
                 for (let row of rows) this.hub.hubDbBroadcaster.broadcastRow({ table: 'price_snapshots', row });
             } catch (e) { /* broadcast is best-effort */ }
         }
-        this._markFinalized(round);
+        // #7: mark as LOCALLY skipped, not finalized, so a legitimate later PROPOSE
+        // from the federation still processes and can upgrade the 'skipped' rows to
+        // 'finalized'. _markFinalized would have frozen this round's NULL price here.
+        this._markLocallySkipped(round);
         this._clearRoundTracking(round);
         console.log('Oracle: Round ' + round + ' skipped (' + (reason || 'no submissions') + ')');
     }

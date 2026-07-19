@@ -177,6 +177,12 @@ class SlashDetector {
     async _checkParticipation(round, participants, allValidators) {
         if (!allValidators || allValidators.length === 0) return;
 
+        // Drop tracking state for pubkeys no longer in the known validator set
+        // before recording this round (SLASH-MAP-NO-GC-1). Without this the four
+        // per-validator maps kept one entry per pubkey ever seen, so a key
+        // rotation leaked an entry forever over the process lifetime.
+        this._gcValidatorState(allValidators);
+
         let participantSet = new Set(participants);
 
         for (let v of allValidators) {
@@ -231,6 +237,28 @@ class SlashDetector {
                 );
                 if (!recorded) this.nonParticipationFired.set(v.pubkey, false);
             }
+        }
+    }
+
+    // Bound the per-validator tracking maps to the currently-known validator set
+    // so a signing-key rotation does not leak a map entry per retired pubkey for
+    // the process lifetime (SLASH-MAP-NO-GC-1). A pubkey is kept if it is in this
+    // round's validator set OR still in the live peer registry: a deviating
+    // validator is recorded via _resolveValidatorPubkey off the registry and may
+    // be known there before/without appearing in the round's `allValidators`, so
+    // reconciling against the registry too never drops an active validator's
+    // window. A dropped-then-returning validator simply restarts its window,
+    // which only makes non-participation detection more lenient, never wrongful.
+    _gcValidatorState(allValidators) {
+        let live = new Set();
+        for (let v of allValidators) if (v && v.pubkey) live.add(v.pubkey);
+        let pm = this.hub.getPeerManager && this.hub.getPeerManager();
+        if (pm && pm.validatorPubkeys) {
+            for (let pk of pm.validatorPubkeys.values()) if (pk) live.add(pk);
+        }
+        for (let map of [this.participation, this.recentDeviations,
+                         this.repeatedDeviationFired, this.nonParticipationFired]) {
+            for (let key of map.keys()) if (!live.has(key)) map.delete(key);
         }
     }
 

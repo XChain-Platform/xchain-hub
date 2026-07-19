@@ -755,8 +755,23 @@ class ReorgHandler extends EventEmitter {
     _getQuorum() {
         let N = this.validatorSet.length;
         if (N <= 0) {
-            let peers = this.peerManager.getPeerStatus().filter(p => p.state === 'open');
-            N = peers.length + 1;
+            // No authoritative validator set yet (startup, before the hub propagates
+            // it to this engine). Reorg co-signs are admitted only from registered
+            // validators (_isKnownSender, keyed on validatorPubkeys), so derive N
+            // from that SAME authenticated registry rather than the raw open-socket
+            // count (REORG-QUORUM-PEER-FALLBACK-1): open-peer connections can include
+            // unregistered or duplicate sockets and differ per hub, so counting them
+            // let the DESTRUCTIVE-rollback threshold be nudged by connection churn and
+            // could fork N across hubs for the same round. Fall back to the socket
+            // count only when the registry is empty too (genuine single-node /
+            // pre-bootstrap), which preserves the N<=1 self-execute path unchanged.
+            let registry = this.peerManager && this.peerManager.validatorPubkeys;
+            if (registry && registry.size > 0) {
+                N = registry.has(this.peerManager.validatorAddr) ? registry.size : registry.size + 1;
+            } else {
+                let peers = this.peerManager.getPeerStatus().filter(p => p.state === 'open');
+                N = peers.length + 1;
+            }
         }
         if (N <= 1) return 0;
         let f = Math.floor((N - 1) / 3);

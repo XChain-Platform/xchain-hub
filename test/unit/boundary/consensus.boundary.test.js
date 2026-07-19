@@ -307,20 +307,24 @@ describe('Boundary: Consensus (PBFT)', function () {
     });
 
     // -----------------------------------------------------------------
-    // Applied digest dedup
+    // Applied dedup is by per-proposal state, never by config digest
     // -----------------------------------------------------------------
 
-    describe('applied digest dedup', function () {
+    describe('applied dedup', function () {
 
-        it('already-applied digest prevents re-application', async function () {
+        it('dedup is keyed on proposal.applied, not the config digest (a repeated digest at a new round still applies)', async function () {
+            // A prior digest-keyed dedup set was removed (stress-sweep #4/#5): it
+            // was never read, and a legitimate A -> B -> A config revert reproduces
+            // an earlier round's digest at a new seq, so a digest-keyed skip would
+            // have wrongly dropped the honest revert. This proves the surviving
+            // guard is per-proposal (proposal.applied), so re-seeing a digest does
+            // not suppress a genuine new round.
             let config = { x: 1 };
             let digest = consensus._digest(config);
-            consensus.applied.add(digest);
 
             consensus.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[0].addr;
 
-            let applyCount = 0;
             consensus.pendingProposals.set(5, {
                 config, digest,
                 prepares: new Set(VALIDATORS_4.map(v => v.addr)),
@@ -333,9 +337,9 @@ describe('Boundary: Consensus (PBFT)', function () {
             consensus._handleCommit({ sender: VALIDATORS_4[2].addr, data: { seq: 5, configDigest: digest } });
             await new Promise(r => setTimeout(r, 20));
 
-            // applyConfig is called because applied check is on the proposal.applied flag, not on digest
-            // The digest is added AFTER successful apply
+            // Applied once and the round cleared (no digest set involved).
             expect(hub.applyConfig.calledOnce).to.be.true;
+            expect(consensus.pendingProposals.has(5)).to.be.false;
         });
     });
 

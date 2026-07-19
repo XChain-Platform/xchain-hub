@@ -76,9 +76,16 @@ class Consensus {
         // snapshot, matching PREPARE/COMMIT. Map<seq, quorum>.
         this.viewChangeQuorums = new Map();
 
-        // Digests already applied (prevents double-apply from late COMMIT messages)
-        this.applied = new Set();
-
+        // Double-apply of a committed round is prevented by three live guards, not
+        // by a digest set: the monotonic `lastAppliedSeq` gate rejects a replayed
+        // PRE_PREPARE for an already-applied seq, `proposal.applied` skips a late
+        // COMMIT for a round this node already applied, and `proposal._applying`
+        // closes the synchronous re-entrancy window while the async apply is in
+        // flight. A prior `this.applied` digest Set was written but never read
+        // (dead defense-in-depth); deleting it is behaviour-preserving. Note it
+        // could NOT have been safely wired as a skip-guard anyway: a legitimate
+        // A -> B -> A config revert reproduces an earlier round's digest at a new
+        // seq, so a digest-keyed skip would drop the honest revert.
         this.pendingClientConfig = null;
         this._messageHandler = null;
         this.lastAppliedSeq = 0;
@@ -700,7 +707,6 @@ class Consensus {
                     proposal.resolve(true);
                 }
 
-                this.applied.add(proposal.digest);
                 this.pendingProposals.delete(seq);
 
                 console.log('PBFT: Config applied (seq ' + seq + ', ' +

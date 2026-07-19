@@ -668,11 +668,14 @@ describe('OracleConsensus', function () {
             await oc.finalizeRound(1, 900000, 1700000000);
 
             // Skipped, not finalized: no snapshot store, no round:finalized emit,
-            // no PROPOSE broadcast, and a 'skipped' row persisted.
+            // no PROPOSE broadcast, and a 'skipped' row persisted. The skip is
+            // recorded as LOCALLY skipped (#7), never in `finalized` -- so a later
+            // legitimate PROPOSE can still process and upgrade the round.
             expect(storeSpy.callCount).to.equal(0);
             expect(emitCount).to.equal(0);
             expect(pm.broadcast.called).to.be.false;
-            expect(oc.finalized.has(1)).to.be.true;
+            expect(oc.locallySkipped.has(1)).to.be.true;
+            expect(oc.finalized.has(1)).to.be.false;
             let skippedInsert = hub.db.doQuery.getCalls().some(c => /skipped/.test(String(c.args[0])));
             expect(skippedInsert).to.be.true;
         });

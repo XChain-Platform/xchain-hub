@@ -187,7 +187,23 @@ class Governance extends EventEmitter {
     // (tallied against the live validator set, historical behaviour). Only votes
     // from electorate members count when locked. Returns the full breakdown.
     _computeTally(votes, electorate) {
-        let members = electorate ? new Set(electorate.map(e => e.pubkey)) : null;
+        // Resolve the electorate membership used to filter the numerator:
+        //  - a snapshot-locked proposal: the locked snapshot;
+        //  - a legacy row with a non-empty current set: this hub's CURRENT set
+        //    (GOV-TALLY-DENOM-1). The denominator (validatorCount below) is already
+        //    the current-set size for legacy rows, so counting a vote from a
+        //    validator that has since LEFT the set inflated the numerator against a
+        //    denominator that no longer includes them. Filtering both by the same
+        //    membership keeps the ratio consistent.
+        //  - a legacy row with an EMPTY set (standalone / single-node): no
+        //    membership to filter against, so count every recorded vote as before
+        //    (preserves single-node self-tally, where the node is not enumerated
+        //    in its own validator set).
+        let members = electorate
+            ? new Set(electorate.map(e => e.pubkey))
+            : (this.validatorSet.length > 0
+                ? new Set(this.validatorSet.map(v => String(v.pubkey).toLowerCase()))
+                : null);
         let counted = members
             ? votes.filter(v => members.has(String(v.voter_pubkey).toLowerCase()))
             : votes;
@@ -433,7 +449,12 @@ class Governance extends EventEmitter {
 
     _handleMessage(envelope) {
         switch (envelope.type) {
-            case GOV_PROPOSE: this._handlePropose(envelope); break;
+            case GOV_PROPOSE:
+                // async (a cooldown-window DB lookup): surface rejections instead of
+                // letting them escape the gossip dispatcher as an unhandled rejection.
+                this._handlePropose(envelope).catch(e =>
+                    console.error('Governance: GOV_PROPOSE handler error:', e && e.message ? e.message : e));
+                break;
             case GOV_VOTE:
                 // async (a proposal-window lookup): surface rejections instead of
                 // letting them escape the gossip dispatcher as an unhandled rejection.
@@ -449,7 +470,7 @@ class Governance extends EventEmitter {
         }
     }
 
-    _handlePropose(envelope) {
+    async _handlePropose(envelope) {
         let { proposalId, parameter, currentValue, proposedValue, rationale, proposerPubkey, activationBlock } = envelope.data;
         if (!proposalId || !parameter) return;
 
@@ -459,6 +480,28 @@ class Governance extends EventEmitter {
         // any non-validator that slips past a null-registry window could inject
         // proposals. Mirrors the _isKnownSender gate on GOV_RESULT / GOV_VOTE.
         if (!this._isKnownSender(envelope.sender)) return;
+
+        // Bind the declared proposerPubkey to the authenticated sender (GOV-PROPOSER-SPOOF-1).
+        // proposer_pubkey is persisted verbatim from the wire and surfaced by getProposals /
+        // the explorer, so a Byzantine validator could otherwise attribute its proposal to
+        // ANOTHER validator's signing key (an attribution spoof). The peer registry maps the
+        // sender addr to its registered signing key; when that registry is authoritative
+        // (non-empty, i.e. _isKnownSender is enforcing membership rather than in the genuine
+        // pre-bootstrap lenient window) require the sender's registered pubkey to equal the
+        // declared proposerPubkey, dropping a mismatch (never recorded). An empty registry
+        // keeps the legacy record-as-is behaviour so bootstrap is unaffected, matching the
+        // leniency of the _isKnownSender gate above. Honest proposals always pass: propose()
+        // broadcasts under the proposer's own identity, so the sender's registered key IS the
+        // proposerPubkey.
+        let proposerRegistry = this.peerManager && this.peerManager.validatorPubkeys;
+        if (proposerRegistry && proposerRegistry.size > 0) {
+            let senderPk = String(proposerRegistry.get(envelope.sender) || '').toLowerCase();
+            if (!senderPk || senderPk !== String(proposerPubkey || '').toLowerCase()) {
+                console.warn('Governance: dropping inbound proposal ' + proposalId + ' (' + parameter +
+                    '): proposerPubkey does not bind to the sending validator (attribution spoof guard)');
+                return;
+            }
+        }
 
         // Pre-launch pin (#4352): drop a peer's CAPABILITY_*_MIN_STAKE proposal so this hub
         // never records or votes on it. With no local row, a later GOV_RESULT UPDATE matches
@@ -566,6 +609,45 @@ class Governance extends EventEmitter {
             return;
         }
         let snapshotJson = snapValid ? JSON.stringify(snap) : null;
+
+        // Re-enforce propose()'s re-proposal cooldown on the follower path
+        // (stress-sweep #12). propose() refuses a new proposal for a parameter whose
+        // most recent 'failed' proposal is still inside the COOLDOWN_DAYS window, but
+        // that gate lived only on the proposing hub: a Byzantine validator that skips
+        // propose() and broadcasts a raw GOV_PROPOSE could otherwise get every hub to
+        // record and vote on a proposal that violates the anti-spam cooldown. Mirror
+        // the same check here (same COOLDOWN_DAYS constant and the same locally-stored
+        // voting_end every hub recorded from the failed round's GOV_PROPOSE), so the
+        // federation drops it uniformly. Only the one-active-per-parameter uniqueness
+        // guard is deliberately NOT mirrored here: two honest hubs can propose the same
+        // parameter simultaneously, and dropping one needs a deterministic cross-hub
+        // tie-break (else hubs diverge on which survives) -- left for a designed change.
+        //
+        // DEPLOY NOTE: enforce fleet-wide in one coordinated upgrade (same as the
+        // change-bounds re-check above). During a mixed-version window a fixed hub
+        // drops a cooled-down Byzantine proposal while an unfixed hub records it, so the
+        // two disagree on its existence. Honest proposals always pass (propose() already
+        // enforced the cooldown before broadcasting), so honest traffic never diverges.
+        // Fail-open on a DB read error so a transient hiccup never drops an honest
+        // proposal.
+        try {
+            let rejected = await this.db.doQuery(
+                "SELECT voting_end FROM governance_proposals WHERE parameter = ? AND status = 'failed' ORDER BY voting_end DESC LIMIT 1",
+                [parameter]
+            );
+            if (rejected.length > 0) {
+                let cooldownEnd = new Date(rejected[0].voting_end).getTime() + (COOLDOWN_DAYS * 86400000);
+                if (Date.now() < cooldownEnd) {
+                    let daysLeft = ((cooldownEnd - Date.now()) / 86400000).toFixed(1);
+                    console.warn('Governance: dropping inbound proposal ' + proposalId + ' (' + parameter +
+                        '): parameter is in re-proposal cooldown (' + daysLeft + ' days remaining)');
+                    return;
+                }
+            }
+        } catch (e) {
+            console.error('Governance: cooldown re-check failed for inbound proposal ' + proposalId +
+                ' (' + parameter + '); proceeding (fail-open):', e && e.message ? e.message : e);
+        }
 
         this.db.doQuery(
             `INSERT IGNORE INTO governance_proposals

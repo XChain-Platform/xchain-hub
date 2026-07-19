@@ -16,7 +16,7 @@ on:
 
 jobs:
   ci:
-    uses: XChain-Platform/.github/.github/workflows/ci-reusable.yml@master
+    uses: XChain-Platform/.github/.github/workflows/ci-reusable.yml@aae44352361242d334234593c39d88be007d2ed3 # pin: XChain-Platform/.github @ master 2026-07-08; bump deliberately 
     # Perf now runs in the dedicated `perf` job below (with a database), so the
     # gate does not also run the self-skipping perf step.
 
@@ -133,3 +133,28 @@ jobs:
             }
             console.log("consensus pin conformance OK (testnet, regtest)");
           '
+
+  # Coverage ratchet : re-run the unit suite under c8 and fail if line or
+  # branch coverage drops below this repo's floor in bin/coverage-thresholds.json
+  # (mirrored into the `coverage:check` npm script). Catches silent coverage
+  # regression the pass/fail gate cannot see: a change that keeps every test green
+  # while deleting the only test that reached a file. These are RATCHET FLOORS
+  # (~1-1.5 points below measured), not tier targets; raise them as coverage climbs.
+  coverage:
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Coverage thresholds (c8 --check-coverage)
+        run: npm run coverage:check

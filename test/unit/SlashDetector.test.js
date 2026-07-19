@@ -468,6 +468,41 @@ describe('SlashDetector', function () {
     });
 
     // -----------------------------------------------------------------
+    // Per-validator map GC (SLASH-MAP-NO-GC-1)
+    // -----------------------------------------------------------------
+
+    describe('validator-state GC (SLASH-MAP-NO-GC-1)', function () {
+
+        it('prunes tracking maps for pubkeys no longer in the known validator set', async function () {
+            let stale = 'dd'.repeat(32); // not in VALIDATORS_3 nor the peer registry
+            sd.participation.set(stale, { history: [true], missed: 1 });
+            sd.recentDeviations.set(stale, [{ round: 1, timestamp: Date.now() }]);
+            sd.repeatedDeviationFired.set(stale, true);
+            sd.nonParticipationFired.set(stale, true);
+
+            await sd._checkParticipation(1, [VALIDATORS_3[0].pubkey], VALIDATORS_3);
+
+            expect(sd.participation.has(stale)).to.equal(false);
+            expect(sd.recentDeviations.has(stale)).to.equal(false);
+            expect(sd.repeatedDeviationFired.has(stale)).to.equal(false);
+            expect(sd.nonParticipationFired.has(stale)).to.equal(false);
+            // A current validator's freshly-recorded state is retained.
+            expect(sd.participation.has(VALIDATORS_3[0].pubkey)).to.equal(true);
+        });
+
+        it('retains a validator still in the live peer registry even if absent from the round set', async function () {
+            // A recent deviator known to the registry but omitted from this round's
+            // allValidators must not be pruned (its 24h deviation window survives).
+            let regOnly = VALIDATORS_3[1].pubkey;
+            sd.recentDeviations.set(regOnly, [{ round: 1, timestamp: Date.now() }]);
+
+            await sd._checkParticipation(1, [], [VALIDATORS_3[0], VALIDATORS_3[2]]);
+
+            expect(sd.recentDeviations.has(regOnly)).to.equal(true);
+        });
+    });
+
+    // -----------------------------------------------------------------
     // _resolveValidatorPubkey()
     // -----------------------------------------------------------------
 

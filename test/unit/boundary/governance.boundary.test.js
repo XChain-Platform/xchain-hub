@@ -131,9 +131,16 @@ describe('Boundary: Governance', function () {
         }
 
         function makeVotes(approveCount, rejectCount) {
+            // Assign each vote to a distinct CURRENT-set member so the
+            // membership-filtered legacy tally (GOV-TALLY-DENOM-1) counts it.
+            // Falls back to synthetic pubkeys when the set is empty (single-node
+            // case, where the tally counts every recorded vote).
+            let members = gov.validatorSet.map(v => String(v.pubkey).toLowerCase());
+            let pk = i => (i < members.length ? members[i] : 'pub' + i);
             let votes = [];
-            for (let i = 0; i < approveCount; i++) votes.push({ voter_pubkey: 'pub' + i, vote: 'approve' });
-            for (let i = 0; i < rejectCount; i++) votes.push({ voter_pubkey: 'rej' + i, vote: 'reject' });
+            let idx = 0;
+            for (let i = 0; i < approveCount; i++) votes.push({ voter_pubkey: pk(idx++), vote: 'approve' });
+            for (let i = 0; i < rejectCount; i++) votes.push({ voter_pubkey: pk(idx++), vote: 'reject' });
             return votes;
         }
 

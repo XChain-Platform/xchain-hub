@@ -296,8 +296,8 @@ describe('Regression: Governance', function () {
     // -----------------------------------------------------------------
 
     describe('P2P message handlers', function () {
-        it('_handlePropose stores proposal locally @regression-p2', function () {
-            gov._handlePropose({
+        it('_handlePropose stores proposal locally @regression-p2', async function () {
+            await gov._handlePropose({
                 sender: 'peer', type: 'GOV_PROPOSE',
                 data: {
                     proposalId: 'gov:P:1', parameter: 'P',
@@ -306,8 +306,7 @@ describe('Regression: Governance', function () {
                     votingEnd: new Date().toISOString()
                 }
             });
-            expect(hub.db.doQuery.called).to.be.true;
-            expect(hub.db.doQuery.getCall(0).args[0]).to.include('INSERT IGNORE');
+            expect(hub.db.doQuery.calledWithMatch(sinon.match(/INSERT IGNORE/))).to.be.true;
         });
 
         it('_handleVote drops a forged vote and stores an authenticated one @regression-p2', async function () {

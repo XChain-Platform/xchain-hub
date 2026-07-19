@@ -77,6 +77,32 @@ describe('ReorgHandler', function () {
             pm.getPeerStatus.returns([]);
             expect(rh._getQuorum()).to.equal(0);
         });
+
+        // REORG-QUORUM-PEER-FALLBACK-1: with no authoritative validator set the
+        // destructive-rollback quorum is derived from the authenticated validator
+        // registry (the same set that gates co-signs), not the raw open-socket count.
+        it('derives N from the registered-validator count, not raw open sockets, when the set is empty', function () {
+            rh.setValidatorSet([]);
+            pm.validatorAddr    = VALIDATORS_3[0].addr;
+            pm.validatorPubkeys = new Map(VALIDATORS_3.map(v => [v.addr, v.pubkey]));
+            // A flood of extra open sockets must NOT move N off the registry count of 3.
+            pm.getPeerStatus.returns(Array.from({ length: 9 }, () => ({ state: 'open' })));
+            expect(rh._getQuorum()).to.equal(2); // N=3 → majority floor ceil(4/2)=2
+        });
+
+        it('adds 1 for self when this node is not yet in the registry', function () {
+            rh.setValidatorSet([]);
+            pm.validatorAddr    = 'ws://self-not-registered:10001';
+            pm.validatorPubkeys = new Map(VALIDATORS_3.map(v => [v.addr, v.pubkey]));
+            expect(rh._getQuorum()).to.equal(3); // N=3+1=4 → 2f+1=3
+        });
+
+        it('falls back to the peer-socket count only when the registry is empty (bootstrap)', function () {
+            rh.setValidatorSet([]);
+            pm.validatorPubkeys = new Map();
+            pm.getPeerStatus.returns([{ state: 'open' }, { state: 'open' }]);
+            expect(rh._getQuorum()).to.equal(2); // N=2 peers + 1 self = 3 → majority floor 2
+        });
     });
 
     // -----------------------------------------------------------------

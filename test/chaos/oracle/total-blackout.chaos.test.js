@@ -114,8 +114,10 @@ describe('Chaos: Total Price Source Blackout (API-6)', function () {
         expect(firstCall[0]).to.include('skipped');
         expect(firstCall[1][0]).to.equal(5);
 
-        // Round should be marked as finalized
-        expect(oracleConsensus.finalized.has(5)).to.be.true;
+        // Round should be marked as LOCALLY skipped (#7), not finalized, so a
+        // later legitimate PROPOSE from the federation can still process it.
+        expect(oracleConsensus.locallySkipped.has(5)).to.be.true;
+        expect(oracleConsensus.finalized.has(5)).to.be.false;
     });
 
     it('consensus stores skipped round when below min submissions', async function () {
