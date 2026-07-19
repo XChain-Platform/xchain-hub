@@ -38,6 +38,7 @@ const crypto       = require('crypto');
 const axios        = require('axios');
 const EventEmitter = require('events');
 const coins        = require('./coins');
+const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 
 const REORG_ALERT          = 'REORG_ALERT';
 const XCHAIN_REORG_PREPARE = 'XCHAIN_REORG_PREPARE';
@@ -773,11 +774,9 @@ class ReorgHandler extends EventEmitter {
                 N = peers.length + 1;
             }
         }
-        if (N <= 1) return 0;
-        let f = Math.floor((N - 1) / 3);
-        // Majority floor: bare 2f+1 degenerates to quorum=1 at N=3 (f=0),
-        // letting a single validator finalize alone.
-        return Math.max(2 * f + 1, Math.ceil((N + 1) / 2));
+        // N<=1: single node, no peer to reach (0 = caller bypasses). Above that,
+        // the majority-floored BFT threshold (bft_quorum.js, ).
+        return bftQuorumOrSingle(N, 0);
     }
 
     // The digest binds the OBSERVED HASHES as well as the round identity, so a

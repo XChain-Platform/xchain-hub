@@ -46,6 +46,7 @@ const crypto            = require('crypto');
 const EventEmitter      = require('events');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const eq                = require('./equivocation_header.js');
+const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 
 const ATTEST_PROPOSE = 'ATTEST_PROPOSE';
 const ATTEST_PREPARE = 'ATTEST_PREPARE';
@@ -362,10 +363,10 @@ class AttestationConsensus extends EventEmitter {
         // never sets the gate today. Do NOT wire it into a new path expecting it
         // to bind without first re-checking this invariant.
         let responsible = roundState.responsible || [];
-        let quorum      = responsible.length <= 1
-            ? 0
-            : Math.max(2 * Math.floor((responsible.length - 1) / 3) + 1,
-                       Math.ceil((responsible.length + 1) / 2));
+        // : majority-floored BFT quorum over the responsible set (0 when
+        // size <= 1). Same threshold as the full-count engines, computed over
+        // responsible.length rather than N per the invariant documented above.
+        let quorum      = bftQuorumOrSingle(responsible.length, 0);
 
         // Unfinalizable-round guard. The finalization gates require
         // max(quorum, redundancy) VALID signatures, and signatures can only ever

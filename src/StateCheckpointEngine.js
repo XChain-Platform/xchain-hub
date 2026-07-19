@@ -55,6 +55,7 @@ const ValidatorIdentity = require('./ValidatorIdentity.js');
 const swq               = require('./stake_weighted_quorum.js');
 const eq                = require('./equivocation_header.js');
 const ckpt              = require('./checkpoint_commitment_activation.js');
+const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const coins             = require('./coins');
 
 const XCHK_SIGN_REQ  = 'XCHK_SIGN_REQ';
@@ -290,7 +291,13 @@ class StateCheckpointEngine extends EventEmitter {
 
         let network = String(bh.network || '');
         if(!network) throw new Error(chain + ' indexer returned no network (refusing a network-agnostic checkpoint)');
-        let seq = await this._getNextCheckpointSeq(chain, network);
+        // : seq is a deterministic function of the round's BTC snapshot_block, NOT
+        // COALESCE(MAX(seq))+1. The old read-then-allocate let two one-block-tip-skewed
+        // leaders read the same MAX and mint the SAME seq for DIFFERENT blocks; every
+        // honest leader now derives its seq from the (per-hub-unique-at-a-given-tip)
+        // snapshot_block, so a shared seq implies a shared snapshot_block implies one
+        // payload. Followers re-derive and refuse a mismatch (_handleSignReq).
+        let seq = StateCheckpointEngine.deriveCheckpointSeq(snapshotBlock);
 
         let cp = {
             chain:          chain,
@@ -325,7 +332,7 @@ class StateCheckpointEngine extends EventEmitter {
         let snapCount = validators.length;
         // STAKE_WEIGHTED_QUORUM: weighted (source-deduped) at/above activation, else count.
         let weighted  = swq.isStakeWeightedQuorumActive(cp.snapshot_block, this.network);
-        let quorum    = (snapCount <= 1) ? 1 : Math.max(2 * Math.floor((snapCount - 1) / 3) + 1, Math.ceil((snapCount + 1) / 2));
+        let quorum    = bftQuorumOrSingle(snapCount, 1);   // : majority-floored BFT quorum
 
         // Single-node set: self-sign satisfies the quorum (in both modes, the sole
         // validator's stake is the whole snapshot), so finalize immediately.
@@ -389,6 +396,13 @@ class StateCheckpointEngine extends EventEmitter {
         let myBtc = await this._resolveSnapshotBlock();
         if(!Number.isFinite(myBtc)) return;                        // no own tip -> fail closed
         if(Math.abs(myBtc - Number(cp.snapshot_block)) > this.cosignToleranceBlocks) return;
+
+        //  deterministic-seq guard: checkpoint_seq is a pure function of
+        // snapshot_block, so re-derive it and refuse a leader whose seq does not match.
+        // This closes seq-grinding (a leader picking an arbitrary seq to dodge the
+        // replay guard below or fork the anchor/reward bookkeeping) and makes the
+        // tightened (chain, network, checkpoint_seq) unique key a true split-brain fence.
+        if(Number(cp.checkpoint_seq) !== StateCheckpointEngine.deriveCheckpointSeq(cp.snapshot_block)) return;
 
         let validators = await this._resolveCapabilityValidators('oracle_publish', cp.snapshot_block);
         let pubkeys    = validators.map(v => String(v.pubkey).toLowerCase()).sort();
@@ -469,11 +483,16 @@ class StateCheckpointEngine extends EventEmitter {
         let cp = this._normalizeCheckpoint(d.checkpoint);
         if(!cp || !Array.isArray(d.signatures)) return;
 
+        // : a finalized checkpoint whose seq is not the value derived from its
+        // snapshot_block is malformed (the signers would not have co-signed it); refuse
+        // to persist it even with an otherwise-valid signature set.
+        if(Number(cp.checkpoint_seq) !== StateCheckpointEngine.deriveCheckpointSeq(cp.snapshot_block)) return;
+
         let validators = await this._resolveCapabilityValidators('oracle_publish', cp.snapshot_block);
         let pubkeys    = new Set(validators.map(v => String(v.pubkey).toLowerCase()));
         let snapCount  = pubkeys.size;
         let weighted   = swq.isStakeWeightedQuorumActive(cp.snapshot_block, this.network);
-        let quorum     = (snapCount <= 1) ? 1 : Math.max(2 * Math.floor((snapCount - 1) / 3) + 1, Math.ceil((snapCount + 1) / 2));
+        let quorum     = bftQuorumOrSingle(snapCount, 1);   // : majority-floored BFT quorum
 
         let canonical = StateCheckpointEngine.canonicalCheckpoint(cp);
         let seen = new Set(), sigs = [];
@@ -595,11 +614,19 @@ class StateCheckpointEngine extends EventEmitter {
         };
     }
 
-    async _getNextCheckpointSeq(chain, network){
-        let r = await this.db.doQuery(
-            'SELECT COALESCE(MAX(checkpoint_seq), -1) + 1 AS next_seq FROM state_checkpoints WHERE chain = ? AND network = ?',
-            [chain, network]);
-        return (r.length > 0) ? Number(r[0].next_seq) : 0;
+    // : the checkpoint_seq is derived purely from the round's BTC snapshot_block.
+    // snapshot_block is the single consensus field every hub already agrees on, and
+    // cadence leader election (rank == btcBlock % N over each hub's OWN BTC tip) makes
+    // at most one honest leader per BTC block; so tying seq to snapshot_block guarantees
+    // two honest leaders cannot mint divergent payloads under one seq (a shared seq
+    // implies a shared snapshot_block implies a shared tip implies one payload). It is
+    // monotonic across cadences (snapshot_block only advances by intervalBlocks), so the
+    // readers' MAX(checkpoint_seq) supersession and the co-sign replay guard still hold,
+    // and it strictly exceeds any legacy COALESCE(MAX)+1 dense seq (a count of prior
+    // checkpoints <= snapshot_block/interval), so a mid-upgrade hub never stalls.
+    // Every hub (leader, follower, finalizer) computes the identical value with no DB read.
+    static deriveCheckpointSeq(snapshotBlock){
+        return Number(snapshotBlock);
     }
 
     async _getMaxCheckpointSeq(chain, network){

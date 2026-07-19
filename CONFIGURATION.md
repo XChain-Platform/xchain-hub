@@ -249,6 +249,30 @@ variable also resolves from `p2pConfig`; the env var wins.
 | `ANCHOR_ELECTION_TOLERANCE_BLOCKS` | No | `36` | Failover ladder: BTC blocks of elected-publisher silence before the next-ranked validator's publish slot unlocks. |
 | `ANCHOR_REWARD_PER_PUBLISH` | No | `10.00000000` | XCHAIN reward recorded per anchor publish (`RewardTracker`). |
 
+## Effector spend policy (`SpendGuard`, )
+
+Every hub effector that spends real coin on-chain runs behind a shared
+`SpendGuard`: a balance floor, a rolling per-window spend ceiling (hard-clamped
+at the $2000 review admission ceiling), and a per-capability runtime pause. The
+knobs below take a per-effector `<PREFIX>`; the four prefixes are
+`ORACLE_PUBLISH`, `ATTEST`, `ANCHOR`, and `FULLNODE`. Each variable also
+resolves from `p2pConfig`; the env var wins. The spend ceiling is
+default-enabled: unset config yields the $2000 clamp, never "off".
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `<PREFIX>_MAX_SPEND_USD_CENTS_PER_WINDOW` | No | `200000` ($2000) | Rolling per-window spend budget in USD cents. Clamped to `<= 200000`; an operator can only lower it. |
+| `<PREFIX>_EST_SPEND_USD_CENTS` | No | `100` ($1) | Per-broadcast cost estimate charged against the window budget when the caller does not supply a real fee. |
+| `<PREFIX>_MAX_PUBLISHES_PER_WINDOW` | No | `0` (off) | Optional per-window broadcast **count** cap (defense in depth alongside the USD budget). `<=0` disables the count cap. |
+| `<PREFIX>_SPEND_WINDOW_MS` | No | `3600000` (1h) | Rolling window length (ms) for both the count and USD ceilings. |
+| `<PREFIX>_MIN_BALANCE` | No | `0` | Wallet floor (native coin). A balance below the floor, or an unreadable (null) balance, skips the spend fail-closed. |
+
+Runtime pause is operator-driven via JSON-RPC (auth-gated): `pauseeffectorspend`
+/ `resumeeffectorspend` take `{ label }` (the effector's guard label, e.g.
+`OraclePublisher`), and `geteffectorspendstatus` lists every effector's live
+state. A pause halts the effector's primary/leader spend path immediately, with
+no restart.
+
 ## Cross-chain DEX / XCALL relay (`CrossChainDexEngine`)
 
 Match discovery over the chain-specific indexer DBs plus PBFT finalization.

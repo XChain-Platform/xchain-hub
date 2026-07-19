@@ -26,6 +26,7 @@ const axios        = require('axios');
 const crypto       = require('crypto');
 const EventEmitter = require('events');
 const coins        = require('./coins');
+const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 
 const XCHAIN_ATTEST_PROPOSE = 'XCHAIN_ATTEST_PROPOSE';
 const XCHAIN_ATTEST_PREPARE = 'XCHAIN_ATTEST_PREPARE';
@@ -629,11 +630,9 @@ class CrossChainEngine extends EventEmitter {
             let peers = this.peerManager.getPeerStatus().filter(p => p.state === 'open');
             N = peers.length + 1;
         }
-        if (N <= 1) return 0;
-        let f = Math.floor((N - 1) / 3);
-        // Majority floor: bare 2f+1 degenerates to quorum=1 at N=3 (f=0),
-        // letting a single validator finalize alone.
-        return Math.max(2 * f + 1, Math.ceil((N + 1) / 2));
+        // N<=1: single node, no peer to reach (0 = caller bypasses). Above that,
+        // the majority-floored BFT threshold (bft_quorum.js, ).
+        return bftQuorumOrSingle(N, 0);
     }
 
     // Record a finalized attestation id under the bounded FIFO ring (R2-CCF4).

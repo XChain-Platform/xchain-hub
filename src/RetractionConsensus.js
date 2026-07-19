@@ -67,6 +67,7 @@
 const crypto            = require('crypto');
 const ValidatorIdentity = require('./ValidatorIdentity');
 const swq               = require('./stake_weighted_quorum.js');
+const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { isRetractionSigningActive } = require('./retraction_signing_activation.js');
 
 const XRETRACT_SIGN_REQ  = 'XRETRACT_SIGN_REQ';
@@ -181,7 +182,7 @@ class RetractionConsensus {
         let mySig    = this.identity.sign(canonical);
         let weighted = swq.isStakeWeightedQuorumActive(snapshotBlock, this.network);
         let snapCount = validators.length;
-        let quorum   = (snapCount <= 1) ? 1 : Math.max(2 * Math.floor((snapCount - 1) / 3) + 1, Math.ceil((snapCount + 1) / 2));
+        let quorum   = bftQuorumOrSingle(snapCount, 1);   // : majority-floored BFT quorum
 
         if(snapCount <= 1){
             await this._finalize(signedEvt, canonical, id, [{ pubkey: myPubkey, sig: mySig }], true);
@@ -342,7 +343,7 @@ class RetractionConsensus {
         let pubkeys    = new Set(validators.map(v => String(v.pubkey).toLowerCase()));
         let snapCount  = pubkeys.size;
         let weighted   = swq.isStakeWeightedQuorumActive(evt.snapshot_block, this.network);
-        let quorum     = (snapCount <= 1) ? 1 : Math.max(2 * Math.floor((snapCount - 1) / 3) + 1, Math.ceil((snapCount + 1) / 2));
+        let quorum     = bftQuorumOrSingle(snapCount, 1);   // : majority-floored BFT quorum
 
         let seen = new Set(), sigs = [];
         for(let s of d.signatures){

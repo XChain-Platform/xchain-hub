@@ -36,6 +36,7 @@ const eq                = require('./equivocation_header.js');
 const { PRICE_MAX, PRICE_V1_COINS, PRICE_V1_FIATS,
         MAX_TICK_LENGTH, MAX_MEMO_LENGTH } = require('./constants.js');
 const { bcgt }          = require('./bcmath.js');
+const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 
 class PriceAggregator extends EventEmitter {
 
@@ -188,7 +189,7 @@ class PriceAggregator extends EventEmitter {
         // max(2 * floor((N - 1) / 3) + 1, ceil((N + 1) / 2)).
         // This is the same threshold the indexer enforces when validating the action.
         let setSize = Number.isFinite(parseInt(snapshot.count)) ? parseInt(snapshot.count) : snapshot.validators.length;
-        let quorum  = (setSize <= 1) ? 1 : Math.max(2 * Math.floor((setSize - 1) / 3) + 1, Math.ceil((setSize + 1) / 2));
+        let quorum  = bftQuorumOrSingle(setSize, 1);   // : majority-floored BFT quorum
         if (verifiedSigs.length < quorum) {
             return { accepted: false, reason: 'insufficient quorum (' + verifiedSigs.length + '/' + quorum + ')' };
         }

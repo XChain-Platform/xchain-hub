@@ -46,6 +46,7 @@
 const EventEmitter      = require('events');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const swq               = require('./stake_weighted_quorum.js');
+const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 
 const XDEX_MATCH_PROPOSE     = 'XDEX_MATCH_PROPOSE';
 const XDEX_MATCH_PREPARE     = 'XDEX_MATCH_PREPARE';
@@ -259,7 +260,7 @@ class CrossChainDexConsensus extends EventEmitter {
             return;
         }
 
-        let quorum     = (snapCount <= 1) ? 0 : Math.max(2 * Math.floor((snapCount - 1) / 3) + 1, Math.ceil((snapCount + 1) / 2));
+        let quorum     = bftQuorumOrSingle(snapCount, 0);   // : majority-floored BFT quorum (0 = single-node self-sign)
         let canonical  = this.engine._canonicalMatch(row, 0);   // new round always starts at view 0
         let myPubkey   = this.identity.getPubkeyHex().toLowerCase();
 

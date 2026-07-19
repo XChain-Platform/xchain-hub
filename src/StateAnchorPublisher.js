@@ -78,6 +78,7 @@ const axios             = require('axios');
 const coins             = require('./coins');
 const EncoderClient     = require('./EncoderClient.js');
 const SpendGuard        = require('./lib/spend_guard.js');
+const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const StateCheckpointEngine = require('./StateCheckpointEngine.js');
@@ -720,7 +721,7 @@ class StateAnchorPublisher {
         let signingPubkeys = signingSet.map(v => v.pubkey);
         let snapCount      = signingPubkeys.length;
         let weighted       = swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block), this.network);
-        let quorum         = (snapCount <= 1) ? 1 : Math.max(2 * Math.floor((snapCount - 1) / 3) + 1, Math.ceil((snapCount + 1) / 2));
+        let quorum         = bftQuorumOrSingle(snapCount, 1);   // : majority-floored BFT quorum
 
         let me        = this.identity.getPubkeyHex().toLowerCase();
         let canonical = this._attestationCanonical(cp, publisher);
@@ -892,7 +893,7 @@ class StateAnchorPublisher {
         let signingPubkeys = signingSet.map(v => v.pubkey);
         let snapCount      = signingPubkeys.length;
         let weighted       = swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block), this.network);
-        let quorum         = (snapCount <= 1) ? 1 : Math.max(2 * Math.floor((snapCount - 1) / 3) + 1, Math.ceil((snapCount + 1) / 2));
+        let quorum         = bftQuorumOrSingle(snapCount, 1);   // : majority-floored BFT quorum
 
         let me        = this.identity.getPubkeyHex().toLowerCase();
         let canonical = this._archiveAttestationCanonical(cp, batchSeq, publisher);
@@ -1186,7 +1187,7 @@ class StateAnchorPublisher {
         // legacy 2f+1 count; keyed on the BTC snapshot_block so the hub flips on the
         // same anchor as anchor.js (`swq.isStakeWeightedQuorumActive(snapshotBlock, NETWORK)`).
         let weighted       = swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block), this.network);
-        let quorum         = (snapCount <= 1) ? 1 : Math.max(2 * Math.floor((snapCount - 1) / 3) + 1, Math.ceil((snapCount + 1) / 2));
+        let quorum         = bftQuorumOrSingle(snapCount, 1);   // : majority-floored BFT quorum
 
         // Seed the leader's own signature only if the leader is itself in the
         // signing set. A leader elected for liveness but absent from the
@@ -2454,7 +2455,7 @@ class StateAnchorPublisher {
             }));
             return swq.meetsStakeThreshold(weightedSet, validSigners);
         }
-        let quorum = (qualified.size <= 1) ? 1 : Math.max(2 * Math.floor((qualified.size - 1) / 3) + 1, Math.ceil((qualified.size + 1) / 2));
+        let quorum = bftQuorumOrSingle(qualified.size, 1);   // : majority-floored BFT quorum
         return validSigners.length >= quorum;
     }
 

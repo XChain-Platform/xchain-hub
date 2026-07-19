@@ -215,6 +215,43 @@ class Database {
             ['price', 'cross_chain', 'oracle_publish', 'attestation', 'full_node'],
             'NOT NULL'
         );
+        //  checkpoint split-brain: tighten the state_checkpoints uniqueness from
+        // (chain, network, block_index, checkpoint_seq) to (chain, network, checkpoint_seq)
+        // so a same-seq race can never seat two divergent rows (and double-anchor DOGE).
+        // _migrateUniqueKey dedups any pre-existing (chain, network, checkpoint_seq)
+        // collisions (keeping the lowest id) before adding the key; the audit the spec
+        // asks for is exactly that dedup step. Then retire the now-redundant wider
+        // indexes so fresh installs and migrated nodes carry the same index set.
+        await this._migrateUniqueKey(
+            'state_checkpoints',
+            'uq_chain_seq',
+            '(chain, network, checkpoint_seq)',
+            ['chain', 'network', 'checkpoint_seq']
+        );
+        await this._migrateIndex('state_checkpoints', 'sc_chain_blk', '(chain, network, block_index)');
+        await this._dropIndexIfExists('state_checkpoints', 'chain_block_seq');
+        await this._dropIndexIfExists('state_checkpoints', 'checkpoint_seq');
+    }
+
+    // Drop an index if it exists (idempotent). Used to retire an index that a
+    // later schema revision superseded, so a node created from an older release
+    // does not keep carrying it after the migration runs.
+    async _dropIndexIfExists(table, indexName){
+        let db = await this.getConnection();
+        try {
+            let existing = await db.query(
+                "SELECT COUNT(*) AS c FROM information_schema.statistics " +
+                "WHERE table_schema = ? AND table_name = ? AND index_name = ?",
+                [this.dbName, table, indexName]
+            );
+            if(!existing[0] || Number(existing[0].c) === 0) return;
+            await db.query('ALTER TABLE `' + table + '` DROP INDEX `' + indexName + '`');
+            console.log('Migration: dropped redundant INDEX ' + indexName + ' on ' + table);
+        } catch(e){
+            console.error('Migration error dropping ' + indexName + ' on ' + table + ':', e);
+        } finally {
+            await db.release();
+        }
     }
 
     async _migrateUniqueKey(table, indexName, indexColumns, columnList){

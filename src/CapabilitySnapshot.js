@@ -33,6 +33,7 @@
  ********************************************************************/
 
 const axios = require('axios');
+const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 
 class CapabilitySnapshot {
 
@@ -398,8 +399,9 @@ class CapabilitySnapshot {
         // a malformed count can never silently drop quorum to a single-node bypass.
         let N = Number(snapshot.count);
         if (!Number.isInteger(N) || N < 0) N = Array.isArray(snapshot.validators) ? snapshot.validators.length : 0;
-        if (N <= 1) return 0;
-        return Math.max(2 * Math.floor((N - 1) / 3) + 1, Math.ceil((N + 1) / 2));
+        // N<=1: single node (0 = caller bypasses consensus). Above that, the
+        // majority-floored BFT threshold (bft_quorum.js, ).
+        return bftQuorumOrSingle(N, 0);
     }
 
     // Whether a pubkey appears in the snapshot's validator set (used to gate PBFT vote counting).

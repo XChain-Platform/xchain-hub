@@ -28,6 +28,7 @@
 const crypto = require('crypto');
 const swq    = require('./stake_weighted_quorum.js');
 const eq     = require('./equivocation_header.js');
+const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 
 const PBFT_PRE_PREPARE = 'PBFT_PRE_PREPARE';
 const PBFT_PREPARE     = 'PBFT_PREPARE';
@@ -933,11 +934,9 @@ class Consensus {
             let peers = this.peerManager.getPeerStatus().filter(p => p.state === 'open');
             N = peers.length + 1; // +1 for self
         }
-        if (N <= 1) return 0;    // Single node; no consensus needed
-        let f = Math.floor((N - 1) / 3);
-        // Majority floor: bare 2f+1 degenerates to quorum=1 at N=3 (f=0),
-        // letting a single validator finalize alone.
-        return Math.max(2 * f + 1, Math.ceil((N + 1) / 2));
+        // N<=1: single node, no consensus needed (0 = caller bypasses). Above
+        // that, the majority-floored BFT threshold (bft_quorum.js, ).
+        return bftQuorumOrSingle(N, 0);
     }
 
     _digest(config) {

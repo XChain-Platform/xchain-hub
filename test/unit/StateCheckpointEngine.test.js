@@ -66,8 +66,11 @@ describe('StateCheckpointEngine', function () {
                 }
                 if (sql.startsWith('INSERT IGNORE INTO state_checkpoints')) {
                     let [chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures] = params;
-                    // Append-only INSERT IGNORE keyed by (chain, network, block_index, checkpoint_seq)
-                    if (!checkpoints.some(r => r.chain === chain && r.network === network && r.block_index === block_index && r.checkpoint_seq === checkpoint_seq))
+                    // : append-only INSERT IGNORE keyed by the TIGHTENED unique index
+                    // (chain, network, checkpoint_seq). A second row at an already-seated seq
+                    // (even a different block_index) is dropped, exactly as the real DB's
+                    // uq_chain_seq collapses a same-seq split-brain to one admitted row.
+                    if (!checkpoints.some(r => r.chain === chain && r.network === network && r.checkpoint_seq === checkpoint_seq))
                         checkpoints.push({ id: checkpoints.length + 1, chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures });
                     return [];
                 }
@@ -291,12 +294,14 @@ describe('StateCheckpointEngine', function () {
     it('followers never co-sign a stale checkpoint_seq (replay guard)', async function () {
         let bus = buildMesh(4, { btcBlock: 101 });
         await startAll(bus);
-        // Pre-record seq 5 on every follower; the leader (fresh DB) proposes seq 0.
+        // : seq is derived from snapshot_block, so the leader proposes seq 101
+        // (btcBlock 101). Pre-record that same seq on every follower so the proposal
+        // is a genuine replay (cp.checkpoint_seq 101 <= recorded maxSeq 101).
         let leader = leaderNode(bus, 101);
         for (let nd of bus.nodes) {
             if (nd === leader) continue;
             nd.db.checkpoints.push({ id: 1, chain: 'BTC', network: 'regtest', block_index: 1, block_hash: '', ledger_hash: '',
-                                     actions_hash: '', contract_hash: '', checkpoint_seq: 5, snapshot_block: 1, validator_signatures: '[]' });
+                                     actions_hash: '', contract_hash: '', checkpoint_seq: 101, snapshot_block: 101, validator_signatures: '[]' });
         }
         await tickAll(bus);
         await sleep(80);
@@ -312,7 +317,10 @@ describe('StateCheckpointEngine', function () {
         let cp = {
             chain: 'BTC', network: TIP.network, block_index: TIP.block_index, block_hash: TIP.block_hash,
             ledger_hash: TIP.ledger_hash, actions_hash: TIP.actions_hash, contract_hash: TIP.contract_hash,
-            checkpoint_seq: 0, snapshot_block: 101
+            // : seq must match the value derived from snapshot_block, so the REQ
+            // clears the deterministic-seq guard and is rejected specifically by the
+            // non-leader (cadence) check we are exercising here.
+            checkpoint_seq: 101, snapshot_block: 101
         };
         let canon = StateCheckpointEngine.canonicalCheckpoint(cp);
         // Impostor broadcasts a well-formed, correctly signed REQ, but isn't the cadence leader.
@@ -408,7 +416,9 @@ describe('StateCheckpointEngine', function () {
                 chain: 'BTC', network: TIP.network, block_index: TIP.block_index,
                 block_hash: TIP.block_hash, ledger_hash: TIP.ledger_hash,
                 actions_hash: TIP.actions_hash, contract_hash: TIP.contract_hash,
-                checkpoint_seq: 0, snapshot_block: snapshotBlock,
+                // : seq is derived from snapshot_block; use the derived value so
+                // these freshness-bound cases exercise the freshness guard, not the seq guard.
+                checkpoint_seq: snapshotBlock, snapshot_block: snapshotBlock,
                 state_root: TIP.state_root, state_root_version: TIP.state_root_version,
                 block_merkle_root: TIP.block_merkle_root, block_merkle_version: TIP.block_merkle_version
             };
@@ -459,6 +469,90 @@ describe('StateCheckpointEngine', function () {
             let signs = watchCosign(follower);
             await follower.engine._handleSignReq(env);
             expect(signs.length, 'missing own tip fails closed').to.equal(0);
+        });
+    });
+
+    // ── : snapshot_block-derived checkpoint_seq + split-brain fence ─────
+    // The old COALESCE(MAX(seq))+1 allocation let two one-block-tip-skewed leaders
+    // mint the SAME seq for DIFFERENT blocks (split-brain), which the anchor
+    // publisher then double-spent on DOGE. seq is now a deterministic function of
+    // snapshot_block, followers refuse a leader whose seq does not match, and the
+    // tightened (chain, network, checkpoint_seq) unique key collapses any residual
+    // same-seq race to one admitted row.
+    describe('snapshot_block-derived seq + split-brain fence ', function () {
+
+        it('deriveCheckpointSeq is the identity on snapshot_block, and a produced checkpoint uses it', async function () {
+            expect(StateCheckpointEngine.deriveCheckpointSeq(900120)).to.equal(900120);
+            expect(StateCheckpointEngine.deriveCheckpointSeq('42')).to.equal(42);
+
+            let bus = buildMesh(1, { btcBlock: 250 });
+            await startAll(bus);
+            await tickAll(bus);
+            await sleep(30);
+            let row = bus.nodes[0].db.checkpoints[0];
+            // seq is the BTC cadence (snapshot) block, NOT a dense 0 from MAX+1.
+            expect(row.checkpoint_seq, 'seq == snapshot_block').to.equal(250);
+            expect(row.snapshot_block).to.equal(250);
+        });
+
+        it('followers refuse to co-sign a SIGN_REQ whose seq does not match its snapshot_block (grinding)', async function () {
+            let SNAP = 500;
+            let bus = buildMesh(2, { btcBlock: SNAP, confirmations: 0 });
+            let leader   = leaderNode(bus, SNAP);
+            let follower = bus.nodes.find(nd => nd.pubkey !== leader.pubkey);
+            follower.hub._resolveBtcLatestBlock = async () => SNAP;   // fresh: passes the freshness bound
+
+            // A leader-signed REQ that is fresh and correctly signed, but carries a
+            // ground seq (SNAP+7) instead of the deterministic deriveCheckpointSeq(SNAP)=SNAP.
+            let cp = {
+                chain: 'BTC', network: TIP.network, block_index: TIP.block_index,
+                block_hash: TIP.block_hash, ledger_hash: TIP.ledger_hash,
+                actions_hash: TIP.actions_hash, contract_hash: TIP.contract_hash,
+                checkpoint_seq: SNAP + 7, snapshot_block: SNAP,
+                state_root: TIP.state_root, state_root_version: TIP.state_root_version,
+                block_merkle_root: TIP.block_merkle_root, block_merkle_version: TIP.block_merkle_version
+            };
+            let canon = StateCheckpointEngine.canonicalCheckpoint(cp);
+            let env = { type: 'XCHK_SIGN_REQ', sender: leader.pubkey,
+                        data: { checkpoint: cp, sig_pubkey: leader.pubkey, sig: leader.identity.sign(canon) } };
+
+            let signs = [];
+            let pm = follower.engine.peerManager, orig = pm.broadcast.bind(pm);
+            pm.broadcast = (type, data) => { if (type === 'XCHK_SIGN') signs.push(data); return orig(type, data); };
+            await follower.engine._handleSignReq(env);
+            expect(signs.length, 'ground seq refused').to.equal(0);
+        });
+
+        it('_handleFinalized rejects a finalized checkpoint whose seq does not match snapshot_block', async function () {
+            let bus = buildMesh(1, { btcBlock: 300 });
+            let nd  = bus.nodes[0];
+            await nd.engine.start();
+            let cp = {
+                chain: 'BTC', network: TIP.network, block_index: TIP.block_index,
+                block_hash: TIP.block_hash, ledger_hash: TIP.ledger_hash,
+                actions_hash: TIP.actions_hash, contract_hash: TIP.contract_hash,
+                checkpoint_seq: 999, snapshot_block: 300   // 999 != deriveCheckpointSeq(300)
+            };
+            await nd.engine._handleFinalized({ data: { checkpoint: cp, signatures: [{ pubkey: nd.pubkey, sig: 'x' }] } });
+            expect(nd.db.checkpoints.length, 'malformed finalized seq not persisted').to.equal(0);
+        });
+
+        it('same-seq split-brain (different block_index) collapses to one admitted row', async function () {
+            let bus = buildMesh(1, { btcBlock: 200 });
+            let nd  = bus.nodes[0];
+            let base = {
+                chain: 'BTC', network: 'regtest', block_hash: TIP.block_hash,
+                ledger_hash: TIP.ledger_hash, actions_hash: TIP.actions_hash,
+                contract_hash: TIP.contract_hash, checkpoint_seq: 200, snapshot_block: 200,
+                state_root: null, state_root_version: null, block_merkle_root: null, block_merkle_version: null
+            };
+            // Two divergent payloads (block_index 10 vs 11) at the SAME seq 200 - exactly
+            // the split-brain the old 4-column unique index admitted BOTH of.
+            await nd.engine._acceptFinalized(Object.assign({}, base, { block_index: 10 }), [{ pubkey: nd.pubkey, sig: 'a' }], 1, true);
+            await nd.engine._acceptFinalized(Object.assign({}, base, { block_index: 11 }), [{ pubkey: nd.pubkey, sig: 'b' }], 1, true);
+            let atSeq = nd.db.checkpoints.filter(r => r.chain === 'BTC' && r.network === 'regtest' && r.checkpoint_seq === 200);
+            expect(atSeq.length, 'exactly one row survives per seq').to.equal(1);
+            expect(atSeq[0].block_index, 'first writer wins').to.equal(10);
         });
     });
 });

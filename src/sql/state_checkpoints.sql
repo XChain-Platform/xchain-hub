@@ -8,7 +8,7 @@ CREATE TABLE state_checkpoints (
     ledger_hash          VARCHAR(64)  NOT NULL,                    -- indexer blocks.ledger_hash (chained) at block_index
     actions_hash         VARCHAR(64)  NOT NULL,                    -- indexer blocks.actions_hash (chained)
     contract_hash        VARCHAR(64)  NOT NULL,                    -- indexer blocks.contract_hash (chained)
-    checkpoint_seq       BIGINT UNSIGNED NOT NULL,                 -- monotonic per (chain, network); replay guard
+    checkpoint_seq       BIGINT UNSIGNED NOT NULL,                 -- monotonic per (chain, network); derived from snapshot_block (StateCheckpointEngine.deriveCheckpointSeq); replay guard + split-brain key
     snapshot_block       BIGINT UNSIGNED NOT NULL,                 -- BTC block selecting the oracle_publish set for sig verification
     state_root           CHAR(64),                                 -- SPV light-client state_root (SMT over balances+stakes); NULL pre CHECKPOINT_COMMITMENT flag-day
     state_root_version   TINYINT UNSIGNED,                         -- merkle.js STATE_ROOT_VERSION the state_root was computed under; NULL pre-flag-day
@@ -24,5 +24,14 @@ CREATE TABLE state_checkpoints (
 -- higher checkpoint_seq (never an UPDATE, because the indexer mirror applies rows with
 -- INSERT IGNORE, so an in-place update would silently never propagate). Readers
 -- resolve "the" checkpoint for a height as MAX(checkpoint_seq).
-CREATE UNIQUE INDEX chain_block_seq ON state_checkpoints (chain, network, block_index, checkpoint_seq);
-CREATE        INDEX checkpoint_seq  ON state_checkpoints (chain, network, checkpoint_seq);
+--
+--  split-brain defense: the unique key is (chain, network, checkpoint_seq),
+-- NOT (chain, network, block_index, checkpoint_seq). checkpoint_seq is derived
+-- deterministically from snapshot_block (StateCheckpointEngine.deriveCheckpointSeq),
+-- so two BTC-tip-skewed leaders can never mint divergent payloads under one seq.
+-- This key is the last line of defense: if a same-seq race ever produces two rows
+-- with different block_index/hashes, exactly one is admitted (INSERT IGNORE drops
+-- the loser), so the anchor publisher's MAX(checkpoint_seq) selection can never see
+-- two rows at one seq and double-spend a DOGE anchor for one logical checkpoint.
+CREATE UNIQUE INDEX uq_chain_seq  ON state_checkpoints (chain, network, checkpoint_seq);
+CREATE        INDEX sc_chain_blk  ON state_checkpoints (chain, network, block_index);
