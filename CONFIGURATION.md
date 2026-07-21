@@ -193,6 +193,7 @@ Wallet and encoder the hub uses to publish oracle prices on Dogecoin.
 | `DOGE_LOW_BALANCE_THRESHOLD` | No | `10` | Low-balance warning threshold (DOGE). |
 | `PUBLISHER_QUEUE_PATH` | No | `./data/publisher-queue.jsonl` | On-disk price publish queue. |
 | `PUBLISHER_MAX_ATTEMPTS` | No | `5` | Max publish retry attempts. |
+| `ORACLE_PUBLISH_ENABLED` | No | `true` | Operator-local kill switch for the oracle price publisher (mirrors the `*_ENABLED` publisher idiom). `false` skips both publish rounds and queue processing. Also resolves from `p2pConfig`; the env var wins. |
 
 ## Reward tracker
 
@@ -339,3 +340,5 @@ env var, else the bundled per-coin `FULLNODE` block.
 |---|---|---|---|
 | `LLM_DEFAULT_MODEL` | No | `claude-sonnet-4-6` | Default judge model. Must be in the approved-models list. |
 | `CLAUDE_BIN` | No | `claude` | Path to the Claude CLI binary. |
+| `LLM_PROVIDER_ENABLED` | No | `true` | Operator-local kill switch for this paid provider. `false` stops `fetch()`/`agree()` from dialing any billed vendor; authoritative and immediate, and survives a governance hotReload. Governance can also pause federation-wide via `additional_config.enabled`. Either source disabling pauses the provider. |
+| `LLM_MAX_BUDGET_USD` | No | _unset_ (no cap) | Per-call USD spend ceiling for the `claude_spawn` transport (plumbed to `--max-budget-usd`). A positive number caps each call; unset, non-numeric, or non-positive means no budget. The env var wins over governance `additional_config.max_budget_usd` when both are positive. |
