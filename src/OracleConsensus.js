@@ -34,6 +34,7 @@ const swq               = require('./stake_weighted_quorum.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const eq                = require('./equivocation_header.js');
 const bcmath            = require('./bcmath.js');
+const devband           = require('./lib/deviation_band.js');
 
 const ORACLE_PROPOSE = 'ORACLE_PROPOSE';
 const ORACLE_PREPARE = 'ORACLE_PREPARE';
@@ -1010,10 +1011,17 @@ class OracleConsensus extends EventEmitter {
                 }
                 let local = localByPair.get(p.coinPair);
                 if (local !== undefined && local !== null && bcmath.bcgt(local, '0')) {
-                    // deviation = |proposed - local| / local, in bignumber
-                    let diff    = bcmath.bcsub(p.price, local, 18);
-                    let absDiff = bcmath.bclt(diff, 0) ? bcmath.bcmul(diff, '-1', 18) : diff;
-                    let deviation = bcmath.bcdiv(absDiff, local, 18);
+                    // Canonical mean-relative band (, shared deviation_band helper):
+                    // deviation = |local - proposed| / proposed, i.e. the follower's own
+                    // aggregate measured against the PROPOSED price as reference, the same
+                    // reference orientation as the publish-side 2-source gate ((hi-lo)/(hi+lo)
+                    // = each submitter vs the mean) and SlashDetector (submission vs the
+                    // finalized price). Dividing by `local` instead (pre-) opened a
+                    // ratio window r in (1.10, 1.10526] at the 5% band where the leader
+                    // publishes a 2-source pair the follower then withholds the whole round
+                    // over, with no durable record. CONSENSUS-CRITICAL: deploy fleet-wide
+                    // atomically.
+                    let deviation = devband.deviationFrom(local, p.price, 18);
                     if (bcmath.bcgt(deviation, String(devThreshold))) {
                         let pct = bcmath.bcformat(bcmath.bcmul(deviation, '100', 4), 4);
                         reject(p.coinPair, 'proposed ' + p.price + ' deviates ' + pct +
@@ -1028,9 +1036,9 @@ class OracleConsensus extends EventEmitter {
                     // quorum co-signers happened to not fetch in this round.
                     let lastPrice = this._getLastFinalizedPrice(p.coinPair);
                     if (lastPrice !== null && bcmath.bcgt(lastPrice, '0')) {
-                        let diff      = bcmath.bcsub(p.price, lastPrice, 18);
-                        let absDiff   = bcmath.bclt(diff, 0) ? bcmath.bcmul(diff, '-1', 18) : diff;
-                        let deviation = bcmath.bcdiv(absDiff, lastPrice, 18);
+                        // Shared deviation_band helper ; reference = last finalized
+                        // price, already the canonical orientation here (behavior-preserving).
+                        let deviation = devband.deviationFrom(p.price, lastPrice, 18);
                         // Use a wider band than the live-submission check to allow for
                         // genuine price movement between rounds, while still bounding a Byzantine
                         // leader from injecting values that are orders of magnitude off. The band
@@ -1431,8 +1439,9 @@ class OracleConsensus extends EventEmitter {
         // gates identically. CONSENSUS-CRITICAL: deploy fleet-wide atomically.
         if (values.length === 2) {
             let lo = values[0].s, hi = values[1].s; // sorted ascending, both > 0
-            let spread = bcmath.bcdiv(bcmath.bcsub(hi, lo, 8), bcmath.bcadd(lo, hi, 8), 8);
-            if (bcmath.bcgt(spread, String(ORACLE_DEVIATION_THRESHOLD))) {
+            // Shared deviation_band helper : (hi-lo)/(hi+lo), byte-identical
+            // to the original inline arithmetic (no rounded intermediate mean).
+            if (devband.twoSourceSpreadExceeds(lo, hi, ORACLE_DEVIATION_THRESHOLD, 8)) {
                 console.warn('Oracle: dropping ' + coinPair + ' this round: only 2 sources and they '
                     + 'disagree beyond the ' + (ORACLE_DEVIATION_THRESHOLD * 100) + '% mean-deviation gate ('
                     + lo + ' vs ' + hi + ')');

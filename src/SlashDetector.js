@@ -28,6 +28,7 @@
 
 const { ORACLE_DEVIATION_THRESHOLD } = require('./constants');
 const bcmath = require('./bcmath.js');
+const devband = require('./lib/deviation_band.js');
 
 const MAX_DEVIATIONS_PER_VALIDATOR = 1000;
 
@@ -137,14 +138,15 @@ class SlashDetector {
                 let submittedPrice = parseFloat(p.price);
                 if (isNaN(submittedPrice) || submittedPrice === 0) continue;
 
-                // Exact-decimal deviation, mirroring the co-sign admission band in
-                // OracleConsensus._handlePropose (bcsub/bcdiv/bcgt at scale 18). Float
-                // arithmetic here re-introduced ULP error at the +-band boundary, so an
-                // exactly-threshold submission was co-signed yet slashed. Both sides of
-                // the band must be decided by the same exact comparison.
-                let diff      = bcmath.bcsub(String(p.price), String(finalPriceStr), 18);
-                let absDiff   = bcmath.bclt(diff, 0) ? bcmath.bcmul(diff, '-1', 18) : diff;
-                let deviation = bcmath.bcdiv(absDiff, String(finalPriceStr), 18);
+                // Canonical mean-relative deviation via the shared deviation_band helper
+                // : |submitted - finalized| / finalized at scale 18, the same
+                // formula and reference orientation as the co-sign admission gate and the
+                // publish-side 2-source gate in OracleConsensus. This site was already
+                // reference-relative pre-helper (behavior-preserving). Exact-decimal
+                // bcmath (no float ULP at the +-band boundary): both sides of the band
+                // must be decided by the same exact comparison, so an exactly-threshold
+                // submission is never co-signed yet slashed.
+                let deviation = devband.deviationFrom(String(p.price), String(finalPriceStr), 18);
 
                 if (bcmath.bcgt(deviation, String(this.deviationThreshold))) {
                     let pct = bcmath.bcformat(bcmath.bcmul(deviation, '100', 4), 4);
