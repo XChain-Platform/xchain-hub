@@ -12,5 +12,9 @@ CREATE TABLE capability_snapshots (
 
 -- Presence of a row = that pubkey QUALIFIED for `capability` at `snapshot_block`
 -- (the hub only writes pubkeys already filtered by min_stake via getcapabilityvalidators).
-CREATE UNIQUE INDEX uq_cap_snap   ON capability_snapshots (snapshot_block, capability, signing_pubkey);
+-- `source` is part of the key : at/above STAKE_WEIGHTED_QUORUM a key
+-- delegated by two sources yields one row per (source, pubkey); a 3-column key
+-- (without source) collapses them on INSERT IGNORE and silently drops the second
+-- source, understating stake for any mirror-reading verifier.
+CREATE UNIQUE INDEX uq_cap_snap   ON capability_snapshots (snapshot_block, capability, signing_pubkey, source);
 CREATE        INDEX cap_block     ON capability_snapshots (capability, snapshot_block);

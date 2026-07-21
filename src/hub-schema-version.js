@@ -28,6 +28,11 @@
  *
  ********************************************************************/
 
-const HUB_SCHEMA_VERSION = 1;
+// v2 : capability_snapshots.uq_cap_snap gained `source`, so a key
+// delegated by two sources keeps BOTH (source, pubkey) rows in the mirror stream
+// instead of collapsing to one. A stale indexer on the 3-column key would
+// INSERT-IGNORE-drop the second source row and understate stake, so it must
+// reject a v2 snapshot stream until it has migrated.
+const HUB_SCHEMA_VERSION = 2;
 
 module.exports = { HUB_SCHEMA_VERSION };

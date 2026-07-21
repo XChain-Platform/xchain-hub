@@ -231,6 +231,21 @@ class Database {
         await this._migrateIndex('state_checkpoints', 'sc_chain_blk', '(chain, network, block_index)');
         await this._dropIndexIfExists('state_checkpoints', 'chain_block_seq');
         await this._dropIndexIfExists('state_checkpoints', 'checkpoint_seq');
+        // : widen capability_snapshots.uq_cap_snap to add `source`. At/above
+        // STAKE_WEIGHTED_QUORUM a signing key delegated by two staking sources yields
+        // one row per (source, pubkey); the old 3-column key collapsed them on
+        // INSERT IGNORE and silently dropped the second source, understating stake for
+        // any mirror-reading verifier. alterTableForDrift only reconciles columns and
+        // _migrateUniqueKey no-ops once the index NAME exists, so neither widens an
+        // existing key: this reconciles the column set in place. Monotonically safe (a
+        // strict superset of an already-enforced UNIQUE key can only relax it, so no
+        // pre-dedup is needed).
+        await this._widenUniqueKey(
+            'capability_snapshots',
+            'uq_cap_snap',
+            'source',
+            '(snapshot_block, capability, signing_pubkey, source)'
+        );
     }
 
     // Drop an index if it exists (idempotent). Used to retire an index that a
@@ -277,6 +292,38 @@ class Database {
             console.log('Migration: added UNIQUE KEY ' + indexName + ' on ' + table);
         } catch(e){
             console.error('Migration error on ' + table + ':', e);
+        } finally {
+            await db.release();
+        }
+    }
+
+    // Add a column to an existing UNIQUE KEY in place (drop + re-add the wider key).
+    // Unlike _migrateUniqueKey (which no-ops as soon as the index NAME exists), this
+    // reconciles a same-named key whose COLUMN SET changed. Only ever used to WIDEN a
+    // key (add a column): a wider UNIQUE key is a strict superset constraint, so an
+    // already-unique table cannot collide on it and no row dedup is required.
+    // Idempotent: a no-op once the live key already covers `requiredColumn`, and it
+    // simply adds the key when it is absent entirely.
+    async _widenUniqueKey(table, indexName, requiredColumn, indexColumns){
+        let db = await this.getConnection();
+        try {
+            let cols = await db.query(
+                "SELECT column_name AS col FROM information_schema.statistics " +
+                "WHERE table_schema = ? AND table_name = ? AND index_name = ?",
+                [this.dbName, table, indexName]
+            );
+            let present = (cols || []).map(r => String(r.col != null ? r.col : '').toLowerCase());
+            if(present.length === 0){
+                await db.query('ALTER TABLE ' + table + ' ADD UNIQUE KEY ' + indexName + ' ' + indexColumns);
+                console.log('Migration: added UNIQUE KEY ' + indexName + ' on ' + table);
+                return;
+            }
+            if(present.indexOf(String(requiredColumn).toLowerCase()) !== -1) return;   // already widened
+            await db.query('ALTER TABLE ' + table + ' DROP INDEX ' + indexName);
+            await db.query('ALTER TABLE ' + table + ' ADD UNIQUE KEY ' + indexName + ' ' + indexColumns);
+            console.log('Migration: widened UNIQUE KEY ' + indexName + ' on ' + table + ' to include ' + requiredColumn);
+        } catch(e){
+            console.error('Migration error widening ' + indexName + ' on ' + table + ':', e);
         } finally {
             await db.release();
         }

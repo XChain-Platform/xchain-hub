@@ -79,6 +79,7 @@ const coins             = require('./coins');
 const EncoderClient     = require('./EncoderClient.js');
 const SpendGuard        = require('./lib/spend_guard.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
+const { resolveQuorumNetwork } = require('./lib/quorum_network.js');
 const { isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const StateCheckpointEngine = require('./StateCheckpointEngine.js');
@@ -717,10 +718,10 @@ class StateAnchorPublisher {
     async _runPublisherAttestationRound(cp, publisher){
         if(!this.identity) return { met: false, sigs: [] };
 
-        let signingSet     = await this._resolveCapabilitySet('oracle_publish', Number(cp.snapshot_block));
+        let signingSet     = await this._resolveCapabilitySet('oracle_publish', Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));
         let signingPubkeys = signingSet.map(v => v.pubkey);
         let snapCount      = signingPubkeys.length;
-        let weighted       = swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block), this.network);
+        let weighted       = swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));   // : gate on the RECORD network to match the indexer
         let quorum         = bftQuorumOrSingle(snapCount, 1);   // : majority-floored BFT quorum
 
         let me        = this.identity.getPubkeyHex().toLowerCase();
@@ -889,10 +890,10 @@ class StateAnchorPublisher {
     async _runArchiveAttestationRound(cp, batchSeq, publisher){
         if(!this.identity) return { met: false, sigs: [] };
 
-        let signingSet     = await this._resolveCapabilitySet('oracle_publish', Number(cp.snapshot_block));
+        let signingSet     = await this._resolveCapabilitySet('oracle_publish', Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));
         let signingPubkeys = signingSet.map(v => v.pubkey);
         let snapCount      = signingPubkeys.length;
-        let weighted       = swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block), this.network);
+        let weighted       = swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));   // : gate on the RECORD network to match the indexer
         let quorum         = bftQuorumOrSingle(snapCount, 1);   // : majority-floored BFT quorum
 
         let me        = this.identity.getPubkeyHex().toLowerCase();
@@ -1180,13 +1181,13 @@ class StateAnchorPublisher {
         // snapshot_block, source-keyed). Bare pubkeys would lose the staking weight
         // the stake-weighted gate needs, so the publisher's local quorum decision
         // must use this set, not _getActiveOraclePublishPubkeys.
-        let signingSet     = await this._resolveCapabilitySet('oracle_publish', Number(cp.snapshot_block));
+        let signingSet     = await this._resolveCapabilitySet('oracle_publish', Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));
         let signingPubkeys = signingSet.map(v => v.pubkey);
         let snapCount      = signingPubkeys.length;
         // STAKE_WEIGHTED_QUORUM: weighted (source-deduped) at/above activation, else
         // legacy 2f+1 count; keyed on the BTC snapshot_block so the hub flips on the
         // same anchor as anchor.js (`swq.isStakeWeightedQuorumActive(snapshotBlock, NETWORK)`).
-        let weighted       = swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block), this.network);
+        let weighted       = swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));   // : gate on the RECORD network to match the indexer
         let quorum         = bftQuorumOrSingle(snapCount, 1);   // : majority-floored BFT quorum
 
         // Seed the leader's own signature only if the leader is itself in the
@@ -1271,11 +1272,18 @@ class StateAnchorPublisher {
     // local capability_snapshots table only holds rows a hub persisted while
     // leading, so it can't be the shared source). Falls back to the local
     // table for seeded/regtest stacks with no live BTC resolution.
-    async _resolveCapabilitySet(capability, block){
+    async _resolveCapabilitySet(capability, block, network){
+        // : derive the weighted-vs-count set for the RECORD's network (callers
+        // pass resolveQuorumNetwork(record, this.network) / the archive network),
+        // matching the round/verify gate that judges the resulting set. On a scoped
+        // hub this equals this.network (a no-op); on an unscoped or cross-network hub
+        // the gate would otherwise say weighted while the set resolved as count,
+        // failing the stake tally closed. Falls back to this.network when none passed.
+        let net = (network != null) ? network : this.network;
         // Source-keyed at/above STAKE_WEIGHTED_QUORUM so the archived snapshot rows
         // carry the staking source recovery needs to dedupe weight; legacy set
         // below it (source=''). amount carries the source's weight when weighted.
-        let weighted = swq.isStakeWeightedQuorumActive(Number(block), this.network);
+        let weighted = swq.isStakeWeightedQuorumActive(Number(block), net);
         // Gate on snapshot PRESENCE, not non-emptiness, matching the three sibling
         // resolvers (CrossChainDexEngine/CrossChainCallEngine/StateCheckpointEngine)
         // and the _coerceValidators contract: an actual array (even length 0) is a
@@ -1347,7 +1355,7 @@ class StateAnchorPublisher {
             let key = w.block + '|' + w.capability;
             if(seen.has(key)) continue;
             seen.add(key);
-            let set = await this._resolveCapabilitySet(w.capability, w.block);
+            let set = await this._resolveCapabilitySet(w.capability, w.block, network);
             // Total order: pubkey then source. Equal pubkeys are legitimately
             // possible in weighted snapshots (one row per (source, pubkey), a key
             // may be delegated by multiple sources); a two-branch comparator that
@@ -1829,9 +1837,9 @@ class StateAnchorPublisher {
                             '... predates our local history; accepting on signature quorum alone');
             }
 
-            let set  = await this._resolveCapabilitySet('cross_chain', Number(am.snapshot_block));
+            let set  = await this._resolveCapabilitySet('cross_chain', Number(am.snapshot_block), resolveQuorumNetwork(am, this.network));
             let sigs = this._parseSigs(am.validator_signatures);
-            if(!this._quorumVerified(this._matchCanonical(am), sigs, set, swq.isStakeWeightedQuorumActive(Number(am.snapshot_block), this.network))){
+            if(!this._quorumVerified(this._matchCanonical(am), sigs, set, swq.isStakeWeightedQuorumActive(Number(am.snapshot_block), resolveQuorumNetwork(am, this.network)))){   // : RECORD network
                 console.warn('StateAnchorPublisher: archive match ' + String(am.match_id).substring(0, 16) +
                              '... fails signature quorum against the cross_chain set at block ' + am.snapshot_block);
                 return false;
@@ -1858,9 +1866,9 @@ class StateAnchorPublisher {
                             '... (' + ac.phase + ') predates our local history; accepting on signature quorum alone');
             }
 
-            let set  = await this._resolveCapabilitySet('cross_chain', Number(ac.snapshot_block));
+            let set  = await this._resolveCapabilitySet('cross_chain', Number(ac.snapshot_block), resolveQuorumNetwork(ac, this.network));
             let sigs = this._parseSigs(ac.validator_signatures);
-            if(!this._quorumVerified(this._callCanonical(ac), sigs, set, swq.isStakeWeightedQuorumActive(Number(ac.snapshot_block), this.network))){
+            if(!this._quorumVerified(this._callCanonical(ac), sigs, set, swq.isStakeWeightedQuorumActive(Number(ac.snapshot_block), resolveQuorumNetwork(ac, this.network)))){   // : RECORD network
                 console.warn('StateAnchorPublisher: archive call ' + String(ac.call_id).substring(0, 16) +
                              '... (' + ac.phase + ') fails signature quorum against the cross_chain set at block ' + ac.snapshot_block);
                 return false;
@@ -1888,7 +1896,7 @@ class StateAnchorPublisher {
                 return false;
             }
             let pubkey = String(rr.validator_pubkey || '').toLowerCase();
-            let set = await this._resolveCapabilitySet('oracle_publish', Number(rr.block_index));
+            let set = await this._resolveCapabilitySet('oracle_publish', Number(rr.block_index), resolveQuorumNetwork(archive, this.network));
             if(!set.some(v => v.pubkey === pubkey)){
                 console.warn('StateAnchorPublisher: archive reward ' + tag + ' pubkey ' + pubkey.substring(0, 12) +
                              '... is not in the oracle_publish set at block ' + rr.block_index + '; NOT signing');
@@ -1961,24 +1969,33 @@ class StateAnchorPublisher {
                 console.log('StateAnchorPublisher: archive reward ' + tag + ' predates our local history; accepting on re-derivation alone');
             }
         }
-        let groups = new Map();              // block|capability -> Map<pubkey, {amount, source}>
+        // : key the inner map on `pubkey|source`, NOT pubkey alone. At/above
+        // STAKE_WEIGHTED_QUORUM the snapshot is one row per (source, pubkey), so a key
+        // delegated by two sources contributes TWO rows; a pubkey-only map collapsed
+        // them to one, making archived.size < resolved.length so `resolved.length !==
+        // archived.size` rejected every archive containing a multi-source key (the
+        // co-sign stall). The builder (_buildArchive) already emits both rows, so the
+        // verifier is the odd one out. Inert below SWQ, where source='' and there is one
+        // row per pubkey (key becomes `pubkey|`).
+        let groups = new Map();              // block|capability -> Map<pubkey|source, {amount, source}>
         for(let s of (archive.capability_snapshots || [])){
             let key = Number(s.snapshot_block) + '|' + String(s.capability);
             if(!groups.has(key)) groups.set(key, new Map());
-            groups.get(key).set(String(s.signing_pubkey).toLowerCase(),
-                                { amount: String(s.amount), source: String(s.source != null ? s.source : '') });
+            let sSource = String(s.source != null ? s.source : '');
+            groups.get(key).set(String(s.signing_pubkey).toLowerCase() + '|' + sSource,
+                                { amount: String(s.amount), source: sSource });
         }
         for(let [key, archived] of groups){
             let [block, capability] = key.split('|');
-            let resolved = await this._resolveCapabilitySet(capability, Number(block));
+            let resolved = await this._resolveCapabilitySet(capability, Number(block), resolveQuorumNetwork(archive, this.network));
             if(resolved.length !== archived.size){
                 console.warn("StateAnchorPublisher: archive snapshot group " + key + " size " + archived.size +
                              " differs from our resolution (" + resolved.length + ")");
                 return false;
             }
             for(let v of resolved){
-                let a = archived.get(v.pubkey);
                 let vSource = String(v.source != null ? v.source : '');
+                let a = archived.get(v.pubkey + '|' + vSource);
                 if(!a || a.amount !== v.amount || a.source !== vSource){
                     console.warn("StateAnchorPublisher: archive snapshot group " + key + " diverges for pubkey " +
                                  v.pubkey.substring(0, 12) + "... (local amount/source " + v.amount + "/" + vSource +

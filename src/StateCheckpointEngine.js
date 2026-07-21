@@ -248,7 +248,15 @@ class StateCheckpointEngine extends EventEmitter {
             if(this._lastCheckpointBtcBlock != null && btcBlock < this._lastCheckpointBtcBlock + this.intervalBlocks) return;
 
             let validators = await this._resolveCapabilityValidators('oracle_publish', btcBlock);
-            let pubkeys    = validators.map(v => String(v.pubkey).toLowerCase()).sort();
+            // : dedupe to DISTINCT pubkeys before ranking (mirrors the finalizer's
+            // Set at _handleFinalized). At/above STAKE_WEIGHTED_QUORUM the weighted
+            // snapshot is one row per (source, pubkey), so a key delegated by two sources
+            // appears twice; ranking over the raw list inflates pubkeys.length and lets
+            // `btcBlock % pubkeys.length` land on a duplicate's slot where no hub is
+            // leader, silently dropping that cadence round. MUST stay in lockstep with the
+            // follower site below (deduping only one turns a dropped round into split-brain).
+            // Inert below SWQ, where there are no duplicate pubkeys.
+            let pubkeys    = [...new Set(validators.map(v => String(v.pubkey).toLowerCase()))].sort();
             // No oracle_publish set at all -> nothing to sign authoritatively. A
             // checkpoint signed by a non-validator identity could never verify
             // against any capability snapshot. (Single-operator regtest seeds a
@@ -329,14 +337,25 @@ class StateCheckpointEngine extends EventEmitter {
 
         let myPubkey = this.identity.getPubkeyHex().toLowerCase();
         let mySig    = this.identity.sign(canonical);
-        let snapCount = validators.length;
+        let snapCount = validators.length;   // raw row count (matches _handleFinalized + anchor.js:336)
         // STAKE_WEIGHTED_QUORUM: weighted (source-deduped) at/above activation, else count.
         let weighted  = swq.isStakeWeightedQuorumActive(cp.snapshot_block, this.network);
         let quorum    = bftQuorumOrSingle(snapCount, 1);   // : majority-floored BFT quorum
 
-        // Single-node set: self-sign satisfies the quorum (in both modes, the sole
-        // validator's stake is the whole snapshot), so finalize immediately.
-        if(snapCount <= 1){
+        // Single-node self-sign fast path. Below SWQ this is snapCount<=1 (one row).
+        // At/above SWQ the snapshot is one row per (source, pubkey), so a lone validator
+        // whose one key is delegated by multiple sources has snapCount>1 even though THIS
+        // hub is the entire federation; meetsStakeThreshold structurally cannot credit one
+        // key for multiple sources (pubkey->source is 1:1), so that round could never
+        // gather a second signer and would stall ( / item 2651). Detect the genuine
+        // sole-self case - every snapshot row is our own pubkey - and self-finalize,
+        // mirroring the CrossChainDexConsensus soleSelf guard. The _tick cadence check
+        // already proved we are a member, so a distinct-pubkey count of 1 means that one
+        // pubkey is ours. Inert below SWQ, where distinct pubkeys == snapCount (no dupes),
+        // so the weighted term never fires and the condition is byte-for-byte snapCount<=1.
+        let oneDistinctPubkey = (new Set(validators.map(v => String(v.pubkey).toLowerCase()))).size === 1;
+        let soleSelf = oneDistinctPubkey && String(validators[0].pubkey).toLowerCase() === myPubkey;
+        if(snapCount <= 1 || (weighted && soleSelf)){
             await this._acceptFinalized(cp, [{ pubkey: myPubkey, sig: mySig }], quorum, true);
             return;
         }
@@ -405,7 +424,10 @@ class StateCheckpointEngine extends EventEmitter {
         if(Number(cp.checkpoint_seq) !== StateCheckpointEngine.deriveCheckpointSeq(cp.snapshot_block)) return;
 
         let validators = await this._resolveCapabilityValidators('oracle_publish', cp.snapshot_block);
-        let pubkeys    = validators.map(v => String(v.pubkey).toLowerCase()).sort();
+        // : dedupe to DISTINCT pubkeys before ranking, in lockstep with the leader
+        // site in _tick (see the rationale there). Both MUST rank the same list or leader
+        // and follower disagree on the cadence slot (split-brain). Inert below SWQ.
+        let pubkeys    = [...new Set(validators.map(v => String(v.pubkey).toLowerCase()))].sort();
         if(!pubkeys.includes(myPubkey)) return;                    // we don't qualify
         if(sender !== pubkeys[cp.snapshot_block % pubkeys.length]) return;   // not the cadence leader
 
@@ -489,8 +511,13 @@ class StateCheckpointEngine extends EventEmitter {
         if(Number(cp.checkpoint_seq) !== StateCheckpointEngine.deriveCheckpointSeq(cp.snapshot_block)) return;
 
         let validators = await this._resolveCapabilityValidators('oracle_publish', cp.snapshot_block);
-        let pubkeys    = new Set(validators.map(v => String(v.pubkey).toLowerCase()));
-        let snapCount  = pubkeys.size;
+        let pubkeys    = new Set(validators.map(v => String(v.pubkey).toLowerCase()));   // signer-membership set
+        //  (item 2651): size the quorum from the RAW row count, matching the propose
+        // path (_runRound) and the on-chain authority (anchor.js:336). The deduped
+        // pubkeys.size used before diverged whenever a key was multi-source. `quorum` only
+        // gates the count path (weighted uses meetsStakeThreshold), and below SWQ
+        // validators.length == pubkeys.size, so this is inert below SWQ.
+        let snapCount  = validators.length;
         let weighted   = swq.isStakeWeightedQuorumActive(cp.snapshot_block, this.network);
         let quorum     = bftQuorumOrSingle(snapCount, 1);   // : majority-floored BFT quorum
 
@@ -681,9 +708,14 @@ class StateCheckpointEngine extends EventEmitter {
                 'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?)',
                 [block, capability, pubkey, amount, source]);
             if(this.broadcaster){
+                // : select the row back by (block, capability, pubkey, SOURCE),
+                // matching the widened uq_cap_snap. A pubkey-only select-back returned
+                // just ONE of a multi-source key's rows (LIMIT 1), so the mirror stream
+                // carried a single source and the downstream indexer never saw the
+                // second. Inert below SWQ, where source='' and there is one row per key.
                 let r = await this.db.doQuery(
-                    'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? LIMIT 1',
-                    [block, capability, pubkey]);
+                    'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
+                    [block, capability, pubkey, source]);
                 if(r.length) this.broadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
             }
         }

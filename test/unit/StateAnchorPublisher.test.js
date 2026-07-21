@@ -242,6 +242,18 @@ describe('StateAnchorPublisher', function () {
     function buildMesh(n, opts) {
         opts = opts || {};
         let bus = { nodes: [], onchain: [] };   // onchain = mined checkpoint anchors ( existence gate)
+        // Network stamped on the checkpoint/match/call rows. Defaults to CP_ROW's
+        // regtest.  routes the archive/attestation quorum gates through the
+        // RECORD's network (matching the indexer), and regtest activates
+        // STAKE_WEIGHTED_QUORUM at block 0, so regtest records take the weighted path.
+        // A count-path test passes network:'mainnet': with snapshot_block 100 below the
+        // mainnet SWQ activation (961000, per src/stake_weighted_quorum.js), the gate
+        // resolves to the legacy 2f+1 COUNT quorum these tests exercise (every other
+        // snapshot-block-gated rule - EQUIV, checkpoint-commitment, royalty, the anchor/
+        // archive reward flag-days - also activates at >=961000 on mainnet, so a block-100
+        // mainnet record sits on the fully-legacy, headerless path the count assertions expect).
+        let recordNetwork = opts.network || CP_ROW.network;
+        bus.network = recordNetwork;
         let identities = [];
         for (let i = 0; i < n; i++) identities.push(new ValidatorIdentity(String(10 + i).repeat(32).slice(0, 64)));
         let validators = identities.map(id => ({ pubkey: id.getPubkeyHex().toLowerCase(), amount: '1' }));
@@ -261,12 +273,12 @@ describe('StateAnchorPublisher', function () {
                 }
             };
             let db = memDb();
-            db.checkpoints.push(Object.assign({}, CP_ROW, { anchor_txid: null }));
+            db.checkpoints.push(Object.assign({}, CP_ROW, { network: recordNetwork, anchor_txid: null }));
             // Every node holds identically-TERMED matches; the signature set is
             // signed by a quorum of mesh identities (matching production, where
             // each hub's collected set may differ but the terms never do).
             for (let m of (opts.matches || [matchRow('m1')])) {
-                let row = Object.assign({}, m);
+                let row = Object.assign({}, m, { network: recordNetwork });
                 if (row.validator_signatures == null) {
                     let canon = matchCanonical(row);
                     let signers = identities.slice(0, Math.max(1, n - 1));
@@ -276,7 +288,7 @@ describe('StateAnchorPublisher', function () {
                 db.matches.push(row);
             }
             for (let c of (opts.calls || [])) {
-                let row = Object.assign({}, c);
+                let row = Object.assign({}, c, { network: recordNetwork });
                 if (row.validator_signatures == null) {
                     let canon = callCanonical(row);
                     let signers = identities.slice(0, Math.max(1, n - 1));
@@ -370,6 +382,28 @@ describe('StateAnchorPublisher', function () {
             });
             bus.nodes.push(self);
         }
+        // Stake-weighted quorum setup. The reward-attestation payloads (v4/v5/v6) can
+        // only be produced at/above the anchor/archive reward flag-day, which on every
+        // network activates at or above the SWQ height (mainnet 961000/969500, regtest 0),
+        // so a round that emits them ALWAYS runs on the weighted quorum path - there is no
+        // count-path snapshot_block for them. Scope each hub to the record network so
+        // _resolveCapabilitySet (which keys on this.network) resolves the WEIGHTED,
+        // source-keyed snapshot the round's stake tally needs, and back it with one
+        // distinct source per validator at equal weight: the 2/3-stake bar then coincides
+        // exactly with the 2f+1 count these tests assert (3-of-4), so the quorum-size
+        // assertions are unchanged - only the tally MECHANISM the fix now selects differs.
+        if (opts.stakeWeighted) {
+            let weightSet = bus.nodes.map((nd, i) => ({ pubkey: nd.pubkey, weight: '1', source: 'wsrc' + i }));
+            for (let nd of bus.nodes) {
+                nd.pub.network = recordNetwork;
+                let snap = {
+                    async getSnapshot() { return { validators: weightSet.map(v => ({ pubkey: v.pubkey, amount: '1' })) }; },
+                    async getWeightSnapshot() { return { validators: weightSet }; }
+                };
+                nd.pub.capSnapshot = snap;
+                nd.pub.hub.capabilitySnapshot = snap;
+            }
+        }
         buses.push(bus);
         return bus;
     }
@@ -377,14 +411,16 @@ describe('StateAnchorPublisher', function () {
     // Election helpers mirroring the publisher's hash-ordering (different key
     // per pending checkpoint, one per election block for the archive round).
     function v0Order(bus, row) {
-        row = row || CP_ROW;
+        // Default to the mesh's actual checkpoint row (CP_ROW at the bus's record
+        // network) so the election key matches the source, which keys on the row's network.
+        row = row || Object.assign({}, CP_ROW, { network: bus.network });
         let key = 'XANCV0|' + row.chain + '|' + row.network + '|' + row.checkpoint_seq + '|' + row.snapshot_block;
         let order = StateAnchorPublisher.hashOrder(key, bus.nodes.map(nd => nd.pubkey));
         return order.map(pk => bus.nodes.find(nd => nd.pubkey === pk));
     }
     function archiveOrder(bus, batchSeq) {
-        // Content-anchored key: wrapper checkpoint (CP_ROW in the mesh) + batch seq.
-        let key = 'XANCV1|' + CP_ROW.chain + '|' + CP_ROW.network + '|' + CP_ROW.checkpoint_seq + '|' + (batchSeq || 0);
+        // Content-anchored key: wrapper checkpoint (CP_ROW at the bus's record network) + batch seq.
+        let key = 'XANCV1|' + CP_ROW.chain + '|' + bus.network + '|' + CP_ROW.checkpoint_seq + '|' + (batchSeq || 0);
         let order = StateAnchorPublisher.hashOrder(key, bus.nodes.map(nd => nd.pubkey));
         return order.map(pk => bus.nodes.find(nd => nd.pubkey === pk));
     }
@@ -430,7 +466,10 @@ describe('StateAnchorPublisher', function () {
         });
 
         it('single-node: flush emits ANCHOR v4 with a self-attestation the indexer can verify', async function () {
-            let bus = buildMesh(1);
+            // Weighted: v4 only emits at/above the anchor-reward flag-day, which everywhere
+            // sits at/above the SWQ height, so there is no count-path block for it. Keep regtest
+            // (flag-day active here) and back the round with one equal-weight source (self-attest).
+            let bus = buildMesh(1, { stakeWeighted: true });
             let nd  = bus.nodes[0];
             await startAll(bus);
             await nd.pub.flush();
@@ -477,7 +516,9 @@ describe('StateAnchorPublisher', function () {
         });
 
         it('publishes normally when the wired balance is above the floor (item 2676)', async function () {
-            let bus = buildMesh(1);
+            // Weighted: the flag-day-active flush emits a v4, which runs on the SWQ path (see
+            // the v4 test above); one equal-weight source self-attests so the publish proceeds.
+            let bus = buildMesh(1, { stakeWeighted: true });
             let nd  = bus.nodes[0];
             nd.pub.setBalanceHook(async () => nd.pub.lowBalanceThreshold + 100);
             await startAll(bus);
@@ -488,7 +529,10 @@ describe('StateAnchorPublisher', function () {
         });
 
         it('root-bearing checkpoint emits v5 (v3 shape + publisher tail)', async function () {
+            // Weighted: v5 (root-bearing v4) only emits at/above the anchor-reward flag-day,
+            // which sits at/above the SWQ height; keep regtest and self-attest one equal-weight source.
             let bus = buildMesh(1, {
+                stakeWeighted: true,
                 mutate: (self, db) => {
                     db.checkpoints[0].state_root           = 'aa'.repeat(32);
                     db.checkpoints[0].state_root_version   = 1;
@@ -512,7 +556,10 @@ describe('StateAnchorPublisher', function () {
         });
 
         it('N=4: the elected publisher collects a 2f+1 XANCPUB quorum and emits v4', async function () {
-            let bus = buildMesh(4, { btcBlock: 100 });
+            // v4 requires the anchor-reward flag-day active, which shares the 961000 height
+            // with SWQ, so this round runs weighted; equal source-weights make the 2/3-stake
+            // bar coincide with 2f+1 (3-of-4), so the quorum-size assertions below are unchanged.
+            let bus = buildMesh(4, { btcBlock: 100, stakeWeighted: true });
             await startAll(bus);
             let leader = v0Order(bus)[0];                                   // rank-0 publisher for CP_ROW
             await leader.pub.flush();
@@ -547,7 +594,11 @@ describe('StateAnchorPublisher', function () {
             // co-signs XANCPUB. The bounded round times out and the publisher FALLS BACK to a
             // legacy v0 so the anchor still lands. A failed reward attestation must never block
             // the anchor (the primary safety invariant).
-            let bus = buildMesh(4, { btcBlock: 100, cfg: { ANCHOR_ROUND_TIMEOUT_MS: '40' } });
+            // Weighted: v4 emission requires the SWQ path (flag-day >= SWQ height), so the
+            // degraded round runs weighted too. The lone started leader holds 1-of-4 equal
+            // weight, far under the 2/3 stake bar, so the round times out into the v0 fallback
+            // exactly as the count path would with 1-of-4 signatures.
+            let bus = buildMesh(4, { btcBlock: 100, stakeWeighted: true, cfg: { ANCHOR_ROUND_TIMEOUT_MS: '40' } });
             let leader = v0Order(bus)[0];
             await leader.pub.start();                                       // followers intentionally NOT started
             await leader.pub.flush();
@@ -654,7 +705,9 @@ describe('StateAnchorPublisher', function () {
         });
 
         it('single-node: flush emits ANCHOR v6 with a self-attestation the indexer can verify', async function () {
-            let bus = buildMesh(1);
+            // Weighted: v6 only emits at/above the archive-reward flag-day (>= SWQ height),
+            // so keep regtest (flag-day active here) and self-attest one equal-weight source.
+            let bus = buildMesh(1, { stakeWeighted: true });
             let nd  = bus.nodes[0];
             await startAll(bus);
             await nd.pub.flush();
@@ -684,7 +737,10 @@ describe('StateAnchorPublisher', function () {
         });
 
         it('N=4: the elected archive leader collects a 2f+1 archive attestation quorum and emits v6', async function () {
-            let bus = buildMesh(4, { btcBlock: 100 });
+            // v6 requires the archive-reward flag-day active (>= SWQ height everywhere), so
+            // the archive signing + attestation rounds run weighted; equal source-weights make
+            // the 2/3-stake bar coincide with 2f+1 (3-of-4), keeping the assertions unchanged.
+            let bus = buildMesh(4, { btcBlock: 100, stakeWeighted: true });
             await startAll(bus);
             for (let nd of bus.nodes) await nd.pub.flush();
             await sleep(200);
@@ -718,7 +774,10 @@ describe('StateAnchorPublisher', function () {
             // must always land), and the anchor_archive reward is withheld: at/above the
             // flag-day no live indexer derives a reward from a v1, so recording one would
             // strand it in hub/archive bookkeeping and fork a recovered ledger.
-            let bus = buildMesh(4, { btcBlock: 100, cfg: { ANCHOR_ROUND_TIMEOUT_MS: '40' } });
+            // Weighted (v6 needs the archive-reward flag-day, >= SWQ height): the archive
+            // SIGNING round must still reach the stake-weighted quorum so a head publishes,
+            // while the severed attestation round times out into the legacy v1 fallback.
+            let bus = buildMesh(4, { btcBlock: 100, stakeWeighted: true, cfg: { ANCHOR_ROUND_TIMEOUT_MS: '40' } });
             await startAll(bus);
             // Sever ONLY the archive-attestation gossip: the archive SIGNING round must
             // still reach quorum (or no archive head publishes at all), but no attest
@@ -779,7 +838,9 @@ describe('StateAnchorPublisher', function () {
     });
 
     it('single-node: flush publishes v0 + v1, archive round-trips, batch back-filled', async function () {
-        let bus = buildMesh(1);
+        // Count-path archive mechanics: a mainnet record below the 961000 SWQ activation
+        // takes the legacy count snapshot the getSnapshot stub serves (weighted has its own suite).
+        let bus = buildMesh(1, { network: 'mainnet' });
         let nd = bus.nodes[0];
         await startAll(bus);
         await nd.pub.flush();
@@ -822,7 +883,7 @@ describe('StateAnchorPublisher', function () {
         // broadcast success ({ txid: null }) must NOT dequeue the rows with their final
         // status (which would strand them in an unrecoverable hole) and must NOT credit
         // the anchor_archive reward for an anchor that never landed on-chain.
-        let bus = buildMesh(1);
+        let bus = buildMesh(1, { network: 'mainnet' });   // count-path archive mechanics (SWQ off below 961000)
         let nd = bus.nodes[0];
         // v0 checkpoint still gets a txid; only the v1 archive broadcast returns none.
         nd.pub.setBroadcastHook(async (payload) => {
@@ -878,7 +939,7 @@ describe('StateAnchorPublisher', function () {
     it('oversized archive splits into v1 + v2 chunks that reassemble byte-identically', async function () {
         let many = [];
         for (let i = 0; i < 40; i++) many.push(matchRow('m' + String(i).padStart(3, '0')));
-        let bus = buildMesh(1, { matches: many, cfg: { ANCHOR_CHUNK_MAX_BYTES: '500' } });
+        let bus = buildMesh(1, { network: 'mainnet', matches: many, cfg: { ANCHOR_CHUNK_MAX_BYTES: '500' } });   // count-path chunking mechanics (SWQ off below 961000)
         let nd = bus.nodes[0];
         await startAll(bus);
         await nd.pub.flush();
@@ -902,7 +963,9 @@ describe('StateAnchorPublisher', function () {
     });
 
     it('N=4: per-row v0 election + archive leader; v1 carries 2f+1 sigs; back-fill propagates', async function () {
-        let bus = buildMesh(4, { btcBlock: 101 });
+        // Count-path: mainnet record below the 961000 SWQ activation, so the archive
+        // quorum stays legacy 2f+1 (the weighted path has its own dedicated suite below).
+        let bus = buildMesh(4, { btcBlock: 101, network: 'mainnet' });
         await startAll(bus);
         let v0Pub  = v0Order(bus)[0];                                  // elected for the BTC checkpoint
         let leader = archiveLeader(bus);                          // elected archive leader
@@ -972,7 +1035,7 @@ describe('StateAnchorPublisher', function () {
         // reached and history became unarchivable. A locally-MISSING row must be
         // accepted purely on its archived 2f+1 signatures; a present-but-
         // DIFFERENT row must still refuse (the divergence test above).
-        let bus = buildMesh(4, { btcBlock: 101 });
+        let bus = buildMesh(4, { btcBlock: 101, network: 'mainnet' });   // count-path (SWQ off below 961000)
         let leader = archiveLeader(bus);
         let pruned = 0;
         for (let nd of bus.nodes) {
@@ -1004,7 +1067,7 @@ describe('StateAnchorPublisher', function () {
 
     it('N=4: pending anchor rewards ride the archive with a pinned source and back-fill batch_seq on every hub', async function () {
         let pk0 = pkOf(0);
-        let bus = buildMesh(4, { btcBlock: 101, matches: [], rewards: [rewardRow(pk0)] });
+        let bus = buildMesh(4, { btcBlock: 101, network: 'mainnet', matches: [], rewards: [rewardRow(pk0)] });   // count-path
         let leader = archiveLeader(bus);
         await startAll(bus);
         await flushAll(bus);
@@ -1038,7 +1101,7 @@ describe('StateAnchorPublisher', function () {
     });
 
     it('a reward whose source cannot be resolved is deferred, not archived as a hole', async function () {
-        let bus = buildMesh(1, { rewards: [rewardRow(pkOf(0))], sourceResolver: () => null });
+        let bus = buildMesh(1, { network: 'mainnet', rewards: [rewardRow(pkOf(0))], sourceResolver: () => null });   // count-path (SWQ off below 961000)
         let nd = bus.nodes[0];
         await startAll(bus);
         await nd.pub.flush();
@@ -1103,7 +1166,7 @@ describe('StateAnchorPublisher', function () {
         // Live finding (3-hub venue): each hub assigns its own AUTO_INCREMENT id
         // to the same finalized row (hub1=60, hub2=36, hub3=34 for one call) -
         // byte-comparing ids made every multi-hub archive unverifiable.
-        let bus = buildMesh(4, { btcBlock: 101 });
+        let bus = buildMesh(4, { btcBlock: 101, network: 'mainnet' });   // count-path (SWQ off below 961000)
         let leader = archiveLeader(bus);
         for (let nd of bus.nodes) {
             if (nd !== leader) nd.db.matches[0].id = 1000 + nd.i;          // divergent local cursors
@@ -1144,7 +1207,7 @@ describe('StateAnchorPublisher', function () {
         // same leader won forever. The election key is now content-anchored
         // (wrapper checkpoint + batch seq) and ranks unlock like v0 anchors:
         // since = btcBlock - wrapper snapshot_block = 37 → floor(37/36) = 1.
-        let bus = buildMesh(4, { btcBlock: 137 });
+        let bus = buildMesh(4, { btcBlock: 137, network: 'mainnet' });   // count-path (SWQ off below 961000)
         await startAll(bus);
         let order = archiveOrder(bus);
 
@@ -1256,7 +1319,7 @@ describe('StateAnchorPublisher', function () {
         // Wrapper checkpoint snapshot_block = 100 (CP_ROW); current BTC tip = 110
         // (a 10-block drift, well inside the 36-block tolerance window). Between
         // the two blocks oracle_publish membership changed: C left, D joined.
-        let bus = buildMesh(4, { btcBlock: 110 });
+        let bus = buildMesh(4, { btcBlock: 110, network: 'mainnet' });   // count-path (SWQ off below 961000)
         let [A, B, C, D] = bus.nodes;
         let snapSet = [A, B, C].map(nd => ({ pubkey: nd.pubkey, amount: '1' }));   // oracle_publish @ snapshot_block 100
         let elecSet = [A, B, D].map(nd => ({ pubkey: nd.pubkey, amount: '1' }));   // oracle_publish @ election block 110
@@ -1340,7 +1403,10 @@ describe('StateAnchorPublisher', function () {
     });
 
     it('flush returns a summary (and reports election skips honestly)', async function () {
-        let bus = buildMesh(1);
+        // Weighted-path: this test asserts the anchored summary carries network 'regtest'
+        // (below), so the record must stay regtest, which activates SWQ at block 0. One
+        // equal-weight source clears the 2/3 bar trivially, so the summary is unchanged.
+        let bus = buildMesh(1, { stakeWeighted: true });
         let nd = bus.nodes[0];
         await startAll(bus);
         let first = await nd.pub.flush();
@@ -1361,7 +1427,8 @@ describe('StateAnchorPublisher', function () {
         // unrecoverable archive (recovery refuses incomplete batches). A partial
         // publish must keep the rows pending and the retry must use a NEW seq
         // (two v1 anchors sharing one seq corrupt chunk reassembly).
-        let bus = buildMesh(1, { cfg: { ANCHOR_CHUNK_MAX_BYTES: '600', ANCHOR_CHUNK_RETRY_MS: '1' },
+        let bus = buildMesh(1, { network: 'mainnet',   // count-path re-archive mechanics (SWQ off below 961000)
+                                 cfg: { ANCHOR_CHUNK_MAX_BYTES: '600', ANCHOR_CHUNK_RETRY_MS: '1' },
                                  matches: [matchRow('m1'), matchRow('m2'), matchRow('m3')] });
         let nd = bus.nodes[0];
         let dropChunks = true;
@@ -1435,7 +1502,7 @@ describe('StateAnchorPublisher', function () {
     });
 
     it('a match retracted after archival is re-archived with its new status', async function () {
-        let bus = buildMesh(1);
+        let bus = buildMesh(1, { network: 'mainnet' });   // count-path re-archive mechanics (SWQ off below 961000)
         let nd = bus.nodes[0];
         await startAll(bus);
         await nd.pub.flush();
@@ -1459,7 +1526,7 @@ describe('StateAnchorPublisher', function () {
     });
 
     it('XCALL relay rows ride the archive (both phases) and back-fill batch metadata', async function () {
-        let bus = buildMesh(1, { calls: [callRow('c'.repeat(64), 'dispatch'), callRow('c'.repeat(64), 'result')] });
+        let bus = buildMesh(1, { network: 'mainnet', calls: [callRow('c'.repeat(64), 'dispatch'), callRow('c'.repeat(64), 'result')] });   // count-path XCALL archive mechanics (SWQ off below 961000)
         let nd = bus.nodes[0];
         await startAll(bus);
         await nd.pub.flush();
