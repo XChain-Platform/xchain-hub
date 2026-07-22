@@ -207,6 +207,13 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     ORACLE_EPOCH_START:     parseInt(process.env.ORACLE_EPOCH_START),
     ORACLE_ROUND_INTERVAL:  parseInt(process.env.ORACLE_ROUND_INTERVAL) || DEFAULT_ORACLE_ROUND_INTERVAL_MS,
     ORACLE_SUBMISSION_WINDOW: parseInt(process.env.ORACLE_SUBMISSION_WINDOW) || DEFAULT_ORACLE_SUBMISSION_WINDOW_MS,
+    // Retention window (in rounds) for the diagnostic oracle_submissions table.
+    // Passed through UNPARSED on purpose: OracleRound.js:88 does its own parseInt +
+    // range validation and owns the 12960-round default, and it honours an explicit
+    // 0 as "disable pruning" - which a `parseInt(...) || DEFAULT` here would eat.
+    // Same class as P2P_SIGNER_SET_REFRESH_MS above: without this line the env knob
+    // never reached p2pConfig and retention was permanently pinned to the default.
+    ORACLE_SUBMISSIONS_RETENTION_ROUNDS: process.env.ORACLE_SUBMISSIONS_RETENTION_ROUNDS,
     ORACLE_REWARD_PER_ROUND: process.env.ORACLE_REWARD_PER_ROUND || '10.00000000',
     SLASH_DEVIATION_THRESHOLD: process.env.SLASH_DEVIATION_THRESHOLD || String(ORACLE_DEVIATION_THRESHOLD),
     SLASH_MISSED_ROUNDS_THRESHOLD: process.env.SLASH_MISSED_ROUNDS_THRESHOLD || '30',

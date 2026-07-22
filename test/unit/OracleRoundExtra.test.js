@@ -459,6 +459,71 @@ describe('OracleRound (extra coverage)', function () {
         });
     });
 
+    // ── ORACLE_SUBMISSIONS_RETENTION_ROUNDS is actually reachable (item 2664) ─
+    //
+    // OracleRound reads this knob off hub.p2pConfig, which is a fixed object literal
+    // in src/api.js. The key was absent from that literal, so it was always undefined:
+    // parseInt(undefined) -> NaN -> the 12960 default won on every deployment and the
+    // documented "0 disables pruning" setting was unreachable. The consumer-side
+    // behaviour below passed even then, which is exactly why the source-side assertion
+    // is here too: it is the half that was actually broken.
+
+    describe('ORACLE_SUBMISSIONS_RETENTION_ROUNDS wiring', function () {
+        const fs   = require('fs');
+        const path = require('path');
+
+        // Brace-match the `const p2pConfig = P2P_VALIDATOR_ADDR ? { ... }` literal.
+        function p2pConfigLiteral() {
+            const src = fs.readFileSync(path.join(__dirname, '../../src/api.js'), 'utf8');
+            const at  = src.indexOf('const p2pConfig = P2P_VALIDATOR_ADDR ? {');
+            expect(at, 'p2pConfig literal not found in src/api.js').to.not.equal(-1);
+            const open = src.indexOf('{', at);
+            let depth = 0;
+            for (let i = open; i < src.length; i++) {
+                if (src[i] === '{') depth++;
+                else if (src[i] === '}' && --depth === 0) return src.slice(open, i + 1);
+            }
+            throw new Error('unbalanced p2pConfig literal in src/api.js');
+        }
+
+        it('the key is present in the api.js p2pConfig literal', function () {
+            expect(p2pConfigLiteral()).to.match(/\n\s*ORACLE_SUBMISSIONS_RETENTION_ROUNDS\s*:/,
+                'OracleRound reads this off hub.p2pConfig; absent from the literal it is permanently '
+                + 'undefined and the retention window is un-tunable');
+        });
+
+        it('is passed through unparsed so an explicit 0 survives', function () {
+            const line = /ORACLE_SUBMISSIONS_RETENTION_ROUNDS\s*:\s*([^\n,]+)/.exec(p2pConfigLiteral());
+            expect(line, 'ORACLE_SUBMISSIONS_RETENTION_ROUNDS not wired').to.not.equal(null);
+            expect(line[1].trim()).to.equal('process.env.ORACLE_SUBMISSIONS_RETENTION_ROUNDS',
+                'wrap it in parseInt(...) || DEFAULT and the documented "0 disables pruning" setting '
+                + 'collapses back to the default; OracleRound.js owns the parse and the default');
+        });
+
+        it('an operator-supplied window reaches the pruner', function () {
+            const fresh = new OracleRound(createMockHub({
+                p2pConfig: { ORACLE_SUBMISSIONS_RETENTION_ROUNDS: '500' }
+            }));
+            expect(fresh.submissionsRetentionRounds).to.equal(500);
+        });
+
+        it('an explicit 0 disables pruning rather than falling back to the default', function () {
+            const fresh = new OracleRound(createMockHub({
+                p2pConfig: { ORACLE_SUBMISSIONS_RETENTION_ROUNDS: '0' }
+            }));
+            expect(fresh.submissionsRetentionRounds).to.equal(0);
+        });
+
+        it('a garbage or negative value falls back to the bounded default', function () {
+            for (const bad of ['nonsense', '-5', '']) {
+                const fresh = new OracleRound(createMockHub({
+                    p2pConfig: { ORACLE_SUBMISSIONS_RETENTION_ROUNDS: bad }
+                }));
+                expect(fresh.submissionsRetentionRounds, 'value ' + JSON.stringify(bad)).to.equal(12960);
+            }
+        });
+    });
+
     // ── _persistSubmissions: pubkey fallbacks ────────────────────────────────
 
     describe('_persistSubmissions(): pubkey fallbacks', function () {

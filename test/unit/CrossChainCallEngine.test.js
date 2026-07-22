@@ -20,12 +20,87 @@
 const { expect } = require('chai');
 const sinon      = require('sinon');
 const crypto     = require('crypto');
+const fs         = require('fs');
+const path       = require('path');
 
 const CrossChainCallEngine = require('../../src/CrossChainCallEngine');
 const eq         = require('../../src/equivocation_header.js');
 
 const CALL_ID = 'c'.repeat(64);
 const sha256  = (s) => crypto.createHash('sha256').update(String(s), 'utf8').digest('hex');
+
+// ── real getcrosschaincall response shape (item 2367) ────────────────────────
+// _validateDispatch re-verifies a leader's proposed row field-for-field against
+// the source indexer's getcrosschaincall reply. A hand-written `call:` stub can
+// therefore assert a field the REAL handler never emits, which is exactly how the
+// push_generation pin passed CI while being dead in production: the handler's
+// response literal omitted the field, every follower re-derived 0, and from the
+// first source-chain rollback onward no honest dispatch could ever be co-signed.
+//
+// So the fixture is not hand-written. It is produced by EXECUTING the sibling
+// indexer's own success-response literal, lifted verbatim out of its source. The
+// literal is a pure projection of (indexer.config, latest, row, pushGeneration),
+// so it evaluates with no DB, network or express involvement - which matters
+// because xchain-indexer/src/api.js calls startApi() at load and cannot be
+// required. If the handler drops a pinned field again, these cases fail instead
+// of passing against a shape production cannot emit.
+const INDEXER_API = process.env.XCHAIN_INDEXER_DIR
+    ? path.join(process.env.XCHAIN_INDEXER_DIR, 'src', 'api.js')
+    : path.join(__dirname, '..', '..', '..', 'xchain-indexer', 'src', 'api.js');
+
+// Slice the handler body, brace-match its success-response object literal, and
+// compile it into a builder. Throws (never silently degrades) on any parse miss:
+// a guard that cannot find its target is a guard that is not running.
+function compileIndexerCallResponse() {
+    const src   = fs.readFileSync(INDEXER_API, 'utf8');
+    const start = src.indexOf('async getcrosschaincall({call_id}){');
+    if (start === -1)
+        throw new Error('getcrosschaincall handler header not found in ' + INDEXER_API);
+    const rel  = src.slice(start + 1).search(/\n {8}async\s+\w+\s*\(/);
+    const body = src.slice(start, rel === -1 ? src.length : start + 1 + rel);
+    const hit  = /return\s*\{\s*[\r\n]?\s*exists:\s*true,/.exec(body);
+    if (!hit)
+        throw new Error('getcrosschaincall success-response literal not found in ' + INDEXER_API);
+    const open = body.indexOf('{', hit.index);
+    let depth = 0, end = -1;
+    for (let i = open; i < body.length; i++) {
+        if (body[i] === '{') depth++;
+        else if (body[i] === '}' && --depth === 0) { end = i; break; }
+    }
+    if (end === -1)
+        throw new Error('unbalanced getcrosschaincall response literal in ' + INDEXER_API);
+    const literal = body.slice(open, end + 1);
+    const make = new Function('indexer', 'latest', 'row', 'pushGeneration',
+        'return (' + literal + ');');
+    return function (opts) {
+        return make({ config: { NETWORK: opts.network } }, opts.latest, opts.row, opts.pushGeneration);
+    };
+}
+
+// A row shaped like getCrossChainCallRequestById's `SELECT x.* FROM xcalls`, matching
+// the dispatchRow() fixture below field-for-field so an honest round validates.
+function xcallsRow(overrides) {
+    return Object.assign({
+        call_id: CALL_ID, action_index: 41, block_index: 100, contract_index: 5,
+        target_chain: 'DOGE', target_contract_index: 99, method: 'onArrival',
+        params_json: '["x"]', gas_limit: 50000, cross_hops: 1, deadline_block: 4000,
+        request_status: 'pending'
+    }, overrides);
+}
+
+let buildIndexerCallResponse = null, indexerSrcErr = null;
+try { buildIndexerCallResponse = compileIndexerCallResponse(); } catch (e) { indexerSrcErr = e; }
+
+// Sibling-gated like every other cross-repo guard in this fleet: skip when the
+// indexer checkout is absent (standalone hub deploy), hard-fail in the
+// required-siblings CI lane so the gap cannot recur as a green skip.
+function requireIndexerSource() {
+    if (buildIndexerCallResponse) return;
+    if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
+        throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the sibling indexer getcrosschaincall handler could not be '
+            + 'read from ' + INDEXER_API + ': ' + (indexerSrcErr && indexerSrcErr.message));
+    this.skip();
+}
 
 function memDb() {
     let rows = [];
@@ -394,16 +469,85 @@ describe('CrossChainCallEngine', function () {
             expect(await engine.validateProposedMatch(Object.assign({}, baseResult, { push_generation: 9 }))).to.equal(false);
         });
 
-        it('refuses a dispatch row whose push_generation diverges from the source indexer', async function () {
-            const { engine } = makeEngine();
-            sinon.stub(engine, '_indexerCall').resolves({
-                exists: true, network: 'regtest', latest_block_index: 200,
-                call: pendingCall({ push_generation: 4 })
+        // The push_generation pin is driven against the REAL indexer response literal,
+        // never a hand-built `call:` stub. See compileIndexerCallResponse() above: the
+        // previous version of this block stubbed `call: pendingCall({push_generation: 4})`,
+        // a shape the production handler could not emit, so it went green for months
+        // while the pin was permanently unsatisfiable on any chain that had reorged.
+        describe('push_generation pin, driven against the real indexer response (item 2367)', function () {
+            before(requireIndexerSource);
+
+            it('the getcrosschaincall response actually carries push_generation', function () {
+                const res = buildIndexerCallResponse({
+                    row: xcallsRow(), latest: 200, pushGeneration: 4, network: 'regtest'
+                });
+                expect(res.call).to.have.property('push_generation',
+                    4, 'getcrosschaincall must stamp the source-reorg fence generation; without it every '
+                     + 'follower re-derives 0 and CrossChainCallEngine.js:_validateDispatch refuses every '
+                     + 'honest dispatch once the source chain has rolled back once');
             });
-            // Matching generation passes.
-            expect(await engine.validateProposedMatch(dispatchRow({ push_generation: 4 }))).to.equal(true);
-            // A forged (inflated) generation is refused.
-            expect(await engine.validateProposedMatch(dispatchRow({ push_generation: 7 }))).to.equal(false);
+
+            it('co-signs when the leader\'s generation matches what our own indexer reports', async function () {
+                const { engine } = makeEngine();
+                sinon.stub(engine, '_indexerCall').resolves(buildIndexerCallResponse({
+                    row: xcallsRow(), latest: 200, pushGeneration: 4, network: 'regtest'
+                }));
+                expect(await engine.validateProposedMatch(dispatchRow({ push_generation: 4 }))).to.equal(true);
+            });
+
+            it('refuses a forged (inflated) generation', async function () {
+                const { engine } = makeEngine();
+                sinon.stub(engine, '_indexerCall').resolves(buildIndexerCallResponse({
+                    row: xcallsRow(), latest: 200, pushGeneration: 4, network: 'regtest'
+                }));
+                expect(await engine.validateProposedMatch(dispatchRow({ push_generation: 7 }))).to.equal(false);
+            });
+
+            // The regression itself: a chain that has rolled back at least once. Pre-fix the
+            // response carried no generation, the follower re-derived 0, and this returned
+            // false for a wholly honest round - no PBFT round on that chain could ever reach
+            // 2f+1 again.
+            it('post-rollback (generation >= 1) an honest dispatch still reaches quorum', async function () {
+                const { engine } = makeEngine();
+                for (const gen of [1, 2, 9]) {
+                    sinon.restore();
+                    sinon.stub(engine, '_indexerCall').resolves(buildIndexerCallResponse({
+                        row: xcallsRow(), latest: 200, pushGeneration: gen, network: 'regtest'
+                    }));
+                    expect(await engine.validateProposedMatch(dispatchRow({ push_generation: gen })),
+                        'honest dispatch refused at push_generation=' + gen).to.equal(true);
+                }
+            });
+
+            // A generation-0 chain is the accidentally-passing case; keep it covered so a
+            // future change cannot "fix" the pin by making it vacuous again.
+            it('generation 0 (never-rolled-back chain) still binds, and a non-zero forgery is refused', async function () {
+                const { engine } = makeEngine();
+                sinon.stub(engine, '_indexerCall').resolves(buildIndexerCallResponse({
+                    row: xcallsRow(), latest: 200, pushGeneration: 0, network: 'regtest'
+                }));
+                expect(await engine.validateProposedMatch(dispatchRow({ push_generation: 0 }))).to.equal(true);
+                expect(await engine.validateProposedMatch(dispatchRow({ push_generation: 1 }))).to.equal(false);
+            });
+
+            // Every other field the pin compares must also survive the round trip through the
+            // real literal, so a future whitelist edit that drops one of THEM fails here too.
+            it('every field _validateDispatch pins is present in the real response', async function () {
+                const { engine } = makeEngine();
+                const divergent = {
+                    action_index: 42, contract_index: 6, target_chain: 'LTC',
+                    target_contract_index: 100, method: 'other', params_json: '["y"]',
+                    gas_limit: 60000, cross_hops: 2
+                };
+                for (const [field, value] of Object.entries(divergent)) {
+                    sinon.restore();
+                    sinon.stub(engine, '_indexerCall').resolves(buildIndexerCallResponse({
+                        row: xcallsRow({ [field]: value }), latest: 200, pushGeneration: 4, network: 'regtest'
+                    }));
+                    expect(await engine.validateProposedMatch(dispatchRow({ push_generation: 4 })),
+                        'a diverging ' + field + ' must refuse the signature').to.equal(false);
+                }
+            });
         });
     });
 

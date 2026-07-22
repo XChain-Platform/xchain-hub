@@ -155,10 +155,18 @@ describe('chain-registry snapshot consistency', function () {
             }
     });
 
+    // Skips when xchain-wallet is not checked out (standalone hub deploy), but hard-fails
+    // in the required-siblings lane (XCHAIN_REQUIRE_SIBLINGS=1, bin/ci-all.sh) so a
+    // mis-resolved sibling path cannot silently retire this byte-parity guard (item 2435).
     it('matches the wallet bundled descriptors byte-for-byte (skip if sibling absent)', async function () {
         const walletDescriptors = path.join(__dirname,
             '../../../xchain-wallet/packages/core/src/registry/descriptors/index.js');
-        if (!fs.existsSync(walletDescriptors)) return this.skip();
+        if (!fs.existsSync(walletDescriptors)) {
+            if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
+                throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the wallet bundled descriptors are missing at '
+                    + walletDescriptors);
+            return this.skip();
+        }
         const mod = await import(walletDescriptors);
         expect(JSON.stringify(SNAPSHOT.descriptors)).to.equal(
             JSON.stringify(mod.BUNDLED_DESCRIPTORS),

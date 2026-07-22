@@ -301,17 +301,27 @@ describe('AttestationRound', function () {
     // hub copy; the indexer ships its own mirror guard over the SAME vector
     // file. When the sibling xchain-documentation repo is not checked out
     // (standalone deploy) the suite skips rather than fails, matching the
-    // ConsensusPrimitiveConformance convention.
+    // ConsensusPrimitiveConformance convention - but in the required-siblings lane
+    // (XCHAIN_REQUIRE_SIBLINGS=1, set by bin/ci-all.sh) an unresolvable vector path
+    // is a hard failure, so a mis-resolved path cannot turn this consensus guard
+    // into a permanent green-by-skip (item 2435).
     describe('_computeResponsibleSet() canonical-vector conformance @regression', function () {
         const path = require('path');
         const DOCS_DIR = process.env.XCHAIN_DOCS_DIR
             || path.join(__dirname, '..', '..', '..', 'xchain-documentation');
-        let vec = null;
+        const VEC_PATH = path.join(DOCS_DIR, 'protocol', 'test-vectors', 'responsible_set.json');
+        let vec = null, vecErr = null;
         try {
-            vec = require(path.join(DOCS_DIR, 'protocol', 'test-vectors', 'responsible_set.json'));
-        } catch (e) { /* sibling xchain-documentation absent */ }
+            vec = require(VEC_PATH);
+        } catch (e) { vecErr = e; }
 
-        before(function () { if (!vec) this.skip(); });
+        before(function () {
+            if (vec) return;
+            if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
+                throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the responsible-set canonical vectors are unloadable at '
+                    + VEC_PATH + ' (' + (vecErr && vecErr.message) + ')');
+            this.skip();
+        });
 
         (vec ? vec.computeResponsibleSet : []).forEach(function (c) {
             it(c.name, function () {

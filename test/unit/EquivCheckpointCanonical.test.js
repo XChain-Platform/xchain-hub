@@ -19,17 +19,44 @@
 const { expect } = require('chai');
 const eq  = require('../../src/equivocation_header.js');
 const SCE = require('../../src/StateCheckpointEngine.js');
+const SAP = require('../../src/StateAnchorPublisher.js');
 
 // The cross-service parity checks require the sibling SDK and indexer sources,
 // which only exist in the monorepo layout. In single-repo CI (hub checked out
 // alone) they are absent, so require them optionally and skip the cross-service
-// blocks rather than crashing the whole suite. The byte-identity gate across
-// repos is enforced separately by the shared conformance vectors.
-let sdkCheckpoint = null, Anchor = null;
-try { sdkCheckpoint = require('../../../xchain-sdk/src/checkpoint.js'); } catch (_) { /* sibling repo absent */ }
-try { Anchor = require('../../../xchain-indexer/src/actions/anchor.js'); } catch (_) { /* sibling repo absent */ }
-const haveSiblings = Boolean(sdkCheckpoint && Anchor);
-const describeSiblings = haveSiblings ? describe : describe.skip;
+// blocks rather than crashing the whole suite.
+//
+// A bare skip is NOT enough (item 2435). This file is the only place the three
+// XCHECKPOINT canonical builders are compared against each other, and the only
+// place the v0/v1 distinct-equivocation-key property (R-4) is asserted; the shared
+// conformance vectors cover equivocation_header/stake_weighted_quorum and the
+// ANCHOR wire bytes, not this gate. A mis-resolved sibling path in the
+// required-siblings CI lane (bin/ci-all.sh sets XCHAIN_REQUIRE_SIBLINGS=1) would
+// otherwise turn both blocks into permanent pendings on a green run. So there the
+// missing sibling is a hard failure, matching ConsensusPrimitiveConformance.test.js
+// and the indexer's coins-conformance / anchorRewardActivationParity guards.
+let sdkCheckpoint = null, Anchor = null, AnchorRecovery = null;
+let sdkErr = null, anchorErr = null, recoveryErr = null;
+try { sdkCheckpoint = require('../../../xchain-sdk/src/checkpoint.js'); } catch (e) { sdkErr = e; }
+try { Anchor = require('../../../xchain-indexer/src/actions/anchor.js'); } catch (e) { anchorErr = e; }
+try { AnchorRecovery = require('../../../xchain-indexer/src/recovery.js'); } catch (e) { recoveryErr = e; }
+const haveSiblings = Boolean(sdkCheckpoint && Anchor && AnchorRecovery);
+
+// before() hook shared by every sibling-gated block: escalate to a throw when the
+// required-siblings lane is active, otherwise skip. Named so the failure message
+// says which sibling failed to load and why.
+function requireSiblings() {
+    if (haveSiblings) return;
+    if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') {
+        const missing = [];
+        if (!sdkCheckpoint)  missing.push('xchain-sdk/src/checkpoint.js (' + (sdkErr && sdkErr.message) + ')');
+        if (!Anchor)         missing.push('xchain-indexer/src/actions/anchor.js (' + (anchorErr && anchorErr.message) + ')');
+        if (!AnchorRecovery) missing.push('xchain-indexer/src/recovery.js (' + (recoveryErr && recoveryErr.message) + ')');
+        throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the XCHECKPOINT cross-service parity siblings are unloadable: '
+            + missing.join('; '));
+    }
+    this.skip();
+}
 
 // regtest activates at genesis (threshold 0) → gate ON; mainnet is placeholder-
 // disabled at a far-future height → gate OFF for any realistic block.
@@ -71,7 +98,9 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
         });
     });
 
-    describeSiblings('cross-service byte parity', function () {
+    describe('cross-service byte parity', function () {
+        before(requireSiblings);
+
         it('hub == sdk (above gate)', function () {
             expect(sdkCheckpoint.canonicalCheckpoint(cpOn)).to.equal(SCE.canonicalCheckpoint(cpOn));
         });
@@ -87,7 +116,9 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
         });
     });
 
-    describeSiblings('v0/v1 collision fix (R-4)', function () {
+    describe('v0/v1 collision fix (R-4)', function () {
+        before(requireSiblings);
+
         it('v1 archive canonical is header-wrapped with batch_seq in the round id', function () {
             expect(anchor._canonical(dV1))
                 .to.equal('EQUIV|XCHECKPOINT|BTC|regtest|500|7|3|0||' + RAW_V1);
@@ -98,6 +129,120 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
             expect(k0).to.equal('XCHECKPOINT|BTC|regtest|500|7|0');
             expect(k1).to.equal('XCHECKPOINT|BTC|regtest|500|7|3|0');
             expect(k0).to.not.equal(k1);
+        });
+    });
+
+    // ── v1/v6 archive canonical: three-way byte parity (item 2461) ───────────
+    //
+    // The archive extension is an independent three-way agreement, and until now
+    // nothing executed all three producers against one fixture:
+    //   producer  xchain-hub      StateAnchorPublisher._archiveCanonical
+    //   verifier  xchain-indexer  Anchor._canonical, FORMAT 1|6
+    //   recovery  xchain-indexer  AnchorRecovery._wrapperCanonical
+    // Every existing test is self-referential: the hub verifies its own published
+    // sigs with its own builder, the indexer fixture (anchor-archive.js) signs with
+    // a FOURTH inline reimplementation, and the golden vectors cover v0/v3/v4/v5
+    // only. A one-sided edit to the batch segment (field order, the crc position, or
+    // the `|batch_seq` ROUND_ID suffix) therefore ships with every suite green and
+    // forks archive verification: recovery.js:229 throws 'wrapper signatures fail
+    // quorum' and the full-parse recoverability guarantee is silently broken while
+    // the base checkpoint string still agrees.
+    //
+    // These cases call the three REAL implementations. All three methods are pure
+    // string builders over their argument plus module-level helpers, so they are
+    // invoked off the prototype with a null receiver: no hub, indexer, DB or
+    // identity is constructed, and nothing about the unit under test is stubbed.
+    describe('v1/v6 archive canonical: hub == indexer anchor == recovery', function () {
+        before(requireSiblings);
+
+        // ONE fixture, projected into each service's own field naming, so a
+        // transcription slip cannot make the three agree for the wrong reason.
+        const ARCHIVE = { batch_seq: 3, count: 10, crc: 'cc', total_chunks: 2 };
+
+        function hubCanonical(cp) {
+            return SAP.prototype._archiveCanonical.call(null, cp, ARCHIVE.batch_seq,
+                ARCHIVE.count, ARCHIVE.crc, ARCHIVE.total_chunks);
+        }
+        function indexerCanonical(cp, format) {
+            return Anchor.prototype._canonical.call(null, {
+                FORMAT: format, CHAIN: cp.chain, NETWORK: cp.network,
+                BLOCK_INDEX_CHECKPOINTED: cp.block_index, BLOCK_HASH: cp.block_hash,
+                LEDGER_HASH: cp.ledger_hash, ACTIONS_HASH: cp.actions_hash,
+                CONTRACT_HASH: cp.contract_hash, CHECKPOINT_SEQ: cp.checkpoint_seq,
+                SNAPSHOT_BLOCK: cp.snapshot_block,
+                MATCH_BATCH_SEQ: ARCHIVE.batch_seq, MATCH_COUNT: ARCHIVE.count,
+                BATCH_CRC32: ARCHIVE.crc, TOTAL_CHUNKS: ARCHIVE.total_chunks
+            });
+        }
+        function recoveryCanonical(cp) {
+            return AnchorRecovery.prototype._wrapperCanonical.call(null, {
+                chain: cp.chain, network: cp.network, block_index: cp.block_index,
+                block_hash: cp.block_hash, ledger_hash: cp.ledger_hash,
+                actions_hash: cp.actions_hash, contract_hash: cp.contract_hash,
+                checkpoint_seq: cp.checkpoint_seq, snapshot_block: cp.snapshot_block,
+                match_batch_seq: ARCHIVE.batch_seq, match_count: ARCHIVE.count,
+                batch_crc32: ARCHIVE.crc, total_chunks: ARCHIVE.total_chunks
+            });
+        }
+
+        // Above the flag day the header wrapper and the `|batch_seq` ROUND_ID suffix
+        // are both in play, so this is the case that pins the suffix across all three.
+        it('above the EQUIV flag day: all three produce identical bytes (v1)', function () {
+            const hub = hubCanonical(cpOn);
+            expect(indexerCanonical(cpOn, 1)).to.equal(hub, 'indexer Anchor._canonical(FORMAT=1) drifted from hub _archiveCanonical');
+            expect(recoveryCanonical(cpOn)).to.equal(hub, 'recovery._wrapperCanonical drifted from hub _archiveCanonical');
+            // Pinned literal so a THREE-sided edit (all copies changed together) still fails.
+            expect(hub).to.equal('EQUIV|XCHECKPOINT|BTC|regtest|500|7|3|0||' + RAW_V1);
+        });
+
+        // v6 is the publisher-bearing archive; its wrapper sigs are produced over the
+        // UNCHANGED v1 archive canonical (the publisher tail is attested separately).
+        it('above the EQUIV flag day: v6 canonical is byte-identical to v1', function () {
+            expect(indexerCanonical(cpOn, 6)).to.equal(indexerCanonical(cpOn, 1));
+            expect(indexerCanonical(cpOn, 6)).to.equal(hubCanonical(cpOn));
+        });
+
+        // Below the flag day the bytes are bare and the ROUND_ID suffix is absent, so
+        // this branch exercises code the regtest-only archive suites never reach.
+        it('below the EQUIV flag day: all three produce identical bare bytes (v1 and v6)', function () {
+            const hub = hubCanonical(cpOff);
+            expect(hub).to.equal(RAW_OFF + '|3|10|cc|2');
+            expect(indexerCanonical(cpOff, 1)).to.equal(hub);
+            expect(indexerCanonical(cpOff, 6)).to.equal(hub);
+            expect(recoveryCanonical(cpOff)).to.equal(hub);
+        });
+
+        // Field ORDER, not just field presence: a swap inside the batch segment keeps
+        // the same characters and would slip past a set-equality style check.
+        it('binds the archive field ORDER identically in all three (crc/count swap diverges)', function () {
+            const swapped = Object.assign({}, ARCHIVE);
+            const orig    = { count: ARCHIVE.count, crc: ARCHIVE.crc };
+            ARCHIVE.count = orig.crc; ARCHIVE.crc = orig.count;
+            try {
+                const hub = hubCanonical(cpOn);
+                expect(hub).to.not.equal('EQUIV|XCHECKPOINT|BTC|regtest|500|7|3|0||' + RAW_V1);
+                expect(indexerCanonical(cpOn, 1)).to.equal(hub);
+                expect(recoveryCanonical(cpOn)).to.equal(hub);
+            } finally {
+                ARCHIVE.count = swapped.count; ARCHIVE.crc = swapped.crc;
+            }
+        });
+
+        // The archive round id must carry batch_seq in all three, or two archive
+        // batches of the same checkpoint collide into one equivocation key.
+        it('all three derive the same equivocation key, and it includes batch_seq', function () {
+            const k = keyOf(hubCanonical(cpOn));
+            expect(k).to.equal('XCHECKPOINT|BTC|regtest|500|7|3|0');
+            expect(keyOf(indexerCanonical(cpOn, 1))).to.equal(k);
+            expect(keyOf(recoveryCanonical(cpOn))).to.equal(k);
+            // A different batch_seq must yield a DIFFERENT key in all three.
+            const prev = ARCHIVE.batch_seq;
+            ARCHIVE.batch_seq = 4;
+            try {
+                expect(keyOf(hubCanonical(cpOn))).to.not.equal(k);
+                expect(keyOf(indexerCanonical(cpOn, 1))).to.equal(keyOf(hubCanonical(cpOn)));
+                expect(keyOf(recoveryCanonical(cpOn))).to.equal(keyOf(hubCanonical(cpOn)));
+            } finally { ARCHIVE.batch_seq = prev; }
         });
     });
 });
