@@ -511,12 +511,14 @@ class StateAnchorPublisher {
                 let me = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
                 let payload;
                 let attested = false;   // a v4/v5 (reward-derivable) payload was actually built
+                let attestSigs = [];    // : hoisted so the post-publish attestation-mirror INSERT can carry them
                 if(me && ar.isAnchorRewardActive(Number(row.snapshot_block), row.network)){
                     let attest = await this._runPublisherAttestationRound(this._cpFromRow(row), me);
                     if(attest && attest.met && attest.sigs.length >= 1){
                         payload = useV3 ? this._buildV5Payload(row, me, attest.sigs)
                                         : this._buildV4Payload(row, me, attest.sigs);
                         attested = true;
+                        attestSigs = attest.sigs;
                     } else {
                         console.warn('StateAnchorPublisher: publisher-attestation quorum not reached for ' +
                                      row.chain + '/' + row.network + ' @ ' + row.block_index +
@@ -587,6 +589,14 @@ class StateAnchorPublisher {
                     this._recordReward('anchor_' + row.chain, Number(row.checkpoint_seq),
                                        this.identity ? this.identity.getPubkeyHex() : null,
                                        Number(row.snapshot_block), row.network);
+                    //  Option C: at/above the derive-relocation flag-day, publish the
+                    // XANCPUB quorum to the append-only anchor_reward_attestations mirror so the
+                    // BTC indexer (where the stake source resolves) derives the reward. Only when
+                    // the v4/v5 attestation actually landed on-chain, so reward <=> anchor published.
+                    if(attested)
+                        await this._recordRewardAttestation(row.chain, row.network, 'anchor_' + row.chain,
+                                                            Number(row.checkpoint_seq), Number(row.snapshot_block),
+                                                            String(me).toLowerCase(), attestSigs);
                 } else {
                     console.log('StateAnchorPublisher: degraded legacy anchor at/above the reward flag-day for ' +
                                 row.chain + '/' + row.network + ' @ ' + row.block_index +
@@ -628,6 +638,39 @@ class StateAnchorPublisher {
         this.hub.rewardTracker
             .recordAnchorReward(rewardType, roundNumber, String(pubkey).toLowerCase(), Number.isFinite(blockIndex) ? blockIndex : 0, network)
             .catch(e => console.warn('StateAnchorPublisher: reward record failed (' + rewardType + '/' + roundNumber + '): ' + (e && e.message)));
+    }
+
+    //  Option C (derive-on-BTC-side): after a v4/v5/v6 anchor lands on-chain, publish
+    // the XANCPUB publisher-attestation quorum to the append-only anchor_reward_attestations
+    // table, mirrored to every indexer via hub_db_sync (HUB_STATE_TABLES). ANCHOR is DOGE-only
+    // but capability staking (hence the resolvable stake source createValidatorReward needs) is
+    // BTC-only, so the BTC indexer keys reward derivation on these rows: it re-verifies the sigs
+    // against its OWN local oracle_publish set at snapshot_block (mirror = transport, not trust)
+    // and materializes validator_rewards at block_index = snapshot_block. Gated by the NEW derive
+    // flag-day so below the gate no rows exist (byte-identical legacy: DOGE-side write still
+    // attempted + silently dropped). INSERT IGNORE keeps it idempotent on the tuple identity; a
+    // failover double-publish inserts a second row and the indexer winner-reconcile collapses it.
+    async _recordRewardAttestation(chain, network, rewardType, roundReference, snapshotBlock, publisher, attestSigs){
+        if(!ar.isAnchorRewardDeriveActive(Number(snapshotBlock), network)) return;
+        if(!publisher || !Array.isArray(attestSigs) || attestSigs.length === 0) return;
+        let amount = (rewardType === 'anchor_archive') ? ar.ARCHIVE_REWARD_AMOUNT : ar.ANCHOR_REWARD_AMOUNT;
+        let sigsJson = JSON.stringify(attestSigs.map(s => ({ pubkey: String(s.pubkey).toLowerCase(), sig: String(s.sig).toLowerCase() })));
+        try {
+            await this.db.doQuery(
+                'INSERT IGNORE INTO anchor_reward_attestations ' +
+                '(chain, network, reward_type, round_reference, snapshot_block, publisher, reward_amount, publisher_attestations) ' +
+                'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                [chain, network, rewardType, roundReference, snapshotBlock, publisher, amount, sigsJson]);
+            let rows = await this.db.doQuery(
+                'SELECT id, chain, network, reward_type, round_reference, snapshot_block, publisher, reward_amount, publisher_attestations, created_at ' +
+                'FROM anchor_reward_attestations WHERE chain = ? AND network = ? AND reward_type = ? AND round_reference = ? AND snapshot_block = ? AND publisher = ? LIMIT 1',
+                [chain, network, rewardType, roundReference, snapshotBlock, publisher]);
+            if(rows && rows[0] && this.hub.hubDbBroadcaster && typeof this.hub.hubDbBroadcaster.broadcastRow === 'function')
+                this.hub.hubDbBroadcaster.broadcastRow({ table: 'anchor_reward_attestations', row: rows[0] });
+        } catch(e){
+            console.warn('StateAnchorPublisher: anchor_reward_attestations record failed (' +
+                         rewardType + '/' + roundReference + '): ' + (e && e.message));
+        }
     }
 
     _buildV0Payload(row){
@@ -2161,6 +2204,15 @@ class StateAnchorPublisher {
                 this._recordReward('anchor_archive', round.batchSeq,
                                    this.identity ? this.identity.getPubkeyHex() : null,
                                    Number(round.cp.snapshot_block), round.cp.network);
+                //  Option C: mirror the archive XANCPUB quorum so the BTC indexer derives
+                // the anchor_archive reward (only when the v6 attestation actually landed).
+                if(attested){
+                    let mePk = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
+                    if(mePk)
+                        await this._recordRewardAttestation(round.cp.chain, round.cp.network, 'anchor_archive',
+                                                            Number(round.batchSeq), Number(round.cp.snapshot_block),
+                                                            mePk, attestSigs);
+                }
             } else {
                 console.log('StateAnchorPublisher: degraded legacy v1 archive at/above the archive-reward ' +
                             'flag-day for batch ' + round.batchSeq + '; reward withheld (no live indexer derives it)');

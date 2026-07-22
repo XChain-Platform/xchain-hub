@@ -2615,3 +2615,54 @@ describe('StateAnchorPublisher checkpoint co-sign guard uses the rootless canoni
             .to.not.equal(StateCheckpointEngine.canonicalCheckpoint(rootBearing));
     });
 });
+
+// ──  Option C: anchor_reward_attestations mirror INSERT ──────────────────────
+describe('StateAnchorPublisher._recordRewardAttestation ', function () {
+    const sinon = require('sinon');
+
+    function makePub(){
+        const queries = [];
+        const broadcast = [];
+        const db = { async doQuery(sql, params){ queries.push({ sql, params }); return sql.indexOf('SELECT') === 0 ? [{ id: 1, publisher: params[5] }] : { affectedRows: 1 }; } };
+        const hub = { db, getIdentity: () => null, hubDbBroadcaster: { broadcastRow: (ev) => broadcast.push(ev) } };
+        return { pub: new StateAnchorPublisher(hub), queries, broadcast };
+    }
+
+    afterEach(() => sinon.restore());
+
+    it('below the derive gate (inert mainnet placeholder) it writes NOTHING', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(false);
+        const { pub, queries, broadcast } = makePub();
+        await pub._recordRewardAttestation('BTC', 'mainnet', 'anchor_BTC', 5, 1000000, 'ab'.repeat(32), [{ pubkey: 'cd'.repeat(32), sig: 'ef'.repeat(64) }]);
+        expect(queries.length).to.equal(0);
+        expect(broadcast.length).to.equal(0);
+    });
+
+    it('at/above the gate it INSERT-IGNOREs the tuple with the FROZEN amount and broadcasts the row', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const { pub, queries, broadcast } = makePub();
+        const pk = 'ab'.repeat(32);
+        await pub._recordRewardAttestation('BTC', 'regtest', 'anchor_BTC', 5, 0, pk, [{ pubkey: 'cd'.repeat(32), sig: 'ef'.repeat(64) }]);
+        const ins = queries.find(q => q.sql.indexOf('INSERT IGNORE INTO anchor_reward_attestations') === 0);
+        expect(ins, 'INSERT IGNORE issued').to.exist;
+        expect(ins.params[2]).to.equal('anchor_BTC');            // reward_type
+        expect(ins.params[6]).to.equal(arMod.ANCHOR_REWARD_AMOUNT); // frozen amount, not wire
+        expect(broadcast.length).to.equal(1);
+        expect(broadcast[0].table).to.equal('anchor_reward_attestations');
+    });
+
+    it('uses the ARCHIVE frozen amount for an anchor_archive tuple', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const { pub, queries } = makePub();
+        await pub._recordRewardAttestation('BTC', 'regtest', 'anchor_archive', 3, 0, 'ab'.repeat(32), [{ pubkey: 'cd'.repeat(32), sig: 'ef'.repeat(64) }]);
+        const ins = queries.find(q => q.sql.indexOf('INSERT IGNORE INTO anchor_reward_attestations') === 0);
+        expect(ins.params[6]).to.equal(arMod.ARCHIVE_REWARD_AMOUNT);
+    });
+
+    it('writes nothing when the attestation sig list is empty', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const { pub, queries } = makePub();
+        await pub._recordRewardAttestation('BTC', 'regtest', 'anchor_BTC', 5, 0, 'ab'.repeat(32), []);
+        expect(queries.length).to.equal(0);
+    });
+});

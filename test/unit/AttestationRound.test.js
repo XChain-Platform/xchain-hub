@@ -495,6 +495,22 @@ describe('AttestationRound', function () {
             expect(ar.rounds.size).to.equal(0);
         });
 
+        it('skips (before the provider fetch) when responsible slots < redundancy (Pkg 7 / 87441a53)', async function () {
+            // One qualifying validator but redundancy 2: the round can never
+            // collect the >= redundancy signatures the indexer requires, so the
+            // round must be refused BEFORE the paid provider fetch.
+            let myPubkey = 'aa'.repeat(32);
+            let capSS = { getSnapshot: sinon.stub().resolves({ validators: [{ pubkey: myPubkey }] }) };
+            let hub   = makeHub({ capabilitySnapshot: capSS });
+            hub.getIdentity = () => makeIdentity(myPubkey);
+            let fetchStub = sinon.stub().resolves({ body: 'data', meta: '200' });
+            let reg = makeProviderRegistry({ getModule: sinon.stub().returns({ fetch: fetchStub }) });
+            let ar  = new AttestationRound(hub, reg);
+            await ar._startRound(makeRequest({ redundancy: 2 }));
+            expect(ar.rounds.size).to.equal(0);
+            expect(fetchStub.called).to.be.false;
+        });
+
         it('skips when this validator is not in the responsible set', async function () {
             // Set myPubkey to 'aa'*32, but the only responsible validator is 'bb'*32
             let myPubkey = 'aa'.repeat(32);
@@ -650,7 +666,10 @@ describe('AttestationRound', function () {
             return {
                 request_id:   'rid0001',
                 provider_id:  'llm',
-                redundancy:   3,
+                // 2 responsible slots below: redundancy must be servable
+                // (<= responsible.length) or the Pkg 7 unservable-redundancy
+                // guard skips the round before the ladder logic under test.
+                redundancy:   2,
                 block_index:  100,
                 action_index: 1,
                 deadline_block: 120,

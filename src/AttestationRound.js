@@ -294,6 +294,22 @@ class AttestationRound {
         }
 
         let responsible = this._computeResponsibleSet(snapshot.validators, rid, redundancy, weighted);
+        // Unservable-redundancy guard (Pkg 7 / 87441a53): when the snapshot (or
+        // its weighted source-dedupe) yields fewer responsible slots than
+        // REDUNDANCY, the round can never finalize; the indexer requires
+        // >= redundancy valid signatures and only responsible-set members can
+        // sign. AttestationConsensus.propose already refuses the round
+        // (unfinalizable-round guard); skipping HERE additionally saves the paid
+        // provider fetch that propose() would discard. Same loud warn; the
+        // request reaches its normal deadline expiry + refund (or, at/above the
+        // indexer's ATTEST_ADMISSION flag-day, is rejected at admission and
+        // never polled at all).
+        if(responsible.length < Math.max(1, redundancy)){
+            console.warn('AttestationRound: skipping unfinalizable ' + rid.substring(0,16) +
+                '... (responsible=' + responsible.length + ' < redundancy=' + Math.max(1, redundancy) +
+                ' at block ' + snapshotBlk + (weighted ? ', weighted source-dedupe' : '') + ')');
+            return;
+        }
         // Leader rotation (Phase 4): a silent leader must not stall the request
         // until deadline expiry. The leader slot advances one step down the
         // hash-ordered responsible set per rotation window of elapsed chain

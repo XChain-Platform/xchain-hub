@@ -66,6 +66,18 @@ const ORACLE_DEVIATION_THRESHOLD = 0.05;
 // (which uses the same 5x multiplier). CONSENSUS-CRITICAL: deploy fleet-wide.
 const ORACLE_MAX_CHANGE_PER_ROUND = 0.25;
 
+// Default oracle round cadence (10 min) and submission window (3 min), in ms.
+// These anchor federation-wide oracle round numbering together with the
+// fail-closed ORACLE_EPOCH_START (api.js): every consumer that falls back when
+// ORACLE_ROUND_INTERVAL / ORACLE_SUBMISSION_WINDOW is absent from p2pConfig
+// (api.js env parsing, OracleRound scheduling, XChainHub tip-freshness bound)
+// must fall back to the SAME value, or a hub constructed without a populated
+// p2pConfig numbers rounds on a different cadence than its peers. Previously
+// each site kept its own bare literal linked only by a prose comment (#2653);
+// requiring these from one module makes the loader enforce the sync.
+const DEFAULT_ORACLE_ROUND_INTERVAL_MS   = 600000;
+const DEFAULT_ORACLE_SUBMISSION_WINDOW_MS = 180000;
+
 // PRICE v1 wire-format bounds . Mirror xchain-indexer/src/config.js
 // (COINS, FIATS, MAX_TICK_LENGTH, MAX_MEMO_LENGTH) and actions/price.js
 // parse_v1: the indexer rejects these on-chain, so any push carrying a value
@@ -78,4 +90,5 @@ const MAX_TICK_LENGTH = 250;
 const MAX_MEMO_LENGTH = 250;
 
 module.exports = { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD, ORACLE_MAX_CHANGE_PER_ROUND, XCALL_MAX_HOPS,
+                   DEFAULT_ORACLE_ROUND_INTERVAL_MS, DEFAULT_ORACLE_SUBMISSION_WINDOW_MS,
                    PRICE_V1_COINS, PRICE_V1_FIATS, MAX_TICK_LENGTH, MAX_MEMO_LENGTH };

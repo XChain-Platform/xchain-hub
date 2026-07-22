@@ -43,7 +43,10 @@ const path      = require('path');
 const geoip     = require('geoip-lite');   // self-contained country/region DB; we read only country + region
 const { HUB_SCHEMA_VERSION } = require('./hub-schema-version');   // stamped on every mirror snapshot so a stale indexer rejects a mismatch
 const { buildOraclePricesSnapshotQuery } = require('./oraclePricesSnapshotQuery');   // page (indexer bootstrap) vs latest-per-feed (dashboard) query selection
-const { ORACLE_DEVIATION_THRESHOLD } = require('./constants');   // #1299: single source of truth for the co-sign/slash deviation band (no re-declared 0.05 literal)
+// #1299: single source of truth for the co-sign/slash deviation band (no re-declared 0.05 literal).
+// #2653: oracle round-interval/submission-window defaults shared with OracleRound.js and XChainHub.js.
+const { ORACLE_DEVIATION_THRESHOLD, DEFAULT_ORACLE_ROUND_INTERVAL_MS,
+        DEFAULT_ORACLE_SUBMISSION_WINDOW_MS } = require('./constants');
 
 const HUB_PORT = process.env.HUB_PORT;
 const HUB_HOST = process.env.HUB_HOST || '0.0.0.0';
@@ -141,11 +144,6 @@ function validateSince(since) {
     return null;
 }
 
-// Default oracle round interval (10 min). Declared here (before the p2pConfig
-// object literal that references it) so the const is in scope at evaluation time.
-// OracleRound.js keeps its own copy with a cross-ref comment; both must stay in sync.
-const DEFAULT_ORACLE_ROUND_INTERVAL_MS = 600000;
-
 // Parse optional P2P config (P2P is enabled when P2P_VALIDATOR_ADDR is set)
 const P2P_VALIDATOR_ADDR = process.env.P2P_VALIDATOR_ADDR || '';
 
@@ -208,7 +206,7 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     P2P_MAX_PAYLOAD:        parseInt(process.env.P2P_MAX_PAYLOAD) || 1048576,
     ORACLE_EPOCH_START:     parseInt(process.env.ORACLE_EPOCH_START),
     ORACLE_ROUND_INTERVAL:  parseInt(process.env.ORACLE_ROUND_INTERVAL) || DEFAULT_ORACLE_ROUND_INTERVAL_MS,
-    ORACLE_SUBMISSION_WINDOW: parseInt(process.env.ORACLE_SUBMISSION_WINDOW) || 180000,
+    ORACLE_SUBMISSION_WINDOW: parseInt(process.env.ORACLE_SUBMISSION_WINDOW) || DEFAULT_ORACLE_SUBMISSION_WINDOW_MS,
     ORACLE_REWARD_PER_ROUND: process.env.ORACLE_REWARD_PER_ROUND || '10.00000000',
     SLASH_DEVIATION_THRESHOLD: process.env.SLASH_DEVIATION_THRESHOLD || String(ORACLE_DEVIATION_THRESHOLD),
     SLASH_MISSED_ROUNDS_THRESHOLD: process.env.SLASH_MISSED_ROUNDS_THRESHOLD || '30',
@@ -481,13 +479,22 @@ async function startApi(){
         // status is optional and additive: omitted/'finalized' preserves the
         // historical finalized-only contract; 'all' includes skipped/disputed
         // rows for health/monitoring consumers (dashboard oracle-feed parity).
-        async getpricesnapshots({limit, status}){
+        async getpricesnapshots({limit, status, with_watermark}){
             let limErr = validateLimit(limit);
             if (limErr) return limErr;
             if (status !== undefined && status !== 'finalized' && status !== 'all')
                 return {error: "status must be 'finalized' or 'all'"};
             try {
                 let snapshots = await hub.getPriceSnapshots(limit || 50, status);
+                // with_watermark is optional and additive: health consumers (the
+                // dashboard's pairHealth) need a server-clock watermark so row age
+                // is computed entirely in the hub's clock domain instead of diffing
+                // hub block_timestamp against the caller's clock, which folds
+                // host/hub skew into the freshness thresholds (same fix the
+                // submissions rail already carries via lastSuccessAgeMs, and the
+                // REST /hub-db/snapshot sibling via its `watermark`). Omitted =
+                // historical bare-array contract, so existing callers are untouched.
+                if (with_watermark) return { watermark: Math.floor(Date.now() / 1000), snapshots };
                 return snapshots;
             } catch (err) {
                 return {error: "error fetching price snapshots"};
@@ -1216,6 +1223,29 @@ async function startApi(){
                 [since, limit]
             );
             res.json({ table: 'state_checkpoints', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
+        } catch (err) {
+            console.error('hub snapshot endpoint error:', err);
+            res.status(500).json({ error: 'snapshot error' });
+        }
+    });
+
+    // GET /hub-db/snapshot/anchor_reward_attestations: full snapshot of the 
+    // anchor-reward attestation table. Explicit column list (id-parity mirror; the BTC
+    // indexer rebuilds the XANCPUB canonical from reward_type/round_reference/snapshot_block/
+    // publisher and re-verifies publisher_attestations against its OWN oracle_publish set).
+    app.get('/hub-db/snapshot/anchor_reward_attestations', async (req, res) => {
+        try {
+            if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
+            let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
+            if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
+            let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
+            let rows = await hub.db.doQuery(
+                'SELECT id, chain, network, reward_type, round_reference, snapshot_block, ' +
+                'publisher, reward_amount, publisher_attestations, created_at ' +
+                'FROM anchor_reward_attestations WHERE id > ? ORDER BY id ASC LIMIT ?',
+                [since, limit]
+            );
+            res.json({ table: 'anchor_reward_attestations', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });

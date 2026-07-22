@@ -1306,6 +1306,24 @@ describe('Security Hardening', function () {
             expect(result).to.be.an('array');
         });
 
+        // Watermark wrapper (#2497): opt-in server-clock watermark so the
+        // dashboard's freshness thresholds are computed in the hub's clock
+        // domain; omitted keeps the historical bare-array contract.
+        it('getpricesnapshots with_watermark wraps rows with a server-clock watermark', async function () {
+            let before = Math.floor(Date.now() / 1000);
+            let result = await controller.getpricesnapshots({ limit: 10, with_watermark: 1 });
+            let after = Math.floor(Date.now() / 1000);
+            expect(result).to.be.an('object');
+            expect(result.snapshots).to.be.an('array');
+            expect(result.watermark).to.be.at.least(before);
+            expect(result.watermark).to.be.at.most(after);
+        });
+
+        it('getpricesnapshots without with_watermark keeps the bare-array contract', async function () {
+            let result = await controller.getpricesnapshots({ limit: 10 });
+            expect(result).to.be.an('array');
+        });
+
         it('reportreorg rejects invalid chain', async function () {
             let result = await controller.reportreorg({ chain: 'ETH', reorg_height: '100', timestamp: String(Date.now()) });
             expect(result.error).to.include('BTC');

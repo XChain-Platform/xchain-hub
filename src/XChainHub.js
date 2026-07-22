@@ -20,6 +20,7 @@
  ********************************************************************/
 
 const Database           = require('./db.js');
+const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('./constants.js');
 const coins              = require('./coins');
 const PeerManager        = require('./PeerManager.js');
 const Consensus          = require('./Consensus.js');
@@ -1385,7 +1386,7 @@ class XChainHub {
     _btcPushedTipFresh(tip){
         let maxAge = Number(process.env.MAX_TIP_AGE_S);
         if(!Number.isFinite(maxAge) || maxAge <= 0){
-            let roundIntervalMs = (this.p2pConfig && Number(this.p2pConfig.ORACLE_ROUND_INTERVAL)) || 600000;
+            let roundIntervalMs = (this.p2pConfig && Number(this.p2pConfig.ORACLE_ROUND_INTERVAL)) || DEFAULT_ORACLE_ROUND_INTERVAL_MS;
             maxAge = Math.floor((2 * roundIntervalMs) / 1000);
         }
         let blockTime = Number(tip.blockTime);

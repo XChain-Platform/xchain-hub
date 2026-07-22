@@ -26,7 +26,8 @@
  ********************************************************************/
 
 const PriceFetcher = require('./PriceFetcher.js');
-const { PRICE_MAX } = require('./constants.js');
+const { PRICE_MAX, DEFAULT_ORACLE_ROUND_INTERVAL_MS,
+        DEFAULT_ORACLE_SUBMISSION_WINDOW_MS } = require('./constants.js');
 
 const ORACLE_PRICE_SUBMIT = 'ORACLE_PRICE_SUBMIT';
 
@@ -71,8 +72,11 @@ class OracleRound {
         this._messageHandler = null;
 
         // Config
-        this.roundInterval          = this.config.ORACLE_ROUND_INTERVAL || 600000;     // 10 minutes
-        this.submissionWindow       = this.config.ORACLE_SUBMISSION_WINDOW || 180000;   // 3 minutes
+        // Defaults shared with api.js/XChainHub.js via constants.js (#2653): a hub
+        // constructed without a populated p2pConfig must land on the same cadence
+        // as its peers, since the interval anchors round numbering federation-wide.
+        this.roundInterval          = this.config.ORACLE_ROUND_INTERVAL || DEFAULT_ORACLE_ROUND_INTERVAL_MS;
+        this.submissionWindow       = this.config.ORACLE_SUBMISSION_WINDOW || DEFAULT_ORACLE_SUBMISSION_WINDOW_MS;
         this.maxSubmissionsPerRound  = parseInt(this.config.ORACLE_MAX_SUBMISSIONS_PER_ROUND) || 200;
         // Retention window (in rounds) for the oracle_submissions audit table.
         // oracle_submissions is a purely diagnostic per-validator trail: the
