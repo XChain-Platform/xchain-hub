@@ -14,12 +14,16 @@ const {
     RETRACTION_SIGNING_ACTIVATION, isRetractionSigningActive,
 } = require('../../src/retraction_signing_activation.js');
 
+// Fourth tuple element: the expected testnet threshold. checkpoint_commitment
+// arms testnet at 146000 ( lead 0e418c8c: the SPV root suffix must not be
+// signed before every chain is past its STATE_COMMITMENT height, else the hub
+// refuses to sign every testnet checkpoint); retraction_signing stays genesis (0).
 const cases = [
-    ['checkpoint_commitment', isCheckpointCommitmentActive, CHECKPOINT_COMMITMENT_ACTIVATION],
-    ['retraction_signing', isRetractionSigningActive, RETRACTION_SIGNING_ACTIVATION],
+    ['checkpoint_commitment', isCheckpointCommitmentActive, CHECKPOINT_COMMITMENT_ACTIVATION, 146000],
+    ['retraction_signing', isRetractionSigningActive, RETRACTION_SIGNING_ACTIVATION, 0],
 ];
 
-for (const [name, isActive, MAP] of cases) {
+for (const [name, isActive, MAP, testnetThreshold] of cases) {
     describe(`${name} activation gate (boundary)`, function () {
         const threshold = MAP.mainnet;
 
@@ -31,10 +35,15 @@ for (const [name, isActive, MAP] of cases) {
             assert.strictEqual(isActive(threshold - 1, 'mainnet'), false);
         });
 
-        it('regtest and testnet are armed from genesis (threshold 0)', function () {
+        it('regtest is armed from genesis; testnet arms at its own threshold', function () {
             assert.strictEqual(MAP.regtest, 0);
             assert.strictEqual(isActive(0, 'regtest'), true);
-            assert.strictEqual(isActive(0, 'testnet'), true);
+            assert.strictEqual(MAP.testnet, testnetThreshold);
+            assert.strictEqual(isActive(testnetThreshold, 'testnet'), true);
+            // One below the testnet threshold is off. For a genesis-armed map
+            // (threshold 0) this probes height -1, which fails closed as a
+            // negative height; for checkpoint_commitment it probes 145999.
+            assert.strictEqual(isActive(testnetThreshold - 1, 'testnet'), false);
         });
 
         it('fails closed on non-numeric / NaN input', function () {
