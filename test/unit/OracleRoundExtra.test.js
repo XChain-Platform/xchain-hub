@@ -524,6 +524,72 @@ describe('OracleRound (extra coverage)', function () {
         });
     });
 
+    // ── ORACLE_MAX_SUBMISSIONS_PER_ROUND is actually reachable (item ) ─
+    //
+    // Same dead-knob mechanism as ORACLE_SUBMISSIONS_RETENTION_ROUNDS above: the key
+    // was missing from the api.js p2pConfig literal, so this.config.ORACLE_MAX_
+    // SUBMISSIONS_PER_ROUND was undefined on every deployment and the 200 default
+    // won no matter what the operator exported. The consumer-side assertions passed
+    // even then, so the source-side shape check is the half that matters.
+
+    describe('ORACLE_MAX_SUBMISSIONS_PER_ROUND wiring', function () {
+        const fs   = require('fs');
+        const path = require('path');
+
+        // Brace-match the `const p2pConfig = P2P_VALIDATOR_ADDR ? { ... }` literal.
+        function p2pConfigLiteral() {
+            const src = fs.readFileSync(path.join(__dirname, '../../src/api.js'), 'utf8');
+            const at  = src.indexOf('const p2pConfig = P2P_VALIDATOR_ADDR ? {');
+            expect(at, 'p2pConfig literal not found in src/api.js').to.not.equal(-1);
+            const open = src.indexOf('{', at);
+            let depth = 0;
+            for (let i = open; i < src.length; i++) {
+                if (src[i] === '{') depth++;
+                else if (src[i] === '}' && --depth === 0) return src.slice(open, i + 1);
+            }
+            throw new Error('unbalanced p2pConfig literal in src/api.js');
+        }
+
+        it('the key is present in the api.js p2pConfig literal', function () {
+            expect(p2pConfigLiteral()).to.match(/\n\s*ORACLE_MAX_SUBMISSIONS_PER_ROUND\s*:/,
+                'OracleRound reads this off hub.p2pConfig; absent from the literal it is permanently '
+                + 'undefined and the per-round submission cap is un-tunable');
+        });
+
+        it('is passed through unparsed so the consumer owns the parse and the default', function () {
+            const line = /ORACLE_MAX_SUBMISSIONS_PER_ROUND\s*:\s*([^\n,]+)/.exec(p2pConfigLiteral());
+            expect(line, 'ORACLE_MAX_SUBMISSIONS_PER_ROUND not wired').to.not.equal(null);
+            expect(line[1].trim()).to.equal('process.env.ORACLE_MAX_SUBMISSIONS_PER_ROUND',
+                'a parseInt(...) || 200 tidy-up here forks the default into two files and lets the '
+                + 'api.js copy eat values (0, negatives) that OracleRound.js handles deliberately');
+        });
+
+        it('an operator-supplied cap reaches the ingest guard', function () {
+            const fresh = new OracleRound(createMockHub({
+                p2pConfig: { ORACLE_MAX_SUBMISSIONS_PER_ROUND: '25' }
+            }));
+            expect(fresh.maxSubmissionsPerRound).to.equal(25);
+        });
+
+        it('an explicit 0 falls back to the default rather than stalling the round', function () {
+            // 0 is not a "disable" here (contrast the retention knob): the cap gates
+            // ingest, so honouring 0 would drop every peer submission silently.
+            const fresh = new OracleRound(createMockHub({
+                p2pConfig: { ORACLE_MAX_SUBMISSIONS_PER_ROUND: '0' }
+            }));
+            expect(fresh.maxSubmissionsPerRound).to.equal(200);
+        });
+
+        it('garbage, negative and absent values fall back to the default', function () {
+            for (const bad of ['nonsense', '-5', '', undefined]) {
+                const fresh = new OracleRound(createMockHub({
+                    p2pConfig: { ORACLE_MAX_SUBMISSIONS_PER_ROUND: bad }
+                }));
+                expect(fresh.maxSubmissionsPerRound, 'value ' + JSON.stringify(bad)).to.equal(200);
+            }
+        });
+    });
+
     // ── _persistSubmissions: pubkey fallbacks ────────────────────────────────
 
     describe('_persistSubmissions(): pubkey fallbacks', function () {

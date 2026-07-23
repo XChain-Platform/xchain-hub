@@ -77,7 +77,15 @@ class OracleRound {
         // as its peers, since the interval anchors round numbering federation-wide.
         this.roundInterval          = this.config.ORACLE_ROUND_INTERVAL || DEFAULT_ORACLE_ROUND_INTERVAL_MS;
         this.submissionWindow       = this.config.ORACLE_SUBMISSION_WINDOW || DEFAULT_ORACLE_SUBMISSION_WINDOW_MS;
-        this.maxSubmissionsPerRound  = parseInt(this.config.ORACLE_MAX_SUBMISSIONS_PER_ROUND) || 200;
+        // Per-round cap on collected peer submissions. api.js passes the env value
+        // through unparsed, so the parse and the default live here only. Unlike the
+        // retention window below, 0 is NOT a "disable" setting: maxSubmissionsPerRound
+        // gates ingest at line ~677, so 0 (or a negative) would drop every peer
+        // submission and stall the round silently. Both fall back to the default.
+        this.maxSubmissionsPerRound = parseInt(this.config.ORACLE_MAX_SUBMISSIONS_PER_ROUND);
+        if (!Number.isFinite(this.maxSubmissionsPerRound) || this.maxSubmissionsPerRound <= 0) {
+            this.maxSubmissionsPerRound = 200;
+        }
         // Retention window (in rounds) for the oracle_submissions audit table.
         // oracle_submissions is a purely diagnostic per-validator trail: the
         // finalized value lives durably in price_snapshots and dropped rows are
