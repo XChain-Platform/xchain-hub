@@ -163,6 +163,16 @@ class SpendGuard {
             return { ok: false, reason: this.label + ': effector spend PAUSED (' + (this.pauseReason || '') + '); skipping broadcast' };
         }
 
+        // A configured floor that never receives a balance is silently inert:
+        // the caller wired no balance source, so <PREFIX>_MIN_BALANCE looks
+        // protective while doing nothing. Warn once so the dead knob is visible
+        // (e.g. FullNodeChallengeRound calls check() with no balance argument).
+        if (opts.balance === undefined && this.minBalance > 0 && !this._warnedFloorInert){
+            this._warnedFloorInert = true;
+            console.warn(this.label + ': ' + this.prefix +
+                '_MIN_BALANCE=' + this.minBalance + ' is configured but check() is called with no balance; ' +
+                'the wallet floor is INERT for this effector (no balance source wired).');
+        }
         if (opts.balance !== undefined){
             if (opts.balance === null){
                 this.blocked.balance++;

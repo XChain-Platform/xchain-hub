@@ -98,6 +98,10 @@ let PROMPT_ENVELOPE_VERSION = 1;
 // reasoning judges headroom while keeping the tight bound for chat-family judges.
 const JUDGE_MAX_TOKENS = 256;
 const JUDGE_MAX_TOKENS_REASONING = 2048;
+// Extra completion budget added to a reasoning-family fetch model on top of the
+// governance content bound, so internal reasoning does not starve the emitted
+// attestation content. Fetch-path counterpart to the judge reasoning budget.
+const FETCH_REASONING_TOKEN_HEADROOM = 2048;
 
 // True for OpenAI reasoning-family models (o-series and gpt-5*), which reject an
 // explicit temperature and bill reasoning tokens against max_completion_tokens.
@@ -233,6 +237,14 @@ exports.fetch = async (payload, options) => {
     if (!options.pinnedModel && APPROVED_MODELS.indexOf(model) === -1) model = APPROVED_MODELS[0];
 
     let maxTokens   = Math.min(Number(envelope.max_tokens) || MAX_TOKENS_DEFAULT, MAX_TOKENS_DEFAULT);
+    // Reasoning-family fetch models (o-series / gpt-5*) bill internal reasoning
+    // tokens against the completion budget, so the governance-tuned content bound
+    // is consumed by reasoning before any attestation content is emitted
+    // (finish_reason='length', empty body -> provider_error every round). Mirror
+    // agree()'s judge headroom on the fetch path so an approved OpenAI reasoning
+    // fallback can actually finalize; add headroom rather than replace so the
+    // governance content budget is preserved. Chat-family models are unchanged.
+    if (_isReasoningModel(model)) maxTokens = maxTokens + FETCH_REASONING_TOKEN_HEADROOM;
     let temperature = (typeof envelope.temperature === 'number') ? envelope.temperature : DEFAULT_TEMPERATURE;
 
     // Envelope output format (spec §4). 'text' (default) leaves behavior unchanged;
@@ -554,11 +566,15 @@ async function _runLlm({ prompt, system, model, maxTokens, temperature, format, 
             max_completion_tokens: maxTokens,
             messages: []
         };
-        if (jsonMode) reqBody.response_format = { type: 'json_object' };
         // Early o-series ids (o1-mini/o1-preview) reject a system-role message
         // outright (400). Other o-series models accept the instruction only via
         // the 'developer' role alias. gpt-* (incl. gpt-5) keeps plain 'system'.
         const isEarlyOSeries = !_modelCarriesSystemRole(model);
+        // Early o-series models also reject the response_format parameter (400),
+        // the same restricted request shape that bans the system role. Omit it
+        // for them; the appended JSON system instruction (folded into the user
+        // turn below) still steers these models toward a JSON-object response.
+        if (jsonMode && !isEarlyOSeries) reqBody.response_format = { type: 'json_object' };
         const isOSeries = /^o[0-9]/.test(String(model));
         let userContent = prompt;
         if (sys) {
@@ -659,6 +675,18 @@ async function _runLlm({ prompt, system, model, maxTokens, temperature, format, 
             for (let c of result.content) {
                 if (c.type === 'text' && typeof c.text === 'string') text += c.text;
             }
+        }
+        // Anthropic's budget-exhaustion signal is stop_reason='max_tokens', the
+        // counterpart to OpenAI's finish_reason='length'. With no text emitted
+        // this is the same reached-model truncation outcome; classify it distinctly
+        // (kind='truncation', transient=false) rather than returning an empty
+        // string that is indistinguishable from a genuine empty verdict, keeping
+        // per-vendor outcome classification symmetric.
+        if (result && result.stop_reason === 'max_tokens' && text.length === 0) {
+            let err = new Error('llm: Anthropic response truncated (stop_reason=max_tokens) with empty content; max_tokens too low');
+            err.kind = 'truncation';
+            err.transient = false;
+            throw err;
         }
         return text;
     }

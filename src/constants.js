@@ -88,7 +88,13 @@ const PRICE_V1_COINS  = ['BTC', 'LTC', 'DOGE'];
 const PRICE_V1_FIATS  = ['USD', 'CAD', 'AUD', 'MXN', 'GBP', 'JPY', 'CNY', 'CHF', 'BRL', 'INR', 'EUR', 'KRW'];
 const MAX_TICK_LENGTH = 250;
 const MAX_MEMO_LENGTH = 250;
+// Row-identity bound for the PRICE v1 dedupe key. Must not exceed the
+// oracle_prices.source_address column width (VARCHAR(100)); an over-long value
+// would otherwise error the INSERT or (on a non-strict server) truncate and
+// collide distinct submitters onto one dedupe key.
+const MAX_SOURCE_ADDRESS_LENGTH = 100;
 
 module.exports = { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD, ORACLE_MAX_CHANGE_PER_ROUND, XCALL_MAX_HOPS,
                    DEFAULT_ORACLE_ROUND_INTERVAL_MS, DEFAULT_ORACLE_SUBMISSION_WINDOW_MS,
-                   PRICE_V1_COINS, PRICE_V1_FIATS, MAX_TICK_LENGTH, MAX_MEMO_LENGTH };
+                   PRICE_V1_COINS, PRICE_V1_FIATS, MAX_TICK_LENGTH, MAX_MEMO_LENGTH,
+                   MAX_SOURCE_ADDRESS_LENGTH };

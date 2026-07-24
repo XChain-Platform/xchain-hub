@@ -2702,6 +2702,25 @@ class StateAnchorPublisher {
     //     makes when its indexer is unreachable.
     async _broadcastWithRetry(broadcaster, payload, attempts, existsCheck){
         attempts = attempts || 5;
+        //  follow-up (item 3121): flush() checks the pause + per-window
+        // ceiling ONCE, but a single flush broadcasts N times (one per pending
+        // checkpoint plus one per archive chunk), each recording a spend. Re-gate
+        // per broadcast here so the ceiling and the runtime pause bind every send,
+        // not just the first: once record() has consumed the window budget an
+        // exhausted ceiling stops the remaining sends (fail-closed, like the sibling
+        // AttestationPublisher which gates allow() immediately before each send).
+        // Retries of the SAME payload do not re-consume (record() only fires on a
+        // successful fresh send below), so gating once at entry is per row/chunk.
+        if(this.spendGuard.isPaused()){
+            let err = new Error(this.spendGuard.noteBlocked() + '; skipping remaining broadcasts this flush');
+            err.spendBlocked = true;
+            throw err;
+        }
+        if(!this.spendGuard.allow()){
+            let err = new Error(this.spendGuard.noteBlocked() + '; skipping remaining broadcasts this flush (per-send ceiling)');
+            err.spendBlocked = true;
+            throw err;
+        }
         let lastErr = null;
         for(let attempt = 0; attempt < attempts; attempt++){
             if(attempt > 0) await new Promise(r => setTimeout(r, this.chunkRetryDelayMs));

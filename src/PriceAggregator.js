@@ -34,7 +34,7 @@ const EventEmitter      = require('events');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const eq                = require('./equivocation_header.js');
 const { PRICE_MAX, PRICE_V1_COINS, PRICE_V1_FIATS,
-        MAX_TICK_LENGTH, MAX_MEMO_LENGTH } = require('./constants.js');
+        MAX_TICK_LENGTH, MAX_MEMO_LENGTH, MAX_SOURCE_ADDRESS_LENGTH } = require('./constants.js');
 const { bcgt }          = require('./bcmath.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 
@@ -301,6 +301,14 @@ class PriceAggregator extends EventEmitter {
         // on-chain, so anything outside them here is a malformed or Byzantine
         // push; without the bounds an attacker on the push channel could write
         // arbitrary-size or bogus-key rows into oracle_prices.
+        // source_address is the row-identity/dedupe key; bound its type and
+        // length like the sibling wire fields (the bare truthiness check above
+        // lets a non-string coerce to a bogus identity, and an over-long value
+        // errors or truncate-collides the INSERT into oracle_prices).
+        if (typeof priceData.source_address !== 'string' || priceData.source_address.length === 0 ||
+            priceData.source_address.length > MAX_SOURCE_ADDRESS_LENGTH) {
+            return { accepted: false, reason: 'invalid source_address' };
+        }
         if (typeof priceData.coin !== 'string' || !PRICE_V1_COINS.includes(priceData.coin)) {
             return { accepted: false, reason: 'invalid coin' };
         }

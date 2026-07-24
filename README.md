@@ -140,11 +140,11 @@ The file is hot-reloaded; edits apply without a restart.
   "cross_chain":    { "chains": { "BTC": { "rpc": "http://node:8332" } } },
   "oracle_publish": { "doge_address": "D...", "doge_wallet": "/path/to/wallet.dat" },
   "attestation":    { "providers": {} },
-  "full_node":      { "BTC_RPC": "http://node:8332" }
+  "FULLNODE":       { "BTC_RPC": "http://node:8332" }
 }
 ```
 
-The `full_node` capability requires a reachable BTC RPC endpoint (`FULLNODE.BTC_RPC` in the config block) and gates a distinct reward tranche for validators providing full-node services.
+The `full_node` capability requires a reachable BTC RPC endpoint (`FULLNODE.BTC_RPC` in the config block; the legacy `full_node` block name is still accepted as an alias) and gates a distinct reward tranche for validators providing full-node services.
 
 > Easiest path: run `xchain-node validator init`, which generates your signing
 > key, prints the **pubkey to stake to**, and writes a starter

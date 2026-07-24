@@ -87,6 +87,7 @@ function resolveHubLlmAuth(ctx) {
     const cliDir   = _trim(envSource.CLAUDE_CONFIG_DIR);
     const hubToken = _trim(envSource.HUB_CLAUDE_CODE_OAUTH_TOKEN);
     const cliToken = _trim(envSource.CLAUDE_CODE_OAUTH_TOKEN);
+    const hubApiKey = _trim(envSource.HUB_ANTHROPIC_API_KEY);
     const apiKey   = _trim(envSource.ANTHROPIC_API_KEY);
 
     if (hubDir && _checkConfigDir(hubDir)) {
@@ -108,6 +109,12 @@ function resolveHubLlmAuth(ctx) {
         return { ok: true, transport: 'claude_spawn', source: 'cli_token', env: { CLAUDE_CODE_OAUTH_TOKEN: cliToken, CLAUDE_CONFIG_DIR: isolatedDir } };
     }
 
+    // HUB_ANTHROPIC_API_KEY (hub-scoped) wins over ANTHROPIC_API_KEY (ambient),
+    // mirroring the HUB_-prefix convention used for the config-dir/token paths
+    // above and for resolveOpenAiAuth's HUB_OPENAI_API_KEY.
+    if (hubApiKey) {
+        return { ok: true, transport: 'anthropic_api', source: 'hub_api_key', apiKey: hubApiKey };
+    }
     if (apiKey) {
         return { ok: true, transport: 'anthropic_api', source: 'api_key', apiKey };
     }
@@ -124,7 +131,7 @@ function resolveHubLlmAuth(ctx) {
         detail: 'Set HUB_CLAUDE_CONFIG_DIR (preferred: run `CLAUDE_CONFIG_DIR=<dir> claude login` first; ' +
                 'the resulting credentials.json carries a refresh token and self-renews) ' +
                 'or HUB_CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`, ~2-week TTL) ' +
-                'or ANTHROPIC_API_KEY (direct API).'
+                'or HUB_ANTHROPIC_API_KEY / ANTHROPIC_API_KEY (direct API).'
     };
 }
 

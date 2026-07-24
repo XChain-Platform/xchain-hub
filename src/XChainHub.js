@@ -1096,9 +1096,17 @@ class XChainHub {
         if('CAPABILITIES' in parsed) this._assertCanonicalMinStakes(parsed.CAPABILITIES);
         if(!this.p2pConfig) this.p2pConfig = {};
         const KEYS = ['CAPABILITIES', 'DISABLED_CAPABILITIES', 'price', 'cross_chain',
-                      'oracle_publish', 'attestation', 'CAPABILITY_RECHECK_MS', 'STAKE_POLL_MS'];
+                      'oracle_publish', 'attestation', 'CAPABILITY_RECHECK_MS', 'STAKE_POLL_MS',
+                      'FULLNODE', 'full_node'];
         for(let k of KEYS){
             if(k in parsed) this.p2pConfig[k] = parsed[k];
+        }
+        // The full-node capability consumers (capabilities/full_node.js,
+        // FullNodeChallengeRound) read cfg.FULLNODE.BTC_RPC; accept the README's
+        // 'full_node' spelling as an alias so the documented HUB_CAPABILITY_CONFIG
+        // override actually reaches selfTest instead of being dropped by the whitelist.
+        if(this.p2pConfig.full_node && !this.p2pConfig.FULLNODE){
+            this.p2pConfig.FULLNODE = this.p2pConfig.full_node;
         }
         // Keep a live registry's view in sync so hot-reload applies without a restart.
         if(this.capabilityRegistry){

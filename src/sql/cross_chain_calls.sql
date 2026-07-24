@@ -6,11 +6,13 @@
 --              first block with block_time >= effective_time.
 --   result:   federation-confirmed execution outcome from the target chain;
 --              source-chain indexers verify and inject the requester's callback.
--- The hub-assigned `id` is BOTH the mirror cursor and the indexers'
--- deterministic injection-order key (ORDER BY id ASC); never reorder.
+-- The hub-assigned `id` is the mirror cursor (since_id) and provenance only;
+-- it is per-hub AUTO_INCREMENT and MUST NOT order consensus state. The
+-- deterministic injection order is the quorum-agreed (snapshot_block, call_id),
+-- identical across indexers no matter which hub DB they mirror.
 DROP TABLE IF EXISTS cross_chain_calls;
 CREATE TABLE cross_chain_calls (
-    id                    BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, -- mirror cursor (since_id) + injection-order key
+    id                    BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, -- mirror cursor (per-hub id; provenance only, not the injection order, which is (snapshot_block, call_id))
     call_id               VARCHAR(80)  NOT NULL,                   -- deterministic id derived in the source-chain VM run
     phase                 VARCHAR(10)  NOT NULL,                   -- 'dispatch' | 'result'
     snapshot_block        BIGINT UNSIGNED NOT NULL,                -- BTC-anchored block; selects the cross_chain validator set for sig verification

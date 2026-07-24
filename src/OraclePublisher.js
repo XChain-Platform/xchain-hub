@@ -117,6 +117,14 @@ class OraclePublisher {
 
         // Per-round state
         this.failoverWindowBlocks = 1; // 1 BTC block before failover triggers
+        // Leader-rotation observability (item 3218). A dark peer publisher is
+        // otherwise invisible: this hub's own status stays perfect while 1/N of
+        // rounds never land on-chain. Track the rank state of the most recent
+        // finalized round plus lifetime leader/follower-window counts so getStats
+        // (getoraclepublisherstatus) exposes the rotation the dashboard can watch.
+        this._lastRankState  = null; // { round, myRank, leaderRank, isLeader, publisherCount }
+        this._leaderRounds   = 0;    // rounds this hub was the elected leader
+        this._followerRounds = 0;    // finalized rounds this hub deferred (not leader)
 
         // Auto-create EncoderClient if DOGE_ENCODER_URL env var is set
         // This is the JSON-RPC endpoint of an xchain-encoder instance configured for DOGE.
@@ -255,10 +263,19 @@ class OraclePublisher {
         if (publisherCount === 0) return;
 
         let leaderRank = round % publisherCount;
+        this._lastRankState = {
+            round:          round,
+            myRank:         myRank,
+            leaderRank:     leaderRank,
+            isLeader:       leaderRank === myRank,
+            publisherCount: publisherCount
+        };
         if (leaderRank !== myRank) {
             // Not our turn yet, but we may need to take over later if leader fails
+            this._followerRounds++;
             return;
         }
+        this._leaderRounds++;
 
         // We are the leader for this round. Enqueue and try to publish.
         // Signatures are collected by OracleConsensus during PBFT prepare/commit and passed in event.signatures
@@ -646,6 +663,18 @@ class OraclePublisher {
             lastObservedBalance: this.lastObservedBalance,
             deadLetterPath:      this.deadLetterPath,
             enabled:             this.enabled,
+            // Leader-rotation view (item 3218): last finalized round's rank state
+            // plus lifetime leader/follower-window counts, so a monitor can tell a
+            // healthy-but-never-leader hub from a genuinely idle one and spot a dark
+            // peer publisher (this hub's follower count climbs while its leader
+            // rounds never land on-chain elsewhere).
+            myRank:              this._lastRankState ? this._lastRankState.myRank : null,
+            leaderRank:          this._lastRankState ? this._lastRankState.leaderRank : null,
+            isLeader:            this._lastRankState ? this._lastRankState.isLeader : null,
+            publisherCount:      this._lastRankState ? this._lastRankState.publisherCount : null,
+            lastRankRound:       this._lastRankState ? this._lastRankState.round : null,
+            leaderRounds:        this._leaderRounds,
+            followerRounds:      this._followerRounds,
             spendGuard:          this.spendGuard.stats()
         };
     }

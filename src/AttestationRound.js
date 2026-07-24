@@ -475,8 +475,10 @@ class AttestationRound {
         return withHash.slice(0, Math.max(1, redundancy));
     }
 
-    // Look up the round state for a given requestId. Used by consensus to
-    // verify incoming PROPOSE messages against our own view of responsibility.
+    // Look up the round state for a given requestId. Accessor over this.rounds;
+    // AttestationConsensus copies responsible/leaderPubkey into `pending` at
+    // propose() time and never re-consults this map, so no consensus path calls
+    // this. Currently exercised only by AttestationRound's unit tests.
     getRoundState(requestId){
         return this.rounds.get(String(requestId).toLowerCase()) || null;
     }

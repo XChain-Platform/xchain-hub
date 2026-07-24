@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- review review-round fixes: per-broadcast spend-ceiling gate, FULLNODE config whitelist, oracle/checkpoint observability counters, provider-contract fixes (o-series response_format, reasoning headroom, Anthropic truncation class, HUB_ANTHROPIC_API_KEY), oracle source_address bounds, checkpoint persist fail-closed, stale comments corrected.
+
 ### Added
 - Standard proprietary/AGPL license header on three unit test files that were missing it (`ConsensusPrimitiveConformance`, `StateAnchorPublisher.reward-crosscheck`, `jsonrpc-body-guard`), matching the rest of `test/unit`; test-only, no behavior change.
 - `HUB_CLAUDE_DEFAULT_CONFIG_DIR` env override for the credential resolver's last-resort `~/.claude-xchain` fallback, so hermetic tests and constrained deploys can disable it.

@@ -139,6 +139,12 @@ class StateCheckpointEngine extends EventEmitter {
         // Surfaced by getcheckpointstats so operators can detect stalled rounds
         // without running raw SQL.
         this._roundTimeouts = 0;
+        // Follower-side FINALIZED drops. Quorum loss observed as leader is metered
+        // via _roundTimeouts; these meter the same loss observed as a follower so a
+        // validator-set/quorum drift or a Byzantine leader is visible at the moment
+        // every incoming FINALIZED fails here, not only via the indirect tip-stall.
+        this._malformedFinalized  = 0;
+        this._subQuorumFinalized  = 0;
     }
 
     async start(){
@@ -210,7 +216,9 @@ class StateCheckpointEngine extends EventEmitter {
         }
         return {
             last_finalized_by_chain: last_finalized_by_chain,
-            round_timeouts:          this._roundTimeouts
+            round_timeouts:          this._roundTimeouts,
+            malformed_finalized:     this._malformedFinalized,
+            sub_quorum_finalized:    this._subQuorumFinalized
         };
     }
 
@@ -503,12 +511,21 @@ class StateCheckpointEngine extends EventEmitter {
     async _handleFinalized(envelope){
         let d  = envelope.data;
         let cp = this._normalizeCheckpoint(d.checkpoint);
-        if(!cp || !Array.isArray(d.signatures)) return;
+        if(!cp || !Array.isArray(d.signatures)){
+            this._malformedFinalized++;
+            console.warn('StateCheckpointEngine: dropped malformed FINALIZED broadcast (missing checkpoint or signatures array)');
+            return;
+        }
 
         // : a finalized checkpoint whose seq is not the value derived from its
         // snapshot_block is malformed (the signers would not have co-signed it); refuse
         // to persist it even with an otherwise-valid signature set.
-        if(Number(cp.checkpoint_seq) !== StateCheckpointEngine.deriveCheckpointSeq(cp.snapshot_block)) return;
+        if(Number(cp.checkpoint_seq) !== StateCheckpointEngine.deriveCheckpointSeq(cp.snapshot_block)){
+            this._malformedFinalized++;
+            console.warn('StateCheckpointEngine: dropped FINALIZED with seq ' + cp.checkpoint_seq +
+                ' != derived seq for snapshot_block ' + cp.snapshot_block + ' ');
+            return;
+        }
 
         let validators = await this._resolveCapabilityValidators('oracle_publish', cp.snapshot_block);
         let pubkeys    = new Set(validators.map(v => String(v.pubkey).toLowerCase()));   // signer-membership set
@@ -533,7 +550,13 @@ class StateCheckpointEngine extends EventEmitter {
         let met = weighted
             ? swq.meetsStakeThreshold(validators, sigs.map(s => s.pubkey))
             : (sigs.length >= quorum);
-        if(!met) return;                                           // sub-quorum, ignore
+        if(!met){                                                  // sub-quorum, ignore
+            this._subQuorumFinalized++;
+            console.warn('StateCheckpointEngine: dropped sub-quorum FINALIZED for snapshot_block ' + cp.snapshot_block +
+                ' (' + sigs.length + '/' + quorum + ' valid sigs' + (weighted ? ', stake-weighted' : '') +
+                '); persisted nothing on this hub');
+            return;
+        }
         await this._acceptFinalized(cp, sigs, quorum, false);
     }
 
@@ -548,9 +571,14 @@ class StateCheckpointEngine extends EventEmitter {
         // whichever hub DB they mirror, and a follower's DB may be the only one
         // they read. Deterministic from BTC stakes + INSERT IGNORE, so all hubs
         // write identical rows. Persisted BEFORE the checkpoint row streams so a
-        // mirror subscriber never sees a row it can't verify.
-        try { await this._persistCapabilitySnapshot('oracle_publish', Number(cp.snapshot_block)); }
-        catch(e){ console.warn('StateCheckpointEngine: snapshot persist on finalize failed: ' + (e && e.message)); }
+        // mirror subscriber never sees a row it can't verify: a persist failure
+        // must therefore fail closed (throw) rather than log-and-continue, so the
+        // checkpoint INSERT/broadcast/emit below are all skipped and no
+        // quorum-signed, unverifiable row reaches a mirror or the anchor poller.
+        // Matches the leader _tick persist (unguarded) and _writeFinalizedMatch;
+        // callers (_tick .catch, _handleFinalized .catch, the leader accept .catch)
+        // log the accept error, and the FINALIZED broadcast is re-deliverable.
+        await this._persistCapabilitySnapshot('oracle_publish', Number(cp.snapshot_block));
         await this.db.doQuery(
             'INSERT IGNORE INTO state_checkpoints (chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures) ' +
             'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
