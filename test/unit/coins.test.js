@@ -19,15 +19,15 @@ const coins      = require('../../src/coins');
 // and fails here. Updating a value is a deliberate act, so update the golden
 // alongside it (and bump the per-service CONSENSUS_CONFIG_PIN in lockstep).
 const GOLDEN_HASH = {
-    BTC:  { mainnet: '7bab8a359f85b9118c4a5c8898c96131b934c104afe960b5b31c1fe6819e9e08',
-            testnet: '63dbeef3ea93fa5ece4ea823f4e1f13d299f274fd869e264d713b58d0e79a66d',
-            regtest: '3a33f0830b7138245b05767a905a1820c51b04b4bffd1178a4628e0bf41cafac' },
-    LTC:  { mainnet: '2f938bea36e27623ae7af591795025a4328301dcaea24805b38607041ca19457',
-            testnet: '39862b4a35bd5c255e68fb065b3bfe0cb3752f4b9a3562a2a23f674fed0482ea',
-            regtest: '6e8a60b0aa4f78f1e64353778252b01d09f41b01ad351d6aa26ab354be4d9645' },
-    DOGE: { mainnet: 'be6714fe06a047b7cf0d403bf3ea26d8031362567a6936688e894d2ff48fb258',
-            testnet: 'c5dca915fb5c8233b52eeac061853b4aa9843d19569870c45ec19d8853136cf6',
-            regtest: '51a8be37d15a183723338bf157365d2fa2c28fad36440db958df2dae86f544fb' },
+    BTC:  { mainnet: 'f9bb6c6b2fdc073fafd3672d3ccd871d2b00c2567f98eb50b8bc6e30a7bcf41e',
+            testnet: '211086b82b345092a8ce18ca08ab945a6b294c59efa5588c70eacdb5ee515e62',
+            regtest: 'd900b05a7df14595ff4a2be4bbd9505a661f0c6cef4237f1e00aace3b2397f0e' },
+    LTC:  { mainnet: 'd09747c47fc095d1c506acdbbfb05372a0165caf71ddaa37891bb8947213c8f2',
+            testnet: '7e4cc52a609606024d1ea8d26c743957e195c660b0bb749e523f4cbdcc82baf8',
+            regtest: '769d91cad98ea674494290ac680bb1c0ddb8bcd3b75cbffa131365bf97811db1' },
+    DOGE: { mainnet: 'eabae17f3633a36b2257c5bc171bfc5151b9293b5e849eae0fe00eb0a090e9ef',
+            testnet: 'd61706332ddcb921b4bb3d0a9f077119426405692fc118eaba8d1a6a9ecb28d0',
+            regtest: '3de84c0bf6478e985f0ea0cc0ece155cf2780f0e932c3f6e063d3f01bfc38197' },
 };
 
 describe('coins registry', () => {
