@@ -48,8 +48,20 @@ describe('XCHAIN derivation: vendored-copy parity with xchain-indexer @regressio
 
     VENDORED.forEach(function (file) {
         it(file + ' is byte-identical to the indexer twin', function () {
+            const twinPath = path.join(INDEXER_DIR, 'src', file);
+            // Skip per FILE, not just per sibling-repo. A sibling checkout can exist
+            // while a given twin does not: a standalone deploy, or a CI venue serving
+            // a sibling from origin while this file is still only local . A
+            // hard read there fails the whole suite for a reason that has nothing to
+            // do with drift, and the gate would report it as something else entirely.
+            if (!fs.existsSync(twinPath)) {
+                if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
+                    throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the twin is missing: ' + twinPath);
+                this.skip();
+                return;
+            }
             const hub  = fs.readFileSync(path.join(HUB_SRC, file), 'utf8');
-            const twin = fs.readFileSync(path.join(INDEXER_DIR, 'src', file), 'utf8');
+            const twin = fs.readFileSync(twinPath, 'utf8');
             expect(hub).to.equal(twin,
                 file + ' has drifted from xchain-indexer/src/' + file + '; the hub would publish a ' +
                 'price the chain data does not support, and this validator would fall outside the ' +
