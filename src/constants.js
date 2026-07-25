@@ -88,6 +88,57 @@ const PRICE_V1_COINS  = ['BTC', 'LTC', 'DOGE'];
 const PRICE_V1_FIATS  = ['USD', 'CAD', 'AUD', 'MXN', 'GBP', 'JPY', 'CNY', 'CHF', 'BRL', 'INR', 'EUR', 'KRW'];
 const MAX_TICK_LENGTH = 250;
 const MAX_MEMO_LENGTH = 250;
+// DERIVED_PAIRS : pairs the federation may carry in a PRICE v0 round that
+// are NOT fetched from an external API. XCHAIN is listed on no exchange, so its
+// USD price is derived from platform-realized fills (see
+// claude/specs/XCHAIN_PRICE_DERIVATION_SPEC.md); every native-coin fee decision on
+// LTC and DOGE needs the pair, and without it those chains cannot price a fee at all.
+//
+// ADMISSION ONLY, deliberately. This list widens what a hub will ACCEPT - the
+// canonical-pair whitelist that gates peer-submission ingest and PROPOSE co-signing.
+// It does NOT widen what a hub PRODUCES: PriceFetcher.getCoinPairs() stays the 36
+// API pairs, so nothing here causes a hub to submit the pair. Until the derived
+// source lands (spec step 2) this constant is purely permissive and inert.
+//
+// It is also deliberately NOT added to the skipped-row sites
+// (OracleConsensus._storeSkippedRound and the missing-pair marker), which answer
+// "which pairs did this hub expect to produce and fail to". A pair with no producer
+// yet is unbuilt, not dropped; writing a skipped row for it every round would make
+// the dashboard health signal permanently red for a pair nothing is trying to
+// publish. When step 2 lands and the source exists, the pair joins the producible
+// set and those markers become meaningful on their own.
+//
+// CONSENSUS-CRITICAL and must deploy fleet-wide BEFORE any leader proposes the pair.
+// A hub without it treats the pair as fabricated and withholds co-sign on the WHOLE
+// round (a signed round is atomic - the pair set is inside the signed payload, so
+// there is no per-entry drop), which would stall all 36 pairs federation-wide and
+// fail fee validation on every chain once the 1800s staleness bound elapses.
+const DERIVED_PAIRS = ['XCHAIN/USD'];
+
+// ── XCHAIN derived-price parameters (, spec §4 / D1+D4) ────────────────
+// CONSENSUS-UNIFORM. Every validator must compute the same window over the same
+// fills, so these deploy fleet-wide in lockstep; a hub running different values
+// produces a different XCHAIN/BTC leg and lands outside the co-sign deviation band.
+//
+// D1 and D4 are still open operator decisions; these are the spec's recommended
+// defaults and are expected to ship as-is unless the operator retunes them. A retune
+// is a declared consensus event (validators on the old constants get slashed, not
+// refused), so it rides a flag-day like any other.
+
+// W: window length in reference-chain blocks. ~1000 BTC blocks is about a week, long
+// enough that renting the price for a round costs a week of sustained wash volume.
+const XCHAIN_PRICE_WINDOW_BLOCKS = 1000;
+
+// K: confirmation buffer. The window top is held K blocks below the round's reference
+// height so a fill that a shallow reorg can still roll back is never inside it.
+const XCHAIN_PRICE_CONFIRMATION_BUFFER = 6;
+
+// D2, DECIDED 2026-07-25 (operator): the bootstrap price, in force until real fills
+// exist. Anchored on a token issuance costing $2.00 - GAS_PRICE 0.00001 x ISSUE
+// 100,000 gas is exactly 1.0 XCHAIN, so the bootstrap equals the issuance cost 1:1.
+// It is also the winsorization anchor for the very first derived round.
+const XCHAIN_PRICE_BOOTSTRAP_USD = '2.00000000';
+
 // Row-identity bound for the PRICE v1 dedupe key. Must not exceed the
 // oracle_prices.source_address column width (VARCHAR(100)); an over-long value
 // would otherwise error the INSERT or (on a non-strict server) truncate and
@@ -97,4 +148,6 @@ const MAX_SOURCE_ADDRESS_LENGTH = 100;
 module.exports = { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD, ORACLE_MAX_CHANGE_PER_ROUND, XCALL_MAX_HOPS,
                    DEFAULT_ORACLE_ROUND_INTERVAL_MS, DEFAULT_ORACLE_SUBMISSION_WINDOW_MS,
                    PRICE_V1_COINS, PRICE_V1_FIATS, MAX_TICK_LENGTH, MAX_MEMO_LENGTH,
-                   MAX_SOURCE_ADDRESS_LENGTH };
+                   MAX_SOURCE_ADDRESS_LENGTH, DERIVED_PAIRS,
+                   XCHAIN_PRICE_WINDOW_BLOCKS, XCHAIN_PRICE_CONFIRMATION_BUFFER,
+                   XCHAIN_PRICE_BOOTSTRAP_USD };

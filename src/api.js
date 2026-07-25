@@ -204,6 +204,27 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     P2P_MAX_CONNECTIONS_PER_IP: parseInt(process.env.P2P_MAX_CONNECTIONS_PER_IP) || 3,
     P2P_MSG_DEDUP_TTL:      parseInt(process.env.P2P_MSG_DEDUP_TTL) || 60000,
     P2P_MAX_PAYLOAD:        parseInt(process.env.P2P_MAX_PAYLOAD) || 1048576,
+    // XCHAIN derived-price source . Read-only access to THIS validator's own
+    // BTC indexer database; XCHAIN is listed on no exchange, so the pair is computed
+    // from realized on-chain fills rather than fetched. Unset = this hub abstains from
+    // XCHAIN/USD and submits the 36 API pairs exactly as before, which is a supported
+    // state: holding the price capability implies this access, and a validator without
+    // it simply does not submit the pair.
+    //
+    // The window/buffer/bootstrap overrides exist for regtest and e2e only. They are
+    // CONSENSUS-UNIFORM values (constants.js): a hub running different ones computes a
+    // different XCHAIN/BTC leg and lands outside the co-sign deviation band, so on a
+    // real network they must be left unset and moved only by a coordinated flag-day.
+    XCHAIN_PRICE_INDEXER_DB_HOST: process.env.XCHAIN_PRICE_INDEXER_DB_HOST || '',
+    XCHAIN_PRICE_INDEXER_DB_PORT: process.env.XCHAIN_PRICE_INDEXER_DB_PORT || '',
+    XCHAIN_PRICE_INDEXER_DB_NAME: process.env.XCHAIN_PRICE_INDEXER_DB_NAME || '',
+    XCHAIN_PRICE_INDEXER_DB_USER: process.env.XCHAIN_PRICE_INDEXER_DB_USER || '',
+    XCHAIN_PRICE_INDEXER_DB_PASS: process.env.XCHAIN_PRICE_INDEXER_DB_PASS || '',
+    XCHAIN_PRICE_INDEXER_DB_COIN: process.env.XCHAIN_PRICE_INDEXER_DB_COIN || 'BTC',
+    XCHAIN_PRICE_WINDOW_BLOCKS:       process.env.XCHAIN_PRICE_WINDOW_BLOCKS || '',
+    XCHAIN_PRICE_CONFIRMATION_BUFFER: process.env.XCHAIN_PRICE_CONFIRMATION_BUFFER || '',
+    XCHAIN_PRICE_BOOTSTRAP_USD:       process.env.XCHAIN_PRICE_BOOTSTRAP_USD || '',
+
     ORACLE_EPOCH_START:     parseInt(process.env.ORACLE_EPOCH_START),
     ORACLE_ROUND_INTERVAL:  parseInt(process.env.ORACLE_ROUND_INTERVAL) || DEFAULT_ORACLE_ROUND_INTERVAL_MS,
     ORACLE_SUBMISSION_WINDOW: parseInt(process.env.ORACLE_SUBMISSION_WINDOW) || DEFAULT_ORACLE_SUBMISSION_WINDOW_MS,

@@ -33,6 +33,7 @@
 const EventEmitter      = require('events');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const eq                = require('./equivocation_header.js');
+const pricePair         = require('./price_pair_activation.js');
 const { PRICE_MAX, PRICE_V1_COINS, PRICE_V1_FIATS,
         MAX_TICK_LENGTH, MAX_MEMO_LENGTH, MAX_SOURCE_ADDRESS_LENGTH } = require('./constants.js');
 const { bcgt }          = require('./bcmath.js');
@@ -112,9 +113,25 @@ class PriceAggregator extends EventEmitter {
 
         // Every pair must satisfy the on-chain wire-format rules (mirrors the
         // indexer's PRICE v0 parser) so the canonical payload reconstruction
-        // below is byte-exact with what the validators signed
+        // below is byte-exact with what the validators signed.
+        //
+        // The pair-name bound is flag-day gated (, price_pair_activation.js,
+        // vendored byte-identically from the indexer): below it the ticker side caps
+        // at 5 characters and the 6-character XCHAIN/USD pair is unrepresentable;
+        // at/above it, 6 is accepted. UNARMED on mainnet today.
+        //
+        // KEYED ON THE ROUND TIMESTAMP, while the chain keys on the block time of the
+        // block the PRICE tx landed in. The push payload carries no block time (see
+        // actions/price.js), and the two are not equal: a round is stamped, then
+        // mined, so block_time >= timestamp. That asymmetry is deliberate and is the
+        // safe direction - the hub can only activate LATER than the chain, never
+        // earlier, so it may briefly withhold on a round the chain accepted (one
+        // round of carry-forward, self-healing) but can never finalize one the chain
+        // will reject. If even that blip is unacceptable at arming time, the clean
+        // fix is to add block_time to the hub-push payload and key on it here.
+        let pairPattern = pricePair.pricePairPattern(timestamp, this.hub && this.hub.network);
         for (let p of roundData.pairs) {
-            if (!p || typeof p.pair !== 'string' || !/^[A-Z]{3,5}\/[A-Z]{3,5}$/.test(p.pair) ||
+            if (!p || typeof p.pair !== 'string' || !pairPattern.test(p.pair) ||
                 p.price === undefined || p.price === null || !/^[0-9]+(\.[0-9]+)?$/.test(String(p.price)) ||
                 // Enforce the consensus PRICE_MAX ceiling at ingest, as constants.js mandates
                 // ("the ingestion layer must reject anything at or above it"); every other

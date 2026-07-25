@@ -26,8 +26,9 @@
  ********************************************************************/
 
 const PriceFetcher = require('./PriceFetcher.js');
+const XchainPriceSource = require('./XchainPriceSource.js');
 const { PRICE_MAX, DEFAULT_ORACLE_ROUND_INTERVAL_MS,
-        DEFAULT_ORACLE_SUBMISSION_WINDOW_MS } = require('./constants.js');
+        DEFAULT_ORACLE_SUBMISSION_WINDOW_MS, DERIVED_PAIRS } = require('./constants.js');
 
 const ORACLE_PRICE_SUBMIT = 'ORACLE_PRICE_SUBMIT';
 
@@ -103,7 +104,20 @@ class OracleRound {
         // fixed set are dropped on ingest, so a peer cannot inject a fabricated pair
         // (e.g. BTC/ZZZ) that would flow into the aggregate and finalize with no
         // deviation history to gate it.
-        this.canonicalPairs = new Set(PriceFetcher.getCoinPairs());
+        //
+        // ADMISSION set = the 36 API pairs PLUS DERIVED_PAIRS . A derived pair
+        // is not fetched from any API, so it is absent from getCoinPairs() and would
+        // otherwise read here as fabricated - which withholds co-sign on the WHOLE
+        // round (OracleConsensus reads this same Set), not merely on that pair. This
+        // is the ONLY place the two sets are unioned; everything that asks "what does
+        // this hub produce" keeps using getCoinPairs() directly.
+        this.canonicalPairs = new Set([...PriceFetcher.getCoinPairs(), ...DERIVED_PAIRS]);
+
+        // Producer for the derived pair . Constructed unconditionally but
+        // inert unless the operator configured read-only access to this validator's
+        // own BTC indexer database; isConfigured() false means this hub abstains from
+        // the pair, which is a supported state, not a misconfiguration to fail on.
+        this.xchainPriceSource = new XchainPriceSource(this.config, hub && hub.db);
 
         // Chain-tip health tracking
         this.lastSuccessfulChainTipFetchAt = null;
@@ -533,6 +547,35 @@ class OracleRound {
             this._scheduleFinalization(this.currentRound);
             this.consecutiveSkippedRounds++;
             return;
+        }
+
+        // Append the derived XCHAIN/USD pair . Deliberately OUTSIDE
+        // fetchPrices(): it is not fetched, it is computed from this validator's own
+        // BTC indexer rows, and it must not be able to disturb the 36 API pairs. The
+        // source never throws and returns null to abstain, so a hub without indexer
+        // access - or one whose chain-tip anchor is unreliable - simply omits the pair
+        // while the rest of the round proceeds untouched (§6 local-failure taxonomy).
+        //
+        // Fed this round's own BTC/USD from the fetch above, because the published
+        // value is on-chain XCHAIN/BTC x the validator's own BTC/USD (§6).
+        if (this.xchainPriceSource) {
+            let btcUsd = prices.find(p => p.coinPair === 'BTC/USD');
+            let entry  = await this.xchainPriceSource.derive({
+                round:            this.currentRound,
+                referenceHeight:  this.currentBtcBlockHeight,
+                btcUsdPrice:      btcUsd ? btcUsd.price : null,
+                chainTipReliable: !this.chainTipFallbackActive,
+            });
+            if (entry) {
+                // meta is local observability only (§10 step 6) and is NOT part of the
+                // signed payload; strip it so the gossiped entry is shaped exactly like
+                // every other pair and the canonical payload stays byte-identical.
+                let { meta, ...wire } = entry;
+                prices.push(wire);
+                console.log('Oracle: derived ' + wire.coinPair + '=' + wire.price +
+                    ' (' + (meta.derived ? meta.fillCount + ' fills, ' + meta.clampedFills + ' clamped'
+                                         : 'carry-forward from ' + meta.carriedFrom) + ')');
+            }
         }
 
         // Count total sources across all pairs
