@@ -33,7 +33,7 @@ describe('PriceFetcher', function () {
 
     describe('_median()', function () {
         beforeEach(function () {
-            pf = new PriceFetcher({});
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0, PRICE_FETCH_JITTER_MS: 0 });
         });
 
         // _median returns an 8-decimal bignumber string (mathjs/bcmath mandate)
@@ -72,7 +72,7 @@ describe('PriceFetcher', function () {
     describe('fetchFromCoinGecko()', function () {
 
         it('returns prices from valid response', async function () {
-            pf = new PriceFetcher({});
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0, PRICE_FETCH_JITTER_MS: 0 });
             axiosStub.get.resolves({
                 data: {
                     bitcoin:  { usd: 100000.5 },
@@ -88,7 +88,7 @@ describe('PriceFetcher', function () {
         });
 
         it('includes API key header when configured', async function () {
-            pf = new PriceFetcher({ COINGECKO_API_KEY: 'test-key' });
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0, COINGECKO_API_KEY: 'test-key' });
             axiosStub.get.resolves({ data: { bitcoin: { usd: 1 }, litecoin: { usd: 1 }, dogecoin: { usd: 1 } } });
 
             await pf.fetchFromCoinGecko();
@@ -97,7 +97,7 @@ describe('PriceFetcher', function () {
         });
 
         it('returns null on network error', async function () {
-            pf = new PriceFetcher({});
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0, PRICE_FETCH_JITTER_MS: 0 });
             axiosStub.get.rejects(new Error('timeout'));
 
             let result = await pf.fetchFromCoinGecko();
@@ -105,7 +105,7 @@ describe('PriceFetcher', function () {
         });
 
         it('handles partial response (missing coin)', async function () {
-            pf = new PriceFetcher({});
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0, PRICE_FETCH_JITTER_MS: 0 });
             axiosStub.get.resolves({
                 data: { bitcoin: { usd: 100000 } } // missing litecoin, dogecoin
             });
@@ -123,14 +123,14 @@ describe('PriceFetcher', function () {
     describe('fetchFromCoinMarketCap()', function () {
 
         it('returns null when no API key configured', async function () {
-            pf = new PriceFetcher({});
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0, PRICE_FETCH_JITTER_MS: 0 });
             let result = await pf.fetchFromCoinMarketCap();
             expect(result).to.be.null;
             expect(axiosStub.get.called).to.be.false;
         });
 
         it('returns prices from valid response', async function () {
-            pf = new PriceFetcher({ COINMARKETCAP_API_KEY: 'cmc-key' });
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0, COINMARKETCAP_API_KEY: 'cmc-key' });
             axiosStub.get.resolves({
                 data: {
                     data: {
@@ -147,7 +147,7 @@ describe('PriceFetcher', function () {
         });
 
         it('passes API key in header', async function () {
-            pf = new PriceFetcher({ COINMARKETCAP_API_KEY: 'my-key' });
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0, COINMARKETCAP_API_KEY: 'my-key' });
             axiosStub.get.resolves({ data: { data: {} } });
 
             await pf.fetchFromCoinMarketCap();
@@ -156,7 +156,7 @@ describe('PriceFetcher', function () {
         });
 
         it('returns null on error', async function () {
-            pf = new PriceFetcher({ COINMARKETCAP_API_KEY: 'key' });
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0, COINMARKETCAP_API_KEY: 'key' });
             axiosStub.get.rejects(new Error('500'));
 
             let result = await pf.fetchFromCoinMarketCap();
@@ -171,7 +171,7 @@ describe('PriceFetcher', function () {
     describe('fetchPrices()', function () {
 
         it('returns median from both sources', async function () {
-            pf = new PriceFetcher({ COINMARKETCAP_API_KEY: 'key' });
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0, COINMARKETCAP_API_KEY: 'key' });
 
             // Stub by URL so order doesn't matter (CoinGecko has a random jitter delay)
             axiosStub.get.callsFake(function (url) {
@@ -203,7 +203,7 @@ describe('PriceFetcher', function () {
         });
 
         it('returns prices from single source when other fails', async function () {
-            pf = new PriceFetcher({ COINMARKETCAP_API_KEY: 'key' });
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0, COINMARKETCAP_API_KEY: 'key' });
 
             // CoinGecko succeeds; CMC fails. Stub by URL for order-independence.
             axiosStub.get.callsFake(function (url) {
@@ -226,7 +226,7 @@ describe('PriceFetcher', function () {
         });
 
         it('returns empty array when all sources fail', async function () {
-            pf = new PriceFetcher({ COINMARKETCAP_API_KEY: 'key' });
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0, COINMARKETCAP_API_KEY: 'key' });
             axiosStub.get.rejects(new Error('fail'));
 
             let prices = await pf.fetchPrices();
@@ -234,7 +234,7 @@ describe('PriceFetcher', function () {
         });
 
         it('fetches CoinGecko + Kraken when no CMC key', async function () {
-            pf = new PriceFetcher({});
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0, PRICE_FETCH_JITTER_MS: 0 });
             axiosStub.get.callsFake(function (url) {
                 if (url.includes('api.coingecko.com')) {
                     return Promise.resolve({
@@ -259,7 +259,7 @@ describe('PriceFetcher', function () {
         });
 
         it('returns 8-decimal fixed-point prices', async function () {
-            pf = new PriceFetcher({});
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0, PRICE_FETCH_JITTER_MS: 0 });
             axiosStub.get.resolves({
                 data: { bitcoin: { usd: 1.5 }, litecoin: { usd: 2 }, dogecoin: { usd: 3 } }
             });
@@ -277,12 +277,12 @@ describe('PriceFetcher', function () {
 
     describe('timeout', function () {
         it('uses default 10000ms', function () {
-            pf = new PriceFetcher({});
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0, PRICE_FETCH_JITTER_MS: 0 });
             expect(pf.timeout).to.equal(10000);
         });
 
         it('uses configured timeout', function () {
-            pf = new PriceFetcher({ PRICE_FETCH_TIMEOUT: 5000 });
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0, PRICE_FETCH_TIMEOUT: 5000 });
             expect(pf.timeout).to.equal(5000);
         });
     });
@@ -293,7 +293,7 @@ describe('PriceFetcher', function () {
 
     describe('multiSourceCapablePairs()', function () {
         it('keyless: only Kraken-listed pairs can reach two sources', function () {
-            pf = new PriceFetcher({});
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0, PRICE_FETCH_JITTER_MS: 0 });
             let capable = pf.multiSourceCapablePairs();
             // CoinGecko (all 36) + Kraken (its listed subset) are the two keyless sources.
             expect(capable.has('BTC/USD')).to.be.true;   // Kraken lists XBTUSD
@@ -303,7 +303,7 @@ describe('PriceFetcher', function () {
         });
 
         it('with a CoinMarketCap key: all 36 pairs become multi-source-capable', function () {
-            pf = new PriceFetcher({ COINMARKETCAP_API_KEY: 'k' });
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0, COINMARKETCAP_API_KEY: 'k' });
             let capable = pf.multiSourceCapablePairs();
             expect(capable.has('BTC/MXN')).to.be.true;   // CoinGecko + CMC both cover it
             expect(capable.size).to.equal(36);

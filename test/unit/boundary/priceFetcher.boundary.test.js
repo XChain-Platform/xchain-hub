@@ -30,7 +30,7 @@ describe('Boundary: PriceFetcher', function () {
 
     // Helper: build a minimal PriceFetcher with no CMC key (so only CoinGecko is called)
     function makeFetcher(overrides) {
-        return new PriceFetcher(Object.assign({ PRICE_FETCH_TIMEOUT: 5000 }, overrides || {}));
+        return new PriceFetcher(Object.assign({ PRICE_FETCH_TIMEOUT: 5000, PRICE_FETCH_JITTER_MS: 0 }, overrides || {}));
     }
 
     // Helper: build a standard CoinGecko response body
