@@ -63,7 +63,8 @@ const bcmath   = require('./bcmath.js');
 const { deriveXchainRate, referenceRateFromUsd, toUsd } = require('./xchainPrice.js');
 const { getWindowFills } = require('./xchainPriceQuery.js');
 const { PRICE_MAX, XCHAIN_PRICE_WINDOW_BLOCKS, XCHAIN_PRICE_CONFIRMATION_BUFFER,
-        XCHAIN_PRICE_BOOTSTRAP_USD, DERIVED_PAIRS } = require('./constants.js');
+        XCHAIN_PRICE_BOOTSTRAP_USD, XCHAIN_PRICE_MIN_BTC_VOLUME,
+        DERIVED_PAIRS } = require('./constants.js');
 
 // The pair this source produces. Taken from DERIVED_PAIRS rather than re-spelled, so
 // the producer and the admission allow-list cannot drift into a pair that is
@@ -114,6 +115,24 @@ class XchainPriceSource {
         this.confirmationBuffer = Number.isFinite(parseInt(config.XCHAIN_PRICE_CONFIRMATION_BUFFER))
             ? parseInt(config.XCHAIN_PRICE_CONFIRMATION_BUFFER) : XCHAIN_PRICE_CONFIRMATION_BUFFER;
         this.bootstrapUsd       = config.XCHAIN_PRICE_BOOTSTRAP_USD || XCHAIN_PRICE_BOOTSTRAP_USD;
+
+        // D2 supersession threshold: the BTC-side notional a window must carry before
+        // the derived VWAP replaces the carry-forward. null = DISABLED, which is how
+        // the constant ships (the value is an open operator decision), and disabled
+        // means the pair publishes carry-forward every round no matter what trades.
+        //
+        // The override exists for regtest and e2e drills, which need supersession ON
+        // at drill scale to prove the derived branch at all - a proof that silently
+        // matched the carry-forward would prove nothing (§10 step 7). An empty or
+        // unparseable override reads as "not set" and leaves the constant in force;
+        // an explicit '0' is a real value meaning "any volume supersedes", which is a
+        // deliberate drill setting and NOT the same as disabled.
+        let volOverride = config.XCHAIN_PRICE_MIN_BTC_VOLUME;
+        this.minBtcVolume = XCHAIN_PRICE_MIN_BTC_VOLUME;
+        if (volOverride !== undefined && volOverride !== null && String(volOverride) !== '') {
+            let parsed = Number(volOverride);
+            if (Number.isFinite(parsed) && parsed >= 0) this.minBtcVolume = String(volOverride);
+        }
 
         // Lazily opened: constructing a pool for a hub that will never derive the
         // pair would hold idle connections against the indexer for nothing.
@@ -229,16 +248,48 @@ class XchainPriceSource {
                 return this._entry(carryForward, Object.assign(meta, { derived: false }));
             }
 
+            // D2 supersession gate. Below the threshold the window's trades are real
+            // but too thin to be called a market, so the carry-forward stands.
+            //
+            // Stateless by design (§7): this is a pure function of THIS round's window,
+            // with nothing persisted about previous rounds. A consecutive-rounds streak
+            // requirement was considered and cut - the ~week-long window slides by about
+            // one block per round, so any burst that clears the bar keeps clearing it for
+            // roughly W blocks anyway, and persisted state is something restarts and
+            // skipped rounds can split the fleet on.
+            //
+            // Measured pre-winsorize (totalCoin), so a clamped print cannot inflate the
+            // evidence for its own admission.
+            if (!this._volumeSupersedes(derived.totalCoin)) {
+                return this._entry(carryForward, Object.assign(meta, {
+                    derived:        false,
+                    reason:         this.minBtcVolume === null
+                        ? 'supersession disabled (D2 threshold undecided)'
+                        : 'window volume below the supersession threshold',
+                    btcVolume:      derived.totalCoin,
+                    minBtcVolume:   this.minBtcVolume,
+                    wouldHaveBeen:  derived.rate,
+                }));
+            }
+
             let usd = toUsd(bcmath, derived.rate, btcUsd);
             if (!usd) return this._entry(carryForward, Object.assign(meta, { derived: false, reason: 'usd leg unusable' }));
 
+            // §10 step 6: everything needed to re-derive and audit this print after the
+            // fact. §5's claim that manipulation is "visible" is only true if these are
+            // recorded - rawXchainBtc beside xchainBtc is what makes a winsorized round
+            // distinguishable from a quiet one, and btcVolume is what makes the
+            // supersession decision reviewable rather than a bare yes/no.
             Object.assign(meta, {
                 derived:      true,
                 xchainBtc:    derived.rate,
+                rawXchainBtc: derived.rawRate,
                 usedFills:    derived.usedCount,
                 clampedFills: derived.clampedCount,
                 droppedFills: derived.droppedCount,
                 totalXchain:  derived.totalXchain,
+                btcVolume:    derived.totalCoin,
+                minBtcVolume: this.minBtcVolume,
                 refRate:      derived.refRate,
             });
             return this._entry(usd, meta);
@@ -248,6 +299,21 @@ class XchainPriceSource {
             console.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR + ' - ' +
                 ((err && err.message) || err));
             return null;
+        }
+    }
+
+    // Whether this window's BTC notional clears the D2 supersession threshold.
+    //
+    // Fails CLOSED on anything it cannot evaluate: an unparseable volume holds the
+    // carry-forward rather than publishing a market observation off a number the
+    // arithmetic could not read. Closed is the safe direction because the
+    // carry-forward is always a value the federation already agreed on.
+    _volumeSupersedes(btcVolume) {
+        if (this.minBtcVolume === null) return false;   // disabled: never supersede
+        try {
+            return bcmath.bcgte(btcVolume, String(this.minBtcVolume));
+        } catch (e) {
+            return false;
         }
     }
 

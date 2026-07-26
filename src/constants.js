@@ -139,6 +139,45 @@ const XCHAIN_PRICE_CONFIRMATION_BUFFER = 6;
 // It is also the winsorization anchor for the very first derived round.
 const XCHAIN_PRICE_BOOTSTRAP_USD = '2.00000000';
 
+// D4: per-pair move clamp for XCHAIN/USD, tighter than the global
+// ORACLE_MAX_CHANGE_PER_ROUND of 25%. XCHAIN trades in a market that is thin by
+// construction pre-launch, so the generic clamp is the wrong size for it: at the
+// 10-minute round default, 25%/round compounds to roughly a 10x move in about 80
+// minutes, which §5 concedes is a speed bump rather than a wall. 10% costs an
+// honest sustained move a few extra hours to walk and costs an attacker most of a
+// day per decade of price.
+//
+// APPLIED AT THE AGGREGATION CLAMP ONLY, deliberately, and the asymmetry with the
+// follower propose-gate is the point rather than an oversight. Tightening the
+// clamp is always safe (§5: a smaller move always passes a wider gate); tightening
+// the GATE to match would put the two within rounding distance of each other, and
+// a maximally-clamped aggregate whose 18dp deviation lands a hair above a 10%
+// threshold would be rejected by every honest follower - wedging the round it was
+// supposed to protect. The gate keeps the wider global band, which for XCHAIN/USD
+// is merely permissive: no honest leader can propose a move the clamp did not
+// already bound.
+const XCHAIN_PRICE_MAX_CHANGE_PER_ROUND = 0.10;
+
+// D2, STILL OPEN: the BTC-side notional a window must carry before the derived
+// VWAP supersedes the bootstrap carry-forward. null means SUPERSESSION DISABLED
+// (threshold effectively infinite), which is how this ships: the value cannot be
+// chosen well before real XCHAIN volume exists, and guessing it wrong in the
+// permissive direction lets the first market print be set by whoever wash-trades
+// first.
+//
+// Disabled is a SAFE default, not a broken one. The pair still publishes every
+// round (§7 requires unconditional publication or the 1800s staleness bound
+// re-bricks LTC/DOGE fees); it publishes the bootstrap, which is exactly what a
+// zero-volume market should price at. Deciding the value later is a consensus
+// retune riding a coordinated flag-day (§8), which is the cost of not guessing.
+//
+// The measured quantity is pinned even though the value is not: the sum of the
+// BTC side over the window's included fills, post-exclusion and PRE-winsorize
+// (xchainPrice.js returns it as totalCoin). XCHAIN-side volume is
+// attacker-denominated - the same inventory recycles through unlimited wash
+// fills - and fill count is trivially inflatable.
+const XCHAIN_PRICE_MIN_BTC_VOLUME = null;
+
 // Row-identity bound for the PRICE v1 dedupe key. Must not exceed the
 // oracle_prices.source_address column width (VARCHAR(100)); an over-long value
 // would otherwise error the INSERT or (on a non-strict server) truncate and
@@ -150,4 +189,5 @@ module.exports = { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD, ORACLE_MAX_CHANGE_PER_
                    PRICE_V1_COINS, PRICE_V1_FIATS, MAX_TICK_LENGTH, MAX_MEMO_LENGTH,
                    MAX_SOURCE_ADDRESS_LENGTH, DERIVED_PAIRS,
                    XCHAIN_PRICE_WINDOW_BLOCKS, XCHAIN_PRICE_CONFIRMATION_BUFFER,
-                   XCHAIN_PRICE_BOOTSTRAP_USD };
+                   XCHAIN_PRICE_BOOTSTRAP_USD, XCHAIN_PRICE_MAX_CHANGE_PER_ROUND,
+                   XCHAIN_PRICE_MIN_BTC_VOLUME };

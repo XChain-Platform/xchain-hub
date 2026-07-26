@@ -68,6 +68,130 @@ describe('OracleRound', function () {
     });
 
     // -----------------------------------------------------------------
+    //  step 5: the XCHAIN/USD composition gate
+    // -----------------------------------------------------------------
+
+    describe('_xchainPriceGateOpen(): whether this round carries the derived pair', function () {
+
+        it('is CLOSED before the network resolves, so a hub that cannot tell stays quiet', function () {
+            // currentBtcNetwork is only set by a successful per-round resolve. A hub
+            // that does not know its own network must not guess: composing on mainnet
+            // before D6 puts a pair in a signed round that every peer rejects wholesale.
+            expect(or.currentBtcNetwork).to.equal(undefined);
+            or.currentRound = 100;
+            expect(or._xchainPriceGateOpen()).to.equal(false);
+        });
+
+        it('is CLOSED on mainnet, which is unarmed pending D6', function () {
+            or.currentBtcNetwork = 'mainnet';
+            or.currentRound = 100;
+            expect(or._xchainPriceGateOpen()).to.equal(false);
+        });
+
+        it('is OPEN on regtest and testnet, which are genesis-on', function () {
+            or.currentRound = 100;
+            or.currentBtcNetwork = 'regtest';
+            expect(or._xchainPriceGateOpen()).to.equal(true);
+            or.currentBtcNetwork = 'testnet';
+            expect(or._xchainPriceGateOpen()).to.equal(true);
+        });
+
+        it('reads the round number, not the wall clock', function () {
+            // The gate must be reproducible for a given round on every hub. Anything
+            // that consults Date.now() at composition time reintroduces the skew the
+            // round-start key exists to remove.
+            or.currentBtcNetwork = 'mainnet';
+            or.epochStart = 0;
+            or.roundInterval = 1000;
+            // Round number x 1s interval, so the round whose start crosses the mainnet
+            // sentinel is the one that opens the gate - regardless of when it is asked.
+            or.currentRound = 9999999998;
+            expect(or._xchainPriceGateOpen()).to.equal(false);
+            or.currentRound = 9999999999;
+            expect(or._xchainPriceGateOpen()).to.equal(true);
+        });
+
+        it('is CLOSED when the round number is not yet a real round', function () {
+            or.currentBtcNetwork = 'regtest';
+            or.currentRound = null;
+            expect(or._xchainPriceGateOpen()).to.equal(false);
+        });
+    });
+
+    // -----------------------------------------------------------------
+    //  step 6: the per-round derivation audit line
+    // -----------------------------------------------------------------
+
+    describe('formatXchainPriceMeta(): the derivation audit line', function () {
+
+        const { formatXchainPriceMeta } = require('../../src/OracleRound');
+        const WINDOW = { fromBlockExclusive: 1925, toBlockInclusive: 2925 };
+
+        it('records every input behind a derived print', function () {
+            // §5's promise that manipulation is "visible" depends entirely on this line
+            // existing, so the spec enumerates the fields and this asserts them.
+            const line = formatXchainPriceMeta({
+                derived: true, window: WINDOW,
+                usedFills: 4, clampedFills: 1, droppedFills: 2,
+                btcVolume: '0.05000000', totalXchain: '1000.00000000',
+                rawXchainBtc: '0.00050500', xchainBtc: '0.00001500',
+                refRate: '0.00001000',
+            });
+            expect(line).to.contain('window (1925, 2925]');
+            expect(line).to.contain('4 fills');
+            expect(line).to.contain('1 clamped');
+            expect(line).to.contain('2 excluded');
+            expect(line).to.contain('vol 0.05000000 BTC / 1000.00000000 XCHAIN');
+            expect(line).to.contain('ref 0.00001000');
+        });
+
+        it('shows the raw VWAP beside the published one, which is how a clamp is seen', function () {
+            // Without both numbers a winsorized round is indistinguishable from a quiet
+            // one: the published rate alone never reveals that the defence fired.
+            const line = formatXchainPriceMeta({
+                derived: true, window: WINDOW,
+                usedFills: 2, clampedFills: 1, droppedFills: 0,
+                btcVolume: '0.10100000', totalXchain: '200.00000000',
+                rawXchainBtc: '0.00050500', xchainBtc: '0.00001500',
+                refRate: '0.00001000',
+            });
+            expect(line).to.contain('raw 0.00050500 -> published 0.00001500 BTC');
+        });
+
+        it('distinguishes a quiet market from a market it chose not to follow', function () {
+            // The failure this guards: with supersession disabled, every round prints the
+            // carry-forward, and an operator reading only the price cannot tell whether
+            // trades happened. The volume and the threshold must both be on the line.
+            const held = formatXchainPriceMeta({
+                derived: false, window: WINDOW, fillCount: 3,
+                carriedFrom: 'bootstrap',
+                reason: 'supersession disabled (D2 threshold undecided)',
+                btcVolume: '0.01100000', minBtcVolume: null,
+                wouldHaveBeen: '0.00220000',
+            });
+            expect(held).to.contain('carry-forward from bootstrap');
+            expect(held).to.contain('3 fills in window');
+            expect(held).to.contain('supersession disabled');
+            expect(held).to.contain('vol 0.01100000 BTC vs threshold DISABLED');
+            expect(held).to.contain('would have been 0.00220000 BTC');
+
+            const quiet = formatXchainPriceMeta({
+                derived: false, window: WINDOW, fillCount: 0, carriedFrom: 'last-finalized',
+            });
+            expect(quiet).to.contain('0 fills in window');
+            expect(quiet).to.not.contain('vs threshold');
+        });
+
+        it('renders an unknown window without throwing or inventing a range', function () {
+            // The line must survive a shape it did not expect: a logging crash inside
+            // the submission path would take the whole round's 36 pairs with it.
+            expect(formatXchainPriceMeta({ derived: false, carriedFrom: 'bootstrap' }))
+                .to.contain('window (?, ?]');
+            expect(formatXchainPriceMeta(null)).to.equal('(no metadata)');
+        });
+    });
+
+    // -----------------------------------------------------------------
     // _executeRound()
     // -----------------------------------------------------------------
 

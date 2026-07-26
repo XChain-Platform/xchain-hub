@@ -27,10 +27,56 @@
 
 const PriceFetcher = require('./PriceFetcher.js');
 const XchainPriceSource = require('./XchainPriceSource.js');
+const { isXchainPriceActive, roundStartSeconds } = require('./xchain_price_activation.js');
 const { PRICE_MAX, DEFAULT_ORACLE_ROUND_INTERVAL_MS,
         DEFAULT_ORACLE_SUBMISSION_WINDOW_MS, DERIVED_PAIRS } = require('./constants.js');
 
 const ORACLE_PRICE_SUBMIT = 'ORACLE_PRICE_SUBMIT';
+
+// Render the XCHAIN/USD derivation metadata for the round log ( §10 step 6).
+//
+// §5 claims manipulation of this pair is "visible". That claim is only true if the
+// inputs behind a print are recorded somewhere an operator can read after the fact,
+// so this line is part of the design rather than debug chatter. It carries the
+// window height range, the fill counts (used, clamped, excluded), both volumes, the
+// winsorization reference, and - critically - the RAW pre-winsorize VWAP beside the
+// published rate. A round where those two differ is a round where the defence fired,
+// and nothing else in the system would say so.
+//
+// Deliberately one line and human-readable: it lands in the same log a hub operator
+// already tails for `Oracle: Round`, and a structured sink can be added later without
+// changing what the derivation computes.
+function formatXchainPriceMeta(meta) {
+    if (!meta) return '(no metadata)';
+    let w = meta.window || {};
+    // Rendered with the bound semantics visible, because they are load-bearing: the
+    // low bound is EXCLUSIVE and the high bound INCLUSIVE, which is what makes
+    // consecutive rounds tile without double-counting a block's fills.
+    let parts = ['window (' + (w.fromBlockExclusive != null ? w.fromBlockExclusive : '?') +
+                 ', ' + (w.toBlockInclusive != null ? w.toBlockInclusive : '?') + ']'];
+
+    if (meta.derived) {
+        parts.push(meta.usedFills + ' fills');
+        parts.push(meta.clampedFills + ' clamped');
+        parts.push(meta.droppedFills + ' excluded');
+        parts.push('vol ' + meta.btcVolume + ' BTC / ' + meta.totalXchain + ' XCHAIN');
+        parts.push('raw ' + meta.rawXchainBtc + ' -> published ' + meta.xchainBtc + ' BTC');
+        parts.push('ref ' + meta.refRate);
+    } else {
+        parts.push('carry-forward from ' + meta.carriedFrom);
+        parts.push(meta.fillCount + ' fills in window');
+        if (meta.reason) parts.push(meta.reason);
+        // Present only when the volume gate was what held the price back, and it is
+        // the field that distinguishes "the market was quiet" from "the market traded
+        // and we chose not to follow it yet".
+        if (meta.btcVolume !== undefined)
+            parts.push('vol ' + meta.btcVolume + ' BTC vs threshold ' +
+                       (meta.minBtcVolume === null ? 'DISABLED' : meta.minBtcVolume));
+        if (meta.wouldHaveBeen !== undefined)
+            parts.push('would have been ' + meta.wouldHaveBeen + ' BTC');
+    }
+    return '(' + parts.join(', ') + ')';
+}
 
 class OracleRound {
 
@@ -140,6 +186,11 @@ class OracleRound {
         this.chainTipStalenessThresholdS = parseInt(this.config.CHAIN_TIP_STALENESS_THRESHOLD_S)
             || Math.floor((2 * this.roundInterval) / 1000);
 
+        // BTC network for this hub, resolved once per round from the configs table and
+        // read by the  composition gate. Undefined until the first successful
+        // resolve, which the gate treats as "do not compose the pair".
+        this.currentBtcNetwork = undefined;
+
         // Skipped-round tracking
         this.consecutiveSkippedRounds = 0;
         this.lastSuccessfulRoundTime  = null;
@@ -168,6 +219,19 @@ class OracleRound {
     // Set the oracle consensus engine (called by XChainHub after both are created)
     setConsensus(oracleConsensus) {
         this.oracleConsensus = oracleConsensus;
+    }
+
+    //  §8 / step 5: has the derived pair's composition gate opened for the round
+    // being composed right now?
+    //
+    // Keyed on the round's canonical start instant, which every hub in the federation
+    // computes identically from the shared epoch and interval - see the header of
+    // xchain_price_activation.js for why a locally-observed chain tip is the wrong key
+    // here and how it would stall the whole round.
+    _xchainPriceGateOpen() {
+        let t = roundStartSeconds(this.currentRound, this.epochStart, this.roundInterval);
+        if (t === null) return false;
+        return isXchainPriceActive(t, this.currentBtcNetwork);
     }
 
     // Start the oracle round system
@@ -451,6 +515,10 @@ class OracleRound {
         // hub serves mainnet, testnet, or regtest BTC indexers.
         try {
             let network = await this.hub._resolveBtcNetwork();
+            // Remembered for the  composition gate below, which needs the network
+            // synchronously. Left UNSET when this resolve throws, so a hub that could
+            // not determine its own network fails the gate closed rather than guessing.
+            this.currentBtcNetwork = network;
             let btcTip = await this.db.getChainTip('BTC', network);
             if (btcTip) {
                 this.currentBtcBlockHeight         = btcTip.blockHeight;
@@ -549,16 +617,22 @@ class OracleRound {
             return;
         }
 
-        // Append the derived XCHAIN/USD pair . Deliberately OUTSIDE
-        // fetchPrices(): it is not fetched, it is computed from this validator's own
-        // BTC indexer rows, and it must not be able to disturb the 36 API pairs. The
-        // source never throws and returns null to abstain, so a hub without indexer
-        // access - or one whose chain-tip anchor is unreliable - simply omits the pair
-        // while the rest of the round proceeds untouched (§6 local-failure taxonomy).
+        // Append the derived XCHAIN/USD pair , if the activation gate has
+        // opened on this network for this round. Deliberately OUTSIDE fetchPrices():
+        // it is not fetched, it is computed from this validator's own BTC indexer
+        // rows, and it must not be able to disturb the 36 API pairs. The source never
+        // throws and returns null to abstain, so a hub without indexer access - or one
+        // whose chain-tip anchor is unreliable - simply omits the pair while the rest
+        // of the round proceeds untouched (§6 local-failure taxonomy).
+        //
+        // The gate is checked HERE rather than inside the source because it is not a
+        // property of this hub's ability to derive: a hub that could compute the pair
+        // perfectly well must still not submit it before the federation-wide instant
+        // (§8 deploy order), regardless of local config.
         //
         // Fed this round's own BTC/USD from the fetch above, because the published
         // value is on-chain XCHAIN/BTC x the validator's own BTC/USD (§6).
-        if (this.xchainPriceSource) {
+        if (this.xchainPriceSource && this._xchainPriceGateOpen()) {
             let btcUsd = prices.find(p => p.coinPair === 'BTC/USD');
             let entry  = await this.xchainPriceSource.derive({
                 round:            this.currentRound,
@@ -573,8 +647,7 @@ class OracleRound {
                 let { meta, ...wire } = entry;
                 prices.push(wire);
                 console.log('Oracle: derived ' + wire.coinPair + '=' + wire.price +
-                    ' (' + (meta.derived ? meta.fillCount + ' fills, ' + meta.clampedFills + ' clamped'
-                                         : 'carry-forward from ' + meta.carriedFrom) + ')');
+                    ' ' + formatXchainPriceMeta(meta));
             }
         }
 
@@ -853,3 +926,6 @@ class OracleRound {
 }
 
 module.exports = OracleRound;
+// Exported for test only: the §10 step 6 audit line is a deliverable of this item,
+// so it is asserted rather than eyeballed in a log.
+module.exports.formatXchainPriceMeta = formatXchainPriceMeta;

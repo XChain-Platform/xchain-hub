@@ -40,6 +40,13 @@ const CONFIG = {
     XCHAIN_PRICE_INDEXER_DB_PASS: 'unused-by-the-double',
 };
 
+// Supersession ships DISABLED (D2 threshold undecided), so the shipped config never
+// publishes a derived value however good the fills are. Every case that means to
+// exercise the derived branch must therefore turn it on explicitly, exactly as the
+// regtest drill harness does - which is the point: a test that forgot would silently
+// assert the carry-forward and prove nothing.
+const DERIVING_CONFIG = { ...CONFIG, XCHAIN_PRICE_MIN_BTC_VOLUME: '0' };
+
 // Real regtest row shapes (see the indexer's xchainPriceQuery suite): 5 XCHAIN for
 // 0.011 BTC = 0.0022 BTC each.
 const DISPENSE_ROW = { venue: 'dispense', action_index: 946, block_index: 2018,
@@ -176,7 +183,7 @@ describe('XchainPriceSource: validator-side XCHAIN/USD @regression', function ()
         it('publishes XCHAIN/BTC x this round own BTC/USD from a real fill', async function () {
             // 0.011 BTC / 5 XCHAIN = 0.0022 BTC each; x 100000 USD/BTC = 220 USD.
             // Reference 0.0022 BTC (= 220 USD / 100000) so nothing is winsorized.
-            const { src } = makeSource({ dispenses: [DISPENSE_ROW] }, { 'XCHAIN/USD': '220.00000000', 'BTC/USD': '100000.00000000' });
+            const { src } = makeSource({ dispenses: [DISPENSE_ROW] }, { 'XCHAIN/USD': '220.00000000', 'BTC/USD': '100000.00000000' }, DERIVING_CONFIG);
             const out = await src.derive(CTX);
             expect(out.price).to.equal('220.00000000');
             expect(out.meta.derived).to.equal(true);
@@ -188,7 +195,7 @@ describe('XchainPriceSource: validator-side XCHAIN/USD @regression', function ()
         it('reports one source, not a fabricated corroboration count', async function () {
             // There is no second upstream for a derived pair; claiming otherwise would
             // mislead the federation single-source health signal.
-            const { src } = makeSource({ dispenses: [DISPENSE_ROW] }, { 'XCHAIN/USD': '220.00000000', 'BTC/USD': '100000.00000000' });
+            const { src } = makeSource({ dispenses: [DISPENSE_ROW] }, { 'XCHAIN/USD': '220.00000000', 'BTC/USD': '100000.00000000' }, DERIVING_CONFIG);
             expect((await src.derive(CTX)).sources).to.equal(1);
         });
 
@@ -196,11 +203,94 @@ describe('XchainPriceSource: validator-side XCHAIN/USD @regression', function ()
             // A self-dealt fill at 100x the reference is the §5 attack. It must be
             // clamped to the band edge, and the meta must say so.
             const wild = { ...DISPENSE_ROW, coin_amount: '1.10000000' };   // 100x the rate
-            const { src } = makeSource({ dispenses: [wild] }, { 'XCHAIN/USD': '220.00000000', 'BTC/USD': '100000.00000000' });
+            const { src } = makeSource({ dispenses: [wild] }, { 'XCHAIN/USD': '220.00000000', 'BTC/USD': '100000.00000000' }, DERIVING_CONFIG);
             const out = await src.derive(CTX);
             expect(out.meta.clampedFills).to.equal(1);
             // Clamped to ref x 2 = 0.0044 BTC -> 440 USD, not the 22000 USD it asked for.
             expect(out.price).to.equal('440.00000000');
+        });
+    });
+
+    // D2: the volume gate that decides whether a real window is a real MARKET.
+    describe('the supersession threshold (D2)', function () {
+        const FINALIZED = { 'XCHAIN/USD': '220.00000000', 'BTC/USD': '100000.00000000' };
+
+        it('ships DISABLED: a perfectly good fill still publishes the carry-forward', async function () {
+            // The shipped constant is null because the threshold value is an open
+            // operator decision, and guessing it permissively lets whoever wash-trades
+            // first set the first market print. Disabled is safe, not broken: the pair
+            // still publishes every round, it just publishes the value the federation
+            // already agreed on.
+            const { src } = makeSource({ dispenses: [DISPENSE_ROW] }, FINALIZED);
+            const out = await src.derive(CTX);
+            expect(out.price).to.equal('220.00000000');           // carried, not derived
+            expect(out.meta.derived).to.equal(false);
+            expect(out.meta.reason).to.match(/supersession disabled/);
+        });
+
+        it('still reports what it WOULD have published, so the gate is auditable', async function () {
+            // Without this a disabled threshold is indistinguishable from a broken
+            // derivation: both just print the carry-forward forever.
+            const { src } = makeSource({ dispenses: [DISPENSE_ROW] }, FINALIZED);
+            const out = await src.derive(CTX);
+            expect(out.meta.wouldHaveBeen).to.equal('0.00220000');
+            expect(out.meta.btcVolume).to.equal('0.01100000');
+        });
+
+        it('supersedes once the window clears the threshold', async function () {
+            const cfg = { ...CONFIG, XCHAIN_PRICE_MIN_BTC_VOLUME: '0.01' };
+            const { src } = makeSource({ dispenses: [DISPENSE_ROW] }, FINALIZED, cfg);   // 0.011 BTC
+            const out = await src.derive(CTX);
+            expect(out.meta.derived).to.equal(true);
+            expect(out.meta.btcVolume).to.equal('0.01100000');
+        });
+
+        it('holds the carry-forward when the window is just under the threshold', async function () {
+            const cfg = { ...CONFIG, XCHAIN_PRICE_MIN_BTC_VOLUME: '0.02' };
+            const { src } = makeSource({ dispenses: [DISPENSE_ROW] }, FINALIZED, cfg);
+            const out = await src.derive(CTX);
+            expect(out.meta.derived).to.equal(false);
+            expect(out.meta.reason).to.match(/below the supersession threshold/);
+            expect(out.price).to.equal('220.00000000');
+        });
+
+        it('treats the threshold as inclusive: exactly at the bar supersedes', async function () {
+            // D2 says "at or above". An exclusive comparison would make a threshold set
+            // to the observed volume mysteriously never fire.
+            const cfg = { ...CONFIG, XCHAIN_PRICE_MIN_BTC_VOLUME: '0.011' };
+            const { src } = makeSource({ dispenses: [DISPENSE_ROW] }, FINALIZED, cfg);
+            expect((await src.derive(CTX)).meta.derived).to.equal(true);
+        });
+
+        it('measures PRE-winsorize, so a clamped print cannot buy its own admission', async function () {
+            // The attack this ordering blocks: a fill whose rate is clamped to the band
+            // edge still contributes its real BTC to the volume count, not the inflated
+            // band-edge notional. Here 1.1 BTC really moved, so the bar is genuinely
+            // cleared - but the PRICE is still held at the band edge.
+            const wild = { ...DISPENSE_ROW, coin_amount: '1.10000000' };
+            const cfg = { ...CONFIG, XCHAIN_PRICE_MIN_BTC_VOLUME: '1' };
+            const { src } = makeSource({ dispenses: [wild] }, FINALIZED, cfg);
+            const out = await src.derive(CTX);
+            expect(out.meta.btcVolume).to.equal('1.10000000');
+            expect(out.meta.derived).to.equal(true);
+            expect(out.price).to.equal('440.00000000');       // clamped, not 22000
+        });
+
+        it('fails closed on an unparseable threshold rather than publishing anyway', async function () {
+            // An override the arithmetic cannot read must not silently become "0" and
+            // turn supersession on for a venue that never asked for it.
+            const cfg = { ...CONFIG, XCHAIN_PRICE_MIN_BTC_VOLUME: 'not-a-number' };
+            const { src } = makeSource({ dispenses: [DISPENSE_ROW] }, FINALIZED, cfg);
+            const out = await src.derive(CTX);
+            expect(out.meta.derived).to.equal(false);
+            expect(out.meta.reason).to.match(/supersession disabled/);
+        });
+
+        it('reads an empty override as "not set", leaving the shipped constant in force', async function () {
+            // api.js passes '' for every unset XCHAIN_PRICE_* env, so '' MUST mean unset.
+            const cfg = { ...CONFIG, XCHAIN_PRICE_MIN_BTC_VOLUME: '' };
+            const { src } = makeSource({ dispenses: [DISPENSE_ROW] }, FINALIZED, cfg);
+            expect((await src.derive(CTX)).meta.derived).to.equal(false);
         });
     });
 

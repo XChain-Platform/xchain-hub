@@ -29,7 +29,8 @@ const crypto            = require('crypto');
 const EventEmitter      = require('events');
 const PriceFetcher      = require('./PriceFetcher.js');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
-const { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD, ORACLE_MAX_CHANGE_PER_ROUND } = require('./constants.js');
+const { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD, ORACLE_MAX_CHANGE_PER_ROUND,
+        XCHAIN_PRICE_MAX_CHANGE_PER_ROUND, DERIVED_PAIRS } = require('./constants.js');
 const swq               = require('./stake_weighted_quorum.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const eq                = require('./equivocation_header.js');
@@ -51,6 +52,30 @@ const FALLBACK_GRACE_MS = 3000;  // brief grace before fallback proposer takes o
 // the round becomes ready to finalize (block-driven, so every hub uses the same
 // window); receivers apply the same grace before accepting such a fallback PROPOSE.
 const DEFAULT_LEADER_TIMEOUT_MS = 30000;  // 30 seconds (< finalization window)
+
+// Per-pair override for the aggregation move clamp ( D4). Most pairs track
+// deep external markets and share ORACLE_MAX_CHANGE_PER_ROUND; XCHAIN/USD is
+// derived from a thin on-platform market and gets a tighter bound.
+//
+// CONSENSUS-CRITICAL and federation-uniform: two hubs on different values clamp the
+// same aggregate to different prices, so they publish different finalized rows and
+// the disagreeing one walks into deviation slashing. A retune is a coordinated
+// flag-day (§8), never a rolling deploy.
+//
+// Keyed off DERIVED_PAIRS[0] rather than a second 'XCHAIN/USD' literal, so the pair
+// name has exactly one spelling in this repo and a rename cannot silently leave the
+// override attached to a pair that no longer exists.
+const MAX_CHANGE_PER_ROUND_BY_PAIR = {
+    [DERIVED_PAIRS[0]]: XCHAIN_PRICE_MAX_CHANGE_PER_ROUND,
+};
+
+// The per-round move bound in force for `coinPair`. Unknown pairs get the global
+// default, so a new pair is never accidentally unclamped.
+function maxChangeForPair(coinPair) {
+    let pct = MAX_CHANGE_PER_ROUND_BY_PAIR[coinPair];
+    return (typeof pct === 'number' && Number.isFinite(pct) && pct > 0)
+        ? pct : ORACLE_MAX_CHANGE_PER_ROUND;
+}
 
 class OracleConsensus extends EventEmitter {
 
@@ -1042,10 +1067,22 @@ class OracleConsensus extends EventEmitter {
                         // Use a wider band than the live-submission check to allow for
                         // genuine price movement between rounds, while still bounding a Byzantine
                         // leader from injecting values that are orders of magnitude off. The band
-                        // is ORACLE_MAX_CHANGE_PER_ROUND, the same constant the aggregation clamp
-                        // (_clampToLastFinalized) emits, so a maximally-clamped aggregate always
-                        // passes this gate. Deriving both sides from one constant keeps them from
-                        // drifting apart (constants.js states this as a federation-uniform contract).
+                        // is ORACLE_MAX_CHANGE_PER_ROUND, which is what the aggregation clamp
+                        // (_clampToLastFinalized) emits for every pair EXCEPT those carrying a
+                        // tighter per-pair override (maxChangeForPair; XCHAIN/USD is at 10%).
+                        //
+                        // Deliberately NOT maxChangeForPair() here, and this asymmetry is
+                        // load-bearing. The gate must never be tighter than the clamp: the two
+                        // compute their bounds differently (this side takes an 18dp deviation
+                        // ratio, the clamp takes an 8dp delta off the last price), so at equal
+                        // thresholds a maximally-clamped aggregate can land a hair over the line
+                        // and be rejected by every honest follower - wedging the round the clamp
+                        // was protecting. Holding the gate at the global maximum keeps it a strict
+                        // superset of every per-pair clamp, so a clamped aggregate always passes.
+                        // For an overridden pair the gate is merely permissive, which costs
+                        // nothing: no honest leader can propose a move the clamp did not bound,
+                        // and a follower that DID submit locally is checked against its own value
+                        // by the much tighter ORACLE_DEVIATION_THRESHOLD above.
                         let histThreshold = String(ORACLE_MAX_CHANGE_PER_ROUND);
                         if (bcmath.bcgt(deviation, histThreshold)) {
                             let pct = bcmath.bcformat(bcmath.bcmul(deviation, '100', 4), 4);
@@ -1492,19 +1529,20 @@ class OracleConsensus extends EventEmitter {
     _clampToLastFinalized(coinPair, price) {
         let last = this._getLastFinalizedPrice(coinPair);
         if (last === null || !bcmath.bcgt(last, '0')) return price;
-        let maxDelta = bcmath.bcmul(last, String(ORACLE_MAX_CHANGE_PER_ROUND), 8);
+        let pct = maxChangeForPair(coinPair);
+        let maxDelta = bcmath.bcmul(last, String(pct), 8);
         let hi = bcmath.bcadd(last, maxDelta, 8);
         let lo = bcmath.bcsub(last, maxDelta, 8);
         if (bcmath.bcgt(price, hi)) {
             console.warn('Oracle: clamping ' + coinPair + ' aggregate ' + price + ' to ' +
                 bcmath.bcformat(hi, 8) + ' (last finalized ' + last + ', max +' +
-                (ORACLE_MAX_CHANGE_PER_ROUND * 100) + '%/round)');
+                (pct * 100) + '%/round)');
             return bcmath.bcformat(hi, 8);
         }
         if (bcmath.bclt(price, lo)) {
             console.warn('Oracle: clamping ' + coinPair + ' aggregate ' + price + ' to ' +
                 bcmath.bcformat(lo, 8) + ' (last finalized ' + last + ', max -' +
-                (ORACLE_MAX_CHANGE_PER_ROUND * 100) + '%/round)');
+                (pct * 100) + '%/round)');
             return bcmath.bcformat(lo, 8);
         }
         return price;

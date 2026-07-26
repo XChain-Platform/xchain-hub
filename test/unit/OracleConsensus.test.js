@@ -285,6 +285,64 @@ describe('OracleConsensus', function () {
     });
 
     // -----------------------------------------------------------------
+    // Per-pair clamp override for the derived pair ( D4)
+    // -----------------------------------------------------------------
+
+    describe('_aggregate(): tighter per-pair clamp for XCHAIN/USD ( D4)', function () {
+
+        function subsFor(pair, prices) {
+            return buildSubmissions(prices.map((p, i) => ({
+                sender: 'validator-' + i,
+                prices: [{ coinPair: pair, price: String(p) }]
+            })));
+        }
+
+        it('bounds XCHAIN/USD at 10%/round, not the global 25%', function () {
+            // XCHAIN trades in a market thin by construction pre-launch, so the generic
+            // clamp is the wrong size for it: 25%/round compounds to roughly 10x in 80
+            // minutes at the default cadence.
+            oc._updateLastFinalizedPrices([{ coinPair: 'XCHAIN/USD', price: '2.00000000' }]);
+            expect(oc._aggregate(subsFor('XCHAIN/USD', [10, 10, 10]), 'XCHAIN/USD')).to.equal('2.20000000');
+        });
+
+        it('bounds the DOWN direction identically: fee-cheapening is the other attack', function () {
+            // §5 is explicit that the incentive is bidirectional - a lower XCHAIN/USD
+            // makes native-coin fees cheaper for whoever pushed it there.
+            oc._updateLastFinalizedPrices([{ coinPair: 'XCHAIN/USD', price: '2.00000000' }]);
+            expect(oc._aggregate(subsFor('XCHAIN/USD', [0.01, 0.01, 0.01]), 'XCHAIN/USD')).to.equal('1.80000000');
+        });
+
+        it('leaves every other pair on the global bound', function () {
+            // The override must not leak: BTC/USD tracks a deep external market and a
+            // 10% cap would suppress genuine moves it should follow.
+            oc._updateLastFinalizedPrices([{ coinPair: 'BTC/USD', price: '100000.00000000' }]);
+            expect(oc._aggregate(subsFor('BTC/USD', [500000, 500000, 500000]), 'BTC/USD')).to.equal('125000.00000000');
+        });
+
+        it('walks the bootstrap to a market level over rounds, never in one print', function () {
+            // §7: an attacker who wash-trades exactly the volume threshold still cannot
+            // set the first market print - it walks from the bootstrap at the clamp rate
+            // like any other move, which is what buys the operator time to notice.
+            oc._updateLastFinalizedPrices([{ coinPair: 'XCHAIN/USD', price: '2.00000000' }]);
+            let subs = subsFor('XCHAIN/USD', [100, 100, 100]);
+            let r1 = oc._aggregate(subs, 'XCHAIN/USD');
+            expect(r1).to.equal('2.20000000');
+            oc._updateLastFinalizedPrices([{ coinPair: 'XCHAIN/USD', price: r1 }]);
+            expect(oc._aggregate(subs, 'XCHAIN/USD')).to.equal('2.42000000');
+        });
+
+        it('stays strictly inside the propose-gate band, which keeps the global bound', function () {
+            // The load-bearing invariant behind the deliberate asymmetry in
+            // _handlePropose: the follower gate is a strict SUPERSET of every per-pair
+            // clamp, so a maximally-clamped aggregate always passes it. If a future
+            // override were ever set LOOSER than the global bound, a clamped proposal
+            // could be rejected by every honest follower and wedge the round.
+            const { ORACLE_MAX_CHANGE_PER_ROUND, XCHAIN_PRICE_MAX_CHANGE_PER_ROUND } = require('../../src/constants.js');
+            expect(XCHAIN_PRICE_MAX_CHANGE_PER_ROUND).to.be.at.most(ORACLE_MAX_CHANGE_PER_ROUND);
+        });
+    });
+
+    // -----------------------------------------------------------------
     // _minRoundSources(): source-diversity health signal
     // -----------------------------------------------------------------
 
