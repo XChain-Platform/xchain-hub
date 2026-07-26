@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-07-25T16:46:27.911Z",
+  "generated_at": "2026-07-26T20:53:50.014Z",
   "descriptors": [
     {
       "coin": "bitcoin",
@@ -70,7 +70,7 @@
       "icon": "bitcoin-mainnet-icon-20.png",
       "wifVersionByte": 128,
       "explorer": {
-        "defaultUrl": "https://explorer.xchain.io/BTC",
+        "defaultUrl": "https://explorer.xchain.io",
         "defaultPort": 443
       },
       "encoder": {
@@ -150,7 +150,7 @@
       "icon": "bitcoin-testnet-icon-20.png",
       "wifVersionByte": 239,
       "explorer": {
-        "defaultUrl": "https://explorer.xchain.io/TBTC",
+        "defaultUrl": "https://explorer.xchain.io",
         "defaultPort": 443
       },
       "encoder": {
@@ -296,7 +296,7 @@
       "icon": "dogecoin-mainnet-icon-20.png",
       "wifVersionByte": 158,
       "explorer": {
-        "defaultUrl": "https://explorer.xchain.io/DOGE",
+        "defaultUrl": "https://explorer.xchain.io",
         "defaultPort": 443
       },
       "encoder": {
@@ -362,7 +362,7 @@
       "icon": "dogecoin-testnet-icon-20.png",
       "wifVersionByte": 241,
       "explorer": {
-        "defaultUrl": "https://explorer.xchain.io/TDOGE",
+        "defaultUrl": "https://explorer.xchain.io",
         "defaultPort": 443
       },
       "encoder": {
@@ -498,7 +498,7 @@
       "icon": "litecoin-mainnet-icon-20.png",
       "wifVersionByte": 176,
       "explorer": {
-        "defaultUrl": "https://explorer.xchain.io/LTC",
+        "defaultUrl": "https://explorer.xchain.io",
         "defaultPort": 443
       },
       "encoder": {
@@ -568,7 +568,7 @@
       "icon": "litecoin-testnet-icon-20.png",
       "wifVersionByte": 239,
       "explorer": {
-        "defaultUrl": "https://explorer.xchain.io/TLTC",
+        "defaultUrl": "https://explorer.xchain.io",
         "defaultPort": 443
       },
       "encoder": {
