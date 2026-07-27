@@ -34,6 +34,27 @@
 
 const axios = require('axios');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
+// : consensus-input fetches fail closed but used to fail SILENTLY for
+// every reason except auth and echo mismatch. The monitor counts every outcome,
+// owns the log throttle, and raises the alert that /health reports.
+const { ConsensusInputMonitor, REASONS, classifyFetchError } = require('./lib/consensus_input_monitor.js');
+
+// Operator-facing detail lines for the non-transport failure classes. Held as
+// constants because each is raised from all four fetchers and must read the
+// same way in a log no matter which one tripped.
+const NO_INDEXER_DETAIL = 'No BTC indexer URL could be resolved (BTC_INDEXER_API_URL / BTC_INDEXER_URL, or the ' +
+    'configs table). Without it this hub can read NO consensus input at all.';
+const MALFORMED_DETAIL  = 'The response carried no `validators` array. Refusing it rather than treating a wrong ' +
+    'shape as an empty validator set (quorum 0 is indistinguishable from single-node mode).';
+
+// The indexer answered but the JSON-RPC body is unusable. Keep the reported
+// error text short: it lands in a log line, and the useful part is which of the
+// two cases happened (no result at all vs. an explicit error).
+function rpcErrorDetail(result) {
+    if (!result) return 'The indexer returned no JSON-RPC result (empty or non-JSON body).';
+    let msg = result.error && (result.error.message || result.error);
+    return 'The indexer returned a JSON-RPC error: ' + String(msg).slice(0, 200) + '.';
+}
 
 class CapabilitySnapshot {
 
@@ -56,20 +77,19 @@ class CapabilitySnapshot {
         // only as a coordinated fleet change. Default 6 = the BTC confirmation
         // depth the platform already treats as buried (XCHAIN_CONFIRMATIONS_BTC).
         this.reorgBufferBlocks = this._resolveReorgBuffer();
-        // Last time we logged an indexer auth (401/403) failure (throttles the
-        // warning so a persistent key mismatch doesn't spam the poll loop).
-        this._authWarnAt = 0;
         // Last time we alarmed on a truncated validator-set snapshot (#4479).
-        // Same throttle idiom as _authWarnAt so a sustained over-limit validator
-        // set raises one warning per cacheTtlMs instead of one per quorum call.
+        // Truncation is alarm-and-PROCEED (the snapshot is still usable and
+        // cross-hub deterministic), so it is not a monitor failure and keeps
+        // its own throttle stamp: one warning per cacheTtlMs, not one per call.
         this._truncWarnAt = 0;
-        // Last time we alarmed on a block-echo mismatch (_blockEchoOk). Own
-        // field so echo-mismatch and auth-failure warnings never suppress each
-        // other's throttle window.
-        this._echoWarnAt = 0;
-        // Last time we alarmed on a wired-but-unconfigured capability threshold.
-        // Same throttle idiom; keyed per capability so each missing one warns.
-        this._minStakeWarnAt = {};
+        // : every path that returns a null snapshot reports here. The
+        // monitor owns counting, per-reason log throttling and the alert flag
+        // that /health turns into a degraded status, so a fail-closed hub is
+        // visible instead of merely silent.
+        this.monitor = new ConsensusInputMonitor({
+            throttleMs:         this.cacheTtlMs,
+            alertAfterFailures: this._resolveAlertAfterFailures()
+        });
     }
 
     // Network qualifier folded into every cache key. HUB_NETWORK is read once at
@@ -92,17 +112,26 @@ class CapabilitySnapshot {
     // attestation round and config-change quorum collapses to a null snapshot
     // while nothing points the operator at auth. Surface it distinctly, throttled.
     _onFetchError(method, err) {
-        let status = err && err.response && err.response.status;
-        if (status === 401 || status === 403) {
-            let now = Date.now();
-            if (now - this._authWarnAt > this.cacheTtlMs) {
-                this._authWarnAt = now;
-                console.error('CapabilitySnapshot: ' + method + ' got HTTP ' + status +
-                    ' from the BTC indexer: the hub\'s x-api-key (BTC_INDEXER_API_KEY) does not match the ' +
-                    'indexer\'s INDEXER_API_KEY. Federation snapshots are NULL (attestation + config-change ' +
-                    'quorum collapse) until the two keys match.');
-            }
+        let reason = classifyFetchError(err);
+        let detail;
+        if (reason === REASONS.AUTH) {
+            detail = 'HTTP ' + err.response.status + ': the hub\'s x-api-key (BTC_INDEXER_API_KEY) does not ' +
+                'match the indexer\'s INDEXER_API_KEY. Federation snapshots stay NULL (attestation + ' +
+                'config-change quorum collapse) until the two keys match.';
+        } else if (reason === REASONS.HTTP_ERROR) {
+            detail = 'HTTP ' + err.response.status + ' from the BTC indexer.';
+        } else {
+            detail = 'The BTC indexer did not respond (' + ((err && err.message) || 'unknown transport error') +
+                '); check that it is running and reachable at the configured URL.';
         }
+        return this._fail(method, reason, detail);
+    }
+
+    // Record a consensus-input failure and return the null sentinel every fetch
+    // path already uses. Single choke point so no future null-return can be
+    // added without also raising the alarm (the exact regression  closes).
+    _fail(method, reason, detail, throttleKey) {
+        this.monitor.recordFailure(method, reason, detail, throttleKey);
         return null;
     }
 
@@ -130,13 +159,9 @@ class CapabilitySnapshot {
     // other). Returns true when the echoed block matches the request.
     _blockEchoOk(method, result, requested) {
         if (Number(result.block_index) === Number(requested)) return true;
-        let now = Date.now();
-        if (now - this._echoWarnAt > this.cacheTtlMs) {
-            this._echoWarnAt = now;
-            console.error('CapabilitySnapshot: ' + method + ' returned block_index ' + result.block_index +
-                ' for requested block ' + requested + '; rejecting snapshot (freshness/echo mismatch, ' +
-                'possible indexer bug or misconfiguration).');
-        }
+        this._fail(method, REASONS.ECHO_MISMATCH,
+            'Returned block_index ' + result.block_index + ' for requested block ' + requested +
+            '; rejecting the snapshot (freshness/echo mismatch, possible indexer bug or misconfiguration).');
         return false;
     }
 
@@ -176,7 +201,7 @@ class CapabilitySnapshot {
         if (cached && cached.expiresAt > now) return cached;
 
         let url = await this.hub._resolveBtcIndexerUrl();
-        if (!url) return null;
+        if (!url) return this._fail('getcapabilityvalidators', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
 
         let params = { capability: capability, block_index: blockIndex };
         if (minStake !== null) params.min_stake = minStake;
@@ -189,10 +214,11 @@ class CapabilitySnapshot {
                 params:  params
             }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
             let result = res && res.data && res.data.result;
-            if (!result || result.error) return null;
+            if (!result || result.error) return this._fail('getcapabilityvalidators', REASONS.RPC_ERROR, rpcErrorDetail(result));
             let validators = this._coerceValidators(result);
-            if (validators === null) return null;
+            if (validators === null) return this._fail('getcapabilityvalidators', REASONS.MALFORMED, MALFORMED_DETAIL);
             if (!this._blockEchoOk('getcapabilityvalidators', result, blockIndex)) return null;
+            this.monitor.recordSuccess('getcapabilityvalidators');
             let snapshot = {
                 capability:  result.capability,
                 blockIndex:  result.block_index,
@@ -235,7 +261,7 @@ class CapabilitySnapshot {
         if (cached && cached.expiresAt > now) return cached;
 
         let url = await this.hub._resolveBtcIndexerUrl();
-        if (!url) return null;
+        if (!url) return this._fail('getstakeweightsbycapability', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
 
         let params = { capability: capability, block_index: blockIndex };
         if (minStake !== null) params.min_stake = minStake;
@@ -248,10 +274,11 @@ class CapabilitySnapshot {
                 params:  params
             }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
             let result = res && res.data && res.data.result;
-            if (!result || result.error) return null;
+            if (!result || result.error) return this._fail('getstakeweightsbycapability', REASONS.RPC_ERROR, rpcErrorDetail(result));
             let validators = this._coerceValidators(result);
-            if (validators === null) return null;
+            if (validators === null) return this._fail('getstakeweightsbycapability', REASONS.MALFORMED, MALFORMED_DETAIL);
             if (!this._blockEchoOk('getstakeweightsbycapability', result, blockIndex)) return null;
+            this.monitor.recordSuccess('getstakeweightsbycapability');
             let snapshot = {
                 capability:  result.capability,
                 blockIndex:  result.block_index,
@@ -282,7 +309,7 @@ class CapabilitySnapshot {
         if (cached && cached.expiresAt > now) return cached;
 
         let url = await this.hub._resolveBtcIndexerUrl();
-        if (!url) return null;
+        if (!url) return this._fail('getactivevalidators', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
 
         try {
             let res = await axios.post(url, {
@@ -292,10 +319,11 @@ class CapabilitySnapshot {
                 params:  { block_index: blockIndex }
             }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
             let result = res && res.data && res.data.result;
-            if (!result || result.error) return null;
+            if (!result || result.error) return this._fail('getactivevalidators', REASONS.RPC_ERROR, rpcErrorDetail(result));
             let validators = this._coerceValidators(result);
-            if (validators === null) return null;
+            if (validators === null) return this._fail('getactivevalidators', REASONS.MALFORMED, MALFORMED_DETAIL);
             if (!this._blockEchoOk('getactivevalidators', result, blockIndex)) return null;
+            this.monitor.recordSuccess('getactivevalidators');
             let snapshot = {
                 capability:  '*',
                 blockIndex:  result.block_index,
@@ -326,7 +354,7 @@ class CapabilitySnapshot {
         if (cached && cached.expiresAt > now) return cached;
 
         let url = await this.hub._resolveBtcIndexerUrl();
-        if (!url) return null;
+        if (!url) return this._fail('getactivestakeweights', REASONS.NO_INDEXER, NO_INDEXER_DETAIL);
 
         try {
             let res = await axios.post(url, {
@@ -336,10 +364,11 @@ class CapabilitySnapshot {
                 params:  { block_index: blockIndex }
             }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
             let result = res && res.data && res.data.result;
-            if (!result || result.error) return null;
+            if (!result || result.error) return this._fail('getactivestakeweights', REASONS.RPC_ERROR, rpcErrorDetail(result));
             let validators = this._coerceValidators(result);
-            if (validators === null) return null;
+            if (validators === null) return this._fail('getactivestakeweights', REASONS.MALFORMED, MALFORMED_DETAIL);
             if (!this._blockEchoOk('getactivestakeweights', result, blockIndex)) return null;
+            this.monitor.recordSuccess('getactivestakeweights');
             let snapshot = {
                 capability:  '*',
                 blockIndex:  result.block_index,
@@ -440,19 +469,35 @@ class CapabilitySnapshot {
         return !!(reg && typeof reg.getMinStake === 'function');
     }
 
-    // Throttled loud alarm for a wired-but-unconfigured capability threshold. Same
-    // idiom as _onFetchError / the truncation alarm: one line per cacheTtlMs per cap.
+    // Throttled loud alarm for a wired-but-unconfigured capability threshold.
+    // Routed through the monitor like every other fail-closed path, sub-keyed by
+    // capability so a second missing threshold is not swallowed by the first
+    // one's throttle window.
     _warnMinStakeMissing(capability) {
-        let now = Date.now();
-        if (now - (this._minStakeWarnAt[capability] || 0) > this.cacheTtlMs) {
-            this._minStakeWarnAt[capability] = now;
-            console.error('CapabilitySnapshot: capability "' + capability + '" has NO configured MIN_STAKE ' +
-                'threshold (missing from HUB_CAPABILITY_CONFIG) while the registry is live. Refusing to build a ' +
-                'snapshot for it: omitting min_stake would let each indexer apply its OWN local threshold, so two ' +
-                'hubs could qualify different validator sets for the same round and FORK. Add CAPABILITY_' +
-                String(capability).toUpperCase() + '_MIN_STAKE to HUB_CAPABILITY_CONFIG (equal to the indexer ' +
-                'constant). Rounds for this capability fail closed until then.');
+        this._fail('getsnapshot', REASONS.MIN_STAKE,
+            'Capability "' + capability + '" has NO configured MIN_STAKE threshold (missing from ' +
+            'HUB_CAPABILITY_CONFIG) while the registry is live. Refusing to build a snapshot for it: omitting ' +
+            'min_stake would let each indexer apply its OWN local threshold, so two hubs could qualify different ' +
+            'validator sets for the same round and FORK. Add CAPABILITY_' + String(capability).toUpperCase() +
+            '_MIN_STAKE to HUB_CAPABILITY_CONFIG (equal to the indexer constant).',
+            String(capability));
+    }
+
+    // Consecutive consensus-input failures before the monitor raises the alert
+    // and /health flips to degraded. Operator-tunable for a venue with a flaky
+    // link; a non-positive or non-integer value falls back to the default rather
+    // than disabling the alarm (a typo must not silently restore the old
+    // silent-fail-closed behaviour).
+    _resolveAlertAfterFailures() {
+        let raw = process.env.HUB_CONSENSUS_INPUT_ALERT_AFTER;
+        if (raw === undefined || raw === '') return undefined;
+        let n = Number(raw);
+        if (!Number.isInteger(n) || n < 1) {
+            console.error('CapabilitySnapshot: HUB_CONSENSUS_INPUT_ALERT_AFTER "' + raw + '" is not a positive ' +
+                'integer; using the default consensus-input alert threshold.');
+            return undefined;
         }
+        return n;
     }
 
     // Drop every cached snapshot for a capability: both the count-keyed

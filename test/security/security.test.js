@@ -1231,7 +1231,11 @@ describe('Security Hardening', function () {
             let origEnv = {};
             let requiredVars = {
                 HUB_DB_HOST: 'localhost', HUB_DB_PORT: '3306', HUB_DB_NAME: 'testdb',
-                HUB_DB_USER: 'root', HUB_DB_PASS: 'pass', HUB_PORT: '9999'
+                HUB_DB_USER: 'root', HUB_DB_PASS: 'pass', HUB_PORT: '9999',
+                // : a keyless boot refuses unless keyless is declared, and
+                // this harness boots keyless on purpose (it drives the RPC
+                // controller directly, not the auth middleware).
+                HUB_ALLOW_UNAUTHENTICATED: 'true'
             };
             for (let [k, v] of Object.entries(requiredVars)) {
                 origEnv[k] = process.env[k];

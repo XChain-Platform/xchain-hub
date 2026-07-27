@@ -43,7 +43,7 @@
     },
     {
       "name": "health",
-      "summary": "Detailed health: DB, oracle staleness, P2P state (503 when degraded).",
+      "summary": "Detailed health: DB, oracle staleness, consensus-input reachability, P2P state (503 when degraded).",
       "paramStructure": "by-name",
       "params": [],
       "result": {

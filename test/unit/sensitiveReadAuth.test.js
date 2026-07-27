@@ -49,7 +49,8 @@ async function bootApi(env) {
     });
 
     const saved = {};
-    for (const k of ['HUB_API_KEY', 'HUB_REORG_API_KEY', 'HUB_SENSITIVE_READ_AUTH', 'HUB_DB_HOST', 'HUB_DB_PORT',
+    for (const k of ['HUB_API_KEY', 'HUB_REORG_API_KEY', 'HUB_SENSITIVE_READ_AUTH', 'HUB_ALLOW_UNAUTHENTICATED',
+                     'HUB_DB_HOST', 'HUB_DB_PORT',
                      'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT', 'P2P_VALIDATOR_ADDR']) {
         saved[k] = process.env[k];
         delete process.env[k];
@@ -187,9 +188,13 @@ describe('hub API-key tiers (writes + sensitive reads vs public reads)', functio
         });
     });
 
-    describe('no HUB_API_KEY (regtest/local default)', function () {
+    // Keyless is still a supported posture, but since  it has to be
+    // DECLARED: a boot with neither a key nor the declaration refuses (proved in
+    // bootAuthGate.test.js), so these keyless cases set the flag the way an
+    // xchain-node-managed keyless deploy now does.
+    describe('no HUB_API_KEY (declared keyless: regtest/local)', function () {
         it('everything passes unauthenticated', async function () {
-            const api = await bootApi({});
+            const api = await bootApi({ HUB_ALLOW_UNAUTHENTICATED: 'true' });
             for (const m of ['getallconfigs', 'updateconfig', 'pushchaintip', 'getproposals'])
                 expect(api.request(m, undefined).nexted).to.equal(true, m);
         });
@@ -231,7 +236,7 @@ describe('hub API-key tiers (writes + sensitive reads vs public reads)', functio
         });
 
         it('reorg tier enforced even when the bulk key is unset', async function () {
-            const reorgOnly = await bootApi({ HUB_REORG_API_KEY: RKEY });
+            const reorgOnly = await bootApi({ HUB_REORG_API_KEY: RKEY, HUB_ALLOW_UNAUTHENTICATED: 'true' });
             expect(reorgOnly.request('pushpricereorg', undefined).res.statusCode).to.equal(401);
             expect(reorgOnly.request('pushpricereorg', RKEY).nexted).to.equal(true);
             expect(reorgOnly.request('pushchaintip', undefined).nexted).to.equal(true);

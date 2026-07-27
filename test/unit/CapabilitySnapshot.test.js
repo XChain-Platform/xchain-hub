@@ -344,10 +344,20 @@ describe('CapabilitySnapshot', function () {
             await snap.getWeightSnapshot('attestation', 101);
             await snap.getActiveValidatorSnapshot(102);
 
-            expect(spy.callCount).to.equal(1);                 // throttled to one inside the TTL window
+            // One throttled auth line inside the TTL window. The third failure
+            // also crosses the  alert threshold, which escalates ONCE per
+            // outage; that line is the alert, not a repeat of the auth warning.
+            let authLines  = spy.getCalls().filter(c => String(c.args[0]).indexOf('(auth)') !== -1);
+            let alertLines = spy.getCalls().filter(c => String(c.args[0]).indexOf('ALERT:') === 0);
+            expect(authLines.length).to.equal(1);
+            expect(alertLines.length).to.equal(1);
         });
 
-        it('does NOT log for a transport error (no HTTP status)', async function () {
+        it('logs a transport error as unreachable, NOT as auth ', async function () {
+            // Before  a transport error was the silent case: it returned
+            // null with no log at all, so an unreachable indexer looked exactly
+            // like a healthy hub with nothing to do. It must now be surfaced,
+            // and still be distinguishable from an auth mismatch.
             axiosStub.post.rejects(new Error('ECONNREFUSED'));
             let spy = sinon.spy(console, 'error');
             let snap = new CapabilitySnapshot(makeHub(null));
@@ -355,7 +365,12 @@ describe('CapabilitySnapshot', function () {
             let result = await snap.getSnapshot('attestation', 106);
 
             expect(result).to.equal(null);                     // still falls back
-            expect(spy.called).to.equal(false);                // but not flagged as auth
+            expect(spy.callCount).to.equal(1);
+            let msg = spy.firstCall.args[0];
+            expect(msg).to.contain('(unreachable)');
+            expect(msg).to.contain('ECONNREFUSED');
+            expect(msg).to.not.contain('BTC_INDEXER_API_KEY');
+            expect(snap.monitor.byReason.unreachable).to.equal(1);
         });
     });
 

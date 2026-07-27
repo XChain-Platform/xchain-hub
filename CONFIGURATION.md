@@ -25,9 +25,13 @@ When `HUB_API_KEY` is set, authentication fails closed: mutating methods
 `reportreorg`, `initiateswap`, the oracle/price push methods) and the hub-DB
 WebSocket upgrade return 401 unless the caller presents the configured key.
 
-When it is unset or empty, those paths are **open** and a warning is logged at
-startup. The key is deliberately not required at boot: `xchain-node`-managed
-deployments provision no key, so a hard requirement would crash-loop them.
+When it is unset or empty those paths are **open**, so since  the hub
+**refuses to boot** unless keyless operation is declared with
+`HUB_ALLOW_UNAUTHENTICATED=true`. Keyless remains supported (single-host
+regtest, a hub reachable only on a private network or behind an authenticating
+proxy) but it has to be a stated choice rather than the result of a forgotten
+variable. `xchain-node` sets the declaration automatically when it deploys a hub
+with no key in the host env, except on mainnet, where the refusal stands.
 
 **Production requirement:** always set a strong, random `HUB_API_KEY`. Generate one with:
 
@@ -77,7 +81,9 @@ signatures.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `HUB_API_KEY` | **Prod** | _empty_ | API key required on write requests and WS upgrades when set. **Empty leaves them open (startup warning) - see above.** |
+| `HUB_API_KEY` | **Prod** | _empty_ | API key required on write requests and WS upgrades when set. **Empty means the hub refuses to boot unless `HUB_ALLOW_UNAUTHENTICATED=true` - see above.** |
+| `HUB_ALLOW_UNAUTHENTICATED` | No | _unset_ | Declares that this hub knowingly runs with an unauthenticated write surface. Only consulted when `HUB_API_KEY` is empty. |
+| `HUB_CONSENSUS_INPUT_ALERT_AFTER` | No | `3` | Consecutive consensus-input fetch failures before the hub alerts and `/health` reports degraded. |
 | `HUB_RATE_LIMIT_RPM` | No | `100` | Requests per minute per client. |
 | `CORS_ORIGIN` | No | `false` | Allowed CORS origin; `false` disables cross-origin requests. |
 

@@ -43,6 +43,7 @@ const path      = require('path');
 const geoip     = require('geoip-lite');   // self-contained country/region DB; we read only country + region
 const { HUB_SCHEMA_VERSION } = require('./hub-schema-version');   // stamped on every mirror snapshot so a stale indexer rejects a mismatch
 const { buildOraclePricesSnapshotQuery } = require('./oraclePricesSnapshotQuery');   // page (indexer bootstrap) vs latest-per-feed (dashboard) query selection
+const { evaluateAuthPosture } = require('./lib/auth_posture.js');   // : boot refuses on an undeclared unauthenticated write surface
 // #1299: single source of truth for the co-sign/slash deviation band (no re-declared 0.05 literal).
 // #2653: oracle round-interval/submission-window defaults shared with OracleRound.js and XChainHub.js.
 const { ORACLE_DEVIATION_THRESHOLD, DEFAULT_ORACLE_ROUND_INTERVAL_MS,
@@ -52,17 +53,17 @@ const HUB_PORT = process.env.HUB_PORT;
 const HUB_HOST = process.env.HUB_HOST || '0.0.0.0';
 const HUB_DB_KEEPALIVE_INTERVAL = parseInt(process.env.HUB_DB_KEEPALIVE_INTERVAL) || 30000;
 
-// HUB_API_KEY is optional, matching the other services: unset disables the
-// write/WS-subscribe gate (single-host / regtest / managed deploys); when
-// configured, those paths fail closed (401) without a valid key. Hard-requiring
-// it at boot crash-loops every xchain-node-managed deployment (ConfigService
-// injects no such var and HubConnector sends no key; the same over-tightening
-// that hit the indexer (771880c) and encoder (e2bf7c4) pre-launch).
+// HUB_API_KEY gates the write/WS-subscribe surface: set, those paths fail closed
+// (401) without a valid key. Unset, the hub REFUSES TO BOOT unless keyless
+// operation is declared with HUB_ALLOW_UNAUTHENTICATED ; see the posture
+// block below.
 const HUB_API_KEY        = process.env.HUB_API_KEY || '';
-// Explicit escape hatch for running keyless. A blind hard-require of HUB_API_KEY
-// crash-loops xchain-node-managed single-host deploys (no key injected), so we
-// only fail closed in validator mode (below) and let the operator opt into
-// keyless validator operation with this flag rather than refusing outright.
+// Explicit declaration that this hub runs keyless (private network, fronting
+// proxy, single-host regtest). It exists so a blind hard-require of HUB_API_KEY
+// does not crash-loop managed deploys the way the same over-tightening did to the
+// indexer (771880c) and the encoder (e2bf7c4) pre-launch: xchain-node's
+// ConfigService sets this var for a managed deploy that has no key in its host
+// env, so keyless stays possible but is always a stated choice, never a default.
 const HUB_ALLOW_UNAUTHENTICATED = (process.env.HUB_ALLOW_UNAUTHENTICATED || '').toLowerCase() === 'true';
 const HUB_RATE_LIMIT_RPM = parseInt(process.env.HUB_RATE_LIMIT_RPM) || 100;
 const CORS_ORIGIN        = process.env.CORS_ORIGIN || false;
@@ -147,24 +148,22 @@ function validateSince(since) {
 // Parse optional P2P config (P2P is enabled when P2P_VALIDATOR_ADDR is set)
 const P2P_VALIDATOR_ADDR = process.env.P2P_VALIDATOR_ADDR || '';
 
-// Write-method auth posture. A keyless validator is dangerous: it would let any
-// caller drive consensus-affecting writes, so in validator mode we fail closed at
-// boot unless the operator explicitly opts into keyless operation. Non-validator
-// (config-server) hubs keep the historical loud-warn-and-allow behaviour so
-// xchain-node-managed single-host deploys (which inject no key) still start.
-if(!HUB_API_KEY){
-    if(P2P_VALIDATOR_ADDR && !HUB_ALLOW_UNAUTHENTICATED){
-        console.error('FATAL: HUB_API_KEY is not set in validator mode. Write methods would be UNAUTHENTICATED, letting anyone drive consensus-affecting writes. Set HUB_API_KEY, or set HUB_ALLOW_UNAUTHENTICATED=true to explicitly run keyless.');
-        process.exit(1);
-    }
-    console.warn('WARNING: HUB_API_KEY is not set. Write methods and WebSocket subscriptions are UNAUTHENTICATED. Set a strong key for any shared or public-facing deployment.');
-}
-
-// The inverse hole is quieter and easier to miss: a keyed hub with the
-// sensitive-read escape hatch flipped serves getallconfigs (every service's
-// DB user/pass) to ANY caller while writes look locked down (AU-4).
-if(HUB_API_KEY && !SENSITIVE_READ_AUTH){
-    console.warn('WARNING: HUB_SENSITIVE_READ_AUTH=0 with HUB_API_KEY set: getallconfigs (returns DB credentials) is readable WITHOUT a key. This escape hatch is for staged rollout/rollback only; unset HUB_SENSITIVE_READ_AUTH to re-enforce.');
+// Write-method auth posture . Keyless, every write method is callable by
+// anyone who can reach the port, on a validator AND on a config-oracle hub. The
+// decision itself lives in lib/auth_posture.js so it is unit-testable; here we
+// only log it and refuse the boot. Keyless operation is still available, but it
+// must be DECLARED (HUB_ALLOW_UNAUTHENTICATED=true) rather than being what you
+// get by forgetting a variable.
+const bootPosture = evaluateAuthPosture({
+    apiKey:               HUB_API_KEY,
+    allowUnauthenticated: HUB_ALLOW_UNAUTHENTICATED,
+    validatorMode:        !!P2P_VALIDATOR_ADDR,
+    sensitiveReadAuth:    SENSITIVE_READ_AUTH
+});
+for(const line of bootPosture.warnings) console.warn(line);
+if(bootPosture.refuse){
+    console.error(bootPosture.fatal);
+    process.exit(1);
 }
 
 if (P2P_VALIDATOR_ADDR && !process.env.ORACLE_EPOCH_START) {
@@ -443,6 +442,18 @@ async function startApi(){
             }
             if (oracleStale) healthy = false;
 
+            // Consensus-input reachability . The snapshot fetches that lock
+            // a round's validator set fail CLOSED, so a hub that cannot reach its BTC
+            // indexer stops participating in every capability / attestation /
+            // config-change round while its process and port stay perfectly healthy.
+            // Reporting "healthy" through that is the fail-open-observability bug the
+            // 2026-06-24 review flagged, so a sustained failure streak degrades the
+            // probe. A config-only hub never fetches consensus input at all (the
+            // counters stay zero), so this can only fire where it means something.
+            let consensusInput = (hub.capabilitySnapshot && hub.capabilitySnapshot.monitor)
+                ? hub.capabilitySnapshot.monitor.snapshot() : null;
+            if (consensusInput && consensusInput.alerting) healthy = false;
+
             let anchorStats = hub.stateAnchorPublisher ? hub.stateAnchorPublisher.getAnchorStats() : null;
             let attestStats = hub.attestationPublisher ? hub.attestationPublisher.getPublisherStats() : null;
 
@@ -459,6 +470,7 @@ async function startApi(){
                     errors: configFetchCounters.errors
                 }
             };
+            if (consensusInput) healthResult.consensus_input = consensusInput;
             if (anchorStats) healthResult.anchor = anchorStats;
             if (attestStats) healthResult.attest = attestStats;
             return healthResult;

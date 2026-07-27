@@ -48,13 +48,17 @@ async function bootRoute({ identity } = {}) {
     });
 
     const saved = {};
-    for (const k of ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT', 'P2P_VALIDATOR_ADDR', 'HUB_API_KEY']) {
+    for (const k of ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT',
+                     'P2P_VALIDATOR_ADDR', 'HUB_API_KEY', 'HUB_ALLOW_UNAUTHENTICATED']) {
         saved[k] = process.env[k];
         delete process.env[k];
     }
     Object.assign(process.env, {
         HUB_DB_HOST: 'localhost', HUB_DB_PORT: '3306', HUB_DB_NAME: 'testdb',
-        HUB_DB_USER: 'root', HUB_DB_PASS: 'pass', HUB_PORT: '9999'
+        HUB_DB_USER: 'root', HUB_DB_PASS: 'pass', HUB_PORT: '9999',
+        // : a keyless boot refuses unless keyless is declared, and this
+        // harness deliberately boots keyless (the route under test is public).
+        HUB_ALLOW_UNAUTHENTICATED: 'true'
     });
     try {
         proxyquire('../../src/api', {

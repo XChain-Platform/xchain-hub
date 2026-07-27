@@ -106,6 +106,24 @@ describe('Smoke: xchain-hub', function () {
                 expect(stderr).to.include(envVar);
             });
         }
+
+        // : with every required var present but no HUB_API_KEY, the hub
+        // must REFUSE to boot rather than serve an unauthenticated write surface.
+        // Run as a real subprocess so this proves the process actually exits,
+        // not just that a decision function returned refuse.
+        it('refuses to boot with no HUB_API_KEY and no keyless declaration', function () {
+            let threw  = false;
+            let stderr = '';
+            try {
+                execSync('node ' + API_ENTRY, { env: validEnv, timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] });
+            } catch (e) {
+                threw  = true;
+                stderr = (e.stderr || '').toString();
+            }
+            expect(threw, 'hub should have refused to boot unauthenticated').to.be.true;
+            expect(stderr).to.include('REFUSING TO BOOT');
+            expect(stderr).to.include('HUB_ALLOW_UNAUTHENTICATED');
+        });
     });
 
     // ─── SMOKE-HUB-002: Database Connection & Schema Init ───────

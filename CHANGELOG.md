@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- The hub now refuses to boot when `HUB_API_KEY` is unset unless keyless operation is declared with `HUB_ALLOW_UNAUTHENTICATED=true` .
+
+### Added
+- Consensus-input fetch failures now alert: every failed validator-set read is classified, counted and logged, and a sustained streak degrades `/health` with a `consensus_input` block (, tunable via `HUB_CONSENSUS_INPUT_ALERT_AFTER`).
+
 ### Fixed
 - review review-round fixes: per-broadcast spend-ceiling gate, FULLNODE config whitelist, oracle/checkpoint observability counters, provider-contract fixes (o-series response_format, reasoning headroom, Anthropic truncation class, HUB_ANTHROPIC_API_KEY), oracle source_address bounds, checkpoint persist fail-closed, stale comments corrected.
 
