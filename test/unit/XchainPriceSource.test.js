@@ -286,6 +286,22 @@ describe('XchainPriceSource: validator-side XCHAIN/USD @regression', function ()
             expect(out.meta.reason).to.match(/supersession disabled/);
         });
 
+        it('carries forward rather than anchoring the band on its own local price', async function () {
+            // §4: the winsorization reference must be consensus-derived, never local.
+            // Here XCHAIN/USD has finalized but BTC/USD has NOT, so there is no
+            // consensus anchor. An earlier cut fell back to this round's own BTC/USD,
+            // which differs per validator by construction, so a band-edge fill would
+            // clamp differently on each one and they would publish different values
+            // straight into deviation slashing. With fills present and supersession
+            // ENABLED, the only safe answer is the carry-forward.
+            const cfg = { ...CONFIG, XCHAIN_PRICE_MIN_BTC_VOLUME: '0' };
+            const { src } = makeSource({ dispenses: [DISPENSE_ROW] },
+                { 'XCHAIN/USD': '220.00000000' }, cfg);        // no BTC/USD finalized
+            const out = await src.derive(CTX);
+            expect(out.meta.derived).to.equal(false);
+            expect(out.price).to.equal('220.00000000');
+        });
+
         it('reads an empty override as "not set", leaving the shipped constant in force', async function () {
             // api.js passes '' for every unset XCHAIN_PRICE_* env, so '' MUST mean unset.
             const cfg = { ...CONFIG, XCHAIN_PRICE_MIN_BTC_VOLUME: '' };

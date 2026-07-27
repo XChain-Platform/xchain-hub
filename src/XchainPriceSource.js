@@ -215,8 +215,22 @@ class XchainPriceSource {
             // The band is applied in BTC terms, the units the fills are quoted in, so
             // the anchor is converted with the SAME round's BTC/USD it was published
             // against - R-1's finalized BTC/USD, not this round's local one.
+            //
+            // NO FALLBACK TO THE LOCAL PRICE, deliberately. An earlier cut read
+            // `refBtcUsd || btcUsd`, which contradicted the sentence above and
+            // reintroduced exactly the divergence §4 exists to prevent: with no
+            // finalized BTC/USD below this round, every validator would anchor the
+            // band on its OWN API price, those differ by construction (it is why the
+            // aggregation exists), and a fill near a band edge would clamp differently
+            // per validator - publishing different values into deviation slashing.
+            //
+            // Null here is a DEFINED state, not an error: referenceRateFromUsd returns
+            // null, deriveXchainRate then returns null, and the caller carries forward.
+            // That is deterministic for everyone, because "has any BTC/USD finalized
+            // below round R" is consensus data, identical on every honest hub. It only
+            // arises before the federation's first BTC/USD finalization.
             let refBtcUsd = await this._lastFinalized(BTC_PAIR, round);
-            let refRate   = referenceRateFromUsd(bcmath, carryForward, refBtcUsd || btcUsd);
+            let refRate   = referenceRateFromUsd(bcmath, carryForward, refBtcUsd);
 
             let selection = await getWindowFills(this._db(), {
                 referenceHeight:    referenceHeight,
