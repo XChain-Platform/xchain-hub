@@ -1450,8 +1450,66 @@ class XChainHub {
     //      capability snapshots and self-signs at quorum 0)
     //   3. Hub's own configs table (populated by xchain-node's updateconfig push)
     // Returns null when none yields a usable URL.
+    //
+    // The resolved URL is then VERIFIED to actually be a BTC indexer. Capability
+    // staking is BTC-only, so every consumer here (capability snapshots, the
+    // publisher election, own-stake polling, the anchored snapshot_block) reads
+    // BTC-anchored state. On a venue with no BTC leg, step 3 happily returns the
+    // DOGE indexer, whose heights and stake rows are a different chain's: the
+    // hub then elects publishers off a set that does not exist and snapshots
+    // checkpoints at a height where the stake is not active, all without one
+    // error line (, from the  A2 drill, where it took hours and an
+    // explicit BTC_INDEXER_API_URL to spot). A POSITIVE identification of a
+    // non-BTC indexer now fails loud and closed; an unreachable or silent
+    // indexer keeps the legacy behavior, since "cannot verify" is not evidence
+    // of a misconfiguration.
     async _resolveBtcIndexerUrl(){
-        return this._resolveIndexerUrl('BTC');
+        let url = await this._resolveIndexerUrl('BTC');
+        if(!url) return null;
+        if(await this._indexerCoinMismatch(url, 'BTC')) return null;
+        return url;
+    }
+
+    // True only when the indexer at `url` positively reports serving a coin
+    // other than `want`. Unknown / unreachable / no coin field -> false (do not
+    // block on an unverifiable answer). Verdicts are cached per URL: an 'ok' is
+    // permanent for the process, a mismatch is re-probed on the TTL so a hub
+    // recovers on its own once the operator repoints it.
+    async _indexerCoinMismatch(url, want){
+        if(process.env.INDEXER_COIN_CHECK === '0') return false;
+        if(!this._indexerCoinVerdicts) this._indexerCoinVerdicts = new Map();
+        const RECHECK_MS = 60000;
+        let key    = want + '@' + url;
+        let cached = this._indexerCoinVerdicts.get(key);
+        if(cached && (cached.verdict === 'ok' || (Date.now() - cached.at) < RECHECK_MS))
+            return cached.verdict === 'mismatch';
+
+        let coin = null;
+        try {
+            // getblockhashes is the one federation read that names the chain it
+            // answers for, and it is already on the hub's allowed surface.
+            let res = await axios.post(url, {
+                jsonrpc: '2.0', id: Date.now(), method: 'getblockhashes', params: {}
+            }, { headers: this._btcIndexerHeaders(), timeout: 5000 });
+            let result = res && res.data && res.data.result;
+            if(result && !result.error && result.coin) coin = String(result.coin).toUpperCase();
+        } catch(_){ /* unreachable: unverifiable, not a mismatch */ }
+
+        if(!coin){
+            this._indexerCoinVerdicts.set(key, { verdict: 'unknown', at: Date.now() });
+            return false;
+        }
+        if(coin === String(want).toUpperCase()){
+            this._indexerCoinVerdicts.set(key, { verdict: 'ok', at: Date.now() });
+            return false;
+        }
+        this._indexerCoinVerdicts.set(key, { verdict: 'mismatch', at: Date.now() });
+        console.error('XChainHub: the resolved ' + want + ' indexer at ' + url + ' is a ' + coin +
+            ' indexer, not ' + want + '. ' + want + '-anchored reads (capability snapshots, the ' +
+            'publisher election, snapshot_block) would silently use another chain\'s state, so ' +
+            'they are DISABLED until this is fixed. Set ' + want + '_INDEXER_API_URL to a real ' +
+            want + ' indexer (or push the right config via updateconfig).');
+        return true;
     }
 
     // Per-coin indexer JSON-RPC URL resolution: env <COIN>_INDEXER_API_URL ->
