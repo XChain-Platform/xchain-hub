@@ -254,6 +254,9 @@ variable also resolves from `p2pConfig`; the env var wins.
 | `ANCHOR_AMBIGUOUS_POLL_ATTEMPTS` | No | `3` |  ambiguous-send existence poll: attempts to find a maybe-accepted anchor in the indexer's mined view before deferring. |
 | `ANCHOR_AMBIGUOUS_POLL_MS` | No | `5000` | Delay (ms) between ambiguous-send poll attempts. |
 | `ANCHOR_ELECTION_TOLERANCE_BLOCKS` | No | `36` | Failover ladder: BTC blocks of elected-publisher silence before the next-ranked validator's publish slot unlocks. |
+| `ANCHOR_ANNOUNCE_RETRY_MS` | No | `300000` | How often a receiver re-verifies queued `XANC_V0_DONE` announcements. The publisher announces at 0 confirmations, so peers queue the announcement and stamp `anchor_txid` once the anchor is buried `XCHAIN_CONFIRMATIONS_DOGE` deep. |
+| `ANCHOR_ANNOUNCE_RETRY_TTL_MS` | No | `21600000` | How long a queued announcement is retried before it is dropped, so a never-mined (evicted or replaced) anchor tx cannot suppress a needed re-anchor forever. |
+| `ANCHOR_ANNOUNCE_QUEUE_MAX` | No | `500` | Max queued announcements per hub; the oldest entry is evicted past this. |
 | `ANCHOR_REWARD_PER_PUBLISH` | No | `10.00000000` | XCHAIN reward recorded per anchor publish (`RewardTracker`). |
 
 ## Effector spend policy (`SpendGuard`, )

@@ -114,7 +114,7 @@ describe('coins registry', () => {
         expect(subset).to.not.have.any.keys('genesis', 'firstBlock', 'displayName', 'confirmations');
     });
 
-    // Every resolved top-level key that is deliberately NOT part of the hashed
+    // Every top-level coin key that is deliberately NOT part of the hashed
     // consensus subset. Shared classification source for the completeness guard:
     // a NEW top-level coin key must either join consensusSubset() or be added here
     // as a conscious display/operational call. An unclassified key fails the guard
@@ -128,19 +128,62 @@ describe('coins registry', () => {
         'genesis',                                 // deliberately excluded: genesis.js fail-closes on its own hashes
         'FEE_PAYMENT_MODE',                        // informational only; not read at runtime (see coin files)
         'wireFormat',                              // block/tx parse family (decoder/utxo-tracker); not hashed, mirrors the pre-existing decoder-local constant
+        'DISPLAY_ONLY_ADDRESS_ROLES',              // classification metadata, not coin data; drives the address exclusion above
+        'networks',                                // the per-network container itself; its OWN keys are enumerated by the guard
     ]);
+
+    //  (item 1074): the guard's anchor is the COIN FILE's key set, never
+    // getCoinConfig's output. getCoinConfig is itself a hand-maintained allowlist
+    // that copies ~22 named fields out of the coin file, and consensusSubset is a
+    // second, parallel hand-maintained allowlist. Iterating the resolved object
+    // meant a new consensus-relevant field wired into NEITHER projection was
+    // invisible to the guard AND absent from the pin: classified by silent
+    // omission. Anchoring on the coin file makes the file the single source of
+    // truth, so a new field must be consciously placed in consensusSubset or in
+    // NON_CONSENSUS_TOP_LEVEL_KEYS. Same pattern as DISPLAY_ONLY_ADDRESS_ROLES.
+    function coinFileTopLevelKeys(tick, net){
+        const coinFile = require(`../../src/coins/${tick}.js`);
+        // The per-network block's own keys count as top-level coin data: they are
+        // flattened into the resolved config (net / firstBlock / addresses / genesis).
+        return [...new Set(Object.keys(coinFile).concat(Object.keys(coinFile.networks[net])))];
+    }
 
     it('covers every non-display top-level coin key in the consensus subset (completeness guard)', () => {
         for(const tick of coins.ALLOWED_COINS){
             for(const net of coins.NETWORKS){
-                const resolved = coins.getCoinConfig(tick, net);
-                const subset   = coins.consensusSubset(tick, net);
-                for(const key of Object.keys(resolved)){
+                const subset = coins.consensusSubset(tick, net);
+                for(const key of coinFileTopLevelKeys(tick, net)){
                     if(NON_CONSENSUS_TOP_LEVEL_KEYS.has(key)) continue;
-                    expect(subset, `${tick}/${net}: top-level key '${key}' is neither in consensusSubset nor classified in NON_CONSENSUS_TOP_LEVEL_KEYS`)
+                    expect(subset, `${tick}/${net}: coin-file top-level key '${key}' is neither in consensusSubset nor classified in NON_CONSENSUS_TOP_LEVEL_KEYS`)
                         .to.have.property(key);
                 }
             }
+        }
+    });
+
+    it('the completeness guard catches a coin-file field that BOTH projections dropped', () => {
+        // The latent failure mode the anchor change closes: a new consensus-relevant
+        // field lands in BTC.js but is wired into neither getCoinConfig nor
+        // consensusSubset. Anchored on the resolved object the guard never saw it
+        // (and the golden hash cannot detect an omission); anchored on the coin file
+        // it fails loudly until someone classifies it.
+        const BTC = require('../../src/coins/BTC.js');
+        BTC.NEW_CONSENSUS_FIELD = 42;
+        try {
+            expect(coins.getCoinConfig('BTC', 'mainnet'), 'the resolved allowlist drops it')
+                .to.not.have.property('NEW_CONSENSUS_FIELD');
+            expect(coins.consensusSubset('BTC', 'mainnet'), 'the hashed subset drops it too')
+                .to.not.have.property('NEW_CONSENSUS_FIELD');
+            expect(coinFileTopLevelKeys('BTC', 'mainnet'), 'but the guard now sees it')
+                .to.include('NEW_CONSENSUS_FIELD');
+            expect(() => {
+                for(const key of coinFileTopLevelKeys('BTC', 'mainnet')){
+                    if(NON_CONSENSUS_TOP_LEVEL_KEYS.has(key)) continue;
+                    expect(coins.consensusSubset('BTC', 'mainnet')).to.have.property(key);
+                }
+            }, 'an unclassified coin-file field must fail the guard').to.throw(/NEW_CONSENSUS_FIELD/);
+        } finally {
+            delete BTC.NEW_CONSENSUS_FIELD;
         }
     });
 

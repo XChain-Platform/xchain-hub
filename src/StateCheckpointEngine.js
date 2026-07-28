@@ -595,6 +595,20 @@ class StateCheckpointEngine extends EventEmitter {
             if(r.length) this.broadcaster.broadcastRow({ table: 'state_checkpoints', row: r[0] });
         }
 
+        // Advance the cadence latch for PEER-led rounds too, symmetric with the
+        // startup seed (_loadLastCheckpointLatch reads MAX(snapshot_block) over rows
+        // written by ANY leader). Writing it only in the leader branch of _tick left
+        // each hub gated on its own leadership history: with N validators and leader
+        // = btcBlock % N, every hub's latch is stale on the N-1 blocks it does not
+        // lead, so the federation finalizes a round roughly every intervalBlocks / N
+        // blocks. That advances checkpoint_seq (and therefore ANCHOR_CHECKPOINT_EVERY_N,
+        // which is defined against seq % N) N times faster than CHECKPOINT_INTERVAL_BLOCKS
+        // configures, and burns DOGE on the extra anchors. Monotonic so an out-of-order
+        // or replayed FINALIZED cannot walk the latch backwards into an early round.
+        let latch = Number(cp.snapshot_block);
+        if(Number.isFinite(latch) && (this._lastCheckpointBtcBlock == null || latch > this._lastCheckpointBtcBlock))
+            this._lastCheckpointBtcBlock = latch;
+
         console.log('StateCheckpointEngine: checkpoint ' + cp.chain + '/' + cp.network + ' @ ' + cp.block_index +
                     ' seq ' + cp.checkpoint_seq + ' (' + sigs.length + '/' + quorum + ' sigs' + (isLeader ? ', leader' : '') + ')');
         this.emit('checkpoint:finalized', { checkpoint: cp, signatures: sigs });
