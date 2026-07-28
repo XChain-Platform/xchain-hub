@@ -486,6 +486,13 @@ async function startApi(){
             if (consensusInput) healthResult.consensus_input = consensusInput;
             if (anchorStats) healthResult.anchor = anchorStats;
             if (attestStats) healthResult.attest = attestStats;
+            // Hub DB stream heartbeat . Consumers gate their price-sync
+            // barriers on this watermark, and until now the cadence was only ever
+            // visible from the consumer's own timeout logs. Body-only telemetry,
+            // like config_fetch above: a stalled heartbeat is worth alerting on but
+            // is not by itself a reason to 503 a hub whose DB and oracle are fine.
+            if (hub.hubDbBroadcaster && typeof hub.hubDbBroadcaster.getWatermarkStats === 'function')
+                healthResult.hub_db_stream = hub.hubDbBroadcaster.getWatermarkStats();
             return healthResult;
         },
 

@@ -58,16 +58,102 @@ class HubDbBroadcaster {
         // barriers can distinguish "mirror is behind" from "the world is quiet"
         // (the row-content watermark deadlock: review items #1984/#1986).
         this.watermarkIntervalMs = parseInt(process.env.WS_WATERMARK_INTERVAL_MS || this.config.WS_WATERMARK_INTERVAL_MS || 10000);
+
+        // Heartbeat-cadence instrumentation . Whether a consumer's price
+        // stream watermark sits within one heartbeat of wall clock used to be
+        // observable only from the indexer's barrier-timeout log line, which was
+        // the sole place the stream watermark was ever printed. The action-scoped
+        // barrier stopped that line from being emitted, so fixing the defect also
+        // removed its only instrument. Measure the cadence HERE, at the producer
+        // that owns it: the payload ts is stamped at send time, so a consumer can
+        // never be further behind wall clock than the gap between two ticks plus
+        // flight time. A gap past watermarkLateThresholdMs is counted and logged,
+        // and getWatermarkStats() exposes the whole picture for /health.
+        let lateFactor = parseFloat(process.env.WS_WATERMARK_LATE_FACTOR || this.config.WS_WATERMARK_LATE_FACTOR || 2);
+        // A factor below 1 would mark an exactly-on-time tick late, so a bad knob
+        // degrades to the default instead of producing permanent false alarms.
+        if (!isFinite(lateFactor) || lateFactor < 1) lateFactor = 2;
+        this.watermarkLateFactor      = lateFactor;
+        this.watermarkLateThresholdMs = Math.round(this.watermarkIntervalMs * lateFactor);
+        this._watermarkStats = {
+            ticks:           0,     // timer firings, counted even with no subscribers
+            sent:            0,     // firings that actually broadcast to someone
+            lateTicks:       0,
+            lastTickAtMs:    null,
+            lastGapMs:       null,
+            maxGapMs:        null,
+            lastWatermarkTs: null,
+            lastDelivered:   0,
+            startedAtMs:     Date.now()
+        };
+
         this._watermarkTimer = setInterval(() => this.broadcastWatermark(), this.watermarkIntervalMs);
         if (this._watermarkTimer.unref) this._watermarkTimer.unref();
     }
 
     broadcastWatermark() {
-        if (this.subscribers.size === 0) return;
-        let message = JSON.stringify({ type: 'watermark', ts: Math.floor(Date.now() / 1000) });
-        for (let ws of this.subscribers) {
-            this._send(ws, message);
+        let nowMs = Date.now();
+        let stats = this._watermarkStats;
+        // Tick-to-tick gap, recorded before the no-subscriber early return: a
+        // stalled event loop delays the heartbeat whether or not anyone is
+        // listening, and that is exactly what this instrument is for.
+        let gapMs = (stats.lastTickAtMs === null) ? null : nowMs - stats.lastTickAtMs;
+        stats.ticks++;
+        stats.lastTickAtMs = nowMs;
+        stats.lastGapMs    = gapMs;
+        if (gapMs !== null) {
+            if (stats.maxGapMs === null || gapMs > stats.maxGapMs) stats.maxGapMs = gapMs;
+            if (gapMs > this.watermarkLateThresholdMs) {
+                stats.lateTicks++;
+                console.warn('HubDbBroadcaster: watermark heartbeat late (' + gapMs + 'ms since previous, interval '
+                    + this.watermarkIntervalMs + 'ms, late ticks ' + stats.lateTicks + ')');
+            }
         }
+
+        if (this.subscribers.size === 0) {
+            stats.lastDelivered = 0;
+            return;
+        }
+        let ts = Math.floor(nowMs / 1000);
+        let message = JSON.stringify({ type: 'watermark', ts: ts });
+        let delivered = 0;
+        for (let ws of this.subscribers) {
+            if (this._send(ws, message)) delivered++;
+        }
+        stats.sent++;
+        stats.lastWatermarkTs = ts;
+        // Sockets the heartbeat actually reached. A live subscriber count with a
+        // zero delivered count means every socket is closed or dropped by
+        // backpressure, which reads to a consumer exactly like a stalled hub.
+        stats.lastDelivered = delivered;
+    }
+
+    // Producer-side view of the heartbeat: cadence actually achieved, not the
+    // cadence configured. `healthy` is the testable form of "the consumer's
+    // watermark sits within one heartbeat of wall clock", asserted where the
+    // heartbeat is produced. nowMs is injectable so callers (and tests) can
+    // evaluate the age against a fixed instant.
+    getWatermarkStats(nowMs) {
+        let now   = (typeof nowMs === 'number') ? nowMs : Date.now();
+        let stats = this._watermarkStats;
+        // Before the first tick, age runs from construction, so a broadcaster
+        // whose timer never fired at all still shows up as stale rather than
+        // reporting a null age that a probe would read as fine.
+        let ageMs = (stats.lastTickAtMs === null) ? now - stats.startedAtMs : now - stats.lastTickAtMs;
+        return {
+            interval_ms:       this.watermarkIntervalMs,
+            late_threshold_ms: this.watermarkLateThresholdMs,
+            ticks:             stats.ticks,
+            sent:              stats.sent,
+            late_ticks:        stats.lateTicks,
+            last_gap_ms:       stats.lastGapMs,
+            max_gap_ms:        stats.maxGapMs,
+            last_watermark_ts: stats.lastWatermarkTs,
+            last_tick_age_ms:  ageMs,
+            subscribers:       this.subscribers.size,
+            last_delivered:    stats.lastDelivered,
+            healthy:           ageMs <= this.watermarkLateThresholdMs
+        };
     }
 
     stop() {
@@ -215,8 +301,11 @@ class HubDbBroadcaster {
         }
     }
 
+    // Returns true only when the message was handed to an open socket, so the
+    // watermark heartbeat can report how many subscribers it actually reached
+    // rather than how many are merely registered.
     _send(ws, message) {
-        if (ws.readyState !== WebSocket.OPEN) return;
+        if (ws.readyState !== WebSocket.OPEN) return false;
         if (ws.bufferedAmount > 0) {
             ws._hubBuffered = (ws._hubBuffered || 0) + 1;
         } else {
@@ -226,14 +315,16 @@ class HubDbBroadcaster {
             console.log('HubDbBroadcaster: subscriber backpressure exceeded, closing');
             try { ws.close(1008, 'Backpressure'); } catch (e) { /* ignore */ }
             this.removeSubscriber(ws);
-            return;
+            return false;
         }
         try {
             ws.send(message);
         } catch (e) {
             console.warn('HubDbBroadcaster: send error:', e);
             this.removeSubscriber(ws);
+            return false;
         }
+        return true;
     }
 
     getSubscriberCount() {
