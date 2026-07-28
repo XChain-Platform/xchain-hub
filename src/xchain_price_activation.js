@@ -71,7 +71,7 @@ const { PRICE_PAIR_WIDEN_ACTIVATION } = require('./price_pair_activation.js');
 // scheduled flag-day. The arming instant is  D6, an open operator decision,
 // and it is the same decision that arms PRICE_PAIR_WIDEN_ACTIVATION - the two are
 // armed together, this one at or after that one. The usual contract-era stamp
-// 1790812800 (2026-10-01) is unusable because it postdates the early-September
+// 1786924800 (2026-08-17) is unusable because it postdates the early-September
 // launch target and would leave LTC/DOGE native-coin fees unpayable through launch.
 //
 // testnet/regtest are genesis-on, so the pair is composed on every test venue and
