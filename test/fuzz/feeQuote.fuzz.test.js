@@ -29,6 +29,27 @@ describe('Fuzz: XChainHub.getFeeQuote()', function () {
     // VM_XCALL_CALLBACK / VM_GUARD_GAS_CEILING).
     const KNOWN_ACTIONS = Object.keys(coins.getCoinConfig('BTC', 'mainnet').GAS_SCHEDULE);
 
+    // getFeeQuote is fail-closed on the XCHAIN/USD oracle (deepdive L-5): with no
+    // finalized round it throws rather than quoting off a missing price. The
+    // arithmetic properties below therefore have to hand it a live oracle; they
+    // used to resolve every query to [], which made every "known action" run throw
+    // before it reached a single assertion. Fail-closed is covered explicitly by
+    // its own property at the bottom of this file.
+    function priceStub (prices) {
+        return sinon.stub().callsFake(function (query, params) {
+            if (query.includes('coin_pair = ?')) {
+                let pair = (params || [])[0];
+                if (Object.prototype.hasOwnProperty.call(prices, pair)) {
+                    // No block_timestamp: getPriceStatus treats an unstamped row as
+                    // fresh, keeping these properties about arithmetic, not clocks.
+                    return Promise.resolve([{ price: String(prices[pair]), status: 'finalized' }]);
+                }
+                return Promise.resolve([]);
+            }
+            return Promise.resolve([]);
+        });
+    }
+
     beforeEach(function () {
         // Stub the Database class to avoid real MariaDB connections
         dbStub = {
@@ -62,7 +83,11 @@ describe('Fuzz: XChainHub.getFeeQuote()', function () {
                 fc.constantFrom(...KNOWN_ACTIONS),
                 fc.constantFrom('BTC', 'LTC', 'DOGE'),
                 async function (action, chain) {
-                    dbStub.doQuery.resolves([]);
+                    dbStub.doQuery = priceStub({
+                        'XCHAIN/USD': '0.05',
+                        'BTC/USD': '60000', 'LTC/USD': '80', 'DOGE/USD': '0.12'
+                    });
+                    hub.db = dbStub;
                     let result = await hub.getFeeQuote(action, chain);
                     expect(result.gasCost).to.be.a('number').and.greaterThan(0);
                     expect(result.xchainAmount).to.match(/^\d+\.\d{8}$/);
@@ -77,7 +102,8 @@ describe('Fuzz: XChainHub.getFeeQuote()', function () {
             return fc.assert(fc.asyncProperty(
                 fc.constantFrom(...KNOWN_ACTIONS),
                 async function (action) {
-                    dbStub.doQuery.resolves([]);
+                    dbStub.doQuery = priceStub({ 'XCHAIN/USD': '0.05', 'BTC/USD': '60000' });
+                    hub.db = dbStub;
                     let result = await hub.getFeeQuote(action, 'BTC');
                     let expected = result.gasCost * parseFloat(result.gasPrice);
                     expect(parseFloat(result.xchainAmount)).to.be.closeTo(expected, 1e-10);
@@ -146,6 +172,42 @@ describe('Fuzz: XChainHub.getFeeQuote()', function () {
                     }
                 }
             ), { numRuns: 100 });
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // Oracle fail-closed (deepdive L-5)
+    // -----------------------------------------------------------------
+
+    describe('oracle fail-closed', function () {
+
+        it('every known action rejects when XCHAIN/USD has no finalized round', function () {
+            return fc.assert(fc.asyncProperty(
+                fc.constantFrom(...KNOWN_ACTIONS),
+                fc.constantFrom('BTC', 'LTC', 'DOGE'),
+                async function (action, chain) {
+                    // Coin price present, XCHAIN price absent: quoting must still refuse.
+                    dbStub.doQuery = priceStub({ 'BTC/USD': '60000', 'LTC/USD': '80', 'DOGE/USD': '0.12' });
+                    hub.db = dbStub;
+                    let threw = null;
+                    try { await hub.getFeeQuote(action, chain); } catch (e) { threw = e; }
+                    expect(threw, 'getFeeQuote must not quote without an XCHAIN/USD price').to.not.equal(null);
+                    expect(threw.message).to.match(/XCHAIN\/USD oracle price/);
+                }
+            ), { numRuns: 30 });
+        });
+
+        it('a zero or negative XCHAIN/USD price is rejected', function () {
+            return fc.assert(fc.asyncProperty(
+                fc.constantFrom('0', '0.00000000', '-1', '-0.0001'),
+                async function (badPrice) {
+                    dbStub.doQuery = priceStub({ 'XCHAIN/USD': badPrice, 'BTC/USD': '60000' });
+                    hub.db = dbStub;
+                    let threw = null;
+                    try { await hub.getFeeQuote('ISSUE', 'BTC'); } catch (e) { threw = e; }
+                    expect(threw, 'a non-positive XCHAIN/USD price must not produce a quote').to.not.equal(null);
+                }
+            ), { numRuns: 4 });
         });
     });
 
