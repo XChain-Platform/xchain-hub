@@ -111,6 +111,30 @@ a keyed one-way hash, then discards the IP.
 | `TELEMETRY_IP_SALT` | No | _empty_ | Secret salt for the one-way IP hash. Without it, `ip_hash` is left null (an unsalted hash would be trivially reversible). |
 | `TELEMETRY_ADMIN_KEY` | No | _empty_ | `x-api-key` gate for the telemetry admin/query surface (empty leaves it fail-closed). Must match the value the dashboard service is configured with. |
 
+## Metrics and log shipping 
+
+The shared observability module (`src/observability/`, vendored byte-identically
+into the other services) adds a Prometheus scrape endpoint and a structured log
+shim. Both are OFF unless set here: with no variables the hub registers no extra
+route, starts no timer and opens no socket. Full reference, including the metric
+names exported, is in `src/observability/README.md`.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `METRICS_ENABLED` | No | _off_ | Serve the Prometheus scrape endpoint. |
+| `METRICS_PATH` | No | `/metrics` | Scrape path. |
+| `METRICS_TOKEN` | No | _empty_ | Require `Authorization: Bearer <token>` on the scrape. Set this (or keep the path behind the fronting proxy) on any internet-reachable box. |
+| `METRICS_HTTP` | No | `true` when metrics are on | Per-request counters and a latency histogram. Set `0` for endpoint-only. |
+| `LOG_FORMAT` | No | `text` | `json` emits one NDJSON record per log line. |
+| `LOG_LEVEL` | No | `info` | `debug`, `info`, `warn` or `error`. |
+| `LOG_SHIP_ENABLED` | No | _off_ | POST batched NDJSON to a collector. Needs `LOG_SHIP_URL` too; either alone stays off. |
+| `LOG_SHIP_URL` | No | _empty_ | Collector endpoint (http/https). |
+| `LOG_SHIP_TOKEN` | No | _empty_ | Bearer token for the collector. Never logged or echoed. |
+| `LOG_SHIP_BATCH_SIZE` | No | `100` | Lines per POST. |
+| `LOG_SHIP_INTERVAL_MS` | No | `5000` | Flush interval. |
+| `LOG_SHIP_MAX_BUFFER` | No | `5000` | Bounded buffer; the oldest lines are dropped and counted, never grown without limit. |
+| `LOG_SHIP_TIMEOUT_MS` | No | `5000` | Per-batch POST timeout. |
+
 ## P2P validator cluster
 
 The P2P cluster, PBFT consensus, oracle rounds, cross-chain engine, reorg
@@ -258,6 +282,36 @@ variable also resolves from `p2pConfig`; the env var wins.
 | `ANCHOR_ANNOUNCE_RETRY_TTL_MS` | No | `21600000` | How long a queued announcement is retried before it is dropped, so a never-mined (evicted or replaced) anchor tx cannot suppress a needed re-anchor forever. |
 | `ANCHOR_ANNOUNCE_QUEUE_MAX` | No | `500` | Max queued announcements per hub; the oldest entry is evicted past this. |
 | `ANCHOR_REWARD_PER_PUBLISH` | No | `10.00000000` | XCHAIN reward recorded per anchor publish (`RewardTracker`). |
+
+### Why those magnitudes (before you retune them)
+
+None of these is consensus data, so two hubs on different values still produce
+mutually verifiable anchors. Three of them do encode a real bound, and the full
+derivation lives in
+[ANCHOR.md](https://github.com/XChain-Platform/xchain-documentation/blob/master/protocol/actions/ANCHOR.md)
+("Where the publisher constants come from"), mirrored in the `StateAnchorPublisher`
+constructor comment and pinned by
+`test/unit/StateAnchorPublisher.constant-derivations.test.js`. In short:
+
+- **`ANCHOR_CHUNK_MAX_BYTES` = 6000** reserves head room under the protocol's
+  8192-byte `MAX_ACTION_DATA_LENGTH` ceiling, because chunk 0 shares the v1/v6
+  action with the checkpoint prefix (~322 B) and the signature lists (194 B per
+  `(PUBKEY, SIG)` pair, doubled on a v6). The ~1870 B left over is about nine
+  signature pairs on a v1, or 4+4 on a v6. **Lower this as the federation
+  grows:** a 5+5 v6 quorum needs ~5860 or less, a 7+7 quorum ~5080. Going over
+  the ceiling is not a loud failure; the decoder silently drops the action.
+- **`ANCHOR_MATCH_BATCH_SIZE` = 200** is an early-flush latency trigger, and
+  **`ANCHOR_MAX_BATCH` = 1000** is the per-cycle DOGE spend bound. Archive rows
+  are signature-dominated and do not compress (~0.55 KB of gzip+base64 per
+  settled match), so 1000 rows is ~550 KB, ~93 chunks, ~93 DOGE transactions in
+  one cycle; 200 rows is ~19.
+- **`ANCHOR_ELECTION_TOLERANCE_BLOCKS` = 36** is ~6h of BTC blocks per failover
+  rank. Blocks, not wall clock, so every hub agrees on the unlock without clock
+  sync. The ordering is what matters: signing round (120s) + DOGE burial (60
+  confs, ~1h) << 36 blocks (~6h) << `ANCHOR_INTERVAL_MS` (24h), which keeps a
+  slow leader from being overtaken while still giving ranks 1-3 a slot (~6/12/18h)
+  inside one publishing cycle. Roughly 6 to 144 blocks preserves both bounds; a
+  wrong value costs duplicate DOGE or delayed anchoring, never a divergence.
 
 ## Effector spend policy (`SpendGuard`, )
 

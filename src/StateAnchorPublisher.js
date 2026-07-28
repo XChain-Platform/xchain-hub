@@ -146,6 +146,42 @@ class StateAnchorPublisher {
         this.network     = (hub && hub.network) ? hub.network : '';   // STAKE_WEIGHTED_QUORUM gate
 
         let cfg = hub.p2pConfig || {};
+        // ---- Derivation of the ANCHOR sizing/timing magnitudes  ----
+        // Read this before retuning any of them. What is load-bearing is the
+        // RELATIONSHIP each number encodes, not the round figure; none of these is
+        // consensus data (they are per-hub operator knobs), but two of them have a
+        // hard on-chain ceiling behind them. The arithmetic below is pinned by
+        // test/unit/StateAnchorPublisher.constant-derivations.test.js, so a retune
+        // that breaks a bound fails there instead of on-chain.
+        //
+        // ANCHOR_CHUNK_MAX_BYTES = 6000 (base64url chars per archive chunk).
+        //   Hard ceiling: MAX_ACTION_DATA_LENGTH = 8192 compiled bytes
+        //   (xchain-documentation/protocol/constants.js). The DECODER is the
+        //   arbiter and silently DROPS a larger action, so an oversize anchor is
+        //   lost fleet-wide, not rejected loudly. Chunk 0 does not travel alone: it
+        //   rides inside the v1/v6 HEAD next to the checkpoint prefix (four 64-hex
+        //   hashes plus the chain/network/seq/index fields, ~322 B at mainnet
+        //   heights) and the signature lists, at 194 B per (PUBKEY,SIG) pair; a v6
+        //   adds ~67 B for PUBLISHER + ATTEST_SIG_COUNT plus another 194 B per
+        //   attesting signer. So 8192 - 6000 - 322 leaves ~1870 B of head budget:
+        //   about nine signature pairs on a v1, or four wrapper + four attestation
+        //   pairs on a v6. THAT RESERVE is why the value is 6000 and not something
+        //   nearer 8000. It binds chunk 0 only (a v2 continuation carries ~30 B of
+        //   overhead), but one uniform slice keeps _splitChunks trivial.
+        //   Tuner rule: this is the knob to LOWER when the federation grows. A v6
+        //   with a 5+5 quorum needs chunkMaxBytes <= ~5860, a 7+7 quorum <= ~5080.
+        //   Raising it costs fewer v2 txs but overflows the head first.
+        //
+        // ANCHOR_MATCH_BATCH_SIZE = 200 is a LATENCY trigger, not a size cap: 200
+        //   pending rows flush an archive early rather than waiting out
+        //   ANCHOR_INTERVAL_MS (24h), bounding how much settled cross-chain state
+        //   exists only in hub DBs. ANCHOR_MAX_BATCH = 1000 is the per-cycle SQL
+        //   LIMIT and therefore the DOGE SPEND bound: archived rows are dominated
+        //   by validator signatures and do not compress (~0.55 KB of gzip+base64
+        //   per settled match), so 1000 rows is ~550 KB, ~93 chunks, ~93 DOGE
+        //   transactions in one cycle; 200 rows is ~19. Both trade cost against
+        //   archive latency and neither affects what the archive MEANS: too large
+        //   spends more DOGE per cycle, too small drains the backlog more slowly.
         this.enabled       = String(process.env.ANCHOR_ENABLED || cfg.ANCHOR_ENABLED || 'true') !== 'false';
         this.intervalMs    = parseInt(process.env.ANCHOR_INTERVAL_MS      || cfg.ANCHOR_INTERVAL_MS      || '86400000'); // daily
         this.batchSize     = parseInt(process.env.ANCHOR_MATCH_BATCH_SIZE || cfg.ANCHOR_MATCH_BATCH_SIZE || '200');
@@ -157,6 +193,25 @@ class StateAnchorPublisher {
         // accepted anchor to reach the indexer's mined view before deferring.
         this.ambiguousPollAttempts = parseInt(process.env.ANCHOR_AMBIGUOUS_POLL_ATTEMPTS || cfg.ANCHOR_AMBIGUOUS_POLL_ATTEMPTS || '3');
         this.ambiguousPollDelayMs  = parseInt(process.env.ANCHOR_AMBIGUOUS_POLL_MS       || cfg.ANCHOR_AMBIGUOUS_POLL_MS       || '5000');
+        // Failover-ladder step ( derivation; the ladder itself is in
+        // _rankUnlocked). The unit is BTC BLOCKS, not wall clock, precisely so
+        // every hub computes the same rank unlock without clock sync; 36 blocks is
+        // ~6h at the 10-minute target. The ORDERING is the load-bearing part:
+        //   round timeout (120s) + DOGE burial (60 confs, ~1h)
+        //     <<  36 blocks (~6h)  <<  ANCHOR_INTERVAL_MS (24h)
+        // Left inequality: a healthy but slow leader is never overtaken, so the
+        // federation does not pay DOGE twice for the same checkpoint (it also keeps
+        // the on-chain verification wait in _handleV0Done well inside one rank).
+        // Right inequality: ranks 1-3 unlock at ~6/12/18h, so up to three backups
+        // still get a slot inside one publishing cycle and a dead rank 0 cannot
+        // cost the federation a whole day of anchoring. Anything in ~6..144 blocks
+        // (1h..24h) preserves both bounds; below the DOGE burial window it burns
+        // DOGE on duplicate anchors, above ~144 a dead leader stalls a cycle.
+        // Never a divergence risk in either direction: concurrent unlocked
+        // publishers build byte-identical archives (see _rankUnlocked).
+        // The same value also bounds how far a peer's claimed election_block may
+        // sit from our own BTC tip in _handleSignReq (anti-spam only; the security
+        // property there is the DB byte-match).
         this.electionToleranceBlocks = parseInt(process.env.ANCHOR_ELECTION_TOLERANCE_BLOCKS || cfg.ANCHOR_ELECTION_TOLERANCE_BLOCKS || '36');
         this.lowBalanceThreshold = parseFloat(process.env.DOGE_LOW_BALANCE_THRESHOLD || cfg.DOGE_LOW_BALANCE_THRESHOLD || '10');
         //  - shared SpendGuard for the on-chain anchor spend path. Adds the

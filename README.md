@@ -169,6 +169,20 @@ The `full_node` capability requires a reachable BTC RPC endpoint (`FULLNODE.BTC_
 
 See [Configuration](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/CONFIGURATION.md) for the full list of 30+ environment variables.
 
+## Metrics and log shipping (optional, off by default)
+
+A Prometheus `/metrics` endpoint and a structured log shim ship with the hub and
+stay inert unless switched on: with no env set, no route is registered, no timer
+starts and no socket opens. Turn the endpoint on with `METRICS_ENABLED=1` (add
+`METRICS_TOKEN` to gate the scrape on a reachable box), and ship logs with
+`LOG_SHIP_ENABLED=1` plus `LOG_SHIP_URL`. Variables are documented in
+[CONFIGURATION.md](CONFIGURATION.md); the exported metric names and the wiring
+API are in [`src/observability/README.md`](src/observability/README.md).
+
+This directory is the CANONICAL copy of the shared module . After
+editing it, re-run `bin/sync-observability.sh` to refresh the vendored copies in
+the sibling services; drift fails `bin/check-observability-parity.js` in CI.
+
 ## Scripts
 
 | Command | Description |

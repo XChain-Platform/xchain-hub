@@ -34,6 +34,7 @@ const EventEmitter      = require('events');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const eq                = require('./equivocation_header.js');
 const pricePair         = require('./price_pair_activation.js');
+const priceSigTally     = require('./price_sig_tally_activation.js');
 const { PRICE_MAX, PRICE_V1_COINS, PRICE_V1_FIATS,
         MAX_TICK_LENGTH, MAX_MEMO_LENGTH, MAX_SOURCE_ADDRESS_LENGTH } = require('./constants.js');
 const { bcgt }          = require('./bcmath.js');
@@ -194,11 +195,31 @@ class PriceAggregator extends EventEmitter {
         let qualified  = new Set(snapshot.validators.map(v => String(v.pubkey).toLowerCase()));
         let seenPubkey = new Set();
         let verifiedSigs = [];
+
+        // PRICE_SIG_TALLY : WHERE the pubkey enters the dedupe set. At/above
+        // the gate it enters only after a successful verify, so a garbage signature
+        // carrying a qualified oracle's pubkey cannot be ordered ahead of that
+        // oracle's real one to consume its slot and under-count the round. Below the
+        // gate the legacy mark-on-first-encounter ordering is preserved verbatim.
+        // Either way a pubkey counts AT MOST ONCE.
+        //
+        // Keyed on btcBlockHeight, the round's signed BTC anchor, which is EXACTLY
+        // what the indexer twin keys on (actions/price.js). Unlike the pair-name gate
+        // above there is no timestamp-vs-block-time asymmetry to accept here: the push
+        // payload carries btc_block_height and it is validated at the top of this
+        // method, so the hub and the chain evaluate the identical number and can never
+        // straddle the flag-day. Hub and indexer are PEERS across this gate, not
+        // producer and consumer: deploy both before the activation height, or the hub
+        // finalizes rounds the chain rejects (or withholds on rounds it accepts).
+        let verifyFirst = priceSigTally.isPriceSigTallyVerifyFirstActive(
+            btcBlockHeight, this.hub && this.hub.network);
+
         for (let s of sigs) {
             if (seenPubkey.has(s.pubkey)) continue;        // duplicate pubkey counts once
-            seenPubkey.add(s.pubkey);
+            if (!verifyFirst) seenPubkey.add(s.pubkey);
             if (!qualified.has(s.pubkey)) continue;        // not price-qualified at this block
             if (!ValidatorIdentity.verify(payload, s.sig, s.pubkey)) continue;
+            if (verifyFirst) seenPubkey.add(s.pubkey);
             verifiedSigs.push(s);
         }
 

@@ -84,6 +84,7 @@ const TELEMETRY_ADMIN_KEY      = process.env.TELEMETRY_ADMIN_KEY || '';
 
 const coins          = require('./coins');
 const SpendGuard     = require('./lib/spend_guard.js');   // : per-capability effector-spend pause registry
+const { installObservability } = require('./observability');   // : default-off /metrics + structured log shim
 const ALLOWED_CHAINS = new Set(coins.ALLOWED_COINS);
 
 // Per-network { coin -> consensusHash } of the bundled canonical coin files,
@@ -323,6 +324,18 @@ async function startApi(){
         standardHeaders: true,
         legacyHeaders: false
     }));
+
+    // : Prometheus /metrics plus a structured log shim, both DEFAULT OFF.
+    // Nothing is registered and no timer starts unless METRICS_ENABLED (and, for
+    // log shipping, LOG_SHIP_ENABLED + LOG_SHIP_URL) are set, so a hub deploy
+    // gains no new listening surface by accident. See src/observability/README.md.
+    let hubVersion = '';
+    try { hubVersion = require('../package.json').version; } catch { /* version label is cosmetic */ }
+    const observability = installObservability(app, {
+        service: 'xchain-hub',
+        version: hubVersion,
+        network: process.env.HUB_NETWORK || ''
+    });
 
     // API key enforcement for write methods and sensitive reads (only when a
     // key is configured; see the HUB_API_KEY and SENSITIVE_READ_METHODS notes
@@ -1735,6 +1748,9 @@ async function startApi(){
             // Release hub-owned resources: P2P, consensus/oracle timers, capability +
             // stake-poll timers, config watcher, and the MariaDB pool.
             await hub.close();
+            // Flush any buffered log lines before the process goes away (no-op
+            // unless log shipping is enabled).
+            await observability.shutdown();
         } catch (e) {
             console.error('Error during shutdown:', e);
         } finally {

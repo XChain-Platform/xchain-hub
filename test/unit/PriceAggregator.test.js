@@ -822,3 +822,125 @@ describe('PriceAggregator.receiveValidatedRound()', function () {
         expect(events).to.deep.equal([]); // aborts before emitting
     });
 });
+
+// . The hub re-verifies every pushed round rather than trusting the pusher,
+// so its tally is the indexer's twin: if the two disagree on WHERE a pubkey enters
+// the dedupe set, the hub finalizes rounds the chain rejects (or withholds on rounds
+// the chain accepts) and the federation and the ledger disagree. Both sides now key
+// on the round's signed BTC anchor, so they flip together.
+describe('PriceAggregator.receiveValidatedRound() signature-tally ordering flag-day ', function () {
+
+    let hub, agg;
+
+    // Three price-qualified validators -> PBFT quorum max(2*floor(2/3)+1, ceil(4/2)) = 2
+    const V = [makeValidator(), makeValidator(), makeValidator()];
+    const PAIRS = [{ pair: 'BTC/USD', price: '50000' }];
+    const GARBAGE_SIG = 'e'.repeat(128);
+
+    // Build a round anchored at `btcHeight`, signing the payload the aggregator
+    // itself would build for that anchor and this hub's network (the EQUIV header
+    // gate also keys on the anchor, so the bytes differ either side of 961000; the
+    // payload shape is pinned by the suite above, this block pins tally ordering).
+    function roundAt(btcHeight, sigsFor) {
+        let payload = agg._buildPriceV0Payload(5, 1700000000, PAIRS, btcHeight);
+        return {
+            round: 5,
+            timestamp: 1700000000,
+            btc_block_height: btcHeight,
+            block_index: 800000,
+            action_index: 42,
+            pairs: PAIRS,
+            sigs: sigsFor(payload)
+        };
+    }
+
+    beforeEach(function () {
+        hub = createMockHub();
+        hub.network = 'mainnet';    // the only network where the gate has two sides
+        agg = new PriceAggregator(hub);
+        hub.capabilitySnapshot = { getSnapshot: sinon.stub().resolves({
+            capability: 'price',
+            blockIndex: 800000,
+            count:      V.length,
+            validators: V.map(v => ({ pubkey: v.pubkey, amount: '100000.00000000' }))
+        }) };
+        hub.db.doQuery.callsFake(async (sql) => {
+            if (/^SELECT id FROM price_snapshots/.test(sql)) return [];
+            return [];
+        });
+    });
+
+    afterEach(function () {
+        sinon.restore();
+    });
+
+    it('at/above the gate: a garbage sig ordered AHEAD of a member\'s real one still reaches quorum', async function () {
+        let result = await agg.receiveValidatedRound('BTC', roundAt(969500, payload => [
+            { pubkey: V[0].pubkey, sig: GARBAGE_SIG },     // slot-stealer, first on the wire
+            { pubkey: V[0].pubkey, sig: V[0].sign(payload) },
+            { pubkey: V[1].pubkey, sig: V[1].sign(payload) },
+        ]));
+        expect(result.accepted).to.equal(true);
+    });
+
+    it('at/above the gate: only the VERIFIED signature is stored as the proof', async function () {
+        let stored = null;
+        hub.db.doQuery.callsFake(async (sql, params) => {
+            if (/^SELECT id FROM price_snapshots/.test(sql)) return [];
+            if (/^INSERT INTO price_snapshots/.test(sql)) { stored = params; return {}; }
+            return [];
+        });
+        await agg.receiveValidatedRound('BTC', roundAt(969500, payload => [
+            { pubkey: V[0].pubkey, sig: GARBAGE_SIG },
+            { pubkey: V[0].pubkey, sig: V[0].sign(payload) },
+            { pubkey: V[1].pubkey, sig: V[1].sign(payload) },
+        ]));
+        let proof = JSON.stringify(stored);
+        expect(proof).to.not.contain(GARBAGE_SIG,
+            'the garbage entry must never ride into the stored consensus proof');
+    });
+
+    it('at/above the gate: a member with ONLY garbage entries still does not count', async function () {
+        // V[0] contributes nothing verifiable, so only V[1] counts: 1 of quorum 2.
+        let result = await agg.receiveValidatedRound('BTC', roundAt(969500, payload => [
+            { pubkey: V[0].pubkey, sig: GARBAGE_SIG },
+            { pubkey: V[0].pubkey, sig: GARBAGE_SIG },
+            { pubkey: V[1].pubkey, sig: V[1].sign(payload) },
+        ]));
+        expect(result.accepted).to.equal(false);
+        expect(result.reason).to.contain('insufficient quorum (1/2)');
+    });
+
+    it('at/above the gate: a repeated VALID member still counts exactly once', async function () {
+        let result = await agg.receiveValidatedRound('BTC', roundAt(969500, payload => [
+            { pubkey: V[0].pubkey, sig: V[0].sign(payload) },
+            { pubkey: V[0].pubkey, sig: V[0].sign(payload) },
+        ]));
+        expect(result.accepted).to.equal(false);
+        expect(result.reason).to.contain('insufficient quorum (1/2)');
+    });
+
+    it('below the gate: the legacy mark-then-verify verdict is preserved verbatim', async function () {
+        let result = await agg.receiveValidatedRound('BTC', roundAt(969499, payload => [
+            { pubkey: V[0].pubkey, sig: GARBAGE_SIG },
+            { pubkey: V[0].pubkey, sig: V[0].sign(payload) },
+            { pubkey: V[1].pubkey, sig: V[1].sign(payload) },
+        ]));
+        expect(result.accepted).to.equal(false);
+        expect(result.reason).to.contain('insufficient quorum (1/2)',
+            'below the flag-day the garbage entry must still consume V[0]\'s dedupe slot');
+    });
+
+    it('fails closed on a hub with no network: legacy ordering, never a unilateral flip', async function () {
+        // A hub that cannot resolve its own network must not be the one node in the
+        // federation tallying under the new rule.
+        hub.network = undefined;
+        let result = await agg.receiveValidatedRound('BTC', roundAt(999999999, payload => [
+            { pubkey: V[0].pubkey, sig: GARBAGE_SIG },
+            { pubkey: V[0].pubkey, sig: V[0].sign(payload) },
+            { pubkey: V[1].pubkey, sig: V[1].sign(payload) },
+        ]));
+        expect(result.accepted).to.equal(false);
+        expect(result.reason).to.contain('insufficient quorum (1/2)');
+    });
+});
