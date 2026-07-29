@@ -625,6 +625,63 @@ describe('StateCheckpointEngine', function () {
             expect(nd.db.checkpoints.length, 'no row written').to.equal(before);
         });
 
+        // ── : SWQ gate plane, asserted rather than silently switched ──
+        //
+        // This engine resolves the stake-weighted-quorum gate on the DEPLOYMENT network
+        // while StateAnchorPublisher resolves the same gate on the RECORD's network
+        // (resolveQuorumNetwork, ). Two files, one gate, two planes. The v1 call is
+        // kept on purpose: switching to cp.network would let a PEER choose this hub's
+        // quorum rule by asserting a network in a gossiped checkpoint, which is worse
+        // than the drift being fixed. So a genuine disagreement is refused loudly.
+        it('refuses a checkpoint whose network disagrees with the deployment network', async function () {
+            let bus = buildMesh(1, { btcBlock: 200 });
+            let nd  = bus.nodes[0];
+            nd.engine.network = 'mainnet';                 // deployment plane
+            let threw = null;
+            try {
+                await nd.engine._acceptFinalized(cp(Object.assign({}, ROOTED, { network: 'regtest' })),
+                    [{ pubkey: nd.pubkey, sig: 'a' }], 1, true);
+            } catch(e){ threw = e; }
+            expect(threw, 'a cross-network checkpoint must be refused').to.not.equal(null);
+            expect(String(threw.message)).to.match(/network mismatch/);
+            expect(String(threw.message), 'names BOTH values so it is diagnosable').to.match(/regtest[\s\S]*mainnet/);
+            expect(nd.db.checkpoints.length, 'nothing persisted').to.equal(0);
+        });
+
+        it('accepts when the two agree', async function () {
+            let bus = buildMesh(1, { btcBlock: 200 });
+            let nd  = bus.nodes[0];
+            // Both planes set to mainnet, where snapshot_block 200 is far below the
+            // 961000 SWQ anchor, so the gate stays OFF and the mesh's count-based
+            // capabilitySnapshot mock is the right shape. (Using regtest here would flip
+            // SWQ on from genesis and need a weight snapshot the mock does not implement,
+            // which tests the harness rather than the assert.)
+            nd.engine.network = 'mainnet';
+            await nd.engine._acceptFinalized(cp(Object.assign({}, ROOTED, { network: 'mainnet' })),
+                [{ pubkey: nd.pubkey, sig: 'a' }], 1, true);
+            expect(nd.db.checkpoints.length).to.equal(1);
+        });
+
+        // An UNSCOPED hub is a different, already-documented problem (#2236): it
+        // resolves every flag-day gate to OFF. It is warned about, not refused, because
+        // refusing would take every unscoped deployment offline at once.
+        it('an unscoped hub warns once but keeps working (legacy path preserved)', async function () {
+            let bus = buildMesh(1, { btcBlock: 200 });
+            let nd  = bus.nodes[0];
+            nd.engine.network = '';
+            let warnings = [];
+            let orig = console.warn;
+            console.warn = (...a) => warnings.push(a.join(' '));
+            try {
+                await nd.engine._acceptFinalized(cp(ROOTED), [{ pubkey: nd.pubkey, sig: 'a' }], 1, true);
+                await nd.engine._acceptFinalized(cp(Object.assign({}, ROOTED, { checkpoint_seq: 201, snapshot_block: 201 })),
+                    [{ pubkey: nd.pubkey, sig: 'b' }], 1, true);
+            } finally { console.warn = orig; }
+            expect(nd.db.checkpoints.length, 'still persists').to.equal(2);
+            let unscoped = warnings.filter(w => /NO deployment network/.test(w));
+            expect(unscoped.length, 'warned exactly once, not per checkpoint').to.equal(1);
+        });
+
         it('persist ACCEPTS the same checkpoint once the roots are present', async function () {
             let bus = buildMesh(1, { btcBlock: 200 });
             let nd  = bus.nodes[0];

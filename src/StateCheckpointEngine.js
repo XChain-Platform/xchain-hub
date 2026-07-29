@@ -344,6 +344,9 @@ class StateCheckpointEngine extends EventEmitter {
 
         let myPubkey = this.identity.getPubkeyHex().toLowerCase();
         let mySig    = this.identity.sign(canonical);
+        // #3095: the SWQ gate below resolves on this.network; refuse before signing if
+        // the checkpoint we just built disagrees (a mis-set indexer network).
+        this._assertCheckpointNetwork(cp, 'propose');
         let snapCount = validators.length;   // raw row count (matches _handleFinalized + anchor.js:336)
         // STAKE_WEIGHTED_QUORUM: weighted (source-deduped) at/above activation, else count.
         let weighted  = swq.isStakeWeightedQuorumActive(cp.snapshot_block, this.network);
@@ -575,6 +578,12 @@ class StateCheckpointEngine extends EventEmitter {
     // the INSERT-IGNORE indexer mirror always converges), stream it to our
     // indexer subscribers, and emit for the StateAnchorPublisher.
     async _acceptFinalized(cp, sigs, quorum, isLeader){
+        // #3095: refuse BEFORE any work. This cp arrived from a PEER, so its network is
+        // the sender's claim; if it disagrees with ours we would tally the signature set
+        // under a different rule than the anchor publisher (and the sender) will. Checked
+        // first so a cross-network checkpoint costs no validator resolution and cannot
+        // slip past an earlier early-return.
+        this._assertCheckpointNetwork(cp, 'accept-finalized');
         // EVERY hub persists the oracle_publish snapshot for the checkpoint's
         // snapshot_block, not just the cadence leader (_tick): ANCHOR verifiers
         // check the checkpoint's signatures against capability_snapshots in
@@ -738,6 +747,50 @@ class StateCheckpointEngine extends EventEmitter {
     //
     // One predicate, three call sites (propose, co-sign, persist), so the rule cannot be
     // enforced on one path and quietly skipped on the others again.
+    // : the SWQ gate here resolves on the DEPLOYMENT network
+    // (`this.network`) while StateAnchorPublisher resolves the same gate on the
+    // RECORD's network (resolveQuorumNetwork(cp, ...), "gate on the RECORD network to
+    // match the indexer", ). Two files, one gate, two planes.
+    //
+    // The v1 call is kept deliberately rather than switched to cp.network. Switching
+    // would make a misconfigured hub silently adopt whatever network a PEER asserts in
+    // a gossiped checkpoint, which is a worse failure than the one being fixed: the
+    // quorum rule would then be chosen by the sender. Instead the drift is made LOUD.
+    //
+    // A checkpoint whose network disagrees with this hub's deployment network is
+    // refused outright. That surfaces the misconfiguration where it is diagnosable (a
+    // named error naming both values) rather than at consensus time, where it appears
+    // as an unexplained quorum failure or, worse, as two hubs tallying the same
+    // signature set under different rules and disagreeing about whether quorum was
+    // reached. Callers treat a throw as "do not sign / do not persist".
+    //
+    // Scoped to a genuine disagreement between two KNOWN networks. An UNSCOPED hub
+    // (this.network === '') is a different, already-documented problem: it silently
+    // resolves every flag-day gate to "off" (isStakeWeightedQuorumActive returns false
+    // on an unknown network) and it is what #2236 found double-crediting the COLLECT
+    // rail. It is warned about loudly here but NOT refused, because refusing would take
+    // every unscoped deployment offline at once, which is a far larger behavioural
+    // change than this finding asks for and is not what it is about.
+    _assertCheckpointNetwork(cp, context){
+        let recordNet = (cp && cp.network != null) ? String(cp.network) : '';
+        if(recordNet === '') return;
+        if(this.network === ''){
+            if(!this._warnedUnscopedNetwork){
+                this._warnedUnscopedNetwork = true;
+                console.warn('StateCheckpointEngine: this hub has NO deployment network, so every ' +
+                    'flag-day gate (stake-weighted quorum, equivocation-header, checkpoint-commitment) ' +
+                    'resolves to OFF while the checkpoints it handles are scoped to "' + recordNet +
+                    '". Set HUB_NETWORK. Continuing on the legacy unscoped path ().');
+            }
+            return;
+        }
+        if(recordNet === this.network) return;
+        throw new Error('checkpoint network mismatch in ' + context + ': record says "' + recordNet +
+            '" but this hub is deployed on "' + this.network + '". Refusing rather than ' +
+            'resolving the stake-weighted-quorum gate on one plane while the anchor ' +
+            'publisher resolves it on the other ().');
+    }
+
     static isRootless(cp){
         if(!cp) return false;
         if(!ckpt.isCheckpointCommitmentActive(cp.snapshot_block, cp.network)) return false;
