@@ -2142,7 +2142,20 @@ class StateAnchorPublisher {
                 return false;
             }
             let pubkey = String(rr.validator_pubkey || '').toLowerCase();
-            let set = await this._resolveCapabilitySet('oracle_publish', Number(rr.block_index), resolveQuorumNetwork(archive, this.network));
+            // : resolve the RECORD's network once, and use it for the
+            // capability set AND both flag-day gates below.
+            //
+            // The gates used to read `this.network`, the DEPLOYMENT network, while the
+            // capability-set resolution on the next line already used the archive's own.
+            // That is the same defect #2236/ fixed at the record/mirror sites and
+            // missed here: on an unscoped hub (network === '') the gate resolved
+            // inactive, so this verifier expected the legacy operator-tunable amount
+            // while the leader that built the row used the FROZEN derived constant, and
+            // a perfectly valid archive was refused signature (or, with the mismatch the
+            // other way, a wrong amount was signed). The activation constants themselves
+            // do not move; only which network they are read for.
+            let recordNetwork = resolveQuorumNetwork(archive, this.network);
+            let set = await this._resolveCapabilitySet('oracle_publish', Number(rr.block_index), recordNetwork);
             if(!set.some(v => v.pubkey === pubkey)){
                 console.warn('StateAnchorPublisher: archive reward ' + tag + ' pubkey ' + pubkey.substring(0, 12) +
                              '... is not in the oracle_publish set at block ' + rr.block_index + '; NOT signing');
@@ -2154,9 +2167,9 @@ class StateAnchorPublisher {
             // legacy operator-configured amount stands. Mirrors RewardTracker.recordAnchorReward
             // so a leader's own archived rows verify here.
             let isDerivedChain   = /^anchor_(BTC|LTC|DOGE)$/.test(String(rr.reward_type || '')) &&
-                                   ar.isAnchorRewardActive(Number(rr.block_index), this.network);
+                                   ar.isAnchorRewardActive(Number(rr.block_index), recordNetwork);
             let isDerivedArchive = String(rr.reward_type || '') === 'anchor_archive' &&
-                                   ar.isArchiveRewardActive(Number(rr.block_index), this.network);
+                                   ar.isArchiveRewardActive(Number(rr.block_index), recordNetwork);
             let expectedAmount = isDerivedChain
                 ? ar.ANCHOR_REWARD_AMOUNT
                 : isDerivedArchive
