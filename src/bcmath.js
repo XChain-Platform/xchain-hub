@@ -105,4 +105,26 @@ function bcstr(num){
     return bcnum(num).toFixed();
 }
 
-module.exports = { isNull, isNumeric, bcnum, bcsub, bcadd, bcmul, bcdiv, getPrice, bcgt, bclt, bcgte, bclte, bcstr, bcformat };
+// Round to d decimal places, half-up, entirely in decimal.js space. Faithful port
+// of xchain-indexer/src/utility.js bcround (): floor(n * 10^d + 0.5)
+// / 10^d, so the rounding mode is EXPLICIT and config-independent rather than
+// inheriting the global decimal.js/mathjs rounding setting. It exists to snap a
+// derived settlement amount onto its tick's decimal grid, which both recovers the
+// true value from sub-ULP artifacts (1 - 1e-18 = 0.999999999999999999 -> 1) and
+// forces indivisible (0-decimal) tokens to integers.
+//
+// This file's header declares byte-equivalence with the indexer's helpers, and
+// until now that claim was false by omission: the indexer quantizes both derived
+// fill amounts with bcround and the hub had no bcround at all. The helper is
+// ported here so the family is complete and the claim can be tested. See
+// CrossChainDexEngine for what the hub can and cannot yet quantize.
+function bcround(num, decimals){
+    let n = (!isNull(num)) ? num : 0;
+    let d = (!isNull(decimals)) ? parseInt(decimals) : 0;
+    let scale   = mathjs.bignumber(10).pow(d);
+    let half    = mathjs.bignumber('0.5');
+    let rounded = bcnum(n).times(scale).plus(half).floor().div(scale);
+    return bcnum(mathjs.format(rounded, {notation: 'fixed', precision: d}));
+}
+
+module.exports = { isNull, isNumeric, bcnum, bcsub, bcadd, bcmul, bcdiv, getPrice, bcgt, bclt, bcgte, bclte, bcstr, bcformat, bcround };

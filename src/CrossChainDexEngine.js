@@ -371,15 +371,37 @@ class CrossChainDexEngine extends EventEmitter {
         // Bottleneck clamp (order_match.js:134-150), orderInfo = taker / matchInfo = maker.
         let max_give = bc.bclt(makerRem.get, takerRem.give) ? makerRem.get : takerRem.give;
         let max_get  = bc.bclt(makerRem.give, takerRem.get) ? makerRem.give : takerRem.get;
-        let give_from_get = bc.bcmul(max_get, takerGetPrice, 18);
+        // : PRECISION 64, matching order_match.js:197/202 exactly.
+        //
+        // These two multiplications ran at precision 18 while the indexer's identical
+        // bottleneck-clamp derivation runs at the mathjs default 64, and getPrice above
+        // already produces a 64-digit rate. Truncating the product to 18 places threw
+        // away digits the indexer keeps, so for a price that is not exactly
+        // representable the hub and the indexer derived DIFFERENT fill quantities from
+        // the same pair of offers. This file's bcmath header states the two must be
+        // byte-equivalent; at 18 they were not, and a hub that finalizes a fill the
+        // indexer will not reproduce is the livelock the finding pair documents.
+        let give_from_get = bc.bcmul(max_get, takerGetPrice, 64);
         let takerGive, takerGet;
         if(bc.bcgt(give_from_get, max_give)){
             takerGive = String(max_give);
-            takerGet  = String(bc.bcmul(max_give, takerGivePrice, 18));
+            takerGet  = String(bc.bcmul(max_give, takerGivePrice, 64));
         } else {
             takerGive = String(give_from_get);
             takerGet  = String(max_get);
         }
+        // KNOWN REMAINING GAP (, not closable here): the indexer follows
+        // this clamp with bcround(amount, <that tick's DECIMALS>) on BOTH sides
+        // (order_match.js:219-220), which is what enforces indivisibility and clears
+        // sub-unit dust. The hub cannot reproduce it yet because nothing in the
+        // cross-chain offer it holds carries the ticks' decimals: offers arrive with
+        // give_tick / get_tick as bare identifiers and the hub mirrors no token table.
+        // bcmath.bcround is ported and ready; only the decimals are missing. Until an
+        // offer carries them (or the hub mirrors token decimals), the hub's derived
+        // amount can still differ from the indexer's in the sub-unit digits, and the
+        // indexer remains the quantizing arbiter. Do NOT paper over this with a
+        // COIN_DECIMALS default: an 8-decimal assumption silently mis-quantizes every
+        // 0-decimal (NFT) and non-8-decimal tick, which is worse than not rounding.
         if(bc.bclte(takerGive, 0) || bc.bclte(takerGet, 0)) return null;
 
         if(ownership){

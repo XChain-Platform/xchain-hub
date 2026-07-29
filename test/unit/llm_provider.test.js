@@ -1616,3 +1616,131 @@ describe('hub-credentials, resolveOpenAiAuth / resolveLlmVendorAuth', function (
         expect(unknown.reason).to.equal('unknown_vendor');
     });
 });
+
+/*********************************************************************
+ * : agree() must not canonicalize an unvouched `meta`.
+ *
+ * `meta` (the model that served a response) is consensus-visible: the canonical
+ * signature binds it and the ATTEST v1 wire records it on-chain. But proposals
+ * come from other validators and the judge only ever evaluates their BODIES, so
+ * whichever proposal won had its meta copied straight through. A Byzantine
+ * validator could put arbitrary bytes on-chain without ever winning on content.
+ *
+ * Two fail-closed gates, mirroring the truncated_pick precedent in the same
+ * function: an exact allowlist against the block-anchored approved identifiers,
+ * and corroboration across proposals.
+ ********************************************************************/
+describe('llm provider, agree() meta canonicalization (#3070)', function () {
+
+    const APPROVED = 'claude-sonnet-4-6';
+    const body = (s) => Buffer.from(s, 'utf8');
+
+    it('passes an approved, corroborated meta through unchanged (single proposal)', async function () {
+        const llm = _reloadProvider();
+        const r = await llm.agree([{ body: body('solo'), meta: APPROVED }]);
+        expect(r).to.not.be.null;
+        expect(r.meta).to.equal(APPROVED);
+    });
+
+    it('rejects an unapproved meta on the single-proposal path', async function () {
+        const llm = _reloadProvider();
+        const outcome = {};
+        // Nothing to corroborate against, but the allowlist still applies: an
+        // unrecognized identifier must never reach the canonical signature.
+        const r = await llm.agree([{ body: body('solo'), meta: 'evil-model-9000' }], { outcome });
+        expect(r).to.be.null;
+        expect(outcome.inconclusive).to.equal(true);
+        expect(outcome.reason).to.equal('meta_unrecognized');
+    });
+
+    it('rejects a non-string or empty meta rather than coercing it', async function () {
+        for (const bad of [undefined, null, '', 42, { model: APPROVED }, Buffer.from(APPROVED)]) {
+            const llm = _reloadProvider();
+            const outcome = {};
+            const r = await llm.agree([{ body: body('solo'), meta: bad }], { outcome });
+            expect(r, 'meta=' + String(bad)).to.be.null;
+            expect(outcome.reason).to.equal('meta_unrecognized');
+        }
+    });
+
+    it('does not accept a near-miss of an approved identifier', async function () {
+        // Exact membership only: no prefix, suffix or case-insensitive matching, any
+        // of which would let a crafted value ride in alongside a legitimate one.
+        for (const near of [APPROVED + '-evil', 'x' + APPROVED, APPROVED.toUpperCase(), ' ' + APPROVED]) {
+            const llm = _reloadProvider();
+            const outcome = {};
+            const r = await llm.agree([{ body: body('solo'), meta: near }], { outcome });
+            expect(r, near).to.be.null;
+            expect(outcome.reason).to.equal('meta_unrecognized');
+        }
+    });
+
+    it('honours a governance-updated approved_models list', async function () {
+        const llm = _reloadProvider();
+        llm._setConfig({ additional_config: { approved_models: ['some-new-approved-model', 'claude-opus-4-7'] } });
+        const r = await llm.agree([{ body: body('solo'), meta: 'some-new-approved-model' }]);
+        expect(r).to.not.be.null;
+        expect(r.meta).to.equal('some-new-approved-model');
+        // ...and the previous default is no longer approved once governance replaced it.
+        const outcome = {};
+        expect(await llm.agree([{ body: body('solo'), meta: APPROVED }], { outcome })).to.be.null;
+        expect(outcome.reason).to.equal('meta_unrecognized');
+    });
+
+    // The corroboration half is exercised through the internal helper, because
+    // reaching the judge-winner return requires a live judge transport. The gate is
+    // the same function used on that path.
+    describe('corroboration across proposals', function () {
+
+        it('requires a second proposal reporting the identical meta', async function () {
+            const llm = _reloadProvider();
+            // Two proposals, only one claiming the approved model: uncorroborated.
+            const outcome = {};
+            const r = llm._canonicalMetaForTest([
+                { body: body('A'), meta: APPROVED },
+                { body: body('B'), meta: 'claude-opus-4-7' }
+            ], 0, outcome);
+            expect(r).to.be.null;
+            expect(outcome.reason).to.equal('meta_uncorroborated');
+        });
+
+        it('accepts when a second proposal corroborates', async function () {
+            const llm = _reloadProvider();
+            const outcome = {};
+            const r = llm._canonicalMetaForTest([
+                { body: body('A'), meta: APPROVED },
+                { body: body('B'), meta: APPROVED }
+            ], 0, outcome);
+            expect(r).to.equal(APPROVED);
+            expect(outcome.inconclusive).to.be.undefined;
+        });
+
+        it('fails closed on honest divergence too, rather than recording an unsupported claim', async function () {
+            // A validator that legitimately fell back to another model and whose body
+            // the judge then picked lands here as well. Inconclusive is the correct
+            // outcome: the federation cannot corroborate which model served it.
+            const llm = _reloadProvider();
+            const outcome = {};
+            const r = llm._canonicalMetaForTest([
+                { body: body('A'), meta: 'claude-opus-4-7' },
+                { body: body('B'), meta: APPROVED },
+                { body: body('C'), meta: APPROVED }
+            ], 0, outcome);
+            expect(r).to.be.null;
+            expect(outcome.reason).to.equal('meta_uncorroborated');
+        });
+
+        it('an unapproved meta is rejected before corroboration is even considered', async function () {
+            // Even a fully corroborated value must be an approved identifier: a
+            // colluding pair must not be able to vote an arbitrary string onto the chain.
+            const llm = _reloadProvider();
+            const outcome = {};
+            const r = llm._canonicalMetaForTest([
+                { body: body('A'), meta: 'evil-model-9000' },
+                { body: body('B'), meta: 'evil-model-9000' }
+            ], 0, outcome);
+            expect(r).to.be.null;
+            expect(outcome.reason).to.equal('meta_unrecognized');
+        });
+    });
+});

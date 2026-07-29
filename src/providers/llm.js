@@ -133,6 +133,11 @@ function _pausedError() {
     return err;          // a deliberate pause from a real vendor/transport failure
 }
 exports._llmEnabled = _llmEnabled;
+// Test seam for the #3070 meta gate. The corroboration half only runs on the
+// judge-winner return, which needs a live judge transport to reach, so the suite
+// exercises the same function directly rather than mocking a vendor.
+exports._canonicalMetaForTest = (proposals, idx, outcome) =>
+    _canonicalMeta(proposals, idx, { outcome: outcome || {} });
 
 // item 2679 - per-call spend ceiling for the claude_spawn transport. The callee
 // (lib/claude-spawn.js) fully plumbs --max-budget-usd but no caller ever supplied
@@ -315,6 +320,69 @@ function _markInconclusive(options, reason){
     }
 }
 
+// ── : canonicalizable `meta` ────────────────────────────────────────
+//
+// `meta` is the model identifier that served a response. It is CONSENSUS-VISIBLE:
+// the canonical signature binds it and the ATTEST v1 wire records it on-chain
+// (see this file's header). But `proposals` arrive from other validators, and the
+// judge only ever evaluates their BODIES (`candidates` below is built from
+// p.body). Nothing looked at `meta`, so whichever proposal the judge happened to
+// pick had its meta copied verbatim onto the chain: a Byzantine validator could
+// put arbitrary bytes there and have the federation sign them, without ever
+// having to win on content.
+//
+// Two independent gates, both fail-closed, mirroring the `truncated_pick`
+// precedent already in this function (refuse to finalize what was not evaluated,
+// rather than finalize it and hope):
+//
+//   1. ALLOWLIST. The value must be exactly one of the block-anchored approved
+//      identifiers. Not a prefix, not a case-insensitive match, not "looks like a
+//      model name": an exact member of the same set the request was pinned from.
+//   2. CORROBORATION. With more than one proposal in play, at least two must
+//      report the identical meta. A meta only its own author vouches for is not
+//      evidence of anything, and it is precisely the shape a fabricated value
+//      takes. Honest divergence (a validator that legitimately fell back to
+//      another model and whose body the judge then picked) also lands here, and
+//      failing closed is the right answer for that too: the round is
+//      inconclusive rather than recording a claim the federation cannot support.
+const META_MIN_CORROBORATION = 2;
+
+// The approved identifiers, resolved at call time so a governance hotReload of
+// approved_models is reflected. Judge fallbacks are included: a body produced by
+// a fallback model is legitimate, and its meta must be expressible.
+function _approvedMetaSet(){
+    return new Set([...APPROVED_MODELS, ...JUDGE_FALLBACK_MODELS].filter(m => typeof m === 'string' && m));
+}
+
+// Validate the winning proposal's meta. Returns the value to canonicalize, or
+// null with `options.outcome` marked inconclusive.
+function _canonicalMeta(proposals, idx, options){
+    const raw = proposals[idx] ? proposals[idx].meta : undefined;
+    // Deliberately strict about type: a non-string meta (object, Buffer, number)
+    // is not something this allowlist can reason about, so it is unrecognized.
+    if (typeof raw !== 'string' || raw === ''){
+        console.warn('llm: winning proposal carries a non-string/empty meta; failing closed (#3070)');
+        _markInconclusive(options, 'meta_unrecognized');
+        return null;
+    }
+    if (!_approvedMetaSet().has(raw)){
+        console.warn('llm: winning proposal meta "' + raw + '" is not an approved model identifier; ' +
+            'failing closed rather than canonicalizing an unvouched value on-chain (#3070)');
+        _markInconclusive(options, 'meta_unrecognized');
+        return null;
+    }
+    if (proposals.length > 1){
+        let agreeing = proposals.filter(p => typeof p.meta === 'string' && p.meta === raw).length;
+        if (agreeing < META_MIN_CORROBORATION){
+            console.warn('llm: winning proposal meta "' + raw + '" is corroborated by only ' + agreeing +
+                ' of ' + proposals.length + ' proposals; failing closed (#3070)');
+            _markInconclusive(options, 'meta_uncorroborated');
+            return null;
+        }
+    }
+    return raw;
+}
+
 exports.agree = async (proposals, options) => {
     options = options || {};
     // item 2680: kill switch. A single proposal is returned without any billed
@@ -326,7 +394,12 @@ exports.agree = async (proposals, options) => {
         return null;
     }
     if (proposals.length === 1) {
-        return { body: proposals[0].body, meta: proposals[0].meta };
+        // Allowlist still applies with a single proposal (#3070). There is nothing to
+        // corroborate against, but an unapproved identifier is unrecognized either way
+        // and must not reach the canonical signature.
+        let solo = _canonicalMeta(proposals, 0, options);
+        if (solo === null) return null;
+        return { body: proposals[0].body, meta: solo };
     }
 
     // item 2680: the multi-proposal path below issues a billed judge call. When the
@@ -474,7 +547,11 @@ exports.agree = async (proposals, options) => {
                 _markInconclusive(options, 'truncated_pick');
                 return null;
             }
-            return { body: proposals[idx].body, meta: proposals[idx].meta };
+            // #3070: the judge vouched for the BODY it selected, never for that
+            // proposal's meta. Gate the meta separately before it is canonicalized.
+            let meta = _canonicalMeta(proposals, idx, options);
+            if (meta === null) return null;
+            return { body: proposals[idx].body, meta: meta };
         }
     }
     // Reached the end without a valid equivalent+canonical_index verdict: the

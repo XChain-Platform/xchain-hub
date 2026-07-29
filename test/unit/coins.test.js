@@ -18,16 +18,21 @@ const coins      = require('../../src/coins');
 // address role, fee value, gas-schedule entry, or staking param changes a hash
 // and fails here. Updating a value is a deliberate act, so update the golden
 // alongside it (and bump the per-service CONSENSUS_CONFIG_PIN in lockstep).
+// REGENERATED 2026-07-28 ( batch, ): `wireFormat` is now folded
+// into consensusSubset(), so every one of these nine hashes moved by construction.
+// The testnet/regtest values are the ones bundled as CONSENSUS_CONFIG_PIN in all
+// nine vendoring services; mainnet stays `null` in the pin (pre-arm) and is
+// pinned only here.
 const GOLDEN_HASH = {
-    BTC:  { mainnet: 'f9bb6c6b2fdc073fafd3672d3ccd871d2b00c2567f98eb50b8bc6e30a7bcf41e',
-            testnet: '211086b82b345092a8ce18ca08ab945a6b294c59efa5588c70eacdb5ee515e62',
-            regtest: 'd900b05a7df14595ff4a2be4bbd9505a661f0c6cef4237f1e00aace3b2397f0e' },
-    LTC:  { mainnet: 'd09747c47fc095d1c506acdbbfb05372a0165caf71ddaa37891bb8947213c8f2',
-            testnet: '7e4cc52a609606024d1ea8d26c743957e195c660b0bb749e523f4cbdcc82baf8',
-            regtest: '769d91cad98ea674494290ac680bb1c0ddb8bcd3b75cbffa131365bf97811db1' },
-    DOGE: { mainnet: 'eabae17f3633a36b2257c5bc171bfc5151b9293b5e849eae0fe00eb0a090e9ef',
-            testnet: 'd61706332ddcb921b4bb3d0a9f077119426405692fc118eaba8d1a6a9ecb28d0',
-            regtest: '3de84c0bf6478e985f0ea0cc0ece155cf2780f0e932c3f6e063d3f01bfc38197' },
+    BTC:  { mainnet: '8c45030307de2c776cecb20e7eefd426aaea5f63e9f6466bbd9376b6fff6d55e',
+            testnet: '6db27c44dfa99968fb89ddc310413ba2d7a9ad59e3b8624b933a76b7cc4de156',
+            regtest: '6535e995e5890c3a0d5a2df970b2f3b94f8d60e83aa563ea861a5909a3f80288' },
+    LTC:  { mainnet: '6275f39f616c2d891551062d666831455206a546782beede1442e18eb90a0a25',
+            testnet: '03f62fc2f57151924aa6a76ff5ee97684aece17ca54a3f39eb7d8167bd34a20b',
+            regtest: '786d903d2b347803c06a1b5b157011834ebc25a246be54f5c27ddd27629eba57' },
+    DOGE: { mainnet: '0e94c5981eb1e7f90e665092322ebb46a7841c896df049f44229da547be73b95',
+            testnet: '3ec0ad2f7290e36887d09a880761c217ea6b0eeb06078d708ee5c200ef2a2410',
+            regtest: '9f448912ed9d24ac50dc16f132619c91115355c165e8f1a5bb3b630ea090f2e0' },
 };
 
 describe('coins registry', () => {
@@ -91,18 +96,34 @@ describe('coins registry', () => {
         }
     });
 
-    it('exposes a per-coin wireFormat family that stays out of the consensus hash', () => {
+    // . This test previously asserted the OPPOSITE: that wireFormat stayed
+    // OUT of the consensus hash. That was the bug. wireFormat selects the block
+    // parser (XChainBlockDecoder keys default/mweb/auxpow off it, and XChainDecoder
+    // derives auxPow from it), so it decides how a block's bytes are read. Leaving it
+    // out of the pinned subset meant CONSENSUS_CONFIG_PIN verified clean on a node
+    // whose bundle declared, say, LTC as 'default' instead of 'mweb': it would decode
+    // different transactions out of the same block and fork, with the one mechanism
+    // built to catch exactly that reporting success.
+    it('folds the per-coin wireFormat family INTO the consensus hash', () => {
         const expected = { BTC: 'default', LTC: 'mweb', DOGE: 'auxpow' };
         for(const tick of coins.ALLOWED_COINS){
             expect(coins.WIRE_FORMAT[tick], `${tick} WIRE_FORMAT map`).to.equal(expected[tick]);
             for(const net of coins.NETWORKS){
-                const before = coins.consensusHash(tick, net);
                 expect(coins.getCoinConfig(tick, net).wireFormat, `${tick}/${net} resolved`).to.equal(expected[tick]);
-                // wireFormat is not folded into the pinned subset, so it cannot shift the hash.
-                expect(coins.consensusSubset(tick, net)).to.not.have.property('wireFormat');
-                expect(coins.consensusHash(tick, net)).to.equal(before);
+                expect(coins.consensusSubset(tick, net), `${tick}/${net} subset`)
+                    .to.have.property('wireFormat', expected[tick]);
             }
         }
+    });
+
+    // The property that matters is not "the field is present" but "changing it moves
+    // the pin". Prove it end to end: a coin whose wireFormat differs must hash
+    // differently, otherwise the fold is decorative and the fork stays reachable.
+    it('a divergent wireFormat changes the consensus hash (the fold is load-bearing)', () => {
+        const canonical = coins.consensusSubset('LTC', 'mainnet');
+        expect(canonical.wireFormat).to.equal('mweb');
+        const tampered = { ...canonical, wireFormat: 'default' };
+        expect(coins.canonicalJson(tampered)).to.not.equal(coins.canonicalJson(canonical));
     });
 
     it('excludes display-only fields from the consensus subset', () => {

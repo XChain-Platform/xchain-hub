@@ -41,18 +41,26 @@ function makeIdentity(pubkey) {
     return { getPubkeyHex: () => pubkey, sign: (s) => 'sig:' + pubkey };
 }
 
+// : the consensus-relevant FULLNODE params (interval, depths, windows,
+// genesis verifiers) now come from the PINNED coin registry, not from p2pConfig.
+// p2pConfig keeps only the operational knobs, so this fixture does too. Tests that
+// need different consensus values drive the registry's documented regtest override
+// surface (setGenesisVerifiers below), which is the only supported way to move them
+// and is exactly what a regtest operator has.
 function fullnodeCfg(overrides) {
     return Object.assign({
-        CHALLENGE_INTERVAL_BLOCKS: 144,
-        CONFIRM_DEPTH: 100,
-        PROOF_WINDOW_BLOCKS: 300,
-        VERDICT_ACCEPT_WINDOW_BLOCKS: 24,
         POLL_MS: 30000,
         COLLECT_MS: 20000,
-        REWARD_SHARE: '0.25',
-        GENESIS_VERIFIERS: [V1],
         BTC_RPC: 'http://coin',
     }, overrides || {});
+}
+
+// Drive FULLNODE.GENESIS_VERIFIERS through the registry's regtest env override
+// (resolveFullnode reads it at getCoinConfig() time, so it must be set BEFORE the
+// engine is constructed). Restored by the afterEach below.
+function setGenesisVerifiers(list) {
+    if (list === undefined || list === null) delete process.env.FULLNODE_GENESIS_VERIFIERS;
+    else process.env.FULLNODE_GENESIS_VERIFIERS = [].concat(list).join(',');
 }
 
 function makeHub(overrides) {
@@ -98,8 +106,8 @@ function deriveChallengeId(network, epoch, ledger, target) {
 
 describe('FullNodeChallengeRound', function () {
 
-    beforeEach(loadModule);
-    afterEach(() => sinon.restore());
+    beforeEach(() => { loadModule(); setGenesisVerifiers(V1); });
+    afterEach(() => { sinon.restore(); setGenesisVerifiers(null); });
 
     // ── construction / config ─────────────────────────────────────────────────
     describe('constructor', function () {
@@ -111,16 +119,107 @@ describe('FullNodeChallengeRound', function () {
             expect(eng.genesis.has(V1)).to.equal(true);
             expect(eng.coinRpcUrl).to.equal('http://coin');
         });
-        it('falls back to defaults when FULLNODE absent', function () {
+        // An absent p2pConfig.FULLNODE block can no longer affect the consensus params:
+        // they come from the registry, which always has them. This is the #3215 property.
+        it('uses the pinned registry values even with no p2pConfig FULLNODE block', function () {
             const hub = makeHub();
             hub.p2pConfig.FULLNODE = {};
             const eng = new FullNodeChallengeRound(hub);
             expect(eng.interval).to.equal(144);
-            expect(eng.genesis.size).to.equal(0);
+            expect(eng.confirmDepth).to.equal(100);
+            expect(eng.acceptWindow).to.equal(24);
+            expect(eng.closeDepth).to.equal(3);
         });
         it('drops malformed genesis pubkeys', function () {
-            const eng = new FullNodeChallengeRound(makeHub({ fullnode: { GENESIS_VERIFIERS: [V1, 'nope', 'AB'] } }));
+            setGenesisVerifiers([V1, 'nope', 'AB']);
+            const eng = new FullNodeChallengeRound(makeHub());
             expect([...eng.genesis]).to.deep.equal([V1]);
+        });
+        it('an empty genesis set resolves to an empty set, not a default', function () {
+            setGenesisVerifiers(null);
+            const eng = new FullNodeChallengeRound(makeHub());
+            expect(eng.genesis.size).to.equal(0);
+        });
+    });
+
+    // ── : consensus params come from the PINNED registry ─────────────
+    // These used to resolve `process.env.FULLNODE_* || p2pConfig || '<literal>'`,
+    // env FIRST, on every network. On mainnet that let an operator env var silently
+    // override a pinned consensus parameter while CONSENSUS_CONFIG_PIN still verified
+    // clean, because the pin covers the registry and not what this class used. Two
+    // hubs with different FULLNODE_CONFIRM_DEPTH compute different possession answers
+    // and different PASS lists, both reporting a matching pin.
+    describe('#3215 pinned-registry resolution', function () {
+        const CONSENSUS_ENV = {
+            FULLNODE_CHALLENGE_INTERVAL_BLOCKS:    '7',
+            FULLNODE_CONFIRM_DEPTH:                '8',
+            FULLNODE_VERDICT_ACCEPT_WINDOW_BLOCKS: '9',
+            FULLNODE_COLLECT_DEPTH_BLOCKS:         '11',
+        };
+        let saved;
+        beforeEach(() => {
+            saved = {};
+            for (const k of Object.keys(CONSENSUS_ENV)) { saved[k] = process.env[k]; process.env[k] = CONSENSUS_ENV[k]; }
+        });
+        afterEach(() => {
+            for (const k of Object.keys(CONSENSUS_ENV)) {
+                if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
+            }
+        });
+
+        for (const net of ['mainnet', 'testnet']) {
+            it(`ignores every FULLNODE_* env override on ${net}`, function () {
+                const eng = new FullNodeChallengeRound(makeHub({ hub: { network: net } }));
+                expect(eng.interval,     'CHALLENGE_INTERVAL_BLOCKS').to.equal(144);
+                expect(eng.confirmDepth, 'CONFIRM_DEPTH').to.equal(100);
+                expect(eng.acceptWindow, 'VERDICT_ACCEPT_WINDOW_BLOCKS').to.equal(24);
+                expect(eng.closeDepth,   'COLLECT_DEPTH_BLOCKS').to.equal(3);
+            });
+        }
+
+        it('honours the same env overrides on regtest, which is the described surface', function () {
+            const eng = new FullNodeChallengeRound(makeHub());
+            expect(eng.interval).to.equal(7);
+            expect(eng.confirmDepth).to.equal(8);
+            expect(eng.acceptWindow).to.equal(9);
+            expect(eng.closeDepth).to.equal(11);
+        });
+
+        it('a p2pConfig FULLNODE block cannot move a consensus param on mainnet', function () {
+            const hub = makeHub({ hub: { network: 'mainnet' } });
+            hub.p2pConfig.FULLNODE = Object.assign({}, hub.p2pConfig.FULLNODE, {
+                CHALLENGE_INTERVAL_BLOCKS: 1, CONFIRM_DEPTH: 2,
+                VERDICT_ACCEPT_WINDOW_BLOCKS: 3, COLLECT_DEPTH_BLOCKS: 4,
+            });
+            const eng = new FullNodeChallengeRound(hub);
+            expect(eng.interval).to.equal(144);
+            expect(eng.confirmDepth).to.equal(100);
+            expect(eng.acceptWindow).to.equal(24);
+            expect(eng.closeDepth).to.equal(3);
+        });
+
+        it('the effective values equal the pinned registry byte for byte (§7 proof)', function () {
+            const coins = require('../../src/coins/index.js');
+            for (const net of ['mainnet', 'testnet', 'regtest']) {
+                const pinned = coins.getCoinConfig('BTC', net).FULLNODE;
+                const eng    = new FullNodeChallengeRound(makeHub({ hub: { network: net } }));
+                expect(eng.interval,     `${net} interval`).to.equal(pinned.CHALLENGE_INTERVAL_BLOCKS);
+                expect(eng.confirmDepth, `${net} confirmDepth`).to.equal(pinned.CONFIRM_DEPTH);
+                expect(eng.acceptWindow, `${net} acceptWindow`).to.equal(pinned.VERDICT_ACCEPT_WINDOW_BLOCKS);
+                expect(eng.closeDepth,   `${net} closeDepth`).to.equal(pinned.COLLECT_DEPTH_BLOCKS);
+            }
+        });
+
+        it('fails closed when the registry lacks a consensus param, rather than defaulting', function () {
+            const coins = require('../../src/coins/index.js');
+            const orig  = coins.getCoinConfig;
+            sinon.stub(coins, 'getCoinConfig').callsFake((tick, net) => {
+                const cfg = orig.call(coins, tick, net);
+                const fn  = Object.assign({}, cfg.FULLNODE);
+                delete fn.CONFIRM_DEPTH;
+                return Object.assign({}, cfg, { FULLNODE: fn });
+            });
+            expect(() => new FullNodeChallengeRound(makeHub())).to.throw(/CONFIRM_DEPTH/);
         });
     });
 
@@ -402,7 +501,8 @@ describe('FullNodeChallengeRound', function () {
         it('a non-leader does not broadcast a verdict', async function () {
             // identity V2 is eligible (we add it to genesis) but rank may not be 0;
             // force two verifiers so quorum is 2 and a single self-sign cannot finalize.
-            const hub = makeHub({ identity: makeIdentity(V2), fullnode: { GENESIS_VERIFIERS: [V1, V2] } });
+            setGenesisVerifiers([V1, V2]);
+            const hub = makeHub({ identity: makeIdentity(V2) });
             const eng = await startEpoch(hub);
             const st = eng.rounds.get(288);
             eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
@@ -413,7 +513,8 @@ describe('FullNodeChallengeRound', function () {
 
         it('a verifier that is not a claimant computes its answer silently (so it can lead)', async function () {
             // V2 is a genesis verifier but NOT in the claimant snapshot ([V1, P1]).
-            const hub = makeHub({ identity: makeIdentity(V2), fullnode: { GENESIS_VERIFIERS: [V1, V2] } });
+            setGenesisVerifiers([V1, V2]);
+            const hub = makeHub({ identity: makeIdentity(V2) });
             const eng = await startEpoch(hub);
             const st  = eng.rounds.get(288);
             expect(st.myAnswer).to.equal(ANSWER);                 // computed for leading/verifying
@@ -507,7 +608,8 @@ describe('FullNodeChallengeRound', function () {
         }
 
         it('refuses to sign a PASS list that omits a claimant it confirmed correct', async function () {
-            const hub = makeHub({ identity: makeIdentity(V2), fullnode: { GENESIS_VERIFIERS: [V1, V2] } });
+            setGenesisVerifiers([V1, V2]);
+            const hub = makeHub({ identity: makeIdentity(V2) });
             const eng = new FullNodeChallengeRound(hub);
             const st  = seedRound(eng);
             const leader = eng._electedLeader(st);
@@ -519,7 +621,8 @@ describe('FullNodeChallengeRound', function () {
         });
 
         it('signs a complete PASS list', async function () {
-            const hub = makeHub({ identity: makeIdentity(V2), fullnode: { GENESIS_VERIFIERS: [V1, V2] } });
+            setGenesisVerifiers([V1, V2]);
+            const hub = makeHub({ identity: makeIdentity(V2) });
             const eng = new FullNodeChallengeRound(hub);
             const st  = seedRound(eng);
             const leader = eng._electedLeader(st);

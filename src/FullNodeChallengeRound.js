@@ -91,6 +91,17 @@ class FullNodeChallengeRound {
         // regtest keeps its tunability through the DESCRIBED surface, while
         // mainnet/testnet get the frozen pinned values with no env surface at all.
         // FULLNODE is BTC-only: the tier is BTC-anchored.
+        // Fail closed on an unresolvable network, and say so in terms the operator can
+        // act on. getCoinConfig would throw "Unknown network: " here, which names
+        // neither the caller nor the fix. A hub that cannot name its network cannot
+        // resolve pinned consensus params, and running the round on literals is the
+        // exact hazard #3215 closes, so this is a refusal rather than a fallback.
+        if(this.network !== 'mainnet' && this.network !== 'testnet' && this.network !== 'regtest')
+            throw new Error('FullNodeChallengeRound: cannot resolve the pinned FULLNODE params because ' +
+                'the hub network is ' + JSON.stringify(this.network) + ' (expected mainnet/testnet/regtest). ' +
+                'Set HUB_NETWORK, or leave the full-node challenge round disabled; it must not run on ' +
+                'unpinned defaults.');
+
         const registry = coins.getCoinConfig('BTC', this.network).FULLNODE || {};
         this.registryFullnode = registry;
         this.interval      = parseInt(registry.CHALLENGE_INTERVAL_BLOCKS, 10);
