@@ -334,8 +334,7 @@ class StateCheckpointEngine extends EventEmitter {
         // Post-flag-day the signed shape REQUIRES the roots; refuse to sign a malformed
         // (empty-root) canonical if the indexer hasn't produced them yet (operator must
         // pick a snapshot_block at/after every chain's STATE_COMMITMENT flag-day).
-        if(ckpt.isCheckpointCommitmentActive(cp.snapshot_block, cp.network) &&
-           (!cp.state_root || !cp.block_merkle_root || cp.state_root_version == null || cp.block_merkle_version == null))
+        if(StateCheckpointEngine.isRootless(cp))
             throw new Error('checkpoint-commitment active for ' + chain + '@' + cp.block_index +
                             ' but indexer returned no light-client roots (state-commitment flag-day not yet reached on ' + chain + ')');
         let canonical = StateCheckpointEngine.canonicalCheckpoint(cp);
@@ -471,6 +470,17 @@ class StateCheckpointEngine extends EventEmitter {
             return;
         }
 
+        // : matching the proposer is NOT sufficient post-flag-day. Two rootless
+        // hubs agree byte-for-byte (the canonical's root suffix is empty when the roots
+        // are null), so the check above passes and we would co-sign a checkpoint that
+        // carries none of the light-client commitment its own flag-day requires. The
+        // propose path already refuses this; refuse it here too.
+        if(StateCheckpointEngine.isRootless(cp)){
+            console.warn('StateCheckpointEngine: ' + cp.chain + '@' + cp.block_index +
+                ' is checkpoint-commitment active but carries no light-client roots, NOT signing');
+            return;
+        }
+
         this.peerManager.broadcast(XCHK_SIGN, {
             id: this._roundId(cp), sig_pubkey: myPubkey, sig: this.identity.sign(canonical)
         });
@@ -578,6 +588,21 @@ class StateCheckpointEngine extends EventEmitter {
         // Matches the leader _tick persist (unguarded) and _writeFinalizedMatch;
         // callers (_tick .catch, _handleFinalized .catch, the leader accept .catch)
         // log the accept error, and the FINALIZED broadcast is re-deliverable.
+        // , final backstop. Co-sign now refuses a rootless checkpoint, but this
+        // path also accepts checkpoints that arrive already-finalized from a peer, so it
+        // must enforce the rule independently rather than trust that every signer did.
+        //
+        // Placed BEFORE the capability-snapshot persist below on purpose: that persist is
+        // deliberately fail-closed so "no quorum-signed, unverifiable row reaches a mirror
+        // or the anchor poller", and the same reasoning applies one step earlier. Throwing
+        // here means neither the snapshot nor the checkpoint row is written and nothing is
+        // broadcast or emitted; the caller's .catch logs the accept error and the FINALIZED
+        // broadcast stays re-deliverable.
+        if(StateCheckpointEngine.isRootless(cp))
+            throw new Error('refusing to persist rootless checkpoint ' + cp.chain + '@' + cp.block_index +
+                ': checkpoint-commitment is active for snapshot_block ' + cp.snapshot_block +
+                ' but the light-client roots are absent ()');
+
         await this._persistCapabilitySnapshot('oracle_publish', Number(cp.snapshot_block));
         await this.db.doQuery(
             'INSERT IGNORE INTO state_checkpoints (chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures) ' +
@@ -696,6 +721,28 @@ class StateCheckpointEngine extends EventEmitter {
     // Every hub (leader, follower, finalizer) computes the identical value with no DB read.
     static deriveCheckpointSeq(snapshotBlock){
         return Number(snapshotBlock);
+    }
+
+    // : true when checkpoint-commitment is active for this checkpoint's
+    // snapshot_block/network but the light-client roots are missing.
+    //
+    // The propose path always refused to SIGN such a checkpoint, but that was the only
+    // place the rule lived, and it is the one path an attacker does not control. The
+    // canonical hides the gap: _checkpointRootSuffix() contributes the EMPTY STRING when
+    // the roots are null, so a rootless proposal and a rootless self-derivation produce
+    // BYTE-IDENTICAL canonicals. A follower's "does the proposer's canonical match mine?"
+    // check therefore passes, and it co-signs a post-flag-day checkpoint carrying no
+    // roots at all. Quorum then forms and every hub persists it, so the light-client
+    // commitment the flag-day exists to guarantee is silently absent from the checkpoint
+    // chain and an SPV client has nothing to verify against.
+    //
+    // One predicate, three call sites (propose, co-sign, persist), so the rule cannot be
+    // enforced on one path and quietly skipped on the others again.
+    static isRootless(cp){
+        if(!cp) return false;
+        if(!ckpt.isCheckpointCommitmentActive(cp.snapshot_block, cp.network)) return false;
+        return (!cp.state_root || !cp.block_merkle_root ||
+                cp.state_root_version == null || cp.block_merkle_version == null);
     }
 
     async _getMaxCheckpointSeq(chain, network){
