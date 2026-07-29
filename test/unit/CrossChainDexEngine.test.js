@@ -51,7 +51,11 @@ function makeDexHub(overrides) {
     return hub;
 }
 
-// A minimal SWAP offer (no `kind` → swap path)
+// A minimal SWAP offer (no `kind` → swap path).
+// give_decimals is the give-side decimal grid the offer's HOME indexer reports
+// (getopencrosschainorders, ). The ORDER path quantizes its derived fills
+// on it and DECLINES the match when it is absent, so every offer fixture carries it,
+// exactly as a real book page does.
 function makeOffer(overrides) {
     return {
         action_index:  1,
@@ -66,6 +70,7 @@ function makeOffer(overrides) {
         get_address:   'ltc1abc',
         give_ownership: 0,
         get_ownership:  0,
+        give_decimals: 8,
         block_index:   10,
         ...(overrides || {})
     };
@@ -92,12 +97,14 @@ function makeOrderPair() {
     let a = {
         kind: 'order', action_index: 1, home_coin: 'LTC', home_network: 'regtest', block_index: 10,
         give_coin: 'LTC', give_tick: 'LTCT', give_amount: '100', give_ownership: 0,
-        get_coin: 'DOGE', get_tick: 'DOGT', get_amount: '50', get_ownership: 0, get_address: 'Laddr'
+        get_coin: 'DOGE', get_tick: 'DOGT', get_amount: '50', get_ownership: 0, get_address: 'Laddr',
+        give_decimals: 8
     };
     let b = {
         kind: 'order', action_index: 7, home_coin: 'DOGE', home_network: 'regtest', block_index: 20,
         give_coin: 'DOGE', give_tick: 'DOGT', give_amount: '20', give_ownership: 0,
-        get_coin: 'LTC', get_tick: 'LTCT', get_amount: '40', get_ownership: 0, get_address: 'Daddr'
+        get_coin: 'LTC', get_tick: 'LTCT', get_amount: '40', get_ownership: 0, get_address: 'Daddr',
+        give_decimals: 8
     };
     return { a, b };
 }
@@ -292,7 +299,10 @@ describe('CrossChainDexEngine', function () {
             let terms = { home_coin: 'DOGE', home_network: 'regtest', block_index: 20, action_index: 7,
                 give_coin: 'DOGE', give_tick: 'DOGT', give_amount: '20',
                 get_coin: 'LTC', get_tick: 'LTCT', get_amount: '40', get_address: 'Daddr',
-                give_ownership: 0, get_ownership: 0 };
+                give_ownership: 0, get_ownership: 0,
+                // Required for the order×order control to reach the fill math at all: the
+                // ORDER path declines a match whose give-side grid it cannot establish.
+                give_decimals: 8 };
             let swap  = Object.assign({}, terms, { kind: 'swap' });
             let ordr2 = Object.assign({}, terms, { kind: 'order' });
 

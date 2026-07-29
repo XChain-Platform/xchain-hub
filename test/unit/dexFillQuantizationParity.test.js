@@ -18,10 +18,29 @@
 // the same pair of offers, and a hub that finalizes a fill the indexer will not
 // reproduce livelocks matching.
 
-const assert = require('assert');
-const fs     = require('fs');
-const path   = require('path');
-const bc     = require('../../src/bcmath.js');
+const assert     = require('assert');
+const fs         = require('fs');
+const path       = require('path');
+const sinon      = require('sinon');
+const proxyquire = require('proxyquire');
+const bc         = require('../../src/bcmath.js');
+const { createMockHub } = require('../helpers/mockHub');
+
+// Warm the mathjs/bcmath require cache outside any timed hook (mirrors
+// CrossChainDexEngine.test.js: the first mathjs load can exceed a 5s hook timeout).
+require('mathjs');
+
+// axios is stubbed: the engine-level assertions below drive _tryOrderMatch directly and
+// must never reach an indexer.
+const CrossChainDexEngine = proxyquire('../../src/CrossChainDexEngine', { axios: { post: sinon.stub() } });
+
+function makeDexHub() {
+    const hub = createMockHub();
+    hub.db = { doQuery: sinon.stub().resolves([]) };
+    hub.hubDbBroadcaster = null;
+    hub.capabilitySnapshot = null;
+    return hub;
+}
 
 const FIXTURE = path.join(__dirname, '../fixtures/dex-fill-quantization-vectors.json');
 const vectors = JSON.parse(fs.readFileSync(FIXTURE, 'utf8'));
@@ -88,8 +107,8 @@ describe('DEX fill quantization parity, hub half (#3145/#3146) @regression @tier
         });
 
         // These run the hub's ported helper against the SAME vectors the indexer half
-        // runs, so the two implementations are pinned to one another even though the hub
-        // cannot yet apply them in the engine.
+        // runs, so the two implementations are pinned to one another. The engine-level
+        // application of the same vectors is asserted further down.
         for (const v of vectors.tick_quantization) {
             it(`${v.label}: bcround(${v.amount}, ${v.decimals}) -> ${v.expected}`, function () {
                 assert.strictEqual(String(bc.bcround(v.amount, v.decimals)),
@@ -104,7 +123,9 @@ describe('DEX fill quantization parity, hub half (#3145/#3146) @regression @tier
         });
     });
 
-    describe('known remaining gap is documented, not silently defaulted', function () {
+    describe('the engine applies the grid, and never guesses it', function () {
+        // KEPT from the pre-parity suite, deliberately: a fallback default is still the
+        // wrong way to close this, and it is the edit someone would reach for first.
         it('the engine does NOT quantize with a guessed COIN_DECIMALS', function () {
             const src = fs.readFileSync(path.join(__dirname, '../../src/CrossChainDexEngine.js'), 'utf8');
             assert.doesNotMatch(src, /bcround\s*\([^)]*COIN_DECIMALS/,
@@ -112,13 +133,69 @@ describe('DEX fill quantization parity, hub half (#3145/#3146) @regression @tier
                 'non-8-decimal tick, which is worse than not rounding at all');
         });
 
-        it('the fixture marks the tick-quantization vectors as hub-unreachable', function () {
-            // Keeps the fixture honest: if someone makes the hub quantize, they must flip
-            // these flags, and that edit is the review trigger.
+        it('the fixture marks the tick-quantization vectors as hub-reachable', function () {
+            // The flip of these flags IS the record that the hub now applies them. Going
+            // back to false means the engine stopped quantizing, which is a consensus
+            // change and must be reviewed as one.
             for (const v of vectors.tick_quantization) {
-                assert.strictEqual(v.hub_reachable, false,
-                    'hub cannot resolve tick decimals from a cross-chain offer yet');
+                assert.strictEqual(v.hub_reachable, true,
+                    'the hub quantizes cross-chain fills on the offer-reported decimals');
             }
+        });
+
+        it('quantizes each derived amount on the GIVING leg\'s own reported decimals', function () {
+            // The one shape that matters and that no unit-level bcround test covers: which
+            // decimals go with which amount. takerGive is denominated in the taker's give
+            // tick, takerGet in the MAKER's give tick, and each value comes from that leg's
+            // own home indexer. Swapping them would quantize a DOGE-side fill on an
+            // LTC-side grid, which reads plausible and settles wrong.
+            const eng = new CrossChainDexEngine(makeDexHub());
+            // Maker (earlier block) gives 100 LTCT at 8dp; taker gives 20 DOGT on a
+            // 0-decimal (NFT-style) tick. Price 1 LTCT per 0.5 DOGT crosses.
+            const maker = { kind: 'order', action_index: 1, home_coin: 'LTC', home_network: 'regtest',
+                block_index: 10, give_coin: 'LTC', give_tick: 'LTCT', give_amount: '100',
+                get_coin: 'DOGE', get_tick: 'DOGT', get_amount: '50', give_ownership: 0,
+                get_ownership: 0, get_address: 'Laddr', give_decimals: 8 };
+            const taker = { kind: 'order', action_index: 7, home_coin: 'DOGE', home_network: 'regtest',
+                block_index: 20, give_coin: 'DOGE', give_tick: 'DOGT', give_amount: '21',
+                get_coin: 'LTC', get_tick: 'LTCT', get_amount: '42', give_ownership: 0,
+                get_ownership: 0, get_address: 'Daddr', give_decimals: 0 };
+            const d = eng._tryOrderMatch(maker, taker);
+            assert.ok(d, 'the pair crosses');
+            // DOGE leg (0 decimals) settles a whole number; LTC leg (8) keeps its grid.
+            const dogeFill = (d.lo.home_coin === 'DOGE') ? d.loFill : d.hiFill;
+            const ltcFill  = (d.lo.home_coin === 'LTC')  ? d.loFill : d.hiFill;
+            assert.doesNotMatch(String(dogeFill), /\./,
+                'a 0-decimal give side must settle an integer quantity');
+            assert.ok(Number(ltcFill) > 0);
+        });
+
+        it('declines the match when an offer carries no decimals, rather than defaulting', function () {
+            // Fail-closed: the only way to see this is a hub polling a pre-batch indexer,
+            // and the documented behaviour there is stalled matching, never a guessed grid.
+            const eng = new CrossChainDexEngine(makeDexHub());
+            const mk = (extra) => Object.assign({ kind: 'order', home_network: 'regtest',
+                give_ownership: 0, get_ownership: 0 }, extra);
+            const maker = mk({ action_index: 1, home_coin: 'LTC', block_index: 10, give_coin: 'LTC',
+                give_tick: 'LTCT', give_amount: '100', get_coin: 'DOGE', get_tick: 'DOGT',
+                get_amount: '50', get_address: 'Laddr', give_decimals: 8 });
+            const taker = mk({ action_index: 7, home_coin: 'DOGE', block_index: 20, give_coin: 'DOGE',
+                give_tick: 'DOGT', give_amount: '20', get_coin: 'LTC', get_tick: 'LTCT',
+                get_amount: '40', get_address: 'Daddr', give_decimals: 8 });
+            assert.ok(eng._tryOrderMatch(maker, taker), 'control: with decimals on both sides it matches');
+
+            for (const missing of [undefined, null, '', 'eight', -1, 19, 2.5]) {
+                const bad = Object.assign({}, taker, { give_decimals: missing });
+                assert.strictEqual(eng._tryOrderMatch(maker, bad), null,
+                    'give_decimals ' + JSON.stringify(missing) + ' must decline the match');
+                const badMaker = Object.assign({}, maker, { give_decimals: missing });
+                assert.strictEqual(eng._tryOrderMatch(badMaker, taker), null,
+                    'the maker side must fail closed too');
+            }
+            // 0 is a VALID grid (indivisible ticks), not a missing value: a falsy check
+            // here would silently refuse every NFT-side match.
+            const zeroDp = Object.assign({}, taker, { give_decimals: 0 });
+            assert.ok(eng._tryOrderMatch(maker, zeroDp), '0 decimals is valid, not absent');
         });
     });
 });

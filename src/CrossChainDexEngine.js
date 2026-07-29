@@ -390,18 +390,44 @@ class CrossChainDexEngine extends EventEmitter {
             takerGive = String(give_from_get);
             takerGet  = String(max_get);
         }
-        // KNOWN REMAINING GAP (, not closable here): the indexer follows
-        // this clamp with bcround(amount, <that tick's DECIMALS>) on BOTH sides
-        // (order_match.js:219-220), which is what enforces indivisibility and clears
-        // sub-unit dust. The hub cannot reproduce it yet because nothing in the
-        // cross-chain offer it holds carries the ticks' decimals: offers arrive with
-        // give_tick / get_tick as bare identifiers and the hub mirrors no token table.
-        // bcmath.bcround is ported and ready; only the decimals are missing. Until an
-        // offer carries them (or the hub mirrors token decimals), the hub's derived
-        // amount can still differ from the indexer's in the sub-unit digits, and the
-        // indexer remains the quantizing arbiter. Do NOT paper over this with a
-        // COIN_DECIMALS default: an 8-decimal assumption silently mis-quantizes every
-        // 0-decimal (NFT) and non-8-decimal tick, which is worse than not rounding.
+        // Grid snap (, gap CLOSED): the indexer follows the clamp with
+        // bcround(amount, <that tick's DECIMALS>) on BOTH derived amounts
+        // (order_match.js:219-220). That is what enforces indivisibility (a 0-decimal NFT
+        // tick settles whole units) and clears sub-unit dust, so a hub that skipped it
+        // could finalize a fill the settling indexer would never reproduce.
+        //
+        // Each amount is quantized on the grid of the leg that GIVES it, using the
+        // decimals that leg's OWN home indexer reported for its OWN give tick
+        // (getopencrosschainorders -> give_decimals, resolved there through the same
+        // getTokenInfo the local matcher uses, so the two cannot drift):
+        //   takerGive is denominated in taker.give_tick  -> taker's give_decimals
+        //   takerGet  is denominated in maker.give_tick  -> maker's give_decimals
+        // Deliberately never the counterparty's view of the same tick: a remote tick is
+        // not in the reading indexer's token table at all, so only the home indexer is
+        // authoritative for it. This is also exactly the amount each leg settles, so the
+        // grid the hub rounds to is the grid the settling indexer will check.
+        //
+        // FAIL CLOSED when either side's decimals are absent or malformed: no match is
+        // produced, and nothing is guessed. An 8-decimal COIN_DECIMALS default would
+        // silently mis-quantize every 0-decimal (NFT) and non-8-decimal tick, which is
+        // worse than not rounding at all, and a test pins that it is not done. The only
+        // way to see missing decimals is a hub polling a pre-batch indexer, i.e. exactly
+        // the half-deployed pair this package is documented to ship against: it stalls
+        // matching (livelock) instead of settling a wrong quantity.
+        let takerDecimals = this._giveDecimals(taker);
+        let makerDecimals = this._giveDecimals(maker);
+        if(takerDecimals === null || makerDecimals === null){
+            console.warn('XDEX: skipping match, missing give_decimals on ' +
+                         (takerDecimals === null ? 'taker' : 'maker') + ' offer ' +
+                         (takerDecimals === null ? taker.home_coin + ':' + taker.action_index
+                                                 : maker.home_coin + ':' + maker.action_index) +
+                         ' (indexer predates the decimals field?) - the hub will not guess tick decimals');
+            return null;
+        }
+        takerGive = String(bc.bcround(takerGive, takerDecimals));
+        takerGet  = String(bc.bcround(takerGet,  makerDecimals));
+        // Zero-drop AFTER quantization, matching order_match.js's order (clamp, round,
+        // then drop): dust that rounds to zero is not settled as a fill.
         if(bc.bclte(takerGive, 0) || bc.bclte(takerGet, 0)) return null;
 
         if(ownership){
@@ -416,6 +442,25 @@ class CrossChainDexEngine extends EventEmitter {
         let aGiveFill = (a === taker) ? takerGive : takerGet;
         let bGiveFill = (b === taker) ? takerGive : takerGet;
         return this._buildDesc(a, b, 'order', 'order', aGiveFill, bGiveFill);
+    }
+
+    // The decimal grid of an offer's GIVE side, or null when it cannot be established.
+    //
+    // The value is the offer's own home indexer's answer for its own tick, reported by
+    // getopencrosschainorders as `give_decimals` and resolved there through getTokenInfo
+    // (token DECIMALS, or that chain's COIN_DECIMALS for a native side) - the identical
+    // resolution the local matcher performs, so the hub inherits it rather than
+    // re-deriving it. The hub mirrors no token table and must never infer this: returning
+    // null here makes the caller decline the match, which is why the range check is
+    // strict rather than coercing. 0 is valid and meaningful (indivisible/NFT ticks), so
+    // this must not be written as a falsy test; 18 is the protocol maximum.
+    _giveDecimals(offer){
+        if(!offer) return null;
+        let d = offer.give_decimals;
+        if(d === null || d === undefined || d === '') return null;
+        let n = Number(d);
+        if(!Number.isInteger(n) || n < 0 || n > 18) return null;
+        return n;
     }
 
     // Canonical-order a matched pair (lo = home_coin-lower side) into a finalize descriptor,
