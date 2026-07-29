@@ -188,6 +188,7 @@ the sibling services; drift fails `bin/check-observability-parity.js` in CI.
 | Command | Description |
 |---|---|
 | `npm run api` | Start the hub API server |
+| `bin/run-db-tiers.sh` | Run the DB-backed tiers against a throwaway MariaDB it starts and drops |
 | `npm test` | Run unit tests (~366 tests) |
 | `npm run test:integration` | Integration tests (~72 tests, requires MariaDB) |
 | `npm run test:e2e` | End-to-end tests (~64 tests, requires full stack) |
@@ -201,6 +202,30 @@ the sibling services; drift fails `bin/check-observability-parity.js` in CI.
 | `npm run test:mutate` | Mutation tests (Stryker) |
 | `npm run test:mutate:pilot` | Pilot mutation tests (phase 1) |
 | `npm run test:all` | Complete test suite |
+
+### Running the DB-backed tiers
+
+`bin/run-db-tiers.sh` starts a throwaway tmpfs-backed MariaDB, exports what the
+suites expect, runs them and drops the container again.
+
+```bash
+bin/run-db-tiers.sh                    # integration tier
+bin/run-db-tiers.sh unit integration
+bin/run-db-tiers.sh -- test/integration/api/jsonrpc.integration.test.js
+```
+
+**One trap it guards, because there is no way to configure around it.** The oracle
+fiat-dispenser suite reaches into the sibling indexer by **path position**:
+
+```js
+require(path.resolve(__dirname, '../../../../xchain-indexer/src/utility.js'))
+```
+
+There is no environment override. A checkout that does not sit beside an
+`xchain-indexer` checkout fails with `MODULE_NOT_FOUND` at module load, before any
+test runs, and mocha reports it as an exception during the run rather than as a
+missing dependency. The script checks that first and refuses, rather than handing back
+a failure that looks like broken code. A symlinked sibling satisfies it.
 
 ## Test Suite
 
