@@ -42,6 +42,7 @@ const SlashGovernance    = require('./SlashGovernance.js');
 const PriceAggregator    = require('./PriceAggregator.js');
 const OraclePublisher    = require('./OraclePublisher.js');
 const { loadSignerHooks, applySignerHooks } = require('./lib/signer-loader.js');
+const fullnodeActivation = require('./lib/fullnode_activation.js');
 const HubDbBroadcaster   = require('./HubDbBroadcaster.js');
 const CapabilityRegistry = require('./CapabilityRegistry.js');
 const CapabilitySnapshot = require('./CapabilitySnapshot.js');
@@ -71,6 +72,12 @@ class XChainHub {
         // notably STAKE_WEIGHTED_QUORUM. Set in validator mode (validated in api.js);
         // '' in standalone (no consensus runs there).
         this.network   = (this.p2pConfig && this.p2pConfig.HUB_NETWORK) ? String(this.p2pConfig.HUB_NETWORK) : '';
+        // Seed the NODEPROOF parameters from the pinned coin bundle HERE, not in
+        // startCapabilities: startP2P constructs FullNodeChallengeRound first and the
+        // engine snapshots cfg.FULLNODE at construction, so a later seed would never
+        // reach it . Never creates p2pConfig - a null one is standalone mode,
+        // which startP2P uses as its early-return signal.
+        this._seedCanonicalFullnode();
         this.db               = null;
         this.peerManager      = null;
         this.consensus        = null;
@@ -1094,6 +1101,12 @@ class XChainHub {
         // Validate BEFORE merging so a divergent file is refused whole: on the
         // hot-reload path the running hub keeps its previous (validated) config.
         if('CAPABILITIES' in parsed) this._assertCanonicalMinStakes(parsed.CAPABILITIES);
+        // : same treatment for a FULLNODE override. Its consensus knobs
+        // (REWARD_SHARE, GENESIS_VERIFIERS, the challenge/window block counts) must
+        // come from the pinned coin bundle every service ships, never from one
+        // operator's file, or that hub runs a challenge schedule and a reward split
+        // its peers reject.
+        this._assertCanonicalFullnode(parsed.FULLNODE || parsed.full_node);
         if(!this.p2pConfig) this.p2pConfig = {};
         const KEYS = ['CAPABILITIES', 'DISABLED_CAPABILITIES', 'price', 'cross_chain',
                       'oracle_publish', 'attestation', 'CAPABILITY_RECHECK_MS', 'STAKE_POLL_MS',
@@ -1108,6 +1121,7 @@ class XChainHub {
         if(this.p2pConfig.full_node && !this.p2pConfig.FULLNODE){
             this.p2pConfig.FULLNODE = this.p2pConfig.full_node;
         }
+        this._seedCanonicalFullnode();
         // Keep a live registry's view in sync so hot-reload applies without a restart.
         if(this.capabilityRegistry){
             this.capabilityRegistry.capConfig = this.p2pConfig.CAPABILITIES || {};
@@ -1193,6 +1207,86 @@ class XChainHub {
         console.warn('MIN_STAKE mismatch (non-strict on ' + (this.network || 'standalone') + '): ' + detail);
     }
 
+    // Canonical FULLNODE block for this hub's network, or null when it cannot be
+    // resolved. STAKING-style: network-independent defaults in src/coins/BTC.js,
+    // with the regtest sidecar/env overrides applied by the coins registry. The
+    // full-node tier is BTC-anchored, so BTC is the only bundle that matters.
+    _canonicalFullnode(){
+        let network = this.network || 'mainnet';
+        try {
+            let cfg = coins.getCoinConfig('BTC', network);
+            return cfg.FULLNODE || null;
+        } catch(e){
+            console.warn('Canonical FULLNODE resolution skipped: could not resolve BTC coin config for network "' +
+                network + '": ' + e.message);
+            return null;
+        }
+    }
+
+    // : assert an operator FULLNODE override against the canonical coins
+    // registry, and check the resulting effective block for activation coherence.
+    //
+    // The NODEPROOF tier ships INERT (REWARD_SHARE '0', GENESIS_VERIFIERS []) and
+    // stays that way at launch (GENESIS-PARAMETERS row B7). Turning it on changes
+    // (a) which epochs are challenged and which coin block answers them, (b) the
+    // verifier universe that leader election and the 2/3+1 quorum are computed
+    // over, and (c) how price.js splits the oracle-round budget into reward rows
+    // that are block-hashed. All three are fleet-wide consensus parameters, so
+    // they belong in the byte-identity-gated coin bundle every service ships, not
+    // in one operator's capabilities.json - the same reasoning that makes the
+    // FEE_DESTINATION env override regtest-only (src/coins/index.js).
+    //
+    // mainnet/testnet: divergent or incoherent -> throw (code FULLNODE_CONFIG_MISMATCH;
+    // startCapabilities rethrows so boot halts fail-closed). regtest/standalone:
+    // warn only, so a venue can run its own challenge cadence and verifier set.
+    // XCHAIN_HUB_SKIP_FULLNODE_ASSERT=1 is a loud one-off bypass.
+    _assertCanonicalFullnode(fn){
+        if(!fn || typeof fn !== 'object' || Array.isArray(fn)) return;
+        if(process.env.XCHAIN_HUB_SKIP_FULLNODE_ASSERT === '1'){
+            console.warn('XCHAIN_HUB_SKIP_FULLNODE_ASSERT=1: skipping canonical FULLNODE ' +
+                'assertion . Divergent NODEPROOF knobs fork the challenge schedule, the ' +
+                'verifier quorum and the oracle reward split; only bypass on a venue where every ' +
+                'hub runs the SAME override.');
+            return;
+        }
+        let canonical = this._canonicalFullnode();
+        if(!canonical) return;
+
+        let problems = fullnodeActivation.diffCanonical(fn, canonical)
+            .concat(fullnodeActivation.validateActivation(
+                fullnodeActivation.mergeWithCanonical(canonical, fn)));
+        if(problems.length === 0) return;
+
+        let detail = 'FULLNODE config is unsafe to run: ' + problems.join('; ') +
+            '. NODEPROOF activation is a fleet-wide consensus change: set it in the pinned ' +
+            'coin bundle (src/coins/BTC.js FULLNODE) across hub, indexer and sync together, ' +
+            'never in a single operator capabilities.json. See ' +
+            'claude/reports/launch/NODEPROOF-ACTIVATION-RUNBOOK.md ' +
+            '(XCHAIN_HUB_SKIP_FULLNODE_ASSERT=1 to bypass on a coordinated test venue).';
+
+        if(this.network === 'mainnet' || this.network === 'testnet'){
+            let err = new Error(detail);
+            err.code = 'FULLNODE_CONFIG_MISMATCH';
+            throw err;
+        }
+        console.warn('FULLNODE config problem (non-strict on ' + (this.network || 'standalone') + '): ' + detail);
+    }
+
+    // Seed p2pConfig.FULLNODE from the canonical coin bundle, keeping any operator
+    // keys on top. Without this the hub's own copy of the tier's parameters was
+    // dead config: FullNodeChallengeRound read only p2pConfig.FULLNODE (i.e. the
+    // operator file) and fell back to hardcoded literals, so an operator who
+    // activated the tier the documented way - editing the pinned coin bundle -
+    // changed the indexer's behaviour while every hub kept running the inert
+    // defaults, and the regtest FULLNODE_* env overrides never reached the hub at
+    // all. Idempotent: safe to re-run on config hot-reload.
+    _seedCanonicalFullnode(){
+        if(!this.p2pConfig) return;
+        let canonical = this._canonicalFullnode();
+        if(!canonical) return;
+        this.p2pConfig.FULLNODE = fullnodeActivation.mergeWithCanonical(canonical, this.p2pConfig.FULLNODE);
+    }
+
     async startCapabilities(configFilePath){
         // Load operator-supplied capability config (MIN_STAKE thresholds + the
         // per-capability self-test config blocks) BEFORE constructing the registry,
@@ -1204,13 +1298,20 @@ class XChainHub {
                 this._loadCapabilityConfigFile(configFilePath);
             } catch(e){
                 // A canonical MIN_STAKE mismatch is a consensus-fork misconfig, not a
-                // degraded mode: halt boot fail-closed . Read/parse problems
-                // keep the legacy warn-and-degrade behavior (self-tests then fail
-                // "config missing" and this hub simply doesn't serve capabilities).
-                if(e && e.code === 'MIN_STAKE_MISMATCH') throw e;
+                // degraded mode: halt boot fail-closed . A divergent FULLNODE
+                // block is the same class . Read/parse problems keep the legacy
+                // warn-and-degrade behavior (self-tests then fail "config missing" and
+                // this hub simply doesn't serve capabilities).
+                if(e && (e.code === 'MIN_STAKE_MISMATCH' || e.code === 'FULLNODE_CONFIG_MISMATCH')) throw e;
                 console.warn('Could not load capability config from ' + configFilePath + ': ', e);
             }
         }
+        // Seed the canonical NODEPROOF parameters even when no operator config file
+        // exists, then report the tier's activation state once at boot so an operator
+        // can see whether this hub thinks the tier is on .
+        this._seedCanonicalFullnode();
+        console.log('NODEPROOF full-node tier: ' +
+            fullnodeActivation.describeActivation(this.p2pConfig && this.p2pConfig.FULLNODE));
         this.capabilityRegistry = new CapabilityRegistry(this);
         // Rebuild block-anchored MIN_STAKE history from finalized governance proposals so a
         // restarted hub resolves the same per-block thresholds as long-running peers (#3703).

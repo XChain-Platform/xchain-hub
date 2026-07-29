@@ -53,6 +53,10 @@ const EncoderClient      = require('./EncoderClient.js');
 const SpendGuard         = require('./lib/spend_guard.js');
 const { isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
 const eq                = require('./equivocation_header.js');
+const activation        = require('./lib/fullnode_activation.js');
+// Pinned coin registry: the single source for the consensus-relevant FULLNODE
+// parameters (). See the constructor.
+const coins             = require('./coins/index.js');
 
 const XNODE_ANSWER   = 'XNODE_ANSWER';
 const XNODE_SIGN_REQ = 'XNODE_SIGN_REQ';
@@ -69,21 +73,75 @@ class FullNodeChallengeRound {
         this.identity         = hub.identity;
         this.capabilitySnapshot = hub.capabilitySnapshot;
 
-        let fn = cfg.FULLNODE || {};
-        this.enabled       = String(process.env.FULLNODE_ENABLED || fn.ENABLED || 'true') !== 'false';
-        this.interval      = parseInt(process.env.FULLNODE_CHALLENGE_INTERVAL_BLOCKS || fn.CHALLENGE_INTERVAL_BLOCKS || '144');
-        this.confirmDepth  = parseInt(process.env.FULLNODE_CONFIRM_DEPTH            || fn.CONFIRM_DEPTH            || '100');
-        this.acceptWindow  = parseInt(process.env.FULLNODE_VERDICT_ACCEPT_WINDOW_BLOCKS || fn.VERDICT_ACCEPT_WINDOW_BLOCKS || '24');
-        this.pollMs        = parseInt(process.env.FULLNODE_POLL_MS    || fn.POLL_MS    || '30000');
-        this.collectMs     = parseInt(process.env.FULLNODE_COLLECT_MS || fn.COLLECT_MS || '20000');
+        this.network       = hub.network || cfg.HUB_NETWORK || '';
+
+        // : the CONSENSUS-relevant full-node params come from the PINNED coin
+        // registry, never from env or literals.
+        //
+        // These used to resolve `process.env.FULLNODE_* || cfg.FULLNODE.* || '<literal>'`.
+        // That read the env FIRST on every network, so on MAINNET an operator env var
+        // silently overrode a pinned consensus parameter, and CONSENSUS_CONFIG_PIN still
+        // verified clean because the pin covers the registry, not what this class
+        // actually used. Two hubs with different FULLNODE_CONFIRM_DEPTH would compute
+        // different possession answers and different PASS lists while both reported a
+        // matching pin. The literals were a third, unpinned source of the same values.
+        //
+        // coins.getCoinConfig() is the single source now. It already applies the
+        // regtest-only sidecar and env overrides internally (resolveFullnode), so
+        // regtest keeps its tunability through the DESCRIBED surface, while
+        // mainnet/testnet get the frozen pinned values with no env surface at all.
+        // FULLNODE is BTC-only: the tier is BTC-anchored.
+        const registry = coins.getCoinConfig('BTC', this.network).FULLNODE || {};
+        this.registryFullnode = registry;
+        this.interval      = parseInt(registry.CHALLENGE_INTERVAL_BLOCKS, 10);
+        this.confirmDepth  = parseInt(registry.CONFIRM_DEPTH, 10);
+        this.acceptWindow  = parseInt(registry.VERDICT_ACCEPT_WINDOW_BLOCKS, 10);
         // Collection closes when the tip reaches epoch + closeDepth blocks, anchored
         // to chain height (shared by all hubs), NOT each hub's local detection time,
         // so the leader has every claimant's answer before it proposes the PASS list.
-        this.closeDepth    = parseInt(process.env.FULLNODE_COLLECT_DEPTH_BLOCKS || fn.COLLECT_DEPTH_BLOCKS || '3');
-        this.genesis       = new Set((fn.GENESIS_VERIFIERS || [])
+        // Pinned in the registry for that reason (see BTC.js COLLECT_DEPTH_BLOCKS).
+        this.closeDepth    = parseInt(registry.COLLECT_DEPTH_BLOCKS, 10);
+
+        // Conformance assert: every consensus param must have resolved to a usable
+        // value FROM THE REGISTRY. A NaN here means the registry lost a key (or this
+        // hub is pointed at a network whose bundle lacks the block), and running on a
+        // NaN interval would silently disable challenge rounds rather than fail. Fail
+        // closed and name the key, so a registry regression surfaces at boot instead of
+        // as a quorum that mysteriously never forms.
+        for(const [key, value] of Object.entries({
+            CHALLENGE_INTERVAL_BLOCKS:    this.interval,
+            CONFIRM_DEPTH:                this.confirmDepth,
+            VERDICT_ACCEPT_WINDOW_BLOCKS: this.acceptWindow,
+            COLLECT_DEPTH_BLOCKS:         this.closeDepth,
+        })){
+            if(!Number.isFinite(value))
+                throw new Error('FullNodeChallengeRound: pinned FULLNODE.' + key + ' is missing or ' +
+                    'non-numeric in the coin registry for BTC/' + this.network + '. These are consensus ' +
+                    'inputs and have no env or literal fallback by design (); fix the bundled ' +
+                    'coin registry rather than supplying the value out of band.');
+        }
+
+        let fn = cfg.FULLNODE || {};
+        // OPERATIONAL knobs only below this line: they affect this hub's local timing
+        // and participation, not what any hub computes, so they keep their env surface.
+        this.enabled       = String(process.env.FULLNODE_ENABLED || fn.ENABLED || 'true') !== 'false';
+        this.pollMs        = parseInt(process.env.FULLNODE_POLL_MS    || fn.POLL_MS    || '30000');
+        this.collectMs     = parseInt(process.env.FULLNODE_COLLECT_MS || fn.COLLECT_MS || '20000');
+        // Genesis verifiers seed the eligible-verifier universe before any node is
+        // verified on-chain, so a key dropped here shrinks the quorum denominator: it is
+        // a consensus input and comes from the pinned registry with the rest.
+        // Malformed entries are dropped (the indexer's admission rule does the same,
+        // so keeping them would only fork this hub's view), but : say so, or a
+        // typo'd activation looks identical to a correct one.
+        let rawGenesis     = Array.isArray(registry.GENESIS_VERIFIERS) ? registry.GENESIS_VERIFIERS : [];
+        this.genesis       = new Set(rawGenesis
                                 .filter(p => /^[0-9a-fA-F]{64}$/.test(String(p)))
                                 .map(p => String(p).toLowerCase()));
-        this.network       = hub.network || cfg.HUB_NETWORK || '';
+        if(this.genesis.size !== rawGenesis.length)
+            console.warn('FullNodeChallengeRound: ignored ' + (rawGenesis.length - this.genesis.size) +
+                ' of ' + rawGenesis.length + ' GENESIS_VERIFIERS entries (not a 64-hex Ed25519 pubkey, ' +
+                'or a duplicate); using ' + this.genesis.size + '. The verifier quorum is computed over ' +
+                'the surviving set.');
 
         // BTC indexer JSON-RPC (ledger-hash seed + tip); same env surface as
         // StateCheckpointEngine / CrossChainDexEngine.
@@ -133,7 +191,8 @@ class FullNodeChallengeRound {
         this._timer = setInterval(tick, this.pollMs);
         await tick();
         console.log('FullNodeChallengeRound started (interval=' + this.interval + ' blocks, depth=' + this.confirmDepth +
-                    ', verifier=' + (this.coinRpcUrl ? 'yes' : 'NO coin RPC (observe-only)') + ')');
+                    ', verifier=' + (this.coinRpcUrl ? 'yes' : 'NO coin RPC (observe-only)') + ', tier=' +
+                    activation.describeActivation(this.cfg.FULLNODE) + ')');
     }
 
     async stop(){

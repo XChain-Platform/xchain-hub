@@ -55,7 +55,12 @@ describe('XChainHub', function () {
     describe('constructor', function () {
         it('stores DB credentials and p2pConfig', function () {
             let hub = new XChainHub('host', 3306, 'db', 'user', 'pass', { P2P_PORT: 10001 });
-            expect(hub.p2pConfig).to.deep.equal({ P2P_PORT: 10001 });
+            expect(hub.p2pConfig.P2P_PORT).to.equal(10001);
+            // The constructor also seeds the canonical NODEPROOF parameters from the
+            // pinned coin bundle, because startP2P builds FullNodeChallengeRound
+            // before startCapabilities runs .
+            expect(hub.p2pConfig.FULLNODE.REWARD_SHARE).to.equal('0');
+            expect(Object.keys(hub.p2pConfig).sort()).to.deep.equal(['FULLNODE', 'P2P_PORT']);
         });
 
         it('handles null p2pConfig', function () {
