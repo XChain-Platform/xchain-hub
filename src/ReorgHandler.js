@@ -246,6 +246,16 @@ class ReorgHandler extends EventEmitter {
             throw new Error('oldHash and newHash must be distinct 64-hex block hashes ' +
                 '(the hash observed at reorgHeight before the reorg, and the one served now)');
 
+        let reorgId = this._canonicalReorgId(chain, reorgHeight, timestamp);
+
+        // Already handled: this call is a no-op, so answer it BEFORE the rate limiter.
+        // Re-reporting a reorg we have already rolled back is idempotent by design and
+        // costs nothing here (no DB, no broadcast, no verification), but sitting behind
+        // the limiter it threw 'Rate limit ...' instead - so the ordinary retry a
+        // monitor or a peer makes after a confirmed reorg surfaced as an error rather
+        // than the intended silent ignore .
+        if (this.processed.has(reorgId)) return;
+
         // Rate limit: 1 report per chain per 60 seconds. CHECK the budget here, but do
         // NOT consume it until the report actually passes self-verification and will be
         // acted on (below). Consuming it up-front let a report that fails verification
@@ -256,10 +266,6 @@ class ReorgHandler extends EventEmitter {
         let lastReport = this.reorgRateTracker.get(chain) || 0;
         if (now - lastReport < 60000)
             throw new Error('Rate limit: only one reorg report per chain per 60 seconds');
-
-        let reorgId = this._canonicalReorgId(chain, reorgHeight, timestamp);
-
-        if (this.processed.has(reorgId)) return;
 
         // Never report (or locally execute) a rollback our own node does not confirm.
         let verified = await this._verifyReorgAgainstOwnNode(chain, h, oldHash, newHash);

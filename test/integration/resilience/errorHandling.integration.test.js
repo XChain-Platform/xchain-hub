@@ -12,7 +12,6 @@
 
 const sinon          = require('sinon');
 const { expect }     = require('chai');
-const EventEmitter   = require('events');
 const testDb         = require('../../helpers/testDb');
 const { buildEnvelope } = require('../../helpers/testPeerNetwork');
 const { VALIDATORS_1, VALIDATORS_4 } = require('../../helpers/fixtures');
@@ -20,37 +19,16 @@ const Database       = require('../../../src/db');
 const Consensus      = require('../../../src/Consensus');
 const OracleConsensus = require('../../../src/OracleConsensus');
 const OracleRound    = require('../../../src/OracleRound');
+const { createIntegrationHub: createTestHub, useSingleValidatorOracleEnv } = require('../../helpers/integrationHub');
 
-function createTestHub(db, validatorAddr) {
-    let pm = new EventEmitter();
-    pm.validatorAddr    = validatorAddr || 'ws://validator-1:10001';
-    pm.validatorPubkeys = new Map();
-    pm.broadcast        = sinon.stub().callsFake((type, data) => {
-        return { type, id: 'msg-' + Date.now(), sender: pm.validatorAddr, timestamp: Date.now(), data };
-    });
-    pm.getPeerStatus    = sinon.stub().returns([]);
-
-    return {
-        db: db,
-        p2pConfig: {
-            ORACLE_ROUND_INTERVAL: 1000,
-            ORACLE_SUBMISSION_WINDOW: 500,
-            ORACLE_REWARD_PER_ROUND: '10.00000000',
-            SLASH_DEVIATION_THRESHOLD: '0.05',
-            SLASH_MISSED_ROUNDS_THRESHOLD: '30',
-            PRICE_FETCH_TIMEOUT: 5000
-        },
-        getPeerManager: sinon.stub().returns(pm),
-        getIdentity:    sinon.stub().returns({ getPubkeyHex: () => '01'.repeat(32), sign: () => 'aa'.repeat(64) }),
-        getOracle:      sinon.stub().returns(null),
-        getConsensus:   sinon.stub().returns(null),
-        getCrossChain:  sinon.stub().returns(null),
-        applyConfig:    sinon.stub().resolves(),
-        _peerManager:   pm
-    };
-}
+// PBFT leader for the first proposal is set[(1 + view) % N], not index 0.
+const FIRST_SEQ_LEADER = 1 % VALIDATORS_4.length;
 
 describe('Integration: Error Handling (SC-10.x)', function () {
+
+    // SC-10.2 drives a one-validator round to the snapshot-storage path; without the
+    // regtest diversity floor it stops at 'below minimum submissions' instead.
+    useSingleValidatorOracleEnv();
 
     before(async function () {
         try { await testDb.setup(); } catch (e) {
@@ -148,14 +126,24 @@ describe('Integration: Error Handling (SC-10.x)', function () {
                 return originalDoQuery(query, args);
             });
 
-            // Finalize should not throw (it catches internally)
-            await oracleConsensus.finalizeRound(1);
+            // finalizeRound propagates the storage failure to its caller (OracleRound's
+            // scheduler is the one that catches and logs). What must NOT happen is a
+            // half-finished round left behind. The old assertion here claimed the
+            // opposite contract and only "passed" because the round never reached the
+            // storage path at all.
+            let thrown = null;
+            try { await oracleConsensus.finalizeRound(1); }
+            catch (e) { thrown = e; }
 
             // Wait for async error handling
             await new Promise(r => setTimeout(r, 100));
 
+            expect(thrown, 'storage failure should surface to the caller').to.be.an('error');
+            expect(thrown.message).to.include('Simulated DB failure');
+
             // Verify no zombie state
             expect(oracleConsensus.pendingRounds.has(1)).to.be.false;
+            expect(oracleConsensus.finalized.has(1), 'a failed store must not mark the round finalized').to.be.false;
 
             db.doQuery.restore();
         });
@@ -165,7 +153,7 @@ describe('Integration: Error Handling (SC-10.x)', function () {
     describe('SC-10.3: Consensus timeout cleanup', function () {
         it('cleans up pending proposals after timeout', async function () {
             let db = testDb.getDb();
-            let hub = createTestHub(db, VALIDATORS_4[0].addr);
+            let hub = createTestHub(db, VALIDATORS_4[FIRST_SEQ_LEADER].addr);
 
             let consensus = new Consensus(hub);
             consensus.setValidatorSet(VALIDATORS_4);

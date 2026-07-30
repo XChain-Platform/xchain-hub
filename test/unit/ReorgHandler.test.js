@@ -1085,6 +1085,17 @@ describe('ReorgHandler', function () {
             catch (e) { expect(e.message).to.include('Rate limit'); }
         });
 
+        it('an ALREADY-PROCESSED reorg is ignored, not rate-limited ', async function () {
+            // Re-reporting a reorg this hub has already rolled back must stay a silent
+            // no-op even inside the 60s window; it used to throw 'Rate limit ...'
+            // because the limiter sat in front of the dedup return.
+            let ts = Date.now();
+            rh.processed.add('BTC:5:' + ts);
+            rh.reorgRateTracker.set('BTC', ts);
+            await rh.reportReorg('BTC', 5, ts, OLD_HASH, NEW_HASH);
+            expect(hub.db.doQuery.called, 'no work for an already-processed reorg').to.be.false;
+        });
+
         it('_initiateReorgConsensus is a no-op for an already-pending reorg', function () {
             rh.pendingReorgs.set('r1', { timer: null });
             rh._initiateReorgConsensus('r1', 'BTC', 5, 1, ['LTC', 'DOGE'], OLD_HASH, NEW_HASH);

@@ -200,6 +200,14 @@ class CrossChainEngine extends EventEmitter {
                 validatorCount: 1, consensusProof: '[]'
             };
             await this._storeAttestation(attestation);
+            // Same post-store bookkeeping the consensus path does in
+            // _checkCommitQuorum. Without it a single-operator hub wrote an
+            // 'attested' row that nothing downstream ever heard about: SwapTracker
+            // subscribes to 'attestation:finalized', so its swap_records rows sat at
+            // 'initiated' forever, and a repeat request re-ran the whole path instead
+            // of short-circuiting on the finalized ring .
+            this._markFinalized(attestationId);
+            this.emit('attestation:finalized', attestation);
             return attestation;
         }
 

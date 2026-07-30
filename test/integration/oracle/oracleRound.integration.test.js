@@ -12,7 +12,6 @@
 
 const sinon          = require('sinon');
 const { expect }     = require('chai');
-const EventEmitter   = require('events');
 const crypto         = require('crypto');
 const testDb         = require('../../helpers/testDb');
 const mockApi        = require('../../helpers/mockExternalApi');
@@ -22,38 +21,12 @@ const OracleRound    = require('../../../src/OracleRound');
 const OracleConsensus = require('../../../src/OracleConsensus');
 const RewardTracker  = require('../../../src/RewardTracker');
 const SlashDetector  = require('../../../src/SlashDetector');
-
-function createTestHub(db, validatorAddr) {
-    let pm = new EventEmitter();
-    pm.validatorAddr    = validatorAddr || 'ws://validator-1:10001';
-    pm.validatorPubkeys = new Map();
-    pm.broadcast        = sinon.stub().callsFake((type, data) => {
-        return { type, id: 'msg-' + Date.now(), sender: pm.validatorAddr, timestamp: Date.now(), data };
-    });
-    pm.getPeerStatus    = sinon.stub().returns([]);
-
-    return {
-        db: db,
-        p2pConfig: {
-            ORACLE_EPOCH_START: 1704067200000,
-            ORACLE_ROUND_INTERVAL: 1000,
-            ORACLE_SUBMISSION_WINDOW: 500,
-            ORACLE_REWARD_PER_ROUND: '10.00000000',
-            SLASH_DEVIATION_THRESHOLD: '0.05',
-            SLASH_MISSED_ROUNDS_THRESHOLD: '30',
-            PRICE_FETCH_TIMEOUT: 5000
-        },
-        getPeerManager: sinon.stub().returns(pm),
-        getIdentity:    sinon.stub().returns({ getPubkeyHex: () => '01'.repeat(32), sign: () => 'aa'.repeat(64) }),
-        getOracle:      sinon.stub().returns(null),
-        getConsensus:   sinon.stub().returns(null),
-        getCrossChain:  sinon.stub().returns(null),
-        applyConfig:    sinon.stub().resolves(),
-        _peerManager:   pm
-    };
-}
+const { createIntegrationHub: createTestHub, useSingleValidatorOracleEnv } = require('../../helpers/integrationHub');
 
 describe('Integration: Oracle Round Lifecycle (SC-2.x)', function () {
+
+    // Single/small-validator rounds only finalize with the regtest diversity floor.
+    useSingleValidatorOracleEnv();
 
     before(async function () {
         try {
@@ -142,6 +115,16 @@ describe('Integration: Oracle Round Lifecycle (SC-2.x)', function () {
             await new Promise(r => setTimeout(r, 100));
 
             let round = oracleRound.getCurrentRound();
+
+            // The oracle leader is set[round % N] and `round` is derived from the wall
+            // clock, so which validator leads is effectively random per run: this test
+            // only ever proposed (and only ever finalized) when the dice landed on
+            // index 0. Rotate the set so THIS node occupies the elected slot for the
+            // round we actually got. Membership is unchanged, only the ordering.
+            let leaderIdx = round % VALIDATORS_4.length;
+            let rotated   = VALIDATORS_4.slice();
+            [rotated[0], rotated[leaderIdx]] = [rotated[leaderIdx], rotated[0]];
+            oracleConsensus.setValidatorSet(rotated);
 
             // Simulate submissions from other validators
             for (let i = 1; i < VALIDATORS_4.length; i++) {

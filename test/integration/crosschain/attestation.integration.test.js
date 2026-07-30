@@ -12,34 +12,18 @@
 
 const sinon          = require('sinon');
 const { expect }     = require('chai');
-const EventEmitter   = require('events');
 const crypto         = require('crypto');
 const testDb         = require('../../helpers/testDb');
 const { buildEnvelope } = require('../../helpers/testPeerNetwork');
 const { VALIDATORS_1, VALIDATORS_4 } = require('../../helpers/fixtures');
 const CrossChainEngine = require('../../../src/CrossChainEngine');
 const SwapTracker      = require('../../../src/SwapTracker');
+const coins            = require('../../../src/coins');
+const { createIntegrationHub: createTestHub, createCapabilitySnapshotStub } = require('../../helpers/integrationHub');
 
-function createTestHub(db, validatorAddr) {
-    let pm = new EventEmitter();
-    pm.validatorAddr    = validatorAddr || 'ws://validator-1:10001';
-    pm.validatorPubkeys = new Map();
-    pm.broadcast        = sinon.stub().callsFake((type, data) => {
-        return { type, id: 'msg-' + Date.now(), sender: pm.validatorAddr, timestamp: Date.now(), data };
-    });
-    pm.getPeerStatus    = sinon.stub().returns([]);
-
-    return {
-        db: db,
-        p2pConfig: {},
-        getPeerManager: sinon.stub().returns(pm),
-        getIdentity:    sinon.stub().returns({ getPubkeyHex: () => '01'.repeat(32) }),
-        getOracle:      sinon.stub().returns(null),
-        getConsensus:   sinon.stub().returns(null),
-        getCrossChain:  sinon.stub().returns(null),
-        _peerManager:   pm
-    };
-}
+// Canonical per-chain cross-chain confirmation depths, from the same source the
+// engine resolves them from.
+const CONFIRMATIONS = coins.resolveConfirmations({}, 'mainnet');
 
 describe('Integration: Cross-Chain Attestation (SC-4.x)', function () {
 
@@ -71,7 +55,11 @@ describe('Integration: Cross-Chain Attestation (SC-4.x)', function () {
             expect(attestation).to.exist;
             expect(attestation.attestationId).to.equal('BTC:42:LTC');
             expect(attestation.status).to.equal('attested');
-            expect(attestation.confirmations).to.equal(3); // BTC threshold
+            // Read the threshold from the canonical coin bundles instead of pinning a
+            // literal. The BTC/LTC/DOGE cross-chain confirmation depths were raised
+            // ( mainnet floor clamp) and this assertion still demanded the old
+            // 3, which read as a product regression rather than a stale fixture.
+            expect(attestation.confirmations).to.equal(CONFIRMATIONS.BTC);
             expect(attestation.validatorCount).to.equal(1);
 
             // Verify in DB
@@ -93,10 +81,14 @@ describe('Integration: Cross-Chain Attestation (SC-4.x)', function () {
             await engine.start();
 
             let dogeAtt = await engine.requestAttestation('DOGE', 1, 'BTC');
-            expect(dogeAtt.confirmations).to.equal(6); // DOGE threshold
+            expect(dogeAtt.confirmations).to.equal(CONFIRMATIONS.DOGE);
 
             let ltcAtt = await engine.requestAttestation('LTC', 1, 'BTC');
-            expect(ltcAtt.confirmations).to.equal(3); // LTC threshold
+            expect(ltcAtt.confirmations).to.equal(CONFIRMATIONS.LTC);
+
+            // The per-chain depths must still differ from one another, or the
+            // canonical-source assertions above would pass against a flat table.
+            expect(CONFIRMATIONS.DOGE).to.not.equal(CONFIRMATIONS.BTC);
 
             await engine.stop();
         });
@@ -167,7 +159,18 @@ describe('Integration: Cross-Chain Attestation (SC-4.x)', function () {
     describe('SC-4.3: Multi-validator attestation', function () {
         it('finalizes attestation after PREPARE and COMMIT quorum', async function () {
             let db = testDb.getDb();
-            let hub = createTestHub(db, VALIDATORS_4[0].addr);
+            // This node must BE the leader the engine elects, or requestAttestation
+            // refuses. The rotation is set[seq % N] and the first request runs at
+            // seq 1, so the leader is index 1, not index 0.
+            let leaderIdx = 1 % VALIDATORS_4.length;
+            let peerIdxs  = VALIDATORS_4.map((_, i) => i).filter(i => i !== leaderIdx).slice(0, 2);
+            // CrossChainEngine._resolveQuorum fails CLOSED for a federated hub with no
+            // deterministic cross_chain snapshot, so a validator set alone is not
+            // enough fixture: it needs a snapshot at a real block height too.
+            let hub = createTestHub(db, VALIDATORS_4[leaderIdx].addr, {
+                btcLatestBlock:      800000,
+                capabilitySnapshot:  createCapabilitySnapshotStub(VALIDATORS_4)
+            });
 
             let engine = new CrossChainEngine(hub);
             engine.setValidatorSet(VALIDATORS_4);
@@ -187,8 +190,8 @@ describe('Integration: Cross-Chain Attestation (SC-4.x)', function () {
             let pending = engine.pendingAttestations.get(attestationId);
             expect(pending).to.exist;
 
-            // Inject PREPARE from validators 2 and 3 (need 3 for quorum with N=4)
-            for (let i = 1; i < 3; i++) {
+            // Inject PREPARE from the two non-leader validators (quorum 3 of N=4)
+            for (let i of peerIdxs) {
                 hub._peerManager.emit('message', buildEnvelope('XCHAIN_ATTEST_PREPARE', {
                     attestationId: attestationId,
                     digest: pending.digest
@@ -197,8 +200,8 @@ describe('Integration: Cross-Chain Attestation (SC-4.x)', function () {
 
             await new Promise(r => setTimeout(r, 50));
 
-            // Inject COMMIT from validators 2 and 3
-            for (let i = 1; i < 3; i++) {
+            // Inject COMMIT from the same two
+            for (let i of peerIdxs) {
                 hub._peerManager.emit('message', buildEnvelope('XCHAIN_ATTEST_COMMIT', {
                     attestationId: attestationId,
                     digest: pending.digest

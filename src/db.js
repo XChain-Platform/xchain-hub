@@ -41,6 +41,36 @@ function normalizeCoin(coin) {
     return COIN_FULL_NAME[coin.toUpperCase()] || coin;
 }
 
+// Binary args the driver encodes correctly on its own, so doQuery's
+// JSON-stringify safety net must leave them alone: stringifying a Buffer yields
+// `{"type":"Buffer","data":[...]}` rather than the BLOB bytes. Everything else
+// (plain objects, arrays) keeps the JSON coercion, which is what the safety net
+// is for: a caller that forgot to stringify a JSON column.
+function isDriverNativeArg(value){
+    return Buffer.isBuffer(value) || ArrayBuffer.isView(value);
+}
+
+// Render a Date as the UTC datetime literal MariaDB should store.
+//
+// Two separate defects met on this line . First, the safety net above
+// used to catch Dates too: JSON.stringify(new Date()) is a QUOTED ISO string and
+// MariaDB rejects it with errno 1292 "Incorrect datetime value", so EVERY product
+// write binding a Date failed outright - Governance.propose() could not record a
+// proposal at all - and the unit tier could not see it because it stubs doQuery.
+// Second, simply handing the Date to the driver is not right either: the
+// connector encodes it with getFullYear()/getHours(), i.e. in the NODE PROCESS's
+// local timezone, while the session is pinned to UTC (see
+// connectionPoolParams.timezone), so a hub on a non-UTC host silently writes an
+// instant hours away from the one the caller meant. An explicit UTC literal makes
+// the write agree with the session, with NOW()/CURRENT_TIMESTAMP, and with the
+// driver's own UTC decoding on the way back out, wherever the hub runs.
+function toUtcDatetimeLiteral(date){
+    const p = (n, width = 2) => String(n).padStart(width, '0');
+    return date.getUTCFullYear() + '-' + p(date.getUTCMonth() + 1) + '-' + p(date.getUTCDate()) +
+        ' ' + p(date.getUTCHours()) + ':' + p(date.getUTCMinutes()) + ':' + p(date.getUTCSeconds()) +
+        '.' + p(date.getUTCMilliseconds(), 3);
+}
+
 class Database {
 
     constructor(host, port, dbName, user, pass) {
@@ -65,6 +95,21 @@ class Database {
             idleTimeout:        60000,
             insertIdAsNumber:   true,
             bigIntAsNumber:     true,
+            // Pin BOTH halves of datetime handling to UTC . The driver
+            // otherwise binds a JS Date using the Node process's LOCAL timezone while
+            // the server evaluates NOW() / CURRENT_TIMESTAMP / FROM_UNIXTIME in the
+            // session's own, so a hub whose host is not on UTC writes and compares
+            // datetimes that are hours apart. Two real consequences, both silent:
+            // Governance.propose() wrote a voting_end already in the past, so a
+            // proposal expired the instant it was created, and ReorgHandler's rollback
+            // DELETE matched nothing because the attestation rows it was meant to
+            // remove appeared to predate the reorg bound. This option makes the driver
+            // serialize/parse Dates as UTC and issue `SET time_zone='+00:00'` per
+            // connection, so both sides agree no matter where the hub runs - which
+            // also keeps a geographically-spread federation comparing like with like.
+            // Safe for existing data: every temporal column in src/sql is TIMESTAMP,
+            // which MariaDB already stores as UTC internally.
+            timezone:           'Z',
             minDelayValidation: 3000,
             queryTimeout:       parseInt(process.env.DB_QUERY_TIMEOUT) || 30000
         };
@@ -112,7 +157,8 @@ class Database {
             host:     this.host,
             user:     this.user,
             password: this.pass,
-            port:     this.port
+            port:     this.port,
+            timezone: 'Z'   // same UTC pin as the pool, see connectionPoolParams
         };
         while(true){
             try {
@@ -134,7 +180,8 @@ class Database {
             host:     this.host,
             user:     this.user,
             password: this.pass,
-            port:     this.port
+            port:     this.port,
+            timezone: 'Z'   // same UTC pin as the pool, see connectionPoolParams
         };
         console.log("Creating " + this.dbName + " database...");
         while(true){
@@ -553,7 +600,10 @@ class Database {
         if(query){
             if(Array.isArray(args)){
                 for(let i = 0; i < args.length; i++){
-                    if(args[i] !== null && args[i] !== undefined && typeof args[i] === 'object') {
+                    if(args[i] instanceof Date){
+                        args[i] = toUtcDatetimeLiteral(args[i]);
+                    } else if(args[i] !== null && args[i] !== undefined && typeof args[i] === 'object'
+                              && !isDriverNativeArg(args[i])) {
                         console.warn('db.doQuery: object arg serialized to JSON at index ' + i);
                         args[i] = JSON.stringify(args[i]);
                     }

@@ -86,6 +86,17 @@ describe('Integration: Price Persistence (SC-3.x)', function () {
                 [1, 'BTC/USD', '100000.00000000', now]
             );
 
+            // ... and the XCHAIN/USD row the quote is denominated in. getFeeQuote
+            // throws without it , which read as a product failure here when
+            // it was a fixture that predated the XCHAIN-denominated fee.
+            await db.doQuery(
+                `INSERT INTO price_snapshots
+                    (round_number, coin_pair, price, reference_block, reference_chain,
+                     block_timestamp, validator_count, consensus_round, consensus_proof, status)
+                 VALUES (?, ?, ?, 0, 'BTC', ?, 3, 1, '[]', 'finalized')`,
+                [1, 'XCHAIN/USD', '1.00000000', now]
+            );
+
             // Use XChainHub.getFeeQuote which reads from DB
             let XChainHub = require('../../../src/XChainHub');
             let hub = new XChainHub(

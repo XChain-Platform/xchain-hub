@@ -154,6 +154,40 @@ describe('Database', function () {
             expect(mockConn.query.getCall(0).args[1][0]).to.equal('{"key":"value"}');
         });
 
+        it('binds a Date as a UTC datetime literal ', async function () {
+            // Two bugs met here: JSON.stringify quoted the ISO string, which MariaDB
+            // rejected outright (errno 1292), and the driver's own encoder writes a
+            // Date in the PROCESS's local timezone against a UTC-pinned session, which
+            // silently stored the wrong instant. A UTC literal settles both.
+            let when = new Date('2026-07-29T23:24:46.579Z');
+            await db.doQuery('INSERT INTO foo (created_at) VALUES (?)', [when]);
+            expect(mockConn.query.getCall(0).args[1][0]).to.equal('2026-07-29 23:24:46.579');
+        });
+
+        it('binds a Date identically whatever the host timezone is', async function () {
+            // Same instant, formatted from a Date object: the bound value must depend
+            // only on the instant, never on where the hub runs.
+            let when = new Date(Date.UTC(2026, 0, 2, 3, 4, 5, 6));
+            await db.doQuery('INSERT INTO foo (created_at) VALUES (?)', [when]);
+            expect(mockConn.query.getCall(0).args[1][0]).to.equal('2026-01-02 03:04:05.006');
+        });
+
+        it('passes Buffer args through untouched', async function () {
+            let blob = Buffer.from('deadbeef', 'hex');
+            await db.doQuery('INSERT INTO foo (payload) VALUES (?)', [blob]);
+            let bound = mockConn.query.getCall(0).args[1][0];
+            expect(Buffer.isBuffer(bound)).to.be.true;
+            expect(bound.equals(blob)).to.be.true;
+        });
+
+        it('still JSON-serializes arrays mixed alongside a Date', async function () {
+            let when = new Date('2026-07-29T23:24:46.579Z');
+            await db.doQuery('INSERT INTO foo (proof, created_at) VALUES (?, ?)', [['a', 'b'], when]);
+            let args = mockConn.query.getCall(0).args[1];
+            expect(args[0]).to.equal('["a","b"]');
+            expect(args[1]).to.equal('2026-07-29 23:24:46.579');
+        });
+
         it('throws on query error and still releases the connection (H-9: no false write success)', async function () {
             mockConn.query.rejects(new Error('syntax error'));
             let thrown = null;

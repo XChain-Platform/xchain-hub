@@ -12,53 +12,43 @@
 
 const sinon          = require('sinon');
 const { expect }     = require('chai');
-const EventEmitter   = require('events');
 const testDb         = require('../../helpers/testDb');
 const { buildEnvelope } = require('../../helpers/testPeerNetwork');
 const { VALIDATORS_1, VALIDATORS_4 } = require('../../helpers/fixtures');
 const Consensus      = require('../../../src/Consensus');
+const { createIntegrationHub } = require('../../helpers/integrationHub');
 
-function createTestHub(db, validatorAddr) {
-    let pm = new EventEmitter();
-    pm.validatorAddr    = validatorAddr || 'ws://validator-1:10001';
-    pm.validatorPubkeys = new Map();
-    pm.broadcast        = sinon.stub().callsFake((type, data) => {
-        return { type, id: 'msg-' + Date.now(), sender: pm.validatorAddr, timestamp: Date.now(), data };
-    });
-    pm.getPeerStatus    = sinon.stub().returns([]);
-
-    let hub = {
-        db: db,
-        p2pConfig: {},
-        getPeerManager: sinon.stub().returns(pm),
-        getIdentity:    sinon.stub().returns(null),
-        getOracle:      sinon.stub().returns(null),
-        getConsensus:   sinon.stub().returns(null),
-        getCrossChain:  sinon.stub().returns(null),
-        applyConfig:    null,
-        _peerManager:   pm
-    };
-
-    // applyConfig writes to the real DB
-    hub.applyConfig = async function (json) {
-        let PARAMETER_LIST = ['host', 'port', 'service_port', 'db_host', 'db_port', 'name', 'user', 'pass'];
-        for (let coin in json) {
-            if (coin === '') continue;
-            for (let network in json[coin]) {
-                for (let module in json[coin][network]) {
-                    for (let param of PARAMETER_LIST) {
-                        let value = json[coin][network][module][param];
-                        if (value !== null && value !== undefined) {
-                            await db.setParam(coin, network, module, param, value);
+// applyConfig must write through to the real DB (the assertions read the rows
+// back), so the shared integration hub is handed a live implementation for it.
+function createTestHub(db, validatorAddr, overrides = {}) {
+    return createIntegrationHub(db, validatorAddr, {
+        identity:    null,
+        applyConfig: async function (json) {
+            let PARAMETER_LIST = ['host', 'port', 'service_port', 'db_host', 'db_port', 'name', 'user', 'pass'];
+            for (let coin in json) {
+                if (coin === '') continue;
+                for (let network in json[coin]) {
+                    for (let module in json[coin][network]) {
+                        for (let param of PARAMETER_LIST) {
+                            let value = json[coin][network][module][param];
+                            if (value !== null && value !== undefined) {
+                                await db.setParam(coin, network, module, param, value);
+                            }
                         }
                     }
                 }
             }
-        }
-    };
-
-    return hub;
+        },
+        ...overrides
+    });
 }
+
+// The PBFT leader for a sequence is set[(seq + view) % N]; a fresh consensus
+// starts at seq 0 / view 0, so the first proposal runs at seq 1 and index 0 is
+// NOT the leader. Tests that must propose have to speak as this node.
+const FIRST_SEQ_LEADER = 1 % VALIDATORS_4.length;
+// Two peers that are NOT this node, to inject PREPARE/COMMIT from.
+const PEER_IDXS = VALIDATORS_4.map((_, i) => i).filter(i => i !== FIRST_SEQ_LEADER).slice(0, 2);
 
 describe('Integration: Config Consensus (SC-6.x)', function () {
 
@@ -79,7 +69,7 @@ describe('Integration: Config Consensus (SC-6.x)', function () {
     describe('SC-6.1: PBFT config consensus', function () {
         it('applies config after PREPARE and COMMIT quorum', async function () {
             let db = testDb.getDb();
-            let hub = createTestHub(db, VALIDATORS_4[0].addr);
+            let hub = createTestHub(db, VALIDATORS_4[FIRST_SEQ_LEADER].addr);
 
             let consensus = new Consensus(hub);
             consensus.setValidatorSet(VALIDATORS_4);
@@ -98,7 +88,7 @@ describe('Integration: Config Consensus (SC-6.x)', function () {
             expect(pending).to.exist;
 
             // Inject PREPARE from 2 other validators (quorum = 3 for N=4)
-            for (let i = 1; i < 3; i++) {
+            for (let i of PEER_IDXS) {
                 hub._peerManager.emit('message', buildEnvelope('PBFT_PREPARE', {
                     seq: seq,
                     configDigest: pending.digest
@@ -108,7 +98,7 @@ describe('Integration: Config Consensus (SC-6.x)', function () {
             await new Promise(r => setTimeout(r, 50));
 
             // Inject COMMIT from 2 other validators
-            for (let i = 1; i < 3; i++) {
+            for (let i of PEER_IDXS) {
                 hub._peerManager.emit('message', buildEnvelope('PBFT_COMMIT', {
                     seq: seq,
                     configDigest: pending.digest
@@ -159,7 +149,7 @@ describe('Integration: Config Consensus (SC-6.x)', function () {
     describe('SC-6.3: Consensus timeout', function () {
         it('rejects proposal after PBFT timeout and initiates view change', async function () {
             let db = testDb.getDb();
-            let hub = createTestHub(db, VALIDATORS_4[0].addr);
+            let hub = createTestHub(db, VALIDATORS_4[FIRST_SEQ_LEADER].addr);
 
             let consensus = new Consensus(hub);
             consensus.setValidatorSet(VALIDATORS_4);

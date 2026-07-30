@@ -113,16 +113,30 @@ describe('Boundary: ReorgHandler', function () {
 
     describe('duplicate reorg report', function () {
 
-        it('second call with same reorgId is rate-limited', async function () {
+        it('second call with same reorgId is a silent no-op, not an error ', async function () {
+            rh.setValidatorSet([]);
+            pm.getPeerStatus.returns([]);
+
+            let ts = Date.now() - 1000;
+            await rh.reportReorg('BTC', 200, ts, OLD_HASH, NEW_HASH);
+            let writesAfterFirst = hub.db.doQuery.callCount;
+
+            // Second identical report: the reorgId is in `processed`, so it returns
+            // without doing anything. It used to reach the rate limiter first and
+            // throw, which turned an idempotent retry into an error for the caller.
+            await rh.reportReorg('BTC', 200, ts, OLD_HASH, NEW_HASH);
+            expect(hub.db.doQuery.callCount).to.equal(writesAfterFirst);
+        });
+
+        it('a DIFFERENT reorg on the same chain inside the window is still rate-limited', async function () {
             rh.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
 
             let ts = Date.now() - 1000;
             await rh.reportReorg('BTC', 200, ts, OLD_HASH, NEW_HASH);
 
-            // Second identical report: rate limiter suppresses it
             try {
-                await rh.reportReorg('BTC', 200, ts, OLD_HASH, NEW_HASH);
+                await rh.reportReorg('BTC', 201, ts, OLD_HASH, NEW_HASH);
                 expect.fail('should have thrown');
             } catch (e) {
                 expect(e.message).to.include('Rate limit');

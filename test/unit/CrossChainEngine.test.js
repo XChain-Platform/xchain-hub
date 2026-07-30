@@ -231,6 +231,25 @@ describe('CrossChainEngine', function () {
             expect(hub.db.doQuery.called).to.be.true;
         });
 
+        it('single-node emits attestation:finalized so downstream listeners run ', async function () {
+            // SwapTracker progresses swap_records off this event. Without it a
+            // single-operator hub wrote the attested row and left every swap at
+            // 'initiated' forever.
+            engine.setValidatorSet([]);
+            pm.getPeerStatus.returns([]);
+
+            let heard = [];
+            engine.on('attestation:finalized', (a) => heard.push(a));
+
+            let result = await engine.requestAttestation('BTC', 42, 'LTC');
+
+            expect(heard).to.have.lengthOf(1);
+            expect(heard[0].attestationId).to.equal(result.attestationId);
+            expect(heard[0].status).to.equal('attested');
+            // ...and the id is recorded as finalized, matching the consensus path.
+            expect(engine.finalized.has('BTC:42:LTC')).to.be.true;
+        });
+
         it('REFUSES to finalize unilaterally over an EMPTY cross_chain snapshot (federation bootstrap guard)', async function () {
             // quorum resolves to 0 from an EMPTY capability snapshot (not a genuine
             // single node): unilaterally minting an unverified 'attested' row here is

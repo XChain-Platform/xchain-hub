@@ -57,6 +57,20 @@ function callRpc(method, params) {
     });
 }
 
+/**
+ * Seed a finalized XCHAIN/USD price snapshot, the row getFeeQuote needs before it
+ * can quote anything at all.
+ */
+async function seedXchainUsd(db, price = '1.00000000') {
+    await db.doQuery(
+        `INSERT INTO price_snapshots
+            (round_number, coin_pair, price, reference_block, reference_chain,
+             block_timestamp, validator_count, consensus_round, consensus_proof, status)
+         VALUES (?, 'XCHAIN/USD', ?, 0, 'BTC', ?, 3, 1, '[]', 'finalized')`,
+        [999, price, Date.now()]
+    );
+}
+
 describe('Integration: JSON-RPC API (SC-8.x)', function () {
 
     before(async function () {
@@ -132,6 +146,27 @@ describe('Integration: JSON-RPC API (SC-8.x)', function () {
                 if (!chain) return { error: 'chain is required' };
                 try { return await hub.getFeeQuote(action, chain); }
                 catch (err) { return { error: 'error calculating fee quote' }; }
+            },
+            // Mirrors api.js pushchaintip. It was missing here entirely, so the four
+            // block_height/block_time validation cases below hit method-not-found and
+            // failed on `res.result` being undefined rather than on the validation
+            // they were written to cover.
+            async pushchaintip({ coin, network, block_height, block_time }) {
+                if (!coin) return { error: 'coin is required' };
+                if (block_height === undefined || block_height === null)
+                    return { error: 'block_height is required' };
+                if (block_time === undefined || block_time === null)
+                    return { error: 'block_time is required' };
+                let height = parseInt(block_height, 10);
+                if (!Number.isFinite(height) || height < 0)
+                    return { error: 'invalid block_height' };
+                let time = parseInt(block_time, 10);
+                if (!Number.isFinite(time) || time < 0)
+                    return { error: 'invalid block_time' };
+                try {
+                    await hub.db.setChainTip(coin, network, height, time);
+                    return { status: 'success' };
+                } catch (err) { return { error: err.message }; }
             }
         };
 
@@ -363,6 +398,10 @@ describe('Integration: JSON-RPC API (SC-8.x)', function () {
         });
 
         it('returns fee quote for valid action', async function () {
+            // getFeeQuote prices the fee in XCHAIN and THROWS without an XCHAIN/USD
+            // oracle row ; seeding one is now part of the fixture, not
+            // optional colour.
+            await seedXchainUsd(testDb.getDb());
             let res = await callRpc('getfeequote', { action: 'ISSUE', chain: 'BTC' });
             expect(res.result.action).to.equal('ISSUE');
             expect(res.result.gasCost).to.equal(100000);

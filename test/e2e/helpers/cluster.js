@@ -405,11 +405,10 @@ function createCluster(nodeCount, overrides) {
                 await nodes[0].hub.registerValidator(keypairs[i].pubkeyHex, nodes[i].addr);
             }
 
-            // Phase 4.5: Add missing updated_at column to reorg_attestations if needed
-            // (The ReorgHandler INSERT references updated_at but the schema doesn't include it)
-            try {
-                await nodes[0].hub.db.doQuery("ALTER TABLE reorg_attestations ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
-            } catch (e) { /* column may already exist */ }
+            // (No schema patching here: reorg_attestations.updated_at is declared in
+            // src/sql/reorg_attestations.sql as of . The hand-run ALTER that used
+            // to sit at this point hid a real product/schema mismatch from every tier
+            // except the integration one, which had no such workaround and went red.)
 
             // Phase 5: Start subsystems
             for (let i = 0; i < nodeCount; i++) {

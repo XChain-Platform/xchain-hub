@@ -12,32 +12,11 @@
 
 const sinon          = require('sinon');
 const { expect }     = require('chai');
-const EventEmitter   = require('events');
 const testDb         = require('../../helpers/testDb');
 const { buildEnvelope } = require('../../helpers/testPeerNetwork');
 const { VALIDATORS_1, VALIDATORS_4 } = require('../../helpers/fixtures');
 const ReorgHandler   = require('../../../src/ReorgHandler');
-
-function createTestHub(db, validatorAddr) {
-    let pm = new EventEmitter();
-    pm.validatorAddr    = validatorAddr || 'ws://validator-1:10001';
-    pm.validatorPubkeys = new Map();
-    pm.broadcast        = sinon.stub().callsFake((type, data) => {
-        return { type, id: 'msg-' + Date.now(), sender: pm.validatorAddr, timestamp: Date.now(), data };
-    });
-    pm.getPeerStatus    = sinon.stub().returns([]);
-
-    return {
-        db: db,
-        p2pConfig: {},
-        getPeerManager: sinon.stub().returns(pm),
-        getIdentity:    sinon.stub().returns(null),
-        getOracle:      sinon.stub().returns(null),
-        getConsensus:   sinon.stub().returns(null),
-        getCrossChain:  sinon.stub().returns(null),
-        _peerManager:   pm
-    };
-}
+const { createIntegrationHub: createTestHub } = require('../../helpers/integrationHub');
 
 describe('Integration: Reorg Handling (SC-5.x)', function () {
 
@@ -79,7 +58,12 @@ describe('Integration: Reorg Handling (SC-5.x)', function () {
 
             // Insert price snapshots (some after reorg timestamp)
             for (let i = 1; i <= 4; i++) {
-                let ts = i <= 2 ? reorgTimestamp - 120000 : reorgTimestamp + i * 1000;
+                // block_timestamp is Unix SECONDS (what OracleConsensus / PriceAggregator
+                // write), and the rollback's dispute UPDATE compares in seconds. Seeding
+                // milliseconds here made EVERY row look newer than the reorg bound, so the
+                // two pre-reorg snapshots were disputed along with the rest and the test
+                // read as a product over-rollback.
+                let ts = Math.floor((i <= 2 ? reorgTimestamp - 120000 : reorgTimestamp + i * 1000) / 1000);
                 await db.doQuery(
                     `INSERT INTO price_snapshots
                         (round_number, coin_pair, price, reference_block, reference_chain,
@@ -171,7 +155,11 @@ describe('Integration: Reorg Handling (SC-5.x)', function () {
             let pending = reorgHandler.pendingReorgs.get(reorgId);
             expect(pending).to.exist;
 
-            // Inject PREPARE from 2 other validators (quorum = 3 for N=4)
+            // Inject PREPARE from 2 other validators (quorum = 3 for N=4).
+            // The R2-C2 wire format carries the observed hash pair and the digest is
+            // derived from it, so a PREPARE without oldHash/newHash is dropped as
+            // malformed before it can be counted: omitting them here meant the round
+            // never reached quorum and simply timed out.
             for (let i = 1; i < 3; i++) {
                 hub._peerManager.emit('message', buildEnvelope('XCHAIN_REORG_PREPARE', {
                     reorgId: reorgId,
@@ -179,6 +167,8 @@ describe('Integration: Reorg Handling (SC-5.x)', function () {
                     reorgHeight: 800000,
                     timestamp: reorgTimestamp,
                     affectedChains: ['LTC', 'DOGE'],
+                    oldHash: 'a'.repeat(64),
+                    newHash: 'b'.repeat(64),
                     digest: pending.digest
                 }, VALIDATORS_4[i].addr));
             }

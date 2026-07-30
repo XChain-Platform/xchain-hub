@@ -36,13 +36,13 @@
 
 const sinon           = require('sinon');
 const { expect }      = require('chai');
-const EventEmitter    = require('events');
 const path            = require('path');
 const testDb          = require('../../helpers/testDb');
 const mockApi         = require('../../helpers/mockExternalApi');
 const { VALIDATORS_1 } = require('../../helpers/fixtures');
 const OracleRound     = require('../../../src/OracleRound');
 const OracleConsensus = require('../../../src/OracleConsensus');
+const { createIntegrationHub: createTestHub, useSingleValidatorOracleEnv } = require('../../helpers/integrationHub');
 
 // The REAL dispenser-side consumption logic lives in the indexer's Utility.
 // reversePriceMatch + the bignumber helpers it calls are pure (mathjs + sibling
@@ -78,38 +78,6 @@ function makePriceDb(hubDb) {
     };
 }
 
-// Mirror of oracleRound.integration.test.js's createTestHub, with an explicit
-// ORACLE_MIN_SUBMISSIONS=1 so the single-validator round finalizes (not skips).
-function createTestHub(db, validatorAddr) {
-    const pm = new EventEmitter();
-    pm.validatorAddr    = validatorAddr || 'ws://validator-1:10001';
-    pm.validatorPubkeys = new Map();
-    pm.broadcast        = sinon.stub().callsFake((type, data) =>
-        ({ type, id: 'msg-' + Date.now(), sender: pm.validatorAddr, timestamp: Date.now(), data }));
-    pm.getPeerStatus    = sinon.stub().returns([]);
-
-    return {
-        db: db,
-        p2pConfig: {
-            ORACLE_EPOCH_START:       1704067200000,
-            ORACLE_ROUND_INTERVAL:    1000,
-            ORACLE_SUBMISSION_WINDOW: 500,
-            ORACLE_MIN_SUBMISSIONS:   1,
-            ORACLE_REWARD_PER_ROUND:  '10.00000000',
-            SLASH_DEVIATION_THRESHOLD:    '0.05',
-            SLASH_MISSED_ROUNDS_THRESHOLD:'30',
-            PRICE_FETCH_TIMEOUT:      5000
-        },
-        getPeerManager: sinon.stub().returns(pm),
-        getIdentity:    sinon.stub().returns({ getPubkeyHex: () => '01'.repeat(32), sign: () => 'aa'.repeat(64) }),
-        getOracle:      sinon.stub().returns(null),
-        getConsensus:   sinon.stub().returns(null),
-        getCrossChain:  sinon.stub().returns(null),
-        applyConfig:    sinon.stub().resolves(),
-        _peerManager:   pm
-    };
-}
-
 // Drive ONE real single-validator oracle round to finalization. Returns the
 // finalized BTC/USD snapshot row { price, block_timestamp }.
 async function driveFiatRound(db) {
@@ -133,6 +101,8 @@ async function driveFiatRound(db) {
 }
 
 describe('Integration: Fiat oracle round -> FIAT dispenser consumption (C3)', function () {
+
+    useSingleValidatorOracleEnv();
 
     before(async function () {
         try { await testDb.setup(); }
