@@ -375,7 +375,179 @@ describe('ProviderRegistry', function () {
         });
     });
 
+    // ── Block-anchored provider stake floor  ──────────────────────────
+
+    describe('normalizeMinStakeXchain', function () {
+        it('passes plain decimal strings through unchanged', function () {
+            let n = ProviderRegistry.normalizeMinStakeXchain;
+            expect(n('10000')).to.equal('10000');
+            expect(n('25000.5')).to.equal('25000.5');
+            expect(n(' 10000 ')).to.equal('10000');
+            expect(n(10000)).to.equal('10000');
+        });
+        it('returns null for absent or unparseable values', function () {
+            let n = ProviderRegistry.normalizeMinStakeXchain;
+            expect(n(undefined)).to.equal(null);
+            expect(n(null)).to.equal(null);
+            expect(n('')).to.equal(null);
+            expect(n('1e5')).to.equal(null);        // exponent form is not a canonical decimal
+            expect(n('-100')).to.equal(null);
+            expect(n('lots')).to.equal(null);
+        });
+    });
+
+    describe('getMinStake (block-anchored provider floor)', function () {
+        it('resolves the spec floors from the genesis seed', function () {
+            let reg = new ProviderRegistry(makeHub());
+            reg._seedProviderConfigGenesis();
+            expect(reg.getMinStake('http_get', 500)).to.equal('10000');
+            expect(reg.getMinStake('llm', 500)).to.equal('25000');
+        });
+
+        it('resolves the activation floor at its block and later, genesis before', function () {
+            let reg = new ProviderRegistry(makeHub());
+            reg._seedProviderConfigGenesis();
+            reg.applyProviderConfigActivation('llm', 1000, { approved_models: ['x'] }, '40000');
+            expect(reg.getMinStake('llm', 999)).to.equal('25000');
+            expect(reg.getMinStake('llm', 1000)).to.equal('40000');
+            expect(reg.getMinStake('llm', 999999)).to.equal('40000');
+        });
+
+        it('keeps the previous floor across an activation that only moves additional_config', function () {
+            let reg = new ProviderRegistry(makeHub());
+            reg._seedProviderConfigGenesis();
+            reg.applyProviderConfigActivation('llm', 1000, { approved_models: ['x'] }, '40000');
+            reg.applyProviderConfigActivation('llm', 2000, { approved_models: ['y'] });   // no floor change
+            expect(reg.getMinStake('llm', 2000)).to.equal('40000');
+            expect(reg.getAdditionalConfig('llm', 2000).approved_models[0]).to.equal('y');
+        });
+
+        it('is order-independent: a later-appended earlier activation still resolves correctly', function () {
+            let reg = new ProviderRegistry(makeHub());
+            reg._seedProviderConfigGenesis();
+            reg.applyProviderConfigActivation('llm', 3000, {}, '60000');
+            reg.applyProviderConfigActivation('llm', 2000, {}, '40000');   // appended out of order
+            expect(reg.getMinStake('llm', 1999)).to.equal('25000');
+            expect(reg.getMinStake('llm', 2000)).to.equal('40000');
+            expect(reg.getMinStake('llm', 3000)).to.equal('60000');
+        });
+
+        it('returns the latest configured floor when no block is given', function () {
+            let reg = new ProviderRegistry(makeHub());
+            reg._seedProviderConfigGenesis();
+            reg.applyProviderConfigActivation('llm', 5000, {}, '90000');
+            expect(reg.getMinStake('llm')).to.equal('90000');
+        });
+
+        it('falls back to the live definition when no history exists', function () {
+            let reg = new ProviderRegistry(makeHub());
+            // No _seedProviderConfigGenesis call: history is empty.
+            expect(reg.getMinStake('http_get', 100)).to.equal('10000');
+        });
+
+        it('returns null for a provider with no floor anywhere', function () {
+            let reg = new ProviderRegistry(makeHub());
+            reg.providers.set('floorless', { provider_id: 'floorless' });
+            expect(reg.getMinStake('floorless', 100)).to.equal(null);
+            expect(reg.getMinStake('nonexistent', 100)).to.equal(null);
+        });
+
+        it('ignores an unparseable governance floor rather than zeroing the bar', function () {
+            let reg = new ProviderRegistry(makeHub());
+            reg._seedProviderConfigGenesis();
+            reg.applyProviderConfigActivation('llm', 1000, {}, 'not-a-number');
+            expect(reg.getMinStake('llm', 1000)).to.equal('25000');
+        });
+
+        it('re-seeding genesis does not wipe a later activation floor', function () {
+            let reg = new ProviderRegistry(makeHub());
+            reg._seedProviderConfigGenesis();
+            reg.applyProviderConfigActivation('llm', 1000, {}, '40000');
+            reg._seedProviderConfigGenesis();
+            expect(reg.getMinStake('llm', 999)).to.equal('25000');
+            expect(reg.getMinStake('llm', 1000)).to.equal('40000');
+        });
+
+        it('genesis stays pinned to DEFAULTS even when the configs table raised the live floor', async function () {
+            let db = {
+                getConfig: sinon.stub().resolves({
+                    llm: JSON.stringify({ provider_id: 'llm', min_stake_xchain: '99999' })
+                }),
+                doQuery: sinon.stub().resolves([])
+            };
+            let reg = new ProviderRegistry(makeHub({ db }));
+            await reg.load();
+            await reg.loadGovernanceHistory();
+            // The live def moved, but the block-0 anchor is the built-in value, so
+            // historical blocks resolve identically on a hub that restarted after the
+            // configs row landed and one that did not.
+            expect(reg.getDef('llm').min_stake_xchain).to.equal('99999');
+            expect(reg.getMinStake('llm', 500)).to.equal('25000');
+        });
+    });
+
     describe('loadGovernanceHistory', function () {
+        it('anchors a full-def proposal floor at its activation block', async function () {
+            let db = {
+                getConfig: sinon.stub().resolves({}),
+                doQuery:   sinon.stub().resolves([
+                    { parameter: 'ATTESTATION_PROVIDER:llm', activation_block: 7000,
+                      proposed_value: JSON.stringify({ provider_id: 'llm', min_stake_xchain: '30000',
+                                                       additional_config: { approved_models: ['z'] } }) }
+                ])
+            };
+            let reg = new ProviderRegistry(makeHub({ db }));
+            await reg.loadGovernanceHistory();
+            expect(reg.getMinStake('llm', 6999)).to.equal('25000');
+            expect(reg.getMinStake('llm', 7000)).to.equal('30000');
+        });
+
+        it('agrees with the live governance apply path on the anchored floor', async function () {
+            // A hub that applies the change live (XChainHub._applyProviderGovernanceChange)
+            // and one that restarts and replays it from governance_proposals must resolve
+            // the SAME floor at the same block; a floor read by only one of the two paths
+            // is a cross-hub divergence.
+            const XChainHub = require('../../src/XChainHub');
+            let proposal = { provider_id: 'llm', min_stake_xchain: '30000',
+                             additional_config: { approved_models: ['z'] } };
+
+            let liveReg = new ProviderRegistry(makeHub());
+            liveReg._seedProviderConfigGenesis();
+            await XChainHub.prototype._applyProviderGovernanceChange.call(
+                { providerRegistry: liveReg },
+                { parameter: 'ATTESTATION_PROVIDER:llm', activationBlock: 7000,
+                  newValue: JSON.stringify(proposal) });
+
+            let db = {
+                getConfig: sinon.stub().resolves({}),
+                doQuery:   sinon.stub().resolves([
+                    { parameter: 'ATTESTATION_PROVIDER:llm', activation_block: 7000,
+                      proposed_value: JSON.stringify(proposal) }
+                ])
+            };
+            let replayReg = new ProviderRegistry(makeHub({ db }));
+            await replayReg.loadGovernanceHistory();
+
+            for (let blk of [6999, 7000, 9000]) {
+                expect(liveReg.getMinStake('llm', blk)).to.equal(replayReg.getMinStake('llm', blk));
+            }
+            expect(liveReg.getMinStake('llm', 7000)).to.equal('30000');
+        });
+
+        it('leaves the floor untouched for a bare additional_config proposal', async function () {
+            let db = {
+                getConfig: sinon.stub().resolves({}),
+                doQuery:   sinon.stub().resolves([
+                    { parameter: 'ATTESTATION_PROVIDER:llm', activation_block: 8000,
+                      proposed_value: JSON.stringify({ approved_models: ['z'] }) }
+                ])
+            };
+            let reg = new ProviderRegistry(makeHub({ db }));
+            await reg.loadGovernanceHistory();
+            expect(reg.getMinStake('llm', 8000)).to.equal('25000');
+        });
+
+
         it('seeds genesis then layers passed ATTESTATION_PROVIDER proposals by activation_block', async function () {
             let db = {
                 getConfig: sinon.stub().resolves({}),

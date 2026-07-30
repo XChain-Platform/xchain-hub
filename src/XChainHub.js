@@ -1748,16 +1748,23 @@ class XChainHub {
                 ' has no activation_block; not applying (would be unanchored, risking cross-hub divergence)');
             return;
         }
-        let ac;
+        let ac, ms;
         try {
             let parsed = JSON.parse(String(ev.newValue));
             ac = (parsed && parsed.additional_config) ? parsed.additional_config : parsed;
+            // The provider stake floor rides the same entry . Read it here as
+            // well as in ProviderRegistry.loadGovernanceHistory: this is the LIVE apply
+            // path and that is the RESTART replay path, and a floor picked up by only
+            // one of them would make a long-running hub and a freshly-restarted one
+            // resolve different floors for the same block, which is the divergence the
+            // anchoring exists to prevent.
+            ms = (parsed && parsed.min_stake_xchain !== undefined) ? parsed.min_stake_xchain : undefined;
         } catch (e) {
             console.warn('Governance ATTESTATION_PROVIDER change for ' + providerId +
                 ' has unparseable proposed_value; not applying:', e && e.message ? e.message : e);
             return;
         }
-        this.providerRegistry.applyProviderConfigActivation(providerId, Number(ev.activationBlock), ac);
+        this.providerRegistry.applyProviderConfigActivation(providerId, Number(ev.activationBlock), ac, ms);
     }
 
     // Parse a governance parameter name of the form CAPABILITY_<CAP>_MIN_STAKE

@@ -97,6 +97,21 @@ function parseAttestationProviderParam(parameter) {
     return m[1];
 }
 
+// Canonicalise a provider min_stake_xchain value to a plain decimal string, or null
+// when it is absent/unparseable. Deterministic by construction (a regex, not
+// Number()) so every hub in the federation derives the identical string from the
+// identical governance payload: this value lands in a block-anchored history whose
+// whole purpose is cross-hub agreement, and a float round-trip would reintroduce
+// the divergence the anchoring removes. An unparseable value resolves to null,
+// which a consensus caller must treat as "no floor configured" and fail closed on
+// rather than silently substituting 0.
+function normalizeMinStakeXchain(value) {
+    if (value === null || value === undefined) return null;
+    let s = String(value).trim();
+    if (!/^\d+(\.\d+)?$/.test(s)) return null;
+    return s;
+}
+
 class ProviderRegistry {
 
     constructor(hub){
@@ -110,7 +125,7 @@ class ProviderRegistry {
         this.modules = new Map();
 
         // Block-anchored provider-config history: providerId -> array of
-        // { activation_block, additional_config } ordered ascending by
+        // { activation_block, additional_config, min_stake_xchain } ordered ascending by
         // activation_block. Seeded from the static DEFAULTS as a genesis entry
         // (activation_block 0), then APPENDED (never overwritten) when a governance
         // ATTESTATION_PROVIDER change finalizes, each entry carrying the
@@ -119,6 +134,17 @@ class ProviderRegistry {
         // deterministic function of block height, identical on every hub regardless
         // of when each one applied the change. This is what makes the LLM fetch/judge
         // model federation-deterministic (mirror of CapabilityRegistry.minStakeHistory).
+        //
+        // The same entries also anchor min_stake_xchain, the PROVIDER stake floor
+        // : a higher, per-provider bar layered on top of the capability-wide
+        // MIN_STAKE (serving an `llm` attestation costs more stake than an `http_get`
+        // one). It is anchored for exactly the reason additional_config is: any
+        // responsible-set or serve decision keyed on a LIVE, non-anchored value would
+        // let two hubs whose governance change finalized at different wall-clock
+        // moments resolve different floors for the same request block, and disagree on
+        // who may serve it. A given entry carries min_stake_xchain: null when its
+        // governance change did not touch the floor, so resolution walks back to the
+        // last entry that did (see getMinStake).
         this.providerConfigHistory = new Map();
 
         // Pre-seed with defaults so even a fresh deploy is operational
@@ -197,10 +223,11 @@ class ProviderRegistry {
     _seedProviderConfigGenesis(){
         for (let [providerId, def] of Object.entries(DEFAULTS)){
             let ac = (def && def.additional_config) || {};
+            let ms = normalizeMinStakeXchain(def && def.min_stake_xchain);
             let hist = this.providerConfigHistory.get(providerId) || [];
             let g = hist.find(e => e.activation_block === 0);
-            if (g) g.additional_config = ac;
-            else { hist.push({ activation_block: 0, additional_config: ac }); hist.sort((a, b) => a.activation_block - b.activation_block); }
+            if (g) { g.additional_config = ac; g.min_stake_xchain = ms; }
+            else { hist.push({ activation_block: 0, additional_config: ac, min_stake_xchain: ms }); hist.sort((a, b) => a.activation_block - b.activation_block); }
             this.providerConfigHistory.set(providerId, hist);
         }
     }
@@ -225,19 +252,59 @@ class ProviderRegistry {
         return resolved !== null ? resolved : hist[0].additional_config;
     }
 
+    // Resolve a provider's min_stake_xchain floor effective AT blockIndex: the greatest
+    // activation_block <= blockIndex whose entry actually SET a floor. Entries left null
+    // (a governance change that only moved additional_config) are transparent, so the
+    // floor persists until a later change replaces it, exactly like a config value that
+    // was never touched. With no blockIndex, returns the latest configured floor
+    // (non-consensus callers: operator status, diagnostics).
+    //
+    // Returns null when nothing in the history set a floor AND the live definition
+    // carries none. A consensus caller must treat null as fail-closed (refuse the
+    // decision) rather than as an implicit floor of 0: substituting 0 would silently
+    // widen the serving set, which is the same class of fork
+    // CapabilitySnapshot._resolveMinStake fails closed on for the capability threshold.
+    //
+    // The fallback to the LIVE definition (used only when the history has nothing to
+    // say) mirrors getAdditionalConfig: it keeps a fresh hub that never seeded genesis
+    // usable, and is safe for non-consensus reads. A consensus caller must therefore
+    // ensure loadGovernanceHistory has run, so the value it reads is the anchored one.
+    getMinStake(providerId, blockIndex){
+        let hist = this.providerConfigHistory.get(providerId);
+        let resolved = null;
+        if (hist && hist.length > 0){
+            if (blockIndex === undefined || blockIndex === null){
+                for (let e of hist) if (e.min_stake_xchain !== null && e.min_stake_xchain !== undefined) resolved = e.min_stake_xchain;
+            } else {
+                for (let e of hist){
+                    if (e.activation_block > blockIndex) break; // ascending: nothing later is in effect yet
+                    if (e.min_stake_xchain !== null && e.min_stake_xchain !== undefined) resolved = e.min_stake_xchain;
+                }
+            }
+        }
+        if (resolved !== null) return resolved;
+        let def = this.getDef(providerId);
+        return normalizeMinStakeXchain(def && def.min_stake_xchain);
+    }
+
     // Append a block-anchored governance provider-config change to the history (idempotent
     // by activation_block; kept sorted ascending). Mirror of
     // CapabilityRegistry.applyMinStakeActivation: the change does not take effect until the
     // chain reaches activation_block, so two hubs that append at different wall-clock moments
     // still agree on the config for every block.
-    applyProviderConfigActivation(providerId, activationBlock, additionalConfig){
+    //
+    // `minStakeXchain` is optional: omit it (or pass an unparseable value) for a change that
+    // does not move the provider stake floor, and the entry stores null so getMinStake keeps
+    // resolving the previously-activated floor.
+    applyProviderConfigActivation(providerId, activationBlock, additionalConfig, minStakeXchain){
         let ab = Number(activationBlock);
         if (!Number.isInteger(ab) || ab < 0)
             throw new Error('invalid activation_block: ' + activationBlock);
+        let ms = normalizeMinStakeXchain(minStakeXchain);
         let hist = this.providerConfigHistory.get(providerId) || [];
         let existing = hist.find(e => e.activation_block === ab);
-        if (existing) { existing.additional_config = additionalConfig; }
-        else { hist.push({ activation_block: ab, additional_config: additionalConfig }); hist.sort((a, b) => a.activation_block - b.activation_block); }
+        if (existing) { existing.additional_config = additionalConfig; existing.min_stake_xchain = ms; }
+        else { hist.push({ activation_block: ab, additional_config: additionalConfig, min_stake_xchain: ms }); hist.sort((a, b) => a.activation_block - b.activation_block); }
         this.providerConfigHistory.set(providerId, hist);
         return hist;
     }
@@ -269,13 +336,17 @@ class ProviderRegistry {
         for (let r of rows){
             let providerId = parseAttestationProviderParam(r.parameter);
             if (!providerId) continue;
-            let ac;
+            let ac, ms;
             try {
                 let parsed = JSON.parse(r.proposed_value);
                 // Accept either a full provider def or a bare additional_config object.
                 ac = (parsed && parsed.additional_config) ? parsed.additional_config : parsed;
+                // Only a FULL provider def can move the stake floor; a bare
+                // additional_config payload leaves it undefined, so the entry stays
+                // transparent and the previously-activated floor keeps resolving.
+                ms = (parsed && parsed.min_stake_xchain !== undefined) ? parsed.min_stake_xchain : undefined;
             } catch (e) { continue; }
-            this.applyProviderConfigActivation(providerId, r.activation_block, ac);
+            this.applyProviderConfigActivation(providerId, r.activation_block, ac, ms);
         }
     }
 
@@ -330,3 +401,4 @@ class ProviderRegistry {
 module.exports = ProviderRegistry;
 module.exports.DEFAULTS = DEFAULTS;
 module.exports.parseAttestationProviderParam = parseAttestationProviderParam;
+module.exports.normalizeMinStakeXchain = normalizeMinStakeXchain;
