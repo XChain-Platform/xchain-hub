@@ -50,6 +50,7 @@ const ProviderRegistry      = require('./ProviderRegistry.js');
 const AttestationRound       = require('./AttestationRound.js');
 const AttestationConsensus   = require('./AttestationConsensus.js');
 const AttestationPublisher   = require('./AttestationPublisher.js');
+const AttestationRelay       = require('./AttestationRelay.js');
 const FullNodeChallengeRound = require('./FullNodeChallengeRound.js');
 const AttestationSpotChecker = require('./AttestationSpotChecker.js');
 const { bcmul, bcdiv }   = require('./bcmath.js');
@@ -101,6 +102,7 @@ class XChainHub {
         this.attestationConsensus    = null;
         this.attestationPublisher    = null;
         this.attestationSpotChecker  = null;
+        this.attestationRelay        = null;
         this._capabilityRecheckTimer = null;
         this._capabilityConfigWatcher = null;
         this._stakePollTimer          = null;
@@ -337,10 +339,25 @@ class XChainHub {
         }
         this.attestationSpotChecker = new AttestationSpotChecker(this, this.providerRegistry);
 
+        //  / : the cross-chain relay driver. Opt-in
+        // (ATTEST_RELAY_ENABLED=1) and a no-op otherwise, so merely deploying it
+        // changes nothing. Its ATTEST v3 request leg broadcasts on BTC, so it takes the
+        // SAME operator signer the publisher uses. Its ATTEST v4 response leg
+        // broadcasts on the ORIGIN chain and is wired separately, by
+        // <COIN>_ENCODER_URL + <COIN>_ADDRESS (the shared wallet-sign hook is then
+        // called with the coin as its second argument) or by an explicit
+        // setChainBroadcastHook: an operator broadcast hook builds and sends on the one
+        // chain it was configured for, so it must never be handed a foreign-chain leg.
+        this.attestationRelay = new AttestationRelay(this);
+        if(attestationSignerHooks){
+            applySignerHooks(this.attestationRelay, attestationSignerHooks);
+        }
+
         await this.attestationConsensus.start();
         await this.attestationRound.start();
         await this.attestationPublisher.start();
         await this.attestationSpotChecker.start();
+        await this.attestationRelay.start();
 
         // Hot-reload provider registry on governance proposal finalization.
         // No-op if governance isn't started or doesn't emit this event.
@@ -394,6 +411,7 @@ class XChainHub {
     getAttestationConsensus(){   return this.attestationConsensus; }
     getAttestationPublisher(){   return this.attestationPublisher; }
     getAttestationSpotChecker(){ return this.attestationSpotChecker; }
+    getAttestationRelay(){       return this.attestationRelay; }
     getProviderRegistry(){       return this.providerRegistry; }
 
     async startCrossChain(){
