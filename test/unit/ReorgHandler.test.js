@@ -611,11 +611,59 @@ describe('ReorgHandler', function () {
             expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
         });
 
-        it('accepts a legacy REORG event at that height whose hash is unrecorded (null)', async function () {
+        // : this case USED to accept (fail open). It now abstains. An unrecorded
+        // hash means this node cannot check the claim, and accepting it reduced the
+        //  verification to "some reorg happened at this height", which is enough
+        // to re-open the  divergent-digest mode. Measured reachable on mainnet
+        // (DOGE 6280198 + 6279100, LTC 3137602), so this is a live path, not a legacy one.
+        it('ABSTAINS when the REORG event at that height has an unrecorded (null) hash', async function () {
             stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
                         { block_index: 500, block_hash: NEW_HASH, network: 'regtest' },
                         { events: [{ id: 1, blocks: [{ block_index: 500, block_hash: null }] }], count: 1 });
+            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
+        });
+
+        it('still confirms when ANOTHER event records the real hash for the same height', async function () {
+            // The null entry must not short-circuit the scan: a later event carrying the
+            // actual orphaned hash is a genuine confirmation and has to survive the fix.
+            stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
+                        { block_index: 500, block_hash: NEW_HASH, network: 'regtest' },
+                        { events: [{ id: 2, blocks: [{ block_index: 500, block_hash: null }] },
+                                   { id: 1, blocks: [{ block_index: 500, block_hash: OLD_HASH }] }], count: 2 });
             expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.ok;
+        });
+
+        it('a null hash does not launder a WRONG oldHash into a confirmation', async function () {
+            // The attack the fail-open enabled: claim any oldHash at a height whose real
+            // orphaned hash was never recorded.
+            stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
+                        { block_index: 500, block_hash: NEW_HASH, network: 'regtest' },
+                        { events: [{ id: 1, blocks: [{ block_index: 500, block_hash: null }] }], count: 1 });
+            expect(await rh._probeOwnNode('BTC', 500, 'a'.repeat(64), NEW_HASH)).to.be.false;
+        });
+
+        it('REORG_ALLOW_UNRECORDED_OLDHASH=1 restores the old fail-open, and warns', async function () {
+            let warn = sinon.stub(console, 'warn');
+            process.env.REORG_ALLOW_UNRECORDED_OLDHASH = '1';
+            try {
+                stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
+                            { block_index: 500, block_hash: NEW_HASH, network: 'regtest' },
+                            { events: [{ id: 1, blocks: [{ block_index: 500, block_hash: null }] }], count: 1 });
+                expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.ok;
+                expect(warn.getCalls().some(c => /UNVERIFIED oldHash/.test(String(c.args[0]))),
+                    'the escape hatch is loud about what it is doing').to.equal(true);
+            } finally {
+                delete process.env.REORG_ALLOW_UNRECORDED_OLDHASH;
+                warn.restore();
+            }
+        });
+
+        it('the escape hatch is OFF by default (no env set means abstain)', async function () {
+            expect(process.env.REORG_ALLOW_UNRECORDED_OLDHASH, 'no ambient opt-in').to.be.undefined;
+            stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
+                        { block_index: 500, block_hash: NEW_HASH, network: 'regtest' },
+                        { events: [{ id: 1, blocks: [{ block_index: 500, block_hash: null }] }], count: 1 });
+            expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
         });
 
         it('matches an uppercase recorded orphaned hash case-insensitively', async function () {

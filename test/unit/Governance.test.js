@@ -692,10 +692,10 @@ describe('Governance', function () {
             // Proposal-open lookup (GOV-LATEVOTE-1 guard) resolves to a future voting_end.
             hub.db.doQuery.withArgs(sinon.match(/SELECT voting_end.*FROM governance_proposals/))
                 .resolves([{ voting_end: new Date(Date.now() + 86400000) }]);
-            let sig = idn.sign(JSON.stringify({ proposalId: 'gov:P:1', vote: 'approve', voter: kp.pubkeyHex }));
+            let sig = idn.sign(Governance.voteSigningPayload('gov:P:1', 'approve', kp.pubkeyHex, 1000));
             await gov._handleVote({
                 sender: 'peer', type: 'GOV_VOTE',
-                data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: kp.pubkeyHex, signature: sig }
+                data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: kp.pubkeyHex, signature: sig, seq: 1000 }
             });
             expect(hub.db.doQuery.calledWithMatch(sinon.match(/INSERT INTO governance_votes/)),
                 'the vote row is inserted').to.be.true;
@@ -709,10 +709,10 @@ describe('Governance', function () {
             // vote() path refuses this; the gossip path must too, or a post-close vote is tallied.
             hub.db.doQuery.withArgs(sinon.match(/SELECT voting_end.*FROM governance_proposals/))
                 .resolves([{ voting_end: new Date(Date.now() - 1000) }]);
-            let sig = idn.sign(JSON.stringify({ proposalId: 'gov:P:1', vote: 'approve', voter: kp.pubkeyHex }));
+            let sig = idn.sign(Governance.voteSigningPayload('gov:P:1', 'approve', kp.pubkeyHex, 1000));
             await gov._handleVote({
                 sender: 'peer', type: 'GOV_VOTE',
-                data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: kp.pubkeyHex, signature: sig }
+                data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: kp.pubkeyHex, signature: sig, seq: 1000 }
             });
             expect(hub.db.doQuery.calledWithMatch(sinon.match(/INSERT INTO governance_votes/)),
                 'no vote row inserted for a closed proposal').to.be.false;
@@ -723,10 +723,10 @@ describe('Governance', function () {
             let idn = new ValidatorIdentity(kp.privkeyHex);
             gov.setValidatorSet([...VALIDATORS_3, { pubkey: kp.pubkeyHex, addr: 'ws://voter:1' }]);
             hub.db.doQuery.withArgs(sinon.match(/SELECT voting_end.*FROM governance_proposals/)).resolves([]);
-            let sig = idn.sign(JSON.stringify({ proposalId: 'gov:GHOST:1', vote: 'approve', voter: kp.pubkeyHex }));
+            let sig = idn.sign(Governance.voteSigningPayload('gov:GHOST:1', 'approve', kp.pubkeyHex, 1000));
             await gov._handleVote({
                 sender: 'peer', type: 'GOV_VOTE',
-                data: { proposalId: 'gov:GHOST:1', vote: 'approve', voterPubkey: kp.pubkeyHex, signature: sig }
+                data: { proposalId: 'gov:GHOST:1', vote: 'approve', voterPubkey: kp.pubkeyHex, signature: sig, seq: 1000 }
             });
             expect(hub.db.doQuery.calledWithMatch(sinon.match(/INSERT INTO governance_votes/)),
                 'no vote row inserted with no local proposal').to.be.false;
@@ -737,10 +737,10 @@ describe('Governance', function () {
             // primitive a Byzantine validator would use to stuff N invented voters.
             let kp  = ValidatorIdentity.generate();
             let idn = new ValidatorIdentity(kp.privkeyHex);
-            let sig = idn.sign(JSON.stringify({ proposalId: 'gov:P:1', vote: 'approve', voter: kp.pubkeyHex }));
+            let sig = idn.sign(Governance.voteSigningPayload('gov:P:1', 'approve', kp.pubkeyHex, 1000));
             gov._handleVote({
                 sender: 'peer', type: 'GOV_VOTE',
-                data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: kp.pubkeyHex, signature: sig }
+                data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: kp.pubkeyHex, signature: sig, seq: 1000 }
             });
             expect(hub.db.doQuery.called).to.be.false;
         });
@@ -951,9 +951,13 @@ describe('Governance: R2-M2 snapshot-lock + R2-H2 re-tally', function () {
         sinon.restore();
     });
 
-    function signedVote(kp, proposalId, vote) {
-        let sig = kp.priv.sign(JSON.stringify({ proposalId, vote, voter: kp.pubkey }));
-        return { voterPubkey: kp.pubkey, vote, signature: sig };
+    // GOV-VOTE-REPLAY-1: sign through the PRODUCTION payload builder so drift
+    // between the bytes signed here and in src/ fails these tests instead of
+    // hiding behind a locally rebuilt copy. seq defaults to a fixed positive
+    // value; the replay tests pass it explicitly.
+    function signedVote(kp, proposalId, vote, seq = 1000) {
+        let sig = kp.priv.sign(Governance.voteSigningPayload(proposalId, vote, kp.pubkey, seq));
+        return { voterPubkey: kp.pubkey, vote, signature: sig, seq };
     }
 
     // ---- R2-M2 snapshot build/validate helpers ----

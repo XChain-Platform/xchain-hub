@@ -725,14 +725,37 @@ class ReorgHandler extends EventEmitter {
             return false;
         }
         if (!hist || hist.error || !Array.isArray(hist.events)) return false;
+        let sawUnrecorded = false;
         for (let ev of hist.events) {
             if (!ev || !Array.isArray(ev.blocks)) continue;
             for (let b of ev.blocks) {
                 if (!b || Number(b.block_index) !== Number(reorgHeight)) continue;
-                if (b.block_hash === null || b.block_hash === undefined) return true;  // legacy: hash unrecorded
+                // : an unrecorded hash is NOT a confirmation. The indexer sets
+                // block_hash null deliberately so a caller can tell "no hash recorded"
+                // apart from "hash did not match" (reorg-history-query.js parseReorgEvent);
+                // treating them alike fails OPEN and accepts ANY claimed oldHash at this
+                // height, which reduces the  check to "some reorg happened here" and
+                // re-opens the  divergent-digest mode. Keep scanning: another event
+                // may carry the real hash for the same height.
+                if (b.block_hash === null || b.block_hash === undefined) { sawUnrecorded = true; continue; }
                 if (String(b.block_hash).toLowerCase() === oldHash) return true;
             }
         }
+        // Escape hatch, off by default. Restores the pre- fail-open for an
+        // operator who knowingly runs against history with unrecorded hashes and
+        // would rather co-sign than abstain. Measured 2026-07-29: 3 of 171 recorded
+        // orphaned blocks on mainnet carry a null hash (DOGE 6280198 + 6279100,
+        // LTC 3137602), so the abstention cost of leaving this off is those heights.
+        if (sawUnrecorded && String(process.env.REORG_ALLOW_UNRECORDED_OLDHASH || '') === '1') {
+            console.warn('Reorg: accepting UNVERIFIED oldHash at ' + chain + ':' + reorgHeight +
+                ' because REORG_ALLOW_UNRECORDED_OLDHASH=1 (the orphaned hash is unrecorded, so this ' +
+                'co-signs a claim this node cannot check; )');
+            return true;
+        }
+        if (sawUnrecorded)
+            console.warn('Reorg: abstaining at ' + chain + ':' + reorgHeight +
+                ': a reorg IS recorded at this height but its orphaned hash was never recorded, so the ' +
+                'claimed oldHash cannot be verified ');
         return false;
     }
 

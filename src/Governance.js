@@ -66,6 +66,33 @@ const GOV_SNAPSHOT_ACTIVATION = { mainnet: 969500, testnet: 0, regtest: 0 };
 const GOV_SNAPSHOT_MAX_VALIDATORS = 1000;
 const GOV_SNAPSHOT_MAX_BYTES      = 262144;   // 256 KB serialized
 
+// GOV-VOTE-REPLAY-1 : the exact bytes a governance vote is signed over.
+// THREE paths produce these bytes (vote() signs, _handleVote and
+// _ingestResultVotes verify), and a one-byte disagreement between them silently
+// drops every peer's vote, so they all call this and nothing builds the payload
+// inline. Key order is part of the wire contract: never reorder it.
+//
+// `seq` is what makes a vote non-replayable. Without it the payload was a pure
+// function of (proposal, choice, voter), so a captured (payload, signature) pair
+// stayed valid forever and could be re-broadcast to overwrite a later opposite
+// vote, since the sink is keyed on (proposal_id, voter_pubkey) and was
+// last-write-wins. With seq inside the signed bytes, replaying an old vote
+// reproduces its old seq, and the sink refuses anything not strictly greater.
+function voteSigningPayload(proposalId, vote, voterPubkey, seq) {
+    return JSON.stringify({ proposalId, vote, voter: voterPubkey, seq: normalizeVoteSeq(seq) });
+}
+
+// A vote seq is a positive integer that fits a BIGINT column and survives
+// JSON.stringify byte-identically on every hub. Anything else (missing, NaN,
+// negative, fractional, Infinity, a numeric string from an older peer) is not
+// coerced into something plausible: it returns 0, which callers treat as
+// "unsigned by an  hub" and refuse. Coercing would let a peer pick bytes
+// our verifier reconstructs differently than the signer did.
+function normalizeVoteSeq(seq) {
+    if (typeof seq !== 'number' || !Number.isSafeInteger(seq) || seq <= 0) return 0;
+    return seq;
+}
+
 // Minimum activation block for parameters that are block-anchored. Used on the
 // follower path to re-validate the proposer-supplied activation_block so a
 // dishonest peer cannot install an already-past (or too-soon) anchor.
@@ -371,19 +398,28 @@ class Governance extends EventEmitter {
         if (electorate && !electorate.some(e => e.pubkey === String(voterPubkey).toLowerCase()))
             throw new Error('Voter is not in this proposal\'s locked validator set');
 
-        let votePayload = JSON.stringify({ proposalId, vote: voteChoice, voter: voterPubkey });
+        // GOV-VOTE-REPLAY-1: stamp a monotonic seq into the signed bytes. The wall
+        // clock is the source, floored to strictly beat whatever this voter already
+        // has stored for this proposal: two votes inside one millisecond, or a clock
+        // that stepped backwards, would otherwise tie and be refused as
+        // non-increasing, leaving the voter unable to change their vote.
+        let priorSeq = 0;
+        let priorRows = await this.db.doQuery(
+            "SELECT vote_seq FROM governance_votes WHERE proposal_id = ? AND voter_pubkey = ? LIMIT 1",
+            [proposalId, voterPubkey]
+        ) || [];
+        if (priorRows.length) priorSeq = normalizeVoteSeq(Number(priorRows[0].vote_seq));
+        let seq = Math.max(Date.now(), priorSeq + 1);
+
+        let votePayload = voteSigningPayload(proposalId, voteChoice, voterPubkey, seq);
         let signature = this.identity ? this.identity.sign(votePayload) : '';
 
-        // Record the vote (upsert -- allows changing vote during voting period)
-        await this.db.doQuery(
-            `INSERT INTO governance_votes (proposal_id, voter_pubkey, vote, signature)
-             VALUES (?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE vote = ?, signature = ?, created_at = NOW()`,
-            [proposalId, voterPubkey, voteChoice, signature, voteChoice, signature]
-        );
+        // Record the vote (upsert -- allows changing vote during voting period,
+        // but only ever forward: _upsertVote refuses a non-increasing seq)
+        await this._upsertVote(proposalId, voterPubkey, voteChoice, signature, seq);
 
         this.peerManager.broadcast(GOV_VOTE, {
-            proposalId, vote: voteChoice, voterPubkey, signature
+            proposalId, vote: voteChoice, voterPubkey, signature, seq
         });
 
         console.log('Governance: Vote cast: ' + voteChoice + ' on ' + proposalId);
@@ -662,9 +698,45 @@ class Governance extends EventEmitter {
         // schema drift). Logging them ties "why didn't node X vote on proposal P?" to its cause.
     }
 
+    // GOV-VOTE-REPLAY-1: persist a vote, accepting it ONLY when its seq is
+    // strictly greater than the seq already stored for this
+    // (proposal_id, voter_pubkey). One statement rather than read-compare-write:
+    // _handleVote is fire-and-forget and several gossiped copies of the same
+    // voter's votes can be in flight at once, so a read-then-write would leave a
+    // TOCTOU window in which the loser lands last and wins. GREATEST keeps the
+    // stored seq monotonic even when a superseded copy arrives late, so the
+    // stale copy cannot lower the bar for the next replay.
+    async _upsertVote(proposalId, voterPubkey, vote, signature, seq) {
+        return this.db.doQuery(
+            `INSERT INTO governance_votes (proposal_id, voter_pubkey, vote, signature, vote_seq)
+             VALUES (?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+                 vote       = IF(VALUES(vote_seq) > COALESCE(vote_seq, 0), VALUES(vote), vote),
+                 signature  = IF(VALUES(vote_seq) > COALESCE(vote_seq, 0), VALUES(signature), signature),
+                 created_at = IF(VALUES(vote_seq) > COALESCE(vote_seq, 0), NOW(), created_at),
+                 vote_seq   = GREATEST(COALESCE(vote_seq, 0), VALUES(vote_seq))`,
+            [proposalId, voterPubkey, vote, String(signature || ''), seq]
+        );
+    }
+
     async _handleVote(envelope) {
-        let { proposalId, vote, voterPubkey, signature } = envelope.data;
+        let { proposalId, vote, voterPubkey, signature, seq } = envelope.data;
         if (!proposalId || !vote || !voterPubkey) return;
+
+        // GOV-VOTE-REPLAY-1: a vote with no usable seq is refused outright rather
+        // than admitted with a default. Admitting seq=0 would rebuild exactly the
+        // replayable payload this fix removes, so the gossip wire format is
+        // deliberately BREAKING here: a pre- peer's votes are dropped, not
+        // counted. Safe to do now precisely because the mainnet validator registry
+        // is empty (getvalidators returns []) and one hub runs each mainnet chain,
+        // so there is no mixed-version federation to fragment. That window closes
+        // as soon as external validators register.
+        let voteSeq = normalizeVoteSeq(seq);
+        if (!voteSeq) {
+            console.warn('Governance: dropped vote on ' + proposalId + ' from ' + voterPubkey +
+                ': missing or invalid seq (pre- peer, or a replay stripped of its seq)');
+            return;
+        }
 
         // Authenticate the vote before persisting (consensus-tally-affecting). The
         // table is keyed by (proposal_id, voter_pubkey), so without this ONE validator
@@ -681,7 +753,7 @@ class Governance extends EventEmitter {
         // (the same set the tally denominator is derived from).
         let pk = String(voterPubkey).toLowerCase();
         if (!this.validatorSet.some(v => String(v.pubkey).toLowerCase() === pk)) return;
-        let payload = JSON.stringify({ proposalId, vote, voter: voterPubkey });
+        let payload = voteSigningPayload(proposalId, vote, voterPubkey, voteSeq);
         if (!ValidatorIdentity.verify(payload, String(signature || ''), voterPubkey)) return;
 
         // Drop a gossiped vote for a proposal that is not OPEN on this hub (GOV-LATEVOTE-1).
@@ -708,13 +780,9 @@ class Governance extends EventEmitter {
         let electorate = this._parseSnapshot(prows[0].validator_snapshot);
         if (electorate && !electorate.some(e => e.pubkey === pk)) return;
 
-        this.db.doQuery(
-            `INSERT INTO governance_votes (proposal_id, voter_pubkey, vote, signature)
-             VALUES (?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE vote = ?, signature = ?, created_at = NOW()`,
-            [proposalId, voterPubkey, vote, signature || '', vote, signature || '']
-        ).catch(e => console.error('Governance: failed to persist inbound vote for proposal ' + proposalId +
-            ' from ' + voterPubkey + ':', e));
+        this._upsertVote(proposalId, voterPubkey, vote, signature, voteSeq)
+            .catch(e => console.error('Governance: failed to persist inbound vote for proposal ' + proposalId +
+                ' from ' + voterPubkey + ':', e));
         // A vote is consensus-tally-affecting state: a silently-dropped write here makes this
         // node's tally diverge from peers that succeeded, with no symptom until operators
         // compare counts. Log it so a tally mismatch is traceable to the specific dropped write.
@@ -847,15 +915,15 @@ class Governance extends EventEmitter {
             if (!v || typeof v.voterPubkey !== 'string' || (v.vote !== 'approve' && v.vote !== 'reject')) continue;
             let pk = v.voterPubkey.toLowerCase();
             if (!members.has(pk)) continue;
-            let payload = JSON.stringify({ proposalId, vote: v.vote, voter: v.voterPubkey });
+            // GOV-VOTE-REPLAY-1: same rule as the gossip path. Evidence without a
+            // usable seq is skipped rather than defaulted, so a leader cannot
+            // launder a replayed vote back in by stripping its seq.
+            let seq = normalizeVoteSeq(v.seq);
+            if (!seq) continue;
+            let payload = voteSigningPayload(proposalId, v.vote, v.voterPubkey, seq);
             if (!ValidatorIdentity.verify(payload, String(v.signature || ''), v.voterPubkey)) continue;
             try {
-                await this.db.doQuery(
-                    `INSERT INTO governance_votes (proposal_id, voter_pubkey, vote, signature)
-                     VALUES (?, ?, ?, ?)
-                     ON DUPLICATE KEY UPDATE vote = ?, signature = ?, created_at = NOW()`,
-                    [proposalId, v.voterPubkey, v.vote, String(v.signature || ''), v.vote, String(v.signature || '')]
-                );
+                await this._upsertVote(proposalId, v.voterPubkey, v.vote, v.signature, seq);
             } catch (e) {
                 console.error('Governance: failed to ingest GOV_RESULT vote evidence for ' + proposalId +
                     ' from ' + v.voterPubkey + ':', e && e.message ? e.message : e);
@@ -915,8 +983,10 @@ class Governance extends EventEmitter {
     async _tallyProposal(proposal) {
         // R2-M2: include the signature so followers can re-verify each vote when
         // they re-tally locally (R2-H2), not accept the leader's status blind.
+        // vote_seq travels with the evidence: a follower re-verifying these
+        // signatures must rebuild the exact signed bytes, which now include seq.
         let votes = await this.db.doQuery(
-            "SELECT voter_pubkey, vote, signature FROM governance_votes WHERE proposal_id = ?",
+            "SELECT voter_pubkey, vote, signature, vote_seq FROM governance_votes WHERE proposal_id = ?",
             [proposal.proposal_id]
         );
 
@@ -950,7 +1020,10 @@ class Governance extends EventEmitter {
             // and NEVER apply the wire status on faith. Each entry re-verifies on
             // the receive side (membership in the locked snapshot + ed25519 sig).
             // Bounded by the snapshot cap. Old hubs ignore the extra field.
-            votes: votes.map(v => ({ voterPubkey: v.voter_pubkey, vote: v.vote, signature: v.signature }))
+            votes: votes.map(v => ({
+                voterPubkey: v.voter_pubkey, vote: v.vote, signature: v.signature,
+                seq: normalizeVoteSeq(Number(v.vote_seq))
+            }))
         });
 
         console.log('Governance: Proposal ' + proposal.proposal_id + ': ' + newStatus +
@@ -1008,3 +1081,8 @@ class Governance extends EventEmitter {
 }
 
 module.exports = Governance;
+// Exported for the unit suite. GOV-VOTE-REPLAY-1 lives entirely in these two
+// functions, and a test that rebuilt the signed bytes itself would keep passing
+// even if production drifted away from it, so the suite must use these.
+module.exports.voteSigningPayload = voteSigningPayload;
+module.exports.normalizeVoteSeq   = normalizeVoteSeq;
