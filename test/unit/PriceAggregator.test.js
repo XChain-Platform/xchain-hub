@@ -359,11 +359,13 @@ describe('PriceAggregator.receiveOraclePrice() validation + persistence', functi
     });
 
     it('HUB-RETRACT-4: rejects a stale replay (generation <= watermark AND action_index in the orphaned range)', async function () {
+        let warn = sinon.stub(console, 'warn');
         hub.db.getPriceIngestWatermark.resolves({ retraction_generation: 5, from_action_index: 100 });
         let result = await agg.receiveOraclePrice('BTC', { ...VALID, action_index: 120, push_generation: 5 });
         expect(result).to.deep.equal({ accepted: false, reason: 'stale (retracted generation)' });
         // Rejected before any dedupe SELECT / INSERT touches oracle_prices.
         expect(hub.db.doQuery.called).to.equal(false);
+        expect(warn.calledOnce).to.equal(true);   // : never a silent drop
     });
 
     it('HUB-RETRACT-4: does NOT false-reject a legitimate late push BELOW the orphaned range', async function () {
@@ -591,6 +593,7 @@ describe('PriceAggregator.receiveValidatedRound()', function () {
     });
 
     it('HUB-RETRACT-4: rejects a stale round replay (generation <= watermark, action_index in the orphaned range)', async function () {
+        let warn = sinon.stub(console, 'warn');
         stubDb();
         hub.db.getPriceIngestWatermark.resolves({ retraction_generation: 5, from_action_index: 100 });
         // A validly-signed round that reaches quorum but replays a rolled-back action_index at the
@@ -599,6 +602,10 @@ describe('PriceAggregator.receiveValidatedRound()', function () {
         expect(result).to.deep.equal({ accepted: false, reason: 'stale (retracted generation)' });
         let inserted = hub.db.doQuery.getCalls().some(c => /^INSERT INTO price_snapshots/.test(c.args[0]));
         expect(inserted).to.equal(false);
+        // : the v0 round path warns as loudly as the v1 path, naming the fence.
+        expect(warn.calledOnce).to.equal(true);
+        expect(warn.firstCall.args[0]).to.contain('PRICE v0 round');
+        expect(warn.firstCall.args[0]).to.contain('price_ingest_watermarks');
     });
 
     it('rejects malformed pairs instead of silently skipping them', async function () {
@@ -942,5 +949,78 @@ describe('PriceAggregator.receiveValidatedRound() signature-tally ordering flag-
         ]));
         expect(result.accepted).to.equal(false);
         expect(result.reason).to.contain('insufficient quorum (1/2)');
+    });
+});
+
+// : the ingest fence used to reject silently, which is how it took a price
+// rail down invisibly after an indexer DB reset (the rebuilt indexer restarts
+// push_generations at 0, so EVERY push matches the fence). These tests pin the
+// warning that names the cause and the remedy, and the throttle that keeps a
+// replaying pusher from drowning the log.
+describe('PriceAggregator ingest-fence rejection warning ', function () {
+
+    const WATERMARK = { retraction_generation: 5, from_action_index: 100 };
+    const STALE = {
+        source_address: 'addr1', coin: 'BTC', tick: 'GOLD', fiat: 'USD',
+        value: '1.23', block_time: 1700000000, action_index: 120, push_generation: 0
+    };
+
+    let hub, agg, warn, clock;
+
+    beforeEach(function () {
+        hub = createMockHub();
+        agg = new PriceAggregator(hub);
+        hub.db.getPriceIngestWatermark.resolves({ ...WATERMARK });
+        warn  = sinon.stub(console, 'warn');
+        clock = sinon.useFakeTimers({ now: 1700000000000, toFake: ['Date'] });
+    });
+
+    afterEach(function () {
+        clock.restore();
+        sinon.restore();
+    });
+
+    it('names the fence, the generation comparison, the remedy and the item id', async function () {
+        await agg.receiveOraclePrice('BTC', STALE);
+        expect(warn.calledOnce).to.equal(true);
+        let line = warn.firstCall.args[0];
+        expect(line).to.contain('PriceAggregator: WARNING');
+        expect(line).to.contain('BTC');
+        expect(line).to.contain('push_generation 0 <= retraction_generation 5');
+        expect(line).to.contain('action_index 120 >= from_action_index 100');
+        expect(line).to.contain('price_ingest_watermarks');
+        expect(line).to.contain('');
+    });
+
+    it('throttles repeats for the same chain and reports the suppressed count on the next line', async function () {
+        for (let i = 0; i < 5; i++) await agg.receiveOraclePrice('BTC', STALE);
+        expect(warn.callCount).to.equal(1);       // 4 suppressed inside the window
+
+        clock.tick(60_000);
+        await agg.receiveOraclePrice('BTC', STALE);
+        expect(warn.callCount).to.equal(2);
+        expect(warn.secondCall.args[0]).to.contain('4 further rejection(s)');
+
+        // The count resets with each printed line, so it never double-counts.
+        clock.tick(60_000);
+        await agg.receiveOraclePrice('BTC', STALE);
+        expect(warn.callCount).to.equal(3);
+        expect(warn.thirdCall.args[0]).to.not.contain('further rejection(s)');
+    });
+
+    it('throttles per source chain, so one noisy chain cannot mask another going down', async function () {
+        await agg.receiveOraclePrice('BTC', STALE);
+        await agg.receiveOraclePrice('BTC', STALE);
+        await agg.receiveOraclePrice('DOGE', STALE);
+        expect(warn.callCount).to.equal(2);
+        expect(warn.secondCall.args[0]).to.contain('DOGE');
+    });
+
+    it('says nothing when the fence does not fire', async function () {
+        hub.db.doQuery.callsFake(async (sql) => (/^INSERT INTO oracle_prices/.test(sql) ? {} : []));
+        // Below the orphaned range: a legitimate survivor, not a stale replay.
+        let result = await agg.receiveOraclePrice('BTC', { ...STALE, action_index: 50, push_generation: 5 });
+        expect(result).to.deep.equal({ accepted: true });
+        expect(warn.called).to.equal(false);
     });
 });

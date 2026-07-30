@@ -40,12 +40,58 @@ const { PRICE_MAX, PRICE_V1_COINS, PRICE_V1_FIATS,
 const { bcgt }          = require('./bcmath.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 
+// : minimum gap between ingest-fence rejection warnings for the SAME source
+// chain. Sized so a stalled rail keeps re-announcing itself in any log tail while a
+// replaying pusher cannot drown the log; the suppressed count rides on the next line.
+const FENCE_WARN_INTERVAL_MS = 60_000;
+
 class PriceAggregator extends EventEmitter {
 
     constructor(hub) {
         super();
         this.hub = hub;
         this.db  = hub.db;
+        // : per-source-chain throttle state for the ingest-fence rejection
+        // warning ({ last: ms, suppressed: n }). See _warnIngestFenceRejection.
+        this._fenceWarnState = new Map();
+    }
+
+    // : an ingest-fence rejection USED TO BE silent (a bare
+    // { accepted:false } return), and that is how it killed a price rail: reset an
+    // indexer DB and its push_generations counter restarts at 0, so every push from
+    // it sits at or below a kept retraction_generation and is dropped. The operator
+    // sees "prices stopped" with nothing anywhere naming the cause, and the
+    // native-fee / XCHAIN-USD path that rides on prices fails with it.
+    //
+    // So say it out loud, with the remedy in the line: on this path the fence is far
+    // more likely to be firing on a rebuilt indexer (a standing condition that stops
+    // the rail until someone clears the row) than on the stale in-flight replay it
+    // was built for (a one-off).
+    //
+    // Throttled per source chain because a replaying pusher must not be able to
+    // flood the log: the first rejection prints immediately, then at most one line
+    // per window, carrying the count it stands for so the volume is never lost.
+    _warnIngestFenceRejection(sourceChain, kind, pushGeneration, actionIndex, wm) {
+        let chain = sourceChain || 'unknown';
+        let now   = Date.now();
+        let state = this._fenceWarnState.get(chain);
+        if (state && (now - state.last) < FENCE_WARN_INTERVAL_MS) {
+            state.suppressed++;
+            return;
+        }
+        let suppressed = state ? state.suppressed : 0;
+        this._fenceWarnState.set(chain, { last: now, suppressed: 0 });
+        console.warn('PriceAggregator: WARNING: DROPPED ' + kind + ' price push from ' + chain
+            + ' at the ingest fence (push_generation ' + pushGeneration + ' <= retraction_generation '
+            + wm.retraction_generation + ' AND action_index ' + actionIndex + ' >= from_action_index '
+            + wm.from_action_index + ').'
+            + (suppressed > 0 ? ' ' + suppressed + ' further rejection(s) for this chain were suppressed since the last warning.' : '')
+            + ' The ' + chain + ' price rail is DOWN for as long as this repeats, and the native-fee'
+            + ' / XCHAIN-USD path fails with it. If the ' + chain + ' indexer DB was reset or rebuilt,'
+            + ' its push_generations counter restarted at 0 and this fence row is stale: clear it with'
+            + " DELETE FROM price_ingest_watermarks WHERE source_chain = '" + chain + "'"
+            + ' on the hub DB . Otherwise this is a stale replay of a retracted action and the'
+            + ' drop is correct.');
     }
 
     // Build the canonical signable payload for a PRICE v0 round.
@@ -251,6 +297,8 @@ class PriceAggregator extends EventEmitter {
         if (Number.isFinite(roundActionIndex)) {
             let wm = await this.db.getPriceIngestWatermark(sourceChain || '');
             if (wm && pushGeneration <= wm.retraction_generation && roundActionIndex >= wm.from_action_index) {
+                // Never silent : a rebuilt indexer trips this fence on every push.
+                this._warnIngestFenceRejection(sourceChain, 'PRICE v0 round', pushGeneration, roundActionIndex, wm);
                 return { accepted: false, reason: 'stale (retracted generation)' };
             }
         }
@@ -389,6 +437,8 @@ class PriceAggregator extends EventEmitter {
         // exists until the first retraction, so genuine pre-reorg generation-0 pushes are never hit.
         let wm = await this.db.getPriceIngestWatermark(sourceChain || '');
         if (wm && pushGeneration <= wm.retraction_generation && actionIndex >= wm.from_action_index) {
+            // Never silent : a rebuilt indexer trips this fence on every push.
+            this._warnIngestFenceRejection(sourceChain, 'PRICE v1 oracle', pushGeneration, actionIndex, wm);
             return { accepted: false, reason: 'stale (retracted generation)' };
         }
 
