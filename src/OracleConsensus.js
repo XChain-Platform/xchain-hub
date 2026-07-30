@@ -36,6 +36,7 @@ const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const eq                = require('./equivocation_header.js');
 const bcmath            = require('./bcmath.js');
 const devband           = require('./lib/deviation_band.js');
+const { canonicalValidatorOrder } = require('./validator_order.js');
 
 const ORACLE_PROPOSE = 'ORACLE_PROPOSE';
 const ORACLE_PREPARE = 'ORACLE_PREPARE';
@@ -175,8 +176,14 @@ class OracleConsensus extends EventEmitter {
         this.allowUnverifiedPairs = String(process.env.ORACLE_ALLOW_UNVERIFIED_PAIRS || '') === 'true';
     }
 
+    // : canonicalize the set's ORDER on the way in, so _getLeader's
+    // legacy live-set path (`validatorSet[round % N]`, taken whenever a round
+    // has no usable block-locked snapshot) elects the same leader on every hub
+    // for identical membership.  already fixed the snapshot path by
+    // sorting the member pubkeys; this closes the same hole on the fallback.
+    // See validator_order.js.
     setValidatorSet(validators) {
-        this.validatorSet = validators;
+        this.validatorSet = canonicalValidatorOrder(validators);
     }
 
     async start() {
@@ -1420,7 +1427,20 @@ class OracleConsensus extends EventEmitter {
                 results.push({ coinPair: pair, price: price });
             }
         }
-        return results;
+        // : emit in canonical pair order rather than coinPairs Set
+        // insertion order (first-seen across submissions, i.e. a function of
+        // arrival order). The per-pair VALUES were already order-invariant; the
+        // ARRAY was not, and this array is what gets propagated on PROPOSE and
+        // stored in price_snapshots, so two hubs with identical prices produced
+        // different bytes for the same round. _digest canonicalizes its own
+        // preimage independently (defence in depth for wire payloads this
+        // method did not build), and _buildPriceV0Payload already sorted; this
+        // makes the propagated and stored array agree with both.
+        return results.sort((a, b) => {
+            if (a.coinPair < b.coinPair) return -1;
+            if (a.coinPair > b.coinPair) return 1;
+            return 0;
+        });
     }
 
     // Aggregate a single coin pair using trimmed median
@@ -1878,8 +1898,52 @@ class OracleConsensus extends EventEmitter {
         return empty && this._getQuorum() > 0;
     }
 
+    // : canonicalize the digest PREIMAGE, not just hash whatever array
+    // arrived. `_aggregateAll` emits its results in coinPairs Set insertion
+    // order (first-seen across submissions), which is a function of submission
+    // ARRIVAL order, not of the round's content. Raw JSON.stringify therefore
+    // made the digest depend on that arrival order, plus on the key order of
+    // each entry object as the proposer happened to serialize it. Today that is
+    // masked because followers re-hash the LEADER's propagated array, so both
+    // sides see the same order; the moment any path re-derives a digest from
+    // its OWN aggregation (or a proposer reorders a payload it re-serializes),
+    // two honest hubs disagree on the digest for identical prices and the round
+    // stalls. Canonicalizing makes the digest a function of the {pair -> price}
+    // mapping alone.
+    //
+    // Shape: entries sorted by coinPair, projected to exactly [coinPair, price]
+    // as strings in fixed order. String coercion mirrors the DEX's
+    // _canonicalMatch discipline (a numeric 80 and the string '80' are the same
+    // price and must hash alike). Projection also means a padded extra field on
+    // the wire cannot change the digest; the per-pair semantic validation on the
+    // PROPOSE path, and the separately signed PRICE v0 canonical, are what bind
+    // the values themselves. `prices` itself is never mutated or reordered: only
+    // the preimage is canonical, so stored rows and the propagated array are
+    // untouched.
+    //
+    // Consensus-breaking (every round digest changes), so it ships ungated with
+    // the  pre-launch batch and its mandatory fleet-wide rebase.
+    _canonicalDigestPrices(prices) {
+        if (!Array.isArray(prices)) return prices;
+        return prices
+            .map(p => ({
+                coinPair: (p && p.coinPair !== undefined && p.coinPair !== null) ? String(p.coinPair) : '',
+                price:    (p && p.price    !== undefined && p.price    !== null) ? String(p.price)    : ''
+            }))
+            .sort((a, b) => {
+                if (a.coinPair < b.coinPair) return -1;
+                if (a.coinPair > b.coinPair) return 1;
+                // Duplicate pairs are not produced by _aggregateAll, but a wire
+                // payload can carry them; order them by price so the digest is
+                // still total rather than arrival-dependent.
+                if (a.price < b.price) return -1;
+                if (a.price > b.price) return 1;
+                return 0;
+            });
+    }
+
     _digest(round, prices) {
-        let payload = JSON.stringify({ round: round, prices: prices });
+        let payload = JSON.stringify({ round: round, prices: this._canonicalDigestPrices(prices) });
         return crypto.createHash('sha256').update(payload).digest('hex');
     }
 }

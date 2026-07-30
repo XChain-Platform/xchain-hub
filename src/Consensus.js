@@ -29,6 +29,7 @@ const crypto = require('crypto');
 const swq    = require('./stake_weighted_quorum.js');
 const eq     = require('./equivocation_header.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
+const { canonicalValidatorOrder } = require('./validator_order.js');
 
 const PBFT_PRE_PREPARE = 'PBFT_PRE_PREPARE';
 const PBFT_PREPARE     = 'PBFT_PREPARE';
@@ -95,8 +96,16 @@ class Consensus {
         this.minValidators = parseInt(process.env.MIN_VALIDATORS) || 1;
     }
 
+    // : canonicalize the set's ORDER on the way in. Leader election is
+    // `validatorSet[(seq + view) % N]`, so before this the cross-hub leader
+    // agreement rested entirely on every hub's loader emitting identical
+    // ordering for identical membership; two hubs ordering the same members
+    // differently elect different leaders for the same (seq, view) and reject
+    // each other's legitimate PRE_PREPARE. Quorum N is untouched (it depends
+    // only on |set|). See validator_order.js for the ordering and for why this
+    // ships ungated inside the  pre-launch batch.
     setValidatorSet(validators) {
-        this.validatorSet = validators;
+        this.validatorSet = canonicalValidatorOrder(validators);
     }
 
     // Fail-closed gate for multi-hub federations. A deterministic snapshot is a

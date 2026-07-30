@@ -27,6 +27,7 @@ const EventEmitter = require('events');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const { parseCapabilityMinStakeParam, MIN_STAKE_GOVERNANCE_DISABLED } = require('./CapabilityRegistry.js');
 const { parseAttestationProviderParam } = require('./ProviderRegistry.js');
+const { canonicalValidatorOrder } = require('./validator_order.js');
 
 const GOV_PROPOSE = 'GOV_PROPOSE';
 const GOV_VOTE    = 'GOV_VOTE';
@@ -142,8 +143,13 @@ class Governance extends EventEmitter {
         this.tallyInterval = parseInt(process.env.GOVERNANCE_TALLY_INTERVAL) || 60000;
     }
 
+    // : canonicalize the set's ORDER on the way in, so
+    // _getProposalLeader (`validatorSet[hash(proposalId) % N]`) picks the same
+    // tally leader on every hub for identical membership. Membership checks
+    // and _buildValidatorSnapshot are unaffected: the former is order-blind and
+    // the latter already sorted by pubkey. See validator_order.js.
     setValidatorSet(validators) {
-        this.validatorSet = validators;
+        this.validatorSet = canonicalValidatorOrder(validators);
     }
 
     // True once the governance snapshot-lock is in effect for this hub: the

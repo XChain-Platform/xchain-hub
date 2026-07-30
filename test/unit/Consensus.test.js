@@ -141,18 +141,77 @@ describe('Consensus (PBFT)', function () {
             expect(a._getQuorum()).to.equal(b._getQuorum());
         });
 
-        // Leader election is (seq + view) % N over the set AS GIVEN. setValidatorSet
-        // does NOT canonicalize order. So cross-hub determinism REQUIRES every hub to
-        // receive the set in identical order (today the indexer's getcapabilityvalidators
-        // response is that source of truth). This pins the dependency: if a future change
-        // sorts the set inside setValidatorSet, that is a deliberate consensus-breaking
-        // change (atomic fleet deploy + re-baseline) and must update this test.
-        it('leader election is order-sensitive: divergent ordering elects divergent leaders', function () {
+        //  (was: "leader election is order-sensitive"). setValidatorSet now
+        // canonicalizes order (validator_order.js), so leader election depends on
+        // MEMBERSHIP alone and no longer on every hub's loader emitting the same
+        // ordering. This is the consensus-breaking change itself; it ships ungated
+        // inside the  pre-launch batch and is made safe by that batch's
+        // mandatory fleet-wide wipe-and-replay rebase.
+        it('leader election is order-INSENSITIVE: divergent input ordering elects the same leader ', function () {
             const set = buildSet(7);
             const a = freshConsensus(); a.setValidatorSet(set.slice());
             const b = freshConsensus(); b.setValidatorSet(set.slice().reverse());
-            // Same membership, reversed order → the seq-0 leader differs (set[0] vs set[N-1]).
-            expect(a._getLeader(0)).to.not.deep.equal(b._getLeader(0));
+            for (let view = 0; view < 3; view++) {
+                a.view = view; b.view = view;
+                for (let seq = 0; seq < set.length * 2 + 1; seq++) {
+                    expect(a._getLeader(seq)).to.deep.equal(b._getLeader(seq));
+                }
+            }
+        });
+
+        it('an arbitrarily shuffled input converges on the pubkey-sorted order ', function () {
+            const set = buildSet(10);
+            const shuffled = set.slice().sort(() => Math.random() - 0.5);
+            const a = freshConsensus(); a.setValidatorSet(shuffled);
+            const expected = set.slice()
+                .sort((x, y) => (x.pubkey < y.pubkey ? -1 : x.pubkey > y.pubkey ? 1 : 0));
+            expect(a.validatorSet).to.deep.equal(expected);
+        });
+
+        // The hub hands the SAME array object to five engines
+        // (XChainHub._propagateValidatorSet), so an in-place sort here would
+        // reorder a caller's array and leak one engine's canonicalization into
+        // the next engine's input.
+        it('does not mutate or reorder the caller\'s array ', function () {
+            const set = buildSet(5);
+            const caller = set.slice().reverse();
+            const snapshot = caller.slice();
+            const a = freshConsensus(); a.setValidatorSet(caller);
+            expect(caller).to.deep.equal(snapshot);
+            expect(a.validatorSet).to.not.equal(caller);
+        });
+
+        // Duplicate pubkeys are not expected from the registry, but the registry
+        // can bind one signing key to several addrs; the addr tie-break keeps the
+        // order total instead of leaning on sort stability (which would just
+        // preserve the non-canonical input order).
+        it('ties on pubkey are broken by addr, so equal-key sets still order identically ', function () {
+            const dup = (addr) => ({ pubkey: 'aa'.repeat(32), addr: addr });
+            const a = freshConsensus(); a.setValidatorSet([dup('ws://z:1'), dup('ws://a:1'), dup('ws://m:1')]);
+            const b = freshConsensus(); b.setValidatorSet([dup('ws://m:1'), dup('ws://z:1'), dup('ws://a:1')]);
+            expect(a.validatorSet).to.deep.equal(b.validatorSet);
+            expect(a.validatorSet.map(v => v.addr)).to.deep.equal(['ws://a:1', 'ws://m:1', 'ws://z:1']);
+        });
+
+        // Mixed-case pubkeys for the same key must not sort into two different
+        // buckets; the sort key is the lowercased pubkey, matching
+        // Governance._buildValidatorSnapshot and OracleConsensus._getLeader.
+        it('sorts on the LOWERCASED pubkey so case drift cannot reorder the set ', function () {
+            const lower = [
+                { pubkey: 'aa'.repeat(32), addr: 'ws://1:1' },
+                { pubkey: 'bb'.repeat(32), addr: 'ws://2:1' },
+                { pubkey: 'cc'.repeat(32), addr: 'ws://3:1' }
+            ];
+            const upper = lower.map(v => ({ pubkey: v.pubkey.toUpperCase(), addr: v.addr })).reverse();
+            const a = freshConsensus(); a.setValidatorSet(lower);
+            const b = freshConsensus(); b.setValidatorSet(upper);
+            expect(a.validatorSet.map(v => v.addr)).to.deep.equal(b.validatorSet.map(v => v.addr));
+        });
+
+        it('empty set still elects no leader after canonicalization ', function () {
+            const a = freshConsensus(); a.setValidatorSet([]);
+            expect(a.validatorSet).to.deep.equal([]);
+            expect(a._getLeader(0)).to.be.null;
         });
     });
 

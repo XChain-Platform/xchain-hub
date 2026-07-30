@@ -463,46 +463,91 @@ describe('OracleConsensus', function () {
                 .to.deep.equal(norm(ocB._aggregateAll(buildSubmissions(rev))));
         });
 
-        // FLAG (pinned invariant boundary): _aggregateAll builds its results array
-        // in coinPairs Set insertion order (first-seen across submissions), and
-        // _digest hashes the array IN ORDER (JSON.stringify). The per-pair VALUES
-        // are deterministic (above), but the array ORDER is not canonicalized, so
-        // a digest computed from a hub's OWN aggregation depends on submission
-        // iteration order. Today this is masked because followers hash the LEADER's
-        // propagated array; if any path re-derives a digest/signature from local
-        // aggregation, the pair order must be canonicalized first.
-        it('the {pair → median} mapping is order-insensitive (raw array order is NOT canonical: see flag)', function () {
+        it('the {pair → median} mapping is order-insensitive', function () {
             expect(norm(oc._aggregateAll(buildSubmissions(fwd))))
                 .to.deep.equal(norm(oc._aggregateAll(buildSubmissions(rev))));
         });
 
-        // Executable guard for the FLAG above. A canonical pair-sort of the local
-        // aggregation makes _digest order-invariant across submission arrival
-        // orders; the raw (unsorted) array does NOT. This pins the requirement
-        // that ANY future path re-deriving a digest from LOCAL aggregation must
-        // canonicalize the pair order first. It deliberately does NOT touch the
-        // live on-wire _digest path (followers still hash the leader's propagated
-        // array), so it is not a consensus change - only a test-side invariant.
+        // -------------------------------------------------------------
+        // : the FLAG this block used to carry is now FIXED.
+        //
+        // Was: _aggregateAll emitted results in coinPairs Set insertion order
+        // (a function of submission ARRIVAL order) and _digest hashed the array
+        // in that order via raw JSON.stringify, so a digest re-derived from a
+        // hub's OWN aggregation depended on arrival order. Masked only because
+        // followers re-hash the LEADER's propagated array.
+        //
+        // Now: _aggregateAll emits canonical pair order, and _digest
+        // canonicalizes its own preimage independently (sorted by coinPair,
+        // projected to String coinPair/price). Both are consensus-breaking and
+        // ship ungated with the  pre-launch batch + its fleet-wide rebase.
+        // -------------------------------------------------------------
         const canonical = (arr) => arr.slice().sort((a, b) => (a.coinPair < b.coinPair ? -1 : a.coinPair > b.coinPair ? 1 : 0));
 
-        it('_digest is order-invariant once the local aggregation is canonically pair-sorted', function () {
+        it('_aggregateAll emits canonical pair order regardless of submission arrival order ', function () {
             let fwdAgg = oc._aggregateAll(buildSubmissions(fwd));
             let revAgg = oc._aggregateAll(buildSubmissions(rev));
-            expect(oc._digest(1, canonical(fwdAgg)))
-                .to.equal(oc._digest(1, canonical(revAgg)));
+            expect(fwdAgg).to.deep.equal(revAgg);
+            expect(fwdAgg).to.deep.equal(canonical(fwdAgg));
+            expect(fwdAgg.map(a => a.coinPair)).to.deep.equal(['BTC/USD', 'LTC/USD']);
         });
 
-        it('_digest over the RAW (un-canonicalized) local aggregation is order-DEPENDENT (why canonicalization is required)', function () {
-            // Force the two aggregations to differ in array order for the same
-            // multiset. If _aggregateAll happens to emit the same order for fwd/rev
-            // (single pair, or first-seen coincides), reversing one array still
-            // exercises the order dependence the FLAG warns about.
+        it('_digest is order-invariant over the RAW local aggregation ', function () {
             let fwdAgg = oc._aggregateAll(buildSubmissions(fwd));
-            let reordered = fwdAgg.slice().reverse();
-            if (fwdAgg.length > 1) {
-                expect(oc._digest(1, fwdAgg)).to.not.equal(oc._digest(1, reordered));
-                // ...and canonicalization collapses that difference:
-                expect(oc._digest(1, canonical(fwdAgg))).to.equal(oc._digest(1, canonical(reordered)));
+            let revAgg = oc._aggregateAll(buildSubmissions(rev));
+            expect(oc._digest(1, fwdAgg)).to.equal(oc._digest(1, revAgg));
+        });
+
+        // The digest must survive a payload that arrives in a different order
+        // than the local aggregation produced: this is the wire case, where the
+        // proposer's array is hashed by every follower.
+        it('_digest ignores array order of an arbitrarily reordered price array ', function () {
+            let agg = oc._aggregateAll(buildSubmissions(fwd));
+            expect(agg.length).to.be.greaterThan(1);
+            expect(oc._digest(1, agg)).to.equal(oc._digest(1, agg.slice().reverse()));
+        });
+
+        // Key order and scalar TYPE are wire-serialization artifacts, not price
+        // content; mirrors the DEX _canonicalMatch discipline.
+        it('_digest is invariant to entry key order and to numeric-vs-string price ', function () {
+            let base     = [{ coinPair: 'BTC/USD', price: '100005' }, { coinPair: 'LTC/USD', price: '81' }];
+            let keySwap  = [{ price: '81', coinPair: 'LTC/USD' }, { price: '100005', coinPair: 'BTC/USD' }];
+            let numeric  = [{ coinPair: 'BTC/USD', price: 100005 }, { coinPair: 'LTC/USD', price: 81 }];
+            expect(oc._digest(7, base)).to.equal(oc._digest(7, keySwap));
+            expect(oc._digest(7, base)).to.equal(oc._digest(7, numeric));
+        });
+
+        // Projection to exactly [coinPair, price] means a padded field cannot
+        // move the digest. Values themselves are bound by the per-pair semantic
+        // validation on PROPOSE and by the separately signed PRICE v0 canonical.
+        it('_digest ignores fields outside the canonical projection ', function () {
+            let base   = [{ coinPair: 'BTC/USD', price: '100005' }];
+            let padded = [{ coinPair: 'BTC/USD', price: '100005', junk: 'x'.repeat(64) }];
+            expect(oc._digest(3, base)).to.equal(oc._digest(3, padded));
+        });
+
+        it('_digest still separates different prices and different rounds ', function () {
+            let a = [{ coinPair: 'BTC/USD', price: '100005' }];
+            let b = [{ coinPair: 'BTC/USD', price: '100006' }];
+            expect(oc._digest(1, a)).to.not.equal(oc._digest(1, b));
+            expect(oc._digest(1, a)).to.not.equal(oc._digest(2, a));
+        });
+
+        it('two independent hubs derive the identical digest from the same submissions in opposite order ', function () {
+            const ocA = mkOc(), ocB = mkOc();
+            expect(ocA._digest(11, ocA._aggregateAll(buildSubmissions(fwd))))
+                .to.equal(ocB._digest(11, ocB._aggregateAll(buildSubmissions(rev))));
+        });
+
+        //  also canonicalizes the oracle's own live validator set, closing
+        // the legacy (no-snapshot) half of _getLeader that  left indexing
+        // into whatever order the loader supplied.
+        it('_getLeader legacy live-set path is order-insensitive ', function () {
+            const set = VALIDATORS_7;
+            const ocA = mkOc(); ocA.setValidatorSet(set.slice());
+            const ocB = mkOc(); ocB.setValidatorSet(set.slice().reverse());
+            for (let round = 0; round < set.length * 2 + 1; round++) {
+                expect(ocA._getLeader(round)).to.deep.equal(ocB._getLeader(round));
             }
         });
     });
