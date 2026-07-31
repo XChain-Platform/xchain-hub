@@ -55,4 +55,33 @@ describe('CONFIGURATION.md env-var coverage ', function () {
         assert.deepStrictEqual(missing, [],
             'env vars read in src/ but undocumented in CONFIGURATION.md: ' + missing.join(', '));
     });
+
+    // : the guard above scans for literal process.env.NAME, so it is blind to
+    // the per-coin rails the attestation relay builds by string concatenation
+    // (process.env[coin + '_ENCODER_URL']). That blindness is exactly how the relay
+    // shipped with four undocumented origin-chain variables whose absence silently
+    // holds a finalized v4 forever. Scan the computed form too.
+    it('documents every dynamically-composed <COIN>_ env var read in src/', function () {
+        const doc = fs.readFileSync(DOC, 'utf8');
+
+        // process.env[coin + '_SUFFIX'] / cfg[coin + '_SUFFIX'], either quote style.
+        const DYNAMIC_RE = /\[\s*coin\s*\+\s*['"](_[A-Z_0-9]+)['"]\s*\]/g;
+
+        const suffixes = new Set();
+        for (const file of walkJs(SRC, [])) {
+            const text = fs.readFileSync(file, 'utf8');
+            let m;
+            while ((m = DYNAMIC_RE.exec(text)) !== null) suffixes.add(m[1]);
+        }
+        assert.ok(suffixes.size >= 4,
+            `expected the relay's per-coin rail vars in src/, got ${suffixes.size}`);
+
+        const missing = [...suffixes]
+            .filter(sfx => !doc.includes('<COIN>' + sfx))
+            .sort();
+
+        assert.deepStrictEqual(missing, [],
+            'per-coin env vars composed at runtime but undocumented as `<COIN>_...` in ' +
+            'CONFIGURATION.md: ' + missing.map(s => '<COIN>' + s).join(', '));
+    });
 });

@@ -469,6 +469,13 @@ async function startApi(){
 
             let anchorStats = hub.stateAnchorPublisher ? hub.stateAnchorPublisher.getAnchorStats() : null;
             let attestStats = hub.attestationPublisher ? hub.attestationPublisher.getPublisherStats() : null;
+            // Attestation relay . The relay drives the v3 request /v4 response
+            // legs across chains and until now its only instrument was the process log,
+            // so an operator could not see that a finalized v4 was sitting held for want
+            // of an origin-chain broadcast rail. The typeof guard is for a hub built
+            // before the relay carried getStats(), matching hub_db_stream below.
+            let relayStats = (hub.attestationRelay && typeof hub.attestationRelay.getStats === 'function')
+                ? hub.attestationRelay.getStats() : null;
 
             if(!healthy) res.status(503);
             let healthResult = {
@@ -486,6 +493,11 @@ async function startApi(){
             if (consensusInput) healthResult.consensus_input = consensusInput;
             if (anchorStats) healthResult.anchor = anchorStats;
             if (attestStats) healthResult.attest = attestStats;
+            // Telemetry only, never a 503: a relay that is disabled, or holding
+            // responses for an unconfigured origin chain, is a configuration fact
+            // rather than a sick hub, and 503-ing the config oracle over it would
+            // take the federation's config rail down with it.
+            if (relayStats) healthResult.attest_relay = relayStats;
             // Hub DB stream heartbeat . Consumers gate their price-sync
             // barriers on this watermark, and until now the cadence was only ever
             // visible from the consumer's own timeout logs. Body-only telemetry,

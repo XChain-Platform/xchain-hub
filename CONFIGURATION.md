@@ -210,6 +210,47 @@ Wallet and encoder the hub uses to publish ATTEST responses on Bitcoin.
 | `ATTESTATION_ROUND_TTL_MS` | No | `3600000` (1h) | Time-to-live for in-memory attestation round entries before lazy eviction. |
 | `REORG_TIMEOUT` | No | `60000` | Reorg-handler timeout (ms). |
 
+## Attestation relay (`AttestationRelay`, )
+
+Attestation staking lives on Bitcoin, so an ATTEST request made on an origin
+chain (LTC, DOGE) is relayed to BTC as a v3 request and the finalized answer is
+relayed back to the origin chain as a v4 response. The relay therefore needs a
+broadcast rail on **every** origin chain it serves, not just on the home chain.
+
+The per-origin-chain variables below are read **dynamically** (`process.env[coin
++ '_ENCODER_URL']` and friends), which is why they do not appear in any static
+env-var scan: nothing but this table will remind you they exist. `<COIN>` is any
+allowed coin other than `BTC`, so today `LTC` and `DOGE`. Each also resolves
+from `p2pConfig`; the env var wins.
+
+**Leaving an origin chain's rail unconfigured does not fail loudly.** The v4 is
+still consensus-finalized and then **held forever**, behind one startup warning
+(`no <COIN> broadcast rail`). Responses are held rather than dropped, so the
+recovery is to configure the rail and restart, but nothing re-warns in the
+meantime. Check `attest_relay` on `/health` to see the hold: a rising
+`awaiting_broadcast` with a flat `responses_relayed` is this misconfiguration.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `ATTEST_RELAY_ENABLED` | No | `0` (off) | Opt-in switch, not a kill switch: a fleet that has merely deployed the relay code runs nothing until this is `1`. |
+| `ATTEST_RELAY_POLL_MS` | No | `15000` | Poll interval (ms) for the request and response legs. |
+| `ATTEST_RELAY_QUEUE_PATH` | No | `./data/attest-relay-queue.jsonl` | On-disk at-most-once write-ahead log for both legs. A duplicate v3 is rejected on-chain, so replaying one only burns a real fee; this file is what stops a restart from doing that. |
+| `ATTEST_RELAY_FAILOVER_MS` | No | `1200000` (20m) | Wall-clock silence per rank before a non-leader broadcasts a round it already co-signed. Rank 0 sends immediately, rank 1 waits one window, and so on. |
+| `<COIN>_ENCODER_URL` | If relaying to `<COIN>` | _empty_ | xchain-encoder endpoint used to build the v4 response transaction on origin chain `<COIN>` (e.g. `LTC_ENCODER_URL`). Empty means no rail: see the hold warning above. |
+| `<COIN>_ENCODER_API_KEY` | No | _empty_ | API key for that origin chain's encoder. |
+| `<COIN>_ADDRESS` | If relaying to `<COIN>` | _empty_ | Wallet address on `<COIN>` that pays for and publishes v4 responses (e.g. `LTC_ADDRESS`). |
+| `<COIN>_PUBKEY_HEX` | If relaying to `<COIN>` | _empty_ | Public key (hex) for that address. |
+| `<COIN>_INDEXER_API_URL` | If relaying to `<COIN>` | _empty_ | Indexer endpoint the relay reads `<COIN>`-origin ATTEST requests from. Also accepted as `<COIN>_INDEXER_URL`, or pushed via `xchain-node updateconfig`. A chain with no indexer URL is skipped every tick, with a startup warning. |
+| `<COIN>_INDEXER_API_KEY` | No | _empty_ | API key for that indexer. |
+
+The home (BTC) rail reuses the **BTC attestation publisher** variables above
+(`BTC_ENCODER_URL`, `BTC_ADDRESS`, `BTC_PUBKEY_HEX`, `BTC_INDEXER_API_URL`).
+Origin rails are deliberately kept separate from it: an operator broadcast hook
+configured for one chain would put an LTC payload on BTC, where it is rejected
+outright after burning a real BTC fee. Spend limits come from the shared
+`SpendGuard` under the `ATTEST` prefix (see **Effector spend policy**), and
+confirmation depths from `XCHAIN_CONFIRMATIONS_<COIN>`.
+
 ## DOGE oracle publisher
 
 Wallet and encoder the hub uses to publish oracle prices on Dogecoin.
@@ -258,6 +299,7 @@ resolves from `p2pConfig`; the env var is the highest-precedence override.
 | `CHECKPOINT_POLL_MS` | No | `60000` | Poll interval (ms) for the checkpoint cycle timer. |
 | `CHECKPOINT_ROUND_TIMEOUT_MS` | No | `60000` | Signing-round timeout (ms) before a checkpoint round is abandoned. |
 | `CHECKPOINT_COSIGN_TOLERANCE_BLOCKS` | No | `144` | How many blocks behind a checkpoint's `snapshot_block` a follower's own indexer may lag and still co-sign. |
+| `CHECKPOINT_STALL_LOG_MS` | No | `3600000` (1h) | Throttle window (ms) for the "checkpoint cadence STALLED" warning. The poll runs far faster than the cadence, so the reason is logged at most once per window; the `cadence_stalls` counter carries the true rate. |
 
 ## State-anchor publisher (`StateAnchorPublisher`)
 
