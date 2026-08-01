@@ -4,14 +4,14 @@
 # XChain Platform Hub
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.2.16-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tests-1222%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/version-2.2.17-blue" alt="Version">
+  <img src="https://img.shields.io/badge/tests-3%2C871%2B%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node">
   <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License">
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/coverage-unit%20%7C%20integration%20%7C%20e2e%20%7C%20security%20%7C%20fuzz%20%7C%20chaos%20%7C%20smoke%20%7C%20regression%20%7C%20performance-brightgreen" alt="Coverage">
+  <img src="https://img.shields.io/badge/coverage-unit%20%7C%20integration%20%7C%20e2e%20%7C%20boundary%20%7C%20security%20%7C%20fuzz%20%7C%20chaos%20%7C%20mutation%20%7C%20regression%20%7C%20performance%20%7C%20smoke-brightgreen" alt="Coverage">
 </p>
 
 Decentralized config oracle, price oracle, and cross-chain coordinator for the XChain Platform. Validators form a P2P gossip network with PBFT consensus, Ed25519 identity, trimmed-median price aggregation, cross-chain attestation, and off-chain governance.
@@ -38,8 +38,10 @@ Decentralized config oracle, price oracle, and cross-chain coordinator for the X
 - **Single-node fallback**: all consensus operations apply directly when no peers are connected
 - **Network-aware chain tips**: `pushchaintip` carries `network` (mainnet/testnet/regtest); consensus anchors against the matching tip with fallback to indexer's `getlatestblock`
 - **State checkpoints and ANCHOR publishing**: `StateCheckpointEngine` quorum-signs per-chain ledger/actions/contract hash checkpoints; `StateAnchorPublisher` elects a leader from the `oracle_publish` snapshot and writes ANCHOR v0/v1/v2 transactions to DOGE with a failover ladder; archive batches carry both DEX matches and XCALL relay rows
-- **MariaDB storage**: 20 relational tables with circuit breaker and exponential backoff
+- **MariaDB storage**: 23 relational tables with circuit breaker and exponential backoff
 - **Docker-ready**: Dockerfile for containerized deployment via xchain-node
+- **API authentication**: `X-Api-Key` required for JSON-RPC write methods when `HUB_API_KEY` is set; `getallconfigs` is a separately auth-gated sensitive read (its response carries DB credentials), with `HUB_SENSITIVE_READ_AUTH=0` as an emergency opt-out
+- **Chain registry endpoint**: `GET /api/v1/chain-registry` serves the wallet/SDK bootstrap chain descriptors, Ed25519-signed when the hub has an identity
 
 ## Documentation
 
@@ -48,12 +50,13 @@ Full hub documentation is available in the [xchain-documentation](https://github
 | Document | Description |
 |---|---|
 | [README](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/README.md) | Overview, installation, quick start, service discovery, multi-instance deployment |
-| [Architecture](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/ARCHITECTURE.md) | Subsystem design, P2P gossip, PBFT consensus, oracle pipeline, cross-chain engine |
-| [Configuration](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/CONFIGURATION.md) | All environment variables, database schema, connection pool, validator identity |
-| [API](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/API.md) | JSON-RPC method reference: config, validators, oracle, attestations, swaps, reorgs, governance |
-| [Database](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/DATABASE.md) | Full schema reference: 13 tables for config, validators, oracle, attestations, governance |
-| [Operations](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/OPERATIONS.md) | Running, Docker, resilience, troubleshooting |
-| [Decentralization](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/DECENTRALIZATION.md) | Evolution from centralized oracle to decentralized validator network (all phases complete) |
+| [Architecture](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/architecture.md) | Subsystem design, P2P gossip, PBFT consensus, oracle pipeline, cross-chain engine |
+| [Configuration](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/configuration.md) | All environment variables, database schema, connection pool, validator identity |
+| [API](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/api.md) | JSON-RPC method reference: config, validators, oracle, attestations, swaps, reorgs, governance |
+| [Database](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/database.md) | Full schema reference: 23 tables for config, validators, oracle, attestations, governance |
+| [Operations](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/operations.md) | Running, Docker, resilience, troubleshooting |
+| [Decentralization](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/decentralization.md) | Evolution from centralized oracle to decentralized validator network (all phases complete) |
+| [Telemetry API](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/telemetry-api.md) | REST routes for the anonymous node-operator usage census |
 
 ## Quick Start
 
@@ -167,7 +170,7 @@ The `full_node` capability requires a reachable BTC RPC endpoint (`FULLNODE.BTC_
 | `ANTHROPIC_API_KEY` | (none) | Required to serve the `llm` provider. Without it, the LLM probe in `selfTest('attestation')` is skipped and the validator silently opts out of LLM requests. |
 | `LLM_DEFAULT_MODEL` | first of `approved_models` | LLM model this validator chooses when serving requests. Falls back to registry default if not in `approved_models`. |
 
-See [Configuration](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/CONFIGURATION.md) for the full list of 30+ environment variables.
+See [Configuration](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/configuration.md) for the full list of 30+ environment variables.
 
 ## Metrics and log shipping (optional, off by default)
 
@@ -189,9 +192,9 @@ the sibling services; drift fails `bin/check-observability-parity.js` in CI.
 |---|---|
 | `npm run api` | Start the hub API server |
 | `bin/run-db-tiers.sh` | Run the DB-backed tiers against a throwaway MariaDB it starts and drops |
-| `npm test` | Run unit tests (~366 tests) |
-| `npm run test:integration` | Integration tests (~72 tests, requires MariaDB) |
-| `npm run test:e2e` | End-to-end tests (~64 tests, requires full stack) |
+| `npm test` | Run unit tests (~3,171 tests) |
+| `npm run test:integration` | Integration tests (~89 tests, requires MariaDB) |
+| `npm run test:e2e` | End-to-end tests (~70 tests, requires full stack) |
 | `npm run test:fuzz` | Fuzz tests (property-based via fast-check) |
 | `npm run test:chaos` | Chaos engineering tests |
 | `npm run test:smoke` | Smoke tests (quick sanity check) |
@@ -231,21 +234,22 @@ a failure that looks like broken code. A symlinked sibling satisfies it.
 
 | Type | Tests | Description |
 |---|---|---|
-| Unit - Core | ~294 | `XChainHub.test.js`, `Consensus.test.js`, `PeerManager.test.js`, `OracleRound.test.js`, `OracleConsensus.test.js`, `CrossChainEngine.test.js`, `Governance.test.js`, `PriceFetcher.test.js`, `ReorgHandler.test.js`, `SwapTracker.test.js`, `ValidatorIdentity.test.js`, `RewardTracker.test.js`, `SlashDetector.test.js`, `db.test.js` |
-| Unit - Security | ~72 | SQL safety, parameter injection, authentication, rate limiting |
-| Boundary | ~260 | Quorum thresholds, consensus edge cases, fee quotes, governance bounds, P2P limits, price fetcher, trimmed median, rewards, slashing, config, cross-chain, reorg, DB, validator |
-| Integration | ~72 | Oracle rounds, price persistence, attestation, reorg, config consensus, governance, JSON-RPC API, message routing, error handling |
-| E2E | ~64 | Oracle, fee quotes, config, governance, attestation, reorg, multi-node, API contract |
-| Fuzz | ~88 | Property-based testing via fast-check: price fetcher, governance, validator identity, consensus, oracle consensus, peer manager, fee quotes |
-| Chaos | ~122 | Network partition, leader crash, quorum loss, DB flapping, pool exhaustion, connection loss, single source failure, malformed data, total blackout, reorg-during-oracle, validator churn, rate limit saturation |
-| Smoke | ~15 | Hub startup, API liveness, basic config operations |
-| Regression | ~193 | Oracle, reorg, governance, P2P, DB, incentives, consensus, cross-chain |
+| Unit | ~3,171 | 128 files covering `XChainHub.test.js`, `Consensus.test.js`, `PeerManager.test.js`, `OracleConsensus.test.js`, `CrossChainDexEngine.test.js`, `Governance.test.js`, `AttestationConsensus.test.js`, `AttestationPublisher.test.js`, `StateAnchorPublisher.test.js`, `ReorgHandler.test.js`, `RewardTracker.test.js`, `SlashDetector.test.js`, `db.coverage.test.js`, and many more |
+| Security | ~87 | SQL safety, parameter injection, authentication, rate limiting |
+| Boundary | ~7 | Consensus activation-height gating edge cases |
+| Integration | ~89 | Oracle rounds, price persistence, attestation, reorg, config consensus, governance, JSON-RPC API, message routing, error handling |
+| E2E | ~70 | Oracle, fee quotes, config, governance, attestation, reorg, multi-node, API contract |
+| Fuzz | ~90 | Property-based testing via fast-check: price fetcher, governance, validator identity, consensus, oracle consensus, peer manager, fee quotes |
+| Chaos | ~81 | Network partition, leader crash, quorum loss, DB flapping, pool exhaustion, connection loss, single source failure, malformed data, total blackout, reorg-during-oracle, validator churn, rate limit saturation |
+| Smoke | ~16 | Hub startup, API liveness, basic config operations |
+| Regression | ~218 | Oracle, reorg, governance, P2P, DB, incentives, consensus, cross-chain |
 | Performance | ~42 | API load, oracle load, P2P flood, DB stress, soak, resilience |
-| **Total** | **~1,222** | |
+| Mutation | StrykerJS | Mutation testing across hub source modules |
+| **Total** | **~3,871+** | |
 
 ## JSON-RPC API
 
-All methods are called via HTTP POST with JSON-RPC 2.0 format. See [API Reference](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/API.md) for full details.
+All methods are called via HTTP POST with JSON-RPC 2.0 format. See [API Reference](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/hub/api.md) for full details.
 
 | Category | Methods |
 |---|---|
@@ -256,13 +260,13 @@ All methods are called via HTTP POST with JSON-RPC 2.0 format. See [API Referenc
 | Cross-Chain | `requestattestation`, `getattestation`, `getattestations` |
 | Swaps | `initiateswap`, `getswap`, `getswaps` |
 | Reorgs | `reportreorg`, `getreorghistory` |
-| Governance | `propose`, `vote`, `getproposals`, `getproposal` |
+| Governance | `propose`, `vote`, `getproposals`, `getproposal`, `getvotes`, `getvalidatorcapabilities` |
 
 The hub also calls **indexer** RPCs (`getownstake`, `getactivevalidators`, `getcapabilityvalidators`, `getpendingattestation_requests`, `getlatestblock`) and posts back to it (`pushchaintip`, `pushvalidatorrewards`, `pushpriceround`, `pushoracleprice`).
 
 ## Database Schema
 
-The hub uses 20 MariaDB tables (auto-created on startup):
+The hub uses 23 MariaDB tables (auto-created on startup):
 
 | Table | Purpose |
 |---|---|
@@ -273,7 +277,9 @@ The hub uses 20 MariaDB tables (auto-created on startup):
 | `oracle_submissions` | Per-validator PRICE v0 submissions per round |
 | `oracle_prices` | User-published PRICE v1 oracle rows (per source_address x coin/tick/fiat) |
 | `price_snapshots` | Finalized price data per round per coin pair |
+| `price_ingest_watermarks` | Highest processed source-chain price-retraction generation per chain, an ingest fence against stale rollback pushes |
 | `attestations` | Cross-chain attestation records |
+| `attestation_validator_stats` | Per-validator, per-request spot-check pass/fail outcomes backing the reorg-safe slash trigger |
 | `swap_records` | SWAP lifecycle tracking |
 | `reorg_attestations` | Confirmed blockchain reorg events |
 | `governance_proposals` | Parameter change proposals |
@@ -285,6 +291,7 @@ The hub uses 20 MariaDB tables (auto-created on startup):
 | `cross_chain_calls` | XCALL relay rows tracking cross-chain contract call dispatch and result phases |
 | `cross_chain_matches` | Finalized cross-chain DEX order matches |
 | `state_checkpoints` | Per-chain ledger/actions/contract hash checkpoints with optional on-chain anchor txid |
+| `anchor_reward_attestations` | Hub-authored, append-only ANCHOR v4/v5/v6 reward attestations mirrored to indexers for COLLECT-spendable reward derivation |
 | `telemetry_pings` | Anonymous usage pings from xchain-node operators (IP never stored) |
 
 ## Dependencies
