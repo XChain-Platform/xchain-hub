@@ -23,10 +23,15 @@ const coins      = require('../../src/coins');
 // The testnet/regtest values are the ones bundled as CONSENSUS_CONFIG_PIN in all
 // nine vendoring services; mainnet stays `null` in the pin (pre-arm) and is
 // pinned only here.
+// BTC REGENERATED 2026-07-31 : minStandardTxNonWitnessSize 65 -> 82 on all
+// three networks. It sits in the `net` block, which consensusSubset() hashes whole,
+// so a relay-policy correction moves all three BTC hashes; LTC and DOGE are
+// deliberately untouched, and their unchanged goldens are the check that nothing
+// else drifted with it.
 const GOLDEN_HASH = {
-    BTC:  { mainnet: '8c45030307de2c776cecb20e7eefd426aaea5f63e9f6466bbd9376b6fff6d55e',
-            testnet: '6db27c44dfa99968fb89ddc310413ba2d7a9ad59e3b8624b933a76b7cc4de156',
-            regtest: '6535e995e5890c3a0d5a2df970b2f3b94f8d60e83aa563ea861a5909a3f80288' },
+    BTC:  { mainnet: '3e24e137cdb3a71438d89811e1621fdd0cf6ae340650a6e8f2449fcc4bb41264',
+            testnet: 'f9ec594c2b9ae8b33a653faed64a36578ca11472e00f2e3cc6258541b35460ed',
+            regtest: '10b520d6b33487b46d9d9bcc5ecc6177eb233ebfc8cb1c4d94c1d4ef0c89899d' },
     LTC:  { mainnet: '6275f39f616c2d891551062d666831455206a546782beede1442e18eb90a0a25',
             testnet: '03f62fc2f57151924aa6a76ff5ee97684aece17ca54a3f39eb7d8167bd34a20b',
             regtest: '786d903d2b347803c06a1b5b157011834ebc25a246be54f5c27ddd27629eba57' },
