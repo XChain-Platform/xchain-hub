@@ -234,9 +234,9 @@ a failure that looks like broken code. A symlinked sibling satisfies it.
 
 | Type | Tests | Description |
 |---|---|---|
-| Unit | ~3,171 | 128 files covering `XChainHub.test.js`, `Consensus.test.js`, `PeerManager.test.js`, `OracleConsensus.test.js`, `CrossChainDexEngine.test.js`, `Governance.test.js`, `AttestationConsensus.test.js`, `AttestationPublisher.test.js`, `StateAnchorPublisher.test.js`, `ReorgHandler.test.js`, `RewardTracker.test.js`, `SlashDetector.test.js`, `db.coverage.test.js`, and many more |
+| Unit | ~3,023 | 114 files covering `XChainHub.test.js`, `Consensus.test.js`, `PeerManager.test.js`, `OracleConsensus.test.js`, `CrossChainDexEngine.test.js`, `Governance.test.js`, `AttestationConsensus.test.js`, `AttestationPublisher.test.js`, `StateAnchorPublisher.test.js`, `ReorgHandler.test.js`, `RewardTracker.test.js`, `SlashDetector.test.js`, `db.coverage.test.js`, and many more. Excludes the boundary files, which are counted on their own row below |
 | Security | ~87 | SQL safety, parameter injection, authentication, rate limiting |
-| Boundary | ~7 | Consensus activation-height gating edge cases |
+| Boundary | ~287 | 15 files in two directories: `test/unit/boundary/` holds the per-module edge cases (config, consensus, cross-chain, db, fee quote, governance, P2P, price fetcher, quorum, reorg, rewards, slashing, trimmed median, validator), `test/boundary/` holds the flag-day consensus activation gates |
 | Integration | ~89 | Oracle rounds, price persistence, attestation, reorg, config consensus, governance, JSON-RPC API, message routing, error handling |
 | E2E | ~70 | Oracle, fee quotes, config, governance, attestation, reorg, multi-node, API contract |
 | Fuzz | ~90 | Property-based testing via fast-check: price fetcher, governance, validator identity, consensus, oracle consensus, peer manager, fee quotes |
@@ -245,7 +245,16 @@ a failure that looks like broken code. A symlinked sibling satisfies it.
 | Regression | ~218 | Oracle, reorg, governance, P2P, DB, incentives, consensus, cross-chain |
 | Performance | ~42 | API load, oracle load, P2P flood, DB stress, soak, resilience |
 | Mutation | StrykerJS | Mutation testing across hub source modules |
-| **Total** | **~3,871+** | |
+| **Total** | **~4,003+** | |
+
+The boundary suite is split across two directories on purpose. `test/unit/boundary/`
+predates the split and is unit-scoped, so those 273 cases run under `npm test` and
+`npm run ci` as well as under `npm run test:boundary`; `test/boundary/` was added later
+for the consensus flag-day activation gates and runs only under `npm run test:boundary`,
+which globs both paths. A guard test
+(`test/unit/boundary/boundary-suite-coverage.boundary.test.js`) fails if any
+`*.boundary.test.js` file exists that the `test:boundary` globs would not pick up, so a
+third boundary directory cannot go silently unrun.
 
 ## JSON-RPC API
 
