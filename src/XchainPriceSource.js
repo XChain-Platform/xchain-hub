@@ -63,7 +63,7 @@ const bcmath   = require('./bcmath.js');
 const { deriveXchainRate, referenceRateFromUsd, toUsd } = require('./xchainPrice.js');
 const { getWindowFills } = require('./xchainPriceQuery.js');
 const { PRICE_MAX, XCHAIN_PRICE_WINDOW_BLOCKS, XCHAIN_PRICE_CONFIRMATION_BUFFER,
-        XCHAIN_PRICE_BOOTSTRAP_USD, XCHAIN_PRICE_MIN_BTC_VOLUME,
+        XCHAIN_PRICE_BOOTSTRAP_XCHAIN_BTC, XCHAIN_PRICE_MIN_BTC_VOLUME,
         DERIVED_PAIRS } = require('./constants.js');
 
 // The pair this source produces. Taken from DERIVED_PAIRS rather than re-spelled, so
@@ -114,7 +114,11 @@ class XchainPriceSource {
         this.windowBlocks       = parseInt(config.XCHAIN_PRICE_WINDOW_BLOCKS) || XCHAIN_PRICE_WINDOW_BLOCKS;
         this.confirmationBuffer = Number.isFinite(parseInt(config.XCHAIN_PRICE_CONFIRMATION_BUFFER))
             ? parseInt(config.XCHAIN_PRICE_CONFIRMATION_BUFFER) : XCHAIN_PRICE_CONFIRMATION_BUFFER;
-        this.bootstrapUsd       = config.XCHAIN_PRICE_BOOTSTRAP_USD || XCHAIN_PRICE_BOOTSTRAP_USD;
+        // Satoshi-denominated (D2, 2026-08-03). Stored as the BTC-denominated rate
+        // because that is the unit `toUsd` and the fill pipeline both expect.
+        this.bootstrapXchainBtc = config.XCHAIN_PRICE_BOOTSTRAP_SATS
+            ? bcmath.bcdiv(String(config.XCHAIN_PRICE_BOOTSTRAP_SATS), '100000000', 8)
+            : XCHAIN_PRICE_BOOTSTRAP_XCHAIN_BTC;
 
         // D2 supersession threshold: the BTC-side notional a window must carry before
         // the derived VWAP replaces the carry-forward. null = DISABLED, which is how
@@ -210,7 +214,6 @@ class XchainPriceSource {
             // Carry-forward value and winsorization anchor, both from rounds strictly
             // below this one so every validator resolves the same reference.
             let lastXchainUsd = await this._lastFinalized(XCHAIN_PAIR, round);
-            let carryForward  = lastXchainUsd || this.bootstrapUsd;
 
             // The band is applied in BTC terms, the units the fills are quoted in, so
             // the anchor is converted with the SAME round's BTC/USD it was published
@@ -230,7 +233,37 @@ class XchainPriceSource {
             // below round R" is consensus data, identical on every honest hub. It only
             // arises before the federation's first BTC/USD finalization.
             let refBtcUsd = await this._lastFinalized(BTC_PAIR, round);
-            let refRate   = referenceRateFromUsd(bcmath, carryForward, refBtcUsd);
+
+            // D2 (redecided 2026-08-03): the bootstrap is denominated in SATOSHIS, so
+            // before it can be carried forward as a USD price it has to be converted,
+            // and the multiplier has to be the CONSENSUS BTC/USD - the same
+            // `refBtcUsd` the band anchor uses, never `btcUsd` from this round's local
+            // submission. The reasoning is the paragraph above, applied one step
+            // earlier: if each validator converted the bootstrap with its own API
+            // price, the very first XCHAIN/USD round would be a different number on
+            // every hub, and they would publish those differences straight into
+            // deviation slashing.
+            //
+            // Consequence, and it is deliberate: with NO finalized BTC/USD below this
+            // round there is nothing consensus-safe to convert with, so the pair
+            // abstains for that round instead of inventing a value. Deterministic for
+            // everyone ("has any BTC/USD finalized below R" is consensus data), and it
+            // resolves itself the moment the federation finalizes its first BTC/USD.
+            // The old USD-denominated bootstrap needed no conversion and so could
+            // publish through that gap; a satoshi-denominated one cannot, and paying
+            // one round of silence is the correct price for not forking.
+            let carryForward = lastXchainUsd;
+            if (!carryForward) {
+                carryForward = toUsd(bcmath, this.bootstrapXchainBtc, refBtcUsd);
+                if (!carryForward) {
+                    console.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR +
+                        ' - bootstrap is satoshi-denominated and no finalized ' + BTC_PAIR +
+                        ' exists below round ' + round + ' to convert it with');
+                    return null;
+                }
+            }
+
+            let refRate = referenceRateFromUsd(bcmath, carryForward, refBtcUsd);
 
             let selection = await getWindowFills(this._db(), {
                 referenceHeight:    referenceHeight,

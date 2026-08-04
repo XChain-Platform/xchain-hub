@@ -133,11 +133,33 @@ const XCHAIN_PRICE_WINDOW_BLOCKS = 1000;
 // height so a fill that a shallow reorg can still roll back is never inside it.
 const XCHAIN_PRICE_CONFIRMATION_BUFFER = 6;
 
-// D2, DECIDED 2026-07-25 (operator): the bootstrap price, in force until real fills
-// exist. Anchored on a token issuance costing $2.00 - GAS_PRICE 0.00001 x ISSUE
-// 100,000 gas is exactly 1.0 XCHAIN, so the bootstrap equals the issuance cost 1:1.
-// It is also the winsorization anchor for the very first derived round.
-const XCHAIN_PRICE_BOOTSTRAP_USD = '2.00000000';
+// D2, REDECIDED 2026-08-03 (operator): the bootstrap price, in force until real
+// fills exist, denominated in SATOSHIS rather than USD.
+//
+// The original D2 (2026-07-25) pinned `2.00000000` USD, anchored on a token
+// issuance costing $2.00: GAS_PRICE 0.00001 x ISSUE 100,000 gas is exactly 1.0
+// XCHAIN, so the bootstrap equalled the issuance cost 1:1. That anchor was
+// replaced because it prices the TOKEN, not just the fee: against a 100M supply
+// $2.00 implies a $200M valuation on a token that has never traded, and a launch
+// price that only ever falls from there is the wrong first impression. 1000 sat
+// is a deliberately reserved floor (about $0.64 at BTC $63.5k).
+//
+// Denominated in satoshis, NOT USD, because the quantity the operator wants held
+// still is the BTC-denominated one; a USD pin drifts against BTC between the
+// decision and launch. It is converted to USD at the point of use with the
+// CONSENSUS BTC/USD (the last finalized below the round), never a local API
+// price - see XchainPriceSource.derive for why that distinction is load-bearing.
+//
+// This is also the winsorization anchor for the very first derived round.
+//
+// Safe to change as of 2026-08-03 because XCHAIN/USD has NEVER finalized a round
+// on any network (measured: 0 rows in price_snapshots on mainnet), so re-pinning
+// it rewrites no history and supersedes no published value.
+const XCHAIN_PRICE_BOOTSTRAP_SATS = 1000;
+
+// The same bootstrap as a BTC-denominated rate, which is the unit fills are
+// quoted in and therefore the unit the conversion helper expects.
+const XCHAIN_PRICE_BOOTSTRAP_XCHAIN_BTC = '0.00001000';
 
 // D4: per-pair move clamp for XCHAIN/USD, tighter than the global
 // ORACLE_MAX_CHANGE_PER_ROUND of 25%. XCHAIN trades in a market that is thin by
@@ -189,5 +211,6 @@ module.exports = { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD, ORACLE_MAX_CHANGE_PER_
                    PRICE_V1_COINS, PRICE_V1_FIATS, MAX_TICK_LENGTH, MAX_MEMO_LENGTH,
                    MAX_SOURCE_ADDRESS_LENGTH, DERIVED_PAIRS,
                    XCHAIN_PRICE_WINDOW_BLOCKS, XCHAIN_PRICE_CONFIRMATION_BUFFER,
-                   XCHAIN_PRICE_BOOTSTRAP_USD, XCHAIN_PRICE_MAX_CHANGE_PER_ROUND,
+                   XCHAIN_PRICE_BOOTSTRAP_SATS, XCHAIN_PRICE_BOOTSTRAP_XCHAIN_BTC,
+                   XCHAIN_PRICE_MAX_CHANGE_PER_ROUND,
                    XCHAIN_PRICE_MIN_BTC_VOLUME };

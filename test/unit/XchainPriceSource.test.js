@@ -29,7 +29,14 @@
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 
-const { XCHAIN_PRICE_BOOTSTRAP_USD, PRICE_MAX } = require('../../src/constants.js');
+const { XCHAIN_PRICE_BOOTSTRAP_SATS, PRICE_MAX } = require('../../src/constants.js');
+
+// D2 (2026-08-03) is satoshi-denominated, so the bootstrap only becomes a USD
+// price once a CONSENSUS BTC/USD exists to convert it with. Every carry-forward
+// case therefore has to seed one. At 1000 sat and BTC/USD 100000 the arithmetic
+// is exact and needs no rounding: 0.00001000 x 100000 = 1.00000000.
+const FINALIZED_BTC = { 'BTC/USD': '100000.00000000' };
+const BOOTSTRAP_AT_100K = '1.00000000';
 const { COIN_ID_SQL, XCHAIN_TICK_SQL, DISPENSE_FILLS_SQL, DEX_FILLS_SQL } =
     require('../../src/xchainPriceQuery.js');
 
@@ -139,6 +146,26 @@ describe('XchainPriceSource: validator-side XCHAIN/USD @regression', function ()
             expect(await src.derive({ ...CTX, round: undefined })).to.equal(null);
         });
 
+        // D2 (2026-08-03) made the bootstrap satoshi-denominated, which bought a new
+        // abstention: with no finalized BTC/USD below the round there is no CONSENSUS
+        // multiplier, and converting with the local price would give every validator a
+        // different first XCHAIN/USD print to be slashed on. The old USD bootstrap
+        // published straight through this gap; a satoshi-denominated one must not.
+        it('abstains when the satoshi bootstrap has no consensus BTC/USD to convert with', async function () {
+            const { src } = makeSource({}, {});
+            expect(await src.derive(CTX)).to.equal(null);
+        });
+
+        // The other half of the same guard: it must STOP firing the moment a finalized
+        // BTC/USD exists, or the pair would be bricked permanently rather than for one
+        // round. A guard that only ever fires is indistinguishable from a broken pair.
+        it('stops abstaining as soon as one BTC/USD has finalized', async function () {
+            const { src } = makeSource({}, FINALIZED_BTC);
+            const out = await src.derive(CTX);
+            expect(out).to.not.equal(null);
+            expect(out.price).to.equal(BOOTSTRAP_AT_100K);
+        });
+
         it('never throws, so an abstention cannot take the 36 API pairs with it', async function () {
             const { src } = makeSource({ throwOn: (sql) => sql === COIN_ID_SQL }, {});
             let out;
@@ -151,10 +178,10 @@ describe('XchainPriceSource: validator-side XCHAIN/USD @regression', function ()
         it('publishes the bootstrap when the window is empty and nothing has finalized', async function () {
             // Pre-market: no fills, no history. Suppressing the pair here would age it
             // past the 1800s staleness bound within a few rounds.
-            const { src } = makeSource({}, {});
+            const { src } = makeSource({}, FINALIZED_BTC);
             const out = await src.derive(CTX);
             expect(out.coinPair).to.equal('XCHAIN/USD');
-            expect(out.price).to.equal(XCHAIN_PRICE_BOOTSTRAP_USD);
+            expect(out.price).to.equal(BOOTSTRAP_AT_100K);
             expect(out.meta.derived).to.equal(false);
             expect(out.meta.carriedFrom).to.equal('bootstrap');
         });
@@ -319,14 +346,14 @@ describe('XchainPriceSource: validator-side XCHAIN/USD @regression', function ()
         });
 
         it('ignores a non-positive finalized value and falls back to the bootstrap', async function () {
-            const { src } = makeSource({}, { 'XCHAIN/USD': '0' });
+            const { src } = makeSource({}, { ...FINALIZED_BTC, 'XCHAIN/USD': '0' });
             const out = await src.derive(CTX);
-            expect(out.price).to.equal(XCHAIN_PRICE_BOOTSTRAP_USD);
+            expect(out.price).to.equal(BOOTSTRAP_AT_100K);
             expect(out.meta.carriedFrom).to.equal('bootstrap');
         });
 
         it('publishes at 8dp like every other pair', async function () {
-            const { src } = makeSource({}, {});
+            const { src } = makeSource({}, FINALIZED_BTC);
             expect((await src.derive(CTX)).price).to.match(/^\d+\.\d{8}$/);
         });
     });
