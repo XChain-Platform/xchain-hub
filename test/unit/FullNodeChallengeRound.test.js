@@ -498,6 +498,75 @@ describe('FullNodeChallengeRound', function () {
             expect(st.finalized).to.equal(true);
         });
 
+        // item 3463: the fee-bearing verdict send was the only one of the four hub
+        // effectors leaving no durable trace of its INTENT. These pin the record and,
+        // more importantly, the gate: an unwritable audit path must defer the verdict,
+        // not spend a BTC fee that nothing on disk remembers.
+        it('fsyncs an intent record BEFORE the verdict spend, then the outcome', async function () {
+            const hub = makeHub();
+            const eng = await startEpoch(hub);
+            const st  = eng.rounds.get(288);
+            let seen = [], sawIntentBeforeSpend = false;
+            eng._recordSpend = (entry) => { seen.push(entry); return true; };
+            eng.broadcastFn = () => {
+                sawIntentBeforeSpend = seen.some(e => e.phase === 'intent');
+                return Promise.resolve({ txid: 'TX' });
+            };
+            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+            await eng._closeCollection(288);
+            expect(sawIntentBeforeSpend, 'intent must be durable before the fee moves').to.equal(true);
+            expect(seen.map(e => e.phase)).to.deep.equal(['intent', 'sent']);
+            expect(seen[0].challengeId).to.equal(st.challengeId);
+            expect(seen[0].epoch).to.equal(288);
+            expect(seen[1].txid).to.equal('TX');
+        });
+
+        it('defers the verdict instead of spending when the audit path is unwritable', async function () {
+            const hub = makeHub();
+            const eng = await startEpoch(hub);
+            const st  = eng.rounds.get(288);
+            eng._recordSpend = () => false;              // disk full / bad permissions
+            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+            await eng._closeCollection(288);
+            expect(eng.broadcastFn.called, 'no BTC fee without a durable record').to.equal(false);
+            // Deferred, not lost: the finalize lock is released so a later tick retries.
+            expect(st.finalized).to.equal(false);
+        });
+
+        it('records an ambiguous send, which is the case the audit trail exists for', async function () {
+            const hub = makeHub();
+            const eng = await startEpoch(hub);
+            const st  = eng.rounds.get(288);
+            let seen = [];
+            eng._recordSpend = (entry) => { seen.push(entry); return true; };
+            eng.broadcastFn = () => Promise.reject(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }));
+            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+            await eng._closeCollection(288);
+            expect(seen.map(e => e.phase)).to.deep.equal(['intent', 'ambiguous']);
+            // The round stays claimed: an ambiguous send may already have cost the fee.
+            expect(st.finalized).to.equal(true);
+        });
+
+        it('writes a real fsynced line to the configured spend log', async function () {
+            const fs   = require('fs');
+            const os   = require('os');
+            const path = require('path');
+            const dir  = fs.mkdtempSync(path.join(os.tmpdir(), 'fnc-spend-'));
+            const logPath = path.join(dir, 'nested', 'verdict.spend.jsonl');
+            const hub = makeHub();
+            const eng = await startEpoch(hub);
+            eng.spendLogPath = logPath;                  // directory does not exist yet
+            const st = eng.rounds.get(288);
+            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+            await eng._closeCollection(288);
+            const lines = fs.readFileSync(logPath, 'utf8').trim().split('\n').map(JSON.parse);
+            expect(lines.map(l => l.phase)).to.deep.equal(['intent', 'sent']);
+            expect(lines[0].effector).to.equal('FULLNODE_VERDICT');
+            expect(lines[0].challengeId).to.equal(st.challengeId);
+            expect(lines[0].ts).to.be.a('number');
+            fs.rmSync(dir, { recursive: true, force: true });
+        });
+
         it('a non-leader does not broadcast a verdict', async function () {
             // identity V2 is eligible (we add it to genesis) but rank may not be 0;
             // force two verifiers so quorum is 2 and a single self-sign cannot finalize.

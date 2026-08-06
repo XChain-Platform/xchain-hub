@@ -59,6 +59,12 @@ const DEFAULT_ROUND_TIMEOUT_MS = 120000;  // 2 minutes per request lifecycle
 // `finalizedMax`: non-ok entries must survive until deadline expiry. 40000
 // clears 100 blocks even at ~400 non-ok finalizations per block.
 const DEFAULT_NONOK_PUBLISHED_MAX = 40000;
+// Non-ok finalizations per block the default is sized to absorb, read straight back
+// out of the derivation above (40000 entries / 100 blocks). It is the one number the
+// sizing floor needs that governance does NOT supply, so naming it lets the floor be
+// re-derived against a CHANGED deadline_window_blocks instead of against the 100-block
+// figure the comments were written around (item 3421).
+const NONOK_THROUGHPUT_PER_BLOCK = DEFAULT_NONOK_PUBLISHED_MAX / 100;
 // Cap for the inbound `meta` field on PROPOSE/PREPARE envelopes, mirroring the
 // body_b64 cap: meta is a short provider tag (HTTP status code, LLM model id),
 // so anything longer is adversarial padding that would otherwise be stored,
@@ -203,7 +209,37 @@ class AttestationConsensus extends EventEmitter {
         }
         this._messageHandler = (env) => this._handleMessage(env);
         this.peerManager.on('message', this._messageHandler);
+        this.checkNonOkSizingFloor();
         console.log('AttestationConsensus: started');
+    }
+
+    // item 3421 - observability for the nonOkPublished ring's SIZING FLOOR (see the
+    // constructor). The cap is a fixed operator/env value read once at startup, but
+    // the horizon it must clear is max(deadline_window_blocks), which is governance-
+    // controlled JSON that ProviderRegistry loads verbatim and that nothing bounds.
+    // A routine proposal raising http_get's window past 100, or registering a
+    // provider with a longer one, silently invalidates the floor: nothing failed,
+    // nothing warned, and the first symptom was nonOkEvictedWhilePendingCount rising
+    // AFTER real BTC fees had already been re-burned on retry rounds. Deliberately
+    // log-only and non-throwing: an undersized ring wastes fees, it does not fork, so
+    // refusing to run would be the worse failure. Called at start() and again from
+    // XChainHub after every provider hotReload, i.e. the moment governance lands.
+    checkNonOkSizingFloor(){
+        if(!this.providerRegistry || typeof this.providerRegistry.maxDeadlineWindowBlocks !== 'function') return null;
+        let { blocks, providerId } = this.providerRegistry.maxDeadlineWindowBlocks();
+        if(!(blocks > 0)) return null;
+        let floor = blocks * NONOK_THROUGHPUT_PER_BLOCK;
+        let ok    = this.nonOkPublishedMax >= floor;
+        if(!ok){
+            console.warn('AttestationConsensus: ATTESTATION_NONOK_PUBLISHED_MAX=' + this.nonOkPublishedMax +
+                ' is BELOW the sizing floor of ' + floor + ' implied by provider "' + providerId +
+                '" (deadline_window_blocks=' + blocks + ' x ' + NONOK_THROUGHPUT_PER_BLOCK +
+                ' non-ok finalizations/block). A still-pending non-ok entry can be evicted while ' +
+                'retry rounds keep running, and each later retry re-quorum-signs and re-broadcasts ' +
+                'the same failure status, burning a BTC tx per poll cycle. Raise ' +
+                'ATTESTATION_NONOK_PUBLISHED_MAX to at least ' + floor + ' or lower that window.');
+        }
+        return { ok, floor, cap: this.nonOkPublishedMax, blocks, providerId };
     }
 
     async stop(){
@@ -424,6 +460,10 @@ class AttestationConsensus extends EventEmitter {
             // provider.agree() call so the judge model cannot drift mid-round via a
             // governance hotReload of the module-mutable JUDGE_MODEL.
             pinnedJudgeModel: roundState.pinnedJudgeModel || null,
+            // Block-anchored model->vendor map from the same config that pinned the
+            // judge model, so the judge's vendor is not resolved from this hub's
+            // live hotReloaded map while the id came from the block (item 3482).
+            pinnedVendors: roundState.pinnedVendors || null,
             finalized:    false,
             timer:        null
         };
@@ -633,7 +673,8 @@ class AttestationConsensus extends EventEmitter {
             // premise goes unexercised). byte_equality honours it; judge_model
             // ignores it. `need` is the responsible-set bound computed above.
             winner = await Promise.resolve(providerModule.agree(proposalsArr,
-                { pinnedJudgeModel: pending.pinnedJudgeModel || null, timeoutMs: judgeTimeoutMs, expectedN: need }));
+                { pinnedJudgeModel: pending.pinnedJudgeModel || null, pinnedVendors: pending.pinnedVendors || null,
+                  timeoutMs: judgeTimeoutMs, expectedN: need }));
         } catch (e) {
             console.warn('AttestationConsensus: agree() threw for ' + rid.substring(0,16) + '...: ', e);
             winner = null;

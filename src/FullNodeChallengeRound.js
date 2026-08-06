@@ -47,6 +47,8 @@
  ********************************************************************/
 
 const crypto            = require('crypto');
+const fs                = require('fs');
+const path              = require('path');
 const axios             = require('axios');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const EncoderClient      = require('./EncoderClient.js');
@@ -182,6 +184,16 @@ class FullNodeChallengeRound {
         // publishers (the nested cfg.FULLNODE block stays the source for FullNode's own
         // knobs; the guard's knobs are the FULLNODE_*-prefixed ones).
         this.spendGuard = new SpendGuard('FULLNODE', cfg, 'FullNodeChallengeRound');
+
+        // item 3463 - durable spend audit for the fee-bearing verdict send. The other
+        // three hub effectors all leave a recoverable trace of a fee-bearing INTENT
+        // before the money moves (AttestationPublisher's fsync'd queue plus
+        // spend.jsonl, AttestationRelay's intent WAL, StateAnchorPublisher's
+        // anchor_txid IS NULL row); this path had only a post-success console.log, so
+        // a crash mid-flight left nothing but stdout retention to say a fee had been
+        // committed. Same JSONL-plus-fsync shape and path idiom as AttestationPublisher.
+        this.spendLogPath = process.env.FULLNODE_SPEND_LOG_PATH || cfg.FULLNODE_SPEND_LOG_PATH ||
+                            './data/fullnode-verdict.spend.jsonl';
 
         this.rounds   = new Map();  // epoch -> round state
         this._timer   = null;
@@ -513,10 +525,26 @@ class FullNodeChallengeRound {
         // now and revert on failure so a later sig/tick can still retry.
         state.finalized = true;
         let wire = this._buildVerdictWire(state);
+
+        // item 3463 - durable intent record BEFORE the money moves, and the broadcast
+        // is GATED on it, matching the rule AttestationPublisher states at its own
+        // durable append: an unwritable audit path must not let a real BTC fee be
+        // spent with no recoverable trace. Failing here reverts the finalize lock, so
+        // this defers the verdict to a later tick rather than losing the round.
+        if(!this._recordSpend({ phase: 'intent', epoch, challengeId: state.challengeId,
+                                pass: state.passList.length, sigs: state.sigs.size, quorum })){
+            state.finalized = false;
+            console.error('FullNodeChallengeRound: spend-audit path unwritable at ' + this.spendLogPath +
+                          '; deferring the verdict broadcast for epoch ' + epoch +
+                          ' rather than spending a BTC fee with no durable record');
+            return;
+        }
+
         try {
             let res = await this._broadcastVerdict(wire);
             this.spendGuard.record();   // : a fresh verdict tx spent a BTC fee
             state.txid = res && res.txid ? res.txid : null;
+            this._recordSpend({ phase: 'sent', epoch, challengeId: state.challengeId, txid: state.txid });
             this.peerManager && this.peerManager.broadcast(XNODE_DONE, { epoch, challengeId: state.challengeId, txid: state.txid });
             console.log('FullNodeChallengeRound: verdict broadcast epoch=' + epoch + ' pass=' + state.passList.length +
                         ' sigs=' + state.sigs.size + '/' + quorum + (state.txid ? ' txid=' + state.txid : ''));
@@ -529,12 +557,44 @@ class FullNodeChallengeRound {
             // fresh epoch re-challenges if it truly never landed. Only a DEFINITIVE
             // pre-send/reject failure unlocks for retry.
             if(isAmbiguousSendError(e)){
+                // The whole point of the intent record: an ambiguous send may have cost
+                // a fee, and the round is deliberately left claimed. Say so on disk, so
+                // the operator reconciling on-chain has the challenge_id without stdout.
+                this._recordSpend({ phase: 'ambiguous', epoch, challengeId: state.challengeId,
+                                    error: e && e.message ? String(e.message).slice(0, 200) : String(e) });
                 console.warn('FullNodeChallengeRound: AMBIGUOUS verdict send (epoch ' + epoch +
                              '); NOT re-broadcasting to avoid a double spend:', e && e.message ? e.message : e);
             } else {
+                this._recordSpend({ phase: 'failed', epoch, challengeId: state.challengeId,
+                                    error: e && e.message ? String(e.message).slice(0, 200) : String(e) });
                 state.finalized = false;   // definitive failure; unlock so a later sig/tick retries
                 console.warn('FullNodeChallengeRound: verdict broadcast failed (epoch ' + epoch + '):', e && e.message ? e.message : e);
             }
+        }
+    }
+
+    // item 3463 - append one fsync'd spend-audit line. Returns true only on a
+    // confirmed durable write; the intent call SITES the gate on that result, the
+    // outcome calls are best-effort (the fee is already committed by then, so
+    // refusing to proceed would help nobody). Mirrors AttestationPublisher._recordSpend,
+    // including creating the directory lazily so a fresh hub does not need it
+    // provisioned ahead of its first verdict.
+    _recordSpend(entry){
+        let line = JSON.stringify({ ts: Date.now(), effector: 'FULLNODE_VERDICT', ...entry }) + '\n';
+        try {
+            fs.mkdirSync(path.dirname(this.spendLogPath), { recursive: true });
+            let fd = fs.openSync(this.spendLogPath, 'a');
+            try {
+                fs.writeSync(fd, line);
+                fs.fsyncSync(fd);
+            } finally {
+                fs.closeSync(fd);
+            }
+            return true;
+        } catch (e) {
+            console.error('FullNodeChallengeRound: failed to write spend-audit record to ' +
+                          this.spendLogPath + ':', e && e.message ? e.message : e);
+            return false;
         }
     }
 

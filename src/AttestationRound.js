@@ -353,6 +353,13 @@ class AttestationRound {
             : 0;
         let pinnedFetchModel = approvedModels[modelIdx] || approvedModels[0] || null;
         let pinnedJudgeModel = pinnedAc.judge_model || null;
+        // item 3482: the model->vendor map has to travel with the pinned model ids,
+        // not be read from each hub's live hotReloaded config. A governance change
+        // that adds a new-family model plus its model_vendors entry in one block
+        // otherwise splits the round, since a laggard hub holds the pinned id but
+        // not the mapping and cannot resolve a vendor at all.
+        let pinnedVendors = (pinnedAc.model_vendors && typeof pinnedAc.model_vendors === 'object')
+            ? pinnedAc.model_vendors : null;
         if(!pinnedFetchModel){
             console.warn('AttestationRound: provider "' + providerId + '" has no approved_models at block ' +
                          snapshotBlk + '; fetch falls back to the provider module default (un-pinned)');
@@ -395,6 +402,8 @@ class AttestationRound {
                 maxResponseBytes: providerDef.max_response_bytes,
                 timeoutMs:        this.fetchTimeoutMs,
                 pinnedModel:      pinnedFetchModel,
+                // Block-anchored model->vendor map for the pinned id (item 3482).
+                pinnedVendors:    pinnedVendors,
                 // Rank of the pinned model on the fallback ladder; providers
                 // enforce request-level fallback policy on it (llm 'strict').
                 modelRank:        modelIdx
@@ -420,6 +429,7 @@ class AttestationRound {
                 ? { body: fetched.body, meta: fetched.meta, status: 'ok' }
                 : { body: Buffer.alloc(0), meta: '', status: myStatus },
             pinnedJudgeModel: pinnedJudgeModel,
+            pinnedVendors:    pinnedVendors,
             error:          (myStatus === 'ok') ? undefined : myStatus,
             proposedAt:     Date.now()
         };

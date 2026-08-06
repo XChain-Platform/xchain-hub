@@ -229,7 +229,17 @@ class OracleRound {
     // xchain_price_activation.js for why a locally-observed chain tip is the wrong key
     // here and how it would stall the whole round.
     _xchainPriceGateOpen() {
-        let t = roundStartSeconds(this.currentRound, this.epochStart, this.roundInterval);
+        return this._xchainPriceGateOpenFor(this.currentRound);
+    }
+
+    // The same gate keyed on an EXPLICIT round rather than the one being composed now.
+    // The drop-marker path in OracleConsensus (item 3521) runs against a STORED round,
+    // which need not be currentRound: a hub writes markers for the round it just
+    // finalized while its own currentRound may already have advanced, so reading the
+    // gate off currentRound there would answer for the wrong instant near the
+    // threshold. Same fail-closed contract; see xchain_price_activation.js.
+    _xchainPriceGateOpenFor(round) {
+        let t = roundStartSeconds(round, this.epochStart, this.roundInterval);
         if (t === null) return false;
         return isXchainPriceActive(t, this.currentBtcNetwork);
     }

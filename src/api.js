@@ -21,12 +21,34 @@
 const dotenv = require('dotenv');
 dotenv.config();
 
-const REQUIRED_ENV = ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS', 'HUB_PORT'];
+const { resolveSecretEnv, deprecatedSecretEnvNames } = require('./secret-env');
+
+const REQUIRED_ENV = ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_PORT'];
 for(const key of REQUIRED_ENV){
     if(!process.env[key]){
         console.error('Missing required environment variable: ' + key);
         process.exit(1);
     }
+}
+
+// The DB password is checked apart from the list above because it accepts two
+// names: HUB_DB_SECRET (preferred) and the deprecated HUB_DB_PASS. See
+// src/secret-env.js for why the name matters.
+let HUB_DB_SECRET;
+try {
+    HUB_DB_SECRET = resolveSecretEnv('HUB_DB_PASS');
+} catch (err) {
+    console.error(err.message);
+    process.exit(1);
+}
+if(!HUB_DB_SECRET){
+    console.error('Missing required environment variable: HUB_DB_SECRET (deprecated name: HUB_DB_PASS)');
+    process.exit(1);
+}
+for(const { legacy, preferred } of deprecatedSecretEnvNames()){
+    console.warn('Deprecated env var name ' + legacy + ': rename it to ' + preferred +
+        '. Automatic secret redaction keys on the variable name, and ' + legacy +
+        ' is not a name it matches, so anything that reads this env file prints the value in full.');
 }
 
 const express    = require('express');
@@ -187,7 +209,7 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     P2P_HOST:               process.env.P2P_HOST || '0.0.0.0',
     SEED_NODES:             (process.env.SEED_NODES || '').split(',').map(s => s.trim()).filter(s => s),
     P2P_VALIDATOR_ADDR:     P2P_VALIDATOR_ADDR,
-    SIGNING_PRIVKEY_HEX:    process.env.SIGNING_PRIVKEY_HEX || '',
+    SIGNING_PRIVKEY_HEX:    resolveSecretEnv('SIGNING_PRIVKEY_HEX') || '',
     REQUIRE_SIGNATURES:     (process.env.REQUIRE_SIGNATURES || 'true').toLowerCase() !== 'false',
     P2P_HEARTBEAT_INTERVAL:    parseInt(process.env.P2P_HEARTBEAT_INTERVAL) || 15000,
     P2P_DEDUP_PRUNE_INTERVAL:  parseInt(process.env.P2P_DEDUP_PRUNE_INTERVAL) || 30000,
@@ -219,7 +241,7 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     XCHAIN_PRICE_INDEXER_DB_PORT: process.env.XCHAIN_PRICE_INDEXER_DB_PORT || '',
     XCHAIN_PRICE_INDEXER_DB_NAME: process.env.XCHAIN_PRICE_INDEXER_DB_NAME || '',
     XCHAIN_PRICE_INDEXER_DB_USER: process.env.XCHAIN_PRICE_INDEXER_DB_USER || '',
-    XCHAIN_PRICE_INDEXER_DB_PASS: process.env.XCHAIN_PRICE_INDEXER_DB_PASS || '',
+    XCHAIN_PRICE_INDEXER_DB_PASS: resolveSecretEnv('XCHAIN_PRICE_INDEXER_DB_PASS') || '',
     XCHAIN_PRICE_INDEXER_DB_COIN: process.env.XCHAIN_PRICE_INDEXER_DB_COIN || 'BTC',
     XCHAIN_PRICE_WINDOW_BLOCKS:       process.env.XCHAIN_PRICE_WINDOW_BLOCKS || '',
     XCHAIN_PRICE_CONFIRMATION_BUFFER: process.env.XCHAIN_PRICE_CONFIRMATION_BUFFER || '',
@@ -272,7 +294,7 @@ async function startApi(){
         process.env.HUB_DB_PORT,
         process.env.HUB_DB_NAME,
         process.env.HUB_DB_USER,
-        process.env.HUB_DB_PASS,
+        HUB_DB_SECRET,
         p2pConfig
     );
     await hub.start();

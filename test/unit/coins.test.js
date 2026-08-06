@@ -28,16 +28,20 @@ const coins      = require('../../src/coins');
 // so a relay-policy correction moves all three BTC hashes; LTC and DOGE are
 // deliberately untouched, and their unchanged goldens are the check that nothing
 // else drifted with it.
+// REGENERATED 2026-08-06 (): `firstBlock` is now folded into
+// consensusSubset(), so all nine hashes moved by construction again. Same rollout
+// rule as the wireFormat fold: every vendoring service ships the new pins in one
+// wave, and a straggler fail-closes rather than forking.
 const GOLDEN_HASH = {
-    BTC:  { mainnet: '3e24e137cdb3a71438d89811e1621fdd0cf6ae340650a6e8f2449fcc4bb41264',
-            testnet: 'f9ec594c2b9ae8b33a653faed64a36578ca11472e00f2e3cc6258541b35460ed',
-            regtest: '10b520d6b33487b46d9d9bcc5ecc6177eb233ebfc8cb1c4d94c1d4ef0c89899d' },
-    LTC:  { mainnet: '6275f39f616c2d891551062d666831455206a546782beede1442e18eb90a0a25',
-            testnet: '03f62fc2f57151924aa6a76ff5ee97684aece17ca54a3f39eb7d8167bd34a20b',
-            regtest: '786d903d2b347803c06a1b5b157011834ebc25a246be54f5c27ddd27629eba57' },
-    DOGE: { mainnet: '0e94c5981eb1e7f90e665092322ebb46a7841c896df049f44229da547be73b95',
-            testnet: '3ec0ad2f7290e36887d09a880761c217ea6b0eeb06078d708ee5c200ef2a2410',
-            regtest: '9f448912ed9d24ac50dc16f132619c91115355c165e8f1a5bb3b630ea090f2e0' },
+    BTC:  { mainnet: '8f2a60c4a06d819d909cefa5d463a2f810d014fc66cdfa0ef51ffa19cbb5f66b',
+            testnet: 'a04af39cd9d3d332a6c043c02e0920075857078437cb46c7d07c9da143d1b551',
+            regtest: '24e6a363e5a36285574dea357328a997fdee5762ef812d8947eacf69c51afc24' },
+    LTC:  { mainnet: 'f5c81b02f2c8bdd4a828f25495cc5c63fa18e6040c80569c2aaeb8d6860ce577',
+            testnet: '185dddc98eb5c94d9069f006a9acb1b1fd6f2772b0a91a6b68a6e0ceddcba778',
+            regtest: '5ad03b383d873d309640e75dfefa2787a5806cb8a84ee46f4cc7fb25ca7f808b' },
+    DOGE: { mainnet: '8073fa2632b84c691ad625ee107f8a03ca90483f1b726700e46db833b86399b4',
+            testnet: '860422244b1317a2a125d38a49358fc01d639d9a50c173828235787368884610',
+            regtest: '019220a461e34c99fcf5cbf107673f13d3f2a57d2a20e16a0323ed44c81edd11' },
 };
 
 describe('coins registry', () => {
@@ -137,7 +141,33 @@ describe('coins registry', () => {
         // .any.keys, not exact-set .keys: the exact-set form is only true when the
         // subset has EXACTLY these keys, so its negation was vacuously true and
         // could never catch a display-only field leaking into the pinned subset.
-        expect(subset).to.not.have.any.keys('genesis', 'firstBlock', 'displayName', 'confirmations');
+        expect(subset).to.not.have.any.keys('genesis', 'displayName', 'confirmations');
+    });
+
+    // , the firstBlock twin of the wireFormat fold above. This test used to
+    // assert firstBlock stayed OUT of the subset on the reading that a scan start is
+    // node-local. It is not: the decoder sets startBlockIndex from it
+    // (xchain-decoder/src/XChainDecoder.js) and never processes a block below it, so a
+    // node bundling a higher value skips the actions in between and builds a different
+    // action history from the same chain, with CONSENSUS_CONFIG_PIN verifying clean.
+    // There is no env override; consensusSubset reads the static bundled value.
+    it('folds the per-network firstBlock INTO the consensus hash', () => {
+        for(const tick of coins.ALLOWED_COINS){
+            for(const net of coins.NETWORKS){
+                const expected = coins.getCoinConfig(tick, net).firstBlock;
+                expect(expected, `${tick}/${net} firstBlock`).to.be.a('number');
+                expect(coins.consensusSubset(tick, net), `${tick}/${net} subset`)
+                    .to.have.property('firstBlock', expected);
+            }
+        }
+    });
+
+    // Presence is not the property that matters; moving the hash is.
+    it('a divergent firstBlock changes the consensus hash (the fold is load-bearing)', () => {
+        const canonical = coins.consensusSubset('DOGE', 'mainnet');
+        expect(canonical.firstBlock).to.equal(6240000);
+        const tampered = { ...canonical, firstBlock: 6240001 };
+        expect(coins.canonicalJson(tampered)).to.not.equal(coins.canonicalJson(canonical));
     });
 
     // Every top-level coin key that is deliberately NOT part of the hashed
@@ -150,7 +180,6 @@ describe('coins registry', () => {
         'tick', 'fullName', 'displayName', 'site', // identity/display metadata
         'decimals', 'confirmations',               // display / operator-tunable depth
         'network',                                 // redundant with the (tick, network) hash key
-        'firstBlock',                              // node-local scan start, not validity-gating
         'genesis',                                 // deliberately excluded: genesis.js fail-closes on its own hashes
         'FEE_PAYMENT_MODE',                        // informational only; not read at runtime (see coin files)
         'wireFormat',                              // block/tx parse family (decoder/utxo-tracker); not hashed, mirrors the pre-existing decoder-local constant

@@ -20,7 +20,7 @@
  * dangerous rather than merely untidy.
  *
  * Connection settings come from the hub's own env (HUB_DB_HOST / HUB_DB_PORT /
- * HUB_DB_NAME / HUB_DB_USER / HUB_DB_PASS) so this runs with the same
+ * HUB_DB_NAME / HUB_DB_USER / HUB_DB_SECRET) so this runs with the same
  * credentials as the service; --db overrides the database name and may be
  * repeated to sweep a federation that keeps one DB per validator.
  *
@@ -35,6 +35,7 @@
 
 const Database = require('../src/db.js');
 const prune    = require('../src/lib/capability_snapshot_prune.js');
+const { resolveSecretEnv } = require('../src/secret-env.js');
 
 function parseArgs(argv){
     let out = { dbs: [], apply: false, from: undefined, to: undefined, capability: undefined,
@@ -78,7 +79,7 @@ function usage(){
         '  --batch-size <n>      Rows per DELETE statement. Default: ' + prune.DEFAULT_BATCH_SIZE + '.',
         '  --apply               Actually delete. Without it the run is a dry run.',
         '',
-        'Connection: HUB_DB_HOST, HUB_DB_PORT, HUB_DB_USER, HUB_DB_PASS (+ HUB_DB_NAME).'
+        'Connection: HUB_DB_HOST, HUB_DB_PORT, HUB_DB_USER, HUB_DB_SECRET (+ HUB_DB_NAME).'
     ].join('\n'));
 }
 
@@ -101,9 +102,12 @@ async function main(){
     let args = parseArgs(process.argv.slice(2));
     if(args.help){ usage(); return 0; }
 
-    for(let v of ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_USER', 'HUB_DB_PASS']){
+    for(let v of ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_USER']){
         if(!process.env[v]) throw new Error('Missing required env var ' + v);
     }
+    // Accepts the deprecated HUB_DB_PASS too; see src/secret-env.js.
+    let dbSecret = resolveSecretEnv('HUB_DB_PASS');
+    if(!dbSecret) throw new Error('Missing required env var HUB_DB_SECRET');
 
     let dbNames = args.dbs.length ? args.dbs : [process.env.HUB_DB_NAME];
     if(!dbNames[0]) throw new Error('No database given: pass --db or set HUB_DB_NAME');
@@ -122,7 +126,7 @@ async function main(){
     let leftover = 0;
     for(let name of dbNames){
         let db = new Database(process.env.HUB_DB_HOST, process.env.HUB_DB_PORT, name,
-                              process.env.HUB_DB_USER, process.env.HUB_DB_PASS);
+                              process.env.HUB_DB_USER, dbSecret);
         try {
             let before = await prune.summarizeStale(db, opts);
             console.log(name + ': before');
@@ -157,7 +161,7 @@ async function main(){
 }
 
 main().then(code => process.exit(code)).catch(err => {
-    // Never echo the connection object; it carries HUB_DB_PASS.
+    // Never echo the connection object; it carries the DB password.
     console.error('prune-stale-capability-snapshots: ' + (err && err.message ? err.message : err));
     process.exit(1);
 });

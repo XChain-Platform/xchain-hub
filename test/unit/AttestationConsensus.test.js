@@ -799,7 +799,28 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         // vendor cannot overrun the round window.
         // expectedN pins the majority denominator to the responsible-set bound
         // need = min(redundancy=2, responsible.length=3) = 2 (item 2642).
-        expect(agreeSpy.firstCall.args[1]).to.deep.equal({ pinnedJudgeModel: 'claude-opus-4-7', timeoutMs: 10000, expectedN: 2 });
+        // pinnedVendors rides alongside the pinned judge model (item 3482): the
+        // block-anchored model_vendors map, null when the round carried none.
+        expect(agreeSpy.firstCall.args[1]).to.deep.equal({ pinnedJudgeModel: 'claude-opus-4-7',
+            pinnedVendors: null, timeoutMs: 10000, expectedN: 2 });
+    });
+
+    // item 3482: a governance change can add a new-family model id and its
+    // model_vendors entry in one block. The map has to reach agree() from the
+    // round snapshot, not from each hub's live hotReloaded config, or a laggard
+    // hub holds the pinned id with no way to resolve its vendor.
+    it('threads the round-snapshotted pinnedVendors into agree() alongside the judge model', async function () {
+        let agreeSpy = sinon.spy(proposals => proposals[0]);
+        c = new AttestationConsensus(hub, makeRealProviderRegistry(agreeSpy, 'judge_model'));
+        let rs = roundState(me, [me, p1, p2], BODY, 'llm', 2);
+        rs.pinnedJudgeModel = 'llama-3-70b';
+        rs.pinnedVendors    = { 'llama-3-70b': 'openai' };
+        await c.propose(RID, rs);
+        await flush();
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
+        await flush();
+        expect(agreeSpy.called).to.equal(true);
+        expect(agreeSpy.firstCall.args[1].pinnedVendors).to.deep.equal({ 'llama-3-70b': 'openai' });
     });
 
     it('a follower converges by adopting + re-signing the leader\'s winning body', async function () {
@@ -1990,5 +2011,79 @@ describe('AttestationConsensus: byte_equality no_quorum + replay hardening', fun
         expect(c.finalized.has(RID)).to.equal(false);   // stays retryable
         expect(c.tornDown.has(RID)).to.equal(true);
         expect(c.earlyMessages.has(RID)).to.equal(false);
+    });
+});
+
+// item 3421: the nonOkPublished ring cap is a fixed operator/env value chosen once at
+// startup, but the horizon it has to clear is max(deadline_window_blocks) across the
+// provider defs, which is governance-controlled JSON that nothing upper-bounds. A
+// proposal widening that window used to invalidate the documented sizing floor in
+// silence, with the first symptom being evictions that had already re-burned BTC fees
+// on retry rounds. The check is log-only on purpose: an undersized ring wastes fees,
+// it does not fork, so refusing to run would be the worse failure.
+describe('AttestationConsensus: nonOkPublished sizing floor vs governance windows (item 3421)', function () {
+
+    function registryWithWindows(windows) {
+        const providers = new Map(Object.entries(windows).map(
+            ([id, w]) => [id, { deadline_window_blocks: w, consensus_strategy: 'byte_equality' }]));
+        return {
+            getDef:  (id) => providers.get(id) || null,
+            getModule: () => ({ agree: (p) => p[0] }),
+            maxDeadlineWindowBlocks() {
+                let blocks = 0, providerId = null;
+                for (const [id, def] of providers) {
+                    const w = Number(def.deadline_window_blocks);
+                    if (Number.isFinite(w) && w > blocks) { blocks = w; providerId = id; }
+                }
+                return { blocks, providerId };
+            }
+        };
+    }
+
+    afterEach(() => sinon.restore());
+
+    it('is satisfied by the shipped default at the 100-block http_get window', function () {
+        const c = new AttestationConsensus(createMockHub(), registryWithWindows({ http_get: 100, llm: 20 }));
+        const r = c.checkNonOkSizingFloor();
+        expect(r.ok).to.equal(true);
+        expect(r.blocks).to.equal(100);
+        expect(r.providerId).to.equal('http_get');
+        expect(r.floor).to.equal(40000);   // the default is sized exactly to this
+        expect(r.cap).to.equal(40000);
+    });
+
+    it('warns, naming the provider, once governance widens a window past the floor', function () {
+        const warn = sinon.stub(console, 'warn');
+        const c = new AttestationConsensus(createMockHub(), registryWithWindows({ http_get: 100, slow_oracle: 250 }));
+        const r = c.checkNonOkSizingFloor();
+        expect(r.ok).to.equal(false);
+        expect(r.blocks).to.equal(250);          // the WIDEST def wins, not http_get
+        expect(r.providerId).to.equal('slow_oracle');
+        expect(r.floor).to.equal(100000);
+        expect(warn.called).to.equal(true);
+        const msg = warn.getCalls().map(x => String(x.args[0])).join(' ');
+        expect(msg).to.include('slow_oracle');
+        expect(msg).to.include('100000');
+    });
+
+    it('stays quiet when the operator has raised the cap to cover the wider window', function () {
+        const warn = sinon.stub(console, 'warn');
+        const hub  = createMockHub();
+        hub.p2pConfig = Object.assign({}, hub.p2pConfig, { ATTESTATION_NONOK_PUBLISHED_MAX: '120000' });
+        const c = new AttestationConsensus(hub, registryWithWindows({ slow_oracle: 250 }));
+        expect(c.nonOkPublishedMax).to.equal(120000);
+        const r = c.checkNonOkSizingFloor();
+        expect(r.ok).to.equal(true);
+        expect(warn.called).to.equal(false);
+    });
+
+    it('returns null rather than guessing when no def declares a usable window', function () {
+        const c = new AttestationConsensus(createMockHub(), registryWithWindows({ http_get: 'not-a-number' }));
+        expect(c.checkNonOkSizingFloor()).to.equal(null);
+    });
+
+    it('is a no-op against a registry that predates the accessor', function () {
+        const c = new AttestationConsensus(createMockHub(), { getDef: () => null, getModule: () => null });
+        expect(c.checkNonOkSizingFloor()).to.equal(null);
     });
 });

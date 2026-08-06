@@ -378,6 +378,20 @@ class ProviderRegistry {
         return [...this.providers.keys()];
     }
 
+    // Widest deadline_window_blocks across the LIVE provider defs, plus the provider
+    // that owns it. deadline_window_blocks is governance-controlled JSON read verbatim
+    // in load(), so this is the value a caller must re-derive against rather than the
+    // 100-block http_get figure baked into any comment (item 3421). Returns
+    // { blocks: 0, providerId: null } when no def declares a usable window.
+    maxDeadlineWindowBlocks(){
+        let blocks = 0, providerId = null;
+        for (let [id, def] of this.providers){
+            let w = Number(def && def.deadline_window_blocks);
+            if (Number.isFinite(w) && w > blocks){ blocks = w; providerId = id; }
+        }
+        return { blocks, providerId };
+    }
+
     isRedundancyAllowed(providerId, redundancy){
         let p = this.providers.get(providerId);
         if (!p) return false;

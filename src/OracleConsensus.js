@@ -1604,7 +1604,7 @@ class OracleConsensus extends EventEmitter {
         // finalized write over the marker.
         try {
             let finalizedPairs = new Set(prices.map(p => p.coinPair));
-            let missingPairs = PriceFetcher.getCoinPairs().filter(pair => !finalizedPairs.has(pair));
+            let missingPairs = this._markerPairs(round).filter(pair => !finalizedPairs.has(pair));
             if (missingPairs.length) {
                 console.warn('Oracle: round ' + round + ' finalized without ' + missingPairs.length
                     + ' configured pair(s): ' + missingPairs.join(', ')
@@ -1646,13 +1646,34 @@ class OracleConsensus extends EventEmitter {
         }
     }
 
+    // item 3521 - the pair set the per-pair drop markers are written over. It must
+    // track the ADMISSION set (OracleRound.canonicalPairs = the 36 API pairs plus
+    // DERIVED_PAIRS), not getCoinPairs() alone, or the one pair produced by derivation
+    // rather than fetch is the sole pair that can vanish with no durable trace: no
+    // status='skipped' row, nothing in getSubmissionsInfo().droppedPairs, and the
+    // stale prior snapshot still reading alive. DERIVED_PAIRS joins only when the
+    // XCHAIN activation gate is open FOR THIS ROUND, since below the gate the pair was
+    // never due and a skip row would be noise. The gate is round-keyed, not
+    // currentRound-keyed: the stored round may already be behind. Fails closed the same
+    // way the composition gate does, so an unreachable OracleRound narrows the marker
+    // set back to the fetched pairs rather than inventing a row.
+    _markerPairs(round) {
+        let pairs = PriceFetcher.getCoinPairs();
+        try {
+            if (this.oracleRound && typeof this.oracleRound._xchainPriceGateOpenFor === 'function'
+                && this.oracleRound._xchainPriceGateOpenFor(round))
+                return [...pairs, ...DERIVED_PAIRS];
+        } catch (e) { /* fail closed to the fetched pairs */ }
+        return pairs;
+    }
+
     // reason: short string describing why the round was skipped ('no submissions',
     // 'below minimum submissions threshold', etc.); surfaced in the skip log so
     // operators can tell a full outage apart from a quorum shortfall.
     async _storeSkippedRound(round, btcBlockHeight, btcBlockTime, reason) {
         let referenceBlock = btcBlockHeight || round;
         let blockTimestamp = btcBlockTime   || Math.floor(Date.now() / 1000);
-        let coinPairs = PriceFetcher.getCoinPairs();
+        let coinPairs = this._markerPairs(round);
         // One multi-row INSERT so the skipped round lands atomically (same torn-read
         // rationale as _storeSnapshot).
         if (coinPairs.length) {

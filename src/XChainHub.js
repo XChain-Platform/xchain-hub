@@ -363,7 +363,14 @@ class XChainHub {
         // No-op if governance isn't started or doesn't emit this event.
         if(this.governance && typeof this.governance.on === 'function'){
             this.governance.on('proposal:finalized', () => {
-                this.providerRegistry.hotReload().catch(e =>
+                this.providerRegistry.hotReload().then(() => {
+                    // item 3421 - a proposal may have widened deadline_window_blocks,
+                    // which is the horizon the fixed nonOkPublished ring cap has to
+                    // clear. Re-check the floor here so the warning lands when the
+                    // config changes, not later when evictions start burning fees.
+                    if(this.attestationConsensus && typeof this.attestationConsensus.checkNonOkSizingFloor === 'function')
+                        this.attestationConsensus.checkNonOkSizingFloor();
+                }).catch(e =>
                     console.error('ProviderRegistry hot-reload failed:', e));
             });
 

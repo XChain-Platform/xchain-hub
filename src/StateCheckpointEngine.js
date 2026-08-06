@@ -145,6 +145,46 @@ class StateCheckpointEngine extends EventEmitter {
         // every incoming FINALIZED fails here, not only via the indirect tip-stall.
         this._malformedFinalized  = 0;
         this._subQuorumFinalized  = 0;
+
+        // : cadence stalls. Every pre-leadership bail in _tick used to return
+        // silently, so a hub whose oracle_publish capability had gone unqualified
+        // produced zero checkpoints and zero log lines. The mainnet hub sat that way
+        // for 18 days (last checkpoint 2026-07-10 at BTC 957439, tip 960028) because
+        // its capability config still carried a placeholder DOGE address, and nothing
+        // in the logs or in getcheckpointstats said so. Meter every "cadence is due
+        // but we cannot lead" bail and name the reason.
+        this._cadenceStalls        = 0;
+        this._cadenceStallReason   = null;
+        this._cadenceStallBlock    = null;
+        this._cadenceStallLoggedAt = 0;
+        // Log throttle: the poll runs far faster than the cadence, so log the reason
+        // at most once an hour and let the counter carry the true rate.
+        this._cadenceStallLogMs = parseInt(process.env.CHECKPOINT_STALL_LOG_MS
+            || cfg.CHECKPOINT_STALL_LOG_MS || String(60 * 60 * 1000));
+    }
+
+    // Record (and throttle-log) a cadence round this hub could not lead. `block` is
+    // the BTC snapshot block the round would have used, or null when we could not
+    // even resolve one.
+    _noteCadenceStall(block, reason){
+        this._cadenceStalls++;
+        this._cadenceStallReason = reason;
+        this._cadenceStallBlock  = (block == null ? null : Number(block));
+        let now = Date.now();
+        if(now - this._cadenceStallLoggedAt < this._cadenceStallLogMs) return;
+        this._cadenceStallLoggedAt = now;
+        console.warn('StateCheckpointEngine: checkpoint cadence STALLED at BTC block ' +
+                     (block == null ? 'unknown' : block) + ': ' + reason +
+                     ' (no checkpoint will be produced until this is fixed; ' +
+                     this._cadenceStalls + ' stalled tick(s) so far)');
+    }
+
+    // A round we led (or a cadence that simply is not due yet) clears the stall, so
+    // getcheckpointstats reports a live reason rather than a stale one.
+    _clearCadenceStall(){
+        this._cadenceStallReason   = null;
+        this._cadenceStallBlock    = null;
+        this._cadenceStallLoggedAt = 0;
     }
 
     async start(){
@@ -218,7 +258,13 @@ class StateCheckpointEngine extends EventEmitter {
             last_finalized_by_chain: last_finalized_by_chain,
             round_timeouts:          this._roundTimeouts,
             malformed_finalized:     this._malformedFinalized,
-            sub_quorum_finalized:    this._subQuorumFinalized
+            sub_quorum_finalized:    this._subQuorumFinalized,
+            // : non-zero with a reason means the engine is alive but structurally
+            // unable to checkpoint (unqualified capability, missing identity, not in the
+            // validator set), the failure mode that produced 18 silent days on mainnet.
+            cadence_stalls:          this._cadenceStalls,
+            cadence_stall_reason:    this._cadenceStallReason,
+            cadence_stall_block:     this._cadenceStallBlock
         };
     }
 
@@ -252,8 +298,12 @@ class StateCheckpointEngine extends EventEmitter {
         this._ticking = true;
         try {
             let btcBlock = await this._resolveSnapshotBlock();
-            if(btcBlock == null) return;
-            if(this._lastCheckpointBtcBlock != null && btcBlock < this._lastCheckpointBtcBlock + this.intervalBlocks) return;
+            if(btcBlock == null){ this._noteCadenceStall(null, 'no BTC snapshot block (indexer unreachable or no tip)'); return; }
+            if(this._lastCheckpointBtcBlock != null && btcBlock < this._lastCheckpointBtcBlock + this.intervalBlocks){
+                // On schedule: the cadence simply has not come round yet.
+                this._clearCadenceStall();
+                return;
+            }
 
             let validators = await this._resolveCapabilityValidators('oracle_publish', btcBlock);
             // : dedupe to DISTINCT pubkeys before ranking (mirrors the finalizer's
@@ -269,20 +319,32 @@ class StateCheckpointEngine extends EventEmitter {
             // checkpoint signed by a non-validator identity could never verify
             // against any capability snapshot. (Single-operator regtest seeds a
             // local validator via XDEX_SEED_LOCAL_VALIDATOR, so it still runs.)
-            if(pubkeys.length === 0) return;
+            if(pubkeys.length === 0){
+                this._noteCadenceStall(btcBlock, 'no qualified oracle_publish validator set (capability self-test failing, ' +
+                                                 'not enabled, or no snapshot rows)');
+                return;
+            }
             // Membership + cadence run for EVERY set size: a size-1 set used to
             // skip even the indexOf check, letting a hub whose identity is NOT
             // the sole oracle_publish validator sign an unverifiable checkpoint.
             // (Size-1 cadence is btcBlock % 1 === 0 === rank, so the sole
             // validator still checkpoints every cadence block.)
-            if(!this.identity) return;
+            if(!this.identity){ this._noteCadenceStall(btcBlock, 'no validator identity (cannot sign checkpoints)'); return; }
             let me = this.identity.getPubkeyHex().toLowerCase();
             let myRank = pubkeys.indexOf(me);
-            if(myRank < 0) return;                              // not an oracle_publish validator
-            if(myRank !== (btcBlock % pubkeys.length)) return;  // not our cadence (rotates next block)
+            if(myRank < 0){                                     // not an oracle_publish validator
+                this._noteCadenceStall(btcBlock, 'this hub is not in the oracle_publish validator set (' +
+                                                 pubkeys.length + ' member(s))');
+                return;
+            }
+            // Not our slot: normal rotation in an N>1 federation, NOT a stall. A single-
+            // member set is always its own leader (btcBlock % 1 === 0 === rank), so this
+            // branch can never hide the lone-validator case the stall counter is for.
+            if(myRank !== (btcBlock % pubkeys.length)) return;
 
             // We are the cadence leader (or a single-node set): one round per chain.
             // The latch advances even on per-chain failure; the next cadence retries.
+            this._clearCadenceStall();
             this._lastCheckpointBtcBlock = btcBlock;
             await this._persistCapabilitySnapshot('oracle_publish', btcBlock);
             for(let chain of this.chains){
@@ -737,16 +799,16 @@ class StateCheckpointEngine extends EventEmitter {
     //
     // The propose path always refused to SIGN such a checkpoint, but that was the only
     // place the rule lived, and it is the one path an attacker does not control. The
-    // canonical hides the gap: _checkpointRootSuffix() contributes the EMPTY STRING when
-    // the roots are null, so a rootless proposal and a rootless self-derivation produce
-    // BYTE-IDENTICAL canonicals. A follower's "does the proposer's canonical match mine?"
-    // check therefore passes, and it co-signs a post-flag-day checkpoint carrying no
-    // roots at all. Quorum then forms and every hub persists it, so the light-client
-    // commitment the flag-day exists to guarantee is silently absent from the checkpoint
-    // chain and an SPV client has nothing to verify against.
+    // canonical hides the gap: _rootSuffix() contributes the EMPTY STRING when the
+    // roots are null, so a rootless proposal and a rootless self-derivation produce
+    // BYTE-IDENTICAL canonicals. A follower's "does the proposer's canonical match
+    // mine?" check therefore passes, and it co-signs a post-flag-day checkpoint
+    // carrying no roots at all. Quorum then forms and every hub persists it, so the
+    // light-client commitment the flag-day exists to guarantee is silently absent from
+    // the checkpoint chain, and an SPV client has nothing to verify against.
     //
-    // One predicate, three call sites (propose, co-sign, persist), so the rule cannot be
-    // enforced on one path and quietly skipped on the others again.
+    // One predicate, three call sites (propose, co-sign, persist), so the rule cannot
+    // be enforced on one path and quietly skipped on the others again.
     // : the SWQ gate here resolves on the DEPLOYMENT network
     // (`this.network`) while StateAnchorPublisher resolves the same gate on the
     // RECORD's network (resolveQuorumNetwork(cp, ...), "gate on the RECORD network to
@@ -763,7 +825,6 @@ class StateCheckpointEngine extends EventEmitter {
     // as an unexplained quorum failure or, worse, as two hubs tallying the same
     // signature set under different rules and disagreeing about whether quorum was
     // reached. Callers treat a throw as "do not sign / do not persist".
-    //
     // Scoped to a genuine disagreement between two KNOWN networks. An UNSCOPED hub
     // (this.network === '') is a different, already-documented problem: it silently
     // resolves every flag-day gate to "off" (isStakeWeightedQuorumActive returns false
