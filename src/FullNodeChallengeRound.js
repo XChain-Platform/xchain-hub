@@ -197,6 +197,7 @@ class FullNodeChallengeRound {
 
         this.rounds   = new Map();  // epoch -> round state
         this._timer   = null;
+        this._ticking = false;      // in-flight guard, see _tick()
         this._handler = (env) => this._handleMessage(env);
     }
 
@@ -258,35 +259,50 @@ class FullNodeChallengeRound {
 
     async _tick(){
         if(this.interval <= 0) return;
-        let tip = await this._indexerCall('getblockhashes', {});
-        let tipBlock = tip && tip.block_index != null ? Number(tip.block_index) : null;
-        if(tipBlock == null) return;
+        // In-flight guard (house convention, mirrors StateCheckpointEngine._tick).
+        // A tick makes up to three sequential _indexerCall round trips at a 15s
+        // timeout each, against a 30s poll: under a slow indexer the next interval
+        // fires while this one is still awaiting. Two overlapping ticks would both
+        // pass the rounds.has(epoch) test below before either reached the
+        // rounds.set() inside _runEpoch (two more awaits later), starting one epoch
+        // twice: duplicate XNODE_ANSWER broadcasts and a second rounds.set that
+        // clobbers the first run's accumulated answers/signatures. The finally is
+        // load-bearing: a rejected indexer call must not wedge the flag forever.
+        if(this._ticking) return;
+        this._ticking = true;
+        try {
+            let tip = await this._indexerCall('getblockhashes', {});
+            let tipBlock = tip && tip.block_index != null ? Number(tip.block_index) : null;
+            if(tipBlock == null) return;
 
-        // Close (and eventually prune) open rounds by CHAIN HEIGHT: every hub closes
-        // a round at the same chain point (tip >= epoch + closeDepth), regardless of
-        // when it locally detected the epoch, so the leader has collected every
-        // claimant's answer (which were all broadcast within ~1 block of the epoch).
-        for(let [e, st] of this.rounds){
-            if(!st.finalized && tipBlock >= e + this.closeDepth){
-                // Chain-based leader failover: rank 0 leads at the close point; each
-                // further closeDepth of height with no verdict promotes the next rank.
-                let rank = Math.floor((tipBlock - (e + this.closeDepth)) / Math.max(1, this.closeDepth));
-                if(!st.closed || rank > st.leadRank){
-                    st.closed = true;
-                    st.leadRank = rank;
-                    this._closeCollection(e).catch(err => console.warn('FullNodeChallengeRound close:', err && err.message));
+            // Close (and eventually prune) open rounds by CHAIN HEIGHT: every hub closes
+            // a round at the same chain point (tip >= epoch + closeDepth), regardless of
+            // when it locally detected the epoch, so the leader has collected every
+            // claimant's answer (which were all broadcast within ~1 block of the epoch).
+            for(let [e, st] of this.rounds){
+                if(!st.finalized && tipBlock >= e + this.closeDepth){
+                    // Chain-based leader failover: rank 0 leads at the close point; each
+                    // further closeDepth of height with no verdict promotes the next rank.
+                    let rank = Math.floor((tipBlock - (e + this.closeDepth)) / Math.max(1, this.closeDepth));
+                    if(!st.closed || rank > st.leadRank){
+                        st.closed = true;
+                        st.leadRank = rank;
+                        this._closeCollection(e).catch(err => console.warn('FullNodeChallengeRound close:', err && err.message));
+                    }
                 }
+                if((tipBlock - e) > (this.acceptWindow + this.closeDepth + this.interval)) this.rounds.delete(e);
             }
-            if((tipBlock - e) > (this.acceptWindow + this.closeDepth + this.interval)) this.rounds.delete(e);
-        }
 
-        // The most recent epoch boundary that is both buried enough for a stable
-        // target block and still inside the verdict-acceptance window.
-        let epoch = Math.floor(tipBlock / this.interval) * this.interval;
-        if(epoch < this.confirmDepth) return;                 // target would be < genesis
-        if((tipBlock - epoch) > this.acceptWindow) return;    // too late to land a verdict this epoch
-        if(this.rounds.has(epoch)) return;                    // already running/finalized
-        await this._runEpoch(epoch, tipBlock);
+            // The most recent epoch boundary that is both buried enough for a stable
+            // target block and still inside the verdict-acceptance window.
+            let epoch = Math.floor(tipBlock / this.interval) * this.interval;
+            if(epoch < this.confirmDepth) return;                 // target would be < genesis
+            if((tipBlock - epoch) > this.acceptWindow) return;    // too late to land a verdict this epoch
+            if(this.rounds.has(epoch)) return;                    // already running/finalized
+            await this._runEpoch(epoch, tipBlock);
+        } finally {
+            this._ticking = false;
+        }
     }
 
     async _runEpoch(epoch, tipBlock){

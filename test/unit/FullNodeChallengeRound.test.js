@@ -728,5 +728,45 @@ describe('FullNodeChallengeRound', function () {
             await eng._tick();
             expect(eng.rounds.get(288).closed, 'closed at tip 291').to.equal(true);
         });
+
+        // The poll is a plain setInterval, so a tick that outruns pollMs (three
+        // sequential indexer calls at a 15s timeout each, against a 30s poll) would
+        // otherwise overlap: both runs pass the rounds.has(epoch) test before either
+        // reaches rounds.set inside _runEpoch, starting one epoch twice.
+        it('a second overlapping tick returns instead of starting the epoch twice', async function () {
+            const hub = makeHub();
+            hub.capabilitySnapshot.getSnapshot.resolves({ validators: [{ pubkey: V1 }] });
+            const eng = new FullNodeChallengeRound(hub);
+            eng.broadcastFn = sinon.stub().resolves({ txid: 'TX' });
+            wireRpc({ ledgerHash: SEED, tip: 288, verifiers: [], block });
+
+            // A slow indexer: the first tick is still awaiting when the second fires.
+            let release;
+            const gate = new Promise((res) => { release = res; });
+            const realCall = eng._indexerCall.bind(eng);
+            let first = true;
+            eng._indexerCall = async (m, p) => {
+                if (first) { first = false; await gate; }
+                return realCall(m, p);
+            };
+            const runEpoch = sinon.spy(eng, '_runEpoch');
+
+            const a = eng._tick();
+            const b = eng._tick();      // fires while a is parked on the gate
+            await b;                    // returns immediately, guarded
+            expect(runEpoch.callCount, 'the guarded tick did no work').to.equal(0);
+            release();
+            await a;
+            expect(runEpoch.callCount, 'only the first tick ran the epoch').to.equal(1);
+            expect(eng._ticking, 'flag released in finally').to.equal(false);
+        });
+
+        it('releases the in-flight flag when a tick throws', async function () {
+            const hub = makeHub();
+            const eng = new FullNodeChallengeRound(hub);
+            eng._indexerCall = async () => { throw new Error('indexer down'); };
+            try { await eng._tick(); } catch (e) { /* start()'s wrapper swallows this */ }
+            expect(eng._ticking, 'a rejected indexer call must not wedge the poll').to.equal(false);
+        });
     });
 });
