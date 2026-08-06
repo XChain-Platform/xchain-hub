@@ -32,8 +32,9 @@
  *   2. CLAUDE_CONFIG_DIR        (standard CLI env, fallback)
  *   3. HUB_CLAUDE_CODE_OAUTH_TOKEN  (hub-scoped token; paired with isolated dir)
  *   4. CLAUDE_CODE_OAUTH_TOKEN  (standard CLI env)
- *   5. ANTHROPIC_API_KEY        (direct API mode)
- *   6. Default ~/.claude-xchain if it's been pre-populated by
+ *   5. HUB_ANTHROPIC_API_KEY   (hub-scoped API key; direct API mode)
+ *   6. ANTHROPIC_API_KEY        (ambient API key; direct API mode)
+ *   7. Default ~/.claude-xchain if it's been pre-populated by
  *      `CLAUDE_CONFIG_DIR=~/.claude-xchain claude login`
  *      (HUB_CLAUDE_DEFAULT_CONFIG_DIR overrides the default dir path;
  *      point it at a nonexistent dir to disable this fallback, e.g. for

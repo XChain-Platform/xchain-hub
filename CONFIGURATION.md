@@ -95,8 +95,32 @@ signatures.
 | `HUB_DB_PORT` | **Yes** | - | MariaDB port. |
 | `HUB_DB_NAME` | **Yes** | - | Database name. |
 | `HUB_DB_USER` | **Yes** | - | Database user. |
-| `HUB_DB_PASS` | **Yes** | - | Database password. |
+| `HUB_DB_SECRET` | **Yes** | - | Database password. Deprecated name `HUB_DB_PASS` is still read; see below. |
 | `DB_QUERY_TIMEOUT` | No | `30000` | Per-query timeout (ms). |
+
+### Secret variable names end in `_SECRET`
+
+Automatic secret redaction, in terminals, CI logs and assistant transcripts,
+keys on the variable **name** and matches `_SECRET` / `_KEY` / `_TOKEN`. A name
+like `HUB_DB_PASS` matches nothing, so the value prints in full every time
+someone reads the env file. In 2026-07 exactly that happened to a regtest hub
+.
+
+Three hub secrets therefore accept a `_SECRET` name, with the historical name
+kept as a deprecated fallback so no running deployment breaks:
+
+| Preferred | Deprecated |
+|---|---|
+| `HUB_DB_SECRET` | `HUB_DB_PASS` |
+| `XCHAIN_PRICE_INDEXER_DB_SECRET` | `XCHAIN_PRICE_INDEXER_DB_PASS` |
+| `SIGNING_PRIVKEY_SECRET` | `SIGNING_PRIVKEY_HEX` |
+
+The hub logs a warning at startup for each secret still supplied under the
+deprecated name. Setting both names to different values is a startup error, not
+a precedence rule: that shape is a half-finished rename, and picking a winner is
+how a hub keeps authenticating with the credential it was supposed to rotate
+away from. Renaming does not un-leak anything by itself: a credential that has
+already been read out loud still has to be rotated.
 
 ## Telemetry collector
 
@@ -145,7 +169,7 @@ handler, governance, and attestation subsystems are **all enabled only when
 |---|---|---|---|
 | `P2P_VALIDATOR_ADDR` | No | _empty_ | This validator's address. Setting it enables the entire P2P/validator stack. |
 | `ORACLE_EPOCH_START` | **If P2P** | - | Unix-ms timestamp anchoring oracle round numbering. Must be identical across all hubs in the federation. The hub exits at startup if P2P is enabled and this is unset. |
-| `SIGNING_PRIVKEY_HEX` | **If P2P** | _empty_ | Ed25519 seed (64 hex chars). **Empty = unsigned / no identity - see above.** |
+| `SIGNING_PRIVKEY_SECRET` | **If P2P** | _empty_ | Ed25519 seed (64 hex chars). Deprecated name `SIGNING_PRIVKEY_HEX` is still read. **Empty = unsigned / no identity - see above.** |
 | `REQUIRE_SIGNATURES` | No | `true` | Reject unsigned or invalid peer messages. |
 | `P2P_PORT` | No | `10001` | P2P listener port. |
 | `P2P_HOST` | No | `0.0.0.0` | P2P bind interface. |
@@ -209,6 +233,7 @@ Wallet and encoder the hub uses to publish ATTEST responses on Bitcoin.
 | `ATTESTATION_TIMEOUT` | No | `60000` | Attestation timeout (ms). |
 | `ATTESTATION_ROUND_TTL_MS` | No | `3600000` (1h) | Time-to-live for in-memory attestation round entries before lazy eviction. |
 | `REORG_TIMEOUT` | No | `60000` | Reorg-handler timeout (ms). |
+| `REORG_ALLOW_UNRECORDED_OLDHASH` | No | unset (fail closed) | Escape hatch . When a reorg IS recorded at the claimed height but its orphaned hash was never recorded, this hub abstains rather than co-sign, because it cannot verify the claimed `oldHash`. Set to `1` to restore the pre- behaviour and accept such claims; it logs loudly every time it does. Leaving it unset costs abstention only at heights whose orphaned hash is missing (measured 2026-07-29: 3 of 171 recorded orphaned blocks on mainnet, DOGE 6280198 and 6279100, LTC 3137602). |
 
 ## Attestation relay (`AttestationRelay`, )
 
@@ -431,6 +456,7 @@ env var, else the bundled per-coin `FULLNODE` block.
 | `FULLNODE_REWARD_SHARE` | No | per-coin | Reward share for passing full nodes. |
 | `FULLNODE_GENESIS_VERIFIERS` | No | per-coin | Comma-separated genesis verifier pubkeys (lowercased). |
 | `FULLNODE_BTC_RPC` | If enabled | _empty_ | Bitcoin RPC endpoint the full-node capability probes. |
+| `FULLNODE_SPEND_LOG_PATH` | No | `./data/fullnode-verdict.spend.jsonl` | Durable spend-audit JSONL for the fee-bearing NODEPROOF verdict send. An intent line is fsync'd before the broadcast and the broadcast is gated on that write, so an unwritable path defers the verdict rather than spending with no record. |
 
 ## Governance
 
