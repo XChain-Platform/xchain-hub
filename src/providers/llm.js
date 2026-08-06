@@ -103,12 +103,17 @@ const JUDGE_MAX_TOKENS_REASONING = 2048;
 // attestation content. Fetch-path counterpart to the judge reasoning budget.
 const FETCH_REASONING_TOKEN_HEADROOM = 2048;
 
-// True for OpenAI reasoning-family models (o-series and gpt-5*), which reject an
-// explicit temperature and bill reasoning tokens against max_completion_tokens.
+// True for OpenAI reasoning-family models: the o-series, and the gpt-5 reasoning
+// ids (gpt-5 / gpt-5-mini / gpt-5-nano), which reject an explicit temperature and
+// bill reasoning tokens against max_completion_tokens. gpt-5-chat* is EXCLUDED on
+// purpose: it is the non-reasoning ChatGPT model, it honors an explicit
+// temperature, and classifying it as reasoning would silently drop the
+// temperature-0 judge contract and over-grant reasoning headroom (item 3535).
 // Shared by the OpenAI transport gate and the judge-budget selection in agree().
 function _isReasoningModel(model) {
-    return /^o[0-9]/.test(String(model)) || /^gpt-5/.test(String(model));
+    return /^o[0-9]/.test(String(model)) || /^gpt-5(?!-chat)/.test(String(model));
 }
+exports._isReasoningModel = _isReasoningModel;
 
 // item 2680 - operator kill switch for this paid provider. The only pre-existing
 // lever was failing healthCheck (which the hub penalizes: the validator is still
@@ -155,11 +160,21 @@ function _resolveMaxBudgetUsd() {
 }
 exports._resolveMaxBudgetUsd = _resolveMaxBudgetUsd;
 
-// Map a model id to its vendor. Explicit MODEL_VENDORS overrides win, then
-// id-prefix inference. Unknown ids throw at call time (never guess a vendor:
-// sending a prompt to the wrong API leaks it to an unintended third party).
-function vendorOfModel(model) {
+// Map a model id to its vendor. A BLOCK-ANCHORED per-call map wins, then the
+// module-level MODEL_VENDORS overrides, then id-prefix inference. Unknown ids
+// throw at call time (never guess a vendor: sending a prompt to the wrong API
+// leaks it to an unintended third party).
+//
+// item 3482: `pinned` is the model_vendors map read from the SAME block-anchored
+// additional_config that produced pinnedModel/pinnedJudgeModel. Without it the
+// vendor lookup read the live, hotReload-mutable module map while the model id
+// came from the request's block, so a governance change adding a new-family id
+// plus its model_vendors entry in one block split the round: hubs that had
+// reloaded resolved the vendor, laggards threw and recorded provider_error.
+// Same anchoring rationale as the pinnedModel clamp-avoidance in fetch().
+function vendorOfModel(model, pinned) {
     let id = String(model || '');
+    if (pinned && typeof pinned[id] === 'string') return pinned[id];
     if (MODEL_VENDORS && typeof MODEL_VENDORS[id] === 'string') return MODEL_VENDORS[id];
     if (/^claude-/.test(id))                 return 'anthropic';
     if (/^(gpt-|chatgpt-|o[0-9])/.test(id))  return 'openai';
@@ -242,7 +257,7 @@ exports.fetch = async (payload, options) => {
     if (!options.pinnedModel && APPROVED_MODELS.indexOf(model) === -1) model = APPROVED_MODELS[0];
 
     let maxTokens   = Math.min(Number(envelope.max_tokens) || MAX_TOKENS_DEFAULT, MAX_TOKENS_DEFAULT);
-    // Reasoning-family fetch models (o-series / gpt-5*) bill internal reasoning
+    // Reasoning-family fetch models (o-series / gpt-5, not gpt-5-chat) bill reasoning
     // tokens against the completion budget, so the governance-tuned content bound
     // is consumed by reasoning before any attestation content is emitted
     // (finish_reason='length', empty body -> provider_error every round). Mirror
@@ -267,7 +282,10 @@ exports.fetch = async (payload, options) => {
         maxTokens,
         temperature,
         format,
-        timeoutMs:   options.timeoutMs
+        timeoutMs:   options.timeoutMs,
+        // Block-anchored model_vendors for this request's block (item 3482), so
+        // the vendor resolves from the same config that pinned the model id.
+        pinnedVendors: options.pinnedVendors || null
     });
 
     if (!text || text.length === 0) throw new Error('llm: returned empty text');
@@ -474,7 +492,10 @@ exports.agree = async (proposals, options) => {
                 // verdict parse below can require a single JSON object rather
                 // than scraping the first {...} out of free-form prose.
                 format:      'json_object',
-                timeoutMs:   attemptTimeoutMs
+                timeoutMs:   attemptTimeoutMs,
+                // Same block-anchored vendor map the leader pinned the judge
+                // model from (item 3482).
+                pinnedVendors: options.pinnedVendors || null
             });
             reached = true;
             if (jm !== judgeModel)
@@ -489,7 +510,17 @@ exports.agree = async (proposals, options) => {
             if (e && (e.kind === 'refusal' || e.transient === false)) {
                 console.warn('llm: judge ' + jm + ' returned a non-transport outcome (' +
                     (e.kind || 'hard_error') + '); deferring to no_quorum without advancing chain');
-                _markInconclusive(options, e.kind === 'truncation' ? 'judge_truncation' : 'judge_refusal');
+                // Three buckets, not two (item 3535/3481). The chain-advance
+                // decision is the same for all of them, but the recorded reason is
+                // the only place an operator sees WHY the round went inconclusive:
+                // a 4xx from a deprecated model id, an auth misconfiguration, and a
+                // non-zero claude CLI exit all arrive here with kind undefined, and
+                // labelling those 'judge_refusal' makes vendor-contract drift
+                // indistinguishable from real content moderation.
+                let reason = 'judge_hard_error';
+                if (e.kind === 'truncation')   reason = 'judge_truncation';
+                else if (e.kind === 'refusal') reason = 'judge_refusal';
+                _markInconclusive(options, reason);
                 return null;
             }
             console.warn('llm: judge model ' + jm + ' unreachable: ' + (e && e.message ? e.message : e));
@@ -621,8 +652,8 @@ exports.healthCheck = async (ctx) => {
 
 // Pick the model's vendor + configured transport and execute the LLM call.
 // Returns the response text (string). Throws on transport-level failure.
-async function _runLlm({ prompt, system, model, maxTokens, temperature, format, timeoutMs }) {
-    const vendor = vendorOfModel(model);
+async function _runLlm({ prompt, system, model, maxTokens, temperature, format, timeoutMs, pinnedVendors }) {
+    const vendor = vendorOfModel(model, pinnedVendors);
     const auth   = resolveLlmVendorAuth(vendor);
     if (!auth.ok) throw new Error('llm: ' + (auth.detail || auth.reason || 'no credentials'));
 
@@ -669,7 +700,7 @@ async function _runLlm({ prompt, system, model, maxTokens, temperature, format, 
         // `typeof temperature` guard is always true and would hard-fail every
         // reasoning-model round. Gate on the model id instead: omit temperature for
         // o-series/gpt-5 and let the API default, send it for other chat models
-        // (gpt-*) that honor it.
+        // (gpt-*, including the non-reasoning gpt-5-chat*) that honor it.
         const isReasoningModel = _isReasoningModel(model);
         if (!isReasoningModel && typeof temperature === 'number') reqBody.temperature = temperature;
         const result = await _callOpenAi('/v1/chat/completions', reqBody, auth.apiKey, { timeoutMs });

@@ -156,12 +156,21 @@ async function runClaudePrint(opts) {
             const result = (json && typeof json.result === 'string') ? json.result : '';
             if (!result) {
                 // Empty result text on a clean exit is how a refusal-with-no-text
-                // manifests on this path. Classify it as a refusal when the CLI
-                // JSON flags an error, otherwise as a reached-CLI hard outcome;
-                // either way it is non-transient and must not re-judge.
-                let isRefusal = !!(json && (json.is_error === true ||
-                    /refus|declin|blocked|error/i.test(String(json.subtype || ''))));
-                rejectHard('claude-spawn: CLI returned no result text', isRefusal ? 'refusal' : undefined);
+                // manifests on this path. Either way it is non-transient and must
+                // not re-judge; only the recorded KIND differs.
+                //
+                // item 3484: the subtype test is anchored to refusal words only. It
+                // used to also fire on is_error===true and on a bare 'error'
+                // substring, which swallowed the CLI's own session-level failure
+                // subtypes (error_max_turns, error_during_execution) -- both carry
+                // is_error true AND the substring -- and reported an exhausted turn
+                // budget as a model refusal. A session failure is a hard error; the
+                // no-kind branch below is what says so.
+                let subtype = String((json && json.subtype) || '');
+                let isRefusal = /refus|declin|blocked/i.test(subtype);
+                rejectHard('claude-spawn: CLI returned no result text' +
+                    (subtype ? ' (subtype=' + subtype.slice(0, 60) + ')' : ''),
+                    isRefusal ? 'refusal' : undefined);
                 return;
             }
             safeResolve({ result, json, stderr });

@@ -1193,6 +1193,112 @@ describe('llm provider, vendor inference', function () {
         llm._setConfig({ additional_config: { model_vendors: { 'llama-3-70b': 'openai' } } });
         expect(llm._vendorOfModel('llama-3-70b')).to.equal('openai');
     });
+
+    // item 3482: the pinned map travels with the pinned model id from the SAME
+    // block-anchored config, so a hub that has not yet hotReloaded still resolves
+    // the vendor instead of throwing and recording provider_error alone.
+    it('lets a block-anchored vendor map resolve an id the live module map has never seen', function () {
+        const llm = _reloadProvider();
+        expect(() => llm._vendorOfModel('llama-3-70b')).to.throw(/cannot infer vendor/);
+        expect(llm._vendorOfModel('llama-3-70b', { 'llama-3-70b': 'openai' })).to.equal('openai');
+    });
+
+    it('gives the block-anchored map precedence over the live module map', function () {
+        const llm = _reloadProvider();
+        llm._setConfig({ additional_config: { model_vendors: { 'llama-3-70b': 'anthropic' } } });
+        expect(llm._vendorOfModel('llama-3-70b', { 'llama-3-70b': 'openai' })).to.equal('openai');
+        // A pinned map that says nothing about this id falls through, not throws.
+        expect(llm._vendorOfModel('llama-3-70b', { 'other-model': 'openai' })).to.equal('anthropic');
+    });
+
+    it('routes fetch through options.pinnedVendors for an unmapped model family', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            // Module map deliberately left empty: only the per-call pinned map knows.
+            const scope = nock('https://api.openai.com')
+                .post('/v1/chat/completions', (body) => body.model === 'llama-3-70b')
+                .reply(200, { choices: [{ message: { content: 'ok' } }] });
+            const res = await llm.fetch(JSON.stringify({ prompt: 'q' }), {
+                pinnedModel: 'llama-3-70b',
+                pinnedVendors: { 'llama-3-70b': 'openai' }
+            });
+            expect(res.body.toString('utf8')).to.equal('ok');
+            expect(scope.isDone()).to.equal(true);
+        });
+    });
+
+    it('still fails a fetch on an unmapped id when no pinned vendor map is supplied', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            let err;
+            try { await llm.fetch(JSON.stringify({ prompt: 'q' }), { pinnedModel: 'llama-3-70b' }); }
+            catch (e) { err = e; }
+            expect(err).to.exist;
+            expect(err.message).to.match(/cannot infer vendor/);
+        });
+    });
+});
+
+// item 3535: the reasoning predicate gates BOTH the temperature on the OpenAI
+// request and the reasoning token headroom. A bare /^gpt-5/ also matched the
+// non-reasoning gpt-5-chat* ChatGPT model, which honors an explicit temperature,
+// so a judge call meant to run deterministically at 0 silently ran at the API
+// default of 1. These cases pin the family boundary on both sides.
+describe('llm provider, reasoning-family classification (item 3535)', function () {
+
+    afterEach(function () {
+        nock.cleanAll();
+        sinon.restore();
+    });
+
+    it('classifies the gpt-5 reasoning ids and the o-series as reasoning', function () {
+        const llm = _reloadProvider();
+        expect(llm._isReasoningModel('gpt-5')).to.equal(true);
+        expect(llm._isReasoningModel('gpt-5-mini')).to.equal(true);
+        expect(llm._isReasoningModel('gpt-5-nano')).to.equal(true);
+        expect(llm._isReasoningModel('o3')).to.equal(true);
+        expect(llm._isReasoningModel('o1-mini')).to.equal(true);
+    });
+
+    it('does NOT classify the non-reasoning gpt-5-chat variants as reasoning', function () {
+        const llm = _reloadProvider();
+        expect(llm._isReasoningModel('gpt-5-chat-latest')).to.equal(false);
+        expect(llm._isReasoningModel('gpt-5-chat')).to.equal(false);
+        expect(llm._isReasoningModel('gpt-4o')).to.equal(false);
+        expect(llm._isReasoningModel('claude-sonnet-4-6')).to.equal(false);
+    });
+
+    it('sends the explicit temperature and the plain token budget for gpt-5-chat-latest', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            const scope = nock('https://api.openai.com')
+                .post('/v1/chat/completions', (body) => {
+                    expect(body.temperature, 'temperature-0 contract must survive for a chat model').to.equal(0);
+                    expect(body.max_completion_tokens, 'no reasoning headroom for a chat model').to.equal(1024);
+                    return true;
+                })
+                .reply(200, { choices: [{ message: { content: 'ok' } }] });
+            const res = await llm.fetch(JSON.stringify({ prompt: 'q' }), { pinnedModel: 'gpt-5-chat-latest' });
+            expect(res.body.toString('utf8')).to.equal('ok');
+            expect(scope.isDone()).to.equal(true);
+        });
+    });
+
+    it('still omits temperature and adds reasoning headroom for gpt-5-mini', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            const scope = nock('https://api.openai.com')
+                .post('/v1/chat/completions', (body) => {
+                    expect(body).to.not.have.property('temperature');
+                    expect(body.max_completion_tokens).to.equal(1024 + 2048);
+                    return true;
+                })
+                .reply(200, { choices: [{ message: { content: 'ok' } }] });
+            const res = await llm.fetch(JSON.stringify({ prompt: 'q' }), { pinnedModel: 'gpt-5-mini' });
+            expect(res.body.toString('utf8')).to.equal('ok');
+            expect(scope.isDone()).to.equal(true);
+        });
+    });
 });
 
 describe('llm provider, fetch via openai_api', function () {
@@ -1478,6 +1584,42 @@ describe('llm provider, judge fallback chain', function () {
             expect(winner).to.equal(null);
             expect(outcome.inconclusive).to.equal(true);
             expect(outcome.reason).to.equal('judge_truncation');
+        });
+    });
+
+    // item 3481: a reached judge can also fail hard for reasons that are NOT a model
+    // refusal (a 4xx from a retired model id, an auth misconfiguration, a non-zero
+    // claude CLI exit). Those arrive with err.transient false and err.kind undefined.
+    // The chain still must not advance, but the recorded reason has to say hard error
+    // so vendor-contract drift is distinguishable from content moderation.
+    it('records judge_hard_error (not judge_refusal) for a non-transient API error with no kind', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            llm._setConfig({ additional_config: { judge_fallback_models: ['gpt-5-nano'] } });
+            // No mock for the fallback gpt-5-nano: if the chain advanced, nock throws.
+            nock('https://api.openai.com')
+                .post('/v1/chat/completions', (body) => body.model === 'gpt-5-mini')
+                .reply(400, { error: { message: 'model gpt-5-mini is not supported' } });
+            const outcome = {};
+            const winner = await llm.agree(PROPOSALS, { pinnedJudgeModel: 'gpt-5-mini', outcome });
+            expect(winner).to.equal(null);
+            expect(outcome.inconclusive).to.equal(true);
+            expect(outcome.reason).to.equal('judge_hard_error');
+        });
+    });
+
+    it('still records judge_refusal for a genuine model refusal', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            llm._setConfig({ additional_config: { judge_fallback_models: ['gpt-5-nano'] } });
+            nock('https://api.openai.com')
+                .post('/v1/chat/completions', (body) => body.model === 'gpt-5-mini')
+                .reply(200, { choices: [{ message: { content: null, refusal: 'I cannot help with that' } }] });
+            const outcome = {};
+            const winner = await llm.agree(PROPOSALS, { pinnedJudgeModel: 'gpt-5-mini', outcome });
+            expect(winner).to.equal(null);
+            expect(outcome.inconclusive).to.equal(true);
+            expect(outcome.reason).to.equal('judge_refusal');
         });
     });
 

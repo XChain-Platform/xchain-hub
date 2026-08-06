@@ -226,6 +226,35 @@ describe('claude-spawn runClaudePrint()', function () {
         expect(err.kind).to.equal('refusal');
     });
 
+    // item 3484: the CLI's own session-failure subtypes carry is_error true and the
+    // substring 'error', so the old is_error-OR-/error/ test reported an exhausted
+    // turn budget as a model refusal. They must stay non-transient (the CLI was
+    // reached, the judge chain must not advance) but carry no refusal kind.
+    it('does NOT call a session-level CLI failure a refusal', async function () {
+        for (const subtype of ['error_max_turns', 'error_during_execution']) {
+            let jsonOut = JSON.stringify({ is_error: true, subtype, result: '' });
+            let { runClaudePrint } = loadClaudeSpawn({ exitCode: 0, stdout: jsonOut });
+            let err;
+            try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+            catch (e) { err = e; }
+            expect(err, subtype).to.exist;
+            expect(err.transient, subtype).to.equal(false);
+            expect(err.kind, subtype + ' must not be tagged a refusal').to.equal(undefined);
+            expect(err.message, subtype).to.include(subtype);
+        }
+    });
+
+    it('still calls an explicit refusal subtype a refusal without is_error', async function () {
+        let jsonOut = JSON.stringify({ subtype: 'declined_by_policy', result: '' });
+        let { runClaudePrint } = loadClaudeSpawn({ exitCode: 0, stdout: jsonOut });
+        let err;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.transient).to.equal(false);
+        expect(err.kind).to.equal('refusal');
+    });
+
     it('classifies a timeout as a transport failure (transient=true)', async function () {
         // Never emit close: let the internal timeout fire.
         let { runClaudePrint } = loadClaudeSpawn({ noClose: true });
