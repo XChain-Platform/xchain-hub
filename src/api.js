@@ -66,6 +66,7 @@ const geoip     = require('geoip-lite');   // self-contained country/region DB; 
 const { HUB_SCHEMA_VERSION } = require('./hub-schema-version');   // stamped on every mirror snapshot so a stale indexer rejects a mismatch
 const { buildOraclePricesSnapshotQuery } = require('./oraclePricesSnapshotQuery');   // page (indexer bootstrap) vs latest-per-feed (dashboard) query selection
 const { evaluateAuthPosture } = require('./lib/auth_posture.js');   // : boot refuses on an undeclared unauthenticated write surface
+const { parseCorsOrigin } = require('./lib/corsOrigin.js');
 // #1299: single source of truth for the co-sign/slash deviation band (no re-declared 0.05 literal).
 // #2653: oracle round-interval/submission-window defaults shared with OracleRound.js and XChainHub.js.
 const { ORACLE_DEVIATION_THRESHOLD, DEFAULT_ORACLE_ROUND_INTERVAL_MS,
@@ -88,7 +89,11 @@ const HUB_API_KEY        = process.env.HUB_API_KEY || '';
 // env, so keyless stays possible but is always a stated choice, never a default.
 const HUB_ALLOW_UNAUTHENTICATED = (process.env.HUB_ALLOW_UNAUTHENTICATED || '').toLowerCase() === 'true';
 const HUB_RATE_LIMIT_RPM = parseInt(process.env.HUB_RATE_LIMIT_RPM) || 100;
-const CORS_ORIGIN        = process.env.CORS_ORIGIN || false;
+// A comma-separated ALLOWLIST, not a single origin: the hub is called
+// cross-origin by several wallet shells at once. parseCorsOrigin is what makes
+// that work - handing `cors` the raw string echoes it verbatim to every caller
+// and is accepted by no browser. See src/lib/corsOrigin.js.
+const CORS_ORIGIN        = parseCorsOrigin(process.env.CORS_ORIGIN);
 
 // Usage telemetry (anonymous install pings from xchain-node operators).
 // Enabled by default on the central hub; an operator's local hub can refuse pings

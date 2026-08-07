@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `CORS_ORIGIN` now accepts a comma-separated allowlist matched per-origin, instead of echoing a multi-value header that no browser accepts .
+
 ### Changed
 - The hub now refuses to boot when `HUB_API_KEY` is unset unless keyless operation is declared with `HUB_ALLOW_UNAUTHENTICATED=true` .
 

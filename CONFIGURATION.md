@@ -85,7 +85,7 @@ signatures.
 | `HUB_ALLOW_UNAUTHENTICATED` | No | _unset_ | Declares that this hub knowingly runs with an unauthenticated write surface. Only consulted when `HUB_API_KEY` is empty. |
 | `HUB_CONSENSUS_INPUT_ALERT_AFTER` | No | `3` | Consecutive consensus-input fetch failures before the hub alerts and `/health` reports degraded. |
 | `HUB_RATE_LIMIT_RPM` | No | `100` | Requests per minute per client. |
-| `CORS_ORIGIN` | No | `false` | Allowed CORS origin; `false` disables cross-origin requests. |
+| `CORS_ORIGIN` | No | `false` | Allowed CORS origin(s); unset disables cross-origin requests. `*` allows any origin, or give one origin or a comma-separated allowlist matched per-origin (browser wallet shells each send a different origin). A stray `*` inside a list is not a wildcard, so the grant fails closed. |
 
 ## Database (MariaDB)
 
