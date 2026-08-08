@@ -233,6 +233,22 @@ describe('FullNodeChallengeRound', function () {
             expect(out.startsWith('EQUIV|XNODEPROOF|' + cid + '|0||')).to.equal(true);
             expect(out.endsWith(cid + '|288|' + [P1, P2].join(','))).to.equal(true);
         });
+        // #3859: the PASS order lands in the signed preimage, so it is consensus. A bare
+        // .sort() orders by UTF-16 code unit, which diverges from UTF-8 byte order above
+        // the BMP; the indexer VERIFIER (nodeproof.js) is pinned to Buffer.compare, so
+        // every producing site here must be too or the two sides sign different bytes.
+        it('_buildVerdictWire sorts PASS by BYTE, not UTF-16 code unit', function () {
+            const eng    = new FullNodeChallengeRound(makeHub());
+            const wide   = '！';      // UTF-8 EF BC 81
+            const astral = '\u{1F600}';   // UTF-8 F0 9F 98 80, UTF-16 lead unit D83D
+            // The default sort compares D83D < FF01 and would emit the astral one first.
+            expect([wide, astral].slice().sort()).to.deep.equal([astral, wide]);
+            const wire = eng._buildVerdictWire({
+                challengeId: 'cid', epoch: 288, passList: [astral, wide], sigs: new Map(),
+            }).split('|');
+            expect(wire.slice(5, 7)).to.deep.equal([wide, astral]);
+        });
+
         it('_answerCanonical binds challenge + answer', function () {
             const eng = new FullNodeChallengeRound(makeHub());
             expect(eng._answerCanonical('cid', 'deadbeef')).to.equal('XNODEANS|cid|deadbeef');

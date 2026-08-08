@@ -207,6 +207,88 @@ describe('llm provider, fetch input validation', function () {
     });
 });
 
+// item 3890: max_tokens and temperature are requester-supplied numerics that used to
+// reach the vendor body unvalidated. The damage was not a uniform 400 - it forked three
+// ways by model family (the reasoning headroom add turns a negative budget positive; the
+// reasoning path omits temperature entirely), so one malformed field produced three
+// different behaviors out of an attested payload.
+describe('llm provider, envelope numeric bounds', function () {
+
+    afterEach(function () { nock.cleanAll(); });
+
+    async function rejects(envelope, options) {
+        const llm = _reloadProvider();
+        let err;
+        try { await llm.fetch(JSON.stringify({ prompt: 'q', ...envelope }), options || {}); }
+        catch (e) { err = e; }
+        expect(err, 'fetch rejected the envelope').to.exist;
+        return err;
+    }
+
+    it('rejects a negative max_tokens instead of clamping it', async function () {
+        expect((await rejects({ max_tokens: -1 })).message).to.match(/max_tokens must be a positive integer/);
+    });
+
+    it('rejects max_tokens 0', async function () {
+        expect((await rejects({ max_tokens: 0 })).message).to.match(/max_tokens must be a positive integer/);
+    });
+
+    it('rejects a fractional max_tokens', async function () {
+        expect((await rejects({ max_tokens: 1.5 })).message).to.match(/max_tokens must be a positive integer/);
+    });
+
+    // The headroom add is what made this case silent: -1 + 2048 = 2047, a valid-looking
+    // budget the vendor accepts, so no 400 ever surfaced the bad envelope.
+    it('rejects a negative max_tokens on a reasoning model rather than sending 2047', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const scope = nock('https://api.openai.com')
+                .post('/v1/chat/completions')
+                .reply(200, { choices: [{ message: { content: 'should not be reached' } }] });
+            expect((await rejects({ max_tokens: -1 }, { pinnedModel: 'gpt-5-mini' })).message)
+                .to.match(/max_tokens must be a positive integer/);
+            expect(scope.isDone(), 'no vendor call was made').to.equal(false);
+        });
+    });
+
+    it('rejects an out-of-range temperature on either side', async function () {
+        expect((await rejects({ temperature: 5 })).message).to.match(/temperature must be a number in \[0, 2\]/);
+        expect((await rejects({ temperature: -3 })).message).to.match(/temperature must be a number in \[0, 2\]/);
+    });
+
+    // Anthropic caps at 1 where OpenAI chat allows 2, so the bound is vendor-resolved
+    // once the model is pinned. Same pinned model + pinned vendor map on every validator,
+    // so the split verdict is still deterministic.
+    it('bounds temperature at 1 for an anthropic-vendor model', async function () {
+        expect((await rejects({ temperature: 1.5 })).message)
+            .to.match(/temperature must be a number in \[0, 1\] for this model/);
+    });
+
+    it('accepts the same 1.5 against an openai chat model', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            let capturedBody;
+            nock('https://api.openai.com')
+                .post('/v1/chat/completions', (body) => { capturedBody = body; return true; })
+                .reply(200, { choices: [{ message: { content: 'ok' } }] });
+            await llm.fetch(JSON.stringify({ prompt: 'q', temperature: 1.5 }), { pinnedModel: 'gpt-4o' });
+            expect(capturedBody.temperature).to.equal(1.5);
+        });
+    });
+
+    it('leaves the defaults alone when neither field is supplied', async function () {
+        await _withEnv({ ANTHROPIC_API_KEY: 'sk-ant-test' }, async () => {
+            const llm = _reloadProvider();
+            let capturedBody;
+            nock('https://api.anthropic.com')
+                .post('/v1/messages', (body) => { capturedBody = body; return true; })
+                .reply(200, { content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 1, output_tokens: 1 } });
+            await llm.fetch(JSON.stringify({ prompt: 'q' }), {});
+            expect(capturedBody.max_tokens).to.equal(1024);
+            expect(capturedBody.temperature).to.equal(0);
+        });
+    });
+});
+
 // ---- fetch() via claude_spawn transport -----------------------------------
 // llm.js destructures runClaudePrint at require-time. We cannot stub it
 // via sinon after the fact. Instead we inject a pre-patched claude-spawn

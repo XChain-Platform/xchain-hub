@@ -356,5 +356,21 @@ describe('XchainPriceSource: validator-side XCHAIN/USD @regression', function ()
             const { src } = makeSource({}, FINALIZED_BTC);
             expect((await src.derive(CTX)).price).to.match(/^\d+\.\d{8}$/);
         });
+
+        it('names itself when the bound abstains (#3870)', async function () {
+            // The bound is the LAST gate every emitted value crosses, so its abstention is
+            // the one the operator most needs attributed. Every sibling abstention in the
+            // module logs; a silent one drops the pair out of the round with no trace,
+            // since OracleRound wraps the result in `if (entry)` with no else.
+            const { src } = makeSource({}, { 'XCHAIN/USD': String(PRICE_MAX) });
+            let warned = [];
+            let orig = console.warn;
+            console.warn = (...a) => warned.push(a.join(' '));
+            let out;
+            try { out = await src.derive(CTX); } finally { console.warn = orig; }
+            expect(out).to.equal(null);
+            expect(warned.some(w => /abstaining from XCHAIN\/USD.*ingestion bound/.test(w)),
+                'the ingestion bound logged its abstention').to.be.true;
+        });
     });
 });

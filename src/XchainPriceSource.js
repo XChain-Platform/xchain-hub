@@ -372,8 +372,14 @@ class XchainPriceSource {
         let value;
         try {
             value = bcmath.bcformat(price, 8);
-            if (!bcmath.bcgt(value, '0') || !bcmath.bclt(value, String(PRICE_MAX))) return null;
+            if (!bcmath.bcgt(value, '0') || !bcmath.bclt(value, String(PRICE_MAX))) {
+                console.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR + ' - computed value ' +
+                    price + ' failed the ingestion bound (0 < value < ' + PRICE_MAX + ')');
+                return null;
+            }
         } catch (e) {
+            console.warn('XchainPriceSource: abstaining from ' + XCHAIN_PAIR + ' - ingestion bound threw on value ' +
+                price + ' - ' + ((e && e.message) || e));
             return null;
         }
         // sources: 1 - this hub derived it once from one place (its own chain data).

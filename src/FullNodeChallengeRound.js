@@ -65,6 +65,15 @@ const XNODE_SIGN_REQ = 'XNODE_SIGN_REQ';
 const XNODE_SIGN     = 'XNODE_SIGN';
 const XNODE_DONE     = 'XNODE_DONE';
 
+// PASS-list byte comparator. The sorted list is joined into the signed verdict
+// preimage, so its order is consensus, and a bare .sort() is a total order here
+// only because every element happens to be lowercase 64-hex (#3859). Pin it the
+// way the other consensus-feeding sorts do (indexer sweep.js / price.js). Every
+// PASS sort on BOTH sides of the seam uses this one comparator; pinning one side
+// alone would make the pinned verifier diverge from a still-bare producer.
+const PASS_CMP = (a, b) => Buffer.compare(Buffer.from(String(a), 'utf8'),
+                                          Buffer.from(String(b), 'utf8'));
+
 class FullNodeChallengeRound {
 
     constructor(hub){
@@ -402,7 +411,7 @@ class FullNodeChallengeRound {
             for(let pk of state.claimants){
                 if(state.answers.get(pk) === this._answerDigest(state.challengeId, pk, state.myAnswer)) pass.push(pk);
             }
-            pass.sort();
+            pass.sort(PASS_CMP);
             state.passList = pass;
             if(pass.length > 0){
                 // Self-sign, then request peer signatures.
@@ -488,7 +497,7 @@ class FullNodeChallengeRound {
         for(let [pk, a] of state.answers){
             if(state.claimants.has(pk) && a === this._answerDigest(state.challengeId, pk, state.myAnswer) && !passSet.has(pk)) return;
         }
-        let sorted = pass.slice().sort();
+        let sorted = pass.slice().sort(PASS_CMP);
         let sig = this.identity.sign(this._verdictCanonical(state.challengeId, state.epoch, sorted));
         if(!state.passList) state.passList = sorted;
         state.sigs.set(myPubkey, sig);
@@ -503,7 +512,7 @@ class FullNodeChallengeRound {
         let pk = String(d.sig_pubkey || '').toLowerCase();
         if(!pk || !state.eligible.has(pk)) return;
         if(String(d.challengeId) !== state.challengeId) return;
-        let canonical = this._verdictCanonical(state.challengeId, state.epoch, state.passList.slice().sort());
+        let canonical = this._verdictCanonical(state.challengeId, state.epoch, state.passList.slice().sort(PASS_CMP));
         if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), pk)) return;
         state.sigs.set(pk, String(d.sig));
         await this._maybeFinalize(state.epoch);
@@ -658,7 +667,7 @@ class FullNodeChallengeRound {
 
     // NODEPROOF|0|CHALLENGE_ID|EPOCH_HEIGHT|PASS_COUNT|PASS_PK...|SIG_COUNT|PK|SIG|...
     _buildVerdictWire(state){
-        let pass = state.passList.slice().sort();
+        let pass = state.passList.slice().sort(PASS_CMP);
         let sigTokens = [];
         for(let [pk, sig] of state.sigs.entries()) sigTokens.push(pk, sig);
         let parts = ['NODEPROOF', '0', state.challengeId, String(state.epoch), String(pass.length)]

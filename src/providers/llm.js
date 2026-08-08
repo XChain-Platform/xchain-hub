@@ -57,7 +57,7 @@
 
 const https = require('https');
 const crypto = require('crypto');
-const { resolveHubLlmAuth, resolveLlmVendorAuth } = require('../lib/hub-credentials');
+const { resolveLlmVendorAuth } = require('../lib/hub-credentials');
 const { runClaudePrint } = require('../lib/claude-spawn');
 
 // Upper bound on candidate text fed to the judge. Candidate bodies are
@@ -228,6 +228,21 @@ exports.fetch = async (payload, options) => {
     if (envelope.envelope_version !== undefined && Number(envelope.envelope_version) > PROMPT_ENVELOPE_VERSION)
         throw new Error('llm: unsupported envelope_version (got ' + envelope.envelope_version + ', max ' + PROMPT_ENVELOPE_VERSION + ')');
 
+    // Reject an out-of-shape requester numeric at this boundary rather than forwarding it
+    // (item 3890). A negative max_tokens survives the clamp below - Number(-1) is truthy,
+    // so the `||` default never fires - and on a reasoning model the headroom add turns it
+    // POSITIVE again, producing a silently wrong budget instead of a vendor 400.
+    if (envelope.max_tokens !== undefined) {
+        let mt = Number(envelope.max_tokens);
+        if (!Number.isInteger(mt) || mt < 1)
+            throw new Error('llm: envelope.max_tokens must be a positive integer');
+    }
+    if (envelope.temperature !== undefined) {
+        if (typeof envelope.temperature !== 'number' || !Number.isFinite(envelope.temperature) ||
+            envelope.temperature < 0 || envelope.temperature > 2)
+            throw new Error('llm: envelope.temperature must be a number in [0, 2]');
+    }
+
     // Requester-controlled fallback policy. 'any' (default): serve from any
     // approved model on the chain. 'strict': the requesting contract only
     // trusts the PRIMARY model (its prompts were engineered against it); when
@@ -266,6 +281,12 @@ exports.fetch = async (payload, options) => {
     // governance content budget is preserved. Chat-family models are unchanged.
     if (_isReasoningModel(model)) maxTokens = maxTokens + FETCH_REASONING_TOKEN_HEADROOM;
     let temperature = (typeof envelope.temperature === 'number') ? envelope.temperature : DEFAULT_TEMPERATURE;
+    // Bound against the vendor that will actually receive the request: Anthropic caps
+    // temperature at 1 where OpenAI chat allows 2, and the model is already pinned here,
+    // so the split verdict is deterministic (same pinned model, same pinned vendor map).
+    if (envelope.temperature !== undefined &&
+        vendorOfModel(model, options.pinnedVendors || null) === 'anthropic' && temperature > 1)
+        throw new Error('llm: envelope.temperature must be a number in [0, 1] for this model');
 
     // Envelope output format (spec §4). 'text' (default) leaves behavior unchanged;
     // 'json_object' constrains the request per-vendor (OpenAI response_format, plus a

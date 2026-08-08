@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Stake-weighted quorum rejects a validator entry with a missing or non-numeric weight instead of lowering the quorum denominator ().
+- envelope.max_tokens and temperature are range-validated at the boundary rather than forwarded raw to vendor APIs ().
+- XchainPriceSource logs its abstention instead of silently dropping the derived pair when the PRICE_MAX or positivity bound fails ().
+- PRICE_MAX and ORACLE_DEVIATION_THRESHOLD are covered by the cross-repo value-equality gate ().
+- NODEPROOF verifier-signing builds its canonical PASS list with the pinned byte comparator ().
+- Dropped an unused resolveHubLlmAuth import ().
 - `CORS_ORIGIN` now accepts a comma-separated allowlist matched per-origin, instead of echoing a multi-value header that no browser accepts .
 
 ### Changed

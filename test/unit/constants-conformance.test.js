@@ -17,10 +17,9 @@ const constants  = require('../../src/constants');
 // band constants that must have a single source of truth (constants.js). This is
 // the hub-local conformance guard against the "re-introduced literal" drift vector:
 // a future consumer (or a refactor) that hardcodes 0.05 or 1e10 instead of importing
-// the constant would drift undetected. The full cross-repo byte-identical twin (a
-// canonical entry in xchain-documentation/protocol/constants.js plus an
-// xchain-e2e-test parity assertion, mirroring XCALL_MAX_HOPS) is a coordinated
-// multi-repo addition; this test locks the hub side.
+// the constant would drift undetected. The cross-repo half is the second describe
+// below (#3886): both literals are hand-mirrored into five other repos, and this file
+// owning the canonical value is what lets one guard diff all of them.
 describe('oracle band constants conformance (#1299)', () => {
 
     it('PRICE_MAX has its pinned value', () => {
@@ -50,6 +49,84 @@ describe('oracle band constants conformance (#1299)', () => {
     it('ORACLE_MAX_CHANGE_PER_ROUND equals 5x ORACLE_DEVIATION_THRESHOLD (documented coupling)', () => {
         expect(constants.ORACLE_MAX_CHANGE_PER_ROUND).to.equal(5 * constants.ORACLE_DEVIATION_THRESHOLD);
     });
+});
+
+// #3886: PRICE_MAX and ORACLE_DEVIATION_THRESHOLD are hand-mirrored into five other
+// repos, and unlike XCALL_MAX_HOPS they are NOT in the GOLDEN set of
+// xcall-constants-cross-repo.test.js (whose GUARD_PATHS name only vm/indexer/sdk), so
+// nothing tied the copies together. Anchored HERE rather than replicated as a sixth
+// byte-identical guard: this repo declares the canonical value, so one file can diff
+// every mirror against it and name the stale one. No mirror repo's code reads either
+// constant - they are re-exports for downstream consumers - so a mirror-side edit has
+// no local motive and being caught on the next hub CI run is enough.
+describe('oracle band constants agree across the mirror repos (#3886)', function () {
+    const fs   = require('fs');
+    const path = require('path');
+
+    const GATED = ['PRICE_MAX', 'ORACLE_DEVIATION_THRESHOLD'];
+
+    // Listed rather than globbed, so a repo that quietly drops its copy reddens here.
+    const MIRRORS = {
+        'xchain-vm':            'src/protocol/constants.js',
+        'xchain-indexer':       'src/protocol/constants.js',
+        'xchain-sdk':           'src/protocol/constants.js',
+        'xchain-explorer':      'src/protocol/constants.js',
+        'xchain-documentation': 'protocol/constants.js'
+    };
+
+    // Walk up to the nearest package.json rather than counting '..' hops, matching
+    // xchain-indexer/test/unit/xcall-constants-cross-repo.test.js.
+    const REPO_ROOT = (function () {
+        let dir = __dirname;
+        while (!fs.existsSync(path.join(dir, 'package.json'))) {
+            const up = path.dirname(dir);
+            if (up === dir) throw new Error('no package.json above ' + __dirname);
+            dir = up;
+        }
+        return dir;
+    })();
+    const PLATFORM_ROOT = path.dirname(REPO_ROOT);
+
+    // Same required-sibling policy as the xcall gate: a missing checkout skips by
+    // default (standalone clones), and hard-fails wherever XCHAIN_REQUIRE_SIBLINGS=1
+    // declares the siblings were provided on purpose, so bin/ci-all.sh can never pass
+    // this green-by-skip.
+    const REQUIRE_SIBLINGS = process.env.XCHAIN_REQUIRE_SIBLINGS === '1';
+    function siblingOrSkip(ctx, absPath, what) {
+        if (fs.existsSync(absPath)) return true;
+        if (REQUIRE_SIBLINGS)
+            throw new Error('oracle band constants gate cannot run: ' + what + ' missing at ' +
+                absPath + '; XCHAIN_REQUIRE_SIBLINGS=1 forbids the green-by-skip');
+        ctx.skip();
+        return false;
+    }
+
+    // Fresh read per call: a module cached by an earlier suite would hide an on-disk edit.
+    function loadConstants(absPath) {
+        const resolved = require.resolve(absPath);
+        delete require.cache[resolved];
+        return require(resolved);
+    }
+
+    it('resolved the hub repo root, so the sibling paths below are real', function () {
+        expect(path.basename(REPO_ROOT), 'walk-up landed outside xchain-hub: ' + REPO_ROOT)
+            .to.equal('xchain-hub');
+    });
+
+    for (const [repo, rel] of Object.entries(MIRRORS)) {
+        it('mirror ' + repo + ' declares the canonical values', function () {
+            const abs = path.join(PLATFORM_ROOT, repo, rel);
+            if (!siblingOrSkip(this, abs, repo + ' ' + rel)) return;
+            const theirs = loadConstants(abs);
+            for (const name of GATED) {
+                expect(theirs[name],
+                    repo + '/' + rel + ': ' + name + ' = ' + theirs[name] + ', but the canonical ' +
+                    'xchain-hub/src/constants.js says ' + constants[name] + '. These are ' +
+                    'federation-uniformity values; propagate the hub-side edit to every mirror')
+                    .to.equal(constants[name]);
+            }
+        });
+    }
 });
 
 // #2653: the oracle round-interval and submission-window defaults anchor
