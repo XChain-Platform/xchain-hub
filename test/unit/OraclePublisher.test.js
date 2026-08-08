@@ -62,6 +62,40 @@ function makeHub(overrides) {
     };
 }
 
+// A minimal in-memory stand-in for hub.db (the MariaDB wrapper's doQuery). Models
+// the oracle_published_rounds table so the durable at-most-once path can be driven
+// without a real database. Pre-seed `markers` to simulate rows surviving a restart.
+function makeDb(seed) {
+    let markers = Object.assign({}, seed || {});   // round -> { round, txid, sent_at }
+    let db = {
+        markers,
+        doQuery: sinon.stub().callsFake(async function (q, args) {
+            if (/^\s*SELECT/i.test(q)) {
+                if (/WHERE\s+round/i.test(q)) {
+                    let r = Number(args[0]);
+                    return markers[r] ? [markers[r]] : [];
+                }
+                return Object.keys(markers).map(k => markers[k]);   // full-table hydrate scan
+            }
+            if (/^\s*INSERT/i.test(q)) {
+                let r = Number(args[0]);
+                if (!markers[r]) markers[r] = { round: r, txid: null, sent_at: null };
+                return { affectedRows: 1 };
+            }
+            if (/^\s*UPDATE/i.test(q)) {
+                let txid = args[0];
+                let r    = Number(args[args.length - 1]);
+                if (!markers[r]) markers[r] = { round: r, txid: null, sent_at: null };
+                markers[r].txid    = txid;
+                markers[r].sent_at = '2026-01-01 00:00:00';
+                return { affectedRows: 1 };
+            }
+            return [];
+        })
+    };
+    return db;
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Tests
 // ────────────────────────────────────────────────────────────────────────────
@@ -564,6 +598,133 @@ describe('OraclePublisher', function () {
             await pub._processQueue();
 
             expect(pub._publishedRounds.size).to.equal(0);
+        });
+    });
+
+    // ── Durable at-most-once across a restart (oracle_published_rounds) ─────────
+    // Regression for the in-memory-only guard: a restart with an empty _publishedRounds
+    // Set but the round still on the durable JSONL queue re-broadcast an already-paid
+    // PRICE v0 round, spending DOGE twice. The durable marker table makes the guard
+    // survive the restart.
+    describe('_processQueue() durable at-most-once', function () {
+        it('records a durable intent before broadcast and a sent marker after (happy path)', async function () {
+            let entry = { round: 20, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
+            fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');
+            let db  = makeDb();
+            let pub = new OraclePublisher(makeHub({ db: db }));
+            let broadcastStub = sinon.stub().resolves({ txid: 'tx-20' });
+            pub.broadcastFn  = broadcastStub;
+            pub.getBalanceFn = sinon.stub().resolves(50);
+
+            await pub._processQueue();
+
+            expect(broadcastStub.calledOnce).to.be.true;
+            // Intent (INSERT) must precede the send, and the sent marker (UPDATE) follow it.
+            let inserted = db.doQuery.getCalls().some(c => /INSERT/i.test(c.args[0]) && Number(c.args[1][0]) === 20);
+            let updated  = db.doQuery.getCalls().some(c => /UPDATE/i.test(c.args[0]));
+            expect(inserted).to.be.true;
+            expect(updated).to.be.true;
+            expect(db.markers[20].txid).to.equal('tx-20');
+            expect(db.markers[20].sent_at).to.not.be.null;
+        });
+
+        it('does NOT re-broadcast a round that already has a durable sent marker (restart with round still on the queue)', async function () {
+            // Simulate a restart: the round is still on the durable JSONL queue, the
+            // in-process Set is empty, but the DB already holds a sent marker.
+            let entry = { round: 21, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
+            fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');
+            let db  = makeDb({ 21: { round: 21, txid: 'tx-21', sent_at: '2026-01-01 00:00:00' } });
+            let pub = new OraclePublisher(makeHub({ db: db }));
+            let broadcastStub = sinon.stub().resolves({ txid: 'tx-21-DUP' });
+            pub.broadcastFn  = broadcastStub;
+            pub.getBalanceFn = sinon.stub().resolves(50);
+
+            expect(pub._publishedRounds.has(21)).to.be.false; // fresh process, empty in-memory guard
+
+            await pub._processQueue();
+
+            expect(broadcastStub.called).to.be.false; // no duplicate DOGE spend
+        });
+
+        it('survives the ENOSPC rewrite-failure path across a restart (durable marker, not just in-memory)', async function () {
+            // Tick 1 on process A: broadcast succeeds, then the queue rewrite fails
+            // (disk full), leaving the round on the durable queue. The sent marker was
+            // persisted to the DB before the rewrite failure.
+            let entry = { round: 22, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
+            fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');
+            fsMock.openSync.throws(new Error('ENOSPC: no space left on device'));
+            let db  = makeDb();
+            let pubA = new OraclePublisher(makeHub({ db: db }));
+            pubA.broadcastFn  = sinon.stub().resolves({ txid: 'tx-22' });
+            pubA.getBalanceFn = sinon.stub().resolves(50);
+            await pubA._processQueue();
+            expect(db.markers[22] && db.markers[22].sent_at).to.not.be.null;
+
+            // Process A dies. Process B starts fresh (empty in-memory Set) with the round
+            // STILL on the JSONL queue and the sent marker present in the shared DB.
+            let pubB = new OraclePublisher(makeHub({ db: db }));
+            let broadcastB = sinon.stub().resolves({ txid: 'tx-22-DUP' });
+            pubB.broadcastFn  = broadcastB;
+            pubB.getBalanceFn = sinon.stub().resolves(50);
+            await pubB.start();       // hydrate loads the sent marker into the guard
+            await pubB._processQueue();
+
+            expect(broadcastB.called).to.be.false; // NOT re-broadcast after restart
+        });
+
+        it('fails closed (does not broadcast) when the durable marker cannot be read', async function () {
+            let entry = { round: 23, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
+            fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');
+            let db  = makeDb();
+            db.doQuery = sinon.stub().rejects(new Error('Circuit breaker open: database connections rejected'));
+            let pub = new OraclePublisher(makeHub({ db: db }));
+            let broadcastStub = sinon.stub().resolves({ txid: 'tx-23' });
+            pub.broadcastFn  = broadcastStub;
+            pub.getBalanceFn = sinon.stub().resolves(50);
+
+            await pub._processQueue();
+
+            expect(broadcastStub.called).to.be.false; // fail closed: no spend when the marker is unknowable
+        });
+    });
+
+    // ── Startup hydration / quarantine of durable markers ──────────────────────
+    describe('start() durable-marker hydration', function () {
+        it('hydrates the in-process guard from confirmed (sent) markers', async function () {
+            let db  = makeDb({
+                30: { round: 30, txid: 'tx-30', sent_at: '2026-01-01 00:00:00' },
+                31: { round: 31, txid: 'tx-31', sent_at: '2026-01-01 00:00:00' }
+            });
+            let pub = new OraclePublisher(makeHub({ db: db }));
+            await pub.start();
+            expect(pub._publishedRounds.has(30)).to.be.true;
+            expect(pub._publishedRounds.has(31)).to.be.true;
+            expect(pub._quarantinedRounds.size).to.equal(0);
+        });
+
+        it('quarantines intent-only (NULL sent_at) markers and never auto-rebroadcasts them', async function () {
+            let entry = { round: 32, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
+            fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');
+            // An intent row with no confirmation: a crash left the on-chain state unknown.
+            let db  = makeDb({ 32: { round: 32, txid: null, sent_at: null } });
+            let pub = new OraclePublisher(makeHub({ db: db }));
+            let broadcastStub = sinon.stub().resolves({ txid: 'tx-32-DUP' });
+            pub.broadcastFn  = broadcastStub;
+            pub.getBalanceFn = sinon.stub().resolves(50);
+
+            await pub.start();
+            expect(pub._quarantinedRounds.has(32)).to.be.true;
+            expect(pub._publishedRounds.has(32)).to.be.false;
+
+            await pub._processQueue();
+            expect(broadcastStub.called).to.be.false; // quarantined round is never re-broadcast
+        });
+
+        it('surfaces quarantined rounds via getStats().quarantined', async function () {
+            let db  = makeDb({ 33: { round: 33, txid: null, sent_at: null } });
+            let pub = new OraclePublisher(makeHub({ db: db }));
+            await pub.start();
+            expect(pub.getStats().quarantined).to.equal(1);
         });
     });
 

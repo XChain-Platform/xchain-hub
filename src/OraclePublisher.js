@@ -92,6 +92,18 @@ class OraclePublisher {
         // rewrite can never turn into a duplicate on-chain PRICE. Cleared once the
         // durable queue is confirmed rewritten (no published round can still be on it).
         this._publishedRounds   = new AtMostOnce();
+        // Durable at-most-once. The in-process tracker above vanishes on restart, but
+        // the finalized round can still be on the durable JSONL queue, so a restart
+        // before the queue rewrite is repaired would re-broadcast an already-paid round
+        // (duplicate DOGE spend). The `oracle_published_rounds` table (src/sql/) records
+        // an intent row BEFORE broadcast and a sent marker AFTER, on the hub DB, a disk
+        // decoupled from the queue file whose exhaustion triggers the rewrite failure.
+        // start() hydrates _publishedRounds from sent markers and quarantines any
+        // intent-only rows (a crash between intent and confirmation left the on-chain
+        // state unknown): those are NEVER auto-rebroadcast, only surfaced for an operator
+        // to verify on-chain and replay by hand. When no hub DB is wired (dev/test), the
+        // durable guard is inert and the in-process tracker is the only at-most-once cover.
+        this._quarantinedRounds = new Set();
         this.lastObservedBalance = null;
         this.dogeAddress        = process.env.DOGE_ADDRESS || cfg.DOGE_ADDRESS || '';
         this.dogePubkeyHex      = process.env.DOGE_PUBKEY_HEX || cfg.DOGE_PUBKEY_HEX || '';
@@ -232,6 +244,19 @@ class OraclePublisher {
             if (!fs.existsSync(this.queuePath)) fs.writeFileSync(this.queuePath, '');
         } catch (e) {
             console.warn('OraclePublisher: queue file unwritable at ' + this.queuePath + ':', e);
+        }
+
+        // Hydrate the durable at-most-once guard before subscribing to new rounds:
+        // load confirmed rounds into the in-process guard and quarantine any
+        // intent-only rounds so a restart can never re-broadcast an already-published
+        // (or ambiguously-published) round. Best-effort; a DB error is logged inside.
+        if (this.db) {
+            try {
+                await this._hydratePublishedMarkers();
+            } catch (e) {
+                console.error('OraclePublisher: failed to hydrate durable publish markers on startup ' +
+                    '(the in-process guard still covers this lifetime): ', e);
+            }
         }
 
         // Subscribe to oracle finalization events
@@ -509,6 +534,82 @@ class OraclePublisher {
         }
     }
 
+    // ----- Durable at-most-once marker (oracle_published_rounds) -----
+
+    // Read the durable marker for a round, or null when none exists / no DB is wired.
+    // Shape: { round, txid, sent_at }. A row with a non-null sent_at is the
+    // authoritative "already broadcast" signal (txid may legitimately be null if the
+    // broadcaster returned none, so sent_at — not txid — gates re-broadcast).
+    // Throws on a DB error so the caller can FAIL CLOSED (never broadcast when we
+    // cannot prove the round is unpublished).
+    async _getPublishedMarker(round) {
+        if (!this.db) return null;
+        let rows = await this.db.doQuery(
+            'SELECT round, txid, sent_at FROM oracle_published_rounds WHERE round = ?',
+            [round]
+        );
+        return (rows && rows.length > 0) ? rows[0] : null;
+    }
+
+    // Durably record broadcast INTENT for a round before the send. Idempotent: an
+    // existing row (intent or sent) is left untouched. Throws on a DB error so the
+    // caller fails closed. No-op when no DB is wired.
+    async _recordPublishIntent(round) {
+        if (!this.db) return;
+        await this.db.doQuery(
+            'INSERT INTO oracle_published_rounds (round) VALUES (?) ' +
+            'ON DUPLICATE KEY UPDATE round = round',
+            [round]
+        );
+    }
+
+    // Durably record that a round's broadcast COMPLETED (sets sent_at + txid). Called
+    // after a successful send. A failure here is logged, not thrown: the DOGE is
+    // already spent, and the intent row means a restart quarantines the round rather
+    // than re-broadcasting it. No-op when no DB is wired.
+    async _markPublished(round, txid) {
+        if (!this.db) return;
+        try {
+            await this.db.doQuery(
+                'UPDATE oracle_published_rounds SET txid = ?, sent_at = NOW() WHERE round = ?',
+                [txid, round]
+            );
+        } catch (e) {
+            console.error('OraclePublisher: broadcast for round ' + round + ' succeeded but its durable ' +
+                'sent marker could not be persisted; a restart will QUARANTINE (not re-broadcast) this round. ' +
+                'Operator: confirm the txid on-chain. Error: ', e);
+        }
+    }
+
+    // Startup reconciliation of the durable marker table. Loads every confirmed
+    // (sent_at set) round into the in-process guard so a queued-but-already-published
+    // round is never re-broadcast after a restart, and QUARANTINES every intent-only
+    // (sent_at NULL) round: a crash between intent and confirmation leaves the on-chain
+    // state unknown, so those are never auto-rebroadcast — only surfaced for an operator
+    // to verify and replay by hand (no price-by-round indexer query exists to reconcile
+    // them automatically). Best-effort: a DB error is logged and startup continues; the
+    // in-process guard still covers this process lifetime.
+    async _hydratePublishedMarkers() {
+        if (!this.db) return;
+        let rows = await this.db.doQuery('SELECT round, sent_at FROM oracle_published_rounds', []);
+        let quarantined = [];
+        for (let r of (rows || [])) {
+            let round = Number(r.round);
+            if (r.sent_at !== null && r.sent_at !== undefined) {
+                this._publishedRounds.mark(round);
+            } else {
+                this._quarantinedRounds.add(round);
+                quarantined.push(round);
+            }
+        }
+        if (quarantined.length > 0) {
+            console.error('OraclePublisher: ' + quarantined.length + ' round(s) have a publish-intent marker ' +
+                'with no confirmation (rounds ' + quarantined.join(', ') + '); their on-chain state is unknown ' +
+                'after a crash. They will NOT be re-broadcast automatically (fail closed). Operator: verify each ' +
+                'round on-chain and replay manually if absent.');
+        }
+    }
+
     // Process pending rounds in the queue: build payload, check balance, broadcast
     async _processQueue() {
         // item 2677 kill switch: suppress the replay/sweep too, not just the live
@@ -568,6 +669,51 @@ class OraclePublisher {
                 continue;
             }
 
+            // Quarantined round (an intent-only durable marker from a pre-crash broadcast
+            // whose on-chain state is unknown). NEVER re-broadcast — drop the stale queue
+            // entry and leave it for operator replay. Surfaced at startup in _hydratePublishedMarkers.
+            if (this._quarantinedRounds.has(entry.round)) {
+                console.warn('OraclePublisher: round ' + entry.round + ' is quarantined (publish intent recorded before a crash, on-chain state unknown); dropping queue entry without re-broadcast, awaiting operator replay');
+                continue;
+            }
+
+            // Durable at-most-once. Consult the persistent marker before spending DOGE so
+            // a restart (empty in-process Set, round still on the durable queue) can never
+            // re-broadcast an already-published round. FAIL CLOSED on any DB error: if we
+            // cannot prove the round is unpublished we defer rather than risk a duplicate
+            // spend (kept on the queue, retried next tick; attempts NOT incremented — this
+            // is not a broadcast failure).
+            if (this.db) {
+                let marker;
+                try {
+                    marker = await this._getPublishedMarker(entry.round);
+                } catch (e) {
+                    console.error('OraclePublisher: cannot read durable publish marker for round ' + entry.round +
+                        '; deferring broadcast (fail closed to avoid a duplicate DOGE spend): ', e);
+                    remaining.push(entry);
+                    continue;
+                }
+                if (marker && marker.sent_at !== null && marker.sent_at !== undefined) {
+                    // Already broadcast in a prior process; only still on the queue because
+                    // a rewrite failed before restart. Drop without re-sending.
+                    console.warn('OraclePublisher: round ' + entry.round + ' has a durable sent marker (txid ' +
+                        (marker.txid || '<none>') + '); dropping stale queue entry without re-broadcast');
+                    this._publishedRounds.mark(entry.round);
+                    continue;
+                }
+                // Record broadcast intent BEFORE the send. A crash between here and the
+                // sent marker leaves an intent-only row that startup quarantines (never
+                // auto-rebroadcast). Fail closed if the intent cannot be durably recorded.
+                try {
+                    await this._recordPublishIntent(entry.round);
+                } catch (e) {
+                    console.error('OraclePublisher: cannot record durable publish intent for round ' + entry.round +
+                        '; deferring broadcast (fail closed): ', e);
+                    remaining.push(entry);
+                    continue;
+                }
+            }
+
             let payload = this.buildPriceV0Wire(entry.round, entry.btcBlockTime, entry.prices, entry.sigs, entry.btcBlockHeight);
 
             // Choose broadcast strategy: custom hook overrides, otherwise use the default encoder pipeline
@@ -597,6 +743,10 @@ class OraclePublisher {
                 // round on the durable queue, the next tick's guard will skip it.
                 this._publishedRounds.mark(entry.round);
                 this.spendGuard.record();   // count the fee against the window budget
+                // Persist the durable sent marker so the guard survives a restart (the
+                // in-process tracker above does not). Best-effort: on failure the intent
+                // row remains and a restart quarantines the round rather than re-broadcasting.
+                await this._markPublished(entry.round, (result && result.txid) || null);
                 console.log('OraclePublisher: published round ' + entry.round + ' (txid: ' + (result && result.txid) + ')');
                 this.publishedCount++;
                 this.lastPublishedRound = entry.round;
@@ -658,6 +808,7 @@ class OraclePublisher {
             published:           this.publishedCount,
             abandoned:           this.abandonedCount,
             oversizedDrops:      this.oversizedDrops,
+            quarantined:         this._quarantinedRounds.size,
             lastPublishedRound:  this.lastPublishedRound,
             lastPublishedTxid:   this.lastPublishedTxid,
             lastObservedBalance: this.lastObservedBalance,
