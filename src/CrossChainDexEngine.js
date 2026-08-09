@@ -146,6 +146,7 @@ class CrossChainDexEngine extends EventEmitter {
         });
 
         this._pollTimer = null;
+        this._matching  = false;   // poll self-overlap guard, see _discoverAndMatch()
     }
 
     async start(){
@@ -231,51 +232,69 @@ class CrossChainDexEngine extends EventEmitter {
     }
 
     async _discoverAndMatch(){
-        let offersByCoin = {};
-        // Fetch each coin's order book in parallel: the three RPC calls are fully
-        // independent (each populates its own offersByCoin slot) and matching runs
-        // only after all books are collected, so parallelising cuts ~2x per-coin
-        // latency from every poll tick without changing which offers are matched or
-        // in what order. Per-coin try/catch is preserved so one slow/failed indexer
-        // still yields an empty book for that coin rather than aborting the whole round.
-        await Promise.all(ALLOWED_CHAINS.map(async (coin) => {
-            if(!this.indexers[coin].url){ offersByCoin[coin] = []; return; }
-            try {
-                // Page the full open book via the keyset cursor rather than a one-shot
-                // limit:500 (XCC-2): a chain holding >500 simultaneously-open cross-chain
-                // offers would otherwise silently drop the newest, which are never discovered
-                // or matched. _fetchOpenOffers loops until the indexer reports the book is no
-                // longer truncated (bounded by a hard page cap so a misbehaving indexer that
-                // keeps flagging truncated can't spin forever).
-                let res = await this._fetchOpenOffers(coin, { limit: 500 });
-                // Tag every offer with its home indexer's network (authoritative). An offer
-                // with no network (pre-network-scoping indexer) is unsafe to match, so we drop
-                // the whole coin's book rather than risk a network-agnostic match.
-                let net = res && res.network ? String(res.network) : '';
-                let latest = Number(res && res.latest_block_index);
-                // Enforce the confirmation-depth floor on the DISCOVERY/leader path too, not
-                // only the follower's validateProposedMatch (_findOpenOffer): the single-node
-                // (quorum-0) fast path in CrossChainDexConsensus.propose self-signs + finalizes
-                // WITHOUT ever calling the follower check, so without this gate XDEX_MIN_CONFIRMATIONS
-                // is silently inert on a single operator and a match can settle against a
-                // reorg-able escrow. Deep-enough = (latest - block_index + 1) >= the offer's
-                // home-chain floor (per-coin defaults BTC 6 / LTC 12 / DOGE 60, ); an
-                // offer with no resolvable depth is kept (an indexed order is >= 1 deep).
-                let deepEnough = (o) => !(Number.isFinite(latest) && Number.isFinite(Number(o.block_index)) &&
-                                          (latest - Number(o.block_index) + 1) < this.minConfirmations[coin]);
-                offersByCoin[coin] = (res && res.orders && net)
-                    ? res.orders.filter(deepEnough).map(o => Object.assign({ home_coin: coin, home_network: net }, o))
-                    : [];
-            } catch(e){
-                offersByCoin[coin] = [];
+        // Poll self-overlap guard (, house convention: FullNodeChallengeRound._tick,
+        // AttestationRound._pollPending). The poll is a bare setInterval at 15s while one
+        // pass makes three paged indexer round trips plus a PBFT round and its DB writes,
+        // so a slow indexer lets the next interval fire on top of this one. Two overlapping
+        // passes read the SAME order books and the same this.committed ledger (which only
+        // advances in _writeFinalizedMatch, after consensus), so both derive the same fills;
+        // the _inflight matchId reservation does not stop them, because the has() test in
+        // _finalizeMatch sits two awaits before the matching add(), and a snapshot block
+        // that moved between the passes gives the second one a DIFFERENT matchId for the
+        // same offers anyway. Result: the same offer proposed into two PBFT rounds and
+        // double-committed against a single escrow. The finally is load-bearing: a rejected
+        // _fetchOpenOffers or _resolveSnapshotBlock must not wedge matching forever.
+        if(this._matching) return;
+        this._matching = true;
+        try {
+            let offersByCoin = {};
+            // Fetch each coin's order book in parallel: the three RPC calls are fully
+            // independent (each populates its own offersByCoin slot) and matching runs
+            // only after all books are collected, so parallelising cuts ~2x per-coin
+            // latency from every poll tick without changing which offers are matched or
+            // in what order. Per-coin try/catch is preserved so one slow/failed indexer
+            // still yields an empty book for that coin rather than aborting the whole round.
+            await Promise.all(ALLOWED_CHAINS.map(async (coin) => {
+                if(!this.indexers[coin].url){ offersByCoin[coin] = []; return; }
+                try {
+                    // Page the full open book via the keyset cursor rather than a one-shot
+                    // limit:500 (XCC-2): a chain holding >500 simultaneously-open cross-chain
+                    // offers would otherwise silently drop the newest, which are never discovered
+                    // or matched. _fetchOpenOffers loops until the indexer reports the book is no
+                    // longer truncated (bounded by a hard page cap so a misbehaving indexer that
+                    // keeps flagging truncated can't spin forever).
+                    let res = await this._fetchOpenOffers(coin, { limit: 500 });
+                    // Tag every offer with its home indexer's network (authoritative). An offer
+                    // with no network (pre-network-scoping indexer) is unsafe to match, so we drop
+                    // the whole coin's book rather than risk a network-agnostic match.
+                    let net = res && res.network ? String(res.network) : '';
+                    let latest = Number(res && res.latest_block_index);
+                    // Enforce the confirmation-depth floor on the DISCOVERY/leader path too, not
+                    // only the follower's validateProposedMatch (_findOpenOffer): the single-node
+                    // (quorum-0) fast path in CrossChainDexConsensus.propose self-signs + finalizes
+                    // WITHOUT ever calling the follower check, so without this gate XDEX_MIN_CONFIRMATIONS
+                    // is silently inert on a single operator and a match can settle against a
+                    // reorg-able escrow. Deep-enough = (latest - block_index + 1) >= the offer's
+                    // home-chain floor (per-coin defaults BTC 6 / LTC 12 / DOGE 60, ); an
+                    // offer with no resolvable depth is kept (an indexed order is >= 1 deep).
+                    let deepEnough = (o) => !(Number.isFinite(latest) && Number.isFinite(Number(o.block_index)) &&
+                                              (latest - Number(o.block_index) + 1) < this.minConfirmations[coin]);
+                    offersByCoin[coin] = (res && res.orders && net)
+                        ? res.orders.filter(deepEnough).map(o => Object.assign({ home_coin: coin, home_network: net }, o))
+                        : [];
+                } catch(e){
+                    offersByCoin[coin] = [];
+                }
+            }));
+            for(let desc of this._findMatches(offersByCoin)){
+                try {
+                    await this._finalizeMatch(desc);
+                } catch(e){
+                    console.error('CrossChainDex: finalizeMatch error:', e && e.message);
+                }
             }
-        }));
-        for(let desc of this._findMatches(offersByCoin)){
-            try {
-                await this._finalizeMatch(desc);
-            } catch(e){
-                console.error('CrossChainDex: finalizeMatch error:', e && e.message);
-            }
+        } finally {
+            this._matching = false;
         }
     }
 

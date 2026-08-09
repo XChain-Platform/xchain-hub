@@ -149,6 +149,8 @@ class AttestationPublisher {
         // only: a restart before the queue is repaired can still replay, the same
         // documented residual the sibling publisher carries.
         this._publishedRequests = new AtMostOnce();
+
+        this._sweeping = false;   // sweep self-overlap guard, see _processQueue()
     }
 
     // Operator-facing stats for the /health response and status tooling.
@@ -549,7 +551,35 @@ class AttestationPublisher {
 
     // Re-broadcast any queued finalized response whose request is still pending.
     // Run once at startup (crash replay) and on an interval (failover + leader retry).
+    //
+    // Sweep self-overlap guard (, house convention: FullNodeChallengeRound._tick).
+    // The sweep is a bare setInterval at 30s while one pass pages the indexer's whole
+    // pending set (5s per page) and then awaits a real BTC broadcast per eligible entry,
+    // so a slow indexer or a slow node lets the next interval fire on top of this one.
+    // Both passes read the same queue FILE, and every gate that would stop the second
+    // one is read before the first arms it: _publishedRequests.mark(rid) lands only
+    // after broadcaster() resolves, pendingIds still lists the request because nothing
+    // has been mined, and _removeFromQueue runs at the very end. So two overlapping
+    // sweeps re-broadcast the SAME finalized response, spending the BTC fee twice for a
+    // duplicate on-chain ATTEST response, which is exactly the double-spend the
+    // at-most-once set and the ambiguous-send cooldown exist to prevent. The guard is a
+    // wrapper rather than inline so the finally cannot be skipped by any of the body's
+    // early returns; a rejected _fetchPendingRequestIds must not wedge the sweep, since
+    // only this timer ever drains the WAL.
     async _processQueue(){
+        if (this._sweeping){
+            console.warn('AttestationPublisher: queue sweep still in flight; skipping this pass');
+            return;
+        }
+        this._sweeping = true;
+        try {
+            return await this._processQueueInner();
+        } finally {
+            this._sweeping = false;
+        }
+    }
+
+    async _processQueueInner(){
         // item 2678 kill switch: suppress the failover/replay sweep too, not just the
         // live path, or a paused publisher would still drain the queue and spend BTC.
         // Entries stay on the durable WAL untouched and resume only when re-enabled.

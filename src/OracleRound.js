@@ -101,6 +101,7 @@ class OracleRound {
         // installs roundTimer; an untracked handle leaks an interval across
         // stop()/recreate and orphans the fresh roundTimer on stop()->start().
         this.boundaryTimer     = null;
+        this._roundInFlight    = false;   // round self-overlap guard, see _executeRound()
 
         // Submissions per round: Map<round, Map<sender, { prices, sources, timestamp }>>
         this.submissions = new Map();
@@ -507,8 +508,41 @@ class OracleRound {
         }, timeToNextRound);
     }
 
-    // Execute a single round: fetch prices, broadcast submission
+    // Execute a single round: fetch prices, broadcast submission.
+    //
+    // Round self-overlap guard (, house convention:
+    // FullNodeChallengeRound._tick). The round-number test below looks like a guard but
+    // is not one: it fences a REPEAT of the same round, and the next interval fires with
+    // a NEW round number, so it passes. Everything after it reads and writes
+    // this.currentRound across several awaits (network resolve, chain-tip read, the
+    // external price fetch, the XCHAIN/USD derive, the submission persist), so a round
+    // that outruns roundInterval has its currentRound reassigned underneath it by the
+    // round that fired on top: the slow round then broadcasts ITS prices stamped with the
+    // NEW round number, records them over the newer round's own entry in the submission
+    // map, and persists the audit row under that number. Peers keep only the first
+    // submission per sender per round (_handleMessage), so the federation aggregates one
+    // price set while this hub's own map, DB row and finalization see the other: it
+    // disagrees with the quorum about what it submitted. The reassignment also clobbers
+    // currentBtcBlockHeight, so both rounds anchor to a height neither of them read.
+    // Skipping the overlapping round drops one round's submission, which is recoverable
+    // (round numbers are wall-clock derived and resync on the next tick); interleaving
+    // corrupts the round already in flight. The guard is a wrapper rather than inline so
+    // the finally cannot be skipped by any of the body's early returns; a rejected fetch
+    // must not wedge the oracle for the process lifetime.
     async _executeRound() {
+        if (this._roundInFlight) {
+            console.warn('Oracle: previous round still in flight; skipping this round tick');
+            return;
+        }
+        this._roundInFlight = true;
+        try {
+            return await this._executeRoundInner();
+        } finally {
+            this._roundInFlight = false;
+        }
+    }
+
+    async _executeRoundInner() {
         // Compute the round number from wall-clock time so every hub in the
         // federation agrees on the round number for the same point in time
         // (and so a restarted hub resumes at the correct number instead of 1).

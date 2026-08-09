@@ -100,6 +100,7 @@ class AttestationSpotChecker {
         this._messageHandler = null;
         this._reorgHandler   = null;
         this._scheduler      = null;
+        this._tickInFlight   = false;   // scheduler self-overlap guard, see _schedulerTick()
     }
 
     _isTruthy(v){
@@ -186,37 +187,57 @@ class AttestationSpotChecker {
     // provider/encoder failure cannot abort the batch or throw out of the timer.
     async _schedulerTick(){
         if (!this._injector || this.corpus.length === 0) return 0;
+        // Scheduler self-overlap guard (, house convention:
+        // FullNodeChallengeRound._tick). The injector is an operator-supplied hook that
+        // emits a real on-chain ATTEST v0 request, and nothing here bounds its round
+        // trip, so a hung encoder/BTC send parks a tick until the socket dies and the
+        // next interval fires on top of it. The backpressure test below cannot stop the
+        // second tick: both read _queue before either registers anything, so injections
+        // land past the headroom it reserves and evict LIVE entries (register() drops the
+        // oldest, a real validator's pending spot-check, whose verdict then never scores),
+        // and the fee-bearing batch runs at twice its configured rate. The finally is
+        // load-bearing: only this timer ever clears the flag, so a throw out of the body
+        // would wedge the scheduler for the process lifetime.
+        if (this._tickInFlight) {
+            console.warn('AttestationSpotChecker: injection tick still in flight; skipping this scheduler pass');
+            return 0;
+        }
         // Backpressure: leave headroom so injections never evict live entries.
         if (this._queue.size >= Math.floor(MAX_QUEUE_SIZE * 0.9)) {
             console.warn('AttestationSpotChecker: spot-check queue near capacity, skipping injection tick');
             return 0;
         }
-        let injected = 0;
-        let n = Math.min(this.maxPerTick, this.corpus.length);
-        for (let i = 0; i < n; i++) {
-            let entry = this.corpus[this._corpusCursor % this.corpus.length];
-            this._corpusCursor = (this._corpusCursor + 1) % this.corpus.length;
-            try {
-                let res = await this._injector({
-                    providerId:      entry.providerId,
-                    prompt:          entry.prompt,
-                    expectedPattern: entry.expectedPattern
-                });
-                let requestId = (res && (res.requestId || res.request_id))
-                    || (typeof res === 'string' ? res : null);
-                if (!requestId) {
-                    console.warn('AttestationSpotChecker: injector returned no request_id for provider ' + entry.providerId);
-                    continue;
+        this._tickInFlight = true;
+        try {
+            let injected = 0;
+            let n = Math.min(this.maxPerTick, this.corpus.length);
+            for (let i = 0; i < n; i++) {
+                let entry = this.corpus[this._corpusCursor % this.corpus.length];
+                this._corpusCursor = (this._corpusCursor + 1) % this.corpus.length;
+                try {
+                    let res = await this._injector({
+                        providerId:      entry.providerId,
+                        prompt:          entry.prompt,
+                        expectedPattern: entry.expectedPattern
+                    });
+                    let requestId = (res && (res.requestId || res.request_id))
+                        || (typeof res === 'string' ? res : null);
+                    if (!requestId) {
+                        console.warn('AttestationSpotChecker: injector returned no request_id for provider ' + entry.providerId);
+                        continue;
+                    }
+                    this.register(requestId, entry.providerId, entry.expectedPattern);
+                    this._injectedCount++;
+                    injected++;
+                } catch (e) {
+                    console.warn('AttestationSpotChecker: injection failed for provider ' + entry.providerId + ': ' +
+                                 (e && e.message ? e.message : e));
                 }
-                this.register(requestId, entry.providerId, entry.expectedPattern);
-                this._injectedCount++;
-                injected++;
-            } catch (e) {
-                console.warn('AttestationSpotChecker: injection failed for provider ' + entry.providerId + ': ' +
-                             (e && e.message ? e.message : e));
             }
+            return injected;
+        } finally {
+            this._tickInFlight = false;
         }
-        return injected;
     }
 
     async stop(){
