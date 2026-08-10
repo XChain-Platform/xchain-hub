@@ -32,15 +32,20 @@ const coins      = require('../../src/coins');
 // consensusSubset(), so all nine hashes moved by construction again. Same rollout
 // rule as the wireFormat fold: every vendoring service ships the new pins in one
 // wave, and a straggler fail-closes rather than forking.
+// REGENERATED 2026-08-10 (fresh testnet genesis): the three testnet `firstBlock`
+// heights moved to just under their live tips (BTC 138000 -> 147500, LTC 4765000
+// -> 4855000, DOGE 64800000 -> 67815000), so only the three TESTNET goldens move.
+// Mainnet and regtest are deliberately untouched, and their unchanged goldens are
+// the check that nothing else drifted in with the genesis edit.
 const GOLDEN_HASH = {
     BTC:  { mainnet: '8f2a60c4a06d819d909cefa5d463a2f810d014fc66cdfa0ef51ffa19cbb5f66b',
-            testnet: 'a04af39cd9d3d332a6c043c02e0920075857078437cb46c7d07c9da143d1b551',
+            testnet: '1e45a958ff9eb6a88be8684e3801b57e7afcfc9031f7761e4f4b1dcf1c8d42a9',
             regtest: '24e6a363e5a36285574dea357328a997fdee5762ef812d8947eacf69c51afc24' },
     LTC:  { mainnet: 'f5c81b02f2c8bdd4a828f25495cc5c63fa18e6040c80569c2aaeb8d6860ce577',
-            testnet: '185dddc98eb5c94d9069f006a9acb1b1fd6f2772b0a91a6b68a6e0ceddcba778',
+            testnet: '888818a874d6d8acb3363355089f0de601c355b63fc8431a44ef666f91615202',
             regtest: '5ad03b383d873d309640e75dfefa2787a5806cb8a84ee46f4cc7fb25ca7f808b' },
     DOGE: { mainnet: '8073fa2632b84c691ad625ee107f8a03ca90483f1b726700e46db833b86399b4',
-            testnet: '860422244b1317a2a125d38a49358fc01d639d9a50c173828235787368884610',
+            testnet: 'ea3ee0d1407959f3cb59e4baf66b50dfc2ada9962351e578d7c6d8586e6ff905',
             regtest: '019220a461e34c99fcf5cbf107673f13d3f2a57d2a20e16a0323ed44c81edd11' },
 };
 
