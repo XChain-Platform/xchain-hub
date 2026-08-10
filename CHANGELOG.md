@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Governance bounds the absolute slash-deviation threshold, not just its rate of change, so a passing proposal cannot leave the hub refusing to boot ().
+- Timer-driven passes carry the in-flight guard its nine sibling loops already enforce ().
+- A governance default temperature is clamped to the vendor-accepted range instead of reaching the request body verbatim and drawing a 400 ().
+- The fetch-meta allowlist no longer unions in the judge fallback chain, so a judge-only model cannot reach a real fetch ().
+- The transient-status docstring names both consumers instead of claiming observability only, which was false for the second one ().
+- The image pins node:22-bookworm instead of a floating node:latest that silently moves the runtime off the declared Node 22 ().
 - Stake-weighted quorum rejects a validator entry with a missing or non-numeric weight instead of lowering the quorum denominator ().
 - envelope.max_tokens and temperature are range-validated at the boundary rather than forwarded raw to vendor APIs ().
 - XchainPriceSource logs its abstention instead of silently dropping the derived pair when the PRICE_MAX or positivity bound fails ().

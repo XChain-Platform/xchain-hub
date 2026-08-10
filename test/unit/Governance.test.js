@@ -85,6 +85,32 @@ describe('Governance', function () {
             it('rejects 21% decrease for SLASH_MISSED_ROUNDS_THRESHOLD', function () {
                 expect(() => gov._validateChangeBounds('SLASH_MISSED_ROUNDS_THRESHOLD', '30', '23')).to.throw(/exceeds maximum/);
             });
+
+            // The ratio bound caps only the SIZE of a change. The slash band also has an
+            // ABSOLUTE floor, ORACLE_DEVIATION_THRESHOLD, that SlashDetector's constructor
+            // hard-enforces: a decrease inside the -20% bound but under that floor used to
+            // pass governance and then brick the hub on its next boot.
+            it('rejects a SLASH_DEVIATION_THRESHOLD decrease below the oracle band floor', function () {
+                // 0.05 -> 0.04 is exactly -20%: inside the ratio bound, under the floor.
+                expect(() => gov._validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.04'))
+                    .to.throw(/below the federation-uniform/);
+                expect(() => gov._validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.045'))
+                    .to.throw(/below the federation-uniform/);
+            });
+
+            it('allows a SLASH_DEVIATION_THRESHOLD at or above the oracle band floor', function () {
+                expect(() => gov._validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.05')).to.not.throw();
+                expect(() => gov._validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.0625')).to.not.throw();
+            });
+
+            it('reports the ratio error when a decrease busts both the bound and the floor', function () {
+                expect(() => gov._validateChangeBounds('SLASH_DEVIATION_THRESHOLD', '0.05', '0.03'))
+                    .to.throw(/exceeds maximum/);
+            });
+
+            it('applies no floor to SLASH_MISSED_ROUNDS_THRESHOLD (it carries no cross-constant band)', function () {
+                expect(() => gov._validateChangeBounds('SLASH_MISSED_ROUNDS_THRESHOLD', '0.05', '0.04')).to.not.throw();
+            });
         });
 
         describe('edge cases', function () {

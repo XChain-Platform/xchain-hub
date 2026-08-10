@@ -342,3 +342,109 @@ describe(': OracleRound._executeRound overlap guard', function () {
         expect(pm.broadcast.callCount, 'the next round runs normally').to.equal(1);
     });
 });
+
+// ── XChainHub._runOwnCapabilityCheck ────────────────────────────────────────
+
+describe(': XChainHub._runOwnCapabilityCheck overlap guard', function () {
+
+    let hub, runAllSelfTests, broadcast;
+
+    beforeEach(function () {
+        const XChainHub = require('../../src/XChainHub');
+        hub = new XChainHub('h', 1, 'd', 'u', 'p', null);
+        broadcast       = sinon.stub();
+        runAllSelfTests = sinon.stub().resolves();
+        hub.peerManager = { broadcast };
+        hub.identity    = { getPubkeyHex: () => 'pk' };
+        hub.capabilityRegistry = {
+            runAllSelfTests,
+            getCapabilities: () => ['llm'],
+            isActive:        async () => true,
+            getState:        async () => null
+        };
+    });
+
+    afterEach(function () {
+        sinon.restore();
+    });
+
+    it('a re-check firing on top of an in-flight pass is skipped', async function () {
+        const { gate, release } = makeGate();
+        let first = true;
+        runAllSelfTests.callsFake(async () => { if (first) { first = false; await gate; } });
+
+        const a = hub._runOwnCapabilityCheck('pk');   // parks inside runAllSelfTests
+        await flush();
+        await hub._runOwnCapabilityCheck('pk');       // the interval (or config watch) fires on top
+
+        expect(runAllSelfTests.callCount, 'the second pass never re-ran the self-tests').to.equal(1);
+        expect(broadcast.callCount, 'the second pass broadcast nothing').to.equal(0);
+
+        release();
+        await a;
+        expect(broadcast.callCount, 'exactly one capability broadcast per capability').to.equal(1);
+        expect(hub._capabilityCheckRunning, 'flag released in finally').to.equal(false);
+    });
+
+    it('a rejected self-test pass does not wedge the re-check loop', async function () {
+        runAllSelfTests.rejects(new Error('capability module blew up'));
+        await hub._runOwnCapabilityCheck('pk').catch(() => {});
+        expect(hub._capabilityCheckRunning, 'a failed pass must not wedge the timer').to.equal(false);
+
+        runAllSelfTests.resolves();
+        await hub._runOwnCapabilityCheck('pk');
+        expect(broadcast.callCount, 'the next pass runs normally').to.equal(1);
+    });
+});
+
+// ── XChainHub._pollOwnStake ─────────────────────────────────────────────────
+
+describe(': XChainHub._pollOwnStake overlap guard', function () {
+
+    let hub, axiosStub, refreshOwnQualification;
+
+    beforeEach(function () {
+        axiosStub = { post: sinon.stub().resolves({ data: { result: { amount: '1', block_index: 5 } } }) };
+        const XChainHub = proxyquire('../../src/XChainHub', { axios: axiosStub });
+        hub = new XChainHub('h', 1, 'd', 'u', 'p', null);
+        refreshOwnQualification     = sinon.stub().resolves();
+        hub.refreshOwnQualification = refreshOwnQualification;
+        hub._btcIndexerHeaders      = () => ({});
+        hub._resolveBtcIndexerUrl   = async () => 'http://indexer.test';
+    });
+
+    afterEach(function () {
+        sinon.restore();
+    });
+
+    it('a stake poll firing on top of an in-flight poll is skipped', async function () {
+        const { gate, release } = makeGate();
+        let first = true;
+        hub._resolveBtcIndexerUrl = async () => {
+            if (first) { first = false; await gate; }
+            return 'http://indexer.test';
+        };
+
+        const a = hub._pollOwnStake('pk');            // parks before the indexer round-trip
+        await flush();
+        await hub._pollOwnStake('pk');                // the interval fires on top
+
+        expect(axiosStub.post.callCount, 'the second pass never hit the indexer').to.equal(0);
+
+        release();
+        await a;
+        expect(axiosStub.post.callCount, 'exactly one indexer round-trip').to.equal(1);
+        expect(refreshOwnQualification.callCount, 'qualification refreshed once').to.equal(1);
+        expect(hub._stakePollRunning, 'flag released in finally').to.equal(false);
+    });
+
+    it('a rejected stake poll does not wedge the poll loop', async function () {
+        hub._resolveBtcIndexerUrl = async () => { throw new Error('config lookup failed'); };
+        await hub._pollOwnStake('pk').catch(() => {});
+        expect(hub._stakePollRunning, 'a failed poll must not wedge the timer').to.equal(false);
+
+        hub._resolveBtcIndexerUrl = async () => 'http://indexer.test';
+        await hub._pollOwnStake('pk');
+        expect(refreshOwnQualification.callCount, 'the next poll runs normally').to.equal(1);
+    });
+});

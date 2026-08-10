@@ -198,7 +198,23 @@ exports._setConfig = (def) => {
     if (typeof ac.require_all_vendors === 'boolean')
         REQUIRE_ALL_VENDORS = ac.require_all_vendors;
     if (Number(ac.max_completion_tokens))  MAX_TOKENS_DEFAULT  = Number(ac.max_completion_tokens);
-    if (typeof ac.default_temperature === 'number') DEFAULT_TEMPERATURE = ac.default_temperature;
+    // Range-check the governance default against the cross-vendor intersection. This one
+    // value serves EVERY vendor and every fetch that omits envelope.temperature,
+    // and Anthropic's Messages API rejects anything outside [0, 1] with a 400, so
+    // an out-of-range value (perfectly legal for OpenAI, which allows up to 2) is a
+    // federation-wide provider_error outage on the default Anthropic approved_models
+    // with no code deploy behind it. Keeping the prior value is the deterministic
+    // failure mode: every hub rejects the identical payload and so holds the
+    // identical default. A caller that genuinely wants an OpenAI temperature above 1
+    // still has the per-request envelope, which is bounded to [0, 2] in fetch().
+    if (typeof ac.default_temperature === 'number') {
+        if (Number.isFinite(ac.default_temperature) &&
+            ac.default_temperature >= 0 && ac.default_temperature <= 1)
+            DEFAULT_TEMPERATURE = ac.default_temperature;
+        else
+            console.warn('llm: ignoring additional_config.default_temperature ' + ac.default_temperature +
+                ' (must be a number in [0, 1]); keeping ' + DEFAULT_TEMPERATURE);
+    }
     if (Number(ac.prompt_envelope_version)) PROMPT_ENVELOPE_VERSION = Number(ac.prompt_envelope_version);
     // Governance kill switch (item 2680) and per-call spend cap (item 2679).
     if (typeof ac.enabled === 'boolean') LLM_ENABLED_CONFIG = ac.enabled;
@@ -387,10 +403,14 @@ function _markInconclusive(options, reason){
 const META_MIN_CORROBORATION = 2;
 
 // The approved identifiers, resolved at call time so a governance hotReload of
-// approved_models is reflected. Judge fallbacks are included: a body produced by
-// a fallback model is legitimate, and its meta must be expressible.
+// approved_models is reflected. Judge fallbacks are deliberately NOT unioned in:
+// a proposal's meta is only ever the FETCH model (fetch() returns `meta: model`,
+// pinned off the block-anchored approved_models ladder), while the judge chain
+// picks who EVALUATES bodies and never serves a fetch. Admitting a judge-fallback
+// id would widen the allowlist by values no honest proposal can carry, which is
+// exactly what gate 1 exists to refuse.
 function _approvedMetaSet(){
-    return new Set([...APPROVED_MODELS, ...JUDGE_FALLBACK_MODELS].filter(m => typeof m === 'string' && m));
+    return new Set(APPROVED_MODELS.filter(m => typeof m === 'string' && m));
 }
 
 // Validate the winning proposal's meta. Returns the value to canonicalize, or
@@ -780,10 +800,21 @@ async function _runLlm({ prompt, system, model, maxTokens, temperature, format, 
     }
 
     if (auth.transport === 'anthropic_api') {
+        // Shape the outgoing value to the vendor contract the way the OpenAI branch
+        // above shapes its own. Both of the temperatures that can reach here are
+        // already bounded (an explicit envelope value >1 throws in fetch(), and
+        // _setConfig refuses an out-of-range governance default), so this is the
+        // net under a future un-guarded source rather than a live behavior change;
+        // a non-numeric value is passed through untouched so the vendor default
+        // still applies. Clamping beats a 400 on every call, and the value is
+        // identical on every hub, so no round splits on it.
+        const anthropicTemperature = (typeof temperature === 'number' && Number.isFinite(temperature))
+            ? Math.min(Math.max(temperature, 0), 1)
+            : temperature;
         const reqBody = {
             model,
             max_tokens:  maxTokens,
-            temperature,
+            temperature: anthropicTemperature,
             messages:    [{ role: 'user', content: prompt }]
         };
         if (sys) reqBody.system = sys;
@@ -894,9 +925,14 @@ function _buildJudgePrompt(candidates) {
 
 // Classify an HTTP status / transport failure as transient (429 rate-limit,
 // 5xx overloaded/gateway, network timeout/reset) vs hard (4xx config/auth/bad
-// request). Recorded on the thrown error for observability only: AttestationRound
-// still maps ANY fetch failure to provider_error and there is NO in-round retry,
-// so round timing and verdict derivation are unchanged.
+// request). Two consumers read the verdict, and only one ignores it. On the
+// fetch() path it is observability only: AttestationRound maps ANY fetch failure
+// to provider_error and there is NO in-round retry, so round timing and verdict
+// derivation are unchanged. On the agree() path it is LOAD-BEARING: the judge
+// fallback chain branches on it, where transient=false stops the chain and defers
+// to no_quorum while transient/undefined advances to the next judge model (see
+// the transport-only invariant in agree()). Moving the 429/5xx boundary here
+// therefore changes which vendor errors earn a same-round judge fallback.
 function _isTransientStatus(status) {
     let s = Number(status);
     return s === 429 || (s >= 500 && s <= 599);

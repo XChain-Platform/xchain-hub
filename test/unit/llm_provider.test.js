@@ -289,6 +289,61 @@ describe('llm provider, envelope numeric bounds', function () {
     });
 });
 
+// The vendor bound on an explicit envelope.temperature never covered the GOVERNANCE
+// default, which fetch() falls back to whenever the envelope omits the field. An
+// out-of-range default_temperature is legal for OpenAI (up to 2) and 400s every
+// Anthropic call, so a single config change with no deploy behind it took out the
+// default approved_models federation-wide.
+describe('llm provider, governance default_temperature bounds', function () {
+
+    afterEach(function () { nock.cleanAll(); });
+
+    async function anthropicBodyFor(additionalConfig) {
+        return await _withEnv({ ANTHROPIC_API_KEY: 'sk-ant-test' }, async () => {
+            const llm = _reloadProvider();
+            llm._setConfig({ additional_config: additionalConfig });
+            let capturedBody;
+            nock('https://api.anthropic.com')
+                .post('/v1/messages', (body) => { capturedBody = body; return true; })
+                .reply(200, { content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 1, output_tokens: 1 } });
+            await llm.fetch(JSON.stringify({ prompt: 'q' }), {});
+            return capturedBody;
+        });
+    }
+
+    it('applies an in-range governance default to a fetch that omits temperature', async function () {
+        const body = await anthropicBodyFor({ default_temperature: 0.4 });
+        expect(body.temperature).to.equal(0.4);
+    });
+
+    it('ignores an above-range governance default instead of 400ing every anthropic fetch', async function () {
+        const body = await anthropicBodyFor({ default_temperature: 1.5 });
+        expect(body.temperature).to.equal(0);
+    });
+
+    it('ignores a negative governance default', async function () {
+        const body = await anthropicBodyFor({ default_temperature: -1 });
+        expect(body.temperature).to.equal(0);
+    });
+
+    it('ignores a non-finite governance default', async function () {
+        const body = await anthropicBodyFor({ default_temperature: Number.POSITIVE_INFINITY });
+        expect(body.temperature).to.equal(0);
+    });
+
+    it('leaves an explicit in-range envelope temperature untouched on the anthropic path', async function () {
+        await _withEnv({ ANTHROPIC_API_KEY: 'sk-ant-test' }, async () => {
+            const llm = _reloadProvider();
+            let capturedBody;
+            nock('https://api.anthropic.com')
+                .post('/v1/messages', (body) => { capturedBody = body; return true; })
+                .reply(200, { content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 1, output_tokens: 1 } });
+            await llm.fetch(JSON.stringify({ prompt: 'q', temperature: 0.9 }), {});
+            expect(capturedBody.temperature).to.equal(0.9);
+        });
+    });
+});
+
 // ---- fetch() via claude_spawn transport -----------------------------------
 // llm.js destructures runClaudePrint at require-time. We cannot stub it
 // via sinon after the fact. Instead we inject a pre-patched claude-spawn
@@ -1952,6 +2007,24 @@ describe('llm provider, agree() meta canonicalization (#3070)', function () {
             ], 0, outcome);
             expect(r).to.be.null;
             expect(outcome.reason).to.equal('meta_uncorroborated');
+        });
+
+        it('does not admit a judge-fallback identifier, which no fetch can produce', async function () {
+            // The judge chain picks who EVALUATES bodies; a proposal's meta is always
+            // the fetch model. A corroborated pair naming a judge fallback is therefore
+            // two validators vouching for a model that served nothing.
+            const llm = _reloadProvider();
+            llm._setConfig({ additional_config: {
+                approved_models:       [APPROVED],
+                judge_fallback_models: ['gpt-5-mini']
+            } });
+            const outcome = {};
+            const r = llm._canonicalMetaForTest([
+                { body: body('A'), meta: 'gpt-5-mini' },
+                { body: body('B'), meta: 'gpt-5-mini' }
+            ], 0, outcome);
+            expect(r).to.be.null;
+            expect(outcome.reason).to.equal('meta_unrecognized');
         });
 
         it('an unapproved meta is rejected before corroboration is even considered', async function () {

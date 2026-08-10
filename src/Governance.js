@@ -28,6 +28,9 @@ const ValidatorIdentity = require('./ValidatorIdentity.js');
 const { parseCapabilityMinStakeParam, MIN_STAKE_GOVERNANCE_DISABLED } = require('./CapabilityRegistry.js');
 const { parseAttestationProviderParam } = require('./ProviderRegistry.js');
 const { canonicalValidatorOrder } = require('./validator_order.js');
+// Federation-uniform oracle co-sign band: the absolute floor under the slash band
+// (see _validateSlashBandFloor). constants.js requires nothing, so no cycle.
+const { ORACLE_DEVIATION_THRESHOLD } = require('./constants.js');
 
 const GOV_PROPOSE = 'GOV_PROPOSE';
 const GOV_VOTE    = 'GOV_VOTE';
@@ -1047,6 +1050,36 @@ class Governance extends EventEmitter {
     }
 
     _validateChangeBounds(parameter, currentValue, proposedValue) {
+        // Ratio bound first, so a proposal that busts BOTH gates still reports the
+        // size error; the floor below only decides values the ratio bound allows.
+        this._validateChangeRatio(parameter, currentValue, proposedValue);
+        this._validateSlashBandFloor(parameter, proposedValue);
+    }
+
+    // Absolute floor under the slash band, mirroring the guard SlashDetector's
+    // constructor already hard-enforces (SlashDetector.js): a slash band tighter than
+    // the federation-uniform oracle co-sign band would slash submissions inside the
+    // band the federation just co-signed. _validateChangeRatio caps only the SIZE of a
+    // change, so from the 0.05 default a -20% proposal (0.04) cleared every gate,
+    // and applying the approved value then bricked the hub at its next restart.
+    // Sits outside _validateChangeRatio's numeric early-returns so a non-numeric or
+    // zero CURRENT value cannot skip it. A proposed 0 is refused here although
+    // SlashDetector's `parseFloat(...) || DEFAULT` would fall back to the band: the
+    // ratio bound already refuses it, and refusing is the safe direction.
+    // DEPLOY NOTE: same mixed-version caveat as the follower-path bounds re-check in
+    // _handlePropose - fixed hubs drop a sub-floor Byzantine proposal that unfixed
+    // hubs still record. Honest proposals always clear the floor, so honest traffic
+    // never diverges.
+    _validateSlashBandFloor(parameter, proposedValue) {
+        if (parameter !== 'SLASH_DEVIATION_THRESHOLD') return;
+        let band = parseFloat(proposedValue);
+        if (!Number.isFinite(band) || band >= ORACLE_DEVIATION_THRESHOLD) return;
+        throw new Error('SLASH_DEVIATION_THRESHOLD (' + band + ') is below the federation-uniform ' +
+            'ORACLE_DEVIATION_THRESHOLD (' + ORACLE_DEVIATION_THRESHOLD + '): this would slash ' +
+            'submissions inside the co-signed band, and SlashDetector refuses to construct on it.');
+    }
+
+    _validateChangeRatio(parameter, currentValue, proposedValue) {
         // Only validate numeric parameters
         let cur  = parseDecimalParts(currentValue);
         let prop = parseDecimalParts(proposedValue);

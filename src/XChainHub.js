@@ -106,6 +106,9 @@ class XChainHub {
         this._capabilityRecheckTimer = null;
         this._capabilityConfigWatcher = null;
         this._stakePollTimer          = null;
+        //  in-flight guards for the two passes those timers drive.
+        this._capabilityCheckRunning  = false;
+        this._stakePollRunning        = false;
         this._transportSetTimer       = null;   // Option A: chain-effective signer-set refresh timer
         this._transportSignerSet      = new Set();  // last-known-good effective signer set (lowercased pubkey hex)
         this._transportSignerSetAt    = 0;       // ms timestamp of last successful refresh (0 = never)
@@ -1420,10 +1423,25 @@ class XChainHub {
         } catch (e) { /* best-effort operator log */ }
     }
 
+    //  in-flight guard for the stake poll. _stakePollTimer fires on a bare
+    // setInterval while the pass awaits an indexer round-trip nothing here bounds, so
+    // a tightened STAKE_POLL_MS or a degraded indexer would otherwise stack a second
+    // pass on the first and drive refreshOwnQualification twice from two reads of the
+    // same on-chain state. Skipping is safe: the next tick re-reads fresh truth.
+    async _pollOwnStake(pubkey){
+        if(this._stakePollRunning) return;
+        this._stakePollRunning = true;
+        try {
+            await this._pollOwnStakePass(pubkey);
+        } finally {
+            this._stakePollRunning = false;
+        }
+    }
+
     // Query the BTC indexer for own pubkey's current active stake amount + latest
     // block index, then feed both into refreshOwnQualification. Best-effort:
     // network/indexer failures are logged but do not change state.
-    async _pollOwnStake(pubkey){
+    async _pollOwnStakePass(pubkey){
         let url = await this._resolveBtcIndexerUrl();
         if(!url) return;
         let body = {
@@ -1805,10 +1823,24 @@ class XChainHub {
     }
 
     // Combined own-state update: self-test + qualification (qualification reuses cached amount if available) + broadcast
+    //
+    //  in-flight guard: _capabilityRecheckTimer fires on a bare setInterval while
+    // runAllSelfTests fans out to every capability module's bounded-but-slow healthCheck,
+    // so a tightened CAPABILITY_RECHECK_MS or a slow vendor would otherwise stack passes
+    // and emit a duplicate CAPABILITY_ACTIVATED/DEACTIVATED broadcast per capability.
+    // Guarding at method entry also covers the config-watch re-check, which is skipped
+    // while a pass is in flight; benign, since the watcher reloads config into memory
+    // first and the next scheduled tick applies it.
     async _runOwnCapabilityCheck(pubkey){
         if(!this.capabilityRegistry) return;
-        await this.capabilityRegistry.runAllSelfTests(pubkey);
-        await this._broadcastOwnCapabilityState(pubkey);
+        if(this._capabilityCheckRunning) return;
+        this._capabilityCheckRunning = true;
+        try {
+            await this.capabilityRegistry.runAllSelfTests(pubkey);
+            await this._broadcastOwnCapabilityState(pubkey);
+        } finally {
+            this._capabilityCheckRunning = false;
+        }
     }
 
     // Broadcast current activation state for every capability owned by this pubkey
