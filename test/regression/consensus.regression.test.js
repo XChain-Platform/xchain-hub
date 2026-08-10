@@ -286,6 +286,74 @@ describe('Regression: Consensus (PBFT)', function () {
     });
 
     // -----------------------------------------------------------------
+    // REG-CON-011: PRE_PREPARE carries the requested tip, not the buried one
+    // -----------------------------------------------------------------
+
+    describe('REG-CON-011: leader and follower bury the reorg buffer once', function () {
+        // Board #3080. CapabilitySnapshot buries every height it is handed by
+        // HUB_SNAPSHOT_REORG_BUFFER, so the snapshot a leader locks is already
+        // at tip - buffer. Stamping that buried value into PRE_PREPARE made the
+        // follower bury it a second time and lock at tip - 2*buffer: two hubs,
+        // one round, different validator sets whenever the set changed across
+        // that window.
+        //
+        // The fake below applies the real burial rather than echoing the
+        // request, which is the whole point: the pre-existing stubs return a
+        // fixed blockIndex, so leader and follower agreed by construction and
+        // no assertion on them could see this.
+        const BUFFER = 6;
+
+        function buryingSnapshotFake() {
+            return {
+                getActiveValidatorSnapshot: (blockIndex) =>
+                    ({ blockIndex: Math.max(0, Number(blockIndex) - BUFFER), validators: [], count: 4 }),
+                getQuorum: () => 3
+            };
+        }
+
+        it('follower locks the same block the leader locked @regression-p0', async function () {
+            const TIP = 800000;
+            consensus.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[1].addr; // leader for seq 1
+            hub.capabilitySnapshot = buryingSnapshotFake();
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(TIP);
+
+            let promise = consensus.propose({ cfg: 1 });
+            await new Promise(r => setImmediate(r));
+
+            let pending = consensus.pendingProposals.get(1);
+            let [, data] = pm.broadcast.getCall(0).args;
+
+            // What the leader actually resolved its validator set at.
+            let leaderBlock = pending.snapshot.blockIndex;
+            expect(leaderBlock).to.equal(TIP - BUFFER);
+
+            // The envelope must carry the REQUESTED tip, so the follower's own
+            // single burial lands on the leader's block.
+            expect(data.btcBlockHeight).to.equal(TIP);
+
+            let follower = new Consensus(createMockHub());
+            follower.hub.capabilitySnapshot = buryingSnapshotFake();
+            let { snapshot: followerSnapshot } =
+                await follower._lockSnapshot(data.btcBlockHeight);
+            expect(followerSnapshot.blockIndex).to.equal(leaderBlock);
+
+            clearTimeout(pending.timer);
+            pending.resolved = true;
+            pending.reject(new Error('cleanup'));
+            await promise.catch(() => {});
+        });
+
+        it('_lockSnapshot reports the height it asked for alongside the buried one @regression-p1', async function () {
+            hub.capabilitySnapshot = buryingSnapshotFake();
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+            let { snapshot, requestedBlockIndex } = await consensus._lockSnapshot();
+            expect(requestedBlockIndex).to.equal(800000);
+            expect(snapshot.blockIndex).to.equal(800000 - BUFFER);
+        });
+    });
+
+    // -----------------------------------------------------------------
     // REG-CON-010: Non-leader PRE_PREPARE rejected
     // -----------------------------------------------------------------
 

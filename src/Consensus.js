@@ -177,7 +177,7 @@ class Consensus {
         // Falls back to live _getQuorum() when the indexer or BTC tip
         // can't be resolved (graceful degradation; same behavior as before
         // the snapshot wiring landed).
-        let { snapshot, weighted } = await this._lockSnapshot();
+        let { snapshot, weighted, requestedBlockIndex } = await this._lockSnapshot();
         // Federation-split guard (fail closed). In a multi-hub federation, a null
         // snapshot means each hub would fall back to its own LOCAL validatorSet,
         // so two hubs could finalize the same config-change round over different
@@ -246,7 +246,14 @@ class Consensus {
                 // stake state drifts mid-round.
                 snapshot:       snapshot || null,
                 quorum:         quorum,
-                btcBlockHeight: snapshot ? snapshot.blockIndex : null,
+                // The REQUESTED tip, never snapshot.blockIndex (#3080). The
+                // snapshot is already buried by HUB_SNAPSHOT_REORG_BUFFER, and a
+                // follower buries whatever this envelope carries a second time,
+                // so stamping the buried value locks followers at tip - 2*buffer
+                // while the leader sits at tip - buffer. Different validator
+                // sets, one round: quorum splits or stalls whenever the set
+                // changed across that window.
+                btcBlockHeight: snapshot ? requestedBlockIndex : null,
                 // STAKE_WEIGHTED_QUORUM round? Carry the source-keyed validator
                 // weights + parallel pubkey vote sets (the address Sets above stay
                 // authoritative for the count path; these are consulted only when
@@ -300,7 +307,8 @@ class Consensus {
     // Used by both the leader (in propose) and followers (in _handlePrePrepare).
     // The leader stamps its tip into the PRE_PREPARE envelope so followers
     // call this with the matching blockIndex.
-    // Returns { snapshot, weighted }. STAKE_WEIGHTED_QUORUM: at/above the
+    // Returns { snapshot, weighted, requestedBlockIndex }. STAKE_WEIGHTED_QUORUM:
+    // at/above the
     // activation block on this hub's network, lock the SOURCE-KEYED weight
     // snapshot (getActiveWeightSnapshot -> [{pubkey,source,weight}]) so quorum is
     // tallied by stake; below activation, the count snapshot (byte-identical to
@@ -308,8 +316,16 @@ class Consensus {
     // the hub and every other hub flip on the same anchor. Returns
     // { snapshot: null, weighted } when no snapshot can be acquired (the caller
     // then falls back to live _getQuorum(), as before).
+    //
+    // `requestedBlockIndex` is the height this call ASKED for, before
+    // CapabilitySnapshot buried it by HUB_SNAPSHOT_REORG_BUFFER; the returned
+    // snapshot's own `blockIndex` is the buried height it resolved at. The two
+    // are not interchangeable and the leader must stamp the requested one (see
+    // the PRE_PREPARE stamp in propose(), review board #3080/#3081).
     async _lockSnapshot(blockHeightOverride) {
-        if (!this.hub || !this.hub.capabilitySnapshot) return { snapshot: null, weighted: false };
+        if (!this.hub || !this.hub.capabilitySnapshot) {
+            return { snapshot: null, weighted: false, requestedBlockIndex: null };
+        }
         let blockHeight = blockHeightOverride;
         if (blockHeight === undefined || blockHeight === null) {
             // _resolveBtcLatestBlock checks hub.db.getChainTip first, then
@@ -317,12 +333,12 @@ class Consensus {
             // indexer. So this works whether or not chain-tip-push is wired.
             blockHeight = await this.hub._resolveBtcLatestBlock();
         }
-        if (!blockHeight) return { snapshot: null, weighted: false };
+        if (!blockHeight) return { snapshot: null, weighted: false, requestedBlockIndex: null };
         let weighted = swq.isStakeWeightedQuorumActive(blockHeight, this.hub.network);
         let snapshot = weighted
             ? await this.hub.capabilitySnapshot.getActiveWeightSnapshot(blockHeight)
             : await this.hub.capabilitySnapshot.getActiveValidatorSnapshot(blockHeight);
-        return { snapshot: snapshot, weighted: weighted };
+        return { snapshot: snapshot, weighted: weighted, requestedBlockIndex: blockHeight };
     }
 
     // Defense-in-depth: only tally votes from senders that are registered
@@ -926,10 +942,13 @@ class Consensus {
     // Calculate quorum size: legacy live-set computation, used as a
     // fallback when a federation snapshot can't be acquired (no BTC tip
     // available, indexer unreachable, etc.). The normal path is:
-    //   1. Leader calls _lockSnapshot() at PROPOSE -> snapshot at BTC tip.
-    //   2. Leader stamps btcBlockHeight into the PRE_PREPARE envelope.
-    //   3. Followers call _lockSnapshot(btcBlockHeight) -> same block, same
-    //      validator set, same quorum.
+    //   1. Leader calls _lockSnapshot() at PROPOSE -> snapshot at the BTC tip,
+    //      buried by HUB_SNAPSHOT_REORG_BUFFER inside CapabilitySnapshot.
+    //   2. Leader stamps the REQUESTED tip (not the buried snapshot.blockIndex)
+    //      into the PRE_PREPARE envelope.
+    //   3. Followers call _lockSnapshot(btcBlockHeight), which buries that tip
+    //      once exactly as the leader did -> same block, same validator set,
+    //      same quorum.
     //   4. PREPARE/COMMIT checks use proposal.quorum (cached), not this.
     // Whole-federation snapshot (not capability-scoped) because config
     // changes affect every staker equally. See capability-staking-model.md §6.
