@@ -39,6 +39,7 @@ const { PRICE_MAX, PRICE_V1_COINS, PRICE_V1_FIATS,
         MAX_TICK_LENGTH, MAX_MEMO_LENGTH, MAX_SOURCE_ADDRESS_LENGTH } = require('./constants.js');
 const { bcgt }          = require('./bcmath.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
+const { normalizeRetractionBounds } = require('./lib/retraction_bounds.js');
 
 // : minimum gap between ingest-fence rejection warnings for the SAME source
 // chain. Sized so a stalled rail keeps re-announcing itself in any log tail while a
@@ -426,7 +427,35 @@ class PriceAggregator extends EventEmitter {
         // this push (0 when absent/malformed). See receiveValidatedRound.
         let pushGeneration = parseInt(priceData.push_generation);
         if (!Number.isFinite(pushGeneration) || pushGeneration < 0) pushGeneration = 0;
-        let actionIndex = parseInt(priceData.action_index) || 0;
+
+        // Gate the two remaining required wire fields instead of coercing them. Unlike
+        // push_generation, whose absence has a meaningful default (0 = pre-fence sender),
+        // action_index and block_time are load-bearing identity/time values with no sane
+        // default, and the old `parseInt(x) || 0` silently minted one for malformed input.
+        // Digits only and inside the safe-integer range: both columns are BIGINT UNSIGNED
+        // and parseInt rounds silently past 2^53, so an over-large value would mis-key the row.
+        //
+        // action_index keys the (source_chain, action_index) unique index, the dedupe SELECT
+        // and the retraction fence below; collapsing it to 0 collided malformed pushes from
+        // DIFFERENT operators on one chain onto a single index-0 row (the unique key carries no
+        // source_address) and left the fence reading an index the action never had. A genuine
+        // index of 0 is still accepted; only unparseable input is rejected.
+        if (!/^[0-9]+$/.test(String(priceData.action_index)) ||
+            !Number.isSafeInteger(Number(priceData.action_index))) {
+            return { accepted: false, reason: 'invalid action_index' };
+        }
+        // block_time is the base of the uniform 24h effective_at delay documented below;
+        // coercing it to 0 produced effective_at 86400 (1970-01-02), which the
+        // `effective_at <= now` read path serves immediately, i.e. the delay silently off.
+        // Deliberately NOT bounded to a recency window against the hub clock: a rebuilt indexer
+        // replays history and pushes genuine old block_times (see the fence warning above), so a
+        // freshness bound would reject exactly the backfill the durable outbox exists to deliver.
+        if (!/^[0-9]+$/.test(String(priceData.block_time)) ||
+            !Number.isSafeInteger(Number(priceData.block_time)) ||
+            Number(priceData.block_time) <= 0) {
+            return { accepted: false, reason: 'invalid block_time' };
+        }
+        let actionIndex = parseInt(priceData.action_index, 10);
 
         // HUB-RETRACT-4: reject a stale replay of a rolled-back PRICE action. A fire-and-forget v1
         // push that failed and was re-enqueued, or an in-flight HTTP push, can land AFTER the reorg
@@ -467,7 +496,7 @@ class PriceAggregator extends EventEmitter {
         // differently once the row existed (a ledger fork). A uniform +24h makes
         // every row land in every mirror long before any block can read it, which
         // is also what makes the hub-db sync stream watermark a sound barrier.
-        let blockTime = parseInt(priceData.block_time) || 0;
+        let blockTime = parseInt(priceData.block_time, 10);   // gated above; never coerced to 0
         let effectiveAt = blockTime + 86400;
 
         // Generation-monotonic upsert (HUB-RETRACT-4): on the (source_chain, action_index) unique
@@ -515,7 +544,7 @@ class PriceAggregator extends EventEmitter {
                 memo:           priceData.memo || null,
                 block_time:     blockTime,
                 effective_at:   effectiveAt,
-                action_index:   priceData.action_index || 0,
+                action_index:   actionIndex,   // the validated integer, matching the stored row
                 push_generation: pushGeneration
             }
         });
@@ -547,14 +576,11 @@ class PriceAggregator extends EventEmitter {
     // inside [from, to]. Omitted (older indexer) => no fence == today's behavior; the bound is
     // mirrored onto row:deleted so replicas fence identically.
     async retractFromActionIndex(sourceChain, fromActionIndex, toActionIndex, retractionGeneration) {
-        let from = parseInt(fromActionIndex);
-        if (!Number.isFinite(from) || from < 0) {
-            return { error: 'invalid from_action_index' };
-        }
-        let to = (toActionIndex !== undefined && toActionIndex !== null) ? parseInt(toActionIndex) : null;
-        let bounded = (to !== null && Number.isFinite(to) && to >= 0);
-        let gen = (retractionGeneration !== undefined && retractionGeneration !== null) ? parseInt(retractionGeneration) : null;
-        let fenced = (gen !== null && Number.isFinite(gen) && gen >= 0);
+        // Fail-closed on a SUPPLIED-but-invalid bound (): a malformed to/generation used to
+        // collapse into the absent branch and widen this into the open-ended DELETE below.
+        let bounds = normalizeRetractionBounds(fromActionIndex, toActionIndex, retractionGeneration);
+        if (bounds.error) return { error: bounds.error };
+        let { from, to, gen, bounded, fenced } = bounds;
 
         // Build the shared WHERE tail once; the only per-table difference is the action-index column.
         let buildArgs = (col) => {

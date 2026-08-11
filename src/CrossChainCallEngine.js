@@ -64,6 +64,7 @@ const eq                     = require('./equivocation_header.js');
 const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
 const { XCALL_MAX_HOPS }     = require('./constants.js');
 const coins                  = require('./coins');
+const { normalizeRetractionBounds } = require('./lib/retraction_bounds.js');
 
 const ALLOWED_CHAINS  = [...coins.ALLOWED_COINS];
 const DEFAULT_POLL_MS = 15000;
@@ -761,14 +762,16 @@ class CrossChainCallEngine extends EventEmitter {
     // it are retracted, so a relay row re-finalized at a recycled source action_index (higher
     // generation, post-rollback) survives even inside [from, to]. Omitted (older indexer) => no fence.
     async retractCallsForReorg(chain, fromActionIndex, toActionIndex, retractionGeneration){
-        let to = (toActionIndex !== undefined && toActionIndex !== null) ? Number(toActionIndex) : null;
-        let bounded = (to !== null && Number.isFinite(to) && to >= 0);
-        let gen = (retractionGeneration !== undefined && retractionGeneration !== null) ? Number(retractionGeneration) : null;
-        let fenced = (gen !== null && Number.isFinite(gen) && gen >= 0);
+        // Fail-closed on a SUPPLIED-but-invalid bound (): a malformed to/generation used to
+        // collapse into the absent branch and drop the range/fence clause, and the raw lower bound
+        // was bound into SQL where MariaDB coerces a nonnumeric to 0 (retracting the whole chain).
+        let bounds = normalizeRetractionBounds(fromActionIndex, toActionIndex, retractionGeneration);
+        if(bounds.error) throw new Error(bounds.error);
+        let { from, to, gen, bounded, fenced } = bounds;
         let tail = " AND source_chain = ? AND source_action_index >= ?" +
                    (bounded ? " AND source_action_index <= ?" : "") +
                    (fenced ? " AND push_generation <= ?" : "");
-        let params = [chain, fromActionIndex];
+        let params = [chain, from];
         if(bounded) params.push(to);
         if(fenced) params.push(gen);
         let rows = await this.db.doQuery("SELECT id, call_id, phase FROM cross_chain_calls WHERE status = 'finalized'" + tail, params);
@@ -785,7 +788,7 @@ class CrossChainCallEngine extends EventEmitter {
             this._resultBackoff.delete(String(r.call_id).toLowerCase());
         }
         if(this.broadcaster){
-            let evt = { table: 'cross_chain_calls', source_chain: chain, from_action_index: fromActionIndex };
+            let evt = { table: 'cross_chain_calls', source_chain: chain, from_action_index: from };
             if(bounded) evt.to_action_index = to;
             if(fenced) evt.retraction_generation = gen;
             // : quorum-class deletions ride the retraction-signing round when
@@ -798,7 +801,7 @@ class CrossChainCallEngine extends EventEmitter {
                 this.broadcaster.broadcastDeletion(evt);
         }
         console.warn('CrossChainCall: retracted ' + rows.length + ' relay row(s) for ' + chain +
-                     ' reorg below action ' + fromActionIndex + (bounded ? ' (bounded <= ' + to + ')' : '') +
+                     ' reorg below action ' + from + (bounded ? ' (bounded <= ' + to + ')' : '') +
                      (fenced ? ' (gen <= ' + gen + ')' : '') + ' (should not happen past confirmation depth)');
     }
 

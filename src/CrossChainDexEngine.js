@@ -51,6 +51,7 @@ const swq                    = require('./stake_weighted_quorum.js');
 const eq                     = require('./equivocation_header.js');
 const ccr                    = require('./cross_chain_royalty_activation.js');
 const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
+const { normalizeRetractionBounds } = require('./lib/retraction_bounds.js');
 const coins                  = require('./coins');
 
 const ALLOWED_CHAINS = [...coins.ALLOWED_COINS];
@@ -865,16 +866,18 @@ class CrossChainDexEngine extends EventEmitter {
     // requires that leg's generation <= it, so a leg re-finalized at a recycled source action_index
     // (higher generation, post-rollback) survives. Omitted (older indexer) => no fence.
     async retractMatchesForReorg(chain, fromActionIndex, toActionIndex, retractionGeneration){
-        let to = (toActionIndex !== undefined && toActionIndex !== null) ? Number(toActionIndex) : null;
-        let bounded = (to !== null && Number.isFinite(to) && to >= 0);
-        let gen = (retractionGeneration !== undefined && retractionGeneration !== null) ? Number(retractionGeneration) : null;
-        let fenced = (gen !== null && Number.isFinite(gen) && gen >= 0);
+        // Fail-closed on a SUPPLIED-but-invalid bound (): a malformed to/generation used to
+        // collapse into the absent branch and widen this into an open-ended retraction, which also
+        // restores capacity via _applyCommit below; the raw lower bound went into SQL uncoerced.
+        let bounds = normalizeRetractionBounds(fromActionIndex, toActionIndex, retractionGeneration);
+        if(bounds.error) throw new Error(bounds.error);
+        let { from, to, gen, bounded, fenced } = bounds;
         // Per-leg clause for whichever side is on the reorged chain, fenced by THAT leg's generation.
         let legClause = (col, gcol) => "(" + col + "_chain = ? AND " + col + "_action_index >= ?" +
             (bounded ? " AND " + col + "_action_index <= ?" : "") +
             (fenced ? " AND " + gcol + " <= ?" : "") + ")";
         let legParams = () => {
-            let p = [chain, fromActionIndex];
+            let p = [chain, from];
             if(bounded) p.push(to);
             if(fenced) p.push(gen);
             return p;
@@ -893,7 +896,7 @@ class CrossChainDexEngine extends EventEmitter {
             // re-finalize (propose() no-ops on a finalized id), stranding it in 'retracted'.
             this.consensus.forgetFinalized(r.match_id);
             if(this.broadcaster){
-                let evt = { table: 'cross_chain_matches', source_chain: chain, from_action_index: fromActionIndex };
+                let evt = { table: 'cross_chain_matches', source_chain: chain, from_action_index: from };
                 if(bounded) evt.to_action_index = to;
                 if(fenced) evt.retraction_generation = gen;
                 // : ride the retraction-signing round when active (the round

@@ -709,6 +709,35 @@ describe('CrossChainDexEngine', function () {
             expect(broadcaster.broadcastDeletion.firstCall.args[0]).to.deep.include(
                 { table: 'cross_chain_matches', source_chain: 'BTC', from_action_index: 5, to_action_index: 75, retraction_generation: 9 });
         });
+
+        // : a supplied-but-malformed bound must ABORT before the SELECT. Fail-open
+        // here widened a fenced rollback into an open-ended retraction that also restored
+        // capacity via _applyCommit(-1) and broadcast the widened event to peers.
+        it('aborts on a supplied-but-malformed bound instead of widening the retraction', async function () {
+            for (const args of [['BTC', 'abc'], ['BTC', 5, 'abc'], ['BTC', 5, 75, 'abc'], ['BTC', 5, 1]]) {
+                let broadcaster = { broadcastDeletion: sinon.stub(), broadcastRow: sinon.stub() };
+                let hub = makeDexHub({ hubDbBroadcaster: broadcaster });
+                hub.db.doQuery = sinon.stub().resolves([]);
+                let eng = new CrossChainDexEngine(hub);
+                eng.broadcaster = broadcaster;
+                let threw = false;
+                try { await eng.retractMatchesForReorg(...args); } catch (e) { threw = /^invalid /.test(e.message); }
+                expect(threw).to.equal(true, 'expected abort for ' + JSON.stringify(args));
+                expect(hub.db.doQuery.called).to.equal(false);
+                expect(broadcaster.broadcastDeletion.called).to.equal(false);
+            }
+        });
+
+        // The absent-bound contract (older indexers omit to/generation) must survive the guard.
+        it('still treats an ABSENT bound as open-ended and unfenced', async function () {
+            let hub = makeDexHub();
+            hub.db.doQuery = sinon.stub().resolves([]);
+            let eng = new CrossChainDexEngine(hub);
+            await eng.retractMatchesForReorg('BTC', 5, null, undefined);
+            let selectCall = hub.db.doQuery.getCall(0);
+            expect(selectCall.args[0]).to.not.match(/<= \?/);
+            expect(selectCall.args[1]).to.deep.equal(['BTC', 5, 'BTC', 5]);
+        });
     });
 
     // ── _resolveCapabilityValidators ─────────────────────────────────────────

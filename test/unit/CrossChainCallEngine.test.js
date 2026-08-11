@@ -642,6 +642,36 @@ describe('CrossChainCallEngine', function () {
                 { table: 'cross_chain_calls', source_chain: 'BTC', from_action_index: 40, to_action_index: 75, retraction_generation: 5 });
         });
 
+        // : a supplied-but-malformed bound must ABORT, not fall through to the
+        // absent-bound branch. Fail-open here retracted every finalized call on the chain
+        // (raw lower bound, MariaDB coerces a nonnumeric to 0) or dropped the range/fence.
+        it('retractCallsForReorg aborts on a supplied-but-malformed bound instead of widening', async function () {
+            for (const args of [['BTC', 'abc'], ['BTC', 40, 'abc'], ['BTC', 40, 75, 'abc'], ['BTC', 40, 10]]) {
+                const { engine, db, broadcaster } = makeEngine();
+                db.rows.push(
+                    { call_id: CALL_ID, phase: 'dispatch', status: 'finalized', source_chain: 'BTC', source_action_index: 41 },
+                    { call_id: CALL_ID, phase: 'result',   status: 'finalized', source_chain: 'BTC', source_action_index: 41 }
+                );
+                let threw = false;
+                try { await engine.retractCallsForReorg(...args); } catch (e) { threw = /^invalid /.test(e.message); }
+                expect(threw).to.equal(true, 'expected abort for ' + JSON.stringify(args));
+                expect(db.rows.filter(r => r.status === 'retracted').length).to.equal(0);
+                expect(broadcaster.broadcastDeletion.called).to.equal(false);
+            }
+        });
+
+        // The absent-bound contract (older indexers omit to/generation) must survive the guard.
+        it('retractCallsForReorg still treats an ABSENT bound as open-ended and unfenced', async function () {
+            const { engine, db, broadcaster } = makeEngine();
+            db.rows.push(
+                { call_id: CALL_ID, phase: 'dispatch', status: 'finalized', source_chain: 'BTC', source_action_index: 41 }
+            );
+            await engine.retractCallsForReorg('BTC', 40, null, undefined);
+            expect(db.rows.find(r => r.source_action_index === 41).status).to.equal('retracted');
+            expect(broadcaster.broadcastDeletion.firstCall.args[0]).to.deep.equal(
+                { table: 'cross_chain_calls', source_chain: 'BTC', from_action_index: 40 });
+        });
+
         // M-13: retraction must clear the consensus finalized-ring entry for BOTH phases,
         // otherwise a call re-confirmed after this reorg can never re-run its deterministic
         // round (propose() no-ops on a finalized id) and is stranded in 'retracted' forever.

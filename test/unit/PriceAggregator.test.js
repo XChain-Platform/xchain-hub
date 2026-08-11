@@ -172,6 +172,17 @@ describe('PriceAggregator.retractFromActionIndex()', function () {
         expect(hub.db.doQuery.called).to.equal(false);
     });
 
+    // : a supplied-but-malformed to/generation used to be treated as ABSENT, turning a
+    // bounded fenced delete into the open-ended one, and parseInt turned '1e3' into 1.
+    it('rejects a supplied-but-malformed to_action_index or retraction_generation without deleting', async function () {
+        for (let args of [['BTC', 50, 'abc'], ['BTC', 50, 75, 'abc'], ['BTC', '1e3junk'], ['BTC', 50, 10], ['BTC', '']]) {
+            hub.db.doQuery.resetHistory();
+            let result = await agg.retractFromActionIndex(...args);
+            expect(result.error, 'expected rejection for ' + JSON.stringify(args)).to.match(/^invalid /);
+            expect(hub.db.doQuery.called).to.equal(false);
+        }
+    });
+
     it('HUB-RETRACT-4: records the ingest watermark (generation + from) on a fenced retraction', async function () {
         hub.db.doQuery.resolves({ affectedRows: 1 });
         await agg.retractFromActionIndex('BTC', 50, null, 7);
@@ -430,6 +441,59 @@ describe('PriceAggregator.receiveOraclePrice() validation + persistence', functi
         expect(hub.db.doQuery.called).to.equal(false);
     });
 
+    // action_index / block_time were the two required wire fields outside every gate:
+    // `parseInt(x) || 0` minted a default, collapsing malformed pushes onto the single
+    // (source_chain, 0) row and onto effective_at 86400 (the 24h delay silently off).
+    it('rejects a missing or malformed action_index without touching the DB', async function () {
+        for (let action_index of [undefined, null, '', 'abc', '7abc', -1, '-1', 7.5, '1e3',
+                                  { i: 1 }, '9007199254740993']) {
+            let bad = { ...VALID, action_index };
+            if (action_index === undefined) delete bad.action_index;
+            let result = await agg.receiveOraclePrice('BTC', bad);
+            expect(result, 'action_index=' + JSON.stringify(action_index))
+                .to.deep.equal({ accepted: false, reason: 'invalid action_index' });
+        }
+        expect(hub.db.doQuery.called).to.equal(false);
+    });
+
+    it('still accepts a genuine action_index of 0', async function () {
+        hub.db.doQuery.callsFake(async (sql) => (/^INSERT/.test(sql) ? {} : []));
+        let result = await agg.receiveOraclePrice('BTC', { ...VALID, action_index: 0 });
+        expect(result).to.deep.equal({ accepted: true });
+    });
+
+    it('rejects a missing or malformed block_time without touching the DB', async function () {
+        for (let block_time of [undefined, null, '', 'abc', 0, '0', -1, '-1', 1.5,
+                                '1e9', { t: 1 }, '9007199254740993']) {
+            let bad = { ...VALID, block_time };
+            if (block_time === undefined) delete bad.block_time;
+            let result = await agg.receiveOraclePrice('BTC', bad);
+            expect(result, 'block_time=' + JSON.stringify(block_time))
+                .to.deep.equal({ accepted: false, reason: 'invalid block_time' });
+        }
+        expect(hub.db.doQuery.called).to.equal(false);
+    });
+
+    it('keeps an old but well-formed block_time acceptable (indexer backfill replays history)', async function () {
+        let insertArgs = null;
+        hub.db.doQuery.callsFake(async (sql, params) => {
+            if (/^INSERT INTO oracle_prices/.test(sql)) { insertArgs = params; return {}; }
+            return [];
+        });
+        let result = await agg.receiveOraclePrice('BTC', { ...VALID, block_time: 1231006505 });
+        expect(result).to.deep.equal({ accepted: true });
+        expect(insertArgs[9]).to.equal(1231006505 + 86400);
+    });
+
+    it('emits the validated integer action_index, not the raw wire value', async function () {
+        hub.db.doQuery.callsFake(async (sql) => (/^INSERT/.test(sql) ? {} : []));
+        let events = [];
+        agg.on('row:inserted', e => events.push(e));
+        let result = await agg.receiveOraclePrice('BTC', { ...VALID, action_index: '42' });
+        expect(result).to.deep.equal({ accepted: true });
+        expect(events[0].row.action_index).to.equal(42);
+    });
+
     // : coin/tick/fiat/memo bounds mirroring the indexer's PRICE v1
     // wire-format rules (actions/price.js parse_v1).
     it('rejects an unsupported or non-string coin without touching the DB', async function () {
@@ -491,21 +555,31 @@ describe('PriceAggregator.receiveOraclePrice() validation + persistence', functi
         }
     });
 
-    it('defaults fee/memo to null, action_index to 0, and source_chain to "" when omitted', async function () {
+    // fee/memo/source_chain still default; action_index and block_time no longer do.
+    // This case previously asserted the defaulting of all five, i.e. it pinned the
+    // very coercion that made a malformed push land on row 0, immediately effective.
+    it('defaults fee/memo to null and source_chain to "" when omitted', async function () {
         let insertArgs = null;
         hub.db.doQuery.callsFake(async (sql, params) => {
             if (/^INSERT INTO oracle_prices/.test(sql)) { insertArgs = params; return {}; }
             return [];
         });
         await agg.receiveOraclePrice(null, {
-            source_address: 'addr1', coin: 'BTC', tick: 'GOLD', fiat: 'USD', value: '1.23'
+            source_address: 'addr1', coin: 'BTC', tick: 'GOLD', fiat: 'USD', value: '1.23',
+            block_time: 1700000000, action_index: 7
         });
         // [addr, chain, coin, tick, fiat, value, fee, memo, block_time, effective_at, action_index]
         expect(insertArgs[1]).to.equal('');     // source_chain
         expect(insertArgs[6]).to.equal(null);   // fee
         expect(insertArgs[7]).to.equal(null);   // memo
-        expect(insertArgs[8]).to.equal(0);      // block_time (parseInt(undefined)||0)
-        expect(insertArgs[10]).to.equal(0);     // action_index
+    });
+
+    it('no longer defaults an omitted action_index or block_time to 0', async function () {
+        let result = await agg.receiveOraclePrice(null, {
+            source_address: 'addr1', coin: 'BTC', tick: 'GOLD', fiat: 'USD', value: '1.23'
+        });
+        expect(result).to.deep.equal({ accepted: false, reason: 'invalid action_index' });
+        expect(hub.db.doQuery.called).to.equal(false);
     });
 });
 
