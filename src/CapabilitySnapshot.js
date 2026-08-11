@@ -47,6 +47,12 @@ const NO_INDEXER_DETAIL = 'No BTC indexer URL could be resolved (BTC_INDEXER_API
 const MALFORMED_DETAIL  = 'The response carried no `validators` array. Refusing it rather than treating a wrong ' +
     'shape as an empty validator set (quorum 0 is indistinguishable from single-node mode).';
 
+// The canonical reorg-depth buffer every hub in a federation must resolve
+// snapshots at. 6 = the BTC confirmation depth the platform already treats as
+// buried (XCHAIN_CONFIRMATIONS_BTC). Named once so the default and the
+// divergence assertion below can never drift apart.
+const CANONICAL_REORG_BUFFER = 6;
+
 // The indexer answered but the JSON-RPC body is unusable. Keep the reported
 // error text short: it lands in a log line, and the useful part is which of the
 // two cases happened (no result at all vs. an explicit error).
@@ -74,8 +80,10 @@ class CapabilitySnapshot {
         // CONSENSUS-CRITICAL: the buffer is part of what every hub folds into
         // the same round height, so it must be identical federation-wide (same
         // tier as ORACLE_EPOCH_START). Override via HUB_SNAPSHOT_REORG_BUFFER
-        // only as a coordinated fleet change. Default 6 = the BTC confirmation
-        // depth the platform already treats as buried (XCHAIN_CONFIRMATIONS_BTC).
+        // only as a coordinated fleet change; on mainnet/testnet a divergent
+        // value now refuses boot rather than forking silently (#4167, see
+        // _resolveReorgBuffer). Default 6 = the BTC confirmation depth the
+        // platform already treats as buried (XCHAIN_CONFIRMATIONS_BTC).
         this.reorgBufferBlocks = this._resolveReorgBuffer();
         // Last time we alarmed on a truncated validator-set snapshot (#4479).
         // Truncation is alarm-and-PROCEED (the snapshot is still usable and
@@ -526,16 +534,49 @@ class CapabilitySnapshot {
     // Only a non-negative integer is accepted; anything else warns loudly and
     // falls back to the default rather than silently forking the federation on
     // a typo'd env value.
+    //
+    // A VALID but non-canonical value is the sharper hazard and is why this is
+    // more than a parse (#4167): the buffer is subtracted before the cache key
+    // and the indexer RPC are formed, so two hubs handed the same requested
+    // height resolve DIFFERENT blocks, and their validator sets and quorum N
+    // diverge with nothing logged. Mainnet/testnet therefore refuse the value
+    // outright (throws out of the constructor, halting boot fail-closed);
+    // regtest/standalone warn and accept so test venues can run deliberate
+    // depths. XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT=1 is the loud one-off bypass
+    // for a coordinated fleet-wide change. Same shape and same reasoning as
+    // XChainHub._assertCanonicalMinStakes, which guards the identical fork
+    // class for MIN_STAKE.
     _resolveReorgBuffer() {
         let raw = process.env.HUB_SNAPSHOT_REORG_BUFFER;
-        if (raw === undefined || raw === '') return 6;
+        if (raw === undefined || raw === '') return CANONICAL_REORG_BUFFER;
         let n = Number(raw);
         if (!Number.isInteger(n) || n < 0) {
             console.error('CapabilitySnapshot: HUB_SNAPSHOT_REORG_BUFFER "' + raw + '" is not a ' +
-                'non-negative integer; using the default (6). This value is CONSENSUS-CRITICAL and ' +
-                'must match across the federation.');
-            return 6;
+                'non-negative integer; using the default (' + CANONICAL_REORG_BUFFER + '). This value ' +
+                'is CONSENSUS-CRITICAL and must match across the federation.');
+            return CANONICAL_REORG_BUFFER;
         }
+        if (n === CANONICAL_REORG_BUFFER) return n;
+        let detail = 'HUB_SNAPSHOT_REORG_BUFFER is ' + n + ' but the canonical federation value is ' +
+            CANONICAL_REORG_BUFFER + '. Every hub subtracts this buffer before resolving a snapshot, ' +
+            'so a hub running a different value locks a different block for the same round: divergent ' +
+            'validator sets and quorum N across the federation. Change it fleet-wide or not at all ' +
+            '(XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT=1 to bypass on a venue where every hub runs the SAME override).';
+        if (process.env.XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT === '1') {
+            console.warn('XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT=1: skipping the canonical reorg-buffer ' +
+                'assertion. ' + detail);
+            return n;
+        }
+        // Strict only on a declared consensus network: standalone ('' - no
+        // consensus runs) and regtest venues warn instead of refusing.
+        let network = (this.hub && this.hub.network) || '';
+        if (network === 'mainnet' || network === 'testnet') {
+            let err = new Error('CapabilitySnapshot: ' + detail);
+            err.code = 'REORG_BUFFER_MISMATCH';
+            throw err;
+        }
+        console.warn('CapabilitySnapshot: reorg-buffer mismatch (non-strict on ' +
+            (network || 'standalone') + '): ' + detail);
         return n;
     }
 

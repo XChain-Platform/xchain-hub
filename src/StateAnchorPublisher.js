@@ -1348,6 +1348,25 @@ class StateAnchorPublisher {
         let signingSet     = await this._resolveCapabilitySet('oracle_publish', Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));
         let signingPubkeys = signingSet.map(v => v.pubkey);
         let snapCount      = signingPubkeys.length;
+        // An UNRESOLVED (empty) signing set is not a quorum of one: defer the round,
+        // exactly as the two publisher-attestation rounds already do (_runPublisherAttestationRound
+        // / _runArchiveAttestationRound both abstain on snapCount === 0). The election gate
+        // above fails closed on an empty set, but it reads a DIFFERENT resolver at a
+        // DIFFERENT height (_getActiveOraclePublishPubkeys @ electionBlock vs
+        // _resolveCapabilitySet @ cp.snapshot_block), so passing it does not imply
+        // snapCount > 0. Without this the `snapCount <= 1` self-sign path below treats 0
+        // as single-node: the leader signs an archive whose declared signing set it is
+        // not a member of, publishes a v1 that the indexer (anchor.js) and full-parse
+        // recovery both refuse (their quorum verifiers need at least one qualified
+        // signer), and dequeues the settled cross_chain rows anyway - a live-vs-recovered
+        // ledger fork. Returning 'none' leaves every row pending, so a later flush
+        // re-archives them under a fresh batch seq once the set resolves.
+        if(snapCount === 0){
+            console.warn('StateAnchorPublisher: unresolved oracle_publish set at snapshot_block ' +
+                         Number(cp.snapshot_block) + ' (batch ' + batchSeq + '); deferring the archive ' +
+                         'round rather than self-publishing an empty-set v1 (rows stay pending)');
+            return 'none';
+        }
         // STAKE_WEIGHTED_QUORUM: weighted (source-deduped) at/above activation, else
         // legacy 2f+1 count; keyed on the BTC snapshot_block so the hub flips on the
         // same anchor as anchor.js (`swq.isStakeWeightedQuorumActive(snapshotBlock, NETWORK)`).
@@ -2033,7 +2052,10 @@ class StateAnchorPublisher {
         let archive;
         try { archive = JSON.parse(json); } catch(e){ return; }
         if(!archive || !Array.isArray(archive.matches) || archive.matches.length !== Number(d.match_count)) return;
-        if(!(await this._verifyArchiveAgainstLocal(archive))){
+        // Wrapper snapshot_block from OUR OWN row (`mine`), never the archive body: it
+        // decides which oracle_publish group the completeness check requires, and `mine`
+        // is byte-matched to the wire cp above (snapshot_block rides _rawCanonicalCheckpoint).
+        if(!(await this._verifyArchiveAgainstLocal(archive, Number(mine.snapshot_block)))){
             console.warn('StateAnchorPublisher: proposed archive (batch ' + d.batch_seq + ') diverges from our DB; NOT signing');
             return;
         }
@@ -2052,7 +2074,12 @@ class StateAnchorPublisher {
     // comparing local copies). Capability sets must exactly equal our own
     // resolution (set equality, not subset, so a leader can neither inject a
     // fake validator nor omit a real one).
-    async _verifyArchiveAgainstLocal(archive){
+    //
+    // `wrapperSnapshotBlock` is the archive wrapper checkpoint's snapshot_block (the
+    // caller's own byte-matched row, never the archive body), needed because the
+    // completeness check below has to know which oracle_publish group _buildArchive
+    // was obliged to emit for the wrapper itself.
+    async _verifyArchiveAgainstLocal(archive, wrapperSnapshotBlock){
         for(let am of archive.matches){
             let rows = await this.db.doQuery('SELECT * FROM cross_chain_matches WHERE match_id = ? LIMIT 1', [am.match_id]);
             if(rows && rows.length > 0){
@@ -2244,6 +2271,39 @@ class StateAnchorPublisher {
             groups.get(key).set(String(s.signing_pubkey).toLowerCase() + '|' + sSource,
                                 { amount: String(s.amount), source: sSource });
         }
+        // COMPLETENESS. `groups` is derived from archive.capability_snapshots, which is
+        // ATTACKER-SUPPLIED, so iterating it alone only proves the groups the leader chose
+        // to include are honest. A Byzantine elected leader that DROPS a whole
+        // (block, capability) group is never visited: the match/call/reward signature
+        // checks above resolve their sets LOCALLY, so they still pass, and this hub
+        // co-signs. The indexer's full-parse recovery then rebuilds each verification set
+        // FROM the archived rows (recovery.js setFor), gets an empty set for the omitted
+        // group and refuses the wrapper or the affected match/call: a quorum-signed but
+        // permanently unrecoverable anchor stranding settled cross_chain rows.
+        //
+        // Re-derive the group list exactly as the honest builder does (_buildArchive
+        // `wants`) and seed any missing key with an EMPTY map, so the loop below judges it
+        // with the same `resolved.length !== archived.size` rule as every present group.
+        // Seeding rather than rejecting outright is deliberate: a group whose set OUR OWN
+        // resolution also finds empty is legitimately absent from an honest archive
+        // (_buildArchive emits one row per member, so an empty set emits nothing), and
+        // rejecting it would stall co-signing on honest rounds.
+        let wants = (archive.matches || []).map(m => ({ block: m.snapshot_block, capability: 'cross_chain' }))
+            .concat((archive.calls   || []).map(c => ({ block: c.snapshot_block, capability: 'cross_chain' })))
+            .concat((archive.rewards || []).map(r => ({ block: r.block_index,    capability: 'oracle_publish' })));
+        if(wrapperSnapshotBlock != null)
+            wants.push({ block: wrapperSnapshotBlock, capability: 'oracle_publish' });
+        for(let w of wants){
+            // An honest builder always emits a finite height; a non-numeric one is a
+            // malformed archive, and letting it through would resolve a NaN-keyed set.
+            if(!Number.isFinite(Number(w.block))){
+                console.warn('StateAnchorPublisher: archive requires a ' + w.capability +
+                             ' snapshot group at a non-numeric block (' + w.block + '); NOT signing');
+                return false;
+            }
+            let key = Number(w.block) + '|' + w.capability;
+            if(!groups.has(key)) groups.set(key, new Map());
+        }
         for(let [key, archived] of groups){
             let [block, capability] = key.split('|');
             let resolved = await this._resolveCapabilitySet(capability, Number(block), resolveQuorumNetwork(archive, this.network));
@@ -2360,9 +2420,15 @@ class StateAnchorPublisher {
         // the rows anyway would strand settled cross_chain_matches/calls in an
         // unrecoverable hole. Treat it exactly like a lost chunk: keep the rows
         // pending so a later round re-archives them under a fresh batch seq. The
-        // single-node / unresolvable-set degenerate (validators.length <= 1) keeps
-        // today's behavior (the indexer stores those as recoverable 'unverified').
-        let onChainValid = (round.validators.length <= 1) ||
+        // GENUINE single-node degenerate (validators.length === 1) keeps today's
+        // behavior (the indexer stores those as recoverable 'unverified').
+        // === 1, not <= 1: an EMPTY declared signing set is not a single-node quorum.
+        // _startArchiveRound now defers a snapCount === 0 round outright, so this is
+        // defense-in-depth for any other path into _publishArchive; it fails closed
+        // (an empty set gives qualified 0 -> bftQuorumOrSingle(0, 1) === 1 > 0 valid
+        // signers), so the rows stay pending instead of being dequeued against a v1
+        // no verifier can ever confirm.
+        let onChainValid = (round.validators.length === 1) ||
                            this._quorumVerified(round.canonical, sigs, round.validators, round.weighted);
 
         // A partially-published archive is unrecoverable (recovery refuses
@@ -2480,6 +2546,38 @@ class StateAnchorPublisher {
         if(!(await this._verifyFinalizedAgainstLocal(d.matches, calls, rewards))){
             console.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') announces content ' +
                          'diverging from our DB; ignoring back-fill (rows re-archive under a fresh seq)');
+            return;
+        }
+        // XANC-FINALIZED-NULLTXID-1 (partial closure of #4180). The back-fill below is
+        // state-changing and runs before ANY on-chain check: it stamps
+        // archived_status = status, and the pending selectors
+        // (`batch_seq IS NULL OR archived_status <> status`) then skip those rows, which
+        // for a row already at its TERMINAL status means forever. An elected-yet-
+        // Byzantine leader that announces real pending rows carrying their true current
+        // statuses passes _verifyFinalizedAgainstLocal (the statuses genuinely match) and
+        // can suppress them with an archive it never published.
+        //
+        // An honest leader NEVER emits that shape: _publishArchive rewrites every match
+        // and call status to the '__partial__' sentinel and clears the reward list
+        // whenever the broadcast returned no txid, so `txid == null` implies
+        // `every status === '__partial__'`, which leaves `archived_status <> status` and
+        // keeps the rows eligible. Refuse the combination the honest builder cannot
+        // produce. This costs no liveness at all and needs no chain access, but it closes
+        // only the NULL-txid half: a FABRICATED-but-plausible txid still stamps, and
+        // closing that needs the announced txid verified on DOGE at depth. That gate
+        // cannot simply be inlined here - the FINALIZED is broadcast at 0 confirmations
+        // (mempool) exactly like XANC_V0_DONE, so it needs the same defer-and-re-verify
+        // queue (_deferV0Done / _drainDeferredV0Done), plus an archive-head version SET
+        // {1, 6} in _verifyArchiveCheckpointOnChain, which today hardcodes v1 because it
+        // only runs below the  flag-day.
+        let terminalAnnounced = (d.matches || []).some(m => m && m.status !== '__partial__') ||
+                                calls.some(c => c && c.status !== '__partial__') ||
+                                rewards.length > 0;
+        if(!d.txid && terminalAnnounced){
+            console.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') carries NO txid but ' +
+                         'announces non-__partial__ rows; an honest publish marks every row __partial__ when ' +
+                         'the broadcast returned no txid, so this cannot be a real archive. Ignoring the ' +
+                         'back-fill (rows stay pending and re-archive under a fresh seq)');
             return;
         }
         await this._backfillBatch(Number(d.batch_seq), d.matches, d.txid ? String(d.txid) : null,

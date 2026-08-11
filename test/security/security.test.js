@@ -290,10 +290,20 @@ describe('Security Hardening', function () {
             consensus.lastAppliedSeq = 2;
             let config = { a: 1 };
             let digest = consensus._digest(config);
+            // #4168: with a 4-member validator set this hub is federated
+            // regardless of MIN_VALIDATORS, so it declines to PREPARE unless the
+            // PRE_PREPARE carries a block height and a deterministic snapshot
+            // resolves. Supply both; the seq-monotonicity contract under test is
+            // unaffected.
+            hub.capabilitySnapshot = {
+                getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000, validators: [{ pubkey: 'aa', amount: '50000' }] }),
+                getQuorum: sinon.stub().returns(3)
+            };
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
             let envelope = {
                 type: 'PBFT_PRE_PREPARE',
                 sender: VALIDATORS_4[0].addr,                       // leader for (seq 3, view 1): (3+1)%4 = 0
-                data: { seq: 3, view: 1, configDigest: digest, config: config }
+                data: { seq: 3, view: 1, configDigest: digest, config: config, btcBlockHeight: 800000 }
             };
             await consensus._handlePrePrepare(envelope);
             expect(consensus.pendingProposals.has(3)).to.be.true;

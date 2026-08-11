@@ -22,6 +22,24 @@ function makeDigest(config) {
     return crypto.createHash('sha256').update(JSON.stringify(config)).digest('hex');
 }
 
+// Give a chaos hub the deterministic federation snapshot a real federated hub
+// locks every round. #4168 keyed the fail-closed federation guards on the LIVE
+// validator set rather than the optional MIN_VALIDATORS, so a multi-member set
+// with a NULL snapshot now correctly refuses to propose. These experiments
+// inject a CRASH, not an indexer outage, so they must clear that guard to reach
+// the behaviour they measure. Quorum is stubbed to what _getQuorum() returns
+// for the set under test, leaving each experiment's arithmetic unchanged.
+function wireFederationSnapshot(hub, quorum) {
+    let snapshot = { blockIndex: 800000, validators: [{ pubkey: 'aa', amount: '50000' }] };
+    hub.capabilitySnapshot = {
+        getActiveValidatorSnapshot: sinon.stub().resolves(snapshot),
+        getActiveWeightSnapshot:    sinon.stub().resolves(snapshot),
+        getQuorum:                  sinon.stub().returns(quorum)
+    };
+    hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+    return snapshot;
+}
+
 describe('Chaos: PBFT Leader Crash (CON-1)', function () {
     this.timeout(15000);
 
@@ -72,6 +90,7 @@ describe('Chaos: PBFT Leader Crash (CON-1)', function () {
         let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
         let con = new Consensus(hub);
         con.validatorSet = VALIDATORS_4;
+        wireFederationSnapshot(hub, 3); // N=4 -> quorum 3; clears the #4168 federation guard
         // seq=3 → nextSeq=4 → leader=validators[(4+0)%4]=validators[0] (this node)
         con.seq = 3;
         con.timeout = 100;
@@ -149,11 +168,17 @@ describe('Chaos: PBFT Leader Crash (CON-1)', function () {
         con.stop();
     });
 
+    // #4168: the two experiments below already fail at HEAD on a pre-existing
+    // race (the PREPARE is emitted synchronously before propose() awaits its
+    // snapshot lock and registers the proposal). They are wired anyway so that
+    // failure keeps reporting ITS cause instead of being masked by the
+    // federation guard, which would send whoever fixes them after the wrong bug.
     it('config write completes under new leader after view change', async function () {
         // New leader (validator-3, index 2) proposes after view change
         let hub = createMockHub({ validatorAddr: VALIDATORS_4[2].addr });
         let con = new Consensus(hub);
         con.validatorSet = VALIDATORS_4;
+        wireFederationSnapshot(hub, 3); // N=4 -> quorum 3; clears the #4168 federation guard
         con.view = 1;
         // seq=0 → nextSeq=1 → leader=validators[(1+1)%4]=validators[2] (this node)
         con.timeout = 5000;
@@ -199,6 +224,7 @@ describe('Chaos: PBFT Leader Crash (CON-1)', function () {
         let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
         let con = new Consensus(hub);
         con.validatorSet = VALIDATORS_4;
+        wireFederationSnapshot(hub, 3); // N=4 -> quorum 3; clears the #4168 federation guard
         // seq=3 → nextSeq=4 → leader=validators[0]
         con.seq = 3;
         con.timeout = 5000;

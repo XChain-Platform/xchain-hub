@@ -200,9 +200,17 @@ describe('Boundary: Consensus (PBFT)', function () {
         it('accepts valid PRE_PREPARE with correct digest', async function () {
             let config = { x: 1 };
             let digest = consensus._digest(config);
+            // #4168: a 4-member validator set is a federation regardless of
+            // MIN_VALIDATORS, so the follower needs the block height and the
+            // deterministic snapshot a real round carries before it will accept.
+            hub.capabilitySnapshot = {
+                getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000, validators: [{ pubkey: 'aa', amount: '50000' }] }),
+                getQuorum: sinon.stub().returns(3)
+            };
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
-                data: { seq: 5, view: 0, configDigest: digest, config }
+                data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 800000 }
             });
             expect(consensus.pendingProposals.has(5)).to.be.true;
             let p = consensus.pendingProposals.get(5);

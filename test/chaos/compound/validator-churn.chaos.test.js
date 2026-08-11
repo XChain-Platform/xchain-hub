@@ -24,6 +24,25 @@ function makeDigest(config) {
     return crypto.createHash('sha256').update(JSON.stringify(config)).digest('hex');
 }
 
+// Give a chaos hub the deterministic federation snapshot a real federated hub
+// locks every round. #4168 keyed the fail-closed federation guards on the LIVE
+// validator set rather than the optional MIN_VALIDATORS, so a multi-member set
+// with a NULL snapshot now correctly refuses to propose. These experiments
+// inject validator CHURN, not an indexer outage, so they must clear that guard
+// to reach the behaviour they measure. Quorum is stubbed to what _getQuorum()
+// returns for the set under test, leaving each experiment's arithmetic
+// unchanged.
+function wireFederationSnapshot(hub, quorum) {
+    let snapshot = { blockIndex: 800000, validators: [{ pubkey: 'aa', amount: '50000' }] };
+    hub.capabilitySnapshot = {
+        getActiveValidatorSnapshot: sinon.stub().resolves(snapshot),
+        getActiveWeightSnapshot:    sinon.stub().resolves(snapshot),
+        getQuorum:                  sinon.stub().returns(quorum)
+    };
+    hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+    return snapshot;
+}
+
 describe('Chaos: Validator Churn During Consensus (XC-5)', function () {
     this.timeout(15000);
 
@@ -41,6 +60,7 @@ describe('Chaos: Validator Churn During Consensus (XC-5)', function () {
         let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
         let con = new Consensus(hub);
         con.validatorSet = [...VALIDATORS_4]; // 4 validators, quorum=3
+        wireFederationSnapshot(hub, 3); // clears the #4168 federation guard
         // seq=3 → nextSeq=4 → leader=validators[(4+0)%4]=validators[0]
         con.seq = 3;
         con.timeout = 5000;
@@ -88,6 +108,7 @@ describe('Chaos: Validator Churn During Consensus (XC-5)', function () {
         let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
         let con = new Consensus(hub);
         con.validatorSet = [...VALIDATORS_4]; // N=4, quorum=3
+        wireFederationSnapshot(hub, 3); // clears the #4168 federation guard
         con.seq = 3;
         con.timeout = 5000;
         hub.db.doQuery.resolves([]);
@@ -187,6 +208,7 @@ describe('Chaos: Validator Churn During Consensus (XC-5)', function () {
         let hub = createMockHub({ validatorAddr: VALIDATORS_4[0].addr });
         let con = new Consensus(hub);
         con.validatorSet = [...VALIDATORS_4, v5]; // N=5, quorum=3
+        wireFederationSnapshot(hub, 3); // clears the #4168 federation guard
         // seq=4 → nextSeq=5 → leader=validators[(5+0)%5]=validators[0]
         con.seq = 4;
         con.timeout = 5000;

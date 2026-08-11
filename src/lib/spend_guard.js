@@ -42,6 +42,10 @@
  *     effector spend MORE, or spend twice.
  *   - check()/allow() are pure pre-send predicates. record() is called only AFTER
  *     a broadcast actually went out, so deferred/failed sends consume no budget.
+ *   - A caller that AWAITS its send uses reserve()/commit()/release() instead: the
+ *     pure-predicate pair leaves a window in which concurrent callers all pass the
+ *     same check before any of them records, and all spend past the cap ().
+ *     release() on every non-send exit keeps "failed sends consume no budget" true.
  *   - The USD cap is default-ON (config-default-enabled per ): unset config
  *     yields the $2000 clamp, not "disabled". Per-broadcast cost defaults to a
  *     conservative estimate; a caller that knows the real fee passes it to
@@ -206,6 +210,46 @@ class SpendGuard {
         this.ceiling.record(now);
         this._prune(now);
         this._spends.push({ t: now, cost: this._cost(cost) });
+    }
+
+    // ---- Await-safe gate: reserve before the send, release if it never went out ----
+    // . check()/allow() are pure predicates and record() runs after the
+    // awaited broadcast, so every caller that awaits between the two leaves a window
+    // in which concurrent callers all read the same pre-send budget and all spend.
+    // reserve() runs the same gates and CONSUMES the budget in the same synchronous
+    // turn, which closes that window by construction on Node's single thread.
+    //
+    // Returns an opaque token, or null when a gate blocked (call noteBlocked() for
+    // the reason, exactly as after a false allow()). The reservation IS the record:
+    // never call record() for a reserved send, or the spend is counted twice.
+    reserve(cost){
+        if (this.paused){ this.blocked.pause++; return null; }
+        let now = Date.now();
+        if (!this.ceiling.allow(now)){ this.blocked.spend++; return null; }
+        let c = this._cost(cost);
+        if (this.spentInWindow(now) + c > this.maxSpendUsdCents){ this.blocked.spend++; return null; }
+
+        this._reserveSeq = (this._reserveSeq || 0) + 1;
+        let token = { id: this._reserveSeq, ceilingHandle: this.ceiling.reserve(now), settled: false };
+        this._spends.push({ t: now, cost: c, reservation: token.id });
+        return token;
+    }
+
+    // The send went out: keep the reserved budget as the recorded spend and make the
+    // token inert, so a later stray release() cannot hand back a real spend.
+    commit(token){
+        if (token) token.settled = true;
+    }
+
+    // The send never went out (blocked, threw, or was abandoned): give the budget
+    // back. Idempotent, and a no-op on a committed token; a missed release only
+    // over-counts, which fails closed and ages out within one window.
+    release(token){
+        if (!token || token.settled) return;
+        token.settled = true;
+        let i = this._spends.findIndex(e => e.reservation === token.id);
+        if (i >= 0) this._spends.splice(i, 1);
+        this.ceiling.release(token.ceilingHandle);
     }
 
     // ---- Legacy drop-in shims for former SpendCeiling call sites ----

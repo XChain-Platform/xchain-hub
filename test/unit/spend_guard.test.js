@@ -146,6 +146,62 @@ describe('SpendGuard ', function () {
         });
     });
 
+    describe('reserve()/commit()/release() ()', function () {
+
+        it('consumes budget at reserve time, before any send can be awaited', function () {
+            const g = new SpendGuard(PFX, { [PFX + '_MAX_PUBLISHES_PER_WINDOW']: '1' });
+            const t = g.reserve();
+            expect(t).to.be.an('object');
+            // The window is already spent for a second caller, though no send has
+            // completed and record() was never called: this is the whole point.
+            expect(g.allow()).to.equal(false);
+            expect(g.reserve()).to.equal(null);
+            g.commit(t);
+            expect(g.stats().count.inWindow).to.equal(1);
+        });
+
+        it('release() hands the budget back so a failed send costs nothing', function () {
+            const g = new SpendGuard(PFX, { [PFX + '_MAX_PUBLISHES_PER_WINDOW']: '1' });
+            const t = g.reserve();
+            expect(g.allow()).to.equal(false);
+            g.release(t);
+            expect(g.allow()).to.equal(true);
+            expect(g.stats().count.inWindow).to.equal(0);
+            expect(g.spentInWindow()).to.equal(0);
+        });
+
+        it('release() is idempotent and never frees a committed spend', function () {
+            const g = new SpendGuard(PFX, { [PFX + '_MAX_PUBLISHES_PER_WINDOW']: '2' });
+            const a = g.reserve(), b = g.reserve();
+            g.commit(a);
+            g.release(b); g.release(b);          // double release frees exactly one slot
+            expect(g.stats().count.inWindow).to.equal(1);
+            g.release(a);                         // committed: must not be given back
+            expect(g.stats().count.inWindow).to.equal(1);
+        });
+
+        it('reserves against the USD budget too, and refuses when it would overshoot', function () {
+            const g = new SpendGuard(PFX, {
+                [PFX + '_MAX_SPEND_USD_CENTS_PER_WINDOW']: '200',
+                [PFX + '_EST_SPEND_USD_CENTS']: '100'
+            });
+            const a = g.reserve(), b = g.reserve();
+            expect(a).to.not.equal(null);
+            expect(b).to.not.equal(null);
+            expect(g.spentInWindow()).to.equal(200);
+            expect(g.reserve()).to.equal(null);   // third would exceed the $2 window budget
+            expect(g.stats().blocked.spend).to.be.greaterThan(0);
+        });
+
+        it('refuses to reserve while the capability is paused', function () {
+            const g = new SpendGuard(PFX, {});
+            g.pause('incident');
+            expect(g.reserve()).to.equal(null);
+            g.resume();
+            expect(g.reserve()).to.be.an('object');
+        });
+    });
+
     describe('stats()', function () {
         it('surfaces every gate for operator diagnostics', function () {
             const g = new SpendGuard(PFX, { [PFX + '_MIN_BALANCE']: '5' });

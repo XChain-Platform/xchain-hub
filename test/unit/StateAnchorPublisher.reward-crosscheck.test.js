@@ -88,8 +88,18 @@ function makePublisher(localRewardRows, oraclePublishSet) {
     return new StateAnchorPublisher(hub);
 }
 
-const verify = (pub, ar) =>
-    pub._verifyArchiveAgainstLocal({ matches: [], calls: [], rewards: [ar], capability_snapshots: [] });
+// The fixture carries the oracle_publish snapshot group at the reward's earn block,
+// built the same way _buildArchive builds it. It used to pass capability_snapshots: []
+// because the verifier only walked the groups an archive happened to include; since
+// #4185 it also REQUIRES the groups the builder was obliged to emit, so an empty list
+// is now refused for completeness before these reward assertions are ever reached.
+// Nothing about the cross-pubkey guard under test changes.
+const verify = async (pub, ar) => {
+    let set   = await pub._resolveCapabilitySet('oracle_publish', BLOCK, '');
+    let snaps = set.map(v => ({ snapshot_block: BLOCK, capability: 'oracle_publish',
+                                signing_pubkey: v.pubkey, amount: v.amount, source: v.source }));
+    return pub._verifyArchiveAgainstLocal({ matches: [], calls: [], rewards: [ar], capability_snapshots: snaps });
+};
 
 describe('StateAnchorPublisher #4383 archive reward cross-pubkey guard', function () {
 

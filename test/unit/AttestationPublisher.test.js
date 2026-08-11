@@ -1680,4 +1680,228 @@ describe('AttestationPublisher: effector-safety guards', function () {
         expect(pub._ambiguousSends.has(rid)).to.equal(false);
         expect(readQueue(pub.queuePath).length).to.equal(0);
     });
+
+    // ── : the spend ceiling must hold across the awaited broadcast ──
+    it('two concurrent finalized events cannot both pass a ceiling of 1 ()', async function () {
+        process.env.ATTEST_MAX_PUBLISHES_PER_WINDOW = '1';
+        const pub = makePublisher(MY_PUB);
+        fs.writeFileSync(pub.queuePath, '');
+
+        // Park every broadcast until both handlers have reached the await: that is the
+        // interleaving the pure-predicate allow() could not survive, since both
+        // handlers then read the same pre-send count and both spend a real fee.
+        let release;
+        const gate = new Promise(res => { release = res; });
+        const bcast = sinon.stub().callsFake(async () => { await gate; return { txid: 'x' }; });
+        pub.setBroadcastHook(bcast);
+
+        const finalize = (rid) => pub.onRequestFinalized({
+            requestId: rid, providerId: 'http_get', responseBody: Buffer.from('ok'),
+            status: 'ok', meta: '', signatures: [{ pubkey: MY_PUB, sig: 'ee'.repeat(64) }], leaderPubkey: MY_PUB
+        });
+        const inFlight = [finalize('a1'.repeat(32)), finalize('b2'.repeat(32))];
+        release();
+        await Promise.all(inFlight);
+
+        expect(bcast.callCount, 'a ceiling of 1 must admit exactly one irreversible send').to.equal(1);
+        expect(pub.spendGuard.stats().count.inWindow).to.equal(1);
+    });
+
+    // ── : the at-most-once guard must survive a restart ──
+
+    // Minimal hub DB double over the attest_published_requests marker table.
+    function makeMarkerDb(rows, failOn) {
+        const calls = [];
+        return {
+            calls,
+            doQuery: async (sql, params) => {
+                calls.push({ sql, params });
+                if (failOn && failOn.test(sql)) throw new Error('marker table unreachable');
+                if (/^SELECT/.test(sql)) {
+                    return /WHERE request_id/.test(sql)
+                        ? rows.filter(r => r.request_id === params[0])
+                        : rows.slice();
+                }
+                if (/^INSERT/.test(sql)) {
+                    // ON DUPLICATE KEY UPDATE request_id = request_id: an existing row stands.
+                    if (!rows.find(r => r.request_id === params[0])) rows.push({ request_id: params[0], txid: null, sent_at: null });
+                    return {};
+                }
+                if (/^UPDATE/.test(sql)) {
+                    const row = rows.find(r => r.request_id === params[1]);
+                    if (row) { row.txid = params[0]; row.sent_at = new Date(); }
+                    return {};
+                }
+                if (/^DELETE/.test(sql)) {
+                    // ... WHERE request_id = ? AND sent_at IS NULL: a confirmed marker survives.
+                    const i = rows.findIndex(r => r.request_id === params[0]);
+                    if (i >= 0 && (rows[i].sent_at === null || rows[i].sent_at === undefined)) rows.splice(i, 1);
+                    return {};
+                }
+                return {};
+            }
+        };
+    }
+
+    it('startup hydration adopts sent markers and quarantines intent-only rows ()', async function () {
+        const sent = 'd4'.repeat(32), intent = 'e5'.repeat(32);
+        const db = makeMarkerDb([
+            { request_id: sent,   txid: 'tx-1', sent_at: new Date() },
+            { request_id: intent, txid: null,   sent_at: null }
+        ]);
+        const pub = makePublisher(MY_PUB, { db });
+        await pub._hydratePublishedMarkers();
+        expect(pub._publishedRequests.has(sent)).to.equal(true);
+        expect(pub._quarantinedRequests.has(intent)).to.equal(true);
+        expect(pub._quarantinedRequests.has(sent)).to.equal(false);
+        expect(pub.getPublisherStats().quarantined).to.equal(1);
+    });
+
+    it('sweep does NOT re-broadcast a still-pending request with a durable sent marker ()', async function () {
+        // The restart case: fresh process (empty in-process guards), the response was
+        // broadcast before the crash and is still PENDING because it is not yet mined.
+        const rid = 'd6'.repeat(32);
+        const db = makeMarkerDb([{ request_id: rid, txid: 'tx-pre-crash', sent_at: new Date() }]);
+        const pub = makePublisher(MY_PUB, { db });
+        const bcast = sinon.stub().resolves({ txid: 'x' });
+        pub.setBroadcastHook(bcast);
+        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set([rid]));
+        writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: rid, wire: wireFor(rid),
+            responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
+        await pub._processQueue();
+        expect(bcast.called, 'a second BTC fee for an already-sent response').to.equal(false);
+        expect(readQueue(pub.queuePath).length).to.equal(0);
+    });
+
+    it('sweep never re-broadcasts a quarantined request ()', async function () {
+        const rid = 'd7'.repeat(32);
+        const db = makeMarkerDb([{ request_id: rid, txid: null, sent_at: null }]);
+        const pub = makePublisher(MY_PUB, { db });
+        await pub._hydratePublishedMarkers();
+        const bcast = sinon.stub().resolves({ txid: 'x' });
+        pub.setBroadcastHook(bcast);
+        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set([rid]));
+        writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: rid, wire: wireFor(rid),
+            responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
+        await pub._processQueue();
+        expect(bcast.called, 'an unknown-on-chain-state request must await operator replay').to.equal(false);
+        expect(readQueue(pub.queuePath).length).to.equal(0);
+    });
+
+    it('sweep FAILS CLOSED and retains the entry when the marker is unreadable ()', async function () {
+        const rid = 'd8'.repeat(32);
+        const db = makeMarkerDb([], /^SELECT request_id, txid/);
+        const pub = makePublisher(MY_PUB, { db });
+        const bcast = sinon.stub().resolves({ txid: 'x' });
+        pub.setBroadcastHook(bcast);
+        sinon.stub(pub, '_fetchPendingRequestIds').resolves(new Set([rid]));
+        writeQueue(pub.queuePath, [{ ts: Date.now() - 10 * 60000, requestId: rid, wire: wireFor(rid),
+            responsible: [MY_PUB], leaderPubkey: MY_PUB }]);
+        await pub._processQueue();
+        expect(bcast.called, 'must not spend when the request cannot be proven unpublished').to.equal(false);
+        expect(readQueue(pub.queuePath).length).to.equal(1);
+    });
+
+    it('live path records durable intent BEFORE the send and confirms it after ()', async function () {
+        const rid = 'd9'.repeat(32);
+        const rows = [];
+        const db = makeMarkerDb(rows);
+        const pub = makePublisher(MY_PUB, { db });
+        fs.writeFileSync(pub.queuePath, '');
+        let intentAtSendTime = null;
+        pub.setBroadcastHook(async () => {
+            intentAtSendTime = db.calls.filter(c => /^INSERT/.test(c.sql)).length;
+            return { txid: 'tx-live' };
+        });
+        await pub.onRequestFinalized({
+            requestId: rid, providerId: 'http_get', responseBody: Buffer.from('ok'),
+            status: 'ok', meta: '', signatures: [{ pubkey: MY_PUB, sig: 'ee'.repeat(64) }], leaderPubkey: MY_PUB
+        });
+        expect(intentAtSendTime, 'intent must be durable before the fee is spent').to.equal(1);
+        expect(rows.length).to.equal(1);
+        expect(rows[0].txid).to.equal('tx-live');
+        expect(rows[0].sent_at).to.not.equal(null);
+    });
+
+    // The other half of #4250: the marker must never make a NEVER-SENT request worse
+    // off than it was without it. An intent row that outlives a no-send exit is read as
+    // a crash-mid-send at the next startup, and quarantine is permanent (operator-only
+    // replay), so a routine ceiling trip or RPC rejection plus a restart would strand a
+    // request the pre-marker code would simply have published in a later window.
+
+    it('a ceiling-blocked (never sent) request leaves NO intent row and survives a restart ()', async function () {
+        process.env.ATTEST_MAX_PUBLISHES_PER_WINDOW = '1';
+        const sent = 'e1'.repeat(32), blocked = 'e2'.repeat(32);
+        const rows = [];
+        const db = makeMarkerDb(rows);
+        const pub = makePublisher(MY_PUB, { db });
+        fs.writeFileSync(pub.queuePath, '');
+        pub.setBroadcastHook(sinon.stub().resolves({ txid: 'tx-1' }));
+        const finalize = (rid) => pub.onRequestFinalized({
+            requestId: rid, providerId: 'http_get', responseBody: Buffer.from('ok'),
+            status: 'ok', meta: '', signatures: [{ pubkey: MY_PUB, sig: 'ee'.repeat(64) }], leaderPubkey: MY_PUB
+        });
+        await finalize(sent);
+        await finalize(blocked);
+        expect(rows.map(r => r.request_id), 'the ceiling trip must not record an intent to send').to.deep.equal([sent]);
+
+        // Restart over the same marker table and the same WAL: the blocked entry must
+        // still be publishable, not quarantined.
+        const pub2 = makePublisher(MY_PUB, { db });
+        pub2.queuePath = pub.queuePath;
+        await pub2._hydratePublishedMarkers();
+        expect(pub2._quarantinedRequests.size, 'a never-sent request must not be quarantined').to.equal(0);
+        const bcast2 = sinon.stub().resolves({ txid: 'tx-2' });
+        pub2.setBroadcastHook(bcast2);
+        sinon.stub(pub2, '_fetchPendingRequestIds').resolves(new Set([blocked]));
+        writeQueue(pub2.queuePath, readQueue(pub2.queuePath).map(e => Object.assign({}, e, { ts: Date.now() - 60 * 60000 })));
+        await pub2._processQueue();
+        expect(bcast2.called, 'the deferred response must publish in the later window').to.equal(true);
+    });
+
+    it('a definitive send failure withdraws its intent row ()', async function () {
+        const rid = 'e3'.repeat(32);
+        const rows = [];
+        const db = makeMarkerDb(rows);
+        const pub = makePublisher(MY_PUB, { db });
+        fs.writeFileSync(pub.queuePath, '');
+        pub.setBroadcastHook(sinon.stub().rejects(new Error('Encoder RPC error: rejected')));
+        await pub.onRequestFinalized({
+            requestId: rid, providerId: 'http_get', responseBody: Buffer.from('ok'),
+            status: 'ok', meta: '', signatures: [{ pubkey: MY_PUB, sig: 'ee'.repeat(64) }], leaderPubkey: MY_PUB
+        });
+        expect(rows.length, 'a rejected pre-send leaves nothing to quarantine').to.equal(0);
+    });
+
+    it('an AMBIGUOUS send failure KEEPS its intent row ()', async function () {
+        // The mirror of the test above: the tx may have reached the BTC node, so the
+        // intent must survive and quarantine on restart rather than risk a second fee.
+        const rid = 'e4'.repeat(32);
+        const rows = [];
+        const db = makeMarkerDb(rows);
+        const pub = makePublisher(MY_PUB, { db });
+        fs.writeFileSync(pub.queuePath, '');
+        const ambiguous = new Error('socket hang up');
+        ambiguous.attestAmbiguousSend = true;
+        pub.setBroadcastHook(sinon.stub().rejects(ambiguous));
+        await pub.onRequestFinalized({
+            requestId: rid, providerId: 'http_get', responseBody: Buffer.from('ok'),
+            status: 'ok', meta: '', signatures: [{ pubkey: MY_PUB, sig: 'ee'.repeat(64) }], leaderPubkey: MY_PUB
+        });
+        expect(rows.length).to.equal(1);
+        expect(rows[0].sent_at, 'an ambiguous send stays intent-only, which is what quarantines it').to.equal(null);
+    });
+
+    it('a send that never went out releases its reservation ()', async function () {
+        process.env.ATTEST_MAX_PUBLISHES_PER_WINDOW = '1';
+        const pub = makePublisher(MY_PUB);
+        fs.writeFileSync(pub.queuePath, '');
+        pub.setBroadcastHook(sinon.stub().rejects(new Error('Encoder RPC error: rejected')));
+        await pub.onRequestFinalized({
+            requestId: 'c3'.repeat(32), providerId: 'http_get', responseBody: Buffer.from('ok'),
+            status: 'ok', meta: '', signatures: [{ pubkey: MY_PUB, sig: 'ee'.repeat(64) }], leaderPubkey: MY_PUB
+        });
+        expect(pub.spendGuard.stats().count.inWindow, 'a failed send consumes no budget').to.equal(0);
+        expect(pub.spendGuard.allow()).to.equal(true);
+    });
 });

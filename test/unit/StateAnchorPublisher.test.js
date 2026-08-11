@@ -1133,8 +1133,18 @@ describe('StateAnchorPublisher', function () {
     it('follower re-derivation rejects forged reward type / pubkey / amount / source / conflicting local row', async function () {
         let pk0 = pkOf(0), pk1 = pkOf(1);
         let bus = buildMesh(2, { matches: [], rewards: [rewardRow(pk0)] });
-        let verify = (ar) => bus.nodes[1].pub._verifyArchiveAgainstLocal(
-            { matches: [], calls: [], rewards: [ar], capability_snapshots: [] });
+        // Since #4185 the verifier also REQUIRES the snapshot groups _buildArchive was
+        // obliged to emit, so the fixture carries the oracle_publish group at the
+        // reward's earn block instead of an empty list. The reward re-derivation
+        // assertions below are unchanged.
+        let verify = async (ar) => {
+            let pub   = bus.nodes[1].pub;
+            let set   = await pub._resolveCapabilitySet('oracle_publish', Number(ar.block_index), pub.network);
+            let snaps = set.map(v => ({ snapshot_block: Number(ar.block_index), capability: 'oracle_publish',
+                                        signing_pubkey: v.pubkey, amount: v.amount, source: v.source }));
+            return pub._verifyArchiveAgainstLocal(
+                { matches: [], calls: [], rewards: [ar], capability_snapshots: snaps });
+        };
         let good = {
             validator_pubkey: pk0, source: srcOf(pk0), round_number: 7,
             reward_type: 'anchor_BTC', amount: '10.00000000', block_index: 100

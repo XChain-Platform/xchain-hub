@@ -30,9 +30,20 @@
  *         `failoverWindowBlocks` blocks (rank-staggered so the responsible set
  *         takes over in deterministic order), using the committed signatures it
  *         already holds in the queued payload.
- *   - The indexer's pending-request set is the authoritative double-broadcast
- *     guard: an entry whose request is no longer pending has already landed
- *     on-chain (or expired) and is dropped without re-broadcast.
+ *   - The indexer's pending-request set is the first double-broadcast guard: an
+ *     entry whose request is no longer pending has already landed on-chain (or
+ *     expired) and is dropped without re-broadcast. It cannot stand alone, because
+ *     an accepted-but-unmined response is still PENDING and reads exactly like one
+ *     that was never sent ().
+ *   - The durable `attest_published_requests` marker is what closes that gap
+ *     across a restart: intent is recorded IMMEDIATELY before the send, past every
+ *     remaining no-send exit, and confirmed after it, so the sweep can tell "already
+ *     broadcast" from "never sent", and an intent-without-confirmation is quarantined
+ *     for an operator rather than re-broadcast. That ordering is load-bearing, not
+ *     incidental: quarantine is permanent and operator-only, so an intent row that
+ *     outlives a DESIGNED non-send (a tripped spend ceiling, a rejected pre-send)
+ *     would strand a request the sweep would otherwise have published in a later
+ *     window. Ported from OraclePublisher; inert where no hub DB is wired.
  *
  * Wire format (parsed by xchain-indexer/src/actions/attest.js):
  *   ATTEST|1|REQUEST_ID|PROVIDER_ID|RESPONSE_PAYLOAD|STATUS|META|
@@ -138,6 +149,13 @@ class AttestationPublisher {
         this._broadcastSucceeded = 0;
         this._broadcastFailed    = 0;
 
+        //  - request ids whose durable marker records an INTENT to broadcast
+        // with no confirmation: the process died between recording intent and marking
+        // the send done, so whether the BTC tx landed is unknown. Never auto-rebroadcast
+        // (that is the second-fee spend the marker exists to prevent); surfaced at
+        // startup by _hydratePublishedMarkers for an operator to verify and replay.
+        this._quarantinedRequests = new Set();
+
         // In-process at-most-once guard. Request ids broadcast this process lifetime
         // are recorded here the instant broadcaster(...) succeeds. If the post-broadcast
         // queue rewrite fails (disk full, permissions, transient I/O), the just-published
@@ -146,8 +164,9 @@ class AttestationPublisher {
         // same request. Consulted before every (re-)broadcast so a failed rewrite can
         // never become a duplicate on-chain ATTEST. Cleared once the durable queue is
         // confirmed rewritten (mirrors OraclePublisher._publishedRounds). In-process
-        // only: a restart before the queue is repaired can still replay, the same
-        // documented residual the sibling publisher carries.
+        // only: the restart case is covered by the durable `attest_published_requests`
+        // marker below (), and only where a hub DB is wired; with no DB this
+        // set is still the whole guard and a restart can replay.
         this._publishedRequests = new AtMostOnce();
 
         this._sweeping = false;   // sweep self-overlap guard, see _processQueue()
@@ -160,6 +179,7 @@ class AttestationPublisher {
             broadcastFailed:    this._broadcastFailed,
             enqueueFailures:    this._enqueueFailures,   // item 2681
             enabled:            this.enabled,            // item 2678
+            quarantined:        this._quarantinedRequests.size,   // , needs operator replay
             spendGuard:         this.spendGuard.stats()  // 
         };
     }
@@ -186,6 +206,13 @@ class AttestationPublisher {
                 });
             });
         }
+
+        //  - load the durable at-most-once markers BEFORE the crash-replay
+        // sweep below, or that first sweep is exactly the pass that re-broadcasts a
+        // response the pre-crash process already sent.
+        await this._hydratePublishedMarkers().catch(err =>
+            console.error('AttestationPublisher: durable publish-marker hydration failed; the in-process guard is ' +
+                          'the only cover this lifetime: ' + (err && err.message ? err.message : err)));
 
         // Crash recovery: replay any finalized responses that survived a restart
         // (a leader that crashed between the queue write and the broadcast).
@@ -336,23 +363,47 @@ class AttestationPublisher {
             console.warn('AttestationPublisher: ' + rid.substring(0,16) + '... already broadcast this process lifetime; skipping duplicate live broadcast');
             return;
         }
+        //  - the durable half of the same guard, which survives the restart
+        // the in-process set does not. Read-only here; the matching intent write comes
+        // after the spend reservation below. Either non-send answer leaves the entry on
+        // the WAL for the sweep, whose matching gate drops it: the same disposition the
+        // in-process check above already gives a duplicate.
+        if (await this._durableSendGate(rid) !== 'send') return;
         // item 2676 - per-window BTC spend ceiling. A tripped ceiling is not a
         // failure: leave the entry on the WAL so the sweep publishes it in a later
         // window; do not spend now.
-        if (!this.spendGuard.allow()){
+        //  - RESERVE rather than allow(): every 'request:finalized' handler
+        // runs detached (start() only .catch()es it), so several can be parked on the
+        // await below at once. With a pure allow() they all read the same pre-send
+        // budget and every one of them broadcasts, overshooting the window ceiling by
+        // the concurrency with irreversible sends. The reservation consumes the budget
+        // in this synchronous turn and is handed back only if the send never went out.
+        let spendToken = this.spendGuard.reserve();
+        if (!spendToken){
             console.warn(this.spendGuard.noteBlocked() + ' (' + rid.substring(0,16) + '...); entry retained on queue');
+            return;
+        }
+        //  - the send is now committed to, so the intent is durable from here
+        // and not one line earlier: everything above this point can still decline to
+        // send, and an intent row for a never-sent request reads as a crash-mid-send.
+        if (!await this._armPublishIntent(rid)){
+            this.spendGuard.release(spendToken);
             return;
         }
         try {
             let result = await broadcaster(payload, event);
             console.log('AttestationPublisher: broadcast ' + rid.substring(0,16) + '... txid=' + (result && result.txid ? result.txid : '?'));
             this._broadcastSucceeded++;
-            this.spendGuard.record();
+            this.spendGuard.commit(spendToken);   // the reservation IS the recorded spend
             this._ambiguousSends.delete(rid);
             this._recordSpend(rid, result && result.txid, 'live');   // item 2681 durable spend audit
             this._publishedRequests.mark(rid);
+            await this._markPublished(rid, result && result.txid);   //  restart-surviving marker
             this._removeFromQueue(new Set([rid]));
         } catch (e) {
+            // The send did not go out, so it consumes no budget (the invariant the
+            // old post-send record() gave us for free).
+            this.spendGuard.release(spendToken);
             this._broadcastFailed++;
             // item 2674 - an ambiguous send may have reached the BTC node. Mark it so
             // the sweep defers re-broadcast (see _processQueue) instead of blindly
@@ -364,6 +415,9 @@ class AttestationPublisher {
                               '... (tx may have reached the BTC node); sweep will defer re-broadcast for ~' +
                               Math.ceil(this.ambiguousCooldownMs / 1000) + 's before retrying: ', e);
             } else {
+                //  - definitively no send, so withdraw the intent: leaving it
+                // would quarantine an ordinary RPC rejection at the next restart.
+                await this._clearPublishIntent(rid);
                 console.error('AttestationPublisher: broadcast failed for ' + rid.substring(0,16) + '... (will retry via sweep): ', e);
             }
         }
@@ -407,6 +461,166 @@ class AttestationPublisher {
         } catch (e) {
             console.error('AttestationPublisher: failed to write spend-audit record for ' +
                           String(rid).substring(0,16) + '... to ' + this.spendLogPath + ':', e);
+        }
+    }
+
+    // ----- Durable at-most-once marker (attest_published_requests, ) -----
+    //
+    // The WAL entry is removed only AFTER broadcaster() resolves and both in-process
+    // guards die with the process, so a crash between an accepted send and the dequeue
+    // leaves an entry the restart sweep cannot tell from a never-sent one: the request
+    // is still in the indexer's PENDING set precisely because the tx has not been mined
+    // yet. This table is the restart-surviving half of the guard, ported from
+    // OraclePublisher's oracle_published_rounds. Resolved lazily off the hub so a
+    // publisher constructed before the hub's DB is wired still sees it.
+    _db(){ return (this.hub && this.hub.db) ? this.hub.db : null; }
+
+    // Read the durable marker for a request, or null when none exists / no DB is wired.
+    // Shape: { request_id, txid, sent_at }. A non-null sent_at is the authoritative
+    // "already broadcast" signal (txid may legitimately be null when the broadcaster
+    // returns none, so sent_at, not txid, gates re-broadcast). Throws on a DB error so
+    // the caller can FAIL CLOSED rather than spend on an unproven request.
+    async _getPublishedMarker(rid){
+        let db = this._db();
+        if (!db) return null;
+        let rows = await db.doQuery(
+            'SELECT request_id, txid, sent_at FROM attest_published_requests WHERE request_id = ?',
+            [rid]
+        );
+        return (rows && rows.length > 0) ? rows[0] : null;
+    }
+
+    // Durably record broadcast INTENT before the send. Idempotent: an existing row
+    // (intent or sent) is left untouched. Throws on a DB error so the caller fails
+    // closed. No-op when no DB is wired.
+    async _recordPublishIntent(rid){
+        let db = this._db();
+        if (!db) return;
+        await db.doQuery(
+            'INSERT INTO attest_published_requests (request_id) VALUES (?) ' +
+            'ON DUPLICATE KEY UPDATE request_id = request_id',
+            [rid]
+        );
+    }
+
+    // Durably record that the broadcast COMPLETED (sets sent_at + txid). Logged, never
+    // thrown: the BTC fee is already spent, and the surviving intent-only row makes a
+    // restart QUARANTINE the request instead of re-broadcasting it, which is the
+    // fail-safe direction. No-op when no DB is wired.
+    async _markPublished(rid, txid){
+        let db = this._db();
+        if (!db) return;
+        try {
+            await db.doQuery(
+                'UPDATE attest_published_requests SET txid = ?, sent_at = NOW() WHERE request_id = ?',
+                [txid || null, rid]
+            );
+        } catch (e) {
+            console.error('AttestationPublisher: broadcast for ' + String(rid).substring(0,16) + '... succeeded but its ' +
+                'durable sent marker could not be persisted; a restart will QUARANTINE (not re-broadcast) this request. ' +
+                'Operator: confirm the txid on-chain. Error: ', e);
+        }
+    }
+
+    // Startup reconciliation. Loads every confirmed (sent_at set) request into the
+    // in-process guard so a queued-but-already-published response is never re-broadcast
+    // after a restart, and QUARANTINES every intent-only row. Best-effort: a DB error is
+    // logged and startup continues, leaving the in-process guard as the only cover for
+    // this process lifetime (the pre-#4250 behavior, never worse).
+    async _hydratePublishedMarkers(){
+        let db = this._db();
+        if (!db) return;
+        let rows = await db.doQuery('SELECT request_id, sent_at FROM attest_published_requests', []);
+        let quarantined = [];
+        for (let r of (rows || [])){
+            let rid = String(r.request_id).toLowerCase();
+            if (r.sent_at !== null && r.sent_at !== undefined){
+                this._publishedRequests.mark(rid);
+            } else {
+                this._quarantinedRequests.add(rid);
+                quarantined.push(rid.substring(0,16) + '...');
+            }
+        }
+        if (quarantined.length > 0){
+            console.error('AttestationPublisher: ' + quarantined.length + ' request(s) have a publish-intent marker ' +
+                'with no confirmation (' + quarantined.join(', ') + '); their on-chain state is unknown after a crash. ' +
+                'They will NOT be re-broadcast automatically (fail closed). Operator: verify each on-chain and replay ' +
+                'manually if absent.');
+        }
+    }
+
+    // Withdraw an intent row for a send that DEFINITIVELY never went out (a pre-send
+    // broadcaster rejection). Without this the routine failure becomes a permanent
+    // quarantine on the next restart, which is worse than the replay risk the marker
+    // exists to remove. Scoped `AND sent_at IS NULL` so a confirmed marker can never be
+    // deleted by a late/misordered call. Logged, never thrown: leaving the row is the
+    // fail-closed direction, so a failure here only costs an operator replay.
+    async _clearPublishIntent(rid){
+        let db = this._db();
+        if (!db) return;
+        try {
+            await db.doQuery(
+                'DELETE FROM attest_published_requests WHERE request_id = ? AND sent_at IS NULL',
+                [rid]
+            );
+        } catch (e) {
+            console.error('AttestationPublisher: could not withdraw the publish-intent marker for ' +
+                String(rid).substring(0,16) + '... after a definitive send failure; a restart will QUARANTINE it ' +
+                'and it will need an operator replay. Error: ', e);
+        }
+    }
+
+    // Consult the durable marker before spending a BTC fee. READ-ONLY: it writes no
+    // intent, because the caller may still decline to send after it ( verify)
+    // and an intent row for a request that was never sent is indistinguishable from a
+    // crash-mid-send, so a restart would quarantine a perfectly replayable request.
+    // Intent is armed by _armPublishIntent once the send is actually committed to.
+    // Returns one of:
+    //   'send'  - no marker, or intent-only from THIS process; proceed
+    //   'sent'  - already broadcast (durable sent marker, or quarantined); drop, do not send
+    //   'defer' - the marker could not be read; fail closed, leave the entry queued and
+    //             retry on a later sweep
+    // Marking the in-process guard on a 'sent' answer keeps the rest of the pass
+    // consistent with a same-process duplicate.
+    async _durableSendGate(rid){
+        if (this._quarantinedRequests.has(rid)){
+            console.warn('AttestationPublisher: ' + rid.substring(0,16) + '... is quarantined (publish intent recorded ' +
+                'before a crash, on-chain state unknown); not re-broadcasting, awaiting operator replay');
+            return 'sent';
+        }
+        if (!this._db()) return 'send';
+        let marker;
+        try {
+            marker = await this._getPublishedMarker(rid);
+        } catch (e) {
+            console.error('AttestationPublisher: cannot read the durable publish marker for ' + rid.substring(0,16) +
+                '...; deferring broadcast (fail closed to avoid a duplicate BTC spend): ', e);
+            return 'defer';
+        }
+        if (marker && marker.sent_at !== null && marker.sent_at !== undefined){
+            console.warn('AttestationPublisher: ' + rid.substring(0,16) + '... has a durable sent marker (txid ' +
+                (marker.txid || '<none>') + '); not re-broadcasting');
+            this._publishedRequests.mark(rid);
+            return 'sent';
+        }
+        return 'send';
+    }
+
+    // Arm the durable intent immediately before the broadcast, and ONLY once every
+    // remaining no-send exit is behind us (the spend reservation in particular: a
+    // ceiling trip is a designed, routine state whose entry stays queued for a later
+    // window, and an intent row would turn that into a quarantine). Returns false when
+    // the intent cannot be persisted, which is a fail-closed defer: the caller hands the
+    // reservation back and leaves the entry queued rather than spending a fee it could
+    // not record.
+    async _armPublishIntent(rid){
+        try {
+            await this._recordPublishIntent(rid);
+            return true;
+        } catch (e) {
+            console.error('AttestationPublisher: cannot record durable publish intent for ' + rid.substring(0,16) +
+                '...; deferring broadcast (fail closed): ', e);
+            return false;
         }
     }
 
@@ -675,11 +889,31 @@ class AttestationPublisher {
                 continue;
             }
 
+            //  - the guard the pending-set check above cannot give us. A
+            // response the PREVIOUS process broadcast is still pending here (accepted
+            // but unmined), and both in-process guards died with that process, so
+            // without a durable marker this sweep pays a second BTC fee for it.
+            let gate = await this._durableSendGate(rid);
+            if (gate === 'sent'){ drop.add(rid); continue; }
+            if (gate === 'defer') continue;   // retained, retried on a later sweep
+
             // item 2676 - per-window BTC spend ceiling. When exhausted, retain the
             // entry (no spend) for a later window rather than re-broadcasting now.
-            if (!this.spendGuard.allow()){
+            //  - reserve before the await for the same reason the live path
+            // does: this loop awaits a real broadcast per entry, so a live
+            // onRequestFinalized firing mid-await would otherwise pass the very same
+            // allow() this pass already passed.
+            let spendToken = this.spendGuard.reserve();
+            if (!spendToken){
                 console.warn(this.spendGuard.noteBlocked() + ' (' + rid.substring(0,16) + '...); entry retained on queue');
                 continue;
+            }
+            //  - intent goes durable only here, past every no-send exit above
+            // (the ceiling trip especially: it retains the entry for a later window, and
+            // an intent row would make that later window quarantine it instead).
+            if (!await this._armPublishIntent(rid)){
+                this.spendGuard.release(spendToken);
+                continue;   // retained, retried on a later sweep
             }
 
             try {
@@ -687,14 +921,17 @@ class AttestationPublisher {
                 // Arm the at-most-once guard the instant the fee is spent, so a failed
                 // dequeue rewrite below cannot let the next sweep re-broadcast this rid.
                 this._publishedRequests.mark(rid);
-                this.spendGuard.record();
+                this.spendGuard.commit(spendToken);   // the reservation IS the recorded spend
                 this._ambiguousSends.delete(rid);
+                await this._markPublished(rid, result && result.txid);   //  restart-surviving marker
                 this._recordSpend(rid, result && result.txid, rank === 0 ? 'sweep-leader' : 'sweep-stepin');  // item 2681
                 replayed++;
                 drop.add(rid);
                 console.log('AttestationPublisher: ' + (rank === 0 ? 're-broadcast leader' : 'stepped in (rank ' + rank + ')') +
                             ' for ' + rid.substring(0,16) + '... txid=' + (result && result.txid ? result.txid : '?'));
             } catch (e) {
+                // The send did not go out, so it consumes no budget ().
+                this.spendGuard.release(spendToken);
                 // item 2674 - mark an ambiguous replay failure so the NEXT sweep defers
                 // rather than immediately re-broadcasting a possibly-landed tx.
                 if (this._isAmbiguousSendError(e) || (e && e.attestAmbiguousSend)){
@@ -702,6 +939,9 @@ class AttestationPublisher {
                     console.error('AttestationPublisher: AMBIGUOUS replay failure for ' + rid.substring(0,16) +
                                   '... (tx may have reached the BTC node); deferring re-broadcast: ', e);
                 } else {
+                    //  - definitively no send; withdraw the intent so the retry
+                    // this line promises is not cancelled by a quarantine after a restart.
+                    await this._clearPublishIntent(rid);
                     console.error('AttestationPublisher: replay broadcast failed for ' + rid.substring(0,16) + '... (will retry): ', e);
                 }
                 // keep; not added to drop

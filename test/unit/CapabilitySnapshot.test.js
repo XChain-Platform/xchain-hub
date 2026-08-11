@@ -531,6 +531,75 @@ describe('CapabilitySnapshot', function () {
             expect(snap.reorgBufferBlocks).to.equal(6);
         });
 
+        // #4167: a VALID but non-canonical buffer is the dangerous case. It is
+        // subtracted before the cache key and the indexer RPC are formed, so a
+        // hub carrying its own value locks a different block than its peers for
+        // the same round and quorum N forks with nothing logged.
+        describe('canonical-value assertion (#4167)', function () {
+
+            function networkedHub(network) {
+                let hub = makeHub(null);
+                hub.network = network;
+                return hub;
+            }
+
+            afterEach(function () {
+                delete process.env.XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT;
+            });
+
+            for (let network of ['mainnet', 'testnet']) {
+                it('refuses to construct on ' + network + ' when the buffer diverges', function () {
+                    process.env.HUB_SNAPSHOT_REORG_BUFFER = '0';
+                    let thrown = null;
+                    try { new CapabilitySnapshot(networkedHub(network)); } catch (e) { thrown = e; }
+                    expect(thrown).to.be.an('error');
+                    expect(thrown.code).to.equal('REORG_BUFFER_MISMATCH');
+                });
+            }
+
+            it('accepts the canonical 6 stated explicitly on mainnet', function () {
+                process.env.HUB_SNAPSHOT_REORG_BUFFER = '6';
+                let snap = new CapabilitySnapshot(networkedHub('mainnet'));
+                expect(snap.reorgBufferBlocks).to.equal(6);
+            });
+
+            it('accepts an unset buffer on mainnet', function () {
+                let snap = new CapabilitySnapshot(networkedHub('mainnet'));
+                expect(snap.reorgBufferBlocks).to.equal(6);
+            });
+
+            it('warns and accepts on regtest so venues can run deliberate depths', function () {
+                process.env.HUB_SNAPSHOT_REORG_BUFFER = '0';
+                let warnStub = sinon.stub(console, 'warn');
+                let snap = new CapabilitySnapshot(networkedHub('regtest'));
+                expect(snap.reorgBufferBlocks).to.equal(0);
+                expect(warnStub.calledWithMatch(/HUB_SNAPSHOT_REORG_BUFFER/)).to.equal(true);
+            });
+
+            it('warns and accepts in standalone mode (no network declared)', function () {
+                process.env.HUB_SNAPSHOT_REORG_BUFFER = '12';
+                sinon.stub(console, 'warn');
+                let snap = new CapabilitySnapshot(makeHub(null));
+                expect(snap.reorgBufferBlocks).to.equal(12);
+            });
+
+            it('honors the loud one-off bypass on mainnet', function () {
+                process.env.HUB_SNAPSHOT_REORG_BUFFER = '0';
+                process.env.XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT = '1';
+                let warnStub = sinon.stub(console, 'warn');
+                let snap = new CapabilitySnapshot(networkedHub('mainnet'));
+                expect(snap.reorgBufferBlocks).to.equal(0);
+                expect(warnStub.calledWithMatch(/XCHAIN_HUB_SKIP_REORG_BUFFER_ASSERT/)).to.equal(true);
+            });
+
+            it('still falls back to the canonical default on a typo, without throwing', function () {
+                process.env.HUB_SNAPSHOT_REORG_BUFFER = 'lots';
+                sinon.stub(console, 'error');
+                let snap = new CapabilitySnapshot(networkedHub('mainnet'));
+                expect(snap.reorgBufferBlocks).to.equal(6);
+            });
+        });
+
         it('still returns null for a null/undefined/non-numeric height', async function () {
             let snap = new CapabilitySnapshot(makeHub(null));
             expect(await snap.getSnapshot('attestation', null)).to.equal(null);

@@ -31,6 +31,11 @@
  *     went out, so deferred/failed sends do not consume budget.
  *   - When the cap is reached, the caller skips the publish (fail-closed) rather
  *     than sending; the work stays queued for a later window.
+ *   - reserve()/release() are the await-safe form of the same pair: a caller that
+ *     awaits its send consumes the slot up front and hands it back on failure, so
+ *     concurrent callers cannot all pass the same allow() (). A slot that
+ *     is never released over-counts, which blocks rather than overspends, and it
+ *     ages out of the window on its own.
  *
  * Construction reads the two knobs from env (operator-local) falling back to the
  * hub p2pConfig, matching the publishers' existing config-read convention:
@@ -93,6 +98,27 @@ class SpendCeiling {
         now = now || Date.now();
         this._prune(now);
         this._spends.push(now);
+    }
+
+    // Consume a count slot SYNCHRONOUSLY, before the caller awaits its send (). allow() is a pure predicate, so two callers that both await between
+    // allow() and record() each see the same pre-send count and both broadcast past
+    // the cap. Returns the timestamp used as the release handle, or null when the
+    // ceiling is disabled (nothing to give back).
+    reserve(now){
+        if (this.disabled) return null;
+        now = now || Date.now();
+        this._prune(now);
+        this._spends.push(now);
+        return now;
+    }
+
+    // Give back a provisional slot whose send never went out. Timestamps are
+    // interchangeable, so removing the first equal entry is exact; an unknown handle
+    // is ignored, which keeps a double release from freeing somebody else's slot.
+    release(handle){
+        if (this.disabled || handle == null) return;
+        let i = this._spends.indexOf(handle);
+        if (i >= 0) this._spends.splice(i, 1);
     }
 
     // Count a tripped-ceiling skip and return an actionable message for the log.

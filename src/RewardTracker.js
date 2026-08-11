@@ -94,8 +94,42 @@ class RewardTracker {
     // that has already ridden an on-chain archive (batch_seq IS NOT NULL) is
     // immutable and is never displaced. Retries / re-flushes / multi-hub recording
     // of the SAME pubkey remain idempotent (UNIQUE KEY + the existence check below).
+    //
+    // The collapse above is a read-modify-write and MUST NOT interleave. Every
+    // caller (StateAnchorPublisher._recordReward) is fire-and-forget, so a hub can
+    // have its own publish and a peer's V0_DONE/FINALIZED mirror in flight for the
+    // same (round_number, reward_type) with DIFFERENT pubkeys at once. Both awaited
+    // the same empty SELECT, both fell through to the INSERT, and because the UNIQUE
+    // KEY carries validator_pubkey both landed: a permanently double-minted,
+    // COLLECT-spendable reward that the "already ours" short-circuit then keeps
+    // short-circuiting past on every replay. Serialize per logical anchor so the
+    // second caller reads the first's row and the deterministic collapse fires.
     async recordAnchorReward(rewardType, roundNumber, pubkey, blockIndex, rewardNetwork) {
         if (typeof pubkey !== 'string' || !/^[0-9a-fA-F]{64}$/.test(pubkey)) return;
+        return this._withAnchorLock(String(rewardType) + '|' + Number(roundNumber),
+            () => this._recordAnchorRewardLocked(rewardType, roundNumber, pubkey, blockIndex, rewardNetwork));
+    }
+
+    // Serialize `fn` against every other call sharing `key` by chaining onto the
+    // last promise recorded for it. The stored link NEVER rejects, so one failed
+    // call cannot break the chain for the next waiter, while the caller still gets
+    // the real settle. The read-then-store pair runs with no await between them, so
+    // no second caller can slip in and lose a link. The entry is dropped by whoever
+    // is still the tail when it finishes, so the map holds only in-flight keys and
+    // cannot grow without bound on a long-lived hub. Scope note: this is an
+    // IN-PROCESS lock, correct because each hub owns its own DB; a shared-DB
+    // topology would need DB-level serialization instead.
+    async _withAnchorLock(key, fn) {
+        if (!this._anchorLocks) this._anchorLocks = new Map();
+        let prev   = this._anchorLocks.get(key) || Promise.resolve();
+        let result = prev.then(fn, fn);
+        let tail   = result.then(() => {}, () => {});
+        this._anchorLocks.set(key, tail);
+        try { return await result; }
+        finally { if (this._anchorLocks.get(key) === tail) this._anchorLocks.delete(key); }
+    }
+
+    async _recordAnchorRewardLocked(rewardType, roundNumber, pubkey, blockIndex, rewardNetwork) {
         let lcPubkey = pubkey.toLowerCase();
 
         // #5311: at/above the anchor-reward flag-day the per-chain reward is DERIVED on-chain

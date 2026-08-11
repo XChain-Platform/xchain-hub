@@ -54,6 +54,12 @@ const FALLBACK_GRACE_MS = 3000;  // brief grace before fallback proposer takes o
 // window); receivers apply the same grace before accepting such a fallback PROPOSE.
 const DEFAULT_LEADER_TIMEOUT_MS = 30000;  // 30 seconds (< finalization window)
 
+// Backoff for the self-heal re-drive of a committed round whose snapshot store keeps
+// failing (item 4281, see _armFinalizeRetry). Starts fast because most DB stalls are
+// brief, caps low enough that a recovered DB is picked up within half a minute.
+const FINALIZE_RETRY_BASE_MS = 1000;
+const FINALIZE_RETRY_MAX_MS  = 30000;
+
 // Per-pair override for the aggregation move clamp ( D4). Most pairs track
 // deep external markets and share ORACLE_MAX_CHANGE_PER_ROUND; XCHAIN/USD is
 // derived from a thin on-platform market and gets a tighter bound.
@@ -1403,10 +1409,44 @@ class OracleConsensus extends EventEmitter {
         // re-enter _checkCommitQuorum and re-drive finalization once the DB recovers,
         // rather than the quorum-signed round being silently and permanently dropped.
         console.error('Oracle: Round ' + round + ' snapshot store failed after ' +
-            maxAttempts + ' attempts; retaining round state for re-finalization on the ' +
-            'next COMMIT (round NOT dropped).');
+            maxAttempts + ' attempts; retaining round state and re-driving on a timer ' +
+            '(round NOT dropped).');
         let stillPending = this.pendingRounds.get(round);
-        if (stillPending) stillPending.finalized = false;
+        if (!stillPending) return;
+        stillPending.finalized = false;
+        this._armFinalizeRetry(round, stillPending);
+    }
+
+    // Re-drive a stalled finalize on our OWN timer, so a quorum-signed round self-heals when
+    // the DB comes back (item 4281). Resetting finalized=false above only makes the round
+    // re-drivable BY A PEER, and each peer broadcasts COMMIT exactly once behind
+    // pending._commitSent (_checkPrepareQuorum), so nothing is guaranteed to arrive: with the
+    // eviction timer already cleared at commit quorum and no sweep over pendingRounds, a DB
+    // outage outlasting the bounded retry above stranded the round in memory forever,
+    // unpersisted and unpublished.
+    //
+    // Reuses the pending.timer slot so stop() and a later _checkCommitQuorum both tear this
+    // down, and clears first so a round can never hold two outstanding retries.
+    _armFinalizeRetry(round, pending) {
+        let delay = Math.min((pending._finalizeRetryMs || 0) * 2 || FINALIZE_RETRY_BASE_MS,
+                             FINALIZE_RETRY_MAX_MS);
+        pending._finalizeRetryMs = delay;
+        if (pending.timer) clearTimeout(pending.timer);
+        pending.timer = setTimeout(() => {
+            let p = this.pendingRounds.get(round);
+            // Bail when another path already finished the round, or one is mid-flight:
+            // finalized=true is exactly the in-flight claim _checkCommitQuorum makes.
+            if (!p || p.finalized || this.finalized.has(round)) return;
+            // Make the same claim before re-entering, so a peer COMMIT landing now cannot
+            // start a second finalize and emit round:finalized twice.
+            p.finalized = true;
+            Promise.resolve(this._finalizeCommittedRound(round)).catch(err =>
+                console.error('Oracle: re-finalize of round ' + round + ' threw:', err && err.message));
+        }, delay);
+        // Never hold the process open on a retry that may re-arm indefinitely; stop() is
+        // what tears it down on a clean shutdown.
+        if (pending.timer && typeof pending.timer.unref === 'function') pending.timer.unref();
+        console.warn('Oracle: re-finalize of round ' + round + ' scheduled in ' + delay + 'ms');
     }
 
     _aggregateAll(submissions) {

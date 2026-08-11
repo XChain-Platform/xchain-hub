@@ -23,6 +23,26 @@ function makeDigest(config) {
     return crypto.createHash('sha256').update(JSON.stringify(config)).digest('hex');
 }
 
+// Give a chaos hub the deterministic federation snapshot a real federated hub
+// locks every round. #4168 keyed the fail-closed federation guards on the LIVE
+// validator set rather than the optional MIN_VALIDATORS, so a multi-member set
+// with a NULL snapshot now correctly refuses to propose. These experiments
+// inject a PARTITION, not an indexer outage, so they must clear that guard to
+// reach the behaviour they measure. Quorum is stubbed to what _getQuorum()
+// returns for the set under test, leaving each experiment's arithmetic
+// unchanged; the genuinely peerless hub below keeps its empty validator set and
+// stays on the single-node path either way.
+function wireFederationSnapshot(hub, quorum) {
+    let snapshot = { blockIndex: 800000, validators: [{ pubkey: 'aa', amount: '50000' }] };
+    hub.capabilitySnapshot = {
+        getActiveValidatorSnapshot: sinon.stub().resolves(snapshot),
+        getActiveWeightSnapshot:    sinon.stub().resolves(snapshot),
+        getQuorum:                  sinon.stub().returns(quorum)
+    };
+    hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
+    return snapshot;
+}
+
 describe('Chaos: Network Partition (NET-3)', function () {
     this.timeout(15000);
 
@@ -50,6 +70,7 @@ describe('Chaos: Network Partition (NET-3)', function () {
 
     it('isolated node times out and initiates view change', async function () {
         consensus.timeout = 200;
+        wireFederationSnapshot(hub, 3); // N=4 -> quorum 3; clears the #4168 federation guard
 
         await consensus.start();
 
@@ -131,6 +152,7 @@ describe('Chaos: Network Partition (NET-3)', function () {
 
     it('partition heals: late PREPARE/COMMIT still processed', async function () {
         consensus.timeout = 5000;
+        wireFederationSnapshot(hub, 3); // N=4 -> quorum 3; clears the #4168 federation guard
         await consensus.start();
 
         let config = { key: 'delayed' };

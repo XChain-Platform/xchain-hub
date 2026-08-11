@@ -108,6 +108,20 @@ class Consensus {
         this.validatorSet = canonicalValidatorOrder(validators);
     }
 
+    // True when this hub is part of a real federation, which is what every
+    // fail-closed guard below actually needs to know. MIN_VALIDATORS alone is
+    // the wrong question (#4168): CONFIGURATION.md marks it optional and
+    // .env.example ships it commented out, so it defaults to 1 and a normally
+    // configured multi-hub deployment silently takes the single-node path, the
+    // exact path those guards exist to keep it off. The live active set is
+    // authoritative instead: XChainHub._propagateValidatorSet pushes in the
+    // rows of `validators` WHERE status='active', so length > 1 means real
+    // peers to diverge from regardless of what the operator declared. Strictly
+    // widening: every case minValidators > 1 caught is still caught.
+    _isFederated() {
+        return this.minValidators > 1 || this.validatorSet.length > 1;
+    }
+
     // Fail-closed gate for multi-hub federations. A deterministic snapshot is a
     // real validator set locked from the indexer at the round's block boundary;
     // it is the only thing that guarantees every hub computes quorum over the
@@ -121,7 +135,7 @@ class Consensus {
     }
 
     // True when a block-anchored snapshot was fetched but qualified ZERO
-    // validators in a federation (minValidators > 1). getQuorum(empty) = 0
+    // validators in a federation (_isFederated). getQuorum(empty) = 0
     // collides with the genuine single-node bypass below; applying a config
     // change over an empty federation snapshot means every hub applies it with
     // NO quorum (a transient empty staker set is not a mandate). An empty
@@ -132,7 +146,7 @@ class Consensus {
     // _hasDeterministicSnapshot (fail closed for federations); this is only the
     // present-but-empty case.
     _isEmptyFederationSnapshot(snapshot) {
-        return this.minValidators > 1 && !!snapshot &&
+        return this._isFederated() && !!snapshot &&
             Array.isArray(snapshot.validators) && snapshot.validators.length === 0;
     }
 
@@ -181,12 +195,12 @@ class Consensus {
         // Federation-split guard (fail closed). In a multi-hub federation, a null
         // snapshot means each hub would fall back to its own LOCAL validatorSet,
         // so two hubs could finalize the same config-change round over different
-        // sets. Refuse to propose rather than split. Single-host federations
-        // (minValidators <= 1) have no peer to diverge from, so they keep the
+        // sets. Refuse to propose rather than split. Genuine single-host hubs
+        // (not _isFederated) have no peer to diverge from, so they keep the
         // existing fallback/single-node path below.
-        if (this.minValidators > 1 && !this._hasDeterministicSnapshot(snapshot)) {
+        if (this._isFederated() && !this._hasDeterministicSnapshot(snapshot)) {
             throw new Error('Consensus: refusing to PROPOSE config change without a deterministic ' +
-                'validator snapshot (minValidators>1); indexer capability snapshot unavailable');
+                'validator snapshot (federated hub); indexer capability snapshot unavailable');
         }
         // Fall back to count mode when weighted is requested but no snapshot is
         // available (BTC indexer unreachable). An empty validator list makes
@@ -207,7 +221,7 @@ class Consensus {
         if (quorum === 0) {
             if (this._isEmptyFederationSnapshot(snapshot)) {
                 throw new Error('Consensus: refusing to apply config change unilaterally over an EMPTY ' +
-                    'active-validator snapshot (block ' + snapshot.blockIndex + ', minValidators>1); ' +
+                    'active-validator snapshot (block ' + snapshot.blockIndex + ', federated hub); ' +
                     'will retry when the snapshot populates');
             }
             if (this.minValidators > 1) {
@@ -439,15 +453,15 @@ class Consensus {
             // THIS follower's own BTC tip and lock a DIFFERENT validator/weight
             // set (and possibly a different STAKE_WEIGHTED_QUORUM activation
             // outcome) than the leader for the same seq. On a federated hub
-            // (minValidators > 1) decline to PREPARE rather than pin to a
+            // (_isFederated) decline to PREPARE rather than pin to a
             // local-tip snapshot. A truthy garbage height is caught downstream by
             // CapabilitySnapshot._blockEchoOk; only the null/omitted case reaches
-            // the own-tip fallback, so this closes that specific hole. Single-node
-            // / regtest hubs (minValidators <= 1) keep the local-tip fallback.
-            if (this.minValidators > 1 && (!Number.isInteger(btcBlockHeight) || btcBlockHeight <= 0)) {
+            // the own-tip fallback, so this closes that specific hole. Genuine
+            // single-node / regtest hubs keep the local-tip fallback.
+            if (this._isFederated() && (!Number.isInteger(btcBlockHeight) || btcBlockHeight <= 0)) {
                 console.warn('Consensus: declining to PREPARE for seq ' + seq +
                     ' from ' + envelope.sender + ': PRE_PREPARE carries no valid btcBlockHeight ' +
-                    '(minValidators>1); refusing to pin the validator snapshot at the local BTC tip, ' +
+                    '(federated hub); refusing to pin the validator snapshot at the local BTC tip, ' +
                     'which would diverge from the leader\'s snapshot for this seq.');
                 return;
             }
@@ -457,14 +471,14 @@ class Consensus {
             // stay in lockstep with the leader for the whole round.
             let { snapshot, weighted } = await this._lockSnapshot(btcBlockHeight);
             // Federation-split guard (fail closed), the follower twin of the
-            // propose() gate. With minValidators > 1, declining to PREPARE when
+            // propose() gate. On a federated hub, declining to PREPARE when
             // no deterministic snapshot is available keeps this hub from voting
             // over its own LOCAL validatorSet while the leader (and peers) used a
             // different set. We create no proposal and emit no PREPARE; the round
             // either reaches quorum without us or times out into view change.
-            if (this.minValidators > 1 && !this._hasDeterministicSnapshot(snapshot)) {
+            if (this._isFederated() && !this._hasDeterministicSnapshot(snapshot)) {
                 console.warn('Consensus: declining to PREPARE for seq ' + seq +
-                    ' without a deterministic validator snapshot (minValidators>1); ' +
+                    ' without a deterministic validator snapshot (federated hub); ' +
                     'indexer capability snapshot unavailable');
                 return;
             }
@@ -490,7 +504,7 @@ class Consensus {
             if (this._isEmptyFederationSnapshot(snapshot)) {
                 console.warn('Consensus: declining to PREPARE for seq ' + seq +
                     ' over an EMPTY active-validator snapshot (block ' + btcBlockHeight +
-                    ', minValidators>1); a legitimate leader skips such a round.');
+                    ', federated hub); a legitimate leader skips such a round.');
                 return;
             }
 

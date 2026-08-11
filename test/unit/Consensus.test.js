@@ -35,6 +35,25 @@ describe('Consensus (PBFT)', function () {
         sinon.restore();
     });
 
+    // Wire the deterministic federation snapshot a real federated hub locks
+    // every round. #4168 keyed the fail-closed federation guards on the LIVE
+    // validator set instead of the optional MIN_VALIDATORS, so a multi-member
+    // set with a NULL snapshot now correctly refuses to propose or PREPARE.
+    // Tests exercising ordinary PBFT flow therefore supply the snapshot rather
+    // than riding the single-node fallback the default MIN_VALIDATORS used to
+    // grant them. Quorum is stubbed to the same value _getQuorum() returns for
+    // the set under test, so what each test measures is unchanged.
+    function wireFederationSnapshot(quorum, blockIndex) {
+        let snapshot = { blockIndex: blockIndex, validators: [{ pubkey: 'aa', amount: '50000' }] };
+        hub.capabilitySnapshot = {
+            getActiveValidatorSnapshot: sinon.stub().returns(snapshot),
+            getActiveWeightSnapshot:    sinon.stub().returns(snapshot),
+            getQuorum:                  sinon.stub().returns(quorum)
+        };
+        hub._resolveBtcLatestBlock = sinon.stub().resolves(blockIndex);
+        return snapshot;
+    }
+
     // -----------------------------------------------------------------
     // _getQuorum()
     // -----------------------------------------------------------------
@@ -267,6 +286,7 @@ describe('Consensus (PBFT)', function () {
 
         it('throws when not the leader', async function () {
             consensus.setValidatorSet(VALIDATORS_3);
+            wireFederationSnapshot(2, 800000); // N=3 -> quorum 2; clears the federation guard
             consensus.seq = 0;
             pm.validatorAddr = VALIDATORS_3[2].addr; // Not leader for seq 1
 
@@ -280,6 +300,7 @@ describe('Consensus (PBFT)', function () {
 
         it('leader broadcasts PRE_PREPARE', async function () {
             consensus.setValidatorSet(VALIDATORS_4);
+            wireFederationSnapshot(3, 800000); // N=4 -> quorum 3
             consensus.seq = 0;
             pm.validatorAddr = VALIDATORS_4[1].addr; // Leader for seq 1: (1+0)%4 = 1
 
@@ -321,13 +342,14 @@ describe('Consensus (PBFT)', function () {
         });
 
         it('PRE_PREPARE creates follower proposal and broadcasts PREPARE', async function () {
+            wireFederationSnapshot(3, 800000);
             let config = { x: 1 };
             let digest = consensus._digest(config);
 
             // seq 5, view 0: (5+0)%4 = 1, VALIDATORS_4[1] is the rotation leader.
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
-                data: { seq: 5, view: 0, configDigest: digest, config }
+                data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 800000 }
             });
 
             expect(consensus.pendingProposals.has(5)).to.be.true;
@@ -428,11 +450,12 @@ describe('Consensus (PBFT)', function () {
 
         it('second PRE_PREPARE for an already-pending seq with a conflicting digest is dropped (no PREPARE)', async function () {
             // First PRE_PREPARE establishes a pending proposal at seq 5 with digest A.
+            wireFederationSnapshot(3, 800000);
             let configA = { x: 1 };
             let digestA = consensus._digest(configA);
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
-                data: { seq: 5, view: 0, configDigest: digestA, config: configA }
+                data: { seq: 5, view: 0, configDigest: digestA, config: configA, btcBlockHeight: 800000 }
             });
 
             expect(consensus.pendingProposals.has(5)).to.be.true;
@@ -450,7 +473,7 @@ describe('Consensus (PBFT)', function () {
             // is dropped only by the digest-conflict rule (two leaders, one seq).
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[2].addr,
-                data: { seq: 5, view: 1, configDigest: digestB, config: configB }
+                data: { seq: 5, view: 1, configDigest: digestB, config: configB, btcBlockHeight: 800000 }
             });
 
             // The conflicting message must be dropped: the existing proposal
@@ -905,7 +928,7 @@ describe('Consensus (PBFT)', function () {
             consensus.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[1].addr; // leader for seq 1
             hub.capabilitySnapshot = {
-                getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000 }),
+                getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000, validators: [{ pubkey: 'aa', amount: '50000' }] }),
                 getQuorum: sinon.stub().returns(3)
             };
             hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
@@ -951,9 +974,51 @@ describe('Consensus (PBFT)', function () {
             expect(hub.applyConfig.called).to.be.false;
         });
 
+        // #4168: the guard above used to be the ONLY way in, and it needed the
+        // operator to have set MIN_VALIDATORS. That env var is optional
+        // (CONFIGURATION.md "No", commented out in .env.example), so a normally
+        // configured multi-hub federation left minValidators at 1, skipped the
+        // guard, and sized quorum from its own mutable local set during an
+        // indexer outage. The live active validator set now decides.
+        it('refuses to PROPOSE on a multi-member set even with MIN_VALIDATORS unset', async function () {
+            consensus.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[1].addr;     // leader for seq 1
+            expect(consensus.minValidators).to.equal(1); // the shipped default
+            let caught = null;
+            try {
+                await consensus.propose({ x: 1 });
+            } catch (e) {
+                caught = e;
+            }
+            expect(caught).to.be.an('error');
+            expect(caught.message).to.include('refusing to PROPOSE');
+            expect(hub.applyConfig.called).to.be.false;
+        });
+
+        it('still applies unilaterally when the hub is genuinely single-node', async function () {
+            consensus.setValidatorSet([VALIDATORS_4[0]]);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+            pm.getPeerStatus.returns([]);
+            expect(await consensus.propose({ x: 1 })).to.equal(true);
+            expect(hub.applyConfig.calledOnce).to.be.true;
+        });
+
+        it('a follower on a multi-member set declines to PREPARE without a snapshot', async function () {
+            consensus.setValidatorSet(VALIDATORS_4);
+            pm.validatorAddr = VALIDATORS_4[0].addr;
+            let config = { x: 1 };
+            await consensus._handlePrePrepare({
+                sender: VALIDATORS_4[1].addr,            // leader for (seq 5, view 0)
+                data: { seq: 5, view: 0, configDigest: consensus._digest(config), config, btcBlockHeight: 800000 }
+            });
+            expect(consensus.pendingProposals.has(5)).to.be.false;
+            expect(pm.broadcast.called).to.be.false;
+        });
+
         it('times out → rejects the promise and initiates a view change', async function () {
             let clock = sinon.useFakeTimers();
             consensus.setValidatorSet(VALIDATORS_4);
+            wireFederationSnapshot(3, 800000);
             pm.validatorAddr = VALIDATORS_4[1].addr; // leader for seq 1
             consensus.timeout = 1000;
 
@@ -994,13 +1059,14 @@ describe('Consensus (PBFT)', function () {
         });
 
         it('expires a follower proposal on its (doubled) timeout', async function () {
+            wireFederationSnapshot(3, 800000);
             let clock = sinon.useFakeTimers();
             consensus.timeout = 1000;
             let config = { x: 1 };
             let digest = consensus._digest(config);
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
-                data: { seq: 5, view: 0, configDigest: digest, config }
+                data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 800000 }
             });
             expect(consensus.pendingProposals.has(5)).to.be.true;
             await clock.tickAsync(2001); // followers wait timeout times 2
@@ -1145,7 +1211,7 @@ describe('Consensus (PBFT)', function () {
 
         it('_handlePrePrepare uses the snapshot quorum when a snapshot is available', async function () {
             hub.capabilitySnapshot = {
-                getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 900000 }),
+                getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 900000, validators: [{ pubkey: 'aa', amount: '50000' }] }),
                 getQuorum: sinon.stub().returns(3)
             };
             hub._resolveBtcLatestBlock = sinon.stub().resolves(900000);
