@@ -20,8 +20,8 @@
  * each co-signer only signs a retraction its OWN chain indexer independently
  * pushed, the same trust tier as insertions of those tables). At/above the
  * threshold a mirror refuses an unsigned or under-signed quorum-class
- * retraction; below it the generation-fence guards stand alone and
- * unsigned events remain accepted (legacy, rolling-deploy safe).
+ * retraction; below it the pre-existing generation-fence guards stand alone
+ * and unsigned events remain accepted (legacy, rolling-deploy safe).
  *
  * Like anchor_reward / checkpoint_commitment / stake_weighted_quorum, this
  * gates on a BTC-anchored `snapshot_block` era, NOT a local processing
@@ -45,8 +45,9 @@ const RETRACTION_SIGNING_ACTIVATION = {
 
 // Whether quorum-class retraction broadcasts must be co-signed for an era at
 // `snapshotBlock` on `network`. Below the threshold -> off (legacy unsigned
-// events accepted under the generation fences). Unknown network -> off (safe for
-// a rolling deploy; the indexer wires its network explicitly and tests pin it).
+// events accepted under the pre-existing generation-fence guards). Unknown
+// network -> off (safe for a rolling deploy; the indexer wires its network
+// explicitly and tests pin it).
 function isRetractionSigningActive(snapshotBlock, network){
     let sb = parseInt(snapshotBlock);
     if(!Number.isFinite(sb)) return false;
