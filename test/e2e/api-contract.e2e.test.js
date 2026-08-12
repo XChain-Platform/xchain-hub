@@ -15,6 +15,7 @@ const testDb        = require('../helpers/testDb');
 const priceMocks    = require('./helpers/priceMocks');
 const { createCluster } = require('./helpers/cluster');
 const { callRpc }       = require('./helpers/rpcClient');
+const { waitUntil }     = require('../helpers/waitUntil');
 
 describe('E2E: API Contract Verification', function () {
 
@@ -226,7 +227,10 @@ describe('E2E: API Contract Verification', function () {
             });
             expect(res.result.status).to.equal('success');
 
-            await new Promise(r => setTimeout(r, 1500));
+            await waitUntil(async () => {
+                let history = await callRpc(port, 'getreorghistory', { limit: 10 });
+                return Array.isArray(history.result) && history.result.length >= 1;
+            }, { timeoutMs: 8000, label: 'the reported reorg to reach the history' });
 
             let history = await callRpc(port, 'getreorghistory', { limit: 10 });
             expect(history.result).to.be.an('array');

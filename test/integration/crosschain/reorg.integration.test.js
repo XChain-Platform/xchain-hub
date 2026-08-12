@@ -14,6 +14,7 @@ const sinon          = require('sinon');
 const { expect }     = require('chai');
 const testDb         = require('../../helpers/testDb');
 const { buildEnvelope } = require('../../helpers/testPeerNetwork');
+const { waitUntil }     = require('../../helpers/waitUntil');
 const { VALIDATORS_1, VALIDATORS_4 } = require('../../helpers/fixtures');
 const ReorgHandler   = require('../../../src/ReorgHandler');
 const { createIntegrationHub: createTestHub } = require('../../helpers/integrationHub');
@@ -83,7 +84,7 @@ describe('Integration: Reorg Handling (SC-5.x)', function () {
 
             await reorgHandler.reportReorg('BTC', 800000, reorgTimestamp, 'a'.repeat(64), 'b'.repeat(64));
 
-            await new Promise(r => setTimeout(r, 200));
+            await waitUntil(() => reorgEvent !== null, { timeoutMs: 5000, label: 'the single-node reorg to confirm' });
 
             // Verify: attestations after reorg timestamp should be deleted
             let remainingAtts = await db.doQuery("SELECT * FROM attestations WHERE source_chain = 'BTC'");
@@ -148,10 +149,10 @@ describe('Integration: Reorg Handling (SC-5.x)', function () {
             // Report reorg: initiates consensus
             await reorgHandler.reportReorg('BTC', 800000, reorgTimestamp, 'a'.repeat(64), 'b'.repeat(64));
 
-            await new Promise(r => setTimeout(r, 50));
+            let reorgId = 'BTC:800000:' + reorgTimestamp;
+            await waitUntil(() => reorgHandler.pendingReorgs.has(reorgId), { label: 'the reorg consensus round to open' });
 
             // Get the pending reorg
-            let reorgId = 'BTC:800000:' + reorgTimestamp;
             let pending = reorgHandler.pendingReorgs.get(reorgId);
             expect(pending).to.exist;
 
@@ -173,7 +174,7 @@ describe('Integration: Reorg Handling (SC-5.x)', function () {
                 }, VALIDATORS_4[i].addr));
             }
 
-            await new Promise(r => setTimeout(r, 50));
+            await waitUntil(() => pending.prepares.size >= 3, { label: 'the PREPARE quorum to be tallied' });
 
             // Inject COMMIT from 2 other validators
             for (let i = 1; i < 3; i++) {
@@ -183,7 +184,7 @@ describe('Integration: Reorg Handling (SC-5.x)', function () {
                 }, VALIDATORS_4[i].addr));
             }
 
-            await new Promise(r => setTimeout(r, 300));
+            await waitUntil(() => reorgEvent !== null, { timeoutMs: 5000, label: 'the commit quorum to execute the rollback' });
 
             // Verify rollback executed
             let atts = await db.doQuery("SELECT * FROM attestations WHERE attestation_id = 'BTC:99:LTC'");
@@ -216,7 +217,10 @@ describe('Integration: Reorg Handling (SC-5.x)', function () {
             await reorgHandler.reportReorg('BTC', 800000, reorgTimestamp, 'a'.repeat(64), 'b'.repeat(64));
             await reorgHandler.reportReorg('BTC', 800000, reorgTimestamp, 'a'.repeat(64), 'b'.repeat(64));
 
-            await new Promise(r => setTimeout(r, 200));
+            await waitUntil(async () => {
+                let rows = await db.doQuery("SELECT * FROM reorg_attestations");
+                return rows.length >= 1;
+            }, { timeoutMs: 5000, label: 'the first reorg report to be recorded' });
 
             // Should only have one reorg record
             let reorgs = await db.doQuery("SELECT * FROM reorg_attestations");

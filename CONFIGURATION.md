@@ -261,6 +261,7 @@ meantime. Check `attest_relay` on `/health` to see the hold: a rising
 | `ATTEST_RELAY_POLL_MS` | No | `15000` | Poll interval (ms) for the request and response legs. |
 | `ATTEST_RELAY_QUEUE_PATH` | No | `./data/attest-relay-queue.jsonl` | On-disk at-most-once write-ahead log for both legs. A duplicate v3 is rejected on-chain, so replaying one only burns a real fee; this file is what stops a restart from doing that. |
 | `ATTEST_RELAY_FAILOVER_MS` | No | `1200000` (20m) | Wall-clock silence per rank before a non-leader broadcasts a round it already co-signed. Rank 0 sends immediately, rank 1 waits one window, and so on. |
+| `ATTEST_RELAY_EVICT_GRACE_BLOCKS` | No | `144` | Origin-chain blocks past a request's own `deadline_block`, on top of that chain's confirmation depth, before the relay forgets the request's at-most-once records and compacts them out of the queue file. Raising it keeps records longer; lowering it below the origin indexer's expiry lag risks re-relaying a request and burning a fee, so a garbage or negative value falls back to the default. |
 | `<COIN>_ENCODER_URL` | If relaying to `<COIN>` | _empty_ | xchain-encoder endpoint used to build the v4 response transaction on origin chain `<COIN>` (e.g. `LTC_ENCODER_URL`). Empty means no rail: see the hold warning above. |
 | `<COIN>_ENCODER_API_KEY` | No | _empty_ | API key for that origin chain's encoder. |
 | `<COIN>_ADDRESS` | If relaying to `<COIN>` | _empty_ | Wallet address on `<COIN>` that pays for and publishes v4 responses (e.g. `LTC_ADDRESS`). |

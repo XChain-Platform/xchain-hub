@@ -69,7 +69,7 @@ describe('ATTEST relay flag-day: hub copy @regression', function () {
             const twin = require(TWIN_PATH);
             expect(local.ATTEST_RELAY_ACTIVATION).to.deep.equal(twin.ATTEST_RELAY_ACTIVATION);
             for (const [block, network] of
-                [[969499, 'mainnet'], [969500, 'mainnet'], [0, 'regtest'], [0, 'testnet'], [7, 'bogusnet']]) {
+                [[962999, 'mainnet'], [963000, 'mainnet'], [0, 'regtest'], [0, 'testnet'], [7, 'bogusnet']]) {
                 expect(local.isAttestRelayActive(block, network),
                     'predicate disagreed at ' + network + ':' + block)
                     .to.equal(twin.isAttestRelayActive(block, network));
@@ -79,15 +79,15 @@ describe('ATTEST relay flag-day: hub copy @regression', function () {
 
     describe('the gate this hub will enforce', function () {
         it('is armed on the ratified  BTC anchor, genesis-on off mainnet', function () {
-            expect(local.ATTEST_RELAY_ACTIVATION.mainnet).to.equal(969500);
+            expect(local.ATTEST_RELAY_ACTIVATION.mainnet).to.equal(963000);
             expect(local.ATTEST_RELAY_ACTIVATION.testnet).to.equal(0);
             expect(local.ATTEST_RELAY_ACTIVATION.regtest).to.equal(0);
         });
 
         it('is INERT below the anchor and live at it', function () {
-            expect(local.isAttestRelayActive(969499, 'mainnet')).to.equal(false);
-            expect(local.isAttestRelayActive(969500, 'mainnet')).to.equal(true);
-            expect(local.isAttestRelayActive(969501, 'mainnet')).to.equal(true);
+            expect(local.isAttestRelayActive(962999, 'mainnet')).to.equal(false);
+            expect(local.isAttestRelayActive(963000, 'mainnet')).to.equal(true);
+            expect(local.isAttestRelayActive(963001, 'mainnet')).to.equal(true);
         });
 
         it('is active from genesis on the test networks so regtest exercises the relay', function () {

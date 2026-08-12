@@ -17,7 +17,7 @@ const Consensus       = require('../../../src/Consensus');
 const OracleConsensus = require('../../../src/OracleConsensus');
 const OracleRound     = require('../../../src/OracleRound');
 const { createMockHub }                         = require('../../helpers/mockHub');
-const { VALIDATORS_4, makeValidator, SAMPLE_PRICES } = require('../../helpers/fixtures');
+const { VALIDATORS_4, makeFederationSnapshot, makeValidator, SAMPLE_PRICES } = require('../../helpers/fixtures');
 const { buildEnvelope }                         = require('../../helpers/testPeerNetwork');
 
 function makeDigest(config) {
@@ -33,7 +33,7 @@ function makeDigest(config) {
 // returns for the set under test, leaving each experiment's arithmetic
 // unchanged.
 function wireFederationSnapshot(hub, quorum) {
-    let snapshot = { blockIndex: 800000, validators: [{ pubkey: 'aa', amount: '50000' }] };
+    let snapshot = makeFederationSnapshot(VALIDATORS_4, 800000);
     hub.capabilitySnapshot = {
         getActiveValidatorSnapshot: sinon.stub().resolves(snapshot),
         getActiveWeightSnapshot:    sinon.stub().resolves(snapshot),

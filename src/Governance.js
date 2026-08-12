@@ -61,9 +61,10 @@ const SLASHING_PARAMS = ['SLASH_DEVIATION_THRESHOLD', 'SLASH_MISSED_ROUNDS_THRES
 // so validator-set churn between propose() and tally can no longer move the
 // quorum/approval goalposts. Same shape + BTC-anchored gating discipline as
 // STAKE_WEIGHTED_QUORUM_ACTIVATION. mainnet ARMED 2026-07-16 (, with the
-//  flag-day set): BTC 969500 ~2026-10-01 (ratified anchor; derived from
-// tip 957062 on 07-07 at ~144 blocks/day); deploy every hub before this era.
-const GOV_SNAPSHOT_ACTIVATION = { mainnet: 969500, testnet: 0, regtest: 0 };
+//  flag-day set): BTC 963000, RE-PINNED 2026-08-12 by off 969500
+// onto the  pre-freeze train boundary, the one height the rest of the
+//  BTC-height cohort now carries; deploy every hub before this era.
+const GOV_SNAPSHOT_ACTIVATION = { mainnet: 963000, testnet: 0, regtest: 0 };
 
 // Bounds on a persisted/wire snapshot (DoS): a validator set is small, so a
 // snapshot far past these is adversarial padding, not a real electorate.

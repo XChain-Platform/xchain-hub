@@ -38,6 +38,7 @@ const sinon           = require('sinon');
 const { expect }      = require('chai');
 const path            = require('path');
 const testDb          = require('../../helpers/testDb');
+const { waitUntil }   = require('../../helpers/waitUntil');
 const mockApi         = require('../../helpers/mockExternalApi');
 const { VALIDATORS_1 } = require('../../helpers/fixtures');
 const OracleRound     = require('../../../src/OracleRound');
@@ -91,7 +92,13 @@ async function driveFiatRound(db) {
     oracleRound.setConsensus(oracleConsensus);
 
     await oracleRound._executeRound();
-    await new Promise(r => setTimeout(r, 100));   // let fire-and-forget submission writes land
+    // The submission write is fire-and-forget, so wait for the row itself rather than
+    // for a duration: finalizeRound reads it back out of the DB.
+    await waitUntil(async () => {
+        let rows = await db.doQuery('SELECT 1 FROM oracle_submissions WHERE round_number = ?',
+            [oracleRound.getCurrentRound()]);
+        return rows.length > 0;
+    }, { timeoutMs: 5000, label: 'the round submission row to land' });
     await oracleConsensus.finalizeRound(oracleRound.getCurrentRound());
 
     const rows = await db.doQuery(

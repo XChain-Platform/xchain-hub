@@ -19,6 +19,7 @@ const crypto            = require('crypto');
 const { EventEmitter }  = require('events');
 const RetractionConsensus = require('../../src/RetractionConsensus.js');
 const ValidatorIdentity   = require('../../src/ValidatorIdentity.js');
+const { waitUntil }       = require('../helpers/waitUntil');
 
 // The golden canonical: MUST byte-match hub_db_sync.js canonicalRetraction()
 // in xchain-indexer / xchain-explorer (their suites sign this same literal).
@@ -98,7 +99,7 @@ describe('RetractionConsensus ( signed retractions) @regression @tier1', functio
     it('below the flag-day era the broadcast stays legacy-unsigned', async function () {
         let id  = makeIdentity();
         let pk  = id.getPubkeyHex().toLowerCase();
-        // mainnet threshold 969500 > snapshot 5000 -> gate off
+        // mainnet threshold 963000 > snapshot 5000 -> gate off
         let hub = makeHub({ identity: id, network: 'mainnet', validators: [{ pubkey: pk, source: 'srcA', weight: '100' }] });
         let rc  = new RetractionConsensus(hub);
         await rc.submitLocal({ table: 'cross_chain_calls', source_chain: 'DOGE', from_action_index: 42, retraction_generation: 7 });
@@ -244,7 +245,7 @@ describe('RetractionConsensus ( signed retractions) @regression @tier1', functio
         let rc  = new RetractionConsensus(hub);
         await rc.submitLocal({ table: 'cross_chain_calls', source_chain: 'DOGE', from_action_index: 42, to_action_index: 99, retraction_generation: 7 });
         assert.strictEqual(hub.hubDbBroadcaster.deletions.length, 0);
-        await new Promise(r => setTimeout(r, 120));
+        await waitUntil(() => hub.hubDbBroadcaster.deletions.length === 1, { label: 'the timed-out round to downgrade to an unsigned broadcast' });
         let dels = hub.hubDbBroadcaster.deletions;
         assert.strictEqual(dels.length, 1, 'timed-out round must still broadcast');
         assert.strictEqual(dels[0].retraction_signatures, undefined, 'timeout downgrade is unsigned');

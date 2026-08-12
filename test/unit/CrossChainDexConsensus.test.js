@@ -20,8 +20,7 @@
 const { expect }             = require('chai');
 const CrossChainDexConsensus = require('../../src/CrossChainDexConsensus');
 const ValidatorIdentity      = require('../../src/ValidatorIdentity');
-
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const { waitUntil }          = require('../helpers/waitUntil');
 
 // Canonical format byte-identical to the indexer verifier (cross_settle._canonical).
 function canonicalMatch(r) {
@@ -106,7 +105,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         await startAll(bus);
         let mid = 'aa'.repeat(32), row = sampleRow(mid);
         await proposeAll(bus, mid, row);
-        await sleep(150);
+        await waitUntil(() => bus.nodes.every(nd => nd.finalized.length === 1), { label: 'every node to finalize the match' });
 
         expect(bus.nodes.every(nd => nd.finalized.length === 1)).to.be.true;
         let ev = bus.nodes[0].finalized[0];
@@ -121,7 +120,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         await startAll(bus);
         let mid = 'bb'.repeat(32), row = sampleRow(mid);
         await proposeAll(bus, mid, row);
-        await sleep(20);
+        await waitUntil(() => bus.nodes[0].finalized.length === 1, { label: 'the single-node round to self-finalize' });
         let ev = bus.nodes[0].finalized[0];
         expect(ev).to.exist;
         expect(ev.signatures.length).to.equal(1);
@@ -140,20 +139,21 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         let mid = 'cc'.repeat(32), row = sampleRow(mid);
 
         await nd.consensus.propose(mid, { row, snapshot: { validators: validatorsOf(bus), count: 1 } });
-        await sleep(20);
+        await waitUntil(() => nd.finalized.length === 1, { label: 'the first round to finalize' });
         expect(nd.finalized.length).to.equal(1);
         expect(nd.consensus.finalized.has(mid)).to.equal(true);
 
         // Without forgetting, a re-propose is suppressed by the finalized ring.
         await nd.consensus.propose(mid, { row, snapshot: { validators: validatorsOf(bus), count: 1 } });
-        await sleep(20);
+        // The finalized ring is consulted inside propose(), so the duplicate is already
+        // suppressed here; a settle would only add dead time to a decided outcome.
         expect(nd.finalized.length).to.equal(1, 'ring must suppress a duplicate finalize');
 
         // Retraction clears the ring; the next propose runs a fresh round.
         expect(nd.consensus.forgetFinalized(mid)).to.equal(true);
         expect(nd.consensus.finalized.has(mid)).to.equal(false);
         await nd.consensus.propose(mid, { row, snapshot: { validators: validatorsOf(bus), count: 1 } });
-        await sleep(20);
+        await waitUntil(() => nd.finalized.length === 2, { label: 'the re-proposed round to finalize a second time' });
         expect(nd.finalized.length).to.equal(2, 're-confirmed action must re-finalize after retraction');
     });
 
@@ -167,7 +167,8 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         let abandoned = [];
         bus.nodes[0].consensus.on('match:abandoned', (ev) => abandoned.push(String(ev.matchId)));
         await bus.nodes[0].consensus.propose(mid, { row, snapshot: { validators: [], count: 0 } });
-        await sleep(20);
+        // The refusal announces itself: match:abandoned is what releases the engine slot.
+        await waitUntil(() => abandoned.includes(mid.toLowerCase()), { label: 'the empty-snapshot round to abandon' });
         expect(bus.nodes[0].finalized.length).to.equal(0);
         // Aborted, not left half-open: a later propose with a real snapshot can retry.
         expect(bus.nodes[0].consensus.pending.has(mid.toLowerCase())).to.be.false;
@@ -189,7 +190,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         let snap = { validators: validatorsOf(bus), count: bus.nodes.length };
         snap.validators.truncated = true;                  // indexer hit VALIDATOR_QUERY_LIMIT
         for (let nd of bus.nodes) await nd.consensus.propose(mid, { row, snapshot: snap });
-        await sleep(150);
+        await waitUntil(() => abandoned.filter(m => m === mid.toLowerCase()).length === bus.nodes.length, { label: 'every node to abandon the truncated weighted round' });
         expect(bus.nodes.every(nd => nd.finalized.length === 0), 'no node finalizes a truncated weighted round').to.be.true;
         expect(bus.nodes.every(nd => nd.consensus.pending.has(mid.toLowerCase()) === false), 'round released, retryable').to.be.true;
         expect(abandoned.filter(m => m === mid.toLowerCase()).length).to.equal(bus.nodes.length, 'each node releases its inflight slot');
@@ -206,7 +207,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         let snap = { validators: validatorsOf(bus), count: bus.nodes.length };
         snap.validators.truncated = true;
         for (let nd of bus.nodes) await nd.consensus.propose(mid, { row, snapshot: snap });
-        await sleep(150);
+        await waitUntil(() => bus.nodes.every(nd => nd.finalized.length === 1), { label: 'the count path to finalize on every node' });
         expect(bus.nodes.every(nd => nd.finalized.length === 1), 'count path proceeds on a deterministic truncation cap').to.be.true;
     });
 
@@ -218,7 +219,8 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         await bus.nodes[0].consensus.propose(mid, {
             row, snapshot: { validators: [{ pubkey: stranger, source: 'src:' + stranger, weight: '1', amount: '1' }], count: 1 }
         });
-        await sleep(20);
+        // propose() resolves the elected-signer check inline, so the refusal is decided
+        // by the time it returns.
         expect(bus.nodes[0].finalized.length).to.equal(0);
     });
 
@@ -227,7 +229,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         await startAll(bus);
         let mid = 'cc'.repeat(32), row = sampleRow(mid);
         await proposeAll(bus, mid, row);
-        await sleep(150);
+        await waitUntil(() => [0, 1, 3].every(i => bus.nodes[i].finalized.length === 1), { label: 'the honest majority to finalize' });
         expect([0, 1, 3].every(i => bus.nodes[i].finalized.length === 1)).to.be.true;
     });
 
@@ -236,7 +238,9 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         await startAll(bus);
         let mid = 'dd'.repeat(32), row = sampleRow(mid);
         await proposeAll(bus, mid, row);
-        await sleep(150);
+        // Quorum is unreachable, so wait on the stall point instead: both validating
+        // nodes have collected each other's signature and can collect no more.
+        await waitUntil(() => [0, 1].every(i => { let p = bus.nodes[i].consensus.pending.get(mid); return p && p.signatures.size >= 2; }), { label: 'both honest nodes to collect the 2 available signatures' });
         expect(bus.nodes.some(nd => nd.finalized.length > 0)).to.be.false;
     });
 
@@ -248,7 +252,8 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         crashed.crashed = true;                                         // never participates
         await startAll(bus);
         await proposeAll(bus, mid, sampleRow(mid));
-        await sleep(1300);                                              // a few 80ms view-change rounds
+        await waitUntil(() => bus.nodes.filter(nd => !nd.crashed && nd.finalized.length === 1).length === 3,
+            { timeoutMs: 4000, label: 'the view-change rotation to finalize on every live node' });
         expect(bus.nodes.filter(nd => !nd.crashed && nd.finalized.length === 1).length).to.equal(3);
     });
 
@@ -269,7 +274,8 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         crashed.crashed = true;                                         // never participates
         await startAll(bus);
         await proposeAll(bus, mid, sampleRow(mid));
-        await sleep(1300);                                              // a few 80ms view-change rounds
+        await waitUntil(() => bus.nodes.filter(nd => !nd.crashed && nd.finalized.length === 1).length === 3,
+            { timeoutMs: 4000, label: 'the view-folding rotation to finalize on every live node' });
 
         let live = bus.nodes.filter(nd => !nd.crashed);
         expect(live.filter(nd => nd.finalized.length === 1).length, 'all live nodes finalize').to.equal(3);
@@ -300,7 +306,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         let mid = 'ab'.repeat(32);
         await victim.consensus.propose(mid, { row: sampleRow(mid), snapshot: { validators: validatorsOf(bus), count: 4 } });
         expect(victim.consensus.pending.has(mid), 'round is live before abandon').to.be.true;
-        await sleep(450);                                                   // several 40ms timeouts, past the 150ms lifetime
+        await waitUntil(() => abandoned.length > 0, { timeoutMs: 4000, label: 'the round to exceed its max lifetime and abandon' });
         expect(abandoned, 'emitted match:abandoned for exactly this round').to.deep.equal([mid]);
         expect(victim.consensus.pending.has(mid), 'pending released so propose() can re-run').to.be.false;
         expect(victim.finalized.length, 'never finalized').to.equal(0);
@@ -315,7 +321,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         await startAll(bus);
         let mid = 'cd'.repeat(32);
         await proposeAll(bus, mid, sampleRow(mid));
-        await sleep(300);
+        await waitUntil(() => bus.nodes.filter(nd => nd.finalized.length === 1).length === 4, { timeoutMs: 4000, label: 'every node to finalize inside the lifetime budget' });
         expect(bus.nodes.filter(nd => nd.finalized.length === 1).length, 'all finalized').to.equal(4);
         expect(bus.nodes.every(nd => nd._abandoned.length === 0), 'none abandoned').to.be.true;
     });
@@ -338,9 +344,10 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         let badRow = Object.assign({}, row, { a_amount: '999999' });
         let badSig = leaderNode.identity.sign(canonicalMatch(badRow));
         let before = victim.consensus.pending.get(mid).signatures.size;
-        victim.consensus._handleMessage({ type: 'XDEX_MATCH_PROPOSE', sender: leaderPk,
+        // _handleMessage fires the PROPOSE branch and forgets it, so drive the async
+        // handler directly: its completion IS the verdict, with nothing left to settle.
+        await victim.consensus._handlePropose({ type: 'XDEX_MATCH_PROPOSE', sender: leaderPk,
             data: { matchId: mid, view: 0, row: badRow, sig_pubkey: leaderPk, sig: badSig } });
-        await sleep(30);
         expect(victim.consensus.pending.get(mid).signatures.size).to.equal(before);
         expect(victim.consensus.pending.get(mid).canonical).to.equal(canonicalMatch(row)); // no adoption either
     });
@@ -360,7 +367,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
             let row = Object.assign(sampleRow(mid), { effective_time: 1700000000 + k });
             await bus.nodes[k].consensus.propose(mid, { row, snapshot: snap });
         }
-        await sleep(200);
+        await waitUntil(() => bus.nodes.every(nd => nd.finalized.length === 1), { label: 'every node to finalize on the leader canonical' });
 
         expect(bus.nodes.every(nd => nd.finalized.length === 1),
                'every node finalizes').to.be.true;
@@ -392,7 +399,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         await startAll(bus);
         let mid = 'c3'.repeat(32), row = sampleRow(mid);
         await proposeAll(bus, mid, row);
-        await sleep(100);
+        await waitUntil(() => [1, 2, 3].every(i => bus.nodes[i].finalized.length === 1), { timeoutMs: 4000, label: 'the three connected nodes to finalize without the straggler' });
 
         // nodes 1-3 finalized without node 0
         expect([1, 2, 3].every(i => bus.nodes[i].finalized.length === 1)).to.be.true;
@@ -401,7 +408,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         // heal the partition; node 0's view-change timer fires and a finalized
         // peer answers with FINAL_SYNC
         partitioned = false;
-        await sleep(400);
+        await waitUntil(() => bus.nodes[0].finalized.length === 1, { timeoutMs: 4000, label: 'the healed straggler to catch up via FINAL_SYNC' });
 
         expect(bus.nodes[0].finalized.length, 'straggler caught up').to.equal(1);
         let ev = bus.nodes[0].finalized[0];
@@ -424,7 +431,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
                 { pubkey: signer.pubkey, sig: signer.identity.sign(canonicalMatch(row)) },
                 { pubkey: bus.nodes[2].pubkey, sig: 'ab'.repeat(64) }
             ] } });
-        await sleep(30);
+        // FINAL_SYNC is handled synchronously, so the verdict is already in.
         expect(victim.finalized.length).to.equal(0);
         expect(victim.consensus.pending.get(mid).finalized).to.equal(false);
     });
@@ -446,7 +453,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
             victim.consensus._handleMessage({ type: 'XDEX_MATCH_COMMIT', sender: nd.pubkey,
                 data: { matchId: mid, view: 0, sig_pubkey: nd.pubkey, sig: null } });
         }
-        await sleep(50);
+        // COMMIT is handled synchronously, so every fed vote is already tallied (or not).
         expect(victim.finalized.length).to.equal(0);
         expect(victim.consensus.pending.get(mid).commits.size).to.equal(0);
     });
@@ -475,7 +482,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
                 data: { matchId: mid, view: 0, sig_pubkey: nd.pubkey, sig: prepareSig,
                         commit_sig: nd.identity.sign('XCALL_RELAY_COMMIT|PHASEV1|' + canon) } });
         }
-        await sleep(50);
+        // COMMIT is handled synchronously, so every replayed PREPARE is already judged.
         expect(victim.finalized.length).to.equal(0);
         let p = victim.consensus.pending.get(mid);
         expect(p.commits.size).to.equal(0);                    // no replayed vote tallied
@@ -495,7 +502,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
                 data: { matchId: mid, view: 0, sig_pubkey: nd.pubkey, sig: nd.identity.sign(canon),
                         commit_sig: nd.identity.sign('XDEX_MATCH_COMMIT|PHASEV1|' + canon) } });
         }
-        await sleep(50);
+        await waitUntil(() => victim.finalized.length === 1, { label: 'the phase-bound commit quorum to finalize the round' });
         expect(victim.finalized.length).to.equal(1);
         expect(victim.finalized[0].signatures.length).to.be.at.least(3);
     });

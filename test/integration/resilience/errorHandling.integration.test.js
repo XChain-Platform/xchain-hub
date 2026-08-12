@@ -14,6 +14,7 @@ const sinon          = require('sinon');
 const { expect }     = require('chai');
 const testDb         = require('../../helpers/testDb');
 const { buildEnvelope } = require('../../helpers/testPeerNetwork');
+const { waitUntil }  = require('../../helpers/waitUntil');
 const { VALIDATORS_1, VALIDATORS_4 } = require('../../helpers/fixtures');
 const Database       = require('../../../src/db');
 const Consensus      = require('../../../src/Consensus');
@@ -79,8 +80,10 @@ describe('Integration: Error Handling (SC-10.x)', function () {
                 expect(e.message).to.include('Circuit breaker open');
             }
 
-            // Wait for cooldown
-            await new Promise(r => setTimeout(r, 600));
+            // Expire the cooldown by moving its deadline into the past. getConnection
+            // compares Date.now() against circuitOpenUntil, so this is the same fact the
+            // sleep was buying, without betting the test on wall-clock slack.
+            db.circuitOpenUntil = Date.now() - 1;
 
             // Restore real getConnection
             db.pool.getConnection.restore();
@@ -135,9 +138,8 @@ describe('Integration: Error Handling (SC-10.x)', function () {
             try { await oracleConsensus.finalizeRound(1); }
             catch (e) { thrown = e; }
 
-            // Wait for async error handling
-            await new Promise(r => setTimeout(r, 100));
-
+            // finalizeRound is awaited above, so the failure has already propagated and
+            // the round has already been torn down: nothing further to settle for.
             expect(thrown, 'storage failure should surface to the caller').to.be.an('error');
             expect(thrown.message).to.include('Simulated DB failure');
 
@@ -169,13 +171,13 @@ describe('Integration: Error Handling (SC-10.x)', function () {
                 expect(e.message).to.include('Consensus timeout');
             });
 
-            await new Promise(r => setTimeout(r, 50));
+            await waitUntil(() => consensus.pendingProposals.size === 1, { label: 'the proposal round to open' });
 
             // Verify pending proposal exists
             expect(consensus.pendingProposals.size).to.equal(1);
 
-            // Wait for timeout
-            await new Promise(r => setTimeout(r, 400));
+            // Wait for the round to time out and reject its proposer.
+            await waitUntil(() => rejected, { timeoutMs: 5000, label: 'the PBFT timeout to reject the proposal' });
 
             expect(rejected).to.be.true;
 

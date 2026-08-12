@@ -25,8 +25,7 @@ const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
 const ValidatorIdentity     = require('../../src/ValidatorIdentity');
 const eq                    = require('../../src/equivocation_header.js');
 const ccr                   = require('../../src/cross_chain_royalty_activation.js');
-
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const { waitUntil }         = require('../helpers/waitUntil');
 
 const CP_ROW = {
     id: 1, chain: 'BTC', network: 'regtest', block_index: 494, block_hash: 'c0'.repeat(32),
@@ -406,7 +405,7 @@ describe('StateAnchorPublisher', function () {
         }
         // Stake-weighted quorum setup. The reward-attestation payloads (v4/v5/v6) can
         // only be produced at/above the anchor/archive reward flag-day, which on every
-        // network activates at or above the SWQ height (mainnet 961000/969500, regtest 0),
+        // network activates at or above the SWQ height (mainnet 961000/963000, regtest 0),
         // so a round that emits them ALWAYS runs on the weighted quorum path - there is no
         // count-path snapshot_block for them. Scope each hub to the record network so
         // _resolveCapabilitySet (which keys on this.network) resolves the WEIGHTED,
@@ -495,7 +494,7 @@ describe('StateAnchorPublisher', function () {
             let nd  = bus.nodes[0];
             await startAll(bus);
             await nd.pub.flush();
-            await sleep(30);
+            await waitUntil(() => nd.published.some(p => p.split('|')[1] === '4'), { label: 'the single-node flush to emit a v4 anchor' });
 
             let v4 = nd.published.find(p => p.split('|')[1] === '4');
             expect(v4, 'a v4 anchor was published').to.be.a('string');
@@ -545,7 +544,7 @@ describe('StateAnchorPublisher', function () {
             nd.pub.setBalanceHook(async () => nd.pub.lowBalanceThreshold + 100);
             await startAll(bus);
             let res = await nd.pub.flush();
-            await sleep(30);
+            await waitUntil(() => nd.published.length > 0, { label: 'the above-floor flush to broadcast an anchor' });
             expect(res.skipped).to.be.undefined;
             expect(nd.published.length).to.be.greaterThan(0);
         });
@@ -565,7 +564,7 @@ describe('StateAnchorPublisher', function () {
             let nd = bus.nodes[0];
             await startAll(bus);
             await nd.pub.flush();
-            await sleep(30);
+            await waitUntil(() => nd.published.some(p => p.split('|')[1] === '5'), { label: 'the root-bearing flush to emit a v5 anchor' });
 
             let v5 = nd.published.find(p => p.split('|')[1] === '5');
             expect(v5, 'a v5 anchor was published').to.be.a('string');
@@ -585,7 +584,7 @@ describe('StateAnchorPublisher', function () {
             await startAll(bus);
             let leader = v0Order(bus)[0];                                   // rank-0 publisher for CP_ROW
             await leader.pub.flush();
-            await sleep(120);
+            await waitUntil(() => leader.published.some(p => p.split('|')[1] === '4'), { label: 'the rank-0 publisher to emit a v4 anchor' });
 
             let v4 = leader.published.find(p => p.split('|')[1] === '4');
             expect(v4, 'rank-0 publisher emitted a v4').to.be.a('string');
@@ -624,7 +623,9 @@ describe('StateAnchorPublisher', function () {
             let leader = v0Order(bus)[0];
             await leader.pub.start();                                       // followers intentionally NOT started
             await leader.pub.flush();
-            await sleep(40);
+            // The v0 fallback is what the timed-out attestation round produces, so it is
+            // the observable this round ends on (the no-v4 assertion then means something).
+            await waitUntil(() => leader.published.some(p => p.split('|')[1] === '0'), { label: 'the timed-out attestation round to fall back to a legacy v0' });
 
             expect(leader.published.some(p => p.split('|')[1] === '4'), 'no v4 emitted').to.be.false;
             let v0 = leader.published.find(p => p.split('|')[1] === '0');
@@ -680,11 +681,23 @@ describe('StateAnchorPublisher', function () {
                 signatures: new Map([[impostor.pubkey, impostor.identity.sign(canonical)]]),
                 done: false, timer: null, resolve: () => { collected++; }
             };
+            // A refusal has nothing of its own to poll for, so wait on the thing that
+            // makes the refusal final: every follower's message handler having run to
+            // completion. A follower that DID co-sign broadcasts from inside that
+            // handler, so once all of them settle the signature set can no longer grow.
+            let handled = [];
+            for (let nd of bus.nodes) {
+                if (nd === impostor) continue;
+                let origHandler = nd.handler;
+                nd.handler = (env) => { let p = origHandler(env); handled.push(Promise.resolve(p)); return p; };
+            }
             impostor.pub.peerManager.broadcast('XANCPUB_SIGN_REQ', {
                 checkpoint: cp, publisher: impostor.pubkey,
                 sig_pubkey: impostor.pubkey, sig: impostor.identity.sign(canonical)
             });
-            await sleep(60);
+            await waitUntil(() => handled.length === bus.nodes.length - 1,
+                { label: 'every follower to receive the impostor SIGN_REQ' });
+            await Promise.all(handled);
             expect(impostor.pub._attestRound.signatures.size, 'only the impostor self-sig').to.equal(1);
         });
     });
@@ -733,7 +746,7 @@ describe('StateAnchorPublisher', function () {
             let nd  = bus.nodes[0];
             await startAll(bus);
             await nd.pub.flush();
-            await sleep(30);
+            await waitUntil(() => nd.published.some(p => p.split('|')[1] === '6'), { label: 'the single-node flush to emit a v6 archive anchor' });
 
             let v6 = nd.published.find(p => p.split('|')[1] === '6');
             expect(v6, 'a v6 archive anchor was published').to.be.a('string');
@@ -765,7 +778,7 @@ describe('StateAnchorPublisher', function () {
             let bus = buildMesh(4, { btcBlock: 100, stakeWeighted: true });
             await startAll(bus);
             for (let nd of bus.nodes) await nd.pub.flush();
-            await sleep(200);
+            await waitUntil(() => bus.nodes.some(nd => nd.published.some(p => p.split('|')[1] === '6')), { label: 'the elected archive leader to emit a v6' });
 
             let leader = bus.nodes.find(nd => nd.published.some(p => p.split('|')[1] === '6'));
             expect(leader, 'an elected leader emitted a v6').to.exist;
@@ -809,7 +822,7 @@ describe('StateAnchorPublisher', function () {
                 nd.handler = (env) => { if (String(env.type).startsWith('XANCARCHPUB')) return; orig(env); };
             }
             for (let nd of bus.nodes) await nd.pub.flush();
-            await sleep(200);
+            await waitUntil(() => bus.nodes.some(nd => nd.published.some(p => ['1', '6'].includes(p.split('|')[1]))), { label: 'an archive head to be published' });
 
             let archiveHeads = bus.nodes.flatMap(nd => nd.published.filter(p => ['1', '6'].includes(p.split('|')[1])));
             expect(archiveHeads.length, 'an archive head was still published').to.be.at.least(1);
@@ -866,7 +879,7 @@ describe('StateAnchorPublisher', function () {
         let nd = bus.nodes[0];
         await startAll(bus);
         await nd.pub.flush();
-        await sleep(30);
+        await waitUntil(() => nd.published.length >= 2, { label: 'the v0 checkpoint and v1 archive to both be broadcast' });
 
         expect(nd.published.length).to.equal(2);                       // v0 checkpoint + v1 archive
         let v0 = nd.published[0].split('|');
@@ -915,7 +928,7 @@ describe('StateAnchorPublisher', function () {
         });
         await startAll(bus);
         await nd.pub.flush();
-        await sleep(30);
+        await waitUntil(() => nd.published.length >= 2, { label: 'the v0 checkpoint and the txid-less v1 archive to both be attempted' });
 
         expect(nd.published.length).to.equal(2);                       // v0 + v1 both attempted
         expect(nd.published[1].split('|')[1]).to.equal('1');           // the archive v1
@@ -944,7 +957,7 @@ describe('StateAnchorPublisher', function () {
         let nd = bus.nodes[0];
         await startAll(bus);
         await nd.pub.flush();
-        await sleep(30);
+        await waitUntil(() => nd.db.checkpoints.some(r => r.checkpoint_seq === 8 && r.anchor_txid), { label: 'the latest divisible seq to be anchored' });
 
         let v0s = nd.published.filter(p => p.split('|')[1] === '0');
         expect(v0s.length, 'exactly one v0 anchor').to.equal(1);
@@ -965,7 +978,7 @@ describe('StateAnchorPublisher', function () {
         let nd = bus.nodes[0];
         await startAll(bus);
         await nd.pub.flush();
-        await sleep(30);
+        await waitUntil(() => nd.published[1] && nd.published.length >= 1 + Number(nd.published[1].split('|')[14]), { label: 'every v1 + v2 archive chunk to be broadcast' });
 
         let v1 = nd.published[1].split('|');
         let total = Number(v1[14]);
@@ -992,7 +1005,7 @@ describe('StateAnchorPublisher', function () {
         let v0Pub  = v0Order(bus)[0];                                  // elected for the BTC checkpoint
         let leader = archiveLeader(bus);                          // elected archive leader
         await flushAll(bus);                                           // every hub's timer fires
-        await sleep(100);
+        await waitUntil(() => bus.nodes.every(nd => nd.db.checkpoints[0].anchor_txid) && bus.nodes.some(nd => nd.published.some(p => p.split('|')[1] === '1')), { label: 'the v0 back-fill to reach every hub and the archive to publish' });
 
         // Exactly one v0, published by the hash-order rank-0 node for that row's key.
         let v0s = bus.nodes.flatMap(nd => nd.published.filter(p => p.split('|')[1] === '0').map(() => nd));
@@ -1043,8 +1056,10 @@ describe('StateAnchorPublisher', function () {
             if (nd !== leader && mutated < 2) { nd.db.matches[0].a_amount = '999'; mutated++; }
         }
         await startAll(bus);
+        // flush() is fully awaited and every co-sign this round can collect is gathered
+        // inside it, so the refusal is already decided here: there is no later condition
+        // a poll could wait for, and the fixed settle it replaces only added dead time.
         await leader.pub.flush();
-        await sleep(120);
         let v1s = bus.nodes.flatMap(nd => nd.published.filter(p => p.split('|')[1] === '1'));
         expect(v1s.length).to.equal(0);
         for (let nd of bus.nodes) expect(nd.db.matches[0].batch_seq).to.equal(null);
@@ -1065,7 +1080,7 @@ describe('StateAnchorPublisher', function () {
         }
         await startAll(bus);
         await leader.pub.flush();
-        await sleep(120);
+        await waitUntil(() => bus.nodes.some(nd => nd.published.some(p => p.split('|')[1] === '1')), { label: 'the archive to publish despite two late joiners' });
 
         let v1s = bus.nodes.flatMap(nd => nd.published.filter(p => p.split('|')[1] === '1'));
         expect(v1s.length, 'archive published despite two late joiners').to.equal(1);
@@ -1093,7 +1108,7 @@ describe('StateAnchorPublisher', function () {
         let leader = archiveLeader(bus);
         await startAll(bus);
         await flushAll(bus);
-        await sleep(150);
+        await waitUntil(() => bus.nodes.every(nd => nd.db.rewardRows[0].batch_seq === 0), { label: 'the archive batch_seq to back-fill on every hub' });
 
         // Rewards-only batches publish (the empty-check includes rewards) with a
         // real co-sign quorum - followers re-derived every archived field.
@@ -1127,7 +1142,7 @@ describe('StateAnchorPublisher', function () {
         let nd = bus.nodes[0];
         await startAll(bus);
         await nd.pub.flush();
-        await sleep(30);
+        await waitUntil(() => nd.published.some(p => p.split('|')[1] === '1'), { label: 'the v1 archive to be broadcast' });
 
         let v1 = nd.published.find(p => p.split('|')[1] === '1').split('|');
         let archive = JSON.parse(zlib.gunzipSync(Buffer.from(v1[15], 'base64url')).toString('utf8'));
@@ -1146,7 +1161,9 @@ describe('StateAnchorPublisher', function () {
         let nd = bus.nodes[0];
         await startAll(bus);
         await nd.pub.flush();
-        await sleep(30);
+        // Nothing to poll on the negative claim, so gate it on the round it belongs to:
+        // the v0 checkpoint anchor still goes out, and the archive must not follow it.
+        await waitUntil(() => nd.published.some(p => p.split('|')[1] === '0'), { label: 'the v0 checkpoint anchor to be broadcast' });
 
         expect(nd.published.find(p => p.split('|')[1] === '1'), 'no v1 archive published').to.equal(undefined);
         expect(nd.db.rewardRows[0].batch_seq, 'reward stays pending').to.equal(null);
@@ -1205,7 +1222,7 @@ describe('StateAnchorPublisher', function () {
         }
         await startAll(bus);
         await leader.pub.flush();
-        await sleep(120);
+        await waitUntil(() => bus.nodes.some(nd => nd.published.some(p => p.split('|')[1] === '1')), { label: 'the archive to publish despite divergent local ids' });
         let v1s = bus.nodes.flatMap(nd => nd.published.filter(p => p.split('|')[1] === '1'));
         expect(v1s.length, 'archive published despite divergent ids').to.equal(1);
     });
@@ -1218,17 +1235,15 @@ describe('StateAnchorPublisher', function () {
 
         await order[2].pub.flush();                                    // rank 2: still locked
         await order[3].pub.flush();                                    // rank 3: still locked
-        await sleep(30);
         expect(bus.nodes.flatMap(nd => nd.published).filter(p => p.split('|')[1] === '0').length).to.equal(0);
 
         await order[1].pub.flush();                                    // rank 1: unlocked (rank 0 absent)
-        await sleep(30);
+        await waitUntil(() => bus.nodes.some(nd => nd.published.some(p => p.split('|')[1] === '0')), { label: 'the unlocked rank-1 publisher to emit the v0 anchor' });
         let v0s = bus.nodes.filter(nd => nd.published.some(p => p.split('|')[1] === '0'));
         expect(v0s.length).to.equal(1);
         expect(v0s[0]).to.equal(order[1]);
         // Back-fill reached rank 0 too - it won't double-publish when it returns.
         await order[0].pub.flush();
-        await sleep(30);
         expect(bus.nodes.flatMap(nd => nd.published).filter(p => p.split('|')[1] === '0').length).to.equal(1);
     });
 
@@ -1245,11 +1260,10 @@ describe('StateAnchorPublisher', function () {
 
         await order[2].pub.flush();                                    // rank 2: still locked
         await order[3].pub.flush();                                    // rank 3: still locked
-        await sleep(60);
         expect(bus.nodes.flatMap(nd => nd.published).filter(p => p.split('|')[1] === '1').length).to.equal(0);
 
         await order[1].pub.flush();                                    // rank 1: unlocked (rank-0 hub signer-less)
-        await sleep(120);
+        await waitUntil(() => order[1].published.some(p => p.split('|')[1] === '1') && bus.nodes.every(nd => nd.db.matches[0].batch_seq === 0), { label: 'the rank-1 archive to publish and back-fill every hub' });
         let v1Nodes = bus.nodes.filter(nd => nd.published.some(p => p.split('|')[1] === '1'));
         expect(v1Nodes.length).to.equal(1);
         expect(v1Nodes[0]).to.equal(order[1]);
@@ -1270,7 +1284,7 @@ describe('StateAnchorPublisher', function () {
         }
         await startAll(bus);
         await flushAll(bus);
-        await sleep(50);
+        await waitUntil(() => bus.nodes.every(nd => nd.db.checkpoints.every(c => c.anchor_txid)), { label: 'every per-chain checkpoint to be anchored on every hub' });
 
         for (let chain of ['BTC', 'LTC', 'DOGE']) {
             let expected = v0Order(bus, Object.assign({}, CP_ROW, { chain: chain }))[0];
@@ -1297,7 +1311,6 @@ describe('StateAnchorPublisher', function () {
         }
         await startAll(bus);
         await outsider.pub.flush();
-        await sleep(30);
         expect(outsider.published.length).to.equal(0);
         expect(outsider.rewards.length).to.equal(0);
     });
@@ -1315,7 +1328,6 @@ describe('StateAnchorPublisher', function () {
         await startAll(bus);
         let summaries = [];
         for (let nd of bus.nodes) summaries.push(await nd.pub.flush());
-        await sleep(50);
         // Nothing went out from ANY hub, and no anchor reward was minted.
         for (let nd of bus.nodes) {
             expect(nd.published.length, 'node ' + nd.i + ' published nothing').to.equal(0);
@@ -1366,7 +1378,7 @@ describe('StateAnchorPublisher', function () {
 
         await startAll(bus);
         await flushAll(bus);
-        await sleep(150);
+        await waitUntil(() => bus.nodes.some(nd => nd.published.some(p => p.split('|')[1] === '1')), { label: 'the archive to publish under the snapshot-block signer set' });
 
         // Exactly one v1, and every signature on it belongs to the snapshot_block
         // set - so the indexer, verifying against oracle_publish @ snapshot_block,
@@ -1421,7 +1433,7 @@ describe('StateAnchorPublisher', function () {
             done: true, timer: null
         };
         await nd.pub._publishArchive(round);
-        await sleep(20);
+        await waitUntil(() => nd.published.some(p => p.split('|')[1] === '1'), { label: 'the v1 archive broadcast' });
 
         // The v1 broadcast happened (a txid was produced) …
         expect(nd.published.some(p => p.split('|')[1] === '1'), 'v1 was broadcast').to.equal(true);
@@ -1442,7 +1454,6 @@ describe('StateAnchorPublisher', function () {
         let nd = bus.nodes[0];
         await startAll(bus);
         let first = await nd.pub.flush();
-        await sleep(30);
         expect(first.anchored.length).to.equal(1);
         expect(first.anchored[0]).to.include({ chain: 'BTC', network: 'regtest', block_index: 494 });
         expect(first.anchored[0].txid).to.be.a('string');
@@ -1471,7 +1482,7 @@ describe('StateAnchorPublisher', function () {
         });
         await startAll(bus);
         await nd.pub.flush();
-        await sleep(50);
+        await waitUntil(() => nd.published.some(p => p.split('|')[1] === '1'), { label: 'the v1 archive head to be broadcast' });
 
         // v1 went out but the batch must stay pending (sentinel ≠ real status)
         let v1a = nd.published.find(p => p.split('|')[1] === '1');
@@ -1485,7 +1496,7 @@ describe('StateAnchorPublisher', function () {
         // chunks deliverable again → next flush re-archives EVERYTHING under a new seq
         dropChunks = false;
         await nd.pub.flush();
-        await sleep(50);
+        await waitUntil(() => nd.published.filter(p => p.split('|')[1] === '1').length === 2, { label: 'the retry flush to re-archive under a second v1' });
         let v1s = nd.published.filter(p => p.split('|')[1] === '1');
         expect(v1s.length).to.equal(2);
         let seqB = Number(v1s[1].split('|')[11]);
@@ -1514,7 +1525,7 @@ describe('StateAnchorPublisher', function () {
         });
         await startAll(bus);
         await nd.pub.flush();
-        await sleep(30);
+        await waitUntil(() => nd.db.checkpoints[0].anchor_txid === 'txid1', { label: 'the retried v0 broadcast to stamp the checkpoint' });
 
         // Two conflicts absorbed by the retry - the checkpoint still anchors this flush.
         expect(v0Failures).to.equal(2);
@@ -1524,12 +1535,11 @@ describe('StateAnchorPublisher', function () {
         nd.db.checkpoints.push(Object.assign({}, CP_ROW, { id: 2, chain: 'DOGE', anchor_txid: null }));
         failuresLeft = 99;
         await nd.pub.flush();
-        await sleep(30);
         expect(nd.db.checkpoints[1].anchor_txid).to.equal(null);
 
         failuresLeft = 0;
         await nd.pub.flush();
-        await sleep(30);
+        await waitUntil(() => typeof nd.db.checkpoints[1].anchor_txid === 'string', { label: 'the conflict-free flush to anchor the deferred row' });
         expect(nd.db.checkpoints[1].anchor_txid).to.be.a('string');
     });
 
@@ -1538,14 +1548,14 @@ describe('StateAnchorPublisher', function () {
         let nd = bus.nodes[0];
         await startAll(bus);
         await nd.pub.flush();
-        await sleep(30);
+        await waitUntil(() => nd.db.matches[0].batch_seq === 0, { label: 'the first archive to claim the match row' });
         expect(nd.db.matches[0].batch_seq).to.equal(0);
 
         // Reorg retraction after archival → pending again under the re-archival rule.
         nd.db.matches[0].status = 'retracted';
         nd.db.checkpoints[0].anchor_txid = 'already';                  // no new v0 this flush
         await nd.pub.flush();
-        await sleep(30);
+        await waitUntil(() => nd.published.filter(p => p.split('|')[1] === '1').length === 2, { label: 'the retracted match to be re-archived under a second v1' });
 
         let v1s = nd.published.filter(p => p.split('|')[1] === '1');
         expect(v1s.length).to.equal(2);
@@ -1562,7 +1572,7 @@ describe('StateAnchorPublisher', function () {
         let nd = bus.nodes[0];
         await startAll(bus);
         await nd.pub.flush();
-        await sleep(30);
+        await waitUntil(() => nd.published.some(p => p.split('|')[1] === '1'), { label: 'the XCALL-bearing archive to be broadcast' });
 
         let v1s = nd.published.filter(p => p.split('|')[1] === '1');
         expect(v1s.length).to.equal(1);
@@ -1600,8 +1610,9 @@ describe('StateAnchorPublisher', function () {
             if (nd !== leader && mutated < 2) { nd.db.calls[0].gas_limit = 999999; mutated++; }
         }
         await startAll(bus);
+        // Same shape as the diverging-match round above: the awaited flush settles the
+        // refusal, so nothing remains to poll for.
         await leader.pub.flush();
-        await sleep(50);
         for (let nd of bus.nodes) expect(nd.db.calls[0].batch_seq).to.equal(null);
     });
 
@@ -2427,11 +2438,11 @@ describe('StateAnchorPublisher', function () {
         await nd.pub.start();
 
         dex.emit('match:finalized');                             // 1 < batchSize → no flush
-        await sleep(10);
+        await waitUntil(() => nd.pub._pendingMatches === 1, { label: 'the first match:finalized event to be counted' });
         expect(flushes, 'one event below batchSize does not flush').to.equal(0);
 
         dex.emit('match:finalized');                             // 2 >= batchSize → flush
-        await sleep(20);
+        await waitUntil(() => flushes > 0, { label: 'reaching batchSize to trigger a flush' });
         expect(flushes, 'reaching batchSize triggers a flush').to.be.greaterThan(0);
     });
 
@@ -2512,7 +2523,6 @@ describe('StateAnchorPublisher', function () {
             await startAll(bus);
 
             let res = await nd.pub.flush();
-            await sleep(30);
 
             expect(res.anchored.length, 'only the regtest checkpoint is anchored').to.equal(1);
             expect(res.anchored[0]).to.include({ chain: 'BTC', network: 'regtest', block_index: 494 });
@@ -2539,7 +2549,6 @@ describe('StateAnchorPublisher', function () {
             await startAll(bus);
 
             let res = await nd.pub.flush();
-            await sleep(30);
 
             expect(res.archive, 'archive round published').to.equal('published');
             expect(capturedNetwork, 'wrapper checkpoint is network-scoped to regtest').to.equal('regtest');

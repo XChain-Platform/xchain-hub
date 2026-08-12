@@ -191,7 +191,10 @@ describe('CapabilitySnapshot', function () {
             let registry = { getMinStake: () => '25000' };
             let snap = new CapabilitySnapshot(makeHub(registry));
 
-            axiosStub.post.resolves(resultWith([{ pubkey: 'old', amount: '30000' }]));
+            // One row that satisfies BOTH RPC shapes: the same stub answers the count
+            // fetch (amount) and the weight fetch (source+weight), and since  a
+            // weight snapshot missing its weight is refused rather than cached.
+            axiosStub.post.resolves(resultWith([{ pubkey: 'old', amount: '30000', source: 'src1', weight: '30000' }]));
             await snap.getSnapshot('attestation', 106);
             await snap.getWeightSnapshot('attestation', 106);
             // A different capability's entry must survive the flush.
@@ -389,12 +392,18 @@ describe('CapabilitySnapshot', function () {
             return { data: { result: result } };
         }
 
-        // Each fetch method paired with a base valid result for its RPC.
+        // Each fetch method paired with a base valid result for its RPC, and with a
+        // row of the shape THAT RPC actually returns: the count RPCs answer
+        // {pubkey, amount}, the source-keyed weight RPCs answer {pubkey, source,
+        // weight}. The distinction matters since : a weight RPC row carrying
+        // no `weight` is rejected as malformed rather than read as zero stake.
+        let countRow  = { pubkey: 'ab', amount: '50000' };
+        let weightRow = { pubkey: 'ab', source: 'bc1qsource', weight: '50000' };
         let methods = [
-            { name: 'getSnapshot',                 call: (s) => s.getSnapshot('attestation', 106),    base: { capability: 'attestation', block_index: 100, count: 1 } },
-            { name: 'getWeightSnapshot',           call: (s) => s.getWeightSnapshot('attestation', 106), base: { capability: 'attestation', block_index: 100, count: 1, source_count: 1 } },
-            { name: 'getActiveValidatorSnapshot',  call: (s) => s.getActiveValidatorSnapshot(106),     base: { block_index: 100, count: 1 } },
-            { name: 'getActiveWeightSnapshot',     call: (s) => s.getActiveWeightSnapshot(106),        base: { block_index: 100, count: 1, source_count: 1 } }
+            { name: 'getSnapshot',                 call: (s) => s.getSnapshot('attestation', 106),    base: { capability: 'attestation', block_index: 100, count: 1 }, row: countRow },
+            { name: 'getWeightSnapshot',           call: (s) => s.getWeightSnapshot('attestation', 106), base: { capability: 'attestation', block_index: 100, count: 1, source_count: 1 }, row: weightRow },
+            { name: 'getActiveValidatorSnapshot',  call: (s) => s.getActiveValidatorSnapshot(106),     base: { block_index: 100, count: 1 }, row: countRow },
+            { name: 'getActiveWeightSnapshot',     call: (s) => s.getActiveWeightSnapshot(106),        base: { block_index: 100, count: 1, source_count: 1 }, row: weightRow }
         ];
 
         // (d) malformed shapes return null on every fetch path.
@@ -418,7 +427,7 @@ describe('CapabilitySnapshot', function () {
             }
 
             it(m.name + ' returns a real snapshot for a VALID validators array', async function () {
-                let result = Object.assign({}, m.base, { validators: [{ pubkey: 'ab', amount: '50000' }] });
+                let result = Object.assign({}, m.base, { validators: [m.row] });
                 axiosStub.post.resolves(dataResult(result));
                 let snap = new CapabilitySnapshot(makeHub(null));
                 let out = await m.call(snap);
@@ -437,6 +446,87 @@ describe('CapabilitySnapshot', function () {
                 expect(out.validators).to.be.an('array').with.lengthOf(0);
             });
         }
+    });
+
+    // -----------------------------------------------------------------
+    // Weightless row on a WEIGHT snapshot 
+    //
+    // stake_weighted_quorum fails closed on a row with no weight, but it never
+    // sees one: every consumer re-maps the snapshot through
+    // `String(v.weight != null ? v.weight : '0')`, which turns the missing
+    // weight into a real zero. The source then sits in the quorum's dedupe map
+    // carrying no stake, so the denominator S shrinks while a signer keeps the
+    // full numerator, and a smaller real stake clears 3*tally > 2*S. The
+    // rejection therefore has to happen where the wire row enters the hub.
+    // A live regtest sweep (BTC/LTC/DOGE, every capability, several block
+    // boundaries) found zero weightless rows, so this can only fire on a
+    // corrupt or hostile indexer answer.
+    // -----------------------------------------------------------------
+
+    describe('weightless weight-snapshot row ', function () {
+
+        function dataResult(result) { return { data: { result: result } }; }
+
+        let weightMethods = [
+            { name: 'getWeightSnapshot',       call: (s) => s.getWeightSnapshot('attestation', 106), base: { capability: 'attestation', block_index: 100, count: 2, source_count: 2 } },
+            { name: 'getActiveWeightSnapshot', call: (s) => s.getActiveWeightSnapshot(106),          base: { block_index: 100, count: 2, source_count: 2 } }
+        ];
+        // Each bad second row is one way a weight can go missing on the wire.
+        let badWeights = [
+            { label: 'weight is absent',   row: { pubkey: 'cd', source: 'src2' } },
+            { label: 'weight is null',     row: { pubkey: 'cd', source: 'src2', weight: null } },
+            { label: 'weight is empty',    row: { pubkey: 'cd', source: 'src2', weight: '' } },
+            { label: 'weight is blank',    row: { pubkey: 'cd', source: 'src2', weight: '   ' } },
+            { label: 'weight is garbage',  row: { pubkey: 'cd', source: 'src2', weight: 'lots' } },
+            { label: 'weight is NaN-ish',  row: { pubkey: 'cd', source: 'src2', weight: 'NaN' } }
+        ];
+        let good = { pubkey: 'ab', source: 'src1', weight: '50000' };
+
+        for (let m of weightMethods) {
+            for (let bad of badWeights) {
+                it(m.name + ' returns null when ' + bad.label, async function () {
+                    axiosStub.post.resolves(dataResult(Object.assign({}, m.base, { validators: [good, bad.row] })));
+                    let snap = new CapabilitySnapshot(makeHub(null));
+                    expect(await m.call(snap)).to.equal(null);
+                });
+            }
+
+            it(m.name + ' rejects the WHOLE snapshot, never just the bad row', async function () {
+                // Dropping the row instead of refusing the snapshot shrinks S by
+                // exactly the amount the missing weight would have contributed -
+                // the same defect wearing a different hat.
+                axiosStub.post.resolves(dataResult(Object.assign({}, m.base, { validators: [good, { pubkey: 'cd', source: 'src2' }] })));
+                let snap = new CapabilitySnapshot(makeHub(null));
+                expect(await m.call(snap)).to.equal(null);
+            });
+
+            it(m.name + ' still accepts a LEGITIMATE zero weight', async function () {
+                // A source qualified at MIN_STAKE 0 really can weigh 0. That is a
+                // value, not an absence, and the predicate handles it.
+                axiosStub.post.resolves(dataResult(Object.assign({}, m.base, { validators: [good, { pubkey: 'cd', source: 'src2', weight: '0' }] })));
+                let snap = new CapabilitySnapshot(makeHub(null));
+                let out = await m.call(snap);
+                expect(out).to.not.equal(null);
+                expect(out.validators).to.be.an('array').with.lengthOf(2);
+            });
+
+            it(m.name + ' accepts a decimal weight', async function () {
+                axiosStub.post.resolves(dataResult(Object.assign({}, m.base, { validators: [good, { pubkey: 'cd', source: 'src2', weight: '12345.67890000' }] })));
+                let snap = new CapabilitySnapshot(makeHub(null));
+                expect(await m.call(snap)).to.not.equal(null);
+            });
+        }
+
+        it('leaves the COUNT snapshot lenient (it carries amount, not weight)', async function () {
+            // getSnapshot feeds the count quorum, which never reads a weight, so
+            // holding it to the weight contract would halt the count path for no
+            // safety gain.
+            axiosStub.post.resolves(dataResult({ capability: 'attestation', block_index: 100, count: 1, validators: [{ pubkey: 'ab', amount: '50000' }] }));
+            let snap = new CapabilitySnapshot(makeHub(null));
+            let out = await snap.getSnapshot('attestation', 106);
+            expect(out).to.not.equal(null);
+            expect(out.validators).to.be.an('array').with.lengthOf(1);
+        });
     });
 
     // -----------------------------------------------------------------

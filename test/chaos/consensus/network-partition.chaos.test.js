@@ -15,9 +15,10 @@ const { expect } = require('chai');
 const crypto     = require('crypto');
 const Consensus  = require('../../../src/Consensus');
 const { createMockHub }                    = require('../../helpers/mockHub');
-const { VALIDATORS_4 }                     = require('../../helpers/fixtures');
+const { VALIDATORS_4, makeFederationSnapshot }                     = require('../../helpers/fixtures');
 const { buildEnvelope }                    = require('../../helpers/testPeerNetwork');
 const { runExperiment, waitForCondition }  = require('../helpers/chaosRunner');
+const { waitUntil }                        = require('../../helpers/waitUntil');
 
 function makeDigest(config) {
     return crypto.createHash('sha256').update(JSON.stringify(config)).digest('hex');
@@ -33,7 +34,7 @@ function makeDigest(config) {
 // unchanged; the genuinely peerless hub below keeps its empty validator set and
 // stays on the single-node path either way.
 function wireFederationSnapshot(hub, quorum) {
-    let snapshot = { blockIndex: 800000, validators: [{ pubkey: 'aa', amount: '50000' }] };
+    let snapshot = makeFederationSnapshot(VALIDATORS_4, 800000);
     hub.capabilitySnapshot = {
         getActiveValidatorSnapshot: sinon.stub().resolves(snapshot),
         getActiveWeightSnapshot:    sinon.stub().resolves(snapshot),
@@ -127,7 +128,7 @@ describe('Chaos: Network Partition (NET-3)', function () {
             seq: 4, configDigest: digest
         }, VALIDATORS_4[2].addr));
 
-        await new Promise(r => setTimeout(r, 50));
+        await waitUntil(() => hub2.applyConfig.calledOnce, { label: 'the majority cluster to apply the config' });
 
         expect(hub2.applyConfig.calledOnce).to.be.true;
         expect(hub2.applyConfig.getCall(0).args[0]).to.deep.equal(config);
@@ -162,7 +163,11 @@ describe('Chaos: Network Partition (NET-3)', function () {
         let promise = consensus.propose(config).then(() => { done = true; });
 
         // seq is now 4; initially only 1 PREPARE (self), not enough
-        await new Promise(r => setTimeout(r, 50));
+        // seq is now 4; initially only 1 PREPARE (self), not enough
+        await waitUntil(() => {
+            let p = consensus.pendingProposals.get(4);
+            return p && p.prepares.size >= 1;
+        }, { label: 'the proposal round to open with only the self PREPARE' });
         expect(done).to.be.false;
 
         // "Partition heals": delayed PREPAREs arrive

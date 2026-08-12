@@ -21,8 +21,21 @@
 const { expect }            = require('chai');
 const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
 const ValidatorIdentity     = require('../../src/ValidatorIdentity');
+const { waitUntil }         = require('../helpers/waitUntil');
 
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+// The mock bus hands SIGN_REQ to an async handler that _handleMessage fires and
+// forgets, so "nobody co-signed" is only settled once every peer has finished
+// judging the request. Wrapping the handler makes that countable, which is the
+// observable the refusal cases used to stand a fixed sleep in for.
+function countHandled(nodes, method) {
+    let done = 0;
+    for (let nd of nodes) {
+        let engine = nd.engine;
+        let orig = engine[method].bind(engine);
+        engine[method] = async (...args) => { try { return await orig(...args); } finally { done++; } };
+    }
+    return () => done;
+}
 
 const TIP = {
     block_index: 500, block_hash: 'c0'.repeat(32), network: 'regtest',
@@ -167,7 +180,7 @@ describe('StateCheckpointEngine', function () {
         let bus = buildMesh(1, { btcBlock: 100 });
         await startAll(bus);
         await tickAll(bus);
-        await sleep(30);
+        await waitUntil(() => bus.nodes[0].db.checkpoints.length === 1, { label: 'the single-validator round to self-sign and write' });
 
         let nd = bus.nodes[0];
         expect(nd.finalized.length).to.equal(1);
@@ -189,7 +202,7 @@ describe('StateCheckpointEngine', function () {
         let nd  = bus.nodes[0];
         await nd.engine.start();
         await nd.engine._tick();
-        await sleep(30);
+        await waitUntil(() => nd.db.checkpoints.length === 1, { label: 'the first boot to write its checkpoint' });
         expect(nd.db.checkpoints.length, 'after first boot').to.equal(1);
         let seqAfterBoot = nd.db.checkpoints[0].checkpoint_seq;
 
@@ -201,14 +214,15 @@ describe('StateCheckpointEngine', function () {
         await restarted.start();
         expect(restarted._lastCheckpointBtcBlock, 'latch restored on start').to.equal(100);
         await restarted._tick();
-        await sleep(30);
+        // _tick() is awaited and the latch decision is taken inside it, so the
+        // no-op is already decided; there is no later condition to poll for.
         expect(nd.db.checkpoints.length, 'no extra checkpoint after restart').to.equal(1);
         expect(nd.db.checkpoints[0].checkpoint_seq).to.equal(seqAfterBoot);
 
         // Once btcBlock advances past the interval, it checkpoints again.
         restarted.hub._resolveBtcLatestBlock = async () => 100 + restarted.intervalBlocks;
         await restarted._tick();
-        await sleep(30);
+        await waitUntil(() => nd.db.checkpoints.length === 2, { label: 'the post-interval tick to write a second checkpoint' });
         expect(nd.db.checkpoints.length, 'checkpoints again past the interval').to.equal(2);
     });
 
@@ -216,7 +230,7 @@ describe('StateCheckpointEngine', function () {
         let bus = buildMesh(4, { btcBlock: 101 });
         await startAll(bus);
         await tickAll(bus);
-        await sleep(80);
+        await waitUntil(() => bus.nodes.every(nd => nd.db.checkpoints.length === 1), { label: 'every node to write the quorum-signed row' });
 
         for (let nd of bus.nodes) {
             expect(nd.db.checkpoints.length, 'node ' + nd.i + ' rows').to.equal(1);
@@ -241,7 +255,9 @@ describe('StateCheckpointEngine', function () {
         let bus = buildMesh(4, { btcBlock: 101 });
         await startAll(bus);
         await tickAll(bus);
-        await sleep(80);
+        await waitUntil(() => bus.nodes.every(nd => nd.db.checkpoints.length === 1 &&
+            nd.db.snapshots.filter(s => s.capability === 'oracle_publish' && s.snapshot_block === 101).length === 4),
+            { label: 'every node to persist the checkpoint and its oracle_publish snapshot' });
 
         for (let nd of bus.nodes) {
             expect(nd.db.checkpoints.length, 'node ' + nd.i + ' checkpoint').to.equal(1);
@@ -264,7 +280,7 @@ describe('StateCheckpointEngine', function () {
         function divergedIndex(b, leader) { return b.nodes.find(nd => nd !== leader).i; }
         await startAll(bus);
         await tickAll(bus);
-        await sleep(80);
+        await waitUntil(() => leaderNode(bus, 101).db.checkpoints.length === 1, { label: 'the leader to reach quorum without the diverged replica' });
 
         let leader = leaderNode(bus, 101);
         expect(leader.db.checkpoints.length).to.equal(1);
@@ -287,7 +303,12 @@ describe('StateCheckpointEngine', function () {
         });
         await startAll(bus);
         await tickAll(bus);
-        await sleep(80);
+        // Quorum (3) is unreachable, so wait on the stall point: the leader holds its
+        // own signature plus the one honest follower's and can collect no more.
+        await waitUntil(() => {
+            let round = [...leaderNode(bus, 101).engine.pending.values()][0];
+            return round && round.signatures.size >= 2;
+        }, { label: 'the single honest co-sign to reach the leader' });
         for (let nd of bus.nodes) expect(nd.db.checkpoints.length, 'node ' + nd.i).to.equal(0);
     });
 
@@ -303,8 +324,9 @@ describe('StateCheckpointEngine', function () {
             nd.db.checkpoints.push({ id: 1, chain: 'BTC', network: 'regtest', block_index: 1, block_hash: '', ledger_hash: '',
                                      actions_hash: '', contract_hash: '', checkpoint_seq: 101, snapshot_block: 101, validator_signatures: '[]' });
         }
+        let reqsHandled = countHandled(bus.nodes.filter(nd => nd !== leader), '_handleSignReq');
         await tickAll(bus);
-        await sleep(80);
+        await waitUntil(() => reqsHandled() === bus.nodes.length - 1, { label: 'every follower to finish judging the replayed SIGN_REQ' });
         // No follower signed → leader stuck below quorum → no new row on the leader.
         expect(leader.db.checkpoints.length).to.equal(0);
     });
@@ -323,11 +345,12 @@ describe('StateCheckpointEngine', function () {
             checkpoint_seq: 101, snapshot_block: 101
         };
         let canon = StateCheckpointEngine.canonicalCheckpoint(cp);
+        let reqsHandled = countHandled(bus.nodes.filter(nd => nd !== impostor), '_handleSignReq');
         // Impostor broadcasts a well-formed, correctly signed REQ, but isn't the cadence leader.
         impostor.engine.peerManager.broadcast(StateCheckpointEngine.XCHK_SIGN_REQ, {
             checkpoint: cp, sig_pubkey: impostor.pubkey, sig: impostor.identity.sign(canon)
         });
-        await sleep(60);
+        await waitUntil(() => reqsHandled() === bus.nodes.length - 1, { label: 'every peer to finish judging the non-leader SIGN_REQ' });
         for (let nd of bus.nodes) expect(nd.db.checkpoints.length, 'node ' + nd.i).to.equal(0);
     });
 
@@ -338,7 +361,7 @@ describe('StateCheckpointEngine', function () {
         let bus = buildMesh(1, { btcBlock: 100, chains: ['BTC', 'LTC', 'DOGE'] });
         await startAll(bus);
         await tickAll(bus);
-        await sleep(40);
+        await waitUntil(() => bus.nodes[0].db.checkpoints.length === 3, { label: 'one tick to checkpoint all three configured chains' });
 
         let nd = bus.nodes[0];
         expect(nd.db.checkpoints.map(r => r.chain).sort()).to.deep.equal(['BTC', 'DOGE', 'LTC']);
@@ -363,7 +386,7 @@ describe('StateCheckpointEngine', function () {
         });
         await startAll(bus);
         await tickAll(bus);
-        await sleep(40);
+        await waitUntil(() => bus.nodes[0].db.checkpoints.length === 1, { label: 'the offset round to write its checkpoint' });
 
         let nd = bus.nodes[0];
         expect(nd.db.checkpoints.length).to.equal(1);
@@ -488,7 +511,7 @@ describe('StateCheckpointEngine', function () {
             let bus = buildMesh(1, { btcBlock: 250 });
             await startAll(bus);
             await tickAll(bus);
-            await sleep(30);
+            await waitUntil(() => bus.nodes[0].db.checkpoints.length === 1, { label: 'the round to write its checkpoint' });
             let row = bus.nodes[0].db.checkpoints[0];
             // seq is the BTC cadence (snapshot) block, NOT a dense 0 from MAX+1.
             expect(row.checkpoint_seq, 'seq == snapshot_block').to.equal(250);

@@ -166,12 +166,12 @@ describe('AttestationRelay ', function () {
             sinon.stub(eq, 'isEquivHeaderActive').returns(false);
             const relay = new AttestationRelay(makeHub());
             const canonical = relay._relayRequestCanonical({
-                request_id: REQ_ID, snapshot_block: 969500, network: 'mainnet',
+                request_id: REQ_ID, snapshot_block: 963000, network: 'mainnet',
                 origin_chain: 'LTC', origin_action_index: 4242, provider_id: 'http_get',
                 request_payload: 'https://example.com/score', redundancy: 3, deadline_blocks: 10,
             });
             expect(canonical).to.equal(
-                'ATTEST|RELAY_REQUEST|' + REQ_ID + '|969500|mainnet|LTC|4242|http_get|' +
+                'ATTEST|RELAY_REQUEST|' + REQ_ID + '|963000|mainnet|LTC|4242|http_get|' +
                 sha256('https://example.com/score') + '|3|10');
         });
 
@@ -180,19 +180,19 @@ describe('AttestationRelay ', function () {
             const relay = new AttestationRelay(makeHub());
             const bodyHash = sha256('body');
             const canonical = relay._relayResponseCanonical({
-                request_id: REQ_ID, snapshot_block: 969500, network: 'mainnet',
+                request_id: REQ_ID, snapshot_block: 963000, network: 'mainnet',
                 origin_chain: 'DOGE', home_response_action_index: 777, provider_id: 'http_get',
                 response_hash: bodyHash, status: 'ok', meta: '200',
             });
             expect(canonical).to.equal(
-                'ATTEST|RELAY_RESPONSE|' + REQ_ID + '|969500|mainnet|DOGE|777|http_get|' +
+                'ATTEST|RELAY_RESPONSE|' + REQ_ID + '|963000|mainnet|DOGE|777|http_get|' +
                 bodyHash + '|ok|200');
         });
 
         it('wraps the EQUIV header with a per-leg round id so the two legs never collide', function () {
             sinon.stub(eq, 'isEquivHeaderActive').returns(true);
             const relay = new AttestationRelay(makeHub());
-            const base = { request_id: REQ_ID, snapshot_block: 969500, network: 'mainnet', origin_chain: 'LTC', provider_id: 'http_get' };
+            const base = { request_id: REQ_ID, snapshot_block: 963000, network: 'mainnet', origin_chain: 'LTC', provider_id: 'http_get' };
             const req = relay._relayRequestCanonical({ ...base, origin_action_index: 1, request_payload: '', redundancy: 1, deadline_blocks: 10 });
             const res = relay._relayResponseCanonical({ ...base, home_response_action_index: 1, response_hash: 'f'.repeat(64), status: 'ok', meta: '' });
             expect(req).to.include('XATTEST');
@@ -203,7 +203,7 @@ describe('AttestationRelay ', function () {
             sinon.stub(eq, 'isEquivHeaderActive').returns(true);
             const relay = new AttestationRelay(makeHub());
             const row = {
-                phase: 'request', request_id: REQ_ID, snapshot_block: 969500, network: 'mainnet',
+                phase: 'request', request_id: REQ_ID, snapshot_block: 963000, network: 'mainnet',
                 origin_chain: 'LTC', origin_action_index: 1, provider_id: 'http_get',
                 request_payload: '', redundancy: 1, deadline_blocks: 10,
             };
@@ -228,7 +228,7 @@ describe('AttestationRelay ', function () {
             const relay = new AttestationRelay(makeHub());
 
             for (const network of ['mainnet', 'regtest']) {
-                for (const snapshotBlock of [0, 969499, 969500, 4000000]) {
+                for (const snapshotBlock of [0, 962999, 963000, 4000000]) {
                     for (const payload of ['', 'https://example.com/score', 'ünïcødé']) {
                         expect(relay._relayRequestCanonical({
                             request_id: REQ_ID, snapshot_block: snapshotBlock, network,
@@ -273,7 +273,7 @@ describe('AttestationRelay ', function () {
 
             let compared = 0;
             for (const network of ['mainnet', 'regtest']) {
-                for (const snapshotBlock of [0, 969499, 969500, 4000000]) {
+                for (const snapshotBlock of [0, 962999, 963000, 4000000]) {
                     for (const payload of ['', '{"score":42}', 'ünïcødé ✓', 'a|b|c', 'x'.repeat(400)]) {
                         for (const meta of ['', '200', 'model=ünï', null]) {
                             for (const status of ['ok', 'expired']) {
@@ -340,21 +340,21 @@ describe('AttestationRelay ', function () {
         });
 
         it('proposes nothing below ATTEST_RELAY_ACTIVATION', async function () {
-            // mainnet arms at 969500; a BTC tip below it must relay nothing.
-            const relay = makeRelay({ network: 'mainnet', _resolveBtcLatestBlock: sinon.stub().resolves(969499) });
+            // mainnet arms at 963000; a BTC tip below it must relay nothing.
+            const relay = makeRelay({ network: 'mainnet', _resolveBtcLatestBlock: sinon.stub().resolves(962999) });
             await relay._poll();
             expect(relay.consensus.propose.called).to.equal(false);
         });
 
         it('proposes at the activation height and not one block below it', async function () {
-            const below = makeRelay({ network: 'mainnet', _resolveBtcLatestBlock: sinon.stub().resolves(969499) });
+            const below = makeRelay({ network: 'mainnet', _resolveBtcLatestBlock: sinon.stub().resolves(962999) });
             await below._poll();
             expect(below.consensus.propose.called).to.equal(false);
 
-            const at = makeRelay({ network: 'mainnet', _resolveBtcLatestBlock: sinon.stub().resolves(969500) });
+            const at = makeRelay({ network: 'mainnet', _resolveBtcLatestBlock: sinon.stub().resolves(963000) });
             await at._poll();
             expect(at.consensus.propose.calledOnce).to.equal(true);
-            expect(at.consensus.propose.firstCall.args[1].row.snapshot_block).to.equal(969500);
+            expect(at.consensus.propose.firstCall.args[1].row.snapshot_block).to.equal(963000);
         });
 
         it('proposes nothing when the BTC tip cannot be resolved', async function () {
@@ -558,7 +558,7 @@ describe('AttestationRelay ', function () {
 
         it('relays nothing below ATTEST_RELAY_ACTIVATION', async function () {
             const relay = makeRelay(
-                { network: 'mainnet', _resolveBtcLatestBlock: sinon.stub().resolves(969499) },
+                { network: 'mainnet', _resolveBtcLatestBlock: sinon.stub().resolves(962999) },
                 [originRow()], [homeRelayedRow()]);
             await relay._poll();
             expect(relay.consensus.propose.called).to.equal(false);
@@ -813,10 +813,10 @@ describe('AttestationRelay ', function () {
         });
 
         it('refuses below ATTEST_RELAY_ACTIVATION', async function () {
-            const relay = makeRelay({ network: 'mainnet', _resolveBtcLatestBlock: sinon.stub().resolves(969499) },
+            const relay = makeRelay({ network: 'mainnet', _resolveBtcLatestBlock: sinon.stub().resolves(962999) },
                 [originRow()], [homeRelayedRow()]);
             expect(await relay.validateProposedMatch(responseRow({
-                network: 'mainnet', snapshot_block: 969499,
+                network: 'mainnet', snapshot_block: 962999,
             }))).to.equal(false);
         });
 
@@ -843,7 +843,7 @@ describe('AttestationRelay ', function () {
             const wire = relay._buildRequestWire({
                 request_id: REQ_ID, origin_chain: 'LTC', origin_action_index: 4242,
                 provider_id: 'http_get', request_payload: 'https://example.com/score',
-                redundancy: 3, deadline_blocks: 10, snapshot_block: 969500,
+                redundancy: 3, deadline_blocks: 10, snapshot_block: 963000,
             }, [{ pubkey: PUBKEY_A, sig: SIG_A }]);
 
             const parts = wire.split('|');
@@ -858,7 +858,7 @@ describe('AttestationRelay ', function () {
             expect(parts[6]).to.equal('https://example.com/score');
             expect(parts[7]).to.equal('3');
             expect(parts[8]).to.equal('10');
-            expect(parts[9]).to.equal('969500');
+            expect(parts[9]).to.equal('963000');
             // The indexer strips the leading 'ATTEST' before indexing, so its
             // params[N] is wire index N+1: _parseRelaySigs(params, 9) reads the
             // signature count from wire index 10.
@@ -894,7 +894,7 @@ describe('AttestationRelay ', function () {
             const b64   = Buffer.from(RESPONSE_BODY, 'utf8').toString('base64');
             const wire  = relay._buildResponseWire({
                 request_id: REQ_ID, home_response_action_index: 9002, response_payload_b64: b64,
-                status: 'ok', meta: '200', snapshot_block: 969500,
+                status: 'ok', meta: '200', snapshot_block: 963000,
             }, [{ pubkey: PUBKEY_A, sig: SIG_A }]);
 
             const parts = wire.split('|');
@@ -908,7 +908,7 @@ describe('AttestationRelay ', function () {
             expect(parts[4]).to.equal(b64);
             expect(parts[5]).to.equal('ok');
             expect(parts[6]).to.equal('200');
-            expect(parts[7]).to.equal('969500');
+            expect(parts[7]).to.equal('963000');
             // The indexer strips the leading 'ATTEST' before indexing, so its params[N]
             // is wire index N+1: _parseRelaySigs(params, 7) reads the count at index 8.
             expect(parts[8]).to.equal('1');
@@ -1276,6 +1276,23 @@ describe('AttestationRelay ', function () {
             expect(sent).to.have.length(1);
         });
 
+        it('stamps the eviction key onto every WAL record it writes', async function () {
+            // : a record with no deadline is one no later process can ever retire,
+            // so the stamp is applied centrally in _appendWal rather than per call site.
+            const relay = new AttestationRelay(makeHub());
+            relay._noteDeadline('LTC', REQ_ID, 3160010);
+            relay.setBroadcastHook(async () => ({ txid: 'deadbeef' }));
+            await relay._onRoundFinalized(finalizedEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
+
+            const recs = fs.readFileSync(process.env.ATTEST_RELAY_QUEUE_PATH, 'utf8')
+                .split('\n').filter(Boolean).map(JSON.parse);
+            expect(recs).to.have.length.greaterThan(1);
+            for (const r of recs) {
+                expect(r.deadline_chain).to.equal('LTC');
+                expect(r.deadline_block).to.equal(3160010);
+            }
+        });
+
         it('treats an ambiguous failure from the send step as sent', async function () {
             const relay = new AttestationRelay(makeHub());
             relay.setEncoder({
@@ -1289,6 +1306,310 @@ describe('AttestationRelay ', function () {
 
             await relay._onRoundFinalized(finalizedEvent([{ pubkey: PUBKEY_A, sig: SIG_A }]));
             expect(relay._published.has(REQ_ID)).to.equal(true);
+        });
+    });
+
+    // ── 8. Deadline-anchored eviction and WAL compaction  ──────────
+    //
+    // Both idempotency sets and the WAL behind them used to grow for the process
+    // lifetime. The bound the operator ruled for on 2026-08-11 (proposal A) anchors on
+    // the ORIGIN request's own absolute deadline_block, which the response leg does not
+    // otherwise have: the home chain's relayed row carries only the RELATIVE count the
+    // v3 put on BTC. What these protect:
+    //   - the record shape: the deadline is threaded onto the response round row and
+    //     re-derived by followers, and it must stay OUT of the signed canonical, which
+    //     has to keep byte-matching the indexer's;
+    //   - the safety of forgetting: a leg is evicted only past a horizon that both
+    //     re-entry paths also refuse, so a forgotten key can never fund a second
+    //     broadcast;
+    //   - the crash controls: a lost or half-written WAL must always fail toward
+    //     suppressing a broadcast, never toward re-spending.
+
+    describe('deadline-anchored eviction', function () {
+
+        const DEADLINE = originRow().deadline_block;   // absolute, on the LTC origin
+        const OTHER_ID = 'e'.repeat(64);
+
+        let dir;
+        beforeEach(function () {
+            dir = fs.mkdtempSync(path.join(os.tmpdir(), 'attest-relay-ev-'));
+            process.env.ATTEST_RELAY_QUEUE_PATH = path.join(dir, 'relay.jsonl');
+        });
+        afterEach(function () { fs.rmSync(dir, { recursive: true, force: true }); });
+
+        // The first LTC height at which a leg for DEADLINE becomes evictable.
+        function horizon(relay) {
+            return DEADLINE + relay.evictGraceBlocks + relay.confirmations.LTC;
+        }
+
+        // A relay whose LTC indexer reports the given tip, everything else as usual.
+        function relayAtTip(tip, rows = [originRow()], homeRows = []) {
+            const relay = makeRelay({}, rows, homeRows);
+            const inner = relay._indexerCall;
+            relay._indexerCall = sinon.stub().callsFake(async (coin, method, params) => {
+                const res = await inner(coin, method, params);
+                if (coin === 'LTC') res.latest_block_index = tip;
+                return res;
+            });
+            return relay;
+        }
+
+        function walLines() {
+            return fs.readFileSync(process.env.ATTEST_RELAY_QUEUE_PATH, 'utf8')
+                .split('\n').filter(Boolean).map(JSON.parse);
+        }
+
+        function writeWal(records) {
+            fs.writeFileSync(process.env.ATTEST_RELAY_QUEUE_PATH,
+                records.map(r => JSON.stringify(r)).join('\n') + '\n');
+        }
+
+        // ── the record-shape change ──────────────────────────────────────────
+
+        it('threads the origin absolute deadline and its chain onto the response round row', async function () {
+            const relay = makeRelay({}, [originRow()], [homeRelayedRow()]);
+            await relay._poll();
+            const row = proposedRows(relay, 'response')[0];
+            expect(row.origin_deadline_block).to.equal(DEADLINE);
+            expect(row.origin_chain).to.equal('LTC');
+        });
+
+        it('keeps the threaded deadline out of the signed canonical and off the v4 wire', function () {
+            // It is bookkeeping, not consensus. The canonical must keep byte-matching the
+            // indexer's _relayResponseCanonical, and the wire is parsed positionally.
+            sinon.stub(eq, 'isEquivHeaderActive').returns(false);
+            const relay = new AttestationRelay(makeHub());
+            const base = {
+                request_id: REQ_ID, snapshot_block: 963000, network: 'mainnet', origin_chain: 'LTC',
+                home_response_action_index: 9002, provider_id: 'http_get',
+                response_hash: 'a'.repeat(64), response_payload_b64: 'eA==', status: 'ok', meta: '200',
+            };
+            const withDeadline = { ...base, origin_deadline_block: DEADLINE };
+            expect(relay._relayResponseCanonical(withDeadline)).to.equal(relay._relayResponseCanonical(base));
+            expect(relay._buildResponseWire(withDeadline, [{ pubkey: PUBKEY_A, sig: SIG_A }]))
+                .to.equal(relay._buildResponseWire(base, [{ pubkey: PUBKEY_A, sig: SIG_A }]));
+        });
+
+        it('re-derives the threaded deadline instead of trusting the leader', async function () {
+            const relay = makeRelay({}, [originRow()], [homeRelayedRow()]);
+            const responseRow = (overrides = {}) => ({
+                round_id: sha256('ATTESTRELAYROUND|response|' + REQ_ID),
+                request_id: REQ_ID, phase: 'response', snapshot_block: 1000, network: 'regtest',
+                origin_chain: 'LTC', home_response_action_index: 9002, provider_id: 'http_get',
+                response_hash: crypto.createHash('sha256').update(Buffer.from(RESPONSE_BODY, 'utf8')).digest('hex'),
+                response_payload_b64: Buffer.from(RESPONSE_BODY, 'utf8').toString('base64'),
+                status: 'ok', meta: '200', ...overrides,
+            });
+
+            expect(await relay.validateProposedMatch(responseRow({ origin_deadline_block: DEADLINE }))).to.equal(true);
+            // A leader cannot push this node's eviction clock forward.
+            expect(await relay.validateProposedMatch(responseRow({ origin_deadline_block: DEADLINE + 5000 }))).to.equal(false);
+            // Absent is tolerated: a pre- leader must not wedge the settling leg.
+            expect(await relay.validateProposedMatch(responseRow())).to.equal(true);
+            // Either way this node has indexed its OWN reading.
+            expect(relay._deadlines.get(REQ_ID)).to.deep.equal({ coin: 'LTC', block: DEADLINE });
+        });
+
+        // ── indexing ─────────────────────────────────────────────────────────
+
+        it('indexes the deadline of a leg it has ALREADY relayed', async function () {
+            // The record most in need of eviction is one already marked published, so the
+            // index has to be written before the already-relayed early returns.
+            const relay = makeRelay({}, [originRow()], [homeRelayedRow()]);
+            relay._published.mark(REQ_ID);
+            relay._publishedResponses.mark(REQ_ID);
+            await relay._poll();
+            expect(relay._deadlines.get(REQ_ID)).to.deep.equal({ coin: 'LTC', block: DEADLINE });
+            expect(relay.getStats().tracked_deadlines).to.equal(1);
+        });
+
+        it('refuses a deadline it cannot use, rather than indexing a guess', function () {
+            const relay = new AttestationRelay(makeHub());
+            expect(relay._noteDeadline('LTC', REQ_ID, 0)).to.equal(false);
+            expect(relay._noteDeadline('LTC', REQ_ID, 'later')).to.equal(false);
+            expect(relay._noteDeadline('BTC', REQ_ID, 100)).to.equal(false);   // home chain issues none
+            expect(relay._noteDeadline('LTC', 'not-a-request-id', 100)).to.equal(false);
+            expect(relay._deadlines.size).to.equal(0);
+            expect(relay._noteDeadline('LTC', REQ_ID, DEADLINE)).to.equal(true);
+        });
+
+        // ── the eviction itself ──────────────────────────────────────────────
+
+        it('evicts both legs once the origin has buried the deadline, and never re-relays', async function () {
+            const relay = relayAtTip(DEADLINE + 5000, [originRow()], [homeRelayedRow()]);
+            relay._published.mark(REQ_ID);
+            relay._publishedResponses.mark(REQ_ID);
+
+            await relay._poll();
+            expect(relay._published.size).to.equal(0);
+            expect(relay._publishedResponses.size).to.equal(0);
+            expect(relay._deadlines.size).to.equal(0);
+            expect(relay.getStats().legs_evicted).to.equal(1);
+
+            // The whole safety argument: the row is STILL pending on the stubbed origin,
+            // so without the matching horizon guard on the re-entry paths this poll would
+            // propose a fresh v3 and v4 for a request it has already relayed.
+            await relay._poll();
+            expect(relay.consensus.propose.called).to.equal(false);
+            expect(relay._published.size).to.equal(0);
+        });
+
+        it('holds the record until the grace window past the deadline has also elapsed', async function () {
+            const relay = relayAtTip(DEADLINE + 5000);
+            relay._published.mark(REQ_ID);
+            relay._noteDeadline('LTC', REQ_ID, DEADLINE);
+
+            relay._originLatest.LTC = horizon(relay);        // exactly at it, not past it
+            expect(relay._evictExpired()).to.equal(0);
+            expect(relay._published.has(REQ_ID)).to.equal(true);
+
+            relay._originLatest.LTC = horizon(relay) + 1;
+            expect(relay._evictExpired()).to.equal(1);
+            expect(relay._published.has(REQ_ID)).to.equal(false);
+        });
+
+        it('evicts nothing on a chain whose tip it has not read', function () {
+            const relay = new AttestationRelay(makeHub());
+            relay._published.mark(REQ_ID);
+            relay._noteDeadline('LTC', REQ_ID, DEADLINE);
+            expect(relay._evictExpired()).to.equal(0);
+            expect(relay._published.has(REQ_ID)).to.equal(true);
+        });
+
+        it('drops a finalized round awaiting broadcast along with its records', function () {
+            const relay = new AttestationRelay(makeHub());
+            relay._finalizedResponse.set(REQ_ID, { rid: REQ_ID, wire: 'x', coin: 'LTC', phase: 'response',
+                                                   finalizedAt: Date.now(), rank: 1 });
+            relay._noteDeadline('LTC', REQ_ID, DEADLINE);
+            relay._originLatest.LTC = DEADLINE + 5000;
+            relay._evictExpired();
+            expect(relay._finalizedResponse.has(REQ_ID)).to.equal(false);
+        });
+
+        it('refuses to co-sign a leg its own origin view has already buried', async function () {
+            const relay = relayAtTip(DEADLINE + 5000, [originRow()], [homeRelayedRow()]);
+            const requestRow = {
+                round_id: sha256('ATTESTRELAYROUND|request|' + REQ_ID), request_id: REQ_ID, phase: 'request',
+                snapshot_block: 1000, network: 'regtest', origin_chain: 'LTC', origin_action_index: 4242,
+                provider_id: 'http_get', request_payload: 'https://example.com/score',
+                redundancy: 3, deadline_blocks: 10,
+            };
+            expect(await relay.validateProposedMatch(requestRow)).to.equal(false);
+        });
+
+        // ── WAL compaction ───────────────────────────────────────────────────
+
+        it('reports a WAL that carries more records than surviving keys', function () {
+            writeWal([
+                { rid: REQ_ID,  leg: 'request',  phase: 'intent' },
+                { rid: REQ_ID,  leg: 'request',  phase: 'sent', txid: 'aa' },
+                { rid: REQ_ID,  leg: 'response', phase: 'intent' },
+                { rid: REQ_ID,  leg: 'response', phase: 'sent', txid: 'bb' },
+                { rid: OTHER_ID, leg: 'request', phase: 'intent' },
+                { rid: OTHER_ID, leg: 'request', phase: 'failed' },
+            ]);
+            const relay = new AttestationRelay(makeHub());
+            expect(relay._loadWal()).to.deep.equal({ records: 6, keys: 2 });
+        });
+
+        it('rewrites the WAL to one record per surviving key, keeping the txid', function () {
+            writeWal([
+                { rid: REQ_ID,   leg: 'request',  phase: 'intent', deadline_chain: 'LTC', deadline_block: DEADLINE },
+                { rid: REQ_ID,   leg: 'request',  phase: 'sent', txid: 'aa', deadline_chain: 'LTC', deadline_block: DEADLINE },
+                { rid: REQ_ID,   leg: 'response', phase: 'intent', deadline_chain: 'LTC', deadline_block: DEADLINE },
+                { rid: REQ_ID,   leg: 'response', phase: 'sent', txid: 'bb', deadline_chain: 'LTC', deadline_block: DEADLINE },
+                { rid: OTHER_ID, leg: 'request',  phase: 'sent', txid: 'cc', deadline_chain: 'LTC', deadline_block: DEADLINE + 100000 },
+                { rid: OTHER_ID, leg: 'request',  phase: 'failed' },
+            ]);
+            const relay = new AttestationRelay(makeHub());
+            relay._loadWal();
+            expect(relay._published.size).to.equal(2);
+
+            relay._originLatest.LTC = DEADLINE + 5000;   // buries REQ_ID, not OTHER_ID
+            expect(relay._evictExpired()).to.equal(1);
+
+            const lines = walLines();
+            expect(lines).to.have.length(1);
+            expect(lines[0]).to.include({ rid: OTHER_ID, leg: 'request', phase: 'sent', txid: 'cc', compacted: true });
+            expect(relay.getStats().wal_compactions).to.equal(1);
+
+            // The restart must agree: one leg still suppressed, the evicted one gone.
+            const restarted = new AttestationRelay(makeHub());
+            restarted._loadWal();
+            expect(restarted._published.has(OTHER_ID)).to.equal(true);
+            expect(restarted._published.has(REQ_ID)).to.equal(false);
+            expect(restarted._publishedResponses.has(REQ_ID)).to.equal(false);
+            expect(restarted._deadlines.get(OTHER_ID)).to.deep.equal({ coin: 'LTC', block: DEADLINE + 100000 });
+        });
+
+        it('re-synthesizes a record for a published key whose WAL line was LOST', function () {
+            // The forced lost-record control: a crash (or a truncated write) that drops
+            // the line for a key this process holds as published must not let compaction
+            // turn that loss into a re-broadcast. The rewrite puts the key back.
+            writeWal([
+                { rid: REQ_ID, leg: 'request', phase: 'sent', txid: 'aa',
+                  deadline_chain: 'LTC', deadline_block: DEADLINE },
+            ]);
+            const relay = new AttestationRelay(makeHub());
+            relay._loadWal();
+            relay._publishedResponses.mark(OTHER_ID);              // held in memory, no line on disk
+            relay._noteDeadline('LTC', OTHER_ID, DEADLINE + 100000);
+
+            relay._originLatest.LTC = DEADLINE + 5000;
+            expect(relay._evictExpired()).to.equal(1);
+
+            const lines = walLines();
+            expect(lines).to.have.length(1);
+            expect(lines[0]).to.include({ rid: OTHER_ID, leg: 'response', phase: 'sent', synthesized: true });
+
+            const restarted = new AttestationRelay(makeHub());
+            restarted._loadWal();
+            expect(restarted._publishedResponses.has(OTHER_ID)).to.equal(true);
+        });
+
+        it('leaves the uncompacted WAL standing when the rewrite fails mid-crash', function () {
+            // A failed compaction must fail toward the FULLER file: the restart then
+            // re-learns the keys and holds them another window, which costs retention.
+            // Losing them would cost a duplicate broadcast, and a real fee.
+            writeWal([
+                { rid: REQ_ID,   leg: 'request', phase: 'sent', txid: 'aa', deadline_chain: 'LTC', deadline_block: DEADLINE },
+                { rid: OTHER_ID, leg: 'request', phase: 'sent', txid: 'cc', deadline_chain: 'LTC', deadline_block: DEADLINE + 100000 },
+            ]);
+            const relay = new AttestationRelay(makeHub());
+            relay._loadWal();
+            sinon.stub(fs, 'renameSync').throws(Object.assign(new Error('EIO'), { code: 'EIO' }));
+
+            relay._originLatest.LTC = DEADLINE + 5000;
+            expect(relay._evictExpired()).to.equal(1);
+            expect(relay._walFailures).to.equal(1);
+            expect(relay.getStats().wal_compactions).to.equal(0);
+
+            sinon.restore();
+            expect(walLines()).to.have.length(2);                       // untouched
+            expect(fs.existsSync(process.env.ATTEST_RELAY_QUEUE_PATH + '.compact')).to.equal(false);
+
+            const restarted = new AttestationRelay(makeHub());
+            restarted._loadWal();
+            expect(restarted._published.has(REQ_ID)).to.equal(true);    // suppression survives
+        });
+
+        it('compacts nothing when there is no WAL on disk yet', function () {
+            const relay = new AttestationRelay(makeHub());
+            expect(relay._compactWal('startup')).to.equal(false);
+            expect(fs.existsSync(process.env.ATTEST_RELAY_QUEUE_PATH)).to.equal(false);
+        });
+
+        it('empties the WAL when every key it held has been evicted', function () {
+            writeWal([
+                { rid: REQ_ID, leg: 'request',  phase: 'sent', txid: 'aa', deadline_chain: 'LTC', deadline_block: DEADLINE },
+                { rid: REQ_ID, leg: 'response', phase: 'sent', txid: 'bb', deadline_chain: 'LTC', deadline_block: DEADLINE },
+            ]);
+            const relay = new AttestationRelay(makeHub());
+            relay._loadWal();
+            relay._originLatest.LTC = DEADLINE + 5000;
+            relay._evictExpired();
+            expect(walLines()).to.have.length(0);
+            expect(relay._loadWal()).to.deep.equal({ records: 0, keys: 0 });
         });
     });
 });

@@ -14,6 +14,7 @@ const sinon          = require('sinon');
 const { expect }     = require('chai');
 const testDb         = require('../../helpers/testDb');
 const { buildEnvelope } = require('../../helpers/testPeerNetwork');
+const { waitUntil }  = require('../../helpers/waitUntil');
 const { VALIDATORS_1, VALIDATORS_4 } = require('../../helpers/fixtures');
 const Consensus      = require('../../../src/Consensus');
 const { createIntegrationHub } = require('../../helpers/integrationHub');
@@ -80,7 +81,7 @@ describe('Integration: Config Consensus (SC-6.x)', function () {
             // Leader proposes (returns a promise)
             let proposePromise = consensus.propose(config);
 
-            await new Promise(r => setTimeout(r, 50));
+            await waitUntil(() => consensus.pendingProposals.size > 0, { label: 'the leader proposal round to open' });
 
             // Get the pending proposal
             let seq = consensus.seq;
@@ -95,7 +96,7 @@ describe('Integration: Config Consensus (SC-6.x)', function () {
                 }, VALIDATORS_4[i].addr));
             }
 
-            await new Promise(r => setTimeout(r, 50));
+            await waitUntil(() => pending.prepares.size >= 3, { label: 'the PREPARE quorum to be tallied' });
 
             // Inject COMMIT from 2 other validators
             for (let i of PEER_IDXS) {

@@ -17,7 +17,8 @@ const Consensus       = require('../../../src/Consensus');
 const OracleConsensus = require('../../../src/OracleConsensus');
 const OracleRound     = require('../../../src/OracleRound');
 const { createMockHub }    = require('../../helpers/mockHub');
-const { VALIDATORS_4, SAMPLE_PRICES } = require('../../helpers/fixtures');
+const { VALIDATORS_4, makeFederationSnapshot, SAMPLE_PRICES } = require('../../helpers/fixtures');
+const { waitUntil }        = require('../../helpers/waitUntil');
 const { buildEnvelope }    = require('../../helpers/testPeerNetwork');
 
 function makeDigest(config) {
@@ -33,7 +34,7 @@ function makeDigest(config) {
 // returns for the set under test, leaving each experiment's arithmetic
 // unchanged.
 function wireFederationSnapshot(hub, quorum) {
-    let snapshot = { blockIndex: 800000, validators: [{ pubkey: 'aa', amount: '50000' }] };
+    let snapshot = makeFederationSnapshot(VALIDATORS_4, 800000);
     hub.capabilitySnapshot = {
         getActiveValidatorSnapshot: sinon.stub().resolves(snapshot),
         getActiveWeightSnapshot:    sinon.stub().resolves(snapshot),
@@ -185,7 +186,8 @@ describe('Chaos: Quorum Loss (CON-2)', function () {
         expect(broadcastType).to.equal('ORACLE_PROPOSE');
 
         // Wait for finalization timeout
-        await new Promise(r => setTimeout(r, 300));
+        // Wait for the finalization timeout to clean the round up.
+        await waitUntil(() => !oracleCon.pendingRounds.has(4), { timeoutMs: 5000, label: 'the finalization timeout to clear round 4' });
 
         // Pending round cleaned up
         expect(oracleCon.pendingRounds.has(4)).to.be.false;
@@ -239,7 +241,12 @@ describe('Chaos: Quorum Loss (CON-2)', function () {
             seq: 4, configDigest: digest
         }, VALIDATORS_4[1].addr));
 
-        await new Promise(r => setTimeout(r, 50));
+        // The round is open (self PREPARE recorded) and one peer has been heard from;
+        // that is the state the "not done yet" assertion is about.
+        await waitUntil(() => {
+            let p = con.pendingProposals.get(4);
+            return p && p.prepares.size >= 1;
+        }, { label: 'the proposal round to open under a lost quorum' });
         expect(done).to.be.false;
 
         // Peer "reconnects"

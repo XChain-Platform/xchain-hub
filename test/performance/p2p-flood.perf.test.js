@@ -24,6 +24,7 @@ const { expect }       = require('chai');
 const WebSocket        = require('ws');
 const testDb           = require('../helpers/testDb');
 const { buildEnvelope, createPeerPair, sendEnvelope, waitForEvent } = require('../helpers/testPeerNetwork');
+const { waitUntil } = require('../helpers/waitUntil');
 const { measure, Histogram, MemoryTracker } = require('./helpers/metrics');
 
 describe('Performance: P2P Message Flood', function () {
@@ -126,8 +127,12 @@ describe('Performance: P2P Message Flood', function () {
         });
 
         it('duplicate messages are correctly filtered', async function () {
-            let received = 0;
-            pm.on('message', () => { received++; });
+            let received  = 0;
+            let probeSeen = false;
+            pm.on('message', (env) => {
+                if (env && env.type === 'FLUSH_PROBE') probeSeen = true;
+                else received++;
+            });
 
             let env = buildEnvelope('DEDUP_TEST', { value: 1 }, 'ws://dedup-peer:10001');
 
@@ -136,8 +141,11 @@ describe('Performance: P2P Message Flood', function () {
                 sendEnvelope(peerWs, env);
             }
 
-            // Wait for processing
-            await new Promise(r => setTimeout(r, 500));
+            // Order-preserving flush: a distinct probe sent behind the duplicates can
+            // only be delivered once every one of them has been processed or filtered,
+            // so its arrival is the observable the fixed settle stood in for.
+            sendEnvelope(peerWs, buildEnvelope('FLUSH_PROBE', {}, 'ws://dedup-peer:10001'));
+            await waitUntil(() => probeSeen, { timeoutMs: 10000, label: 'the flush probe to arrive behind the duplicates' });
 
             // Only first should be processed
             expect(received).to.equal(1, 'duplicates should be filtered');
@@ -217,7 +225,16 @@ describe('Performance: P2P Message Flood', function () {
                     sendEnvelope(peerWs, env);
                 }
 
-                await new Promise(r => setTimeout(r, 1000));
+                // The cap is applied message by message, so wait for the inbound stream
+                // to go quiet (a probe interval with no change) instead of guessing how
+                // long 50 frames take to drain.
+                let last = -1;
+                await waitUntil(() => {
+                    let now = received;
+                    let quiet = (now === last && now > 0);
+                    last = now;
+                    return quiet;
+                }, { timeoutMs: 10000, intervalMs: 50, label: 'the inbound flood to quiesce' });
 
                 console.log('    Sent 50 msgs (limit=20): %d received', received);
                 // Should receive approximately the rate limit, not all 50

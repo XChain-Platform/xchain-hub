@@ -14,9 +14,10 @@ const sinon          = require('sinon');
 const { expect }     = require('chai');
 const proxyquire     = require('proxyquire');
 const { createMockHub }    = require('../helpers/mockHub');
+const { waitUntil }        = require('../helpers/waitUntil');
 const { PRICE_MAX }        = require('../../src/constants.js');
 const { VALIDATORS_3, VALIDATORS_4, makeValidator, SAMPLE_PRICES,
-        buildSubmissions } = require('../helpers/fixtures');
+        buildSubmissions, makeFederationSnapshot } = require('../helpers/fixtures');
 // A price strictly above the accepted (0, PRICE_MAX) band, used as the
 // out-of-bounds sentinel so these bound tests track PRICE_MAX (widened over time
 // from 10M) instead of a hardcoded literal that silently rots.
@@ -296,7 +297,7 @@ describe('Security Hardening', function () {
             // resolves. Supply both; the seq-monotonicity contract under test is
             // unaffected.
             hub.capabilitySnapshot = {
-                getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000, validators: [{ pubkey: 'aa', amount: '50000' }] }),
+                getActiveValidatorSnapshot: sinon.stub().returns(makeFederationSnapshot(VALIDATORS_4, 800000)),
                 getQuorum: sinon.stub().returns(3)
             };
             hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
@@ -1272,8 +1273,9 @@ describe('Security Hardening', function () {
                 }
             }
 
-            // Wait for async startApi() to complete
-            await new Promise(resolve => setTimeout(resolve, 100));
+            // The JSON-RPC router receives the method table at the end of the async
+            // startApi(), so its arrival is what "boot finished" means here.
+            await waitUntil(() => capturedMethods, { label: 'api.js boot to register its JSON-RPC methods' });
 
             controller = capturedMethods;
         });

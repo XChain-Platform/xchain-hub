@@ -15,7 +15,8 @@ const { expect }     = require('chai');
 const Consensus      = require('../../src/Consensus');
 const { createMockHub }     = require('../helpers/mockHub');
 const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7, VALIDATORS_10, VALIDATORS_13,
-        makeValidator, WEIGHTED_VALIDATORS_4, makeWeightSnapshot } = require('../helpers/fixtures');
+        makeValidator, WEIGHTED_VALIDATORS_4, makeWeightSnapshot,
+        makeFederationSnapshot } = require('../helpers/fixtures');
 const { waitUntil }  = require('../helpers/waitUntil');
 
 describe('Consensus (PBFT)', function () {
@@ -44,8 +45,11 @@ describe('Consensus (PBFT)', function () {
     // than riding the single-node fallback the default MIN_VALIDATORS used to
     // grant them. Quorum is stubbed to the same value _getQuorum() returns for
     // the set under test, so what each test measures is unchanged.
-    function wireFederationSnapshot(quorum, blockIndex) {
-        let snapshot = { blockIndex: blockIndex, validators: [{ pubkey: 'aa', amount: '50000' }] };
+    // : the snapshot's MEMBERS now decide the leader, so it has to carry
+    // the validators under test rather than a placeholder pubkey. Callers set
+    // the validator set first; the snapshot is built from it here.
+    function wireFederationSnapshot(quorum, blockIndex, validators) {
+        let snapshot = makeFederationSnapshot(validators || consensus.validatorSet, blockIndex);
         hub.capabilitySnapshot = {
             getActiveValidatorSnapshot: sinon.stub().returns(snapshot),
             getActiveWeightSnapshot:    sinon.stub().returns(snapshot),
@@ -933,7 +937,7 @@ describe('Consensus (PBFT)', function () {
             consensus.setValidatorSet(VALIDATORS_4);
             pm.validatorAddr = VALIDATORS_4[1].addr; // leader for seq 1
             hub.capabilitySnapshot = {
-                getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000, validators: [{ pubkey: 'aa', amount: '50000' }] }),
+                getActiveValidatorSnapshot: sinon.stub().returns(makeFederationSnapshot(VALIDATORS_4, 800000)),
                 getQuorum: sinon.stub().returns(3)
             };
             hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
@@ -1216,7 +1220,7 @@ describe('Consensus (PBFT)', function () {
 
         it('_handlePrePrepare uses the snapshot quorum when a snapshot is available', async function () {
             hub.capabilitySnapshot = {
-                getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 900000, validators: [{ pubkey: 'aa', amount: '50000' }] }),
+                getActiveValidatorSnapshot: sinon.stub().returns(makeFederationSnapshot(VALIDATORS_4, 900000)),
                 getQuorum: sinon.stub().returns(3)
             };
             hub._resolveBtcLatestBlock = sinon.stub().resolves(900000);
@@ -1291,11 +1295,14 @@ describe('Consensus (PBFT)', function () {
                 resolved: false, applied: false, timer: null, resolve: null, reject: null, quorum: 3
             });
             consensus._handleCommit({ sender: VALIDATORS_4[2].addr, data: { seq: 5, configDigest: digest } });
-            // A bounded settle, deliberately, not a missed poll: the assertion is
-            // that the failed apply did NOT drop the proposal, and an absence has
-            // no condition to poll for. Polling on `applyConfig.called` would
-            // pass before the catch handler runs and stop guarding the drop.
-            await new Promise(r => setTimeout(r, 20));
+            // The catch handler clears the in-flight guard, so `_applying === false`
+            // is the failed apply having actually been handled: poll that, then assert
+            // the proposal survived it. (A poll on `applyConfig.called` would pass
+            // before the catch ran and would stop guarding the drop.)
+            await waitUntil(() => {
+                let p = consensus.pendingProposals.get(5);
+                return p && p._applying === false;
+            }, { label: 'the failed apply to run its catch handler' });
             // Proposal stays pending (retry path) and applied is still false.
             expect(consensus.pendingProposals.has(5)).to.be.true;
             expect(consensus.pendingProposals.get(5).applied).to.be.false;

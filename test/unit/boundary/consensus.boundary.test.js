@@ -14,7 +14,8 @@ const sinon        = require('sinon');
 const { expect }   = require('chai');
 const Consensus    = require('../../../src/Consensus');
 const { createMockHub }   = require('../../helpers/mockHub');
-const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7, makeValidator } = require('../../helpers/fixtures');
+const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7, makeValidator,
+        makeFederationSnapshot } = require('../../helpers/fixtures');
 const { waitUntil }       = require('../../helpers/waitUntil');
 
 describe('Boundary: Consensus (PBFT)', function () {
@@ -205,7 +206,7 @@ describe('Boundary: Consensus (PBFT)', function () {
             // MIN_VALIDATORS, so the follower needs the block height and the
             // deterministic snapshot a real round carries before it will accept.
             hub.capabilitySnapshot = {
-                getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000, validators: [{ pubkey: 'aa', amount: '50000' }] }),
+                getActiveValidatorSnapshot: sinon.stub().returns(makeFederationSnapshot(VALIDATORS_4, 800000)),
                 getQuorum: sinon.stub().returns(3)
             };
             hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);

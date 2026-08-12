@@ -30,6 +30,7 @@ const sinon = require('sinon');
 const nock  = require('nock');
 const { expect } = require('chai');
 const AttestationPublisher = require('../../src/AttestationPublisher');
+const { waitUntil } = require('../helpers/waitUntil');
 
 const MY_PUB     = 'aa'.repeat(32);
 const LEADER_PUB = 'bb'.repeat(32);
@@ -295,7 +296,7 @@ describe('AttestationPublisher: start / stop', function () {
             // Make onRequestFinalized reject with a real Error (tests the err.message branch)
             sinon.stub(pub, 'onRequestFinalized').rejects(new Error('handler exploded'));
             emitter.emit('request:finalized', { requestId: 'test' });
-            await new Promise(r => setTimeout(r, 20));
+            await waitUntil(() => errStub.called, { label: 'the rejected handler to be logged' });
             expect(errStub.called).to.equal(true);
             const loggedMsg = errStub.args.find(a => String(a[0]).match(/onRequestFinalized error/));
             expect(loggedMsg).to.exist;
@@ -321,7 +322,7 @@ describe('AttestationPublisher: start / stop', function () {
             // Reject with a plain string (no .message property) to exercise the `: err` branch
             sinon.stub(pub, 'onRequestFinalized').rejects('plain string error');
             emitter.emit('request:finalized', { requestId: 'test' });
-            await new Promise(r => setTimeout(r, 20));
+            await waitUntil(() => errStub.called, { label: 'the non-Error rejection to be logged' });
             expect(errStub.called).to.equal(true);
         } finally {
             await pub.stop();
@@ -343,7 +344,8 @@ describe('AttestationPublisher: start / stop', function () {
         await pub.start();
         try {
             // Wait for the interval to fire
-            await new Promise(r => setTimeout(r, 60));
+            // Wait for the interval to fire
+            await waitUntil(() => errStub.called, { label: 'the sweep interval to fire and log its rejection' });
             expect(errStub.called).to.equal(true);
             const loggedMsg = errStub.args.find(a => String(a[0]).match(/sweep error/));
             expect(loggedMsg).to.exist;
@@ -368,7 +370,7 @@ describe('AttestationPublisher: start / stop', function () {
         const errStub = sinon.stub(console, 'error');
         await pub.start();
         try {
-            await new Promise(r => setTimeout(r, 60));
+            await waitUntil(() => errStub.called, { label: 'the sweep interval to log its non-Error rejection' });
             expect(errStub.called).to.equal(true);
         } finally {
             await pub.stop();

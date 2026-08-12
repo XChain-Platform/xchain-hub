@@ -39,7 +39,8 @@
     "test:chaos": "mocha 'test/chaos/**/*.chaos.test.js' --timeout 30000 --recursive",
     "test:mutate": "stryker run",
     "test:mutate:pilot": "stryker run stryker.config.phase1.json",
-    "test:boundary": "mocha 'test/boundary/**/*.boundary.test.js' 'test/unit/boundary/**/*.boundary.test.js' --timeout 5000 --recursive"
+    "test:boundary": "mocha 'test/boundary/**/*.boundary.test.js' 'test/unit/boundary/**/*.boundary.test.js' --timeout 5000 --recursive",
+    "check:blind-sleeps": "node bin/check-blind-sleeps.js"
   },
   "devDependencies": {
     "@stryker-mutator/core": "^9.6.1",

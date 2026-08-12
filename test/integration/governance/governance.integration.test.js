@@ -93,8 +93,11 @@ describe('Integration: Governance (SC-7.x)', function () {
                 await govVoter.vote(proposal.proposalId, 'approve');
             }
 
-            // Wait for voting period to end
-            await new Promise(r => setTimeout(r, 1200));
+            // End the voting window by moving its deadline into the past: the tally
+            // reads voting_end, so this is exactly what the sleep was buying, and it
+            // cannot lose a race with a busy box.
+            await db.doQuery("UPDATE governance_proposals SET voting_end = ? WHERE proposal_id = ?",
+                [new Date(Date.now() - 1000), proposal.proposalId]);
 
             // Tally
             let proposalRow = await db.doQuery(
@@ -144,7 +147,8 @@ describe('Integration: Governance (SC-7.x)', function () {
                 await govVoter.vote(proposal.proposalId, 'reject');
             }
 
-            await new Promise(r => setTimeout(r, 600));
+            await db.doQuery("UPDATE governance_proposals SET voting_end = ? WHERE proposal_id = ?",
+                [new Date(Date.now() - 1000), proposal.proposalId]);
 
             let proposalRow = await db.doQuery(
                 "SELECT * FROM governance_proposals WHERE proposal_id = ?", [proposal.proposalId]
@@ -220,7 +224,8 @@ describe('Integration: Governance (SC-7.x)', function () {
             // Create and fail a proposal
             let proposal = await gov.propose('ORACLE_ROUND_INTERVAL', '600000', '700000', 'Test');
 
-            await new Promise(r => setTimeout(r, 200));
+            await db.doQuery("UPDATE governance_proposals SET voting_end = ? WHERE proposal_id = ?",
+                [new Date(Date.now() - 1000), proposal.proposalId]);
             let proposalRow = await db.doQuery(
                 "SELECT * FROM governance_proposals WHERE proposal_id = ?", [proposal.proposalId]
             );

@@ -16,6 +16,19 @@ const WebSocket        = require('ws');
 const testDb           = require('../../helpers/testDb');
 const { createPeerPair, buildEnvelope, sendEnvelope, waitForEvent } = require('../../helpers/testPeerNetwork');
 const ValidatorIdentity = require('../../../src/ValidatorIdentity');
+const { waitUntil }     = require('../../helpers/waitUntil');
+
+// Order-preserving flush. The transport delivers frames in order, so a probe sent
+// after the frames under test can only be dispatched once those have been handled
+// (or dropped): its arrival is the observable that a fixed settle stood in for.
+// Returns what was delivered, minus the probe itself.
+async function flushWith(peerWs, received) {
+    let probe = buildEnvelope('FLUSH_PROBE', {}, 'ws://flush-probe:10001');
+    sendEnvelope(peerWs, probe);
+    await waitUntil(() => received.some(e => e.id === probe.id),
+        { label: 'the flush probe to arrive behind the frames under test' });
+    return received.filter(e => e.id !== probe.id);
+}
 
 describe('Integration: P2P Message Routing (SC-9.x)', function () {
 
@@ -61,7 +74,7 @@ describe('Integration: P2P Message Routing (SC-9.x)', function () {
                 sendEnvelope(peerPair.peerWs, env);
             }
 
-            await new Promise(r => setTimeout(r, 200));
+            await waitUntil(() => received.length === 3, { label: 'all three envelopes to be routed' });
 
             expect(received).to.have.lengthOf(3);
             expect(received[0].type).to.equal('ORACLE_PRICE_SUBMIT');
@@ -79,7 +92,7 @@ describe('Integration: P2P Message Routing (SC-9.x)', function () {
             let env = buildEnvelope('HEARTBEAT', { version: '1.0.0' }, 'ws://peer-hb:10001');
             sendEnvelope(peerPair.peerWs, env);
 
-            await new Promise(r => setTimeout(r, 200));
+            await waitUntil(() => heartbeats.length === 1, { label: 'the HEARTBEAT to be routed to its own event' });
 
             expect(heartbeats).to.have.lengthOf(1);
             expect(heartbeats[0].sender).to.equal('ws://peer-hb:10001');
@@ -94,9 +107,8 @@ describe('Integration: P2P Message Routing (SC-9.x)', function () {
 
             peerPair.peerWs.send('not json {{{');
 
-            await new Promise(r => setTimeout(r, 200));
-
-            expect(received).to.have.lengthOf(0);
+            let delivered = await flushWith(peerPair.peerWs, received);
+            expect(delivered).to.have.lengthOf(0);
         });
 
         it('drops messages missing required fields', async function () {
@@ -113,9 +125,8 @@ describe('Integration: P2P Message Routing (SC-9.x)', function () {
             // Missing sender
             peerPair.peerWs.send(JSON.stringify({ type: 'TEST', id: 'test2', timestamp: Date.now(), data: {} }));
 
-            await new Promise(r => setTimeout(r, 200));
-
-            expect(received).to.have.lengthOf(0);
+            let delivered = await flushWith(peerPair.peerWs, received);
+            expect(delivered).to.have.lengthOf(0);
         });
     });
 
@@ -133,9 +144,8 @@ describe('Integration: P2P Message Routing (SC-9.x)', function () {
             sendEnvelope(peerPair.peerWs, env);
             sendEnvelope(peerPair.peerWs, env);
 
-            await new Promise(r => setTimeout(r, 200));
-
-            expect(received).to.have.lengthOf(1);
+            let delivered = await flushWith(peerPair.peerWs, received);
+            expect(delivered).to.have.lengthOf(1);
         });
 
         it('processes messages with different IDs from same sender', async function () {
@@ -150,7 +160,7 @@ describe('Integration: P2P Message Routing (SC-9.x)', function () {
             sendEnvelope(peerPair.peerWs, env1);
             sendEnvelope(peerPair.peerWs, env2);
 
-            await new Promise(r => setTimeout(r, 200));
+            await waitUntil(() => received.length === 2, { label: 'both distinctly-identified envelopes to be routed' });
 
             expect(received).to.have.lengthOf(2);
         });
@@ -206,8 +216,7 @@ describe('Integration: P2P Message Routing (SC-9.x)', function () {
             env.sig = peerIdentity.signEnvelope(env);
             ws.send(JSON.stringify(env));
 
-            await new Promise(r => setTimeout(r, 200));
-            expect(received).to.have.lengthOf(1);
+            await waitUntil(() => received.length === 1, { label: 'the signed envelope to be routed' });
 
             // Send a message with invalid signature
             let badEnv = {
@@ -218,9 +227,16 @@ describe('Integration: P2P Message Routing (SC-9.x)', function () {
                 data:      { hello: 'tampered' },
                 sig:       'ff'.repeat(64)
             };
-            ws.send(JSON.stringify(badEnv));
-
-            await new Promise(r => setTimeout(r, 200));
+            // The forged envelope has no valid probe available on a signature-required
+            // socket, so wait on the drop the transport announces instead of a clock.
+            let warnStub = sinon.stub(console, 'warn');
+            try {
+                ws.send(JSON.stringify(badEnv));
+                await waitUntil(() => warnStub.args.some(a => String(a[0]).includes('Invalid signature')),
+                    { label: 'the forged envelope to be dropped' });
+            } finally {
+                warnStub.restore();
+            }
             // Should still only have the one valid message
             expect(received).to.have.lengthOf(1);
 
@@ -261,9 +277,16 @@ describe('Integration: P2P Message Routing (SC-9.x)', function () {
 
             // Send unsigned message
             let env = buildEnvelope('UNSIGNED_TEST', { data: true }, 'ws://unsigned-peer:10001');
-            ws.send(JSON.stringify(env));
-
-            await new Promise(r => setTimeout(r, 200));
+            // Nothing can pass this socket unsigned, so the drop the transport logs is
+            // the only observable the round produces.
+            let warnStub = sinon.stub(console, 'warn');
+            try {
+                ws.send(JSON.stringify(env));
+                await waitUntil(() => warnStub.args.some(a => String(a[0]).includes('Invalid signature')),
+                    { label: 'the unsigned envelope to be dropped' });
+            } finally {
+                warnStub.restore();
+            }
             expect(received).to.have.lengthOf(0);
 
             ws.close();

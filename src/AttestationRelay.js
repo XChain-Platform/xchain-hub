@@ -62,6 +62,27 @@
  * xexec.js applies to an XCALL dispatch, mirrored rather than reinvented: both
  * are the same trust decision on the same capability set.
  *
+ * WHAT BOUNDS THE AT-MOST-ONCE STATE . Both legs' idempotency sets and the
+ * WAL behind them used to grow for the process lifetime: every relayed leg stayed
+ * remembered forever, and the WAL was append-only with a whole-file read at startup.
+ * The bound is DEADLINE-ANCHORED (the operator's 2026-08-11 ruling, proposal A over
+ * proposal B's landed-signal compaction, which would need a confirmation-depth guard
+ * or it evicts on indexer lag and re-broadcasts, burning a fee):
+ *
+ *   - Each leg is indexed by the ORIGIN request's own ABSOLUTE deadline_block, on the
+ *     origin chain that issued it. For the request leg that value is read straight off
+ *     the origin row the v3 is built from; for the response leg the home chain's
+ *     relayed-request row carries no deadline at all, so it is THREADED ONTO THE
+ *     RESPONSE ROUND ROW as origin_deadline_block + origin_chain and re-derived by
+ *     every follower from its own origin indexer.
+ *   - A leg is forgotten only once the ORIGIN chain's tip is past that deadline by the
+ *     chain's confirmation depth plus a grace window. That is the point after which no
+ *     spend can follow: the origin indexer's expiry sweep has taken the request out of
+ *     'pending', and both re-entry paths here (materialize, relay-response) require a
+ *     row that is still pending. Forgetting earlier is what would re-broadcast.
+ *   - Eviction then COMPACTS the WAL: it is rewritten atomically to one record per
+ *     surviving key, so the file tracks the live set instead of the whole history.
+ *
  * Opt-in via ATTEST_RELAY_ENABLED=1, default OFF. That default is the response
  * to the deploy-order hazard: v3 and v4 are NEW VERSION values, so an un-upgraded
  * indexer rejects what an upgraded one accepts. If BTC crosses
@@ -128,6 +149,21 @@ const SNAPSHOT_DRIFT_BLOCKS = 144;
 // whole deadline. Matches AttestationPublisher's failover shape.
 const DEFAULT_FAILOVER_WINDOW_MS = 20 * 60 * 1000;
 
+// How far past an origin request's own absolute deadline_block that chain's tip must
+// travel before this driver forgets the request's at-most-once records .
+// Added to the chain's confirmation depth, so the total covers both a reorg that
+// could un-expire the request and the indexer's own expiry lag: the deadline sweep
+// (xchain-indexer getExpiredAttestationRequests) is capped per block, so a batch of
+// requests sharing one deadline drains over several blocks rather than all at once.
+// Blocks, not wall clock, because the thing being outlived is a chain height.
+const DEFAULT_EVICTION_GRACE_BLOCKS = 144;
+
+// Safety valve on the deadline index itself. It is populated only for legs this node
+// actually took part in, so it tracks the at-most-once sets rather than the chain, but
+// an unbounded map is the very defect being fixed. At the cap new deadlines are
+// refused, which costs RETENTION (those legs are never evicted) and never a re-spend.
+const MAX_TRACKED_DEADLINES = 50000;
+
 class AttestationRelay {
 
     constructor(hub){
@@ -154,6 +190,14 @@ class AttestationRelay {
 
         this.failoverWindowMs = parseInt(process.env.ATTEST_RELAY_FAILOVER_MS ||
                                          cfg.ATTEST_RELAY_FAILOVER_MS || DEFAULT_FAILOVER_WINDOW_MS);
+
+        // Origin blocks past a request's deadline before its records are evicted
+        // . A garbage or negative value falls back rather than shrinking the
+        // window: this is the guard that stops an early eviction from re-spending.
+        this.evictGraceBlocks = parseInt(process.env.ATTEST_RELAY_EVICT_GRACE_BLOCKS ||
+                                         cfg.ATTEST_RELAY_EVICT_GRACE_BLOCKS || DEFAULT_EVICTION_GRACE_BLOCKS);
+        if(!Number.isFinite(this.evictGraceBlocks) || this.evictGraceBlocks < 0)
+            this.evictGraceBlocks = DEFAULT_EVICTION_GRACE_BLOCKS;
 
         // Per-coin indexer endpoints; filled from the hub's configs-aware resolver
         // in start() for hubs provisioned without env vars.
@@ -255,6 +299,18 @@ class AttestationRelay {
         this._originPending = {};
         for(let coin of ORIGIN_CHAINS) this._originPending[coin] = null;
 
+        // . request_id -> { coin, block }: the ABSOLUTE deadline_block of the
+        // origin request behind a leg, on the chain that issued it. This is what the
+        // at-most-once sets are evicted against, and it is deliberately keyed on the
+        // request rather than on (leg, request): one request has ONE origin deadline,
+        // and when it passes, both of its legs are equally dead.
+        this._deadlines = new Map();
+
+        // Last tip observed on each origin chain, from the same paged read the pending
+        // views come from. Only ever written from a SUCCESSFUL read: an unread chain
+        // must stall eviction, never advance it.
+        this._originLatest = {};
+
         this.consensus = new CrossChainDexConsensus(this, {
             messageTypes: {
                 PROPOSE:     'ATTEST_RELAY_PROPOSE',
@@ -283,6 +339,8 @@ class AttestationRelay {
         this._broadcastSucceeded = 0;
         this._broadcastFailed    = 0;
         this._walFailures        = 0;
+        this._evicted            = 0;
+        this._walCompactions     = 0;
     }
 
     setBroadcastHook(fn){ this.broadcastFn  = fn; }
@@ -320,7 +378,12 @@ class AttestationRelay {
                     '_INDEXER_API_URL, or push it via xchain-node updateconfig); this chain is skipped every tick');
         }
 
-        this._loadWal();
+        let wal = this._loadWal();
+        // : fold the file down as soon as it carries more than one record per
+        // surviving key. Without this a long-lived hub re-reads (whole-file, readFileSync)
+        // an ever-growing history of intent/sent/failed pairs at every restart, even on a
+        // fleet whose legs all evict cleanly.
+        if(wal.records > wal.keys) this._compactWal('startup');
         // : the WAL kept at-most-once sends across a restart, but the spend
         // ceilings behind them did not; reload the saved window from the same idiom.
         this.spendGuard.persistTo();
@@ -366,6 +429,13 @@ class AttestationRelay {
             responses_relayed:    this._publishedResponses.size,
             awaiting_broadcast:   this._finalizedWire.size + this._finalizedResponse.size,
             inflight_rounds:      this._inflight.size,
+            // : the three numbers that show the bound is working. tracked_deadlines
+            // is the eviction index; legs_evicted and wal_compactions should both climb on
+            // a fleet that is actually relaying, and a flat legs_evicted next to a rising
+            // relayed_count means deadlines are not reaching the index.
+            tracked_deadlines:    this._deadlines.size,
+            legs_evicted:         this._evicted,
+            wal_compactions:      this._walCompactions,
             spend_guard:          this.spendGuard.stats()
         };
     }
@@ -391,6 +461,10 @@ class AttestationRelay {
                 catch(e){ console.warn('AttestationRelay: response relay pass failed: ' + (e && e.message)); }
             }
             await this._sweepFinalized();
+            // Last, on the tips this tick just read: a leg is only evictable once its
+            // origin chain has buried the request's deadline, so eviction wants the
+            // freshest view and must never run ahead of the legs it might retire.
+            this._evictExpired();
         } finally {
             this._polling = false;
         }
@@ -449,6 +523,8 @@ class AttestationRelay {
 
         let latest = Number(res.latest);
         if(!Number.isFinite(latest)) return;
+        // The tip the eviction pass measures this chain's deadlines against .
+        this._originLatest[coin] = latest;
         for(let req of res.rows){
             try { await this._maybeMaterialize(coin, latest, req); }
             catch(e){
@@ -493,14 +569,26 @@ class AttestationRelay {
         if(ORIGIN_CHAINS.indexOf(coin) === -1) return;
         if(!this.indexers[coin] || !this.indexers[coin].url) return;
 
-        if(this._publishedResponses.has(rid)) return;
-        if(this._finalizedResponse.has(rid)) return;
-
         // The origin must still be waiting for it. A refresh that failed leaves the
         // set null, and a null set is not evidence of anything, so the chain waits a
         // tick rather than being relayed to blind.
         let pending = this._originPending[coin];
         if(!pending || !pending.has(rid)) return;
+        let originReq = pending.get(rid);
+
+        // Index the origin's ABSOLUTE deadline BEFORE the already-relayed guards below
+        // . Eviction can only forget a record it holds a deadline for, and the
+        // record most in need of forgetting is precisely one already marked published:
+        // indexing after those returns would leave every relayed leg pinned forever.
+        this._noteDeadline(coin, rid, originReq && originReq.deadline_block);
+
+        // Same horizon, same reason as the request leg, and here it also saves a real
+        // fee outright: the origin indexer rejects a v4 for a request past its own
+        // deadline_block ('invalid: REQUEST expired'), so the broadcast could only burn.
+        if(this._pastEvictionHorizon(coin, originReq && originReq.deadline_block)) return;
+
+        if(this._publishedResponses.has(rid)) return;
+        if(this._finalizedResponse.has(rid)) return;
 
         // BTC confirmation depth on the RESPONSE row, not the request. The v4 closes
         // the origin request irreversibly, so relaying a response that a BTC reorg can
@@ -527,7 +615,6 @@ class AttestationRelay {
         // and it wedges silently. They agree by construction (the v3 carried the
         // provider from the origin), which is exactly why a disagreement is worth
         // saying out loud rather than proposing into a round that cannot finalize.
-        let originReq = pending.get(rid);
         if(originReq && String(originReq.provider_id || '') !== fields.providerId){
             console.error('AttestationRelay: refusing to relay ' + rid.substring(0, 16) +
                           '...: ' + coin + ' names provider "' + originReq.provider_id +
@@ -542,6 +629,14 @@ class AttestationRelay {
             snapshot_block:             Number(snapshotBlock),
             network:                    this.network,
             origin_chain:               coin,
+            // , the operator's proposal-A record-shape change. The home chain's
+            // relayed-request row carries no deadline of its own (the v3 put a RELATIVE
+            // block count on BTC), so the origin's absolute deadline_block travels on the
+            // round row, paired with the origin_chain it is a height on. It is BOOKKEEPING,
+            // NOT CONSENSUS: it is deliberately absent from _relayResponseCanonical, which
+            // must byte-match the indexer's, and every follower re-derives it from its own
+            // origin indexer instead of trusting the leader's copy.
+            origin_deadline_block:      this._absoluteOriginDeadline(originReq),
             home_response_action_index: fields.homeResponseActionIndex,
             provider_id:                fields.providerId,
             response_hash:              fields.responseHash,
@@ -610,6 +705,17 @@ class AttestationRelay {
         // native request on an origin chain (there are none today, since an empty
         // responsible set rejects it at admission) carries no origin_chain stamp.
         if(String(req.origin_chain || '') !== coin) return;
+
+        // Index the absolute deadline BEFORE the already-relayed guards, for the reason
+        // spelled out in _maybeRelayResponse: the record that most needs evicting is one
+        // this node has already published, and those returns are hit on every later tick.
+        this._noteDeadline(coin, rid, req.deadline_block);
+
+        // Never materialize a request whose deadline the origin has already buried. This
+        // is the same horizon eviction uses, and it is what makes eviction safe: a
+        // forgotten key cannot come back through this path and spend a second fee. The
+        // request is dead anyway (the origin's expiry sweep is simply behind).
+        if(this._pastEvictionHorizon(coin, req.deadline_block)) return;
 
         if(this._published.has(rid)) return;
         if(this._homeHasRequest(rid)) return;
@@ -812,6 +918,14 @@ class AttestationRelay {
         if(!mine) return false;
         if(String(mine.origin_chain || '') !== coin) return false;
 
+        // The request leg needs no deadline field on the row: this node is looking at
+        // the origin row itself, which carries the absolute deadline. Index it here so a
+        // node that only ever CO-SIGNS (and therefore never runs _maybeMaterialize for
+        // this request) can still evict the record its own broadcast may create.
+        this._noteDeadline(coin, rid, mine.deadline_block);
+        if(Number.isFinite(Number(res.latest))) this._originLatest[coin] = Number(res.latest);
+        if(this._pastEvictionHorizon(coin, mine.deadline_block)) return false;
+
         let depth = Number(res.latest) - Number(mine.block_index) + 1;
         if(!Number.isFinite(depth) || depth < this.confirmations[coin]) return false;
 
@@ -856,6 +970,17 @@ class AttestationRelay {
         // provider_id, so a row naming a different one signs bytes the origin will
         // never reproduce, and the v4 would be dropped as unquorate.
         if(String(originReq.provider_id || '') !== String(row.provider_id)) return false;
+
+        // : re-derive the threaded deadline rather than trusting it. A leader that
+        // named a deadline this node's own origin indexer does not hold is refused, so the
+        // eviction clock can never be moved forward by a peer. An ABSENT field is tolerated
+        // (a pre- leader): the value is bookkeeping, and refusing over it would wedge
+        // a mixed-version fleet on the leg that settles.
+        if(!this._checkOriginDeadline(row, originReq)) return false;
+        if(Number.isFinite(Number(origin.latest))) this._originLatest[coin] = Number(origin.latest);
+        // The leg the leader proposed is past recall on this node's own view of the
+        // origin: co-signing it would fund a v4 the origin rejects as expired.
+        if(this._pastEvictionHorizon(coin, originReq.deadline_block)) return false;
 
         let res;
         try { res = await this._indexerCall(HOME_CHAIN, 'getrelayedattestation_requests', { request_id: rid, limit: 1 }); }
@@ -1207,6 +1332,11 @@ class AttestationRelay {
     // ----- durable at-most-once -----
 
     _appendWal(entry){
+        // Stamp the eviction key  from one place rather than at each call site,
+        // so no record can be written that a later process cannot re-anchor: a record
+        // without a deadline is one the eviction pass can never retire.
+        let d = this._deadlines.get(String((entry && entry.rid) || '').toLowerCase());
+        if(d) entry = Object.assign({}, entry, { deadline_chain: d.coin, deadline_block: d.block });
         try {
             fs.mkdirSync(path.dirname(this.walPath), { recursive: true });
             let fd = fs.openSync(this.walPath, 'a');
@@ -1229,17 +1359,28 @@ class AttestationRelay {
     // Records are keyed on (leg, request_id), the same idempotency key the round ids
     // use, so one request's v3 and v4 never occupy the same slot. A record written
     // before  carries no `leg` and is a request-leg record by construction.
+    //
+    // Each record also carries the eviction key , so the deadline index that
+    // bounds these sets survives the restart with them. A record written before 
+    // carries none: that leg is simply never evicted, which retains state rather than
+    // spending, and the first poll that still sees the request re-indexes it anyway.
+    //
+    // Returns { records, keys } so start() can tell a file that is one record per live
+    // key from a history that has earned a compaction.
     _loadWal(){
         let text;
         try { text = fs.readFileSync(this.walPath, 'utf8'); }
-        catch(e){ return; }   // absent on a first run
+        catch(e){ return { records: 0, keys: 0 }; }   // absent on a first run
         let outcome = new Map();
+        let records = 0;
         for(let line of text.split('\n')){
             if(!line.trim()) continue;
             let rec;
             try { rec = JSON.parse(line); } catch(_){ continue; }
             let rid = String(rec.rid || '').toLowerCase();
             if(!rid) continue;
+            records++;
+            this._noteDeadline(rec.deadline_chain, rid, rec.deadline_block);
             let leg = (String(rec.leg || '') === 'response') ? 'response' : 'request';
             let key = leg + '|' + rid;
             let prior = outcome.get(key);
@@ -1248,10 +1389,183 @@ class AttestationRelay {
             else if(rec.phase === 'failed' && prior !== 'sent') outcome.set(key, 'failed');
             else if(rec.phase === 'intent' && prior === undefined) outcome.set(key, 'intent');
         }
+        let keys = 0;
         for(let [key, state] of outcome){
             if(state !== 'sent' && state !== 'intent') continue;
             let split = key.indexOf('|');
             this._legState(key.substring(0, split)).published.mark(key.substring(split + 1));
+            keys++;
+        }
+        return { records: records, keys: keys };
+    }
+
+    // ----- deadline-anchored eviction  -----
+
+    // The absolute deadline_block of an origin request row, or null when the row cannot
+    // supply a usable one. Null means "never evict this leg": retention is the safe
+    // direction, since the only cost is memory and the cost of the other direction is a
+    // duplicate broadcast that burns a real fee.
+    _absoluteOriginDeadline(originReq){
+        let block = Number(originReq && originReq.deadline_block);
+        return (Number.isInteger(block) && block > 0) ? block : null;
+    }
+
+    // A follower's re-derivation of the threaded deadline. Indexes its OWN reading first,
+    // then accepts the row only if the leader's copy agrees (or is absent, from a
+    // pre- leader). Never adopts the leader's number.
+    _checkOriginDeadline(row, originReq){
+        let rid  = String(row.request_id || '').toLowerCase();
+        let mine = this._absoluteOriginDeadline(originReq);
+        this._noteDeadline(row.origin_chain, rid, mine);
+        if(row.origin_deadline_block == null) return true;
+        return mine != null && Number(row.origin_deadline_block) === mine;
+    }
+
+    _noteDeadline(coin, rid, deadlineBlock){
+        coin  = String(coin || '');
+        rid   = String(rid  || '').toLowerCase();
+        let block = Number(deadlineBlock);
+        if(ORIGIN_CHAINS.indexOf(coin) === -1) return false;
+        if(!/^[0-9a-f]{64}$/.test(rid)) return false;
+        if(!Number.isInteger(block) || block <= 0) return false;
+        let prior = this._deadlines.get(rid);
+        if(prior && prior.coin === coin && prior.block === block) return true;
+        if(!prior && this._deadlines.size >= MAX_TRACKED_DEADLINES){
+            console.warn('AttestationRelay: deadline index full at ' + MAX_TRACKED_DEADLINES +
+                         ' entries; ' + rid.substring(0, 16) + '... will be retained rather than evicted');
+            return false;
+        }
+        this._deadlines.set(rid, { coin: coin, block: block });
+        return true;
+    }
+
+    // The one definition of "dead beyond recall", shared by the eviction pass and by
+    // both re-entry paths. They MUST use the same horizon: if a request could still be
+    // proposed after its records were forgotten, eviction would be exactly the
+    // double-broadcast it is supposed to prevent. False whenever the chain's tip is
+    // unknown, so an unread chain evicts nothing and blocks nothing.
+    _pastEvictionHorizon(coin, deadlineBlock){
+        let tip   = Number(this._originLatest[String(coin || '')]);
+        let block = Number(deadlineBlock);
+        if(!Number.isFinite(tip) || !Number.isInteger(block)) return false;
+        return tip > block + this.evictGraceBlocks + Number(this.confirmations[String(coin)] || 0);
+    }
+
+    // Forget every leg whose origin request is dead beyond recall, and compact the WAL
+    // down to what is left. THE SAFETY ARGUMENT, which is the whole of this feature:
+    //
+    //   a leg is evicted only when the ORIGIN chain's tip is past the request's own
+    //   deadline_block by that chain's confirmation depth PLUS the grace window. Past
+    //   that point the origin indexer's expiry sweep has taken the row out of 'pending'
+    //   and no reorg this driver honours can put it back, and BOTH re-entry paths here
+    //   (_maybeMaterialize, _maybeRelayResponse) refuse the same horizon on their way in.
+    //   So there is no path from a forgotten key back to a second broadcast.
+    //
+    // A chain whose tip we have never read is skipped: eviction runs off observed
+    // heights only, never off wall clock or off a chain we cannot see.
+    _evictExpired(){
+        let expired = [];
+        for(let [rid, d] of this._deadlines){
+            if(!this._pastEvictionHorizon(d.coin, d.block)) continue;
+            expired.push(rid);
+        }
+        if(!expired.length) return 0;
+
+        for(let rid of expired){
+            this._deadlines.delete(rid);
+            for(let phase of ['request', 'response']){
+                let state = this._legState(phase);
+                state.published.delete(rid);
+                state.wire.delete(rid);
+            }
+            this._evicted++;
+        }
+        console.log('AttestationRelay: evicted ' + expired.length + ' relay leg(s) whose origin deadline is ' +
+                    'buried past recall (' + this._published.size + ' request + ' + this._publishedResponses.size +
+                    ' response record(s) retained)');
+        // Only ever after the in-memory eviction: a compaction that failed leaves the
+        // fuller file on disk, so a restart re-learns the keys and holds them another
+        // window. The reverse order could drop a record that is still live.
+        this._compactWal('eviction');
+        return expired.length;
+    }
+
+    // Rewrite the WAL as ONE record per surviving at-most-once key, atomically. The
+    // retained record is the original line that decided the key's state, so a txid an
+    // operator may need to trace is preserved rather than synthesized away; a key with
+    // no line left (only possible if a record was lost) gets a synthetic 'sent' so
+    // compaction can never be the thing that un-suppresses a broadcast.
+    _compactWal(reason){
+        let text;
+        try { text = fs.readFileSync(this.walPath, 'utf8'); }
+        catch(e){ return false; }   // nothing on disk yet: nothing to compact
+
+        let state = new Map();
+        let keep  = new Map();
+        let lines = 0;
+        for(let line of text.split('\n')){
+            if(!line.trim()) continue;
+            let rec;
+            try { rec = JSON.parse(line); } catch(_){ continue; }
+            let rid = String(rec.rid || '').toLowerCase();
+            if(!rid) continue;
+            lines++;
+            let leg   = (String(rec.leg || '') === 'response') ? 'response' : 'request';
+            let key   = leg + '|' + rid;
+            let prior = state.get(key);
+            // The same fold _loadWal applies, tracking the record that carried the state.
+            if(rec.phase === 'sent'){ state.set(key, 'sent'); keep.set(key, rec); }
+            else if(rec.phase === 'failed' && prior !== 'sent'){ state.set(key, 'failed'); keep.set(key, rec); }
+            else if(rec.phase === 'intent' && prior === undefined){ state.set(key, 'intent'); keep.set(key, rec); }
+        }
+
+        let out  = [];
+        let seen = new Set();
+        for(let [key, rec] of keep){
+            let split = key.indexOf('|');
+            let leg   = key.substring(0, split);
+            let rid   = key.substring(split + 1);
+            // Dropped here: keys this pass just evicted, and keys whose last word was a
+            // definitive 'failed' (absent and 'failed' mean the same thing on reload).
+            if(!this._legState(leg).published.has(rid)) continue;
+            let d = this._deadlines.get(rid);
+            out.push(JSON.stringify(Object.assign({}, rec, {
+                leg: leg, compacted: true,
+                deadline_chain: d ? d.coin  : rec.deadline_chain,
+                deadline_block: d ? d.block : rec.deadline_block
+            })));
+            seen.add(key);
+        }
+        for(let leg of ['request', 'response']){
+            for(let rid of this._legState(leg).published.keys()){
+                if(seen.has(leg + '|' + rid)) continue;
+                let d = this._deadlines.get(rid);
+                out.push(JSON.stringify({
+                    ts: Date.now(), rid: rid, leg: leg, phase: 'sent', compacted: true, synthesized: true,
+                    deadline_chain: d ? d.coin : undefined, deadline_block: d ? d.block : undefined
+                }));
+            }
+        }
+
+        let tmp = this.walPath + '.compact';
+        try {
+            fs.mkdirSync(path.dirname(this.walPath), { recursive: true });
+            let fd = fs.openSync(tmp, 'w');
+            fs.writeSync(fd, out.length ? out.join('\n') + '\n' : '');
+            fs.fsyncSync(fd);
+            fs.closeSync(fd);
+            // Atomic: a crash here leaves the OLD file, which is the conservative one.
+            fs.renameSync(tmp, this.walPath);
+            this._walCompactions++;
+            console.log('AttestationRelay: compacted the relay WAL (' + reason + '): ' +
+                        lines + ' record(s) -> ' + out.length);
+            return true;
+        } catch(e){
+            this._walFailures++;
+            try { fs.unlinkSync(tmp); } catch(_){ /* best effort */ }
+            console.error('AttestationRelay: WAL compaction (' + reason + ') failed at ' + this.walPath +
+                          '; the uncompacted file stands:', e);
+            return false;
         }
     }
 

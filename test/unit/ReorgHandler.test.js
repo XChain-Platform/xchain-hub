@@ -15,6 +15,7 @@ const { expect }     = require('chai');
 const ReorgHandler   = require('../../src/ReorgHandler');
 const { createMockHub }     = require('../helpers/mockHub');
 const { VALIDATORS_3, VALIDATORS_4 } = require('../helpers/fixtures');
+const { waitUntil }  = require('../helpers/waitUntil');
 
 // A valid observed-hash pair for the R2-C2 wire format (distinct 64-hex).
 const OLD_HASH = 'a'.repeat(64);
@@ -504,7 +505,8 @@ describe('ReorgHandler', function () {
             expect(pm.broadcast.called, 'no COMMIT broadcast for an unverified round').to.be.false;
 
             rh._checkCommitQuorum(reorgId);
-            await new Promise(r => setTimeout(r, 20));
+            // _checkCommitQuorum refuses an unverified round inline, so the refusal is
+            // already decided by the time it returns.
             expect(hub.db.doQuery.called, 'no rollback for an unverified round').to.be.false;
         });
     });
@@ -875,7 +877,7 @@ describe('ReorgHandler', function () {
                 data: { reorgId, digest }
             });
 
-            await new Promise(r => setTimeout(r, 20));
+            await waitUntil(() => rh.processed.has(reorgId), { label: 'the commit quorum to execute the rollback' });
 
             expect(hub.db.doQuery.callCount).to.equal(3); // delete + update + insert
             expect(rh.processed.has(reorgId)).to.be.true;
@@ -1015,8 +1017,16 @@ describe('ReorgHandler', function () {
         it('the start() listener surfaces (does not crash on) handler rejections', async function () {
             await rh.start();
             sinon.stub(rh, '_handleMessage').rejects(new Error('boom'));
-            expect(() => pm.emit('message', { type: 'REORG_ALERT', data: {} })).to.not.throw();
-            await new Promise(r => setTimeout(r, 10));
+            // The listener's own catch logs the rejection, so that log line is the
+            // proof it was surfaced rather than left to crash the process.
+            let errStub = sinon.stub(console, 'error');
+            try {
+                expect(() => pm.emit('message', { type: 'REORG_ALERT', data: {} })).to.not.throw();
+                await waitUntil(() => errStub.calledWithMatch('Reorg: message handling error:'),
+                    { label: 'the listener to surface the handler rejection' });
+            } finally {
+                errStub.restore();
+            }
             await rh.stop();
         });
     });
@@ -1112,7 +1122,7 @@ describe('ReorgHandler', function () {
                 finalized: false, timer: null, quorum: 2, digest: 'd', selfVerified: true
             });
             rh._checkCommitQuorum('BTC:5:1');
-            await new Promise(r => setTimeout(r, 20));
+            await waitUntil(() => rh.pendingReorgs.has('BTC:5:1') === false, { label: 'the failed rollback to clear the pending reorg' });
             expect(rh.pendingReorgs.has('BTC:5:1')).to.be.false;
         });
     });

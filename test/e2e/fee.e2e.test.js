@@ -15,6 +15,7 @@ const testDb        = require('../helpers/testDb');
 const priceMocks    = require('./helpers/priceMocks');
 const { createCluster } = require('./helpers/cluster');
 const { callRpc }       = require('./helpers/rpcClient');
+const { waitUntil }     = require('../helpers/waitUntil');
 
 // getFeeQuote refuses to quote without a finalized XCHAIN/USD oracle price
 // (fails closed); the oracle round only finalizes coin/USD pairs, so tests
@@ -76,8 +77,11 @@ describe('E2E: Fee Quote Pipeline', function () {
 
             // Run oracle round to populate prices
             await cluster.triggerOracleRound(0);
-            await new Promise(r => setTimeout(r, 500));
             let round = cluster.getHub(0).oracle.getCurrentRound();
+            await waitUntil(async () => {
+                let rows = await cluster.getDb().doQuery('SELECT 1 FROM oracle_submissions WHERE round_number = ?', [round]);
+                return rows.length > 0;
+            }, { timeoutMs: 10000, label: 'the round submission row to land' });
             await cluster.triggerOracleFinalization(0, round);
 
             // getFeeQuote fails closed without a finalized XCHAIN/USD price

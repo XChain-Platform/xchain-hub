@@ -14,8 +14,9 @@ const sinon          = require('sinon');
 const { expect }     = require('chai');
 const Consensus      = require('../../src/Consensus');
 const { createMockHub }     = require('../helpers/mockHub');
+const { waitUntil }         = require('../helpers/waitUntil');
 const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7, VALIDATORS_10, VALIDATORS_13,
-        makeValidator } = require('../helpers/fixtures');
+        makeValidator, makeFederationSnapshot } = require('../helpers/fixtures');
 
 describe('Regression: Consensus (PBFT)', function () {
 
@@ -84,7 +85,7 @@ describe('Regression: Consensus (PBFT)', function () {
             // quorum 3 is what _getQuorum() returns for N=4, so what this
             // regression measures is unchanged.
             hub.capabilitySnapshot = {
-                getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000, validators: [{ pubkey: 'aa', amount: '50000' }] }),
+                getActiveValidatorSnapshot: sinon.stub().returns(makeFederationSnapshot(VALIDATORS_4, 800000)),
                 getQuorum: sinon.stub().returns(3)
             };
             hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
@@ -128,7 +129,10 @@ describe('Regression: Consensus (PBFT)', function () {
                 data: { seq: 5, configDigest: digest }
             });
 
-            await new Promise(r => setTimeout(r, 30));
+            // The proposer promise resolves only after the apply AND the seq write, so
+            // it is the last observable of the round: polling the apply alone would
+            // race the seq write and re-introduce the flake from the other side.
+            await waitUntil(() => resolved, { label: 'the commit quorum to apply the config and resolve the proposer' });
             expect(hub.applyConfig.calledOnce).to.be.true;
             expect(hub.applyConfig.calledWith(config)).to.be.true;
             expect(resolved).to.be.true;
@@ -150,7 +154,7 @@ describe('Regression: Consensus (PBFT)', function () {
             // #4168: supply the deterministic snapshot the federation guard now
             // requires for a multi-member set (quorum 3 = _getQuorum() at N=4).
             hub.capabilitySnapshot = {
-                getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000, validators: [{ pubkey: 'aa', amount: '50000' }] }),
+                getActiveValidatorSnapshot: sinon.stub().returns(makeFederationSnapshot(VALIDATORS_4, 800000)),
                 getQuorum: sinon.stub().returns(3)
             };
             hub._resolveBtcLatestBlock = sinon.stub().resolves(800000);
@@ -196,7 +200,9 @@ describe('Regression: Consensus (PBFT)', function () {
                 data: { seq: 5, configDigest: digest }
             });
 
-            await new Promise(r => setTimeout(r, 20));
+            // One vote short of quorum, so wait on the round the votes landed in rather
+            // than on a clock: both commits are recorded and no third can arrive.
+            await waitUntil(() => consensus.pendingProposals.get(5).commits.size === 2, { label: 'the second commit to be tallied' });
             expect(hub.applyConfig.called).to.be.false;
         });
     });

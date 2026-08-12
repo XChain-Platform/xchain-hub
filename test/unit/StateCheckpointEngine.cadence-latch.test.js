@@ -25,7 +25,10 @@
 const { expect }            = require('chai');
 const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
 const ValidatorIdentity     = require('../../src/ValidatorIdentity');
+const { waitUntil }         = require('../helpers/waitUntil');
 
+// Kept for the block-walk loop below, where the settle bounds how often the walk
+// re-ticks rather than standing in for a condition.
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 const TIP = {
@@ -156,13 +159,14 @@ describe('StateCheckpointEngine cadence latch ', function () {
         // The next round waits for a full interval past that snapshot_block.
         bus.btcBlock = seq + 5;
         for (let nd of bus.nodes) await nd.engine._tick();
-        await sleep(20);
+        // Every tick is awaited and the latch refuses inside it, so the inside-interval
+        // no-op is already decided here.
         for (let nd of bus.nodes)
             expect(nd.db.checkpoints.length, 'node ' + nd.i + ' still one round inside the interval').to.equal(1);
 
         bus.btcBlock = seq + 6;
         for (let nd of bus.nodes) await nd.engine._tick();
-        await sleep(20);
+        await waitUntil(() => bus.nodes.every(nd => nd.db.checkpoints.length === 2), { label: 'the past-interval round to land on every hub' });
         for (let nd of bus.nodes)
             expect(nd.db.checkpoints.length, 'node ' + nd.i + ' second round past the interval').to.equal(2);
     });

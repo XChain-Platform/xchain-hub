@@ -317,8 +317,10 @@ describe('AttestationSpotChecker', function () {
             sc.register('rid1', 'http_get', 'e');
             await sc.onRequestFinalized(makeFinalizedEvent({ requestId: 'rid1', signatures: [{ pubkey: 'pk' }] }));
 
-            // Wait for window to expire
-            await new Promise(r => setTimeout(r, 150));
+            // Age the first failure out of the window by rewriting its timestamp. The
+            // pruning rule is "older than SPOT_CHECK_FAILURE_WINDOW_MS", so stating that
+            // directly is deterministic where sleeping past a wall clock is a race.
+            for (let f of (sc._failures.get('pk') || [])) f.timestamp -= 200;
 
             // Second failure after the window; pruning should remove the first
             sc.register('rid2', 'http_get', 'e');
@@ -856,7 +858,9 @@ describe('AttestationSpotChecker: re-judge queue ()', function () {
         sc.register('ra1', 'http_get', 'expected');
         await sc.onRequestFinalized(okEvent('ra1', 706, ['ab'.repeat(32)]));
         expect(sc._pendingReJudgeSize()).to.equal(1);
-        await new Promise(r => setTimeout(r, 5));
+        // Age the held record past SPOT_CHECK_REJUDGE_MAX_AGE_MS directly rather than
+        // sleeping through it: the sweep compares firstSeen, so this is the same fact.
+        for (let rec of sc._pendingReJudge.values()) rec.firstSeen -= 50;
         await sc._sweepReJudge();
         expect(sc._pendingReJudgeSize()).to.equal(0);
     });

@@ -15,6 +15,7 @@ const { expect }         = require('chai');
 const CrossChainEngine   = require('../../src/CrossChainEngine');
 const { createMockHub }  = require('../helpers/mockHub');
 const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7, makeValidator } = require('../helpers/fixtures');
+const { waitUntil }      = require('../helpers/waitUntil');
 
 // #1223: _resolveQuorum now fails closed when federated with no deterministic
 // capability snapshot (the live-validator-set fallback forked N/quorum across
@@ -425,7 +426,7 @@ describe('CrossChainEngine', function () {
                 data: { attestationId, digest }
             });
 
-            await new Promise(r => setTimeout(r, 20));
+            await waitUntil(() => engine.finalized.has(attestationId), { label: 'the third commit to finalize the attestation' });
 
             expect(hub.db.doQuery.called).to.be.true;
             expect(emitted).to.not.be.null;
@@ -468,7 +469,7 @@ describe('CrossChainEngine', function () {
                 engine.pendingAttestations.set(attestationId, quorateRound(attestationId, digest));
                 engine._handleCommit({ sender: VALIDATORS_4[2].addr, data: { attestationId, digest } });
 
-                await new Promise(r => setTimeout(r, 60));
+                await waitUntil(() => emitted.length === 1, { label: 'the retried store to finalize the round' });
 
                 expect(hub.db.doQuery.callCount).to.equal(3);
                 expect(emitted).to.have.lengthOf(1);
@@ -487,7 +488,8 @@ describe('CrossChainEngine', function () {
                 engine.pendingAttestations.set(attestationId, quorateRound(attestationId, digest));
                 engine._handleCommit({ sender: VALIDATORS_4[2].addr, data: { attestationId, digest } });
 
-                await new Promise(r => setTimeout(r, 120));
+                // Every attempt fails, so the observable is the retry budget being spent.
+                await waitUntil(() => hub.db.doQuery.callCount === engine.storeRetryAttempts, { label: 'the store retries to be exhausted' });
 
                 // Round retained (not deleted) with the finalize flag reset, so the
                 // collected quorum proof survives the outage.
@@ -502,7 +504,7 @@ describe('CrossChainEngine', function () {
                 hub.db.doQuery.resolves([]);
                 engine._handleCommit({ sender: VALIDATORS_4[3].addr, data: { attestationId, digest } });
 
-                await new Promise(r => setTimeout(r, 40));
+                await waitUntil(() => emitted.length === 1, { label: 'the retransmitted COMMIT to finalize the round' });
 
                 expect(emitted).to.have.lengthOf(1);
                 expect(emitted[0].attestationId).to.equal(attestationId);

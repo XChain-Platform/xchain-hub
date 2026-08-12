@@ -46,12 +46,27 @@ const NO_INDEXER_DETAIL = 'No BTC indexer URL could be resolved (BTC_INDEXER_API
     'configs table). Without it this hub can read NO consensus input at all.';
 const MALFORMED_DETAIL  = 'The response carried no `validators` array. Refusing it rather than treating a wrong ' +
     'shape as an empty validator set (quorum 0 is indistinguishable from single-node mode).';
+const WEIGHTLESS_DETAIL = 'A row in the source-keyed weight snapshot carried no usable `weight`. Refusing the whole ' +
+    'snapshot: a missing weight read as 0 keeps the source in the dedupe map with no stake, shrinking the ' +
+    'denominator S and LOWERING the two-thirds bar it is measured against .';
+
+// A weight is a plain decimal string, exactly as stake_weighted_quorum.bcnum
+// accepts one. Kept identical to that predicate's own pattern so a row this
+// class admits can never be one the predicate then fails closed on.
+const NUMERIC_WEIGHT = /^[+-]?(\d+\.?\d*|\.\d+)$/;
 
 // The canonical reorg-depth buffer every hub in a federation must resolve
 // snapshots at. 6 = the BTC confirmation depth the platform already treats as
 // buried (XCHAIN_CONFIRMATIONS_BTC). Named once so the default and the
 // divergence assertion below can never drift apart.
-const CANONICAL_REORG_BUFFER = 6;
+//
+// : the literal now comes from the shared, byte-vendored
+// snapshot_reorg_buffer.js rather than living here, because the three verifier
+// families outside this repo (indexer attest.js, indexer recovery.js, sdk
+// light.js) must bury by the SAME depth the signer buried by. A hub-local 6 and
+// a verifier-local 6 that drift apart resolve different validator sets for the
+// same declared height with nothing logged.
+const { CANONICAL_REORG_BUFFER } = require('./snapshot_reorg_buffer.js');
 
 // The indexer answered but the JSON-RPC body is unusable. Keep the reported
 // error text short: it lands in a log line, and the useful part is which of the
@@ -152,9 +167,29 @@ class CapabilitySnapshot {
     // shape and returns null, which routes the caller through the consensus
     // fail-closed gate instead of silently yielding a zero-validator snapshot
     // (quorum=0) that is indistinguishable from single-node.
-    _coerceValidators(result) {
-        if (result && Array.isArray(result.validators)) return result.validators;
-        return null;
+    //
+    // : on the WEIGHT fetchers the caller passes requireWeight, and a row
+    // whose weight is missing/blank/nonnumeric makes the whole snapshot MALFORMED.
+    // stake_weighted_quorum fails closed on such a row, but only if it ever sees
+    // one: every consumer of this snapshot re-maps it through
+    // `String(v.weight != null ? v.weight : '0')`, which launders a missing weight
+    // into a real '0' and hands the predicate a well-formed row carrying no stake.
+    // That is the exact defect the predicate guards against - the source stays in
+    // the dedupe map, S shrinks, and a smaller real stake clears 3*tally > 2*S -
+    // so the rejection has to happen HERE, at the point the wire row enters the
+    // hub, not at the predicate the laundering hides it from. Rejecting the whole
+    // snapshot (rather than dropping the row) is deliberate: dropping a row shrinks
+    // S exactly the same way. A legitimate '0' weight still passes.
+    _coerceValidators(result, opts) {
+        if (!result || !Array.isArray(result.validators)) return null;
+        if (opts && opts.requireWeight) {
+            for (let v of result.validators) {
+                if (!v || v.weight === null || v.weight === undefined) return null;
+                let w = String(v.weight).trim();
+                if (w === '' || !NUMERIC_WEIGHT.test(w)) return null;
+            }
+        }
+        return result.validators;
     }
 
     // Freshness / echo guard. The indexer fail-closes on a not-yet-indexed block
@@ -283,8 +318,9 @@ class CapabilitySnapshot {
             }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
             let result = res && res.data && res.data.result;
             if (!result || result.error) return this._fail('getstakeweightsbycapability', REASONS.RPC_ERROR, rpcErrorDetail(result));
-            let validators = this._coerceValidators(result);
-            if (validators === null) return this._fail('getstakeweightsbycapability', REASONS.MALFORMED, MALFORMED_DETAIL);
+            let validators = this._coerceValidators(result, { requireWeight: true });
+            if (validators === null) return this._fail('getstakeweightsbycapability', REASONS.MALFORMED,
+                Array.isArray(result.validators) ? WEIGHTLESS_DETAIL : MALFORMED_DETAIL);
             if (!this._blockEchoOk('getstakeweightsbycapability', result, blockIndex)) return null;
             this.monitor.recordSuccess('getstakeweightsbycapability');
             let snapshot = {
@@ -373,8 +409,9 @@ class CapabilitySnapshot {
             }, { headers: this.hub._btcIndexerHeaders(), timeout: 5000 });
             let result = res && res.data && res.data.result;
             if (!result || result.error) return this._fail('getactivestakeweights', REASONS.RPC_ERROR, rpcErrorDetail(result));
-            let validators = this._coerceValidators(result);
-            if (validators === null) return this._fail('getactivestakeweights', REASONS.MALFORMED, MALFORMED_DETAIL);
+            let validators = this._coerceValidators(result, { requireWeight: true });
+            if (validators === null) return this._fail('getactivestakeweights', REASONS.MALFORMED,
+                Array.isArray(result.validators) ? WEIGHTLESS_DETAIL : MALFORMED_DETAIL);
             if (!this._blockEchoOk('getactivestakeweights', result, blockIndex)) return null;
             this.monitor.recordSuccess('getactivestakeweights');
             let snapshot = {

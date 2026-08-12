@@ -956,7 +956,7 @@ describe('PriceAggregator.receiveValidatedRound() signature-tally ordering flag-
     });
 
     it('at/above the gate: a garbage sig ordered AHEAD of a member\'s real one still reaches quorum', async function () {
-        let result = await agg.receiveValidatedRound('BTC', roundAt(969500, payload => [
+        let result = await agg.receiveValidatedRound('BTC', roundAt(963000, payload => [
             { pubkey: V[0].pubkey, sig: GARBAGE_SIG },     // slot-stealer, first on the wire
             { pubkey: V[0].pubkey, sig: V[0].sign(payload) },
             { pubkey: V[1].pubkey, sig: V[1].sign(payload) },
@@ -971,7 +971,7 @@ describe('PriceAggregator.receiveValidatedRound() signature-tally ordering flag-
             if (/^INSERT INTO price_snapshots/.test(sql)) { stored = params; return {}; }
             return [];
         });
-        await agg.receiveValidatedRound('BTC', roundAt(969500, payload => [
+        await agg.receiveValidatedRound('BTC', roundAt(963000, payload => [
             { pubkey: V[0].pubkey, sig: GARBAGE_SIG },
             { pubkey: V[0].pubkey, sig: V[0].sign(payload) },
             { pubkey: V[1].pubkey, sig: V[1].sign(payload) },
@@ -983,7 +983,7 @@ describe('PriceAggregator.receiveValidatedRound() signature-tally ordering flag-
 
     it('at/above the gate: a member with ONLY garbage entries still does not count', async function () {
         // V[0] contributes nothing verifiable, so only V[1] counts: 1 of quorum 2.
-        let result = await agg.receiveValidatedRound('BTC', roundAt(969500, payload => [
+        let result = await agg.receiveValidatedRound('BTC', roundAt(963000, payload => [
             { pubkey: V[0].pubkey, sig: GARBAGE_SIG },
             { pubkey: V[0].pubkey, sig: GARBAGE_SIG },
             { pubkey: V[1].pubkey, sig: V[1].sign(payload) },
@@ -993,7 +993,7 @@ describe('PriceAggregator.receiveValidatedRound() signature-tally ordering flag-
     });
 
     it('at/above the gate: a repeated VALID member still counts exactly once', async function () {
-        let result = await agg.receiveValidatedRound('BTC', roundAt(969500, payload => [
+        let result = await agg.receiveValidatedRound('BTC', roundAt(963000, payload => [
             { pubkey: V[0].pubkey, sig: V[0].sign(payload) },
             { pubkey: V[0].pubkey, sig: V[0].sign(payload) },
         ]));
@@ -1002,7 +1002,7 @@ describe('PriceAggregator.receiveValidatedRound() signature-tally ordering flag-
     });
 
     it('below the gate: the legacy mark-then-verify verdict is preserved verbatim', async function () {
-        let result = await agg.receiveValidatedRound('BTC', roundAt(969499, payload => [
+        let result = await agg.receiveValidatedRound('BTC', roundAt(962999, payload => [
             { pubkey: V[0].pubkey, sig: GARBAGE_SIG },
             { pubkey: V[0].pubkey, sig: V[0].sign(payload) },
             { pubkey: V[1].pubkey, sig: V[1].sign(payload) },

@@ -64,9 +64,9 @@ describe('PRICE v0 signature-tally flag-day : hub copy @regression', function ()
 
     describe('predicate', function () {
         it('is inactive below the mainnet anchor and active at/above it', function () {
-            expect(local.PRICE_SIG_TALLY_ACTIVATION.mainnet).to.equal(969500);
-            expect(local.isPriceSigTallyVerifyFirstActive(969499, 'mainnet')).to.equal(false);
-            expect(local.isPriceSigTallyVerifyFirstActive(969500, 'mainnet')).to.equal(true);
+            expect(local.PRICE_SIG_TALLY_ACTIVATION.mainnet).to.equal(963000);
+            expect(local.isPriceSigTallyVerifyFirstActive(962999, 'mainnet')).to.equal(false);
+            expect(local.isPriceSigTallyVerifyFirstActive(963000, 'mainnet')).to.equal(true);
         });
 
         it('is active from genesis on testnet and regtest', function () {

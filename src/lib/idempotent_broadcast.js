@@ -62,6 +62,11 @@ class AtMostOnce {
     delete(key){ return this._seen.delete(String(key)); }
     clear(){ this._seen.clear(); }
     get size(){ return this._seen.size; }
+    // The live key list, so a caller that bounds this set ('s deadline-anchored
+    // eviction in AttestationRelay) can enumerate what it holds and rewrite its own
+    // durable record from it. A copy, not the backing set: a caller iterating while it
+    // deletes must not mutate what it is walking.
+    keys(){ return Array.from(this._seen); }
 }
 
 // Compose the shared money-path steps around a caller-provided send().

@@ -15,6 +15,7 @@ const { expect }       = require('chai');
 const proxyquire       = require('proxyquire');
 const OracleConsensus  = require('../../src/OracleConsensus');
 const { createMockHub }       = require('../helpers/mockHub');
+const { waitUntil }           = require('../helpers/waitUntil');
 const { VALIDATORS_4, buildSubmissions } = require('../helpers/fixtures');
 
 describe('Regression: Oracle Pipeline', function () {
@@ -270,7 +271,7 @@ describe('Regression: Oracle Pipeline', function () {
                     data: { round: 1, digest }
                 });
 
-                await new Promise(r => setTimeout(r, 20));
+                await waitUntil(() => oc.finalized.has(1), { label: 'the commit quorum to finalize the round' });
 
                 expect(hub.db.doQuery.called).to.be.true;
                 expect(emitted).to.not.be.null;

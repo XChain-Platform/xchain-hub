@@ -14,6 +14,7 @@ const sinon          = require('sinon');
 const { expect }     = require('chai');
 const ReorgHandler   = require('../../src/ReorgHandler');
 const { createMockHub }     = require('../helpers/mockHub');
+const { waitUntil }         = require('../helpers/waitUntil');
 const { VALIDATORS_3 }      = require('../helpers/fixtures');
 
 // R2-C2 wire format: every report/round carries the reporter's observed hash
@@ -150,7 +151,7 @@ describe('Regression: ReorgHandler', function () {
                 data: { reorgId, digest }
             });
 
-            await new Promise(r => setTimeout(r, 20));
+            await waitUntil(() => rh.processed.has(reorgId), { label: 'the commit quorum to execute the rollback' });
 
             expect(hub.db.doQuery.callCount).to.equal(3);
             expect(rh.processed.has(reorgId)).to.be.true;

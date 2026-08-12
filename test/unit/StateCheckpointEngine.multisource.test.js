@@ -24,8 +24,7 @@ const StateAnchorPublisher    = require('../../src/StateAnchorPublisher');
 const ValidatorIdentity       = require('../../src/ValidatorIdentity');
 const swq                     = require('../../src/stake_weighted_quorum');
 const { resolveQuorumNetwork } = require('../../src/lib/quorum_network');
-
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const { waitUntil }           = require('../helpers/waitUntil');
 
 const TIP = {
     block_index: 500, block_hash: 'c0'.repeat(32), network: 'regtest',
@@ -139,7 +138,7 @@ describe(' multi-source pubkey (checkpoint/anchor family)', function () {
 
         await ctx.engine.start();
         await ctx.engine._tick();
-        await sleep(30);
+        await waitUntil(() => ctx.db.checkpoints.length === 1, { label: 'the two-source self-sign to write its checkpoint' });
 
         expect(ctx.db.checkpoints.length, 'checkpoint produced (round not skipped, no stall)').to.equal(1);
         let sigs = JSON.parse(ctx.db.checkpoints[0].validator_signatures);

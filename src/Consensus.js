@@ -104,6 +104,12 @@ class Consensus {
     // each other's legitimate PRE_PREPARE. Quorum N is untouched (it depends
     // only on |set|). See validator_order.js for the ordering and for why this
     // ships ungated inside the  pre-launch batch.
+    //
+    //  narrowed what this ordering still governs: a round that locks a
+    // capability snapshot now elects from that snapshot's members instead, and
+    // this order is the fallback rotation for rounds that have no snapshot. The
+    // sort key is the same either way (lowercased pubkey ascending), so the two
+    // rotations agree whenever the two populations do.
     setValidatorSet(validators) {
         this.validatorSet = canonicalValidatorOrder(validators);
     }
@@ -231,10 +237,23 @@ class Consensus {
             return true;
         }
 
+        // : elect the leader from the SAME population this round's quorum
+        // was sized from. Everything below the quorum line is snapshot-pinned
+        // (getQuorum(snapshot), proposal.validators, the weighted tally), but
+        // leader election used to index the LIVE validatorSet, so a hub whose
+        // local peer set had drifted from the block-locked staker set elected a
+        // different leader for the same seq and rejected the legitimate
+        // PRE_PREPARE. Same shape as the already-hardened
+        // OracleConsensus._getLeader : sorted member pubkeys, index by
+        // rotation, resolve the addr locally. Null memberPubkeys (no usable
+        // snapshot, i.e. the single-node / graceful-degradation path) keeps the
+        // legacy live-set rotation.
+        let memberPubkeys = this._memberPubkeySet(snapshot);
         let nextSeq = this.seq + 1;
-        let leader = this._getLeader(nextSeq);
-        if (leader && leader.addr !== this.peerManager.validatorAddr) {
-            throw new Error('Not the leader for seq ' + nextSeq + ' (leader: ' + leader.addr + ')');
+        let leader = this._getLeader(nextSeq, memberPubkeys);
+        if (leader && !this._isLeaderIdentity(leader, this.peerManager.validatorAddr, this._selfPubkey())) {
+            throw new Error('Not the leader for seq ' + nextSeq + ' (leader: ' +
+                (leader.addr || leader.pubkey) + ')');
         }
 
         this.seq++;
@@ -274,6 +293,11 @@ class Consensus {
                 // weighted). One vote per staking source (DELEGATE v0 is additive).
                 weighted:       !!weighted,
                 validators:     this._normalizeValidators(snapshot, weighted),
+                // : the round's pinned leader-election population, carried
+                // so every later leader question for this seq (view change, a
+                // repeat PRE_PREPARE, NEW_VIEW) is answered from the set the
+                // round was opened over rather than from the live peer set.
+                memberPubkeys:  memberPubkeys || null,
                 preparePubkeys: weighted ? new Set() : null,
                 commitPubkeys:  weighted ? new Set() : null
             };
@@ -293,7 +317,8 @@ class Consensus {
                     // view-change vote tally uses the same rule (count or stake)
                     // this proposal round used, even though we've just removed the
                     // proposal from the map. Captured here, before deletion.
-                    this._initiateViewChange(seq, proposal.quorum, proposal.weighted, proposal.validators);
+                    this._initiateViewChange(seq, proposal.quorum, proposal.weighted, proposal.validators,
+                        proposal.memberPubkeys);
                     reject(new Error('Consensus timeout for seq ' + seq + ' (received ' +
                         proposal.prepares.size + ' prepares, ' + proposal.commits.size + ' commits, need ' + quorum + ')'));
                 }
@@ -410,25 +435,12 @@ class Consensus {
         // before doing any snapshot/indexer work for them.
         if (!this._isKnownSender(envelope.sender)) return;
 
-        // Leader-identity guard: a PRE_PREPARE must come from the validator the
-        // rotation designates as leader for the CLAIMED (seq, view), mirroring
-        // the check _handleNewView applies to NEW_VIEW and OracleConsensus
-        // applies to PROPOSE. Without it any registered validator could inject a
-        // PRE_PREPARE for an uncontested seq and drive every follower to PREPARE/
-        // COMMIT its config. The leader stamps its view into the envelope, so
-        // (seq + view) % N matches _getLeader's rotation evaluated at the claimed
-        // view. A Byzantine node can therefore only ever propose in a (seq, view)
-        // for which it is already the legitimate leader.
+        // The leader stamps its view into the envelope so the identity guard
+        // below can evaluate the rotation at the CLAIMED (seq, view). A viewless
+        // envelope cannot be identity-checked at all, so it is dropped here,
+        // still before any snapshot/indexer work.
         if (typeof view !== 'number') {
             console.warn('PBFT: Rejecting PRE_PREPARE with no view from ' + envelope.sender + ' (seq ' + seq + ')');
-            return;
-        }
-        let N = this.validatorSet.length;
-        if (N === 0) return;
-        let expectedLeader = this.validatorSet[(seq + view) % N];
-        if (!expectedLeader || envelope.sender !== expectedLeader.addr) {
-            console.warn('PBFT: Rejecting PRE_PREPARE for seq ' + seq + ' view ' + view +
-                ' from non-leader ' + envelope.sender);
             return;
         }
 
@@ -508,6 +520,14 @@ class Consensus {
                 return;
             }
 
+            // Leader-identity guard,  edition: run it against the
+            // population the round is actually being opened over, which only
+            // exists once the snapshot is locked. It must still run BEFORE the
+            // follower proposal is created, or an authenticated non-leader could
+            // seed a proposal for an uncontested seq and drive every follower to
+            // PREPARE/COMMIT its config.
+            if (!this._leaderIdentityOk(seq, view, envelope, this._memberPubkeySet(snapshot))) return;
+
             // Create a follower proposal (no resolve/reject; we didn't initiate it)
             let proposal = {
                 config:   config,
@@ -525,6 +545,7 @@ class Consensus {
                 btcBlockHeight: btcBlockHeight || null,
                 weighted:       !!weighted,
                 validators:     this._normalizeValidators(snapshot, weighted),
+                memberPubkeys:  this._memberPubkeySet(snapshot),
                 preparePubkeys: weighted ? new Set() : null,
                 commitPubkeys:  weighted ? new Set() : null
             };
@@ -538,6 +559,12 @@ class Consensus {
             }, this.timeout * 2); // Followers wait longer; they don't report to a client
 
             this.pendingProposals.set(seq, proposal);
+        } else if (!this._leaderIdentityOk(seq, view, envelope,
+                this.pendingProposals.get(seq).memberPubkeys)) {
+            // Repeat PRE_PREPARE for a seq this hub already opened: re-run the
+            // same guard against the population that round was opened over, so
+            // the check is never skipped and never costs a second indexer trip.
+            return;
         }
 
         let proposal = this.pendingProposals.get(seq);
@@ -599,6 +626,106 @@ class Consensus {
             source: String(v.source != null ? v.source : ''),
             weight: String(v.weight != null ? v.weight : '0')
         }));
+    }
+
+    //  leader-election population. The lowercased signing pubkeys of the
+    // block-locked snapshot: the same rows that sized this round's quorum, so
+    // election and quorum finally read one population instead of two. Returns
+    // null when no usable snapshot exists (indexer down, single-node bootstrap),
+    // which every caller reads as "fall back to legacy live-set rotation".
+    // Mirrors OracleConsensus._memberPubkeySet.
+    _memberPubkeySet(snapshot) {
+        if (!snapshot || !Array.isArray(snapshot.validators) || snapshot.validators.length === 0) return null;
+        let set = new Set();
+        for (let v of snapshot.validators) {
+            if (v && v.pubkey) set.add(String(v.pubkey).toLowerCase());
+        }
+        return set.size > 0 ? set : null;
+    }
+
+    // Resolve a (lowercase) signing pubkey to its P2P addr. Snapshot rows carry
+    // no addr (they are indexer staker rows), so the binding has to come from
+    // local state: the loaded validator set first, then the peer registry
+    // (lowest addr wins so a key bound to several addrs resolves identically on
+    // every hub), then this hub's own identity. Null when unknown; the leader
+    // is then only recognizable by pubkey, and a round whose leader no hub can
+    // address times out into a view change that rotates to the next member.
+    // Mirrors OracleConsensus._addrForPubkey.
+    _addrForPubkey(pubkey) {
+        for (let v of this.validatorSet) {
+            if (v && v.pubkey && String(v.pubkey).toLowerCase() === pubkey) return v.addr;
+        }
+        let registry = this.peerManager && this.peerManager.validatorPubkeys;
+        if (registry && typeof registry.get === 'function') {
+            let matches = [];
+            for (let [addr, pk] of registry) {
+                if (pk && String(pk).toLowerCase() === pubkey) matches.push(addr);
+            }
+            if (matches.length > 0) return matches.sort()[0];
+        }
+        let identity = this.hub && this.hub.getIdentity ? this.hub.getIdentity() : null;
+        if (identity && String(identity.getPubkeyHex()).toLowerCase() === pubkey) {
+            return this.peerManager.validatorAddr;
+        }
+        return null;
+    }
+
+    // This hub's own lowercased signing pubkey, or null before the identity is
+    // available. Needed because a snapshot-derived leader may be recognizable
+    // only by key:  case (2) is two hubs holding different addr bindings
+    // for the same staker, which an addr-only self-check turns back into the
+    // very divergence the pinning removes.
+    _selfPubkey() {
+        let identity = this.hub && this.hub.getIdentity ? this.hub.getIdentity() : null;
+        if (!identity) return null;
+        let pk = identity.getPubkeyHex();
+        return pk ? String(pk).toLowerCase() : null;
+    }
+
+    // True when `addr` (with verified pubkey `pubkey`, may be null) is the round
+    // leader. Matches on addr OR verified pubkey so a snapshot-derived leader is
+    // still recognized when this hub's addr binding for that key differs from
+    // the one _addrForPubkey picked. Mirrors OracleConsensus._isLeaderIdentity.
+    _isLeaderIdentity(leader, addr, pubkey) {
+        if (!leader) return false;
+        if (leader.addr && leader.addr === addr) return true;
+        let lpk = leader.pubkey ? String(leader.pubkey).toLowerCase() : null;
+        return !!(lpk && pubkey && lpk === pubkey);
+    }
+
+    // Shared PRE_PREPARE leader-identity guard . A PRE_PREPARE must
+    // come from the validator the rotation designates as leader for the CLAIMED
+    // (seq, view), mirroring the check _handleNewView applies to NEW_VIEW and
+    // OracleConsensus applies to PROPOSE: a Byzantine node can then only ever
+    // propose in a (seq, view) for which it is already the legitimate leader.
+    // The rotation is evaluated over `memberPubkeys` when the round has a pinned
+    // population, else over the live set (unchanged legacy behavior).
+    _leaderIdentityOk(seq, view, envelope, memberPubkeys) {
+        let leader = this._leaderAt(seq, view, memberPubkeys);
+        if (!leader) {
+            console.warn('PBFT: Rejecting PRE_PREPARE for seq ' + seq + ' view ' + view +
+                ' from ' + envelope.sender + ': no leader can be elected (empty validator set)');
+            return false;
+        }
+        if (!this._isLeaderIdentity(leader, envelope.sender, this._resolveSenderPubkey(envelope))) {
+            console.warn('PBFT: Rejecting PRE_PREPARE for seq ' + seq + ' view ' + view +
+                ' from non-leader ' + envelope.sender);
+            return false;
+        }
+        return true;
+    }
+
+    // The pinned leader-election population for `seq` when this hub still holds
+    // the round's context: the pending proposal first, then the view-change
+    // context the initiator stashed after the proposal was cleared. Null when
+    // neither survives, which is the graceful-degradation path back to live-set
+    // rotation.
+    _memberPubkeysForSeq(seq) {
+        let proposal = this.pendingProposals.get(seq);
+        if (proposal && proposal.memberPubkeys) return proposal.memberPubkeys;
+        let vcCtx = this.viewChangeQuorums.get(seq);
+        if (vcCtx && vcCtx.memberPubkeys) return vcCtx.memberPubkeys;
+        return null;
     }
 
     // Add this hub's own signing pubkey to a weighted vote set (no-op if the
@@ -811,11 +938,12 @@ class Consensus {
         let proposal = this.pendingProposals.get(seq);
         let vcCtx;
         if (proposal && typeof proposal.quorum === 'number') {
-            vcCtx = { quorum: proposal.quorum, weighted: !!proposal.weighted, validators: proposal.validators || [] };
+            vcCtx = { quorum: proposal.quorum, weighted: !!proposal.weighted, validators: proposal.validators || [],
+                      memberPubkeys: proposal.memberPubkeys || null };
         } else if (this.viewChangeQuorums.has(seq)) {
             vcCtx = this.viewChangeQuorums.get(seq);
         } else {
-            vcCtx = { quorum: this._getQuorum(), weighted: false, validators: [] };
+            vcCtx = { quorum: this._getQuorum(), weighted: false, validators: [], memberPubkeys: null };
         }
         if (vcCtx.quorum === 0) return;
 
@@ -829,10 +957,14 @@ class Consensus {
         }
 
         if (this._quorumMet(vcCtx, this.pendingViewChanges.get(view), this.pendingViewChangePubkeys.get(view))) {
-            // View change accepted; update view and check if we're the new leader
+            // View change accepted; update view and check if we're the new leader.
+            // : the new leader comes from the round's pinned population,
+            // the same one PRE_PREPARE was validated against, so a view change
+            // cannot hand the round to a node the rest of the federation would
+            // not recognize as leader.
             this.view = view;
-            let newLeader = this._getLeader(seq);
-            if (newLeader && newLeader.addr === this.peerManager.validatorAddr) {
+            let newLeader = this._getLeader(seq, vcCtx.memberPubkeys || null);
+            if (this._isLeaderIdentity(newLeader, this.peerManager.validatorAddr, this._selfPubkey())) {
                 console.log('PBFT: View change to view ' + view + '; this node is the new leader');
                 this.peerManager.broadcast(PBFT_NEW_VIEW, { view: view, seq: seq });
             }
@@ -883,14 +1015,27 @@ class Consensus {
         // A NEW_VIEW must advance the view, never rewind it.
         if (view <= this.view) return;
 
-        // Validate the announcer against the claimed view's designated leader.
-        // (seq + view) % N matches _getLeader's rotation, evaluated at the
-        // claimed view rather than the local one. With no validator set there
-        // is no leader to validate against, so the announcement is rejected.
-        let N = this.validatorSet.length;
-        if (N === 0) return;
-        let expectedLeader = this.validatorSet[(seq + view) % N];
-        if (!expectedLeader || envelope.sender !== expectedLeader.addr) {
+        // Validate the announcer against the claimed view's designated leader,
+        // evaluated at the CLAIMED view rather than the local one. With no
+        // leader to validate against, the announcement is rejected.
+        //
+        // , the deliberately partial half: a NEW_VIEW envelope carries no
+        // block height, so this handler cannot lock a snapshot of its own and
+        // cannot be pinned the way the other sites are. It does the best it can
+        // and reuses the round's pinned population when this hub still holds it
+        // (a pending proposal for `seq`, or the view-change context the
+        // initiator stashed), because _handleViewChange now elects the new
+        // leader from exactly that set: without this, the pinned leader's own
+        // NEW_VIEW would be rejected by every peer still checking the live set,
+        // turning the fix into a liveness stall. When neither survives, the live
+        // set is used, unchanged from before. That residual window (a hub with
+        // no round context for `seq`, whose live set has drifted from the
+        // block-locked staker set) is the divergence the operator accepted on
+        // 2026-08-11 when ruling this fix landable as a partial one.
+        let memberPubkeys = this._memberPubkeysForSeq(seq);
+        let expectedLeader = this._leaderAt(seq, view, memberPubkeys);
+        if (!expectedLeader ||
+            !this._isLeaderIdentity(expectedLeader, envelope.sender, this._resolveSenderPubkey(envelope))) {
             console.warn('PBFT: Ignoring NEW_VIEW for view ' + view +
                 ' from non-leader ' + envelope.sender);
             return;
@@ -904,7 +1049,7 @@ class Consensus {
     // (lockedWeighted + lockedValidators) is captured by the caller BEFORE the
     // proposal is deleted, so the stake-weighted view-change tally can run even
     // though the proposal is gone.
-    _initiateViewChange(seq, lockedQuorum, lockedWeighted, lockedValidators) {
+    _initiateViewChange(seq, lockedQuorum, lockedWeighted, lockedValidators, lockedMemberPubkeys) {
         this.view++;
         console.log('PBFT: Initiating view change to view ' + this.view + ' (seq ' + seq + ')');
 
@@ -922,7 +1067,11 @@ class Consensus {
             this.viewChangeQuorums.set(seq, {
                 quorum:     lockedQuorum,
                 weighted:   !!lockedWeighted,
-                validators: lockedValidators || []
+                validators: lockedValidators || [],
+                // : the round's pinned leader-election population, so the
+                // initiator (whose proposal the timeout already removed) still
+                // elects the new leader from the set the round was opened over.
+                memberPubkeys: lockedMemberPubkeys || null
             });
         }
 
@@ -942,15 +1091,33 @@ class Consensus {
         }
     }
 
-    _getLeader(seq) {
+    // Rotation leader for (seq, view). : when the round carries a pinned
+    // population (`memberPubkeys`, the block-locked snapshot the quorum was
+    // sized from), elect sorted-member-pubkeys[(seq + view) % N] and resolve the
+    // addr locally, so every hub in the federation elects the same key for the
+    // same round no matter how its local peer set has drifted. Without one, the
+    // legacy live-set rotation is preserved unchanged, which is the single-node
+    // and indexer-unavailable path. Note that when the two populations agree the
+    // two rotations are identical: setValidatorSet canonicalizes the live set by
+    // lowercased pubkey ascending (validator_order.js), the same order the
+    // sorted member keys give.
+    _leaderAt(seq, view, memberPubkeys) {
+        if (memberPubkeys && memberPubkeys.size > 0) {
+            let keys = [...memberPubkeys].sort();
+            let pubkey = keys[(seq + view) % keys.length];
+            return { addr: this._addrForPubkey(pubkey), pubkey: pubkey };
+        }
         if (this.validatorSet.length === 0) return null;
-        let idx = (seq + this.view) % this.validatorSet.length;
-        return this.validatorSet[idx];
+        return this.validatorSet[(seq + view) % this.validatorSet.length];
     }
 
-    _isLeader(seq) {
-        let leader = this._getLeader(seq);
-        return leader && leader.addr === this.peerManager.validatorAddr;
+    _getLeader(seq, memberPubkeys) {
+        return this._leaderAt(seq, this.view, memberPubkeys);
+    }
+
+    _isLeader(seq, memberPubkeys) {
+        let leader = this._getLeader(seq, memberPubkeys);
+        return this._isLeaderIdentity(leader, this.peerManager.validatorAddr, this._selfPubkey());
     }
 
     // Calculate quorum size: legacy live-set computation, used as a

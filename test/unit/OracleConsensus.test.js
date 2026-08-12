@@ -16,6 +16,7 @@ const { expect }       = require('chai');
 const OracleConsensus  = require('../../src/OracleConsensus');
 const swq              = require('../../src/stake_weighted_quorum.js');
 const { createMockHub }       = require('../helpers/mockHub');
+const { waitUntil }           = require('../helpers/waitUntil');
 const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7, VALIDATORS_10, VALIDATORS_13,
         buildSubmissions, buildUniformSubmissions, SAMPLE_PRICES } = require('../helpers/fixtures');
 
@@ -1012,7 +1013,7 @@ describe('OracleConsensus', function () {
                 data: { round: 1, digest }
             });
 
-            await new Promise(r => setTimeout(r, 20));
+            await waitUntil(() => oc.finalized.has(1), { label: 'the third commit to finalize round 1' });
 
             expect(hub.db.doQuery.called).to.be.true;
             expect(emitted).to.not.be.null;

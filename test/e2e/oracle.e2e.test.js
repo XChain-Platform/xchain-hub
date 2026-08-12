@@ -15,6 +15,7 @@ const testDb        = require('../helpers/testDb');
 const priceMocks    = require('./helpers/priceMocks');
 const { createCluster } = require('./helpers/cluster');
 const { callRpc }       = require('./helpers/rpcClient');
+const { waitUntil }     = require('../helpers/waitUntil');
 const { waitForPrice, waitForPriceSnapshot } = require('./helpers/waitFor');
 const { assertPriceSnapshot, assertSkippedRound, assertRewardDistributed } = require('./helpers/dbAssertions');
 
@@ -72,10 +73,14 @@ describe('E2E: Oracle Price Pipeline', function () {
             // Trigger oracle round manually
             await cluster.triggerOracleRound(0);
 
-            // Wait for submission window, then finalize
-            await new Promise(r => setTimeout(r, 500));
+            // The submission write is fire-and-forget, so wait for its row rather than
+            // for a duration: finalization reads the submissions back out of the DB.
             let oracle = cluster.getHub(0).oracle;
             let round = oracle.getCurrentRound();
+            await waitUntil(async () => {
+                let rows = await cluster.getDb().doQuery('SELECT 1 FROM oracle_submissions WHERE round_number = ?', [round]);
+                return rows.length > 0;
+            }, { timeoutMs: 10000, label: 'the round submission row to land' });
             await cluster.triggerOracleFinalization(0, round);
 
             // Verify via JSON-RPC
@@ -141,8 +146,11 @@ describe('E2E: Oracle Price Pipeline', function () {
             let port = cluster.getPort(0);
 
             await cluster.triggerOracleRound(0);
-            await new Promise(r => setTimeout(r, 500));
             let round = cluster.getHub(0).oracle.getCurrentRound();
+            await waitUntil(async () => {
+                let rows = await cluster.getDb().doQuery('SELECT 1 FROM oracle_submissions WHERE round_number = ?', [round]);
+                return rows.length > 0;
+            }, { timeoutMs: 10000, label: 'the round submission row to land' });
             await cluster.triggerOracleFinalization(0, round);
 
             // Should still have prices from CMC
@@ -167,8 +175,9 @@ describe('E2E: Oracle Price Pipeline', function () {
             await cluster.start();
             let port = cluster.getPort(0);
 
+            // With both sources down the round writes no submission at all, so there is
+            // nothing to poll for: _executeRound is awaited and the skip is already decided.
             await cluster.triggerOracleRound(0);
-            await new Promise(r => setTimeout(r, 500));
             let round = cluster.getHub(0).oracle.getCurrentRound();
             await cluster.triggerOracleFinalization(0, round);
 
@@ -200,15 +209,21 @@ describe('E2E: Oracle Price Pipeline', function () {
             let pubkey = cluster.getKeypair(0).pubkeyHex;
 
             await cluster.triggerOracleRound(0);
-            await new Promise(r => setTimeout(r, 500));
             let round = cluster.getHub(0).oracle.getCurrentRound();
+            await waitUntil(async () => {
+                let rows = await cluster.getDb().doQuery('SELECT 1 FROM oracle_submissions WHERE round_number = ?', [round]);
+                return rows.length > 0;
+            }, { timeoutMs: 10000, label: 'the round submission row to land' });
             await cluster.triggerOracleFinalization(0, round);
 
-            // Wait a moment for async reward distribution
-            await new Promise(r => setTimeout(r, 500));
+            // Reward distribution is async off the finalize, so wait for the rows.
+            let db = cluster.getDb();
+            await waitUntil(async () => {
+                let rows = await db.doQuery('SELECT 1 FROM validator_rewards WHERE round_number = ?', [round]);
+                return rows.length >= 1;
+            }, { timeoutMs: 10000, label: 'the round reward rows to be written' });
 
             // Verify rewards in DB
-            let db = cluster.getDb();
             await assertRewardDistributed(db, round, 1);
 
             // Verify via API: validator status shows unclaimed rewards
@@ -235,8 +250,11 @@ describe('E2E: Oracle Price Pipeline', function () {
 
             // Round 1
             await cluster.triggerOracleRound(0);
-            await new Promise(r => setTimeout(r, 500));
             let round1 = cluster.getHub(0).oracle.getCurrentRound();
+            await waitUntil(async () => {
+                let rows = await cluster.getDb().doQuery('SELECT 1 FROM oracle_submissions WHERE round_number = ?', [round1]);
+                return rows.length > 0;
+            }, { timeoutMs: 10000, label: 'the round-1 submission row to land' });
             await cluster.triggerOracleFinalization(0, round1);
 
             // Update prices
@@ -252,8 +270,11 @@ describe('E2E: Oracle Price Pipeline', function () {
 
             // Round 2
             await cluster.triggerOracleRound(0);
-            await new Promise(r => setTimeout(r, 500));
             let round2 = cluster.getHub(0).oracle.getCurrentRound();
+            await waitUntil(async () => {
+                let rows = await cluster.getDb().doQuery('SELECT 1 FROM oracle_submissions WHERE round_number = ?', [round2]);
+                return rows.length > 0;
+            }, { timeoutMs: 10000, label: 'the round-2 submission row to land' });
             await cluster.triggerOracleFinalization(0, round2);
 
             // getprice returns the latest round

@@ -16,6 +16,7 @@ const EventEmitter       = require('events');
 const CrossChainEngine   = require('../../src/CrossChainEngine');
 const SwapTracker        = require('../../src/SwapTracker');
 const { createMockHub }  = require('../helpers/mockHub');
+const { waitUntil }      = require('../helpers/waitUntil');
 const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7, makeValidator } = require('../helpers/fixtures');
 
 describe('Regression: CrossChain & SwapTracker', function () {
@@ -136,7 +137,7 @@ describe('Regression: CrossChain & SwapTracker', function () {
                     data: { attestationId, digest }
                 });
 
-                await new Promise(r => setTimeout(r, 20));
+                await waitUntil(() => engine.finalized.has(attestationId), { label: 'the commit quorum to finalize the attestation' });
 
                 expect(hub.db.doQuery.called).to.be.true;
                 expect(emitted).to.not.be.null;
@@ -247,7 +248,7 @@ describe('Regression: CrossChain & SwapTracker', function () {
                     data: { attestationId, digest }
                 });
 
-                await new Promise(r => setTimeout(r, 20));
+                await waitUntil(() => emitted !== null, { label: 'the finalized round to emit its event' });
 
                 expect(emitted).to.not.be.null;
                 expect(emitted.attestationId).to.equal('LTC:10:DOGE');
@@ -389,7 +390,7 @@ describe('Regression: CrossChain & SwapTracker', function () {
                     sourceChain: 'BTC', sourceActionIndex: 1, attestationId: 'BTC:1:LTC'
                 });
 
-                await new Promise(r => setTimeout(r, 20));
+                await waitUntil(() => hub.db.doQuery.callCount === 2, { label: 'the finalized attestation to drive the swap update' });
                 expect(hub.db.doQuery.callCount).to.equal(2);
             });
         });

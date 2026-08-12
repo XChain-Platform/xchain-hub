@@ -15,6 +15,7 @@ const testDb        = require('../helpers/testDb');
 const priceMocks    = require('./helpers/priceMocks');
 const { createCluster } = require('./helpers/cluster');
 const { callRpc }       = require('./helpers/rpcClient');
+const { waitUntil }     = require('../helpers/waitUntil');
 const { waitForAttestation, waitForSwapStatus } = require('./helpers/waitFor');
 const { assertAttestationStored, assertSwapStatus } = require('./helpers/dbAssertions');
 
@@ -165,7 +166,14 @@ describe('E2E: Cross-Chain Attestation Pipeline', function () {
                 source_chain: 'BTC', source_action_index: 9999, dest_chain: 'LTC'
             });
 
-            await new Promise(r => setTimeout(r, 300));
+            // The unrelated attestation is stored before it could touch any swap, so its
+            // own row is the point after which "the other swap is untouched" is decided.
+            await waitUntil(async () => {
+                let att = await callRpc(port, 'getattestation', {
+                    source_chain: 'BTC', source_action_index: 9999, dest_chain: 'LTC'
+                });
+                return att.result && att.result.attestation_id;
+            }, { timeoutMs: 8000, label: 'the unrelated attestation to be stored' });
 
             // Swap should still be initiated
             let swap = await callRpc(port, 'getswap', { source_chain: 'BTC', source_action_index: 7000 });

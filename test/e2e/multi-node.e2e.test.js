@@ -15,6 +15,7 @@ const testDb        = require('../helpers/testDb');
 const priceMocks    = require('./helpers/priceMocks');
 const { createCluster } = require('./helpers/cluster');
 const { callRpc }       = require('./helpers/rpcClient');
+const { waitUntil }     = require('../helpers/waitUntil');
 const { assertPriceSnapshot, assertAttestationStored } = require('./helpers/dbAssertions');
 
 describe('E2E: Multi-Node Cluster', function () {
@@ -63,18 +64,21 @@ describe('E2E: Multi-Node Cluster', function () {
 
             cluster = createCluster(3);
             await cluster.start();
-
-            // Allow P2P mesh to fully establish
-            await new Promise(r => setTimeout(r, 2000));
+            // cluster.start() already polls the peer sockets until the mesh is up, so
+            // there is nothing left to wait for here.
 
             // Trigger oracle round on all nodes simultaneously
             await cluster.triggerAllOracleRounds();
 
-            // Wait for submissions
-            await new Promise(r => setTimeout(r, 2000));
-
             // Get the round number from the leader
             let round = cluster.getHub(0).oracle.getCurrentRound();
+
+            // Submission writes are fire-and-forget: wait for all three rows.
+            await waitUntil(async () => {
+                let rows = await cluster.getDb().doQuery(
+                    'SELECT 1 FROM oracle_submissions WHERE round_number = ?', [round]);
+                return rows.length >= 3;
+            }, { timeoutMs: 15000, label: 'every node submission row to land' });
 
             // Trigger finalization from the leader
             // The leader is determined by: validatorSet[round % validatorSet.length]
@@ -84,11 +88,16 @@ describe('E2E: Multi-Node Cluster', function () {
                 await cluster.triggerOracleFinalization(i, round).catch(() => {});
             }
 
-            // Wait for PBFT consensus to complete
-            await new Promise(r => setTimeout(r, 3000));
-
-            // Verify finalized prices in DB
+            // Wait for the PBFT round to persist its snapshots. The assertions below are
+            // conditional on consensus having completed, so a round that never finalizes
+            // must not become a timeout failure here: poll for it, then move on.
             let db = cluster.getDb();
+            await waitUntil(async () => {
+                let rows = await db.doQuery(
+                    "SELECT 1 FROM price_snapshots WHERE round_number = ? AND status = 'finalized'", [round]);
+                return rows.length > 0;
+            }, { timeoutMs: 10000, label: 'the PBFT round to persist its finalized snapshots' })
+                .catch(() => {});
             let snapshots = await db.doQuery(
                 "SELECT * FROM price_snapshots WHERE round_number = ? AND status = 'finalized'",
                 [round]
@@ -125,7 +134,8 @@ describe('E2E: Multi-Node Cluster', function () {
 
             cluster = createCluster(3);
             await cluster.start();
-            await new Promise(r => setTimeout(r, 2000));
+            // cluster.start() already polls the peer sockets until the mesh is up, so
+            // there is nothing left to wait for here.
 
             // Write config directly via DB to avoid PBFT leader routing
             let db = cluster.getDb();
@@ -151,7 +161,8 @@ describe('E2E: Multi-Node Cluster', function () {
 
             cluster = createCluster(3);
             await cluster.start();
-            await new Promise(r => setTimeout(r, 2000));
+            // cluster.start() already polls the peer sockets until the mesh is up, so
+            // there is nothing left to wait for here.
 
             // Request attestation from the leader node
             // The CrossChainEngine uses seq-based leader rotation
@@ -167,11 +178,15 @@ describe('E2E: Multi-Node Cluster', function () {
                 }
             }
 
-            // Wait for PBFT consensus to propagate
-            await new Promise(r => setTimeout(r, 3000));
-
-            // Verify in DB
+            // Wait for the attestation row the round writes. As above the assertions are
+            // conditional, so an unfinished round stays a skip rather than a timeout.
             let db = cluster.getDb();
+            await waitUntil(async () => {
+                let rows = await db.doQuery(
+                    "SELECT 1 FROM attestations WHERE attestation_id = 'BTC:3000:LTC'");
+                return rows.length > 0;
+            }, { timeoutMs: 10000, label: 'the attestation round to persist its row' })
+                .catch(() => {});
             let rows = await db.doQuery(
                 "SELECT * FROM attestations WHERE attestation_id = 'BTC:3000:LTC'"
             );
@@ -202,7 +217,8 @@ describe('E2E: Multi-Node Cluster', function () {
 
             cluster = createCluster(3);
             await cluster.start();
-            await new Promise(r => setTimeout(r, 2000));
+            // cluster.start() already polls the peer sockets until the mesh is up, so
+            // there is nothing left to wait for here.
 
             // Write config directly via DB
             let db = cluster.getDb();
@@ -229,7 +245,8 @@ describe('E2E: Multi-Node Cluster', function () {
 
             cluster = createCluster(3);
             await cluster.start();
-            await new Promise(r => setTimeout(r, 2000));
+            // cluster.start() already polls the peer sockets until the mesh is up, so
+            // there is nothing left to wait for here.
 
             let results = [];
             for (let i = 0; i < 3; i++) {

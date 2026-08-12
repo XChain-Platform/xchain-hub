@@ -15,8 +15,9 @@ const { expect } = require('chai');
 const crypto     = require('crypto');
 const Consensus  = require('../../../src/Consensus');
 const { createMockHub }    = require('../../helpers/mockHub');
-const { VALIDATORS_4 }     = require('../../helpers/fixtures');
+const { VALIDATORS_4, makeFederationSnapshot }     = require('../../helpers/fixtures');
 const { buildEnvelope }    = require('../../helpers/testPeerNetwork');
+const { waitUntil }        = require('../../helpers/waitUntil');
 
 function makeDigest(config) {
     return crypto.createHash('sha256').update(JSON.stringify(config)).digest('hex');
@@ -30,7 +31,7 @@ function makeDigest(config) {
 // the behaviour they measure. Quorum is stubbed to what _getQuorum() returns
 // for the set under test, leaving each experiment's arithmetic unchanged.
 function wireFederationSnapshot(hub, quorum) {
-    let snapshot = { blockIndex: 800000, validators: [{ pubkey: 'aa', amount: '50000' }] };
+    let snapshot = makeFederationSnapshot(VALIDATORS_4, 800000);
     hub.capabilitySnapshot = {
         getActiveValidatorSnapshot: sinon.stub().resolves(snapshot),
         getActiveWeightSnapshot:    sinon.stub().resolves(snapshot),
@@ -77,7 +78,8 @@ describe('Chaos: PBFT Leader Crash (CON-1)', function () {
         expect(proposal).to.exist;
 
         // Wait for follower timeout (2x leader timeout = 400ms)
-        await new Promise(r => setTimeout(r, 500));
+        // Wait for the follower timeout (2x the leader timeout) to clear the proposal.
+        await waitUntil(() => !con.pendingProposals.has(4), { timeoutMs: 5000, label: 'the follower timeout to drop the crashed leader proposal' });
 
         // Proposal should have been cleaned up by timeout
         expect(con.pendingProposals.has(4)).to.be.false;
@@ -259,7 +261,8 @@ describe('Chaos: PBFT Leader Crash (CON-1)', function () {
             seq: 4, configDigest: digest
         }, VALIDATORS_4[3].addr));
 
-        await new Promise(r => setTimeout(r, 50));
+        // The round is already applied, and the late-COMMIT dedup is decided inside the
+        // synchronous handler above, so there is nothing left to settle for.
 
         // Still only applied once
         expect(hub.applyConfig.callCount).to.equal(1);

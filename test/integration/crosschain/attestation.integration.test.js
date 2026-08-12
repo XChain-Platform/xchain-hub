@@ -15,6 +15,7 @@ const { expect }     = require('chai');
 const crypto         = require('crypto');
 const testDb         = require('../../helpers/testDb');
 const { buildEnvelope } = require('../../helpers/testPeerNetwork');
+const { waitUntil }     = require('../../helpers/waitUntil');
 const { VALIDATORS_1, VALIDATORS_4 } = require('../../helpers/fixtures');
 const CrossChainEngine = require('../../../src/CrossChainEngine');
 const SwapTracker      = require('../../../src/SwapTracker');
@@ -118,8 +119,11 @@ describe('Integration: Cross-Chain Attestation (SC-4.x)', function () {
             // Request attestation (single-node, completes immediately)
             await engine.requestAttestation('BTC', 42, 'LTC');
 
-            // Wait for event propagation
-            await new Promise(r => setTimeout(r, 200));
+            // Wait for the finalized attestation to drive the swap forward.
+            await waitUntil(async () => {
+                let s = await swapTracker.getSwap('BTC', 42);
+                return s && s.status === 'attested';
+            }, { timeoutMs: 5000, label: 'the swap record to reach attested' });
 
             // Verify swap progressed
             let updated = await swapTracker.getSwap('BTC', 42);
@@ -144,7 +148,10 @@ describe('Integration: Cross-Chain Attestation (SC-4.x)', function () {
 
             await engine.start();
             await engine.requestAttestation('BTC', 99, 'LTC');
-            await new Promise(r => setTimeout(r, 200));
+            await waitUntil(async () => {
+                let s = await swapTracker.getSwap('BTC', 99);
+                return s && s.status === 'attested';
+            }, { timeoutMs: 5000, label: 'the swap record to reach attested' });
 
             // Should only have one swap record
             let rows = await db.doQuery("SELECT * FROM swap_records WHERE source_chain = 'BTC' AND source_action_index = 99");
@@ -183,7 +190,7 @@ describe('Integration: Cross-Chain Attestation (SC-4.x)', function () {
             // Request attestation: leader broadcasts PROPOSE
             let attestPromise = engine.requestAttestation('BTC', 42, 'LTC');
 
-            await new Promise(r => setTimeout(r, 50));
+            await waitUntil(() => engine.pendingAttestations.has('BTC:42:LTC'), { label: 'the leader PROPOSE round to open' });
 
             // Get the pending attestation
             let attestationId = 'BTC:42:LTC';
@@ -198,7 +205,7 @@ describe('Integration: Cross-Chain Attestation (SC-4.x)', function () {
                 }, VALIDATORS_4[i].addr));
             }
 
-            await new Promise(r => setTimeout(r, 50));
+            await waitUntil(() => pending.prepares.size >= 3, { label: 'the PREPARE quorum to be tallied' });
 
             // Inject COMMIT from the same two
             for (let i of peerIdxs) {

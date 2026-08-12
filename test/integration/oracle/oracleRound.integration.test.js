@@ -16,6 +16,7 @@ const crypto         = require('crypto');
 const testDb         = require('../../helpers/testDb');
 const mockApi        = require('../../helpers/mockExternalApi');
 const { buildEnvelope } = require('../../helpers/testPeerNetwork');
+const { waitUntil }     = require('../../helpers/waitUntil');
 const { VALIDATORS_1, VALIDATORS_4, SAMPLE_PRICES } = require('../../helpers/fixtures');
 const OracleRound    = require('../../../src/OracleRound');
 const OracleConsensus = require('../../../src/OracleConsensus');
@@ -67,8 +68,12 @@ describe('Integration: Oracle Round Lifecycle (SC-2.x)', function () {
             // Execute round
             await oracleRound._executeRound();
 
-            // Wait for fire-and-forget DB writes
-            await new Promise(r => setTimeout(r, 100));
+            // The submission write is fire-and-forget: wait for the row, not a duration.
+            await waitUntil(async () => {
+                let rows = await db.doQuery('SELECT 1 FROM oracle_submissions WHERE round_number = ?',
+                    [oracleRound.getCurrentRound()]);
+                return rows.length > 0;
+            }, { timeoutMs: 5000, label: 'the round submission row to land' });
 
             // Manually finalize (normally done by timer)
             await oracleConsensus.finalizeRound(oracleRound.getCurrentRound());
@@ -112,7 +117,11 @@ describe('Integration: Oracle Round Lifecycle (SC-2.x)', function () {
 
             // Execute round (leader is validator at round % 4)
             await oracleRound._executeRound();
-            await new Promise(r => setTimeout(r, 100));
+            await waitUntil(async () => {
+                let rows = await db.doQuery('SELECT 1 FROM oracle_submissions WHERE round_number = ?',
+                    [oracleRound.getCurrentRound()]);
+                return rows.length > 0;
+            }, { timeoutMs: 5000, label: 'the round submission row to land' });
 
             let round = oracleRound.getCurrentRound();
 
@@ -149,7 +158,7 @@ describe('Integration: Oracle Round Lifecycle (SC-2.x)', function () {
                     }, VALIDATORS_4[i].addr));
                 }
 
-                await new Promise(r => setTimeout(r, 50));
+                await waitUntil(() => pending.prepares.size >= 3, { label: 'the PREPARE quorum to be tallied' });
 
                 // Inject COMMIT from other validators
                 for (let i = 1; i < 3; i++) {
@@ -159,7 +168,11 @@ describe('Integration: Oracle Round Lifecycle (SC-2.x)', function () {
                     }, VALIDATORS_4[i].addr));
                 }
 
-                await new Promise(r => setTimeout(r, 200));
+                await waitUntil(async () => {
+                    let rows = await db.doQuery(
+                        "SELECT 1 FROM price_snapshots WHERE status = 'finalized' AND round_number = ?", [round]);
+                    return rows.length > 0;
+                }, { timeoutMs: 5000, label: 'the commit quorum to persist the finalized snapshot' });
             }
 
             // Verify finalization
@@ -195,7 +208,10 @@ describe('Integration: Oracle Round Lifecycle (SC-2.x)', function () {
             await slashDetector.checkRound(1, submissions, finalizedPrices,
                 [VALIDATORS_1[0].pubkey], [VALIDATORS_1[0]]);
 
-            await new Promise(r => setTimeout(r, 100));
+            await waitUntil(async () => {
+                let rows = await db.doQuery("SELECT 1 FROM slash_proposals WHERE offense_type = 'price_deviation'");
+                return rows.length > 0;
+            }, { timeoutMs: 5000, label: 'the deviation slash proposal to be recorded' });
 
             let slashes = await db.doQuery("SELECT * FROM slash_proposals WHERE offense_type = 'price_deviation'");
             expect(slashes.length).to.be.greaterThan(0);

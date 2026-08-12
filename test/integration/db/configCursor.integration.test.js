@@ -26,6 +26,7 @@
 
 const { expect } = require('chai');
 const testDb     = require('../../helpers/testDb');
+const { waitUntil } = require('../../helpers/waitUntil');
 
 // Count leaf params in the nested { coin: { network: { module: { param: v } } } }.
 function countLeaves(configs) {
@@ -36,8 +37,6 @@ function countLeaves(configs) {
                 n += Object.keys(configs[coin][network][module]).length;
     return n;
 }
-
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 describe('Integration: getallconfigs cursor (since_updated_at)', function () {
 
@@ -88,8 +87,13 @@ describe('Integration: getallconfigs cursor (since_updated_at)', function () {
         let boundary = await db.getAllConfigs(w0);
         expect(countLeaves(boundary)).to.equal(120);
 
-        // Cross a second boundary so the mutation lands in a fresh cursor second.
-        await sleep(1100);
+        // Cross a second boundary so the mutation lands in a fresh cursor second. The
+        // cursor is UNIX_TIMESTAMP(updated_at) on the SERVER, so poll the server clock
+        // rather than assuming 1100ms of local wall time covers it.
+        await waitUntil(async () => {
+            let rows = await db.doQuery('SELECT UNIX_TIMESTAMP() AS now');
+            return Number(rows[0].now) > w0;
+        }, { timeoutMs: 5000, intervalMs: 25, label: 'the DB clock to cross into a fresh cursor second' });
 
         // Mutate exactly one row.
         await db.setParam('BTC', 'mainnet', 'mod0', 'p0', 'changed');
@@ -103,7 +107,10 @@ describe('Integration: getallconfigs cursor (since_updated_at)', function () {
 
         // Once a NEWER second holds a write, an advanced cursor no longer
         // re-delivers the old seed batch.
-        await sleep(1100);
+        await waitUntil(async () => {
+            let rows = await db.doQuery('SELECT UNIX_TIMESTAMP() AS now');
+            return Number(rows[0].now) > w1;
+        }, { timeoutMs: 5000, intervalMs: 25, label: 'the DB clock to cross past the delta second' });
         await db.setParam('BTC', 'mainnet', 'mod0', 'p1', 'later');
         let w2 = await db.getConfigWatermark();
         expect(w2).to.be.above(w1);

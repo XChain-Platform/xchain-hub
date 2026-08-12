@@ -15,6 +15,7 @@ const testDb        = require('../helpers/testDb');
 const priceMocks    = require('./helpers/priceMocks');
 const { createCluster } = require('./helpers/cluster');
 const { callRpc }       = require('./helpers/rpcClient');
+const { waitUntil }     = require('../helpers/waitUntil');
 const { assertReorgConfirmed } = require('./helpers/dbAssertions');
 
 describe('E2E: Reorg Handling Pipeline', function () {
@@ -85,10 +86,12 @@ describe('E2E: Reorg Handling Pipeline', function () {
             });
             expect(reorgRes.result.status).to.equal('success');
 
-            // Wait for rollback; the reorgHandler in single-node mode (quorum=0)
-            // executes _executeRollback synchronously within the reportReorg call,
-            // but the JSON-RPC response arrives after the await completes.
-            await new Promise(r => setTimeout(r, 2000));
+            // Wait for the rollback the report drives: the reorg row is written at the
+            // end of it, so its arrival is what the settle was standing in for.
+            await waitUntil(async () => {
+                let rows = await db.doQuery('SELECT 1 FROM reorg_attestations');
+                return rows.length >= 1;
+            }, { timeoutMs: 10000, label: 'the reorg rollback to be recorded' });
 
             // Step 3: Verify rollback effects
             // Attestations for BTC created after epoch should be deleted (all of them)
@@ -135,7 +138,13 @@ describe('E2E: Reorg Handling Pipeline', function () {
                 chain: 'BTC', reorg_height: 799999, timestamp: reorgTimestamp,
                 old_hash: 'c'.repeat(64), new_hash: newHash
             });
-            await new Promise(r => setTimeout(r, 500));
+            // This case does not assert the report's own result, so the poll is a settle,
+            // not the check: on a venue where the report never lands, the per-chain
+            // assertions below are the ones that should speak.
+            await waitUntil(async () => {
+                let rows = await db.doQuery('SELECT 1 FROM reorg_attestations');
+                return rows.length >= 1;
+            }, { timeoutMs: 10000, label: 'the BTC reorg to be recorded' }).catch(() => {});
 
             // BTC attestation should be deleted
             let btcAtts = await db.doQuery("SELECT * FROM attestations WHERE source_chain = 'BTC'");

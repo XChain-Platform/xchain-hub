@@ -648,6 +648,18 @@ describe('XChainHub', function () {
             expect(mockDb.doQuery.getCall(0).args[0]).to.include("status = 'active'");
         });
 
+        // : the documented getvalidators response carries `chains`
+        // (components/hub/api.md), and the explorer folds addr/chains/status onto
+        // its on-chain /validators table. Dropping the column from the SELECT
+        // blanks the served chains everywhere downstream.
+        it('getValidators selects the registry addr, chains and status columns', async function () {
+            mockDb.doQuery.resolves([{ addr: 'a' }]);
+            await hub.getValidators();
+            let query = mockDb.doQuery.getCall(0).args[0];
+            for (const col of ['signing_pubkey', 'addr', 'chains', 'status'])
+                expect(query).to.include(col);
+        });
+
         it('getValidatorStatus returns null when unknown, full status when known', async function () {
             mockDb.doQuery.resolves([]);
             expect(await hub.getValidatorStatus('ab'.repeat(32))).to.be.null;

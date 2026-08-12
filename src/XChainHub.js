@@ -1008,8 +1008,12 @@ class XChainHub {
         return true;
     }
 
+    // : `chains` rides along with addr/status. The documented getvalidators
+    // response has always advertised it (components/hub/api.md), and the explorer
+    // folds all three onto its on-chain /validators table, so leaving it out of the
+    // SELECT made the served chains permanently blank there.
     async getValidators() {
-        let query = "SELECT signing_pubkey, addr, status, created_at, updated_at FROM validators WHERE status = 'active' ORDER BY signing_pubkey";
+        let query = "SELECT signing_pubkey, addr, chains, status, created_at, updated_at FROM validators WHERE status = 'active' ORDER BY signing_pubkey";
         return await this.db.doQuery(query);
     }
 

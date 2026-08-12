@@ -186,6 +186,7 @@ describe('coins registry', () => {
         'decimals', 'confirmations',               // display / operator-tunable depth
         'network',                                 // redundant with the (tick, network) hash key
         'genesis',                                 // deliberately excluded: genesis.js fail-closes on its own hashes
+        'chainGenesisHash',                        // : identifies the ENDPOINT's chain, not how bytes are read; pinning one must not move CONSENSUS_CONFIG_PIN
         'FEE_PAYMENT_MODE',                        // informational only; not read at runtime (see coin files)
         'wireFormat',                              // block/tx parse family (decoder/utxo-tracker); not hashed, mirrors the pre-existing decoder-local constant
         'DISPLAY_ONLY_ADDRESS_ROLES',              // classification metadata, not coin data; drives the address exclusion above
@@ -245,6 +246,60 @@ describe('coins registry', () => {
         } finally {
             delete BTC.NEW_CONSENSUS_FIELD;
         }
+    });
+
+    // . The chain-tier gate in xchain-decoder can prove an endpoint is on the
+    // wrong TIER, never that it is on our COIN: BTC-mainnet and DOGE-mainnet both report
+    // chain="main", and testnet3/testnet4 both report a testnet string. The block-0 hash
+    // is the only constant that separates them, so it lives in the registry beside the
+    // other per-network identity data - but OUTSIDE the hashed consensus subset, because
+    // it says which node we are talking to, not how a block's bytes are read.
+    describe('chainGenesisHash (endpoint chain identity, )', () => {
+        it('every coin/network declares the field, unpinned (null) or a 64-char hex hash', () => {
+            for(const tick of coins.ALLOWED_COINS){
+                const coinFile = require(`../../src/coins/${tick}.js`);
+                for(const net of coins.NETWORKS){
+                    const v = coinFile.networks[net].chainGenesisHash;
+                    expect(coinFile.networks[net], `${tick}/${net}`).to.have.property('chainGenesisHash');
+                    if(v !== null)
+                        expect(v, `${tick}/${net} chainGenesisHash`).to.match(/^[0-9a-fA-F]{64}$/);
+                }
+            }
+        });
+
+        it('regtest stays unpinned: every stack mines its own chain', () => {
+            for(const tick of coins.ALLOWED_COINS)
+                expect(coins.getCoinConfig(tick, 'regtest').chainGenesisHash, tick).to.equal(null);
+        });
+
+        it('getCoinConfig exposes it so consumers can assert it against getblockhash 0', () => {
+            for(const tick of coins.ALLOWED_COINS)
+                for(const net of coins.NETWORKS)
+                    expect(coins.getCoinConfig(tick, net), `${tick}/${net}`).to.have.property('chainGenesisHash');
+        });
+
+        it('is NOT in the hashed consensus subset', () => {
+            for(const tick of coins.ALLOWED_COINS)
+                for(const net of coins.NETWORKS)
+                    expect(coins.consensusSubset(tick, net), `${tick}/${net}`).to.not.have.property('chainGenesisHash');
+        });
+
+        // The property that matters operationally: the operator can pin a real block-0
+        // hash without moving CONSENSUS_CONFIG_PIN, so no flag-day and no lockstep
+        // re-pin of the nine per-service bundles is needed to close the wrong-coin hole.
+        it('pinning a real hash does not move the consensus hash (no flag-day to arm it)', () => {
+            const BTC = require('../../src/coins/BTC.js');
+            const before = coins.consensusHash('BTC', 'mainnet');
+            BTC.networks.mainnet.chainGenesisHash =
+                '000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f';
+            try {
+                expect(coins.getCoinConfig('BTC', 'mainnet').chainGenesisHash)
+                    .to.equal('000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f');
+                expect(coins.consensusHash('BTC', 'mainnet')).to.equal(before);
+            } finally {
+                BTC.networks.mainnet.chainGenesisHash = null;
+            }
+        });
     });
 
     it('derives the address exclusion from each coin file\'s DISPLAY_ONLY_ADDRESS_ROLES (no magic string)', () => {
@@ -325,6 +380,55 @@ describe('coins registry', () => {
             setEnv('XCHAIN_GENESIS_BLOCK', '999');
             expect(coins.getCoinConfig('BTC', 'mainnet').genesis.block).to.equal(950000);
             expect(coins.getCoinConfig('DOGE', 'testnet').genesis.block).to.equal(0);
+        });
+
+        //  / . The airdrop bucket set decides how much XCHAIN each
+        // snapshot holder mints and which synthetic tx hashes carry the credits, so it
+        // belongs to the bundle everywhere the bundle is frozen.
+        it('binds the regtest airdrop set from env, index-aligned, without moving the consensus hash', () => {
+            const before = coins.consensusHash('BTC', 'regtest');
+            setEnv('GENESIS_AIRDROP_PATHS',   'data/xcp.csv, data/xdp.csv');
+            setEnv('GENESIS_AIRDROP_HASHES',  'aa, ');           // second bucket deliberately unpinned
+            setEnv('GENESIS_AIRDROP_AMOUNTS', '20000000.00000000,10000000.00000000');
+            setEnv('GENESIS_AIRDROP_SNAPSHOT_BLOCK', '950000');
+            setEnv('GENESIS_AIRDROP_SET_HASH', 'f00d');
+            const g = coins.getCoinConfig('BTC', 'regtest').genesis;
+            expect(g.airdropPaths).to.deep.equal(['data/xcp.csv', 'data/xdp.csv']);
+            // The empty hash entry SURVIVES: entry N pins entry N of paths, so compacting
+            // it would shift the first bucket's pin onto the second bucket's file.
+            expect(g.airdropHashes).to.deep.equal(['aa', '']);
+            expect(g.airdropAmounts).to.deep.equal(['20000000.00000000', '10000000.00000000']);
+            expect(g.airdropSnapshotBlock).to.equal('950000');
+            expect(g.airdropSetHash).to.equal('f00d');
+            expect(coins.consensusHash('BTC', 'regtest')).to.equal(before);
+        });
+
+        it('IGNORES the airdrop env on mainnet and testnet, for every coin', () => {
+            setEnv('GENESIS_AIRDROP_PATHS',   'data/evil.csv');
+            setEnv('GENESIS_AIRDROP_HASHES',  'bb');
+            setEnv('GENESIS_AIRDROP_AMOUNTS', '99999999.00000000');
+            setEnv('GENESIS_AIRDROP_SNAPSHOT_BLOCK', '1');
+            setEnv('GENESIS_AIRDROP_SET_HASH', 'beef');
+            for(const tick of coins.ALLOWED_COINS){
+                for(const net of ['mainnet', 'testnet']){
+                    const g = coins.getCoinConfig(tick, net).genesis;
+                    expect(g.airdropPaths,   `${tick}/${net} paths`).to.deep.equal([]);
+                    expect(g.airdropHashes,  `${tick}/${net} hashes`).to.deep.equal([]);
+                    expect(g.airdropAmounts, `${tick}/${net} amounts`).to.deep.equal([]);
+                    expect(g.airdropSnapshotBlock, `${tick}/${net} snapshot`).to.equal(null);
+                    expect(g.airdropSetHash, `${tick}/${net} set hash`).to.equal(null);
+                }
+            }
+        });
+
+        it('carries the airdrop keys on every coin/network so the bundle is the only source', () => {
+            for(const tick of coins.ALLOWED_COINS){
+                for(const net of coins.NETWORKS){
+                    const g = coins.getCoinConfig(tick, net).genesis;
+                    expect(g, `${tick}/${net}`).to.include.all.keys(
+                        'airdropPaths', 'airdropHashes', 'airdropAmounts', 'airdropSnapshotBlock', 'airdropSetHash');
+                }
+            }
         });
     });
 

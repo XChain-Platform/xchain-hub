@@ -57,6 +57,20 @@ function makeWeightSnapshot(validators, blockIndex) {
     };
 }
 
+// Build a getActiveValidatorSnapshot-shaped whole-federation snapshot whose
+// members are the validators under test.  made Consensus elect its
+// leader from the snapshot population rather than the live validatorSet, so a
+// snapshot carrying a placeholder pubkey no longer stands in for a real one:
+// it now describes a federation with exactly one unaddressable member.
+function makeFederationSnapshot(validators, blockIndex, amount) {
+    return {
+        capability: '*',
+        blockIndex: blockIndex,
+        count:      validators.length,
+        validators: validators.map(v => ({ pubkey: v.pubkey, amount: String(amount || '50000') }))
+    };
+}
+
 // Sample price data
 const SAMPLE_PRICES = [
     { coinPair: 'BTC/USD', price: '100000.12345678', sources: 2 },
@@ -90,6 +104,7 @@ module.exports = {
     makeValidator,
     makeWeightedValidator,
     makeWeightSnapshot,
+    makeFederationSnapshot,
     VALIDATORS_1,
     VALIDATORS_3,
     VALIDATORS_4,
