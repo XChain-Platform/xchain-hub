@@ -235,7 +235,7 @@
       },
       "encoder": {
         "defaultUrl": "http://localhost",
-        "defaultPort": 3023
+        "defaultPort": 3003
       },
       "hub": {
         "defaultUrl": "http://localhost",
