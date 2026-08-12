@@ -20,7 +20,7 @@
  * redaction filter keyed on the variable NAME, and those filters key on
  * `_SECRET` / `_KEY` / `_TOKEN`. `HUB_DB_PASS` matches none of them, so on
  * 2026-07-23 a regtest relay hub's DB password was read out of
- * `~/relay-hub.env` in full . The value was regtest-only, but the
+ * `~/relay-hub.env` in full. The value was regtest-only, but the
  * naming gap is not: the same file shape carries prod credentials.
  *
  * The fix is a name the filter catches. This module lets every secret the hub

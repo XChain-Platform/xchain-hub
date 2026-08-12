@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-//  full fix: 2f+1 co-signed quorum-class retraction broadcasts.
+// full fix: 2f+1 co-signed quorum-class retraction broadcasts.
 // Covers the canonical byte-shape (pinned against the hub_db_sync consumer
 // rebuild), the single-node self-sign path, gate/identity fallthroughs to the
 // legacy unsigned broadcast, follower sign-only-with-local-intent, initiator
@@ -65,7 +65,7 @@ function makeHub({ identity, validators, network = 'regtest', btcBlock = 5000, p
     return hub;
 }
 
-describe('RetractionConsensus ( signed retractions) @regression @tier1', function () {
+describe('RetractionConsensus (signed retractions) @regression @tier1', function () {
 
     it('canonicalRetraction matches the golden consumer vector byte-for-byte', function () {
         assert.strictEqual(RetractionConsensus.canonicalRetraction(GOLDEN_EVT), GOLDEN_CANONICAL);
@@ -252,12 +252,12 @@ describe('RetractionConsensus ( signed retractions) @regression @tier1', functio
         rc.stop();
     });
 
-    // SWQ-TRUNC-MIRROR (). The retraction rail is a fourth writer into the
+    // SWQ-TRUNC-MIRROR. The retraction rail is a fourth writer into the
     // shared capability_snapshots mirror, and `.truncated` is a JS array property with
     // no column behind it: mirroring a capped set hands the off-BTC verifiers a partial
     // stake denominator they read back as COMPLETE, while this class rejects the same
     // set at its own meetsStakeThreshold. Persist must write nothing and stream nothing.
-    it('refuses to persist or mirror a TRUNCATED capability set ()', async function () {
+    it('refuses to persist or mirror a TRUNCATED capability set', async function () {
         let id  = makeIdentity();
         let pk  = id.getPubkeyHex().toLowerCase();
         let hub = makeHub({ identity: id, validators: [{ pubkey: pk, source: 'srcA', weight: '100' }] });

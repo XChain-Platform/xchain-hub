@@ -12,12 +12,11 @@
  *
  **********************************************************************
  *
- * XChain Hub - NODEPROOF full-node tier activation config 
+ * XChain Hub - NODEPROOF full-node tier activation config
  *
  * The verified-full-node tier (NODEPROOF.md) ships INERT: the canonical coin
  * bundle carries REWARD_SHARE '0' and an empty GENESIS_VERIFIERS list, and the
- * launch genesis parameters (claude/reports/launch/GENESIS-PARAMETERS.md row B7)
- * keep it that way at launch. Activation is therefore a deliberate, fleet-wide
+ * launch genesis parameters keep it that way at launch. Activation is therefore a deliberate, fleet-wide
  * config change, and every knob it touches is a CONSENSUS parameter:
  *
  *   REWARD_SHARE               splits the oracle-round budget into the base and
@@ -41,10 +40,9 @@
  *                              tranche (reward-only tier; there is no slashing).
  *
  * This module is the hub's preflight for that change. It is pure (no I/O) and is
- * consumed by XChainHub._assertCanonicalFullnode, which mirrors the 
- * MIN_STAKE assert: on mainnet/testnet a divergent or incoherent block is
- * REFUSED fail-closed, on regtest/standalone it warns so venues can run their own
- * knobs. See claude/reports/launch/NODEPROOF-ACTIVATION-RUNBOOK.md.
+ * consumed by XChainHub._assertCanonicalFullnode, which mirrors the MIN_STAKE
+ * assert: on mainnet/testnet a divergent or incoherent block is REFUSED
+ * fail-closed, on regtest/standalone it warns so venues can run their own knobs.
  *
  * Two distinct checks live here, deliberately separate:
  *

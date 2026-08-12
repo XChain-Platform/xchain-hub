@@ -172,7 +172,7 @@ describe('PriceAggregator.retractFromActionIndex()', function () {
         expect(hub.db.doQuery.called).to.equal(false);
     });
 
-    // : a supplied-but-malformed to/generation used to be treated as ABSENT, turning a
+    // a supplied-but-malformed to/generation used to be treated as ABSENT, turning a
     // bounded fenced delete into the open-ended one, and parseInt turned '1e3' into 1.
     it('rejects a supplied-but-malformed to_action_index or retraction_generation without deleting', async function () {
         for (let args of [['BTC', 50, 'abc'], ['BTC', 50, 75, 'abc'], ['BTC', '1e3junk'], ['BTC', 50, 10], ['BTC', '']]) {
@@ -376,7 +376,7 @@ describe('PriceAggregator.receiveOraclePrice() validation + persistence', functi
         expect(result).to.deep.equal({ accepted: false, reason: 'stale (retracted generation)' });
         // Rejected before any dedupe SELECT / INSERT touches oracle_prices.
         expect(hub.db.doQuery.called).to.equal(false);
-        expect(warn.calledOnce).to.equal(true);   // : never a silent drop
+        expect(warn.calledOnce).to.equal(true);   // never a silent drop
     });
 
     it('HUB-RETRACT-4: does NOT false-reject a legitimate late push BELOW the orphaned range', async function () {
@@ -494,7 +494,7 @@ describe('PriceAggregator.receiveOraclePrice() validation + persistence', functi
         expect(events[0].row.action_index).to.equal(42);
     });
 
-    // : coin/tick/fiat/memo bounds mirroring the indexer's PRICE v1
+    // coin/tick/fiat/memo bounds mirroring the indexer's PRICE v1
     // wire-format rules (actions/price.js parse_v1).
     it('rejects an unsupported or non-string coin without touching the DB', async function () {
         for (let coin of ['XCP', 'btc', 'ETH', 42, { x: 1 }, 'B'.repeat(300)]) {
@@ -676,7 +676,7 @@ describe('PriceAggregator.receiveValidatedRound()', function () {
         expect(result).to.deep.equal({ accepted: false, reason: 'stale (retracted generation)' });
         let inserted = hub.db.doQuery.getCalls().some(c => /^INSERT INTO price_snapshots/.test(c.args[0]));
         expect(inserted).to.equal(false);
-        // : the v0 round path warns as loudly as the v1 path, naming the fence.
+        // the v0 round path warns as loudly as the v1 path, naming the fence.
         expect(warn.calledOnce).to.equal(true);
         expect(warn.firstCall.args[0]).to.contain('PRICE v0 round');
         expect(warn.firstCall.args[0]).to.contain('price_ingest_watermarks');
@@ -904,12 +904,12 @@ describe('PriceAggregator.receiveValidatedRound()', function () {
     });
 });
 
-// . The hub re-verifies every pushed round rather than trusting the pusher,
+// The hub re-verifies every pushed round rather than trusting the pusher,
 // so its tally is the indexer's twin: if the two disagree on WHERE a pubkey enters
 // the dedupe set, the hub finalizes rounds the chain rejects (or withholds on rounds
 // the chain accepts) and the federation and the ledger disagree. Both sides now key
 // on the round's signed BTC anchor, so they flip together.
-describe('PriceAggregator.receiveValidatedRound() signature-tally ordering flag-day ', function () {
+describe('PriceAggregator.receiveValidatedRound() signature-tally ordering flag-day', function () {
 
     let hub, agg;
 
@@ -1026,12 +1026,12 @@ describe('PriceAggregator.receiveValidatedRound() signature-tally ordering flag-
     });
 });
 
-// : the ingest fence used to reject silently, which is how it took a price
+// the ingest fence used to reject silently, which is how it took a price
 // rail down invisibly after an indexer DB reset (the rebuilt indexer restarts
 // push_generations at 0, so EVERY push matches the fence). These tests pin the
 // warning that names the cause and the remedy, and the throttle that keeps a
 // replaying pusher from drowning the log.
-describe('PriceAggregator ingest-fence rejection warning ', function () {
+describe('PriceAggregator ingest-fence rejection warning', function () {
 
     const WATERMARK = { retraction_generation: 5, from_action_index: 100 };
     const STALE = {
@@ -1054,7 +1054,7 @@ describe('PriceAggregator ingest-fence rejection warning ', function () {
         sinon.restore();
     });
 
-    it('names the fence, the generation comparison, the remedy and the item id', async function () {
+    it('names the fence, the generation comparison, and the remedy', async function () {
         await agg.receiveOraclePrice('BTC', STALE);
         expect(warn.calledOnce).to.equal(true);
         let line = warn.firstCall.args[0];
@@ -1063,7 +1063,6 @@ describe('PriceAggregator ingest-fence rejection warning ', function () {
         expect(line).to.contain('push_generation 0 <= retraction_generation 5');
         expect(line).to.contain('action_index 120 >= from_action_index 100');
         expect(line).to.contain('price_ingest_watermarks');
-        expect(line).to.contain('');
     });
 
     it('throttles repeats for the same chain and reports the suppressed count on the next line', async function () {

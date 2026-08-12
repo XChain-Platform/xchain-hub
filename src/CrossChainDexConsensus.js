@@ -203,7 +203,7 @@ class CrossChainDexConsensus extends EventEmitter {
         return ValidatorIdentity.verify(this._controlPayload(tag, rid, view), String(sig || ''), String(pubkey || '').toLowerCase());
     }
 
-    // Phase-bound COMMIT vote payload (A-F6, ). The artifact signature
+    // Phase-bound COMMIT vote payload (A-F6). The artifact signature
     // (d.sig, over the plain canonical) is what indexers persist and verify, so
     // it must stay phase-free; but on its own it made PREPARE and COMMIT votes
     // interchangeable (a COMMIT literally re-sent the prepare sig), letting one
@@ -261,7 +261,7 @@ class CrossChainDexConsensus extends EventEmitter {
             return;
         }
 
-        let quorum     = bftQuorumOrSingle(snapCount, 0);   // : majority-floored BFT quorum (0 = single-node self-sign)
+        let quorum     = bftQuorumOrSingle(snapCount, 0);   // majority-floored BFT quorum (0 = single-node self-sign)
         let canonical  = this.engine._canonicalMatch(row, 0);   // new round always starts at view 0
         let myPubkey   = this.identity.getPubkeyHex().toLowerCase();
 
@@ -517,7 +517,7 @@ class CrossChainDexConsensus extends EventEmitter {
         if(this.peerManager){
             this.peerManager.broadcast(this.types.COMMIT, {
                 matchId: rid, view: pending.view, sig_pubkey: pending.myPubkey, sig: mySig,
-                // Phase-bound vote signature ; see _commitPayload.
+                // Phase-bound vote signature; see _commitPayload.
                 commit_sig: this.identity.sign(this._commitPayload(pending.canonical))
             });
         }
@@ -544,13 +544,13 @@ class CrossChainDexConsensus extends EventEmitter {
         // The artifact signature verified above proves the peer signed the
         // canonical (prepare-tier evidence); the phase-bound commit_sig proves
         // it actually reached COMMIT for this round. Without it a replayed
-        // PREPARE would count as a commit vote (A-F6, ). Collect the
+        // PREPARE would count as a commit vote (A-F6). Collect the
         // artifact sig either way (it is genuine and indexer-verifiable), but
         // only tally the commit with a verifying commit_sig.
         pending.signatures.set(senderPubkey, String(d.sig));
         if(!d.commit_sig || !ValidatorIdentity.verify(this._commitPayload(pending.canonical), String(d.commit_sig), senderPubkey)){
             console.warn('CrossChainDexConsensus: COMMIT without verifying phase-bound commit_sig from ' +
-                senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (vote not counted; pre- peer or replayed PREPARE)');
+                senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (vote not counted; a peer running older code, or a replayed PREPARE)');
             return;
         }
         pending.commits.add(senderPubkey);

@@ -192,7 +192,7 @@ describe('hub API-key tiers (writes + sensitive reads vs public reads)', functio
         });
     });
 
-    // Keyless is still a supported posture, but since  it has to be
+    // Keyless is still a supported posture, but it has to be
     // DECLARED: a boot with neither a key nor the declaration refuses (proved in
     // bootAuthGate.test.js), so these keyless cases set the flag the way an
     // xchain-node-managed keyless deploy now does.
@@ -204,7 +204,7 @@ describe('hub API-key tiers (writes + sensitive reads vs public reads)', functio
         });
     });
 
-    //  interim credential scoping: with HUB_REORG_API_KEY set, the
+    // interim credential scoping: with HUB_REORG_API_KEY set, the
     // retraction rails (push*reorg) answer ONLY to it - the bulk key no longer
     // authorizes them, and the reorg key authorizes nothing else - so a
     // bulk-key compromise cannot fabricate reorg retractions.

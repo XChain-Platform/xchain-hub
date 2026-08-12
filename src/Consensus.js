@@ -96,16 +96,16 @@ class Consensus {
         this.minValidators = parseInt(process.env.MIN_VALIDATORS) || 1;
     }
 
-    // : canonicalize the set's ORDER on the way in. Leader election is
+    // Canonicalize the set's ORDER on the way in. Leader election is
     // `validatorSet[(seq + view) % N]`, so before this the cross-hub leader
     // agreement rested entirely on every hub's loader emitting identical
     // ordering for identical membership; two hubs ordering the same members
     // differently elect different leaders for the same (seq, view) and reject
     // each other's legitimate PRE_PREPARE. Quorum N is untouched (it depends
     // only on |set|). See validator_order.js for the ordering and for why this
-    // ships ungated inside the  pre-launch batch.
+    // ships ungated inside this pre-launch batch.
     //
-    //  narrowed what this ordering still governs: a round that locks a
+    // A later change narrowed what this ordering still governs: a round that locks a
     // capability snapshot now elects from that snapshot's members instead, and
     // this order is the fallback rotation for rounds that have no snapshot. The
     // sort key is the same either way (lowercased pubkey ascending), so the two
@@ -116,7 +116,7 @@ class Consensus {
 
     // True when this hub is part of a real federation, which is what every
     // fail-closed guard below actually needs to know. MIN_VALIDATORS alone is
-    // the wrong question (#4168): CONFIGURATION.md marks it optional and
+    // the wrong question: CONFIGURATION.md marks it optional and
     // .env.example ships it commented out, so it defaults to 1 and a normally
     // configured multi-hub deployment silently takes the single-node path, the
     // exact path those guards exist to keep it off. The live active set is
@@ -237,14 +237,14 @@ class Consensus {
             return true;
         }
 
-        // : elect the leader from the SAME population this round's quorum
+        // Elect the leader from the SAME population this round's quorum
         // was sized from. Everything below the quorum line is snapshot-pinned
         // (getQuorum(snapshot), proposal.validators, the weighted tally), but
         // leader election used to index the LIVE validatorSet, so a hub whose
         // local peer set had drifted from the block-locked staker set elected a
         // different leader for the same seq and rejected the legitimate
         // PRE_PREPARE. Same shape as the already-hardened
-        // OracleConsensus._getLeader : sorted member pubkeys, index by
+        // OracleConsensus._getLeader: sorted member pubkeys, index by
         // rotation, resolve the addr locally. Null memberPubkeys (no usable
         // snapshot, i.e. the single-node / graceful-degradation path) keeps the
         // legacy live-set rotation.
@@ -265,7 +265,7 @@ class Consensus {
             let proposal = {
                 config:   config,
                 digest:   digest,
-                view:     this.view,    // EQUIV (WI-2 bump 2): all 3 votes for this round sign (seq, view, digest)
+                view:     this.view,    // EQUIV: all 3 votes for this round sign (seq, view, digest)
                 prepares: new Set(),
                 commits:  new Set(),
                 resolved: false,
@@ -279,7 +279,7 @@ class Consensus {
                 // stake state drifts mid-round.
                 snapshot:       snapshot || null,
                 quorum:         quorum,
-                // The REQUESTED tip, never snapshot.blockIndex (#3080). The
+                // The REQUESTED tip, never snapshot.blockIndex. The
                 // snapshot is already buried by HUB_SNAPSHOT_REORG_BUFFER, and a
                 // follower buries whatever this envelope carries a second time,
                 // so stamping the buried value locks followers at tip - 2*buffer
@@ -293,7 +293,7 @@ class Consensus {
                 // weighted). One vote per staking source (DELEGATE v0 is additive).
                 weighted:       !!weighted,
                 validators:     this._normalizeValidators(snapshot, weighted),
-                // : the round's pinned leader-election population, carried
+                // The round's pinned leader-election population, carried
                 // so every later leader question for this seq (view change, a
                 // repeat PRE_PREPARE, NEW_VIEW) is answered from the set the
                 // round was opened over rather than from the live peer set.
@@ -360,7 +360,7 @@ class Consensus {
     // CapabilitySnapshot buried it by HUB_SNAPSHOT_REORG_BUFFER; the returned
     // snapshot's own `blockIndex` is the buried height it resolved at. The two
     // are not interchangeable and the leader must stamp the requested one (see
-    // the PRE_PREPARE stamp in propose(), review board #3080/#3081).
+    // the PRE_PREPARE stamp in propose()).
     async _lockSnapshot(blockHeightOverride) {
         if (!this.hub || !this.hub.capabilitySnapshot) {
             return { snapshot: null, weighted: false, requestedBlockIndex: null };
@@ -396,7 +396,7 @@ class Consensus {
         if (!registry) return false;
         if (registry.size === 0) {
             // Empty-registry leniency is for the genuine pre-bootstrap window ONLY
-            // (G-1/): once the on-chain snapshot has produced a non-empty
+            // (G-1): once the on-chain snapshot has produced a non-empty
             // effective signer set, an empty registry is a misconfiguration or
             // wipe window, not bootstrap, and counting unattributable senders
             // would reopen count-mode quorum forgery. Fail closed instead.
@@ -458,7 +458,7 @@ class Consensus {
 
         if (!this.pendingProposals.has(seq)) {
             // Fail closed on a missing/invalid BTC block height, mirroring the
-            // OracleConsensus PROPOSE guard (#1225). The leader stamped the block
+            // OracleConsensus PROPOSE guard. The leader stamped the block
             // it locked its snapshot at into the PRE_PREPARE; if that height is
             // absent or not a positive integer (old peer mid rolling deploy, or a
             // malformed/Byzantine envelope), _lockSnapshot would silently resolve
@@ -520,7 +520,7 @@ class Consensus {
                 return;
             }
 
-            // Leader-identity guard,  edition: run it against the
+            // Leader-identity guard: run it against the
             // population the round is actually being opened over, which only
             // exists once the snapshot is locked. It must still run BEFORE the
             // follower proposal is created, or an authenticated non-leader could
@@ -532,7 +532,7 @@ class Consensus {
             let proposal = {
                 config:   config,
                 digest:   configDigest,
-                view:     view,         // EQUIV (WI-2 bump 2): the leader's view, stamped in the PRE_PREPARE
+                view:     view,         // EQUIV: the leader's view, stamped in the PRE_PREPARE
                 prepares: new Set(),
                 commits:  new Set(),
                 resolved: false,
@@ -628,7 +628,7 @@ class Consensus {
         }));
     }
 
-    //  leader-election population. The lowercased signing pubkeys of the
+    // Leader-election population. The lowercased signing pubkeys of the
     // block-locked snapshot: the same rows that sized this round's quorum, so
     // election and quorum finally read one population instead of two. Returns
     // null when no usable snapshot exists (indexer down, single-node bootstrap),
@@ -672,7 +672,7 @@ class Consensus {
 
     // This hub's own lowercased signing pubkey, or null before the identity is
     // available. Needed because a snapshot-derived leader may be recognizable
-    // only by key:  case (2) is two hubs holding different addr bindings
+    // only by key: one such case is two hubs holding different addr bindings
     // for the same staker, which an addr-only self-check turns back into the
     // very divergence the pinning removes.
     _selfPubkey() {
@@ -693,7 +693,7 @@ class Consensus {
         return !!(lpk && pubkey && lpk === pubkey);
     }
 
-    // Shared PRE_PREPARE leader-identity guard . A PRE_PREPARE must
+    // Shared PRE_PREPARE leader-identity guard. A PRE_PREPARE must
     // come from the validator the rotation designates as leader for the CLAIMED
     // (seq, view), mirroring the check _handleNewView applies to NEW_VIEW and
     // OracleConsensus applies to PROPOSE: a Byzantine node can then only ever
@@ -736,7 +736,7 @@ class Consensus {
         if (identity) pubkeySet.add(identity.getPubkeyHex().toLowerCase());
     }
 
-    // EQUIV durable canonical (WI-2 bump 2, the 6th engine, XCONFIG). Config-change
+    // EQUIV durable canonical (the 6th engine, XCONFIG). Config-change
     // PBFT signs only the ephemeral transport envelope today; this adds a durable
     // per-validator signature over
     //   buildEquivCanonical('XCONFIG', seq, view, `${blockHeight}|${digest}`)
@@ -958,7 +958,7 @@ class Consensus {
 
         if (this._quorumMet(vcCtx, this.pendingViewChanges.get(view), this.pendingViewChangePubkeys.get(view))) {
             // View change accepted; update view and check if we're the new leader.
-            // : the new leader comes from the round's pinned population,
+            // The new leader comes from the round's pinned population,
             // the same one PRE_PREPARE was validated against, so a view change
             // cannot hand the round to a node the rest of the federation would
             // not recognize as leader.
@@ -1019,7 +1019,7 @@ class Consensus {
         // evaluated at the CLAIMED view rather than the local one. With no
         // leader to validate against, the announcement is rejected.
         //
-        // , the deliberately partial half: a NEW_VIEW envelope carries no
+        // This is the deliberately partial half: a NEW_VIEW envelope carries no
         // block height, so this handler cannot lock a snapshot of its own and
         // cannot be pinned the way the other sites are. It does the best it can
         // and reuses the round's pinned population when this hub still holds it
@@ -1068,7 +1068,7 @@ class Consensus {
                 quorum:     lockedQuorum,
                 weighted:   !!lockedWeighted,
                 validators: lockedValidators || [],
-                // : the round's pinned leader-election population, so the
+                // The round's pinned leader-election population, so the
                 // initiator (whose proposal the timeout already removed) still
                 // elects the new leader from the set the round was opened over.
                 memberPubkeys: lockedMemberPubkeys || null
@@ -1091,7 +1091,7 @@ class Consensus {
         }
     }
 
-    // Rotation leader for (seq, view). : when the round carries a pinned
+    // Rotation leader for (seq, view). When the round carries a pinned
     // population (`memberPubkeys`, the block-locked snapshot the quorum was
     // sized from), elect sorted-member-pubkeys[(seq + view) % N] and resolve the
     // addr locally, so every hub in the federation elects the same key for the
@@ -1144,7 +1144,7 @@ class Consensus {
             N = peers.length + 1; // +1 for self
         }
         // N<=1: single node, no consensus needed (0 = caller bypasses). Above
-        // that, the majority-floored BFT threshold (bft_quorum.js, ).
+        // that, the majority-floored BFT threshold (bft_quorum.js).
         return bftQuorumOrSingle(N, 0);
     }
 

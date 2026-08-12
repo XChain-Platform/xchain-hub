@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// : _broadcastWithRetry double-broadcast guard. A lost ACK on a
+// _broadcastWithRetry double-broadcast guard. A lost ACK on a
 // mempool-accepted DOGE anchor must never lead to a rebuilt-PSBT re-broadcast
 // (a double-spend: fresh UTXOs mean both txs can confirm). Covers the
 // pre-broadcast existence check, the ambiguous-send error classification in
@@ -35,7 +35,7 @@ function ambiguousErr(msg){
     return e;
 }
 
-describe('StateAnchorPublisher : _broadcastWithRetry guard', function () {
+describe('StateAnchorPublisher: _broadcastWithRetry guard', function () {
 
     it('keeps the legacy behavior with no existsCheck: retries pre-send failures with a fresh call, then succeeds', async function () {
         const pub = mkPub();
@@ -136,7 +136,7 @@ describe('StateAnchorPublisher : _broadcastWithRetry guard', function () {
     });
 });
 
-describe('StateAnchorPublisher : _isAmbiguousSendError classification', function () {
+describe('StateAnchorPublisher: _isAmbiguousSendError classification', function () {
     const pub = mkPub();
 
     it('encoder RPC rejections are NOT ambiguous (the node answered, tx refused)', function () {
@@ -168,7 +168,7 @@ describe('StateAnchorPublisher : _isAmbiguousSendError classification', function
     });
 });
 
-describe('StateAnchorPublisher : _defaultBroadcast tagging', function () {
+describe('StateAnchorPublisher: _defaultBroadcast tagging', function () {
 
     function mkSigner(overrides){
         return Object.assign({
@@ -225,7 +225,7 @@ describe('StateAnchorPublisher : _defaultBroadcast tagging', function () {
     });
 });
 
-describe('StateAnchorPublisher : _findExistingCheckpointAnchor', function () {
+describe('StateAnchorPublisher: _findExistingCheckpointAnchor', function () {
 
     const ROW = { chain: 'BTC', network: 'regtest', block_index: 494, checkpoint_seq: 7 };
 

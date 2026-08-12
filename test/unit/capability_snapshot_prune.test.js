@@ -87,7 +87,7 @@ class FakeDb {
     async close(){}
 }
 
-// The  shape: a dead chain incarnation left cross_chain snapshots across
+// A dead chain incarnation left cross_chain snapshots across
 // blocks 131-487, and the live chain has since written its own rows down at the
 // low heights it has actually reached.
 const DEAD_WRITE = '2026-06-01 10:00:00';   // written under the dead incarnation
@@ -116,7 +116,7 @@ function remimedFixture(){
     return rows;
 }
 
-describe('lib/capability_snapshot_prune ( stale snapshot prune)', () => {
+describe('lib/capability_snapshot_prune (stale snapshot prune)', () => {
 
     describe('normalizeRange', () => {
         it('requires fromBlock so a typo cannot become a full-table wipe', () => {

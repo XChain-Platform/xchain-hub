@@ -76,7 +76,7 @@ class XChainHub {
         // Seed the NODEPROOF parameters from the pinned coin bundle HERE, not in
         // startCapabilities: startP2P constructs FullNodeChallengeRound first and the
         // engine snapshots cfg.FULLNODE at construction, so a later seed would never
-        // reach it . Never creates p2pConfig - a null one is standalone mode,
+        // reach it. Never creates p2pConfig - a null one is standalone mode,
         // which startP2P uses as its early-return signal.
         this._seedCanonicalFullnode();
         this.db               = null;
@@ -106,7 +106,7 @@ class XChainHub {
         this._capabilityRecheckTimer = null;
         this._capabilityConfigWatcher = null;
         this._stakePollTimer          = null;
-        //  in-flight guards for the two passes those timers drive.
+        // In-flight guards for the two passes those timers drive.
         this._capabilityCheckRunning  = false;
         this._stakePollRunning        = false;
         this._transportSetTimer       = null;   // Option A: chain-effective signer-set refresh timer
@@ -342,7 +342,7 @@ class XChainHub {
         }
         this.attestationSpotChecker = new AttestationSpotChecker(this, this.providerRegistry);
 
-        //  / : the cross-chain relay driver. Opt-in
+        // The cross-chain relay driver. Opt-in
         // (ATTEST_RELAY_ENABLED=1) and a no-op otherwise, so merely deploying it
         // changes nothing. Its ATTEST v3 request leg broadcasts on BTC, so it takes the
         // SAME operator signer the publisher uses. Its ATTEST v4 response leg
@@ -459,7 +459,7 @@ class XChainHub {
         this.stateCheckpoints = new StateCheckpointEngine(this);
         await this.stateCheckpoints.start();
 
-        // Signed retractions ( full fix): collects 2f+1 cross_chain
+        // Signed retractions: collects 2f+1 cross_chain
         // co-signatures over quorum-class reorg-retraction broadcasts before they
         // reach the mirror stream. The engines route their retract-path deletions
         // through it; below the flag-day / without an identity it falls through
@@ -507,7 +507,7 @@ class XChainHub {
         this.governance.setValidatorSet(validators);
         await this.governance.start();
 
-        // : governance-mediated penalty execution over slash_proposals.
+        // Governance-mediated penalty execution over slash_proposals.
         // 'proposal:finalized' fires on the tally leader AND on every follower's
         // local re-tally of GOV_RESULT, so a passed SLASH_PENALTY:* proposal
         // executes the penalty federation-wide with no new wire message.
@@ -520,7 +520,7 @@ class XChainHub {
     }
 
     // Create a SLASH_PENALTY governance proposal over a validator's pending
-    // slash_proposals evidence . penalty: 'suspend' | 'dismiss'.
+    // slash_proposals evidence. penalty: 'suspend' | 'dismiss'.
     async proposeSlashPenalty(validatorPubkey, penalty, rationale){
         if(!this.slashGovernance) throw new Error('Governance not active');
         return await this.slashGovernance.proposeSlashPenalty(validatorPubkey, penalty, rationale);
@@ -577,7 +577,7 @@ class XChainHub {
         return await this.swapTracker.getSwaps(status, limit);
     }
 
-    // : surface XCALL hub relay rows. getCrossChainCall returns one call's
+    // Surface XCALL hub relay rows. getCrossChainCall returns one call's
     // full lifecycle (both phases) by call_id; listCrossChainCalls lists rows with
     // optional filters. Both read the hub's own cross_chain_calls table (read-only).
     async getCrossChainCall(callId){
@@ -1008,7 +1008,7 @@ class XChainHub {
         return true;
     }
 
-    // : `chains` rides along with addr/status. The documented getvalidators
+    // `chains` rides along with addr/status. The documented getvalidators
     // response has always advertised it (components/hub/api.md), and the explorer
     // folds all three onto its on-chain /validators table, so leaving it out of the
     // SELECT made the served chains permanently blank there.
@@ -1133,7 +1133,7 @@ class XChainHub {
         // Validate BEFORE merging so a divergent file is refused whole: on the
         // hot-reload path the running hub keeps its previous (validated) config.
         if('CAPABILITIES' in parsed) this._assertCanonicalMinStakes(parsed.CAPABILITIES);
-        // : same treatment for a FULLNODE override. Its consensus knobs
+        // Same treatment for a FULLNODE override. Its consensus knobs
         // (REWARD_SHARE, GENESIS_VERIFIERS, the challenge/window block counts) must
         // come from the pinned coin bundle every service ships, never from one
         // operator's file, or that hub runs a challenge schedule and a reward split
@@ -1166,7 +1166,7 @@ class XChainHub {
             ' (thresholds: ' + Object.keys(this.p2pConfig.CAPABILITIES || {}).join(', ') + ')');
     }
 
-    // : assert operator MIN_STAKE thresholds against the canonical coins
+    // Assert operator MIN_STAKE thresholds against the canonical coins
     // registry (src/coins/BTC.js STAKING.CAPABILITIES, byte-identity-gated across
     // the fleet). The value configured here is what every CapabilitySnapshot query
     // sends the indexer as the qualifying floor, so a hub whose capabilities.json
@@ -1186,7 +1186,7 @@ class XChainHub {
         if(!caps || typeof caps !== 'object' || Array.isArray(caps)) return;
         if(process.env.XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT === '1'){
             console.warn('XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT=1: skipping canonical MIN_STAKE ' +
-                'assertion . Divergent thresholds fork the qualified validator set; ' +
+                'assertion. Divergent thresholds fork the qualified validator set; ' +
                 'only bypass on a venue where every hub runs the SAME override.');
             return;
         }
@@ -1255,7 +1255,7 @@ class XChainHub {
         }
     }
 
-    // : assert an operator FULLNODE override against the canonical coins
+    // Assert an operator FULLNODE override against the canonical coins
     // registry, and check the resulting effective block for activation coherence.
     //
     // The NODEPROOF tier ships INERT (REWARD_SHARE '0', GENESIS_VERIFIERS []) and
@@ -1276,7 +1276,7 @@ class XChainHub {
         if(!fn || typeof fn !== 'object' || Array.isArray(fn)) return;
         if(process.env.XCHAIN_HUB_SKIP_FULLNODE_ASSERT === '1'){
             console.warn('XCHAIN_HUB_SKIP_FULLNODE_ASSERT=1: skipping canonical FULLNODE ' +
-                'assertion . Divergent NODEPROOF knobs fork the challenge schedule, the ' +
+                'assertion. Divergent NODEPROOF knobs fork the challenge schedule, the ' +
                 'verifier quorum and the oracle reward split; only bypass on a venue where every ' +
                 'hub runs the SAME override.');
             return;
@@ -1292,8 +1292,7 @@ class XChainHub {
         let detail = 'FULLNODE config is unsafe to run: ' + problems.join('; ') +
             '. NODEPROOF activation is a fleet-wide consensus change: set it in the pinned ' +
             'coin bundle (src/coins/BTC.js FULLNODE) across hub, indexer and sync together, ' +
-            'never in a single operator capabilities.json. See ' +
-            'claude/reports/launch/NODEPROOF-ACTIVATION-RUNBOOK.md ' +
+            'never in a single operator capabilities.json ' +
             '(XCHAIN_HUB_SKIP_FULLNODE_ASSERT=1 to bypass on a coordinated test venue).';
 
         if(this.network === 'mainnet' || this.network === 'testnet'){
@@ -1330,8 +1329,8 @@ class XChainHub {
                 this._loadCapabilityConfigFile(configFilePath);
             } catch(e){
                 // A canonical MIN_STAKE mismatch is a consensus-fork misconfig, not a
-                // degraded mode: halt boot fail-closed . A divergent FULLNODE
-                // block is the same class . Read/parse problems keep the legacy
+                // degraded mode: halt boot fail-closed. A divergent FULLNODE
+                // block is the same class. Read/parse problems keep the legacy
                 // warn-and-degrade behavior (self-tests then fail "config missing" and
                 // this hub simply doesn't serve capabilities).
                 if(e && (e.code === 'MIN_STAKE_MISMATCH' || e.code === 'FULLNODE_CONFIG_MISMATCH')) throw e;
@@ -1340,7 +1339,7 @@ class XChainHub {
         }
         // Seed the canonical NODEPROOF parameters even when no operator config file
         // exists, then report the tier's activation state once at boot so an operator
-        // can see whether this hub thinks the tier is on .
+        // can see whether this hub thinks the tier is on.
         this._seedCanonicalFullnode();
         console.log('NODEPROOF full-node tier: ' +
             fullnodeActivation.describeActivation(this.p2pConfig && this.p2pConfig.FULLNODE));
@@ -1427,7 +1426,7 @@ class XChainHub {
         } catch (e) { /* best-effort operator log */ }
     }
 
-    //  in-flight guard for the stake poll. _stakePollTimer fires on a bare
+    // In-flight guard for the stake poll. _stakePollTimer fires on a bare
     // setInterval while the pass awaits an indexer round-trip nothing here bounds, so
     // a tightened STAKE_POLL_MS or a degraded indexer would otherwise stack a second
     // pass on the first and drive refreshOwnQualification twice from two reads of the
@@ -1489,7 +1488,7 @@ class XChainHub {
     //      development) so block-boundary snapshotting Just Works.
     // Returns null when both paths fail.
     async _resolveBtcLatestBlock(){
-        // A cross-network configs tree makes this throw (). Degrade to the
+        // A cross-network configs tree makes this throw. Degrade to the
         // null return this method already documents rather than crashing the
         // scheduler tick that called it.
         let network;
@@ -1568,7 +1567,8 @@ class XChainHub {
     // Which BTC network does this hub talk to? In validator mode the answer is
     // this.network (the validated HUB_NETWORK) and nothing else: the configs
     // table is only consulted to confirm that network has an indexer, and a
-    // tree carrying only OTHER networks fails closed by throwing. Before  this loop returned the first of regtest>testnet>mainnet found, so a
+    // tree carrying only OTHER networks fails closed by throwing. Previously
+    // this loop returned the first of regtest>testnet>mainnet found, so a
     // multi-network configs tree let a mainnet validator anchor its oracle
     // round to the REGTEST tip while every consensus gate still read mainnet;
     // the _indexerCoinMismatch guard cannot see it, because a regtest BTC
@@ -1631,7 +1631,7 @@ class XChainHub {
     // DOGE indexer, whose heights and stake rows are a different chain's: the
     // hub then elects publishers off a set that does not exist and snapshots
     // checkpoints at a height where the stake is not active, all without one
-    // error line (, from the  A2 drill, where it took hours and an
+    // error line (from the A2 drill, where it took hours and an
     // explicit BTC_INDEXER_API_URL to spot). A POSITIVE identification of a
     // non-BTC indexer now fails loud and closed; an unreachable or silent
     // indexer keeps the legacy behavior, since "cannot verify" is not evidence
@@ -1711,7 +1711,7 @@ class XChainHub {
             return (host && port) ? ('http://' + host + ':' + port) : null;
         };
         // A validator hub reads ONLY its own network's indexer and returns null
-        // otherwise (). The preference order below is a dev-loop
+        // otherwise. The preference order below is a dev-loop
         // convenience, and on a multi-network configs tree it silently handed a
         // mainnet-gated hub the regtest indexer, which then fed the checkpoint,
         // attestation and cross-chain engines another chain's state.
@@ -1834,7 +1834,7 @@ class XChainHub {
         try {
             let parsed = JSON.parse(String(ev.newValue));
             ac = (parsed && parsed.additional_config) ? parsed.additional_config : parsed;
-            // The provider stake floor rides the same entry . Read it here as
+            // The provider stake floor rides the same entry. Read it here as
             // well as in ProviderRegistry.loadGovernanceHistory: this is the LIVE apply
             // path and that is the RESTART replay path, and a floor picked up by only
             // one of them would make a long-running hub and a freshly-restarted one
@@ -1863,7 +1863,7 @@ class XChainHub {
 
     // Combined own-state update: self-test + qualification (qualification reuses cached amount if available) + broadcast
     //
-    //  in-flight guard: _capabilityRecheckTimer fires on a bare setInterval while
+    // In-flight guard: _capabilityRecheckTimer fires on a bare setInterval while
     // runAllSelfTests fans out to every capability module's bounded-but-slow healthCheck,
     // so a tightened CAPABILITY_RECHECK_MS or a slow vendor would otherwise stack passes
     // and emit a duplicate CAPABILITY_ACTIVATED/DEACTIVATED broadcast per capability.

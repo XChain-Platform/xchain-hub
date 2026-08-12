@@ -19,8 +19,6 @@
  * for the llm provider tier can serve ATTEST v0 (request) rows with
  * provider_id='llm'.
  *
- * Spec: claude/reports/specs/2026-05-24_llm-attestation-provider.md
- *
  * Provider interface (mirrored by all providers; see providers/README):
  *   fetch(payload, options)  -> Promise<{ body: Buffer, meta: string }>
  *   agree(proposals)         -> Promise<{ body, meta } | null>
@@ -71,13 +69,13 @@ const MAX_JUDGE_CANDIDATE_CHARS = 4096;
 
 const _tokenUsage = { inputTokens: 0, outputTokens: 0, calls: 0 };
 
-// ---- Durable spend audit () -------------------------------------
+// Durable spend audit
 //
 // Every billed dispatch used to leave nothing on disk: usage accrued to the
 // in-memory _tokenUsage AFTER a successful response, and the claude_spawn
 // branch recorded nothing at all, so a crash mid-call erased every local trace
 // that a vendor charge had been initiated. This is the same append-only,
-// fsync'd audit AttestationPublisher._recordSpend (item 2681) keeps for BTC
+// fsync'd audit AttestationPublisher._recordSpend keeps for BTC
 // fees, applied to the other money path: an `intent` line lands BEFORE the
 // vendor is dialed and a `settle` line after, so an intent with no settle is
 // exactly the operator's post-crash reconciliation list.
@@ -184,13 +182,13 @@ const FETCH_REASONING_TOKEN_HEADROOM = 2048;
 // bill reasoning tokens against max_completion_tokens. gpt-5-chat* is EXCLUDED on
 // purpose: it is the non-reasoning ChatGPT model, it honors an explicit
 // temperature, and classifying it as reasoning would silently drop the
-// temperature-0 judge contract and over-grant reasoning headroom (item 3535).
+// temperature-0 judge contract and over-grant reasoning headroom.
 // Shared by the OpenAI transport gate and the judge-budget selection in agree().
 //
-// item 4465: the exclusion absorbs an optional `.N` version segment. `(?!-chat)`
+// The exclusion absorbs an optional `.N` version segment. `(?!-chat)`
 // only rejected a LITERAL `-chat` directly after `gpt-5`, so every versioned Chat
 // id (gpt-5.1-chat-latest, gpt-5.2-chat-latest, ...) cleared the lookahead and
-// classified as reasoning - the exact inversion item 3535 exists to prevent.
+// classified as reasoning - the exact inversion the exclusion above exists to prevent.
 // Versioned REASONING ids (gpt-5.1, gpt-5.1-mini) still classify as reasoning.
 function _isReasoningModel(model) {
     return /^o[0-9]/.test(String(model)) || /^gpt-5(?!(?:\.\d+)?-chat)/.test(String(model));
@@ -202,7 +200,7 @@ exports._isReasoningModel = _isReasoningModel;
 // than accepted-and-ignored. Depth on these models is governed by the effort /
 // adaptive-thinking controls instead, so there is no temperature to send at all.
 //
-// : the anthropic_api branch emitted `temperature` unconditionally while
+// The anthropic_api branch emitted `temperature` unconditionally while
 // claude-opus-4-7 sits in the DEFAULT approved_models ladder, so every fetch that
 // escalated to the fallback - and every Opus-4.7 judge call, which is pinned at
 // temperature 0 - was a deterministic vendor 400 mapped to provider_error.
@@ -225,7 +223,7 @@ function _anthropicRejectsSampling(model) {
 }
 exports._anthropicRejectsSampling = _anthropicRejectsSampling;
 
-// item 2680 - operator kill switch for this paid provider. The only pre-existing
+// Operator kill switch for this paid provider. The only pre-existing
 // lever was failing healthCheck (which the hub penalizes: the validator is still
 // counted in N, so unserved rounds expire and accrue missed_count), i.e. a failure
 // mode, not a control. This is a first-class pause that stops fetch()/agree() from
@@ -248,10 +246,10 @@ function _pausedError() {
     return err;          // a deliberate pause from a real vendor/transport failure
 }
 exports._llmEnabled = _llmEnabled;
-// Test seam for the #3070 meta gate. The corroboration half only runs on the
+// Test seam for the canonicalizable-meta gate. The corroboration half only runs on the
 // judge-winner return, which needs a live judge transport to reach, so the suite
 // exercises the same function directly rather than mocking a vendor.
-// `pinnedApprovedModels` is the round's block-anchored allowlist ();
+// `pinnedApprovedModels` is the round's block-anchored allowlist;
 // omit it to exercise the live-module-global fallback the seam has always used.
 exports._canonicalMetaForTest = (proposals, idx, outcome, pinnedApprovedModels) =>
     _canonicalMeta(proposals, idx, {
@@ -259,7 +257,7 @@ exports._canonicalMetaForTest = (proposals, idx, outcome, pinnedApprovedModels) 
         pinnedApprovedModels: pinnedApprovedModels || null
     });
 
-// item 2679 - per-call spend ceiling for the claude_spawn transport. The callee
+// Per-call spend ceiling for the claude_spawn transport. The callee
 // (lib/claude-spawn.js) fully plumbs --max-budget-usd but no caller ever supplied
 // it, so the guard was dead. Resolve a positive number from env or governance;
 //   - LLM_MAX_BUDGET_USD (env)          : operator-local per-call cap
@@ -267,7 +265,7 @@ exports._canonicalMetaForTest = (proposals, idx, outcome, pinnedApprovedModels) 
 //   - DEFAULT_MAX_BUDGET_USD            : built-in fail-safe floor
 // Env wins when both are set and positive.
 //
-//  - the resolver used to return undefined at the end, and the
+// The resolver used to return undefined at the end, and the
 // claude_spawn branch omits the flag for an undefined budget, so an operator who
 // configured nothing ran every paid CLI invocation with NO ceiling at all. This
 // is the one transport with no other bound: the two HTTP branches pass an
@@ -296,7 +294,7 @@ exports._resolveMaxBudgetUsd = _resolveMaxBudgetUsd;
 // throw at call time (never guess a vendor: sending a prompt to the wrong API
 // leaks it to an unintended third party).
 //
-// item 3482: `pinned` is the model_vendors map read from the SAME block-anchored
+// `pinned` is the model_vendors map read from the SAME block-anchored
 // additional_config that produced pinnedModel/pinnedJudgeModel. Without it the
 // vendor lookup read the live, hotReload-mutable module map while the model id
 // came from the request's block, so a governance change adding a new-family id
@@ -328,13 +326,13 @@ exports._setConfig = (def) => {
         MODEL_VENDORS = { ...ac.model_vendors };
     if (typeof ac.require_all_vendors === 'boolean')
         REQUIRE_ALL_VENDORS = ac.require_all_vendors;
-    //  - validate before installing. A bare truthy check admitted -1, 1.5
+    // Validate before installing. A bare truthy check admitted -1, 1.5
     // and Infinity as the federation-wide token budget: the clamp in fetch() is a
     // min() against this same value so a negative survives it, chat/Anthropic then
     // send it verbatim for a deterministic vendor 400, and the reasoning path's
     // +FETCH_REASONING_TOKEN_HEADROOM flips it positive into a silently wrong
     // budget instead. Same positive-integer rule the per-request envelope.max_tokens
-    // boundary already enforces (item 3890); warn-and-keep rather than throw, so one
+    // boundary already enforces; warn-and-keep rather than throw, so one
     // bad key holds the prior default instead of aborting the whole config install,
     // matching the sibling default_temperature handling directly below.
     if (ac.max_completion_tokens !== undefined) {
@@ -363,7 +361,7 @@ exports._setConfig = (def) => {
                 ' (must be a number in [0, 1]); keeping ' + DEFAULT_TEMPERATURE);
     }
     if (Number(ac.prompt_envelope_version)) PROMPT_ENVELOPE_VERSION = Number(ac.prompt_envelope_version);
-    // Governance kill switch (item 2680) and per-call spend cap (item 2679).
+    // Governance kill switch and per-call spend cap.
     if (typeof ac.enabled === 'boolean') LLM_ENABLED_CONFIG = ac.enabled;
     if (ac.max_budget_usd !== undefined) {
         let b = parseFloat(ac.max_budget_usd);
@@ -380,7 +378,7 @@ exports._setConfig = (def) => {
 //     envelope_version?: number }
 exports.fetch = async (payload, options) => {
     options = options || {};
-    // item 2680: kill switch. Refuse to dial any billed vendor while paused.
+    // Kill switch: refuse to dial any billed vendor while paused.
     if (!_llmEnabled()) throw _pausedError();
     let envelope;
     try { envelope = JSON.parse(payload); }
@@ -391,8 +389,8 @@ exports.fetch = async (payload, options) => {
     if (envelope.envelope_version !== undefined && Number(envelope.envelope_version) > PROMPT_ENVELOPE_VERSION)
         throw new Error('llm: unsupported envelope_version (got ' + envelope.envelope_version + ', max ' + PROMPT_ENVELOPE_VERSION + ')');
 
-    // Reject an out-of-shape requester numeric at this boundary rather than forwarding it
-    // (item 3890). A negative max_tokens survives the clamp below - Number(-1) is truthy,
+    // Reject an out-of-shape requester numeric at this boundary rather than forwarding it.
+    // A negative max_tokens survives the clamp below - Number(-1) is truthy,
     // so the `||` default never fires - and on a reasoning model the headroom add turns it
     // POSITIVE again, producing a silently wrong budget instead of a vendor 400.
     if (envelope.max_tokens !== undefined) {
@@ -467,7 +465,7 @@ exports.fetch = async (payload, options) => {
         temperature,
         format,
         timeoutMs:   options.timeoutMs,
-        // Block-anchored model_vendors for this request's block (item 3482), so
+        // Block-anchored model_vendors for this request's block, so
         // the vendor resolves from the same config that pinned the model id.
         pinnedVendors: options.pinnedVendors || null
     });
@@ -522,7 +520,7 @@ function _markInconclusive(options, reason){
     }
 }
 
-// ── : canonicalizable `meta` ────────────────────────────────────────
+// canonicalizable `meta`
 //
 // `meta` is the model identifier that served a response. It is CONSENSUS-VISIBLE:
 // the canonical signature binds it and the ATTEST v1 wire records it on-chain
@@ -556,7 +554,7 @@ const META_MIN_CORROBORATION = 2;
 // id would widen the allowlist by values no honest proposal can carry, which is
 // exactly what gate 1 exists to refuse.
 //
-// : prefer options.pinnedApprovedModels, the SAME block-anchored
+// Prefer options.pinnedApprovedModels, the SAME block-anchored
 // approved_models list AttestationRound resolved at the request's block to pin
 // the fetch model. Reading the live module-global instead left gate 1 unanchored
 // while the value it judges is anchored: a governance hotReload that DELISTS the
@@ -579,13 +577,13 @@ function _canonicalMeta(proposals, idx, options){
     // Deliberately strict about type: a non-string meta (object, Buffer, number)
     // is not something this allowlist can reason about, so it is unrecognized.
     if (typeof raw !== 'string' || raw === ''){
-        console.warn('llm: winning proposal carries a non-string/empty meta; failing closed (#3070)');
+        console.warn('llm: winning proposal carries a non-string/empty meta; failing closed');
         _markInconclusive(options, 'meta_unrecognized');
         return null;
     }
     if (!_approvedMetaSet(options).has(raw)){
         console.warn('llm: winning proposal meta "' + raw + '" is not an approved model identifier; ' +
-            'failing closed rather than canonicalizing an unvouched value on-chain (#3070)');
+            'failing closed rather than canonicalizing an unvouched value on-chain');
         _markInconclusive(options, 'meta_unrecognized');
         return null;
     }
@@ -593,7 +591,7 @@ function _canonicalMeta(proposals, idx, options){
         let agreeing = proposals.filter(p => typeof p.meta === 'string' && p.meta === raw).length;
         if (agreeing < META_MIN_CORROBORATION){
             console.warn('llm: winning proposal meta "' + raw + '" is corroborated by only ' + agreeing +
-                ' of ' + proposals.length + ' proposals; failing closed (#3070)');
+                ' of ' + proposals.length + ' proposals; failing closed');
             _markInconclusive(options, 'meta_uncorroborated');
             return null;
         }
@@ -603,7 +601,7 @@ function _canonicalMeta(proposals, idx, options){
 
 exports.agree = async (proposals, options) => {
     options = options || {};
-    // item 2680: kill switch. A single proposal is returned without any billed
+    // Kill switch: a single proposal is returned without any billed
     // judge call, so only gate the paths that would actually dial a vendor (the
     // multi-proposal judge fan-out below). Guarded again just before _runLlm.
     let paused = !_llmEnabled();
@@ -612,7 +610,7 @@ exports.agree = async (proposals, options) => {
         return null;
     }
     if (proposals.length === 1) {
-        // Allowlist still applies with a single proposal (#3070). There is nothing to
+        // Allowlist still applies with a single proposal. There is nothing to
         // corroborate against, but an unapproved identifier is unrecognized either way
         // and must not reach the canonical signature.
         let solo = _canonicalMeta(proposals, 0, options);
@@ -620,7 +618,7 @@ exports.agree = async (proposals, options) => {
         return { body: proposals[0].body, meta: solo };
     }
 
-    // item 2680: the multi-proposal path below issues a billed judge call. When the
+    // The multi-proposal path below issues a billed judge call. When the
     // provider is paused, do not dial: mark the round inconclusive (could-not-judge)
     // and return null, the same contract a judge-transport outage already produces.
     if (paused) {
@@ -694,7 +692,7 @@ exports.agree = async (proposals, options) => {
                 format:      'json_object',
                 timeoutMs:   attemptTimeoutMs,
                 // Same block-anchored vendor map the leader pinned the judge
-                // model from (item 3482).
+                // model from.
                 pinnedVendors: options.pinnedVendors || null
             });
             reached = true;
@@ -710,7 +708,7 @@ exports.agree = async (proposals, options) => {
             if (e && (e.kind === 'refusal' || e.transient === false)) {
                 console.warn('llm: judge ' + jm + ' returned a non-transport outcome (' +
                     (e.kind || 'hard_error') + '); deferring to no_quorum without advancing chain');
-                // Three buckets, not two (item 3535/3481). The chain-advance
+                // Three buckets, not two. The chain-advance
                 // decision is the same for all of them, but the recorded reason is
                 // the only place an operator sees WHY the round went inconclusive:
                 // a 4xx from a deprecated model id, an auth misconfiguration, and a
@@ -778,7 +776,7 @@ exports.agree = async (proposals, options) => {
                 _markInconclusive(options, 'truncated_pick');
                 return null;
             }
-            // #3070: the judge vouched for the BODY it selected, never for that
+            // The judge vouched for the BODY it selected, never for that
             // proposal's meta. Gate the meta separately before it is canonicalized.
             let meta = _canonicalMeta(proposals, idx, options);
             if (meta === null) return null;
@@ -804,7 +802,7 @@ exports.agree = async (proposals, options) => {
 // a failed self-test makes this validator skip llm rounds while still being
 // counted in N, so unserved rounds expire and accrue missed_count against it.
 exports.healthCheck = async (ctx) => {
-    // item 2680: report a deliberate operator/governance pause as its own state,
+    // Report a deliberate operator/governance pause as its own state,
     // distinct from a credential/transport failure, so operators can tell a kill
     // switch from a real outage in the logs. Carries paused:true for callers that
     // want to treat a pause differently from an ordinary ok:false.
@@ -853,7 +851,7 @@ exports.healthCheck = async (ctx) => {
 // Pick the model's vendor + configured transport and execute the LLM call.
 // Returns the response text (string). Throws on transport-level failure.
 //
-//  - the durable spend audit wraps the dispatch rather than living
+// The durable spend audit wraps the dispatch rather than living
 // inside it: one intent record before ANY of the three billed transports is
 // dialed, one settle record on every exit, including the throwing ones (a
 // refusal or a truncation is a REACHED vendor, so it was still billed).
@@ -924,7 +922,7 @@ async function _runLlmDispatch({ prompt, system, model, maxTokens, temperature, 
         const isReasoningModel = _isReasoningModel(model);
         if (!isReasoningModel && typeof temperature === 'number') reqBody.temperature = temperature;
         const result = await _callOpenAi('/v1/chat/completions', reqBody, auth.apiKey, { timeoutMs });
-        // : the vendor is billed from here on, whichever branch below
+        // The vendor is billed from here on, whichever branch below
         // throws, so the settle record carries this call's real usage.
         if (_usage && result && result.usage) _usage.tokens = result.usage;
         let choice = Array.isArray(result.choices) ? result.choices[0] : null;
@@ -953,7 +951,7 @@ async function _runLlmDispatch({ prompt, system, model, maxTokens, temperature, 
         // transient=false) rather than returning the text, so the judge chain does
         // not re-ask a different model for what is a reached-judge outcome.
         //
-        // item 4467: this guard used to also require text.length===0, which failed
+        // This guard used to also require text.length===0, which failed
         // OPEN on the case that matters. A 'length' stop means the response is
         // INCOMPLETE whether or not bytes were emitted, and a partial one reaches the
         // hub's two highest-integrity paths: fetch() signs it as the on-chain
@@ -972,9 +970,9 @@ async function _runLlmDispatch({ prompt, system, model, maxTokens, temperature, 
     if (auth.transport === 'claude_spawn') {
         // The CLI doesn't expose temperature or a hard max-tokens cap;
         // redundancy>=3's judge_model step is what converges spreads.
-        // item 2679: thread the resolved per-call budget so --max-budget-usd is
+        // Thread the resolved per-call budget so --max-budget-usd is
         // actually emitted (claude-spawn.js only appends the flag for a positive
-        // number). : the resolver now always yields one, so this
+        // number); the resolver now always yields one, so this
         // transport is capped unless env/governance widens it.
         const budget = _resolveMaxBudgetUsd();
         const spawnOpts = {
@@ -985,7 +983,7 @@ async function _runLlmDispatch({ prompt, system, model, maxTokens, temperature, 
         };
         if (budget !== undefined) spawnOpts.maxBudgetUsd = budget;
         const { result, json } = await runClaudePrint(spawnOpts);
-        // : this branch used to drop `json` and record nothing, so
+        // This branch used to drop `json` and record nothing, so
         // subscription spend was the one billed path with no accounting at all.
         // `claude --print --output-format json` returns total_cost_usd + usage.
         if (json) {
@@ -1019,14 +1017,14 @@ async function _runLlmDispatch({ prompt, system, model, maxTokens, temperature, 
             max_tokens:  maxTokens,
             messages:    [{ role: 'user', content: prompt }]
         };
-        // : omit the field entirely for the model families that removed it
+        // Omit the field entirely for the model families that removed it
         // (400, not accepted-and-ignored). Mirrors the OpenAI branch's reasoning-model
         // gate above; every other Anthropic model keeps the clamped explicit value, so
         // the temperature-0 contract is unchanged wherever it is actually reachable.
         if (!_anthropicRejectsSampling(model)) reqBody.temperature = anthropicTemperature;
         if (sys) reqBody.system = sys;
         const result = await _callAnthropic('/v1/messages', reqBody, auth.apiKey, { timeoutMs });
-        // : billed from here on, whichever branch below throws.
+        // Billed from here on, whichever branch below throws.
         if (_usage && result && result.usage) _usage.tokens = result.usage;
         // A Claude-family refusal stop (stop_reason: "refusal") is a MODEL-level
         // outcome, not a transport failure. Surface it with the same distinct
@@ -1052,7 +1050,7 @@ async function _runLlmDispatch({ prompt, system, model, maxTokens, temperature, 
         // them the same way (kind='truncation', transient=false) so per-vendor
         // outcome classification stays symmetric.
         //
-        // item 4467: the max_tokens guard used to also require text.length===0 and
+        // The max_tokens guard used to also require text.length===0 and
         // model_context_window_exceeded was not handled at all, so both fell through
         // as complete answers. See the OpenAI branch above for why emitted length is
         // not evidence against truncation on a path that signs its result on-chain.

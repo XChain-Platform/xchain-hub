@@ -242,7 +242,7 @@ describe('StateAnchorPublisher', function () {
     // contents unless opts.mutate(self) tweaks its copy (divergence tests).
     function buildMesh(n, opts) {
         opts = opts || {};
-        let bus = { nodes: [], onchain: [] };   // onchain = mined checkpoint anchors ( existence gate)
+        let bus = { nodes: [], onchain: [] };   // onchain = mined checkpoint anchors (existence gate)
         // txid -> the ANCHOR version that txid really carries on-chain. A receiver asking
         // for no EXACT version (the #4180 archive-head gate sends a version SET, and
         // rejectVersions is a client-side check the indexer never sees) must get the real
@@ -250,7 +250,7 @@ describe('StateAnchorPublisher', function () {
         // that names a synthetic archive txid declares it here.
         bus.anchorVersions = new Map();
         // Network stamped on the checkpoint/match/call rows. Defaults to CP_ROW's
-        // regtest.  routes the archive/attestation quorum gates through the
+        // regtest. This routes the archive/attestation quorum gates through the
         // RECORD's network (matching the indexer), and regtest activates
         // STAKE_WEIGHTED_QUORUM at block 0, so regtest records take the weighted path.
         // A count-path test passes network:'mainnet': with snapshot_block 100 below the
@@ -337,7 +337,7 @@ describe('StateAnchorPublisher', function () {
             };
             self.db  = db;
             self.pub = new StateAnchorPublisher(hub);
-            // start() arms the spend guard's durable window (), so point it
+            // start() arms the spend guard's durable window, so point it
             // at a per-node temp file the way this suite already points queuePath and
             // walPath. Left on its ./data default, every mesh node in every run wrote
             // into the checkout and the NEXT run inherited the spends, which reddens
@@ -356,7 +356,7 @@ describe('StateAnchorPublisher', function () {
             // txid (forge), checkpoint_anchored, or no txid at all (stale indexer).
             self.pub._indexerCall = async (coin, method, params) => {
                 if (method !== 'getanchoraction') return null;
-                // A real DOGE indexer only knows MINED anchors. The 
+                // A real DOGE indexer only knows MINED anchors. The
                 // pre-broadcast existence check is the only txid-LESS caller
                 // (receiver verification always binds an announced txid), so gate
                 // txid-less lookups on a checkpoint anchor having actually been
@@ -702,7 +702,7 @@ describe('StateAnchorPublisher', function () {
         });
     });
 
-    // Archive publisher-attestation round (v6, ): at/above the archive-reward
+    // Archive publisher-attestation round (v6): at/above the archive-reward
     // flag-day the elected archive leader emits ANCHOR v6 (the v1 archive anchor + the
     // publisher tail) carrying a 2f+1 oracle_publish attestation over the archive XANCPUB
     // canonical, so the indexer DERIVES the anchor_archive reward and the last
@@ -1674,7 +1674,7 @@ describe('StateAnchorPublisher', function () {
             expect(pub._quorumVerified(CANON, three, set, false)).to.equal(true);
         });
 
-        it('_quorumVerified: duplicate pubkey with garbage sig FIRST still counts the later valid sig ()', function () {
+        it('_quorumVerified: duplicate pubkey with garbage sig FIRST still counts the later valid sig', function () {
             // seen-before-verify was an order-dependent under-count: the garbage
             // entry consumed the pubkey's seen slot and the real signature was
             // skipped, diverging from the indexer recovery twin (verify-first).
@@ -1847,7 +1847,7 @@ describe('StateAnchorPublisher', function () {
     });
 
     it('archive mirror gates on the CHECKPOINT network, not this.network, so an unscoped hub retires the push at/above the flag-day (#2359)', async function () {
-        // #2236/ (archive leg): on an unscoped hub (this.network===''),
+        // Archive leg: on an unscoped hub (this.network===''),
         // ARCHIVE_REWARD_ACTIVATION[''] is undefined so isArchiveRewardActive('') is
         // false and the OLD code failed to retire the mirror even for a checkpoint
         // whose OWN network is at/above the archive flag-day, push-mirroring a reward
@@ -2699,8 +2699,8 @@ describe('StateAnchorPublisher checkpoint co-sign guard uses the rootless canoni
     });
 });
 
-// ──  Option C: anchor_reward_attestations mirror INSERT ──────────────────────
-describe('StateAnchorPublisher._recordRewardAttestation ', function () {
+// ── anchor_reward_attestations mirror INSERT ──────────────────────
+describe('StateAnchorPublisher._recordRewardAttestation', function () {
     const sinon = require('sinon');
 
     function makePub(){
@@ -2750,7 +2750,7 @@ describe('StateAnchorPublisher._recordRewardAttestation ', function () {
     });
 });
 
-// ── : the attestation row waits for a MINED anchor, not a broadcast one ────
+// ── The attestation row waits for a MINED anchor, not a broadcast one ────
 // _broadcastWithRetry returns on DOGE mempool acceptance, so writing the append-only,
 // never-retracted mirror row there minted a permanent COLLECT-spendable reward for an
 // anchor that could still be evicted or reorged away. Both producer sites now queue.

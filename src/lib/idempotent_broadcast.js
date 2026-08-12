@@ -12,7 +12,7 @@
  *
  **********************************************************************
  *
- * XChain Hub - Shared idempotent-broadcast helper 
+ * XChain Hub - Shared idempotent-broadcast helper
  *
  * The four hub effectors that spend coin on-chain each grew the same two
  * money-path primitives independently. This module is the single shared copy:
@@ -62,7 +62,7 @@ class AtMostOnce {
     delete(key){ return this._seen.delete(String(key)); }
     clear(){ this._seen.clear(); }
     get size(){ return this._seen.size; }
-    // The live key list, so a caller that bounds this set ('s deadline-anchored
+    // The live key list, so a caller that bounds this set (the deadline-anchored
     // eviction in AttestationRelay) can enumerate what it holds and rewrite its own
     // durable record from it. A copy, not the backing set: a caller iterating while it
     // deletes must not mutate what it is walking.

@@ -12,7 +12,7 @@ CREATE TABLE capability_snapshots (
 
 -- Presence of a row = that pubkey QUALIFIED for `capability` at `snapshot_block`
 -- (the hub only writes pubkeys already filtered by min_stake via getcapabilityvalidators).
--- `source` is part of the key : at/above STAKE_WEIGHTED_QUORUM a key
+-- `source` is part of the key: at/above STAKE_WEIGHTED_QUORUM a key
 -- delegated by two sources yields one row per (source, pubkey); a 3-column key
 -- (without source) collapses them on INSERT IGNORE and silently drops the second
 -- source, understating stake for any mirror-reading verifier.

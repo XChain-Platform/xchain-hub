@@ -170,12 +170,12 @@ function memDb() {
                         r.status = 'retracted';
                 return [];
             }
-            //  getCall: explicit-column SELECT by call_id, both phases.
+            // getCall: explicit-column SELECT by call_id, both phases.
             if (sql.includes('FROM cross_chain_calls WHERE call_id = ? ORDER BY phase')) {
                 return rows.filter(r => r.call_id === params[0])
                            .sort((a, b) => String(a.phase).localeCompare(String(b.phase)));
             }
-            //  listCalls: explicit-column SELECT with optional filters, id DESC.
+            // listCalls: explicit-column SELECT with optional filters, id DESC.
             if (sql.startsWith('SELECT id, call_id, phase, snapshot_block, network, source_chain') && sql.includes('ORDER BY id DESC')) {
                 let out = rows.slice();
                 let pi = 0;
@@ -752,7 +752,7 @@ describe('CrossChainCallEngine', function () {
                 { table: 'cross_chain_calls', source_chain: 'BTC', from_action_index: 40, to_action_index: 75, retraction_generation: 5 });
         });
 
-        // : a supplied-but-malformed bound must ABORT, not fall through to the
+        // a supplied-but-malformed bound must ABORT, not fall through to the
         // absent-bound branch. Fail-open here retracted every finalized call on the chain
         // (raw lower bound, MariaDB coerces a nonnumeric to 0) or dropped the range/fence.
         it('retractCallsForReorg aborts on a supplied-but-malformed bound instead of widening', async function () {
@@ -873,7 +873,7 @@ describe('CrossChainCallEngine', function () {
             expect(vals.truncated).to.not.equal(true);
         });
 
-        // : carrying the flag is only half the guard. capability_snapshots has no
+        // carrying the flag is only half the guard. capability_snapshots has no
         // column for it, so a truncated set that gets MIRRORED reaches the off-BTC
         // cross_chain verifiers as a COMPLETE one and finalizes over an under-counted stake
         // denominator this hub itself rejects. Persist has to refuse the write.
@@ -909,7 +909,7 @@ describe('CrossChainCallEngine', function () {
         });
     });
 
-    // : read-only relay-row surfacing for the explorer/dashboard.
+    // read-only relay-row surfacing for the explorer/dashboard.
     describe('getCall / listCalls (relay-row surfacing)', function () {
 
         function seed(db) {

@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// : NODEPROOF full-node tier activation preflight. The tier ships INERT
+// NODEPROOF full-node tier activation preflight. The tier ships INERT
 // (REWARD_SHARE '0', GENESIS_VERIFIERS []) and activation is a fleet-wide
 // consensus change, so the hub (a) refuses a per-operator FULLNODE override that
 // diverges from the pinned coin bundle, (b) refuses an incoherent activation that
@@ -44,7 +44,7 @@ function activatedCfg(overrides) {
     }, overrides || {});
 }
 
-describe('fullnode_activation ', function () {
+describe('fullnode_activation', function () {
 
     describe('the shipped canonical bundle', function () {
 
@@ -186,7 +186,7 @@ describe('fullnode_activation ', function () {
     });
 });
 
-describe('XChainHub._assertCanonicalFullnode ', function () {
+describe('XChainHub._assertCanonicalFullnode', function () {
 
     let warnStub;
     beforeEach(function () { warnStub = sinon.stub(console, 'warn'); });
@@ -205,7 +205,7 @@ describe('XChainHub._assertCanonicalFullnode ', function () {
         expect(err).to.not.equal(null);
         expect(err.code).to.equal('FULLNODE_CONFIG_MISMATCH');
         expect(err.message).to.include('CHALLENGE_INTERVAL_BLOCKS');
-        expect(err.message).to.include('NODEPROOF-ACTIVATION-RUNBOOK');
+        expect(err.message).to.include('fleet-wide consensus change');
     });
 
     it('refuses a per-operator activation on mainnet (consensus change, must ship in the bundle)', function () {
@@ -247,7 +247,7 @@ describe('XChainHub._assertCanonicalFullnode ', function () {
     });
 });
 
-describe('XChainHub._seedCanonicalFullnode ', function () {
+describe('XChainHub._seedCanonicalFullnode', function () {
 
     it('seeds at CONSTRUCTION, before startP2P builds FullNodeChallengeRound', function () {
         // The engine snapshots cfg.FULLNODE in its constructor, so a seed that only
@@ -292,7 +292,7 @@ describe('XChainHub._seedCanonicalFullnode ', function () {
 
     it('picks up the regtest env override so the hub matches its indexer', function () {
         // The regtest venue activates the tier with FULLNODE_* env vars; before
-        //  those reached the indexer only, and the hub kept the inert values.
+        // those reached the indexer only, and the hub kept the inert values.
         process.env.FULLNODE_GENESIS_VERIFIERS = PK1 + ',' + PK2.toUpperCase();
         process.env.FULLNODE_CHALLENGE_INTERVAL_BLOCKS = '4';
         try {
@@ -307,7 +307,7 @@ describe('XChainHub._seedCanonicalFullnode ', function () {
     });
 });
 
-describe('XChainHub._loadCapabilityConfigFile FULLNODE integration ', function () {
+describe('XChainHub._loadCapabilityConfigFile FULLNODE integration', function () {
 
     let tmpPath, warnStub, logStub;
     beforeEach(function () {

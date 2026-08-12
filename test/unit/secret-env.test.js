@@ -1,4 +1,4 @@
-// : secret env vars must be supplied under a name that automatic
+// secret env vars must be supplied under a name that automatic
 // redaction matches (`_SECRET`), with the historical `_PASS` name still read so
 // an upgrade does not take a running hub down.
 
@@ -7,7 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { SECRET_ENV_ALIASES, resolveSecretEnv, deprecatedSecretEnvNames } = require('../../src/secret-env');
 
-describe('secret-env ', function () {
+describe('secret-env', function () {
 
     describe('alias table', function () {
 

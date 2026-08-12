@@ -18,8 +18,6 @@
  * plain HTTPS GET requests. Used as the v1 built-in provider to exercise
  * the full attestation pipeline (request -> fetch -> consensus -> publish).
  *
- * Spec: claude/reports/specs/2026-05-24_external-attestation-framework.md (§7)
- *
  * Provider interface (mirrored by all providers; see providers/README):
  *   fetch(payload, options)  -> Promise<{ body: Buffer, meta: string }>
  *   agree(proposals)         -> { body, meta } | null

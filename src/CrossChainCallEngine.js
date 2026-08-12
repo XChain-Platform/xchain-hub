@@ -92,7 +92,7 @@ const RESULT_STATUSES = ['ok', 'reverted', 'out_of_gas', 'no_contract', 'not_cal
 // permanently shifting its action-index counter relative to a node that sees
 // the row on time (EMITTER_ACTION_INDEX is in the call_id preimage -> ledger
 // fork). Tunable UPWARD via XCALL_RELAY_MARGIN_BLOCKS (env / p2pConfig); the
-// default doubles as a HARD FLOOR, so a 0 no longer zeroes the margin (#4202).
+// default doubles as a HARD FLOOR, so a 0 no longer zeroes the margin.
 // Sizing, the ceiling and the follower-side floor live in lib/relay_margin.js.
 const { DEFAULT_RELAY_MARGIN_BLOCKS, RELAY_MIN_FUTURE_S, relayMarginS } = require('./lib/relay_margin.js');
 
@@ -123,7 +123,7 @@ const RESULT_BACKOFF_MAX_MS     = 60 * 60 * 1000;   // exponential backoff ceili
 const RESULT_BACKOFF_EXCLUDE_MAX = 500;             // max parked call_ids excluded per query (bounds query size)
 const RESULT_BACKOFF_MAP_MAX    = 10000;            // parked-map cap; FIFO evict just retries an entry sooner (safe)
 
-// Read-only surface column list for the relay-row API (: getCall/listCalls).
+// Read-only surface column list for the relay-row API (getCall/listCalls).
 // Excludes the heavy validator_signatures blob, the hub-side-only ANCHOR audit
 // columns (batch_seq/archived_status/anchor_txid), and the mirror-internal
 // consensus fences (finalizing_view/push_generation): those serve signature
@@ -152,7 +152,7 @@ class CrossChainCallEngine extends EventEmitter {
 
         // Confirmation thresholds (env -> p2pConfig -> default), shared with the
         // swap-attestation engine so operators tune ONE depth per chain.
-        // Mainnet floor-clamped, see coins.resolveConfirmations .
+        // Mainnet floor-clamped, see coins.resolveConfirmations.
         this.confirmations = coins.resolveConfirmations(cfg, hub && hub.network);
 
         // Relay margin in blocks (env -> p2pConfig -> default). Stamped onto every
@@ -264,7 +264,7 @@ class CrossChainCallEngine extends EventEmitter {
         let rows = [];
         try {
             // Mirror _pollTargetResults' retracted-result filter so the backlog
-            // count matches what the engine will actually re-relay (#4478): a
+            // count matches what the engine will actually re-relay: a
             // dispatch whose only result row is 'retracted' is pending again.
             rows = await this.db.doQuery(
                 "SELECT d.target_chain, COUNT(*) AS pending_relay_count " +
@@ -284,7 +284,7 @@ class CrossChainCallEngine extends EventEmitter {
         };
     }
 
-    // : surface one XCALL relay lifecycle for the explorer/dashboard. Reads
+    // Surface one XCALL relay lifecycle for the explorer/dashboard. Reads
     // the hub's OWN cross_chain_calls table and returns both phases keyed by call_id
     // as { call_id, dispatch, result }. dispatch/result are null when absent (e.g. a
     // dispatched call whose target execution has not been relayed back yet). Includes
@@ -303,7 +303,7 @@ class CrossChainCallEngine extends EventEmitter {
         };
     }
 
-    // : list XCALL relay rows for the explorer/dashboard, newest first,
+    // List XCALL relay rows for the explorer/dashboard, newest first,
     // with optional source_chain/target_chain/status/phase filters. Read-only.
     async listCalls({sourceChain, targetChain, status, phase, limit} = {}){
         let where = [];
@@ -399,7 +399,7 @@ class CrossChainCallEngine extends EventEmitter {
             effective_time:        this._relayEffectiveTime(String(call.target_chain)),
             result_status:         null,
             return_payload_b64:    null,
-            // Source-chain reorg fence (item 5308): the source indexer's generation
+            // Source-chain reorg fence: the source indexer's generation
             // for this call, mirrored from getpendingcrosschaincalls. The result row
             // inherits it so a source-keyed retraction fences both phases by the same
             // generation. Metadata only; NOT part of the signed canonical.
@@ -420,7 +420,7 @@ class CrossChainCallEngine extends EventEmitter {
     // completed at confirmation depth, and run a result round for each.
     async _pollTargetResults(coin){
         // The result-leg join carries `AND r.status <> 'retracted'` for the same
-        // reason _rowExists does (#4478): after a deep reorg leaves a 'retracted'
+        // reason _rowExists does: after a deep reorg leaves a 'retracted'
         // result row, an unfiltered join would see r.id IS NOT NULL, exclude the
         // dispatch, and never re-relay the result (the call could then only deliver
         // the deterministic 'expired' callback). Filtering retracted result rows
@@ -519,7 +519,7 @@ class CrossChainCallEngine extends EventEmitter {
             result_status:         resultStatus,
             return_payload_b64:    (res.return_payload_b64 == null) ? '' : String(res.return_payload_b64),
             // Inherit the source generation from the dispatch row so the source-keyed
-            // reorg retraction fences this result phase by the same generation (item 5308).
+            // reorg retraction fences this result phase by the same generation.
             push_generation:       Number(dispatch.push_generation) || 0
         };
 
@@ -575,7 +575,7 @@ class CrossChainCallEngine extends EventEmitter {
         if(row.source_chain === row.target_chain) return false;
         if(String(row.round_id).toLowerCase() !== this._roundId(row.phase, String(row.call_id).toLowerCase())) return false;
 
-        // Canonical integer spellings (#4204). These fields are signed verbatim but
+        // Canonical integer spellings. These fields are signed verbatim but
         // re-derived from a BIGINT round-trip by xexec.js and the archive verifier, so
         // a leader-supplied '041' would pass every Number()-based check below, collect
         // an honest quorum, and finalize a row whose signatures no verifier can ever
@@ -591,7 +591,7 @@ class CrossChainCallEngine extends EventEmitter {
         // one). Pinning an ancient snapshot_block would let a Byzantine leader
         // select a stale validator set for indexer-side signature verification.
         //
-        // The window is ASYMMETRIC (#4202). The upper guard is the old griefing
+        // The window is ASYMMETRIC. The upper guard is the old griefing
         // bound: a far-future row would never settle. The lower guard is a
         // propagation floor: an effective_time at or behind our clock makes the row
         // eligible the instant it finalizes, so an indexer that already holds it
@@ -625,7 +625,7 @@ class CrossChainCallEngine extends EventEmitter {
         let depth  = latest - Number(call.block_index) + 1;
         if(!Number.isFinite(depth) || depth < this.confirmations[row.source_chain]) return false;
 
-        // Lifecycle gates, mirroring _maybeDispatch (#4199). The leader path never
+        // Lifecycle gates, mirroring _maybeDispatch. The leader path never
         // even sees an expired or settled request: it polls getpendingcrosschaincalls
         // (SQL-filtered to request_status='pending') and refuses to START a round once
         // the deadline is reached. The follower path re-fetches by call_id through
@@ -660,7 +660,7 @@ class CrossChainCallEngine extends EventEmitter {
         // Treat a retracted dispatch as absent, exactly as the sibling dispatch lookups
         // do (a reorg marks status='retracted' + broadcasts a deletion). Without this
         // filter a follower co-signs a result round bound to a dispatch its own reorg
-        // already retracted (item 5ecc2867).
+        // already retracted.
         let d = await this.db.doQuery(
             "SELECT * FROM cross_chain_calls WHERE call_id = ? AND phase = 'dispatch' AND status <> 'retracted' LIMIT 1",
             [String(row.call_id).toLowerCase()]);
@@ -698,7 +698,7 @@ class CrossChainCallEngine extends EventEmitter {
     async _writeFinalizedRow(ev){
         let row = ev.row;
         row.validator_signatures = JSON.stringify(ev.signatures || []);
-        row.finalizing_view = ev.view != null ? ev.view : 0;   // PBFT view at finalization; signed into the EQUIV canonical (WI-2 bump 2)
+        row.finalizing_view = ev.view != null ? ev.view : 0;   // PBFT view at finalization; signed into the EQUIV canonical
         // EVERY hub persists the capability snapshot for the row's snapshot_block,
         // not just the round leader: the indexers verify the row's signatures
         // against capability_snapshots in whichever hub DB they mirror, and a
@@ -741,7 +741,7 @@ class CrossChainCallEngine extends EventEmitter {
     // same contract as CrossChainDexEngine._persistCapabilitySnapshot).
     async _persistCapabilitySnapshot(capability, block, network){
         let validators = await this._resolveCapabilityValidators(capability, block, network);
-        // SWQ-TRUNC-MIRROR (): a TRUNCATED set is never mirrored, for the reason
+        // SWQ-TRUNC-MIRROR: a TRUNCATED set is never mirrored, for the reason
         // spelled out in CrossChainDexEngine._persistCapabilitySnapshot. Mirroring the
         // capped rows would let the off-BTC cross_chain verifiers finalize over an
         // under-counted stake denominator that this hub's own meetsStakeThreshold rejects.
@@ -804,14 +804,14 @@ class CrossChainCallEngine extends EventEmitter {
     // archive re-archives the status drift and recovery never resurrects a
     // retracted call as injectable.
     // toActionIndex (optional) bounds the retraction to a CLOSED range [from, to] for a DEFERRED
-    // retraction, so a relay row re-published inside the original open-ended range is not retracted
-    // (item 5296). Absent => open-ended, the live behavior. The bound rides the broadcastDeletion so
+    // retraction, so a relay row re-published inside the original open-ended range is not retracted.
+    // Absent => open-ended, the live behavior. The bound rides the broadcastDeletion so
     // replicas mirror the same delete.
-    // retractionGeneration (optional, item 5308): when present, only rows stamped push_generation <=
+    // retractionGeneration (optional): when present, only rows stamped push_generation <=
     // it are retracted, so a relay row re-finalized at a recycled source action_index (higher
     // generation, post-rollback) survives even inside [from, to]. Omitted (older indexer) => no fence.
     async retractCallsForReorg(chain, fromActionIndex, toActionIndex, retractionGeneration){
-        // Fail-closed on a SUPPLIED-but-invalid bound (): a malformed to/generation used to
+        // Fail-closed on a SUPPLIED-but-invalid bound: a malformed to/generation used to
         // collapse into the absent branch and drop the range/fence clause, and the raw lower bound
         // was bound into SQL where MariaDB coerces a nonnumeric to 0 (retracting the whole chain).
         let bounds = normalizeRetractionBounds(fromActionIndex, toActionIndex, retractionGeneration);
@@ -840,7 +840,7 @@ class CrossChainCallEngine extends EventEmitter {
             let evt = { table: 'cross_chain_calls', source_chain: chain, from_action_index: from };
             if(bounded) evt.to_action_index = to;
             if(fenced) evt.retraction_generation = gen;
-            // : quorum-class deletions ride the retraction-signing round when
+            // Quorum-class deletions ride the retraction-signing round when
             // active (2f+1 co-signatures before mirrors will delete); legacy unsigned
             // broadcast otherwise. submitLocal always records the local intent so this
             // hub can co-sign peers' rounds for the same reorg.
@@ -895,7 +895,7 @@ class CrossChainCallEngine extends EventEmitter {
     // clock-skew bound (RELAY_MARGIN_MAX_S) so a large XCALL_RELAY_MARGIN_BLOCKS
     // can never produce a row a peer would reject, and FLOORED at the default
     // margin so XCALL_RELAY_MARGIN_BLOCKS=0 can no longer stamp the bare clock
-    // second and re-open the very race the margin exists to close (#4202). The
+    // second and re-open the very race the margin exists to close. The
     // operator tunes the margin up; the floor is not tunable, because followers
     // enforce a fixed floor of their own and a hub stamping under it would never
     // collect a quorum.

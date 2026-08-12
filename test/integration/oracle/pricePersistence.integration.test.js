@@ -87,8 +87,8 @@ describe('Integration: Price Persistence (SC-3.x)', function () {
             );
 
             // ... and the XCHAIN/USD row the quote is denominated in. getFeeQuote
-            // throws without it , which read as a product failure here when
-            // it was a fixture that predated the XCHAIN-denominated fee.
+            // throws without it, which read as a product failure here when it was
+            // a fixture that predated the XCHAIN-denominated fee.
             await db.doQuery(
                 `INSERT INTO price_snapshots
                     (round_number, coin_pair, price, reference_block, reference_chain,

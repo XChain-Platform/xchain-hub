@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-//  wiring proof: the shared SpendGuard's per-capability runtime pause
+// wiring proof: the shared SpendGuard's per-capability runtime pause
 // reaches an effector's PRIMARY (broadcast) path, not only its queue sweep, and
 // each effector registers a $2000-clamped spend ceiling. Uses OraclePublisher as
 // the representative effector (its _processQueue is the sole broadcast choke
@@ -51,7 +51,7 @@ function makeHub() {
     };
 }
 
-describe(' SpendGuard wiring into hub effectors', function () {
+describe('SpendGuard wiring into hub effectors', function () {
 
     afterEach(function () { sinon.restore(); });
 

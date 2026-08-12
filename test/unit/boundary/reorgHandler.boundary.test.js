@@ -113,7 +113,7 @@ describe('Boundary: ReorgHandler', function () {
 
     describe('duplicate reorg report', function () {
 
-        it('second call with same reorgId is a silent no-op, not an error ', async function () {
+        it('second call with same reorgId is a silent no-op, not an error', async function () {
             rh.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
 

@@ -12,7 +12,7 @@
  *
  **********************************************************************
  *
- * XChain Hub - Reorg-retraction bound normalization ()
+ * XChain Hub - Reorg-retraction bound normalization
  *
  * The three reorg-retraction engines (price, XCALL, DEX) take the same
  * (from, to, generation) triple off an indexer push and turn it into a

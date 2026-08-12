@@ -60,10 +60,10 @@ const SLASHING_PARAMS = ['SLASH_DEVIATION_THRESHOLD', 'SLASH_MISSED_ROUNDS_THRES
 // proposals; at/above it the snapshot is REQUIRED and is the tally denominator,
 // so validator-set churn between propose() and tally can no longer move the
 // quorum/approval goalposts. Same shape + BTC-anchored gating discipline as
-// STAKE_WEIGHTED_QUORUM_ACTIVATION. mainnet ARMED 2026-07-16 (, with the
-//  flag-day set): BTC 963000, RE-PINNED 2026-08-12 by off 969500
-// onto the  pre-freeze train boundary, the one height the rest of the
-//  BTC-height cohort now carries; deploy every hub before this era.
+// STAKE_WEIGHTED_QUORUM_ACTIVATION. mainnet ARMED 2026-07-16, with the rest of
+// that flag-day set: BTC 963000, RE-PINNED 2026-08-12 off 969500
+// onto the shared pre-freeze train boundary, the one height the rest of that
+// BTC-height cohort now carries; deploy every hub before this era.
 const GOV_SNAPSHOT_ACTIVATION = { mainnet: 963000, testnet: 0, regtest: 0 };
 
 // Bounds on a persisted/wire snapshot (DoS): a validator set is small, so a
@@ -71,7 +71,7 @@ const GOV_SNAPSHOT_ACTIVATION = { mainnet: 963000, testnet: 0, regtest: 0 };
 const GOV_SNAPSHOT_MAX_VALIDATORS = 1000;
 const GOV_SNAPSHOT_MAX_BYTES      = 262144;   // 256 KB serialized
 
-// GOV-VOTE-REPLAY-1 : the exact bytes a governance vote is signed over.
+// GOV-VOTE-REPLAY-1: the exact bytes a governance vote is signed over.
 // THREE paths produce these bytes (vote() signs, _handleVote and
 // _ingestResultVotes verify), and a one-byte disagreement between them silently
 // drops every peer's vote, so they all call this and nothing builds the payload
@@ -91,7 +91,7 @@ function voteSigningPayload(proposalId, vote, voterPubkey, seq) {
 // JSON.stringify byte-identically on every hub. Anything else (missing, NaN,
 // negative, fractional, Infinity, a numeric string from an older peer) is not
 // coerced into something plausible: it returns 0, which callers treat as
-// "unsigned by an  hub" and refuse. Coercing would let a peer pick bytes
+// "unsigned by a hub that predates GOV-VOTE-REPLAY-1" and refuse. Coercing would let a peer pick bytes
 // our verifier reconstructs differently than the signer did.
 function normalizeVoteSeq(seq) {
     if (typeof seq !== 'number' || !Number.isSafeInteger(seq) || seq <= 0) return 0;
@@ -147,7 +147,7 @@ class Governance extends EventEmitter {
         this.tallyInterval = parseInt(process.env.GOVERNANCE_TALLY_INTERVAL) || 60000;
     }
 
-    // : canonicalize the set's ORDER on the way in, so
+    // Canonicalize the set's ORDER on the way in, so
     // _getProposalLeader (`validatorSet[hash(proposalId) % N]`) picks the same
     // tally leader on every hub for identical membership. Membership checks
     // and _buildValidatorSnapshot are unaffected: the former is order-blind and
@@ -736,7 +736,7 @@ class Governance extends EventEmitter {
         // GOV-VOTE-REPLAY-1: a vote with no usable seq is refused outright rather
         // than admitted with a default. Admitting seq=0 would rebuild exactly the
         // replayable payload this fix removes, so the gossip wire format is
-        // deliberately BREAKING here: a pre- peer's votes are dropped, not
+        // deliberately BREAKING here: a legacy peer's votes are dropped, not
         // counted. Safe to do now precisely because the mainnet validator registry
         // is empty (getvalidators returns []) and one hub runs each mainnet chain,
         // so there is no mixed-version federation to fragment. That window closes
@@ -744,7 +744,7 @@ class Governance extends EventEmitter {
         let voteSeq = normalizeVoteSeq(seq);
         if (!voteSeq) {
             console.warn('Governance: dropped vote on ' + proposalId + ' from ' + voterPubkey +
-                ': missing or invalid seq (pre- peer, or a replay stripped of its seq)');
+                ': missing or invalid seq (a legacy peer, or a replay stripped of its seq)');
             return;
         }
 
@@ -808,7 +808,7 @@ class Governance extends EventEmitter {
         if (!registry) return false;
         if (registry.size === 0) {
             // Empty-registry leniency is for the genuine pre-bootstrap window ONLY
-            // (G-1/): once the on-chain snapshot has produced a non-empty
+            // (G-1): once the on-chain snapshot has produced a non-empty
             // effective signer set, an empty registry is a misconfiguration or
             // wipe window, not bootstrap, and counting unattributable senders
             // would reopen count-mode quorum forgery. Fail closed instead.

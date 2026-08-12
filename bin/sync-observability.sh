@@ -14,7 +14,7 @@
 #*********************************************************************
 
 #
-# Vendor the shared observability module  into the sibling services.
+# Vendor the shared observability module into the sibling services.
 #
 # Every xchain-* service is an independent repo with its own package.json, so a
 # shared /metrics exporter cannot be an internal npm dependency without a

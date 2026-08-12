@@ -39,8 +39,6 @@
  * quorum and converges on the next retry. This is the same transient skew
  * the confirmation gate already tolerates.
  *
- * Spec: claude/reports/specs/2026-05-24_external-attestation-framework.md (§8.2, Phase 4)
- *
  ********************************************************************/
 
 'use strict';

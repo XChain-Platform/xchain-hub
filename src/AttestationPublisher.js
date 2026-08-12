@@ -34,7 +34,7 @@
  *     entry whose request is no longer pending has already landed on-chain (or
  *     expired) and is dropped without re-broadcast. It cannot stand alone, because
  *     an accepted-but-unmined response is still PENDING and reads exactly like one
- *     that was never sent ().
+ *     that was never sent.
  *   - The durable `attest_published_requests` marker is what closes that gap
  *     across a restart: intent is recorded IMMEDIATELY before the send, past every
  *     remaining no-send exit, and confirmed after it, so the sweep can tell "already
@@ -56,8 +56,6 @@
  *   - setEncoder + setWalletSignHook for the default pipeline; build PSBT via
  *     xchain-encoder, sign via wallet hook, broadcast via encoder. (Same
  *     hooks shape as OraclePublisher; phase-3+ wiring.)
- *
- * Spec: claude/reports/specs/2026-05-24_external-attestation-framework.md (§5.2, §9)
  *
  ********************************************************************/
 
@@ -89,30 +87,30 @@ class AttestationPublisher {
         let cfg = hub.p2pConfig || {};
         this.queuePath = process.env.ATTESTATION_QUEUE_PATH || cfg.ATTESTATION_QUEUE_PATH || './data/attestation-queue.jsonl';
 
-        // item 2678 - operator kill switch. Mirrors StateAnchorPublisher's
+        // Operator kill switch. Mirrors StateAnchorPublisher's
         // ANCHOR_ENABLED gate. Halts outbound BTC spend (both the live path and the
         // failover sweep) during an incident without tearing down config. Default on.
         this.enabled = String(process.env.ATTEST_ENABLED || cfg.ATTEST_ENABLED || 'true') !== 'false';
 
-        //  - shared SpendGuard (supersedes the old per-publisher SpendCeiling).
+        // Shared SpendGuard (supersedes the old per-publisher SpendCeiling).
         // Per-window spend ceiling (count + a $2000-clamped USD-cents budget, default-ON),
         // wallet balance floor, and a per-capability runtime pause. The pause folds into
         // allow(), which the live path AND the sweep both consult, so an operator can halt
         // this publisher's PRIMARY (leader) BTC spend at runtime.
         this.spendGuard = new SpendGuard('ATTEST', cfg, 'AttestationPublisher');
 
-        // item 2681 - count of durable-WAL enqueue failures. A non-zero value means a
+        // Count of durable-WAL enqueue failures. A non-zero value means a
         // finalized response could not be recorded before broadcast; surfaced via
         // getPublisherStats() so it is visible without log-grepping.
         this._enqueueFailures = 0;
 
-        // item 2681 - append-only, fsync'd audit log of ACTUAL on-chain spends (rid,
+        // Append-only, fsync'd audit log of ACTUAL on-chain spends (rid,
         // txid, ts). The WAL queue is a pre-send intent record that is REMOVED on
         // success, so post-success reconstruction otherwise depends on stdout retention;
         // this file is the durable record of what BTC fee was actually spent.
         this.spendLogPath = this.queuePath.replace(/\.jsonl$/, '') + '.spend.jsonl';
 
-        // item 2674 - rid -> timestamp of the last AMBIGUOUS broadcast failure (a
+        // rid -> timestamp of the last AMBIGUOUS broadcast failure (a
         // timeout / reset / 5xx after the request left the wire, where the BTC node may
         // have actually accepted the tx). The sweep must NOT re-broadcast such an rid
         // until it has had time to reach the indexer's mined view (leaving the pending
@@ -126,7 +124,7 @@ class AttestationPublisher {
         this.leaderRetryMs        = parseInt(process.env.ATTESTATION_LEADER_RETRY_MS        || cfg.ATTESTATION_LEADER_RETRY_MS        || DEFAULT_LEADER_RETRY_MS);
         this.approxBlockMs        = parseInt(process.env.ATTESTATION_BLOCK_MS               || cfg.ATTESTATION_BLOCK_MS               || APPROX_BTC_BLOCK_MS);
 
-        // item 2674 - how long after an ambiguous send the sweep defers re-broadcast,
+        // How long after an ambiguous send the sweep defers re-broadcast,
         // giving a possibly-accepted tx time to reach the indexer's mined view before
         // we conclude it never landed. Defaults to one failover window.
         this.ambiguousCooldownMs  = parseInt(process.env.ATTESTATION_AMBIGUOUS_COOLDOWN_MS  || cfg.ATTESTATION_AMBIGUOUS_COOLDOWN_MS  || String(this.failoverWindowBlocks * this.approxBlockMs), 10);
@@ -149,7 +147,7 @@ class AttestationPublisher {
         this._broadcastSucceeded = 0;
         this._broadcastFailed    = 0;
 
-        //  - request ids whose durable marker records an INTENT to broadcast
+        // Request ids whose durable marker records an INTENT to broadcast
         // with no confirmation: the process died between recording intent and marking
         // the send done, so whether the BTC tx landed is unknown. Never auto-rebroadcast
         // (that is the second-fee spend the marker exists to prevent); surfaced at
@@ -165,7 +163,7 @@ class AttestationPublisher {
         // never become a duplicate on-chain ATTEST. Cleared once the durable queue is
         // confirmed rewritten (mirrors OraclePublisher._publishedRounds). In-process
         // only: the restart case is covered by the durable `attest_published_requests`
-        // marker below (), and only where a hub DB is wired; with no DB this
+        // marker below, and only where a hub DB is wired; with no DB this
         // set is still the whole guard and a restart can replay.
         this._publishedRequests = new AtMostOnce();
 
@@ -177,10 +175,10 @@ class AttestationPublisher {
         return {
             broadcastSucceeded: this._broadcastSucceeded,
             broadcastFailed:    this._broadcastFailed,
-            enqueueFailures:    this._enqueueFailures,   // item 2681
-            enabled:            this.enabled,            // item 2678
-            quarantined:        this._quarantinedRequests.size,   // , needs operator replay
-            spendGuard:         this.spendGuard.stats()  // 
+            enqueueFailures:    this._enqueueFailures,
+            enabled:            this.enabled,
+            quarantined:        this._quarantinedRequests.size,   // needs operator replay
+            spendGuard:         this.spendGuard.stats()
         };
     }
 
@@ -189,7 +187,7 @@ class AttestationPublisher {
     setEncoder(encoder){ this.encoder = encoder; }
 
     async start(){
-        // : the per-window spend ceilings were memory-only, so every restart
+        // The per-window spend ceilings were memory-only, so every restart
         // restored a full allowance. Reload the saved window before anything publishes.
         this.spendGuard.persistTo();
         // Ensure the queue exists. The queue is load-bearing: it is the durable
@@ -210,7 +208,7 @@ class AttestationPublisher {
             });
         }
 
-        //  - load the durable at-most-once markers BEFORE the crash-replay
+        // Load the durable at-most-once markers BEFORE the crash-replay
         // sweep below, or that first sweep is exactly the pass that re-broadcasts a
         // response the pre-crash process already sent.
         await this._hydratePublishedMarkers().catch(err =>
@@ -250,7 +248,7 @@ class AttestationPublisher {
     // leader broadcasts immediately, followers wait for the failover sweep.
     async onRequestFinalized(event){
         if (!event || !event.requestId) return;
-        // item 2678 kill switch: when disabled, do not WAL or broadcast. Skip rather
+        // Kill switch: when disabled, do not WAL or broadcast. Skip rather
         // than queue-for-later so a disabled publisher does not build a backlog that
         // floods BTC broadcasts the moment it is re-enabled.
         if (!this.enabled){
@@ -307,7 +305,7 @@ class AttestationPublisher {
         // event.signatures.length fallback produced a responsible list of a
         // different LENGTH than consensus and the indexer derived whenever the
         // request carried no redundancy, so _myRank and the failover step-in
-        // schedule ranked against a divergent ordering (item 2643). Failover timing
+        // schedule ranked against a divergent ordering. Failover timing
         // only - the indexer's pending-set guard still prevents a double landing -
         // but wrong timing means multiple followers can step in early or the true
         // rank-1 late.
@@ -323,7 +321,7 @@ class AttestationPublisher {
         }
 
         // Durable write-ahead log BEFORE the send attempt.
-        // item 2681: gate the broadcast on a successful, fsync'd WAL write. The queue
+        // Gate the broadcast on a successful, fsync'd WAL write. The queue
         // is the durable record of an intent to spend a real BTC fee; if it cannot be
         // written (full disk, permissions, bad mount) we must NOT spend, or the fee is
         // spent with only stdout as its trace and crash recovery is disarmed for the
@@ -366,16 +364,16 @@ class AttestationPublisher {
             console.warn('AttestationPublisher: ' + rid.substring(0,16) + '... already broadcast this process lifetime; skipping duplicate live broadcast');
             return;
         }
-        //  - the durable half of the same guard, which survives the restart
+        // The durable half of the same guard, which survives the restart
         // the in-process set does not. Read-only here; the matching intent write comes
         // after the spend reservation below. Either non-send answer leaves the entry on
         // the WAL for the sweep, whose matching gate drops it: the same disposition the
         // in-process check above already gives a duplicate.
         if (await this._durableSendGate(rid) !== 'send') return;
-        // item 2676 - per-window BTC spend ceiling. A tripped ceiling is not a
+        // Per-window BTC spend ceiling. A tripped ceiling is not a
         // failure: leave the entry on the WAL so the sweep publishes it in a later
         // window; do not spend now.
-        //  - RESERVE rather than allow(): every 'request:finalized' handler
+        // RESERVE rather than allow(): every 'request:finalized' handler
         // runs detached (start() only .catch()es it), so several can be parked on the
         // await below at once. With a pure allow() they all read the same pre-send
         // budget and every one of them broadcasts, overshooting the window ceiling by
@@ -386,7 +384,7 @@ class AttestationPublisher {
             console.warn(this.spendGuard.noteBlocked() + ' (' + rid.substring(0,16) + '...); entry retained on queue');
             return;
         }
-        //  - the send is now committed to, so the intent is durable from here
+        // The send is now committed to, so the intent is durable from here
         // and not one line earlier: everything above this point can still decline to
         // send, and an intent row for a never-sent request reads as a crash-mid-send.
         if (!await this._armPublishIntent(rid)){
@@ -399,16 +397,16 @@ class AttestationPublisher {
             this._broadcastSucceeded++;
             this.spendGuard.commit(spendToken);   // the reservation IS the recorded spend
             this._ambiguousSends.delete(rid);
-            this._recordSpend(rid, result && result.txid, 'live');   // item 2681 durable spend audit
+            this._recordSpend(rid, result && result.txid, 'live');   // durable spend audit
             this._publishedRequests.mark(rid);
-            await this._markPublished(rid, result && result.txid);   //  restart-surviving marker
+            await this._markPublished(rid, result && result.txid);   // restart-surviving marker
             this._removeFromQueue(new Set([rid]));
         } catch (e) {
             // The send did not go out, so it consumes no budget (the invariant the
             // old post-send record() gave us for free).
             this.spendGuard.release(spendToken);
             this._broadcastFailed++;
-            // item 2674 - an ambiguous send may have reached the BTC node. Mark it so
+            // An ambiguous send may have reached the BTC node. Mark it so
             // the sweep defers re-broadcast (see _processQueue) instead of blindly
             // spending a second fee. Definitive pre-send errors leave no mark and retry
             // normally.
@@ -418,7 +416,7 @@ class AttestationPublisher {
                               '... (tx may have reached the BTC node); sweep will defer re-broadcast for ~' +
                               Math.ceil(this.ambiguousCooldownMs / 1000) + 's before retrying: ', e);
             } else {
-                //  - definitively no send, so withdraw the intent: leaving it
+                // Definitively no send, so withdraw the intent: leaving it
                 // would quarantine an ordinary RPC rejection at the next restart.
                 await this._clearPublishIntent(rid);
                 console.error('AttestationPublisher: broadcast failed for ' + rid.substring(0,16) + '... (will retry via sweep): ', e);
@@ -428,7 +426,7 @@ class AttestationPublisher {
 
     // ----- Durable queue (JSONL with fsync) -----
 
-    // Durable append (item 2681). Returns true on a confirmed fsync'd write, false
+    // Durable append. Returns true on a confirmed fsync'd write, false
     // on failure. The caller GATES the fee-bearing broadcast on this result: an
     // unwritable queue must not let a real BTC fee be spent with no durable record
     // and with crash recovery disarmed for the entry. A failure is critical (not a
@@ -449,7 +447,7 @@ class AttestationPublisher {
         }
     }
 
-    // item 2681 - append-only, fsync'd audit record of an ACTUAL on-chain spend.
+    // Append-only, fsync'd audit record of an ACTUAL on-chain spend.
     // Best-effort (never blocks or reverses a spend that already happened); its job
     // is post-incident reconstruction of what BTC fee was spent, independent of
     // stdout retention. The WAL queue entry is removed on success, so without this
@@ -467,7 +465,7 @@ class AttestationPublisher {
         }
     }
 
-    // ----- Durable at-most-once marker (attest_published_requests, ) -----
+    // ----- Durable at-most-once marker (attest_published_requests) -----
     //
     // The WAL entry is removed only AFTER broadcaster() resolves and both in-process
     // guards die with the process, so a crash between an accepted send and the dequeue
@@ -529,7 +527,7 @@ class AttestationPublisher {
     // in-process guard so a queued-but-already-published response is never re-broadcast
     // after a restart, and QUARANTINES every intent-only row. Best-effort: a DB error is
     // logged and startup continues, leaving the in-process guard as the only cover for
-    // this process lifetime (the pre-#4250 behavior, never worse).
+    // this process lifetime (the behavior before this marker existed, never worse).
     async _hydratePublishedMarkers(){
         let db = this._db();
         if (!db) return;
@@ -574,7 +572,7 @@ class AttestationPublisher {
     }
 
     // Consult the durable marker before spending a BTC fee. READ-ONLY: it writes no
-    // intent, because the caller may still decline to send after it ( verify)
+    // intent, because the caller may still decline to send after it
     // and an intent row for a request that was never sent is indistinguishable from a
     // crash-mid-send, so a restart would quarantine a perfectly replayable request.
     // Intent is armed by _armPublishIntent once the send is actually committed to.
@@ -627,7 +625,7 @@ class AttestationPublisher {
         }
     }
 
-    // Classify a broadcast failure (: delegates to the shared classifier so
+    // Classify a broadcast failure (delegates to the shared classifier so
     // all four hub effectors answer "could this send have landed?" identically).
     _isAmbiguousSendError(e){
         return isAmbiguousSendError(e);
@@ -730,8 +728,8 @@ class AttestationPublisher {
     // STAKE_WEIGHTED_QUORUM: when active at blockIndex, resolve the SOURCE-keyed
     // weight snapshot and dedupe by staking source so a source's delegated keys
     // cannot occupy multiple responsible slots (mirrors AttestationRound._computeResponsibleSet).
-    // CONSENSUS-CRITICAL: this is the THIRD copy of the responsible-set rule
-    // (item 2643); it must stay byte-for-byte in sync with
+    // CONSENSUS-CRITICAL: this is the THIRD copy of the responsible-set rule;
+    // it must stay byte-for-byte in sync with
     // AttestationRound._computeResponsibleSet and the indexer's attest.js,
     // including the caller's Math.max(1, Number(redundancy) || 1) normalization.
     // A silent change to any one copy is a fork surface; update all three together.
@@ -769,7 +767,7 @@ class AttestationPublisher {
     // Re-broadcast any queued finalized response whose request is still pending.
     // Run once at startup (crash replay) and on an interval (failover + leader retry).
     //
-    // Sweep self-overlap guard (, house convention: FullNodeChallengeRound._tick).
+    // Sweep self-overlap guard (house convention: FullNodeChallengeRound._tick).
     // The sweep is a bare setInterval at 30s while one pass pages the indexer's whole
     // pending set (5s per page) and then awaits a real BTC broadcast per eligible entry,
     // so a slow indexer or a slow node lets the next interval fire on top of this one.
@@ -797,7 +795,7 @@ class AttestationPublisher {
     }
 
     async _processQueueInner(){
-        // item 2678 kill switch: suppress the failover/replay sweep too, not just the
+        // Kill switch: suppress the failover/replay sweep too, not just the
         // live path, or a paused publisher would still drain the queue and spend BTC.
         // Entries stay on the durable WAL untouched and resume only when re-enabled.
         if (!this.enabled){
@@ -839,7 +837,7 @@ class AttestationPublisher {
 
             if (!pendingIds.has(rid)){
                 // Already resolved on-chain; clear it out. This also settles an
-                // ambiguous send (item 2674): the tx landed and left the pending set,
+                // ambiguous send: the tx landed and left the pending set,
                 // so drop it and forget the ambiguous mark rather than re-broadcasting.
                 drop.add(rid);
                 this._ambiguousSends.delete(rid);
@@ -871,7 +869,7 @@ class AttestationPublisher {
                 : (age >= rank * this.failoverWindowBlocks * this.approxBlockMs);
             if (!eligible) continue;
 
-            // item 2674 - defer re-broadcast of a request whose prior send failed
+            // Defer re-broadcast of a request whose prior send failed
             // AMBIGUOUSLY until it has had time to reach the indexer's mined view. It
             // is still pending here, but "pending" cannot distinguish a never-sent tx
             // from a landed-but-unmined one (the exact double-spend window). If the
@@ -892,7 +890,7 @@ class AttestationPublisher {
                 continue;
             }
 
-            //  - the guard the pending-set check above cannot give us. A
+            // The guard the pending-set check above cannot give us. A
             // response the PREVIOUS process broadcast is still pending here (accepted
             // but unmined), and both in-process guards died with that process, so
             // without a durable marker this sweep pays a second BTC fee for it.
@@ -900,9 +898,9 @@ class AttestationPublisher {
             if (gate === 'sent'){ drop.add(rid); continue; }
             if (gate === 'defer') continue;   // retained, retried on a later sweep
 
-            // item 2676 - per-window BTC spend ceiling. When exhausted, retain the
+            // Per-window BTC spend ceiling. When exhausted, retain the
             // entry (no spend) for a later window rather than re-broadcasting now.
-            //  - reserve before the await for the same reason the live path
+            // Reserve before the await for the same reason the live path
             // does: this loop awaits a real broadcast per entry, so a live
             // onRequestFinalized firing mid-await would otherwise pass the very same
             // allow() this pass already passed.
@@ -911,7 +909,7 @@ class AttestationPublisher {
                 console.warn(this.spendGuard.noteBlocked() + ' (' + rid.substring(0,16) + '...); entry retained on queue');
                 continue;
             }
-            //  - intent goes durable only here, past every no-send exit above
+            // Intent goes durable only here, past every no-send exit above
             // (the ceiling trip especially: it retains the entry for a later window, and
             // an intent row would make that later window quarantine it instead).
             if (!await this._armPublishIntent(rid)){
@@ -926,23 +924,23 @@ class AttestationPublisher {
                 this._publishedRequests.mark(rid);
                 this.spendGuard.commit(spendToken);   // the reservation IS the recorded spend
                 this._ambiguousSends.delete(rid);
-                await this._markPublished(rid, result && result.txid);   //  restart-surviving marker
-                this._recordSpend(rid, result && result.txid, rank === 0 ? 'sweep-leader' : 'sweep-stepin');  // item 2681
+                await this._markPublished(rid, result && result.txid);   // restart-surviving marker
+                this._recordSpend(rid, result && result.txid, rank === 0 ? 'sweep-leader' : 'sweep-stepin');
                 replayed++;
                 drop.add(rid);
                 console.log('AttestationPublisher: ' + (rank === 0 ? 're-broadcast leader' : 'stepped in (rank ' + rank + ')') +
                             ' for ' + rid.substring(0,16) + '... txid=' + (result && result.txid ? result.txid : '?'));
             } catch (e) {
-                // The send did not go out, so it consumes no budget ().
+                // The send did not go out, so it consumes no budget.
                 this.spendGuard.release(spendToken);
-                // item 2674 - mark an ambiguous replay failure so the NEXT sweep defers
+                // Mark an ambiguous replay failure so the NEXT sweep defers
                 // rather than immediately re-broadcasting a possibly-landed tx.
                 if (this._isAmbiguousSendError(e) || (e && e.attestAmbiguousSend)){
                     this._ambiguousSends.set(rid, Date.now());
                     console.error('AttestationPublisher: AMBIGUOUS replay failure for ' + rid.substring(0,16) +
                                   '... (tx may have reached the BTC node); deferring re-broadcast: ', e);
                 } else {
-                    //  - definitively no send; withdraw the intent so the retry
+                    // Definitively no send; withdraw the intent so the retry
                     // this line promises is not cancelled by a quarantine after a restart.
                     await this._clearPublishIntent(rid);
                     console.error('AttestationPublisher: replay broadcast failed for ' + rid.substring(0,16) + '... (will retry): ', e);
@@ -1055,7 +1053,7 @@ class AttestationPublisher {
         let txHex = await this.walletSignFn(psbtResult.psbt);
         if (!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
         // Everything above is pre-send (build/sign; no money moved). Only broadcast_tx
-        // has a side effect, so only ITS failures are classified for ambiguity (item 2674).
+        // has a side effect, so only ITS failures are classified for ambiguity.
         try {
             return await this.encoder.broadcastTx(txHex);
         } catch (e) {

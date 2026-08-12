@@ -16,8 +16,7 @@
  * Regression guards for the validator setup/run findings (2026-05-30 audit).
  * Each of these bugs was SILENT: the node came up and looked healthy while
  * being subtly broken, which is exactly what a permanent regression gate is
- * for. Spec: claude/reports/specs/2026-05-30_validator-test-spec.md (Pillar B);
- * handover: claude/reports/2026-05-30_validator-testing-handover.md §3.2.
+ * for.
  *
  *   F1  mariadb ^3.5.x is ESM-only → require('mariadb') crashed fresh builds.
  *   F3  startCapabilities() was never called → self-test config unreachable.

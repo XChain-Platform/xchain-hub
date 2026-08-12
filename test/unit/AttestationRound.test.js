@@ -664,9 +664,9 @@ describe('AttestationRound', function () {
         });
     });
 
-    // ── durable fetch cache () ──────────────────────────────────────
+    // ── durable fetch cache ──────────────────────────────────────
 
-    describe('_startRound() durable fetch cache ()', function () {
+    describe('_startRound() durable fetch cache', function () {
 
         const MY_PUBKEY = 'aa'.repeat(32);
 

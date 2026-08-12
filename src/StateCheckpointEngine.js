@@ -146,7 +146,7 @@ class StateCheckpointEngine extends EventEmitter {
         this._malformedFinalized  = 0;
         this._subQuorumFinalized  = 0;
 
-        // : cadence stalls. Every pre-leadership bail in _tick used to return
+        // Cadence stalls. Every pre-leadership bail in _tick used to return
         // silently, so a hub whose oracle_publish capability had gone unqualified
         // produced zero checkpoints and zero log lines. The mainnet hub sat that way
         // for 18 days (last checkpoint 2026-07-10 at BTC 957439, tip 960028) because
@@ -259,7 +259,7 @@ class StateCheckpointEngine extends EventEmitter {
             round_timeouts:          this._roundTimeouts,
             malformed_finalized:     this._malformedFinalized,
             sub_quorum_finalized:    this._subQuorumFinalized,
-            // : non-zero with a reason means the engine is alive but structurally
+            // Non-zero with a reason means the engine is alive but structurally
             // unable to checkpoint (unqualified capability, missing identity, not in the
             // validator set), the failure mode that produced 18 silent days on mainnet.
             cadence_stalls:          this._cadenceStalls,
@@ -306,7 +306,7 @@ class StateCheckpointEngine extends EventEmitter {
             }
 
             let validators = await this._resolveCapabilityValidators('oracle_publish', btcBlock);
-            // : dedupe to DISTINCT pubkeys before ranking (mirrors the finalizer's
+            // Dedupe to DISTINCT pubkeys before ranking (mirrors the finalizer's
             // Set at _handleFinalized). At/above STAKE_WEIGHTED_QUORUM the weighted
             // snapshot is one row per (source, pubkey), so a key delegated by two sources
             // appears twice; ranking over the raw list inflates pubkeys.length and lets
@@ -369,7 +369,7 @@ class StateCheckpointEngine extends EventEmitter {
 
         let network = String(bh.network || '');
         if(!network) throw new Error(chain + ' indexer returned no network (refusing a network-agnostic checkpoint)');
-        // : seq is a deterministic function of the round's BTC snapshot_block, NOT
+        // Seq is a deterministic function of the round's BTC snapshot_block, NOT
         // COALESCE(MAX(seq))+1. The old read-then-allocate let two one-block-tip-skewed
         // leaders read the same MAX and mint the SAME seq for DIFFERENT blocks; every
         // honest leader now derives its seq from the (per-hub-unique-at-a-given-tip)
@@ -406,20 +406,20 @@ class StateCheckpointEngine extends EventEmitter {
 
         let myPubkey = this.identity.getPubkeyHex().toLowerCase();
         let mySig    = this.identity.sign(canonical);
-        // #3095: the SWQ gate below resolves on this.network; refuse before signing if
+        // The SWQ gate below resolves on this.network; refuse before signing if
         // the checkpoint we just built disagrees (a mis-set indexer network).
         this._assertCheckpointNetwork(cp, 'propose');
         let snapCount = validators.length;   // raw row count (matches _handleFinalized + anchor.js:336)
         // STAKE_WEIGHTED_QUORUM: weighted (source-deduped) at/above activation, else count.
         let weighted  = swq.isStakeWeightedQuorumActive(cp.snapshot_block, this.network);
-        let quorum    = bftQuorumOrSingle(snapCount, 1);   // : majority-floored BFT quorum
+        let quorum    = bftQuorumOrSingle(snapCount, 1);   // majority-floored BFT quorum
 
         // Single-node self-sign fast path. Below SWQ this is snapCount<=1 (one row).
         // At/above SWQ the snapshot is one row per (source, pubkey), so a lone validator
         // whose one key is delegated by multiple sources has snapCount>1 even though THIS
         // hub is the entire federation; meetsStakeThreshold structurally cannot credit one
         // key for multiple sources (pubkey->source is 1:1), so that round could never
-        // gather a second signer and would stall ( / item 2651). Detect the genuine
+        // gather a second signer and would stall (item 2651). Detect the genuine
         // sole-self case - every snapshot row is our own pubkey - and self-finalize,
         // mirroring the CrossChainDexConsensus soleSelf guard. The _tick cadence check
         // already proved we are a member, so a distinct-pubkey count of 1 means that one
@@ -488,7 +488,7 @@ class StateCheckpointEngine extends EventEmitter {
         if(!Number.isFinite(myBtc)) return;                        // no own tip -> fail closed
         if(Math.abs(myBtc - Number(cp.snapshot_block)) > this.cosignToleranceBlocks) return;
 
-        //  deterministic-seq guard: checkpoint_seq is a pure function of
+        // Deterministic-seq guard: checkpoint_seq is a pure function of
         // snapshot_block, so re-derive it and refuse a leader whose seq does not match.
         // This closes seq-grinding (a leader picking an arbitrary seq to dodge the
         // replay guard below or fork the anchor/reward bookkeeping) and makes the
@@ -496,7 +496,7 @@ class StateCheckpointEngine extends EventEmitter {
         if(Number(cp.checkpoint_seq) !== StateCheckpointEngine.deriveCheckpointSeq(cp.snapshot_block)) return;
 
         let validators = await this._resolveCapabilityValidators('oracle_publish', cp.snapshot_block);
-        // : dedupe to DISTINCT pubkeys before ranking, in lockstep with the leader
+        // Dedupe to DISTINCT pubkeys before ranking, in lockstep with the leader
         // site in _tick (see the rationale there). Both MUST rank the same list or leader
         // and follower disagree on the cadence slot (split-brain). Inert below SWQ.
         let pubkeys    = [...new Set(validators.map(v => String(v.pubkey).toLowerCase()))].sort();
@@ -535,7 +535,7 @@ class StateCheckpointEngine extends EventEmitter {
             return;
         }
 
-        // : matching the proposer is NOT sufficient post-flag-day. Two rootless
+        // Matching the proposer is NOT sufficient post-flag-day. Two rootless
         // hubs agree byte-for-byte (the canonical's root suffix is empty when the roots
         // are null), so the check above passes and we would co-sign a checkpoint that
         // carries none of the light-client commitment its own flag-day requires. The
@@ -592,26 +592,26 @@ class StateCheckpointEngine extends EventEmitter {
             return;
         }
 
-        // : a finalized checkpoint whose seq is not the value derived from its
+        // A finalized checkpoint whose seq is not the value derived from its
         // snapshot_block is malformed (the signers would not have co-signed it); refuse
         // to persist it even with an otherwise-valid signature set.
         if(Number(cp.checkpoint_seq) !== StateCheckpointEngine.deriveCheckpointSeq(cp.snapshot_block)){
             this._malformedFinalized++;
             console.warn('StateCheckpointEngine: dropped FINALIZED with seq ' + cp.checkpoint_seq +
-                ' != derived seq for snapshot_block ' + cp.snapshot_block + ' ');
+                ' != derived seq for snapshot_block ' + cp.snapshot_block);
             return;
         }
 
         let validators = await this._resolveCapabilityValidators('oracle_publish', cp.snapshot_block);
         let pubkeys    = new Set(validators.map(v => String(v.pubkey).toLowerCase()));   // signer-membership set
-        //  (item 2651): size the quorum from the RAW row count, matching the propose
+        // Size the quorum from the RAW row count (item 2651), matching the propose
         // path (_runRound) and the on-chain authority (anchor.js:336). The deduped
         // pubkeys.size used before diverged whenever a key was multi-source. `quorum` only
         // gates the count path (weighted uses meetsStakeThreshold), and below SWQ
         // validators.length == pubkeys.size, so this is inert below SWQ.
         let snapCount  = validators.length;
         let weighted   = swq.isStakeWeightedQuorumActive(cp.snapshot_block, this.network);
-        let quorum     = bftQuorumOrSingle(snapCount, 1);   // : majority-floored BFT quorum
+        let quorum     = bftQuorumOrSingle(snapCount, 1);   // majority-floored BFT quorum
 
         let canonical = StateCheckpointEngine.canonicalCheckpoint(cp);
         let seen = new Set(), sigs = [];
@@ -640,7 +640,7 @@ class StateCheckpointEngine extends EventEmitter {
     // the INSERT-IGNORE indexer mirror always converges), stream it to our
     // indexer subscribers, and emit for the StateAnchorPublisher.
     async _acceptFinalized(cp, sigs, quorum, isLeader){
-        // #3095: refuse BEFORE any work. This cp arrived from a PEER, so its network is
+        // Refuse BEFORE any work. This cp arrived from a PEER, so its network is
         // the sender's claim; if it disagrees with ours we would tally the signature set
         // under a different rule than the anchor publisher (and the sender) will. Checked
         // first so a cross-network checkpoint costs no validator resolution and cannot
@@ -659,7 +659,7 @@ class StateCheckpointEngine extends EventEmitter {
         // Matches the leader _tick persist (unguarded) and _writeFinalizedMatch;
         // callers (_tick .catch, _handleFinalized .catch, the leader accept .catch)
         // log the accept error, and the FINALIZED broadcast is re-deliverable.
-        // , final backstop. Co-sign now refuses a rootless checkpoint, but this
+        // Final backstop. Co-sign now refuses a rootless checkpoint, but this
         // path also accepts checkpoints that arrive already-finalized from a peer, so it
         // must enforce the rule independently rather than trust that every signer did.
         //
@@ -672,7 +672,7 @@ class StateCheckpointEngine extends EventEmitter {
         if(StateCheckpointEngine.isRootless(cp))
             throw new Error('refusing to persist rootless checkpoint ' + cp.chain + '@' + cp.block_index +
                 ': checkpoint-commitment is active for snapshot_block ' + cp.snapshot_block +
-                ' but the light-client roots are absent ()');
+                ' but the light-client roots are absent');
 
         await this._persistCapabilitySnapshot('oracle_publish', Number(cp.snapshot_block));
         await this.db.doQuery(
@@ -779,7 +779,7 @@ class StateCheckpointEngine extends EventEmitter {
         };
     }
 
-    // : the checkpoint_seq is derived purely from the round's BTC snapshot_block.
+    // The checkpoint_seq is derived purely from the round's BTC snapshot_block.
     // snapshot_block is the single consensus field every hub already agrees on, and
     // cadence leader election (rank == btcBlock % N over each hub's OWN BTC tip) makes
     // at most one honest leader per BTC block; so tying seq to snapshot_block guarantees
@@ -794,7 +794,7 @@ class StateCheckpointEngine extends EventEmitter {
         return Number(snapshotBlock);
     }
 
-    // : true when checkpoint-commitment is active for this checkpoint's
+    // True when checkpoint-commitment is active for this checkpoint's
     // snapshot_block/network but the light-client roots are missing.
     //
     // The propose path always refused to SIGN such a checkpoint, but that was the only
@@ -809,10 +809,10 @@ class StateCheckpointEngine extends EventEmitter {
     //
     // One predicate, three call sites (propose, co-sign, persist), so the rule cannot
     // be enforced on one path and quietly skipped on the others again.
-    // : the SWQ gate here resolves on the DEPLOYMENT network
+    // The SWQ gate here resolves on the DEPLOYMENT network
     // (`this.network`) while StateAnchorPublisher resolves the same gate on the
     // RECORD's network (resolveQuorumNetwork(cp, ...), "gate on the RECORD network to
-    // match the indexer", ). Two files, one gate, two planes.
+    // match the indexer"). Two files, one gate, two planes.
     //
     // The v1 call is kept deliberately rather than switched to cp.network. Switching
     // would make a misconfigured hub silently adopt whatever network a PEER asserts in
@@ -841,7 +841,7 @@ class StateCheckpointEngine extends EventEmitter {
                 console.warn('StateCheckpointEngine: this hub has NO deployment network, so every ' +
                     'flag-day gate (stake-weighted quorum, equivocation-header, checkpoint-commitment) ' +
                     'resolves to OFF while the checkpoints it handles are scoped to "' + recordNet +
-                    '". Set HUB_NETWORK. Continuing on the legacy unscoped path ().');
+                    '". Set HUB_NETWORK. Continuing on the legacy unscoped path.');
             }
             return;
         }
@@ -849,7 +849,7 @@ class StateCheckpointEngine extends EventEmitter {
         throw new Error('checkpoint network mismatch in ' + context + ': record says "' + recordNet +
             '" but this hub is deployed on "' + this.network + '". Refusing rather than ' +
             'resolving the stake-weighted-quorum gate on one plane while the anchor ' +
-            'publisher resolves it on the other ().');
+            'publisher resolves it on the other.');
     }
 
     static isRootless(cp){
@@ -903,7 +903,7 @@ class StateCheckpointEngine extends EventEmitter {
     // on the DOGE indexer resolves oracle_publish from the mirrored snapshots.
     async _persistCapabilitySnapshot(capability, block){
         let validators = await this._resolveCapabilityValidators(capability, block);
-        // SWQ-TRUNC-MIRROR (): never mirror a TRUNCATED set. The `.truncated`
+        // SWQ-TRUNC-MIRROR: never mirror a TRUNCATED set. The `.truncated`
         // marker _resolveCapabilityValidators carries is what makes this hub's own
         // meetsStakeThreshold fail closed on an over-cap snapshot, but it is a JS array
         // property and capability_snapshots has no column for it, so persisting the capped
@@ -930,7 +930,7 @@ class StateCheckpointEngine extends EventEmitter {
                 'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?)',
                 [block, capability, pubkey, amount, source]);
             if(this.broadcaster){
-                // : select the row back by (block, capability, pubkey, SOURCE),
+                // Select the row back by (block, capability, pubkey, SOURCE),
                 // matching the widened uq_cap_snap. A pubkey-only select-back returned
                 // just ONE of a multi-source key's rows (LIMIT 1), so the mirror stream
                 // carried a single source and the downstream indexer never saw the

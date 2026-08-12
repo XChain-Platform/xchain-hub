@@ -399,8 +399,8 @@ describe('Integration: JSON-RPC API (SC-8.x)', function () {
 
         it('returns fee quote for valid action', async function () {
             // getFeeQuote prices the fee in XCHAIN and THROWS without an XCHAIN/USD
-            // oracle row ; seeding one is now part of the fixture, not
-            // optional colour.
+            // oracle row; seeding one is now part of the fixture, not optional
+            // colour.
             await seedXchainUsd(testDb.getDb());
             let res = await callRpc('getfeequote', { action: 'ISSUE', chain: 'BTC' });
             expect(res.result.action).to.equal('ISSUE');

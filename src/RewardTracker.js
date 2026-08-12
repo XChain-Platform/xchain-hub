@@ -132,13 +132,13 @@ class RewardTracker {
     async _recordAnchorRewardLocked(rewardType, roundNumber, pubkey, blockIndex, rewardNetwork) {
         let lcPubkey = pubkey.toLowerCase();
 
-        // #5311: at/above the anchor-reward flag-day the per-chain reward is DERIVED on-chain
+        // At/above the anchor-reward flag-day the per-chain reward is DERIVED on-chain
         // from the ANCHOR v4/v5 publisher attestation, and every indexer credits the FROZEN
         // consensus constant (`ANCHOR_REWARD_AMOUNT`, never the wire). The hub must record (and
         // therefore archive) that SAME frozen amount, or a recovered node (which restores the
         // archived amount) would diverge from a live node (which derives the frozen amount) when
-        // an operator has overridden `ANCHOR_REWARD_PER_PUBLISH`.  extends the same
-        // rule to `anchor_archive` at/above its own ARCHIVE_REWARD flag-day (derived from the
+        // an operator has overridden `ANCHOR_REWARD_PER_PUBLISH`. The same rule extends to
+        // `anchor_archive` at/above its own ARCHIVE_REWARD flag-day (derived from the
         // ANCHOR v6 publisher attestation with the frozen ARCHIVE_REWARD_AMOUNT). Below each
         // flag-day the legacy operator-tunable amount stands.
         // Gate on the REWARD's network (the checkpoint row's, threaded from the
@@ -149,7 +149,7 @@ class RewardTracker {
         // mainnet checkpoint was built derivable (indexer credits the frozen
         // amount on-chain) while this half saw ''->inactive and ALSO credited +
         // pushed the legacy amount - a double-credit on the COLLECT-spendable
-        // rail (#2236, the #5311 vector).
+        // rail.
         let network   = (rewardNetwork !== undefined && rewardNetwork !== null)
                       ? String(rewardNetwork)
                       : ((this.hub && this.hub.network) ? this.hub.network : '');
@@ -197,7 +197,7 @@ class RewardTracker {
 
         // A derived reward (per-chain at/above the anchor-reward flag-day, anchor_archive
         // at/above the archive-reward flag-day) is credited on-chain by every indexer, so the
-        // forgeable `pushvalidatorrewards` write is retired for it (#5311 / ). The push
+        // forgeable `pushvalidatorrewards` write is retired for it. The push
         // survives below each flag-day; `oracle_round` never pushes here.
         if(!isDerived)
             this._pushRewardsToBtcIndexer(roundNumber, [lcPubkey], amountStr, blockIndex || roundNumber, rewardType)
@@ -216,7 +216,7 @@ class RewardTracker {
     // same URL every other hub component does. resolveSourceByPubkey gates a
     // consensus co-sign decision, so an env-only resolution here made two hubs with
     // identical DB config disagree on archive contents. Falls back to the
-    // constructor-captured env value if the hub/resolver is unavailable. #2652.
+    // constructor-captured env value if the hub/resolver is unavailable.
     async _getBtcIndexerUrl() {
         if (this.hub && typeof this.hub._resolveBtcIndexerUrl === 'function') {
             try {

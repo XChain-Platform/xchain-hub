@@ -154,7 +154,7 @@ describe('Database', function () {
             expect(mockConn.query.getCall(0).args[1][0]).to.equal('{"key":"value"}');
         });
 
-        it('binds a Date as a UTC datetime literal ', async function () {
+        it('binds a Date as a UTC datetime literal', async function () {
             // Two bugs met here: JSON.stringify quoted the ISO string, which MariaDB
             // rejected outright (errno 1292), and the driver's own encoder writes a
             // Date in the PROCESS's local timezone against a UTC-pinned session, which

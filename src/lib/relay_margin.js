@@ -12,7 +12,7 @@
  *
  **********************************************************************
  *
- * XChain Hub - relay effective_time propagation floor ()
+ * XChain Hub - relay effective_time propagation floor
  *
  * Both mirror-settled engines stamp a quorum-signed row with an
  * `effective_time` and every indexer applies the row at the first block whose

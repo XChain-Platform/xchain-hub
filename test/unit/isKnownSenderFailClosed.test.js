@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-//  (deep-review G-1/D2) regression: every count-mode quorum tally keys on
+// (deep-review G-1/D2) regression: every count-mode quorum tally keys on
 // envelope.sender via a per-engine _isKnownSender twin. An EMPTY (non-null)
 // validatorPubkeys registry used to be unconditionally lenient, so any sender
 // reaching a tally during an empty-registry window counted toward quorum. The
@@ -31,7 +31,7 @@ function call(cls, method, peerManager, sender) {
     return cls.prototype[method].call({ peerManager }, sender);
 }
 
-describe('_isKnownSender empty-registry fail-closed ', function () {
+describe('_isKnownSender empty-registry fail-closed', function () {
     for (const { name, cls, method } of TWINS) {
         describe(name + '.' + method, function () {
             it('fails closed on a null registry', function () {

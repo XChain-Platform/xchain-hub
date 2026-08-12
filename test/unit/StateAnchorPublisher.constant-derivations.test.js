@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// : pins the DERIVATION behind the ANCHOR sizing/timing constants, so the
+// pins the DERIVATION behind the ANCHOR sizing/timing constants, so the
 // prose in StateAnchorPublisher's constructor, xchain-hub/CONFIGURATION.md and
 // protocol/actions/ANCHOR.md ("Where the publisher constants come from") cannot
 // drift away from the values. None of these knobs is consensus data, but two of
@@ -58,7 +58,7 @@ function archiveHead(version, chunk0Len, wrapperSigs, attestSigs){
     return parts.join('|');
 }
 
-describe('StateAnchorPublisher : ANCHOR constant derivations', function () {
+describe('StateAnchorPublisher: ANCHOR constant derivations', function () {
 
     let saved;
     before(function () {

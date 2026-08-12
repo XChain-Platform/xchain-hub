@@ -13,7 +13,7 @@
  **********************************************************************
  * test/unit/price_sig_tally_activation.test.js
  *
- * PRICE v0 signature-tally ordering flag-day , hub side.
+ * PRICE v0 signature-tally ordering flag-day, hub side.
  *
  * The hub does not trust the pushing indexer: it re-verifies every round's
  * signatures before storing it as finalized. That makes its tally the indexer's
@@ -40,7 +40,7 @@ const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR ||
 const TWIN_PATH  = path.join(INDEXER_DIR, 'src', 'price_sig_tally_activation.js');
 const LOCAL_PATH = path.join(__dirname, '..', '..', 'src', 'price_sig_tally_activation.js');
 
-describe('PRICE v0 signature-tally flag-day : hub copy @regression', function () {
+describe('PRICE v0 signature-tally flag-day: hub copy @regression', function () {
 
     describe('byte-identity with the xchain-indexer twin', function () {
         before(function () {

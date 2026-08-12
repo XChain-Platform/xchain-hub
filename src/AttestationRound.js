@@ -28,8 +28,6 @@
  *      keccak256; SHA-256 has equivalent ordering properties; see plan §1.)
  *   3. Top REDUNDANCY are responsible; lowest-hash is leader.
  *
- * Spec: claude/reports/specs/2026-05-24_external-attestation-framework.md
- *
  ********************************************************************/
 
 const crypto = require('crypto');
@@ -76,7 +74,7 @@ class AttestationRound {
         this.consensus = null;
 
         this._pollTimer      = null;
-        // In-flight guard for the interval-driven poll (item 2591). Matches the
+        // In-flight guard for the interval-driven poll. Matches the
         // house convention (XChainIndexer _hubConfigPollRunning, XChainDecoder
         // mempoolBusy, HubPushQueue draining): a poll that outruns pollMs under a
         // slow/partitioned indexer or a tightened ATTESTATION_POLL_MS must not
@@ -94,7 +92,7 @@ class AttestationRound {
         // Defaults to 5 poll cycles so transient skips clear quickly while
         // still suppressing the steady-state re-poll of confirmed work.
         //
-        // Floor it above the consensus round timeout (item 2358). The seen window
+        // Floor it above the consensus round timeout. The seen window
         // must never nest inside a LIVE consensus round: if it evicts first, the
         // next poll re-`_startRound`s a request whose round is still pending and
         // issues another paid provider fetch that consensus.propose() then discards
@@ -147,7 +145,7 @@ class AttestationRound {
 
     async _pollPending(){
         if(!this.identity) return;  // observer-only hub; nothing to propose
-        // In-flight guard (item 2591): if a prior poll is still awaiting the
+        // In-flight guard: if a prior poll is still awaiting the
         // indexer, skip this tick rather than stack a concurrent run that races
         // this.pollCursor. The finally clears the flag across every early return.
         if(this._pollRunning) return;
@@ -160,7 +158,7 @@ class AttestationRound {
         // requests can be re-evaluated once their blocking condition clears.
         this._evictStaleSeen();
 
-        // Same window, durable half (): drop recorded fetches whose
+        // Same window, durable half: drop recorded fetches whose
         // retry window has lapsed so the table cannot grow with request volume.
         await this._evictStaleFetchCache();
 
@@ -244,7 +242,7 @@ class AttestationRound {
         }
     }
 
-    // ----- Durable fetch cache () -----
+    // ----- Durable fetch cache -----
     //
     // Fail-OPEN, deliberately, and unlike AttestationPublisher's spend WAL: this
     // table only prevents paying a second time for the same fetch, so a DB fault
@@ -431,7 +429,7 @@ class AttestationRound {
             : 0;
         let pinnedFetchModel = approvedModels[modelIdx] || approvedModels[0] || null;
         let pinnedJudgeModel = pinnedAc.judge_model || null;
-        // item 3482: the model->vendor map has to travel with the pinned model ids,
+        // The model->vendor map has to travel with the pinned model ids,
         // not be read from each hub's live hotReloaded config. A governance change
         // that adds a new-family model plus its model_vendors entry in one block
         // otherwise splits the round, since a laggard hub holds the pinned id but
@@ -462,7 +460,7 @@ class AttestationRound {
         // empty meta) so the round can quorum-sign an explicit non-ok ATTEST v1
         // (Phase 4) instead of stalling every peer until deadline expiry.
         // Short-circuit the paid provider call if a consensus round for this rid
-        // is already live (item 2358). A re-poll of a still-running round would
+        // is already live. A re-poll of a still-running round would
         // otherwise pay for a fetch that consensus.propose() immediately discards
         // on its `pending.has(rid)` guard. Checking here moves that existing guard
         // ahead of the vendor call instead of after it. Worst blast radius is
@@ -473,7 +471,7 @@ class AttestationRound {
             return;
         }
 
-        //  - durable, request_id-keyed twin of the in-memory `seen`
+        // Durable, request_id-keyed twin of the in-memory `seen`
         // window. Both guards above die with the process (`seen` is cleared on
         // stop(), isRoundActive reads live consensus state), so a restart inside
         // the round window re-paid the provider for a request this hub had
@@ -496,7 +494,7 @@ class AttestationRound {
                     maxResponseBytes: providerDef.max_response_bytes,
                     timeoutMs:        this.fetchTimeoutMs,
                     pinnedModel:      pinnedFetchModel,
-                    // Block-anchored model->vendor map for the pinned id (item 3482).
+                    // Block-anchored model->vendor map for the pinned id.
                     pinnedVendors:    pinnedVendors,
                     // Rank of the pinned model on the fallback ladder; providers
                     // enforce request-level fallback policy on it (llm 'strict').
@@ -529,7 +527,7 @@ class AttestationRound {
                 : { body: Buffer.alloc(0), meta: '', status: myStatus },
             pinnedJudgeModel: pinnedJudgeModel,
             pinnedVendors:    pinnedVendors,
-            // : the allowlist that judges the winning proposal's meta has
+            // The allowlist that judges the winning proposal's meta has
             // to be the SAME block-anchored list this round pinned the fetch model
             // from. Judged against the live hotReloadable set instead, a governance
             // DELISTING of the pinned model made every honestly-served meta
@@ -565,7 +563,7 @@ class AttestationRound {
     // source's lowest-hash key (iterate in hash order).
     //
     // CONSENSUS-CRITICAL: this rule exists in THREE copies that must apply it
-    // identically or validation forks (item 2643):
+    // identically or validation forks:
     //   1. here (AttestationRound._computeResponsibleSet)
     //   2. the indexer, xchain-indexer/src/actions/attest.js
     //   3. AttestationPublisher._computeResponsible (failover-rank derivation)
@@ -621,7 +619,7 @@ class AttestationRound {
             proposed_count:  proposed,
             failed_count:    failed
         };
-        // : expose the non-ok publication-throttle ring health so an
+        // Expose the non-ok publication-throttle ring health so an
         // undersized ATTESTATION_NONOK_PUBLISHED_MAX (evictions of entries
         // whose requests are still pending) is operator-visible.
         if(this.consensus){

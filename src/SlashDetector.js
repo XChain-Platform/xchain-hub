@@ -20,9 +20,9 @@
  * - Non-participation (missed-rounds rate over a sliding round window)
  *
  * Detection only: rows land as status 'pending' evidence. Enforcement is
- * governance-mediated : SlashGovernance turns a validator's pending
+ * governance-mediated: SlashGovernance turns a validator's pending
  * rows into a SLASH_PENALTY governance proposal and a passed vote executes
- * the penalty. On-chain stake slashing stays in the indexer (WI-2).
+ * the penalty. On-chain stake slashing stays in the indexer.
  *
  ********************************************************************/
 
@@ -66,7 +66,7 @@ class SlashDetector {
 
         // Sliding window (in rounds) over which missed rounds are counted.
         // A consecutive-miss counter reset to 0 on ANY participation let a
-        // validator at 1-in-30 participation evade forever (S-F4 / );
+        // validator at 1-in-30 participation evade forever;
         // counting misses over the last N rounds catches sustained low-rate
         // participation while a fully consecutive streak still fires at the
         // same round it used to. The window must be at least the threshold or
@@ -138,8 +138,8 @@ class SlashDetector {
                 let submittedPrice = parseFloat(p.price);
                 if (isNaN(submittedPrice) || submittedPrice === 0) continue;
 
-                // Canonical mean-relative deviation via the shared deviation_band helper
-                // : |submitted - finalized| / finalized at scale 18, the same
+                // Canonical mean-relative deviation via the shared deviation_band helper:
+                // |submitted - finalized| / finalized at scale 18, the same
                 // formula and reference orientation as the co-sign admission gate and the
                 // publish-side 2-source gate in OracleConsensus. This site was already
                 // reference-relative pre-helper (behavior-preserving). Exact-decimal
@@ -206,7 +206,7 @@ class SlashDetector {
                 // Windowed miss count is back under the threshold: the validator
                 // is genuinely participating again, so re-arm the latch. A single
                 // token participation while the window stays saturated does NOT
-                // reach here (that reset was the S-F4 evasion).
+                // reach here (that reset was the earlier evasion this window closes).
                 this.nonParticipationFired.set(v.pubkey, false);
                 continue;
             }
@@ -354,8 +354,6 @@ class SlashDetector {
     //
     // `requestId` is used as the round key. Evidence captures the request
     // metadata, validator's proposed body hash, and the winning body hash.
-    //
-    // Spec: claude/reports/specs/2026-05-24_external-attestation-framework.md §8.3
     async recordAttestationDivergence(validatorPubkey, requestId, providerId, proposedBodyHash, winnerBodyHash){
         if(!validatorPubkey || !requestId) return;
         let pk = String(validatorPubkey).toLowerCase();

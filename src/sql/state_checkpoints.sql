@@ -25,7 +25,7 @@ CREATE TABLE state_checkpoints (
 -- INSERT IGNORE, so an in-place update would silently never propagate). Readers
 -- resolve "the" checkpoint for a height as MAX(checkpoint_seq).
 --
---  split-brain defense: the unique key is (chain, network, checkpoint_seq),
+-- Split-brain defense: the unique key is (chain, network, checkpoint_seq),
 -- NOT (chain, network, block_index, checkpoint_seq). checkpoint_seq is derived
 -- deterministically from snapshot_block (StateCheckpointEngine.deriveCheckpointSeq),
 -- so two BTC-tip-skewed leaders can never mint divergent payloads under one seq.

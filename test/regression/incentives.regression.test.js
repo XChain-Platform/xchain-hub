@@ -230,7 +230,7 @@ describe('Regression: Incentives & Slashing', function () {
             });
         });
 
-        // REG-INC-005 (: windowed rate, not a consecutive counter)
+        // REG-INC-005: windowed rate, not a consecutive counter
         describe('REG-INC-005: 30+ missed rounds in the sliding window triggers non_participation', function () {
 
             // Seed the sliding window with `misses` missed rounds (newest last).

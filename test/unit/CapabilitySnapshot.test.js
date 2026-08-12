@@ -192,8 +192,8 @@ describe('CapabilitySnapshot', function () {
             let snap = new CapabilitySnapshot(makeHub(registry));
 
             // One row that satisfies BOTH RPC shapes: the same stub answers the count
-            // fetch (amount) and the weight fetch (source+weight), and since  a
-            // weight snapshot missing its weight is refused rather than cached.
+            // fetch (amount) and the weight fetch (source+weight), and a weight
+            // snapshot missing its weight is refused rather than cached.
             axiosStub.post.resolves(resultWith([{ pubkey: 'old', amount: '30000', source: 'src1', weight: '30000' }]));
             await snap.getSnapshot('attestation', 106);
             await snap.getWeightSnapshot('attestation', 106);
@@ -348,7 +348,7 @@ describe('CapabilitySnapshot', function () {
             await snap.getActiveValidatorSnapshot(102);
 
             // One throttled auth line inside the TTL window. The third failure
-            // also crosses the  alert threshold, which escalates ONCE per
+            // also crosses the alert threshold, which escalates ONCE per
             // outage; that line is the alert, not a repeat of the auth warning.
             let authLines  = spy.getCalls().filter(c => String(c.args[0]).indexOf('(auth)') !== -1);
             let alertLines = spy.getCalls().filter(c => String(c.args[0]).indexOf('ALERT:') === 0);
@@ -356,8 +356,8 @@ describe('CapabilitySnapshot', function () {
             expect(alertLines.length).to.equal(1);
         });
 
-        it('logs a transport error as unreachable, NOT as auth ', async function () {
-            // Before  a transport error was the silent case: it returned
+        it('logs a transport error as unreachable, NOT as auth', async function () {
+            // A transport error used to be the silent case: it returned
             // null with no log at all, so an unreachable indexer looked exactly
             // like a healthy hub with nothing to do. It must now be surfaced,
             // and still be distinguishable from an auth mismatch.
@@ -395,7 +395,7 @@ describe('CapabilitySnapshot', function () {
         // Each fetch method paired with a base valid result for its RPC, and with a
         // row of the shape THAT RPC actually returns: the count RPCs answer
         // {pubkey, amount}, the source-keyed weight RPCs answer {pubkey, source,
-        // weight}. The distinction matters since : a weight RPC row carrying
+        // weight}. The distinction matters: a weight RPC row carrying
         // no `weight` is rejected as malformed rather than read as zero stake.
         let countRow  = { pubkey: 'ab', amount: '50000' };
         let weightRow = { pubkey: 'ab', source: 'bc1qsource', weight: '50000' };
@@ -449,7 +449,7 @@ describe('CapabilitySnapshot', function () {
     });
 
     // -----------------------------------------------------------------
-    // Weightless row on a WEIGHT snapshot 
+    // Weightless row on a WEIGHT snapshot
     //
     // stake_weighted_quorum fails closed on a row with no weight, but it never
     // sees one: every consumer re-maps the snapshot through
@@ -463,7 +463,7 @@ describe('CapabilitySnapshot', function () {
     // corrupt or hostile indexer answer.
     // -----------------------------------------------------------------
 
-    describe('weightless weight-snapshot row ', function () {
+    describe('weightless weight-snapshot row', function () {
 
         function dataResult(result) { return { data: { result: result } }; }
 
@@ -530,7 +530,7 @@ describe('CapabilitySnapshot', function () {
     });
 
     // -----------------------------------------------------------------
-    // Reorg-depth buffer (#S-F7 / )
+    // Reorg-depth buffer
     //
     // Callers pass a tip-derived height, but stake state AT tip is not
     // reorg-safe: a shallow reorg can rewrite it while the 60s cache keeps

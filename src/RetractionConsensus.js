@@ -12,7 +12,7 @@
  *
  **********************************************************************
  *
- * XChain Hub - Retraction Consensus ( full fix)
+ * XChain Hub - Retraction Consensus
  *
  * Collects 2f+1 `cross_chain` validator co-signatures over quorum-class
  * reorg-retraction broadcasts (row:deleted events for cross_chain_calls /
@@ -59,7 +59,7 @@
  * Below the RETRACTION_SIGNING_ACTIVATION era, with no validator identity
  * (standalone hub), or when a round times out below quorum, the event is
  * broadcast unsigned exactly as before (mirrors past the gate refuse it,
- * mirrors below it apply it under the  fences), so a rolling deploy
+ * mirrors below it apply it under the activation fences), so a rolling deploy
  * and a degraded federation both stay live.
  *
  ********************************************************************/
@@ -75,7 +75,7 @@ const XRETRACT_SIGN      = 'XRETRACT_SIGN';
 const XRETRACT_FINALIZED = 'XRETRACT_FINALIZED';
 
 // Tables whose retractions require the co-signature set (their insertions are
-// the quorum-signed relay rows  protects). Price-table retractions stay
+// the quorum-signed relay rows this consensus protects). Price-table retractions stay
 // on the fence-guarded legacy path: their insertions are not quorum-signed
 // either, so signing their deletions would claim a trust tier the data lacks.
 const QUORUM_CLASS_TABLES = new Set(['cross_chain_calls', 'cross_chain_matches']);
@@ -182,7 +182,7 @@ class RetractionConsensus {
         let mySig    = this.identity.sign(canonical);
         let weighted = swq.isStakeWeightedQuorumActive(snapshotBlock, this.network);
         let snapCount = validators.length;
-        let quorum   = bftQuorumOrSingle(snapCount, 1);   // : majority-floored BFT quorum
+        let quorum   = bftQuorumOrSingle(snapCount, 1);   // majority-floored BFT quorum
 
         if(snapCount <= 1){
             await this._finalize(signedEvt, canonical, id, [{ pubkey: myPubkey, sig: mySig }], true);
@@ -211,7 +211,7 @@ class RetractionConsensus {
             if(!pending.done){
                 // Liveness over the signature tier: mirrors past the gate refuse the
                 // unsigned event anyway (fail closed there), mirrors below it still
-                // converge under the  fences. Never silently drop a retraction.
+                // converge under the activation fences. Never silently drop a retraction.
                 console.warn('RetractionConsensus: round ' + id.substring(0, 16) + '... timed out at ' +
                     pending.signatures.size + '/' + pending.quorum + ' sigs, broadcasting UNSIGNED (legacy tier)');
                 this._broadcastUnsigned(evt);
@@ -343,7 +343,7 @@ class RetractionConsensus {
         let pubkeys    = new Set(validators.map(v => String(v.pubkey).toLowerCase()));
         let snapCount  = pubkeys.size;
         let weighted   = swq.isStakeWeightedQuorumActive(evt.snapshot_block, this.network);
-        let quorum     = bftQuorumOrSingle(snapCount, 1);   // : majority-floored BFT quorum
+        let quorum     = bftQuorumOrSingle(snapCount, 1);   // majority-floored BFT quorum
 
         let seen = new Set(), sigs = [];
         for(let s of d.signatures){
@@ -382,7 +382,7 @@ class RetractionConsensus {
     async _persistCapabilitySnapshot(capability, block){
         if(!this.db) return;
         let validators = await this._resolveCapabilityValidators(capability, block, this.network);
-        // SWQ-TRUNC-MIRROR (): a TRUNCATED set is never mirrored, for the reason
+        // SWQ-TRUNC-MIRROR: a TRUNCATED set is never mirrored, for the reason
         // spelled out in CrossChainDexEngine._persistCapabilitySnapshot. The retraction
         // rail is a fourth writer into the SAME shared capability_snapshots mirror, so an
         // unguarded write here re-opens the accept/reject divergence the three engines

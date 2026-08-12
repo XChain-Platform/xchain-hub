@@ -13,7 +13,7 @@
  **********************************************************************
  * test/unit/attest_relay_activation.test.js
  *
- * ATTEST cross-chain relay flag-day , hub side.
+ * ATTEST cross-chain relay flag-day, hub side.
  *
  * The hub decides WHEN to broadcast an ATTEST v3/v4 relay leg; the indexers
  * decide whether to ACCEPT one. A one-sided edit to either copy of the gate
@@ -78,7 +78,7 @@ describe('ATTEST relay flag-day: hub copy @regression', function () {
     });
 
     describe('the gate this hub will enforce', function () {
-        it('is armed on the ratified  BTC anchor, genesis-on off mainnet', function () {
+        it('is armed on the ratified BTC anchor, genesis-on off mainnet', function () {
             expect(local.ATTEST_RELAY_ACTIVATION.mainnet).to.equal(963000);
             expect(local.ATTEST_RELAY_ACTIVATION.testnet).to.equal(0);
             expect(local.ATTEST_RELAY_ACTIVATION.regtest).to.equal(0);

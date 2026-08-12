@@ -52,7 +52,7 @@ function isDriverNativeArg(value){
 
 // Render a Date as the UTC datetime literal MariaDB should store.
 //
-// Two separate defects met on this line . First, the safety net above
+// Two separate defects met on this line. First, the safety net above
 // used to catch Dates too: JSON.stringify(new Date()) is a QUOTED ISO string and
 // MariaDB rejects it with errno 1292 "Incorrect datetime value", so EVERY product
 // write binding a Date failed outright - Governance.propose() could not record a
@@ -95,7 +95,7 @@ class Database {
             idleTimeout:        60000,
             insertIdAsNumber:   true,
             bigIntAsNumber:     true,
-            // Pin BOTH halves of datetime handling to UTC . The driver
+            // Pin BOTH halves of datetime handling to UTC. The driver
             // otherwise binds a JS Date using the Node process's LOCAL timezone while
             // the server evaluates NOW() / CURRENT_TIMESTAMP / FROM_UNIXTIME in the
             // session's own, so a hub whose host is not on UTC writes and compares
@@ -262,7 +262,7 @@ class Database {
             ['price', 'cross_chain', 'oracle_publish', 'attestation', 'full_node'],
             'NOT NULL'
         );
-        //  checkpoint split-brain: tighten the state_checkpoints uniqueness from
+        // Checkpoint split-brain: tighten the state_checkpoints uniqueness from
         // (chain, network, block_index, checkpoint_seq) to (chain, network, checkpoint_seq)
         // so a same-seq race can never seat two divergent rows (and double-anchor DOGE).
         // _migrateUniqueKey dedups any pre-existing (chain, network, checkpoint_seq)
@@ -278,7 +278,7 @@ class Database {
         await this._migrateIndex('state_checkpoints', 'sc_chain_blk', '(chain, network, block_index)');
         await this._dropIndexIfExists('state_checkpoints', 'chain_block_seq');
         await this._dropIndexIfExists('state_checkpoints', 'checkpoint_seq');
-        // : widen capability_snapshots.uq_cap_snap to add `source`. At/above
+        // Widen capability_snapshots.uq_cap_snap to add `source`. At/above
         // STAKE_WEIGHTED_QUORUM a signing key delegated by two staking sources yields
         // one row per (source, pubkey); the old 3-column key collapsed them on
         // INSERT IGNORE and silently dropped the second source, understating stake for
@@ -310,7 +310,7 @@ class Database {
     // UTC-normalized and rendered through the SESSION time zone while DATETIME stores the
     // literal, so the conversion preserves the instant only under a UTC session. It is one:
     // the pool pins timezone 'Z' and the driver issues SET time_zone='+00:00' per connection
-    // (connectionPoolParams, ), so no host's local zone can shift a stored value here.
+    // (connectionPoolParams), so no host's local zone can shift a stored value here.
     async _migrateColumnType(table, column, targetType, columnDef){
         let db = await this.getConnection();
         try {

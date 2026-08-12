@@ -106,7 +106,7 @@ function bcstr(num){
 }
 
 // Round to d decimal places, half-up, entirely in decimal.js space. Faithful port
-// of xchain-indexer/src/utility.js bcround (): floor(n * 10^d + 0.5)
+// of xchain-indexer/src/utility.js bcround (#3145/#3146): floor(n * 10^d + 0.5)
 // / 10^d, so the rounding mode is EXPLICIT and config-independent rather than
 // inheriting the global decimal.js/mathjs rounding setting. It exists to snap a
 // derived settlement amount onto its tick's decimal grid, which both recovers the

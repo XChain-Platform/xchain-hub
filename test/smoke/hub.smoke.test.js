@@ -107,8 +107,8 @@ describe('Smoke: xchain-hub', function () {
             });
         }
 
-        // : with every required var present but no HUB_API_KEY, the hub
-        // must REFUSE to boot rather than serve an unauthenticated write surface.
+        // With every required var present but no HUB_API_KEY, the hub must
+        // REFUSE to boot rather than serve an unauthenticated write surface.
         // Run as a real subprocess so this proves the process actually exits,
         // not just that a decision function returned refuse.
         it('refuses to boot with no HUB_API_KEY and no keyless declaration', function () {

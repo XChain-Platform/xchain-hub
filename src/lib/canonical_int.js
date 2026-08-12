@@ -12,7 +12,7 @@
  *
  **********************************************************************
  *
- * XChain Hub - canonical integer spelling guard ()
+ * XChain Hub - canonical integer spelling guard
  *
  * Every hub consensus engine signs its row's integer fields VERBATIM
  * (`String(r.field)` inside _canonicalMatch) but re-checks them NUMERICALLY

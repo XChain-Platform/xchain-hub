@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// : durable at-most-once for the checkpoint-anchor spend. 's existence
+// durable at-most-once for the checkpoint-anchor spend. The existence
 // check reads MINED indexer state, so a crash between an accepted-but-unmined broadcast
 // and the `anchor_txid` stamp used to leave nothing recording that DOGE had paid, and
 // the next flush rebuilt a fresh PSBT from different UTXOs (a second fee, two anchors
@@ -62,7 +62,7 @@ function mkPub(db){
 
 function sqlHits(db, needle){ return db.seen.filter(q => q.sql.indexOf(needle) !== -1); }
 
-describe('StateAnchorPublisher : durable at-most-once anchor intent', function () {
+describe('StateAnchorPublisher: durable at-most-once anchor intent', function () {
 
     describe('_anchorIntentHolds', function () {
         it('does not hold with no marker', function () {

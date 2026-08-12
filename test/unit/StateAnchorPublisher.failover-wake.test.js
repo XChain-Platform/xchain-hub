@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// : the failover ladder had no wake-up. flush() ran on ANCHOR_INTERVAL_MS
+// the failover ladder had no wake-up. flush() ran on ANCHOR_INTERVAL_MS
 // (24h by default) plus the size triggers, and failover rank was evaluated ONLY
 // inside flush, so the constant derivation's promise that "ranks 1-3 still get a
 // slot inside one publishing cycle" was reachable only by phase luck: a dead rank 0
@@ -95,7 +95,7 @@ function archiveRound(wantLeader) {
     return { pub, me, peer, published };
 }
 
-describe('StateAnchorPublisher : failover wake', function () {
+describe('StateAnchorPublisher: failover wake', function () {
 
     let saved;
     before(function () {

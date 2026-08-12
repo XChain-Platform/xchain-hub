@@ -45,7 +45,7 @@ describe('Consensus (PBFT)', function () {
     // than riding the single-node fallback the default MIN_VALIDATORS used to
     // grant them. Quorum is stubbed to the same value _getQuorum() returns for
     // the set under test, so what each test measures is unchanged.
-    // : the snapshot's MEMBERS now decide the leader, so it has to carry
+    // the snapshot's MEMBERS now decide the leader, so it has to carry
     // the validators under test rather than a placeholder pubkey. Callers set
     // the validator set first; the snapshot is built from it here.
     function wireFederationSnapshot(quorum, blockIndex, validators) {
@@ -165,13 +165,12 @@ describe('Consensus (PBFT)', function () {
             expect(a._getQuorum()).to.equal(b._getQuorum());
         });
 
-        //  (was: "leader election is order-sensitive"). setValidatorSet now
+        // (was: "leader election is order-sensitive"). setValidatorSet now
         // canonicalizes order (validator_order.js), so leader election depends on
         // MEMBERSHIP alone and no longer on every hub's loader emitting the same
         // ordering. This is the consensus-breaking change itself; it ships ungated
-        // inside the  pre-launch batch and is made safe by that batch's
-        // mandatory fleet-wide wipe-and-replay rebase.
-        it('leader election is order-INSENSITIVE: divergent input ordering elects the same leader ', function () {
+        // and is made safe by a mandatory fleet-wide wipe-and-replay rebase.
+        it('leader election is order-INSENSITIVE: divergent input ordering elects the same leader', function () {
             const set = buildSet(7);
             const a = freshConsensus(); a.setValidatorSet(set.slice());
             const b = freshConsensus(); b.setValidatorSet(set.slice().reverse());
@@ -183,7 +182,7 @@ describe('Consensus (PBFT)', function () {
             }
         });
 
-        it('an arbitrarily shuffled input converges on the pubkey-sorted order ', function () {
+        it('an arbitrarily shuffled input converges on the pubkey-sorted order', function () {
             const set = buildSet(10);
             const shuffled = set.slice().sort(() => Math.random() - 0.5);
             const a = freshConsensus(); a.setValidatorSet(shuffled);
@@ -196,7 +195,7 @@ describe('Consensus (PBFT)', function () {
         // (XChainHub._propagateValidatorSet), so an in-place sort here would
         // reorder a caller's array and leak one engine's canonicalization into
         // the next engine's input.
-        it('does not mutate or reorder the caller\'s array ', function () {
+        it('does not mutate or reorder the caller\'s array', function () {
             const set = buildSet(5);
             const caller = set.slice().reverse();
             const snapshot = caller.slice();
@@ -209,7 +208,7 @@ describe('Consensus (PBFT)', function () {
         // can bind one signing key to several addrs; the addr tie-break keeps the
         // order total instead of leaning on sort stability (which would just
         // preserve the non-canonical input order).
-        it('ties on pubkey are broken by addr, so equal-key sets still order identically ', function () {
+        it('ties on pubkey are broken by addr, so equal-key sets still order identically', function () {
             const dup = (addr) => ({ pubkey: 'aa'.repeat(32), addr: addr });
             const a = freshConsensus(); a.setValidatorSet([dup('ws://z:1'), dup('ws://a:1'), dup('ws://m:1')]);
             const b = freshConsensus(); b.setValidatorSet([dup('ws://m:1'), dup('ws://z:1'), dup('ws://a:1')]);
@@ -220,7 +219,7 @@ describe('Consensus (PBFT)', function () {
         // Mixed-case pubkeys for the same key must not sort into two different
         // buckets; the sort key is the lowercased pubkey, matching
         // Governance._buildValidatorSnapshot and OracleConsensus._getLeader.
-        it('sorts on the LOWERCASED pubkey so case drift cannot reorder the set ', function () {
+        it('sorts on the LOWERCASED pubkey so case drift cannot reorder the set', function () {
             const lower = [
                 { pubkey: 'aa'.repeat(32), addr: 'ws://1:1' },
                 { pubkey: 'bb'.repeat(32), addr: 'ws://2:1' },
@@ -232,7 +231,7 @@ describe('Consensus (PBFT)', function () {
             expect(a.validatorSet.map(v => v.addr)).to.deep.equal(b.validatorSet.map(v => v.addr));
         });
 
-        it('empty set still elects no leader after canonicalization ', function () {
+        it('empty set still elects no leader after canonicalization', function () {
             const a = freshConsensus(); a.setValidatorSet([]);
             expect(a.validatorSet).to.deep.equal([]);
             expect(a._getLeader(0)).to.be.null;

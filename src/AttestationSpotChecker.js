@@ -26,7 +26,7 @@
  * signing validator. Crossing the failure threshold records a slash
  * proposal via SlashDetector.
  *
- * Phase 4 quality enforcement  ships three pieces here:
+ * Phase 4 quality enforcement ships three pieces here:
  *
  *   1. Spot-check scheduler. On `SPOT_CHECK_INTERVAL_MS` (default 1h) the
  *      scheduler walks a platform-private corpus of prompts whose answers
@@ -53,8 +53,6 @@
  *      that no longer exists. Persistence is best-effort: with no DB the
  *      module still runs on its in-memory window (single-node / tests).
  *
- * Spec: claude/reports/specs/2026-05-24_llm-attestation-provider.md §8.1
- *
  ********************************************************************/
 
 'use strict';
@@ -67,7 +65,7 @@ const DEFAULT_SCHEDULER_INTERVAL_MS = 60 * 60 * 1000;    // 1h between injection
 const DEFAULT_MAX_INJECTIONS_PER_TICK = 1;
 const STATS_TABLE                = 'attestation_validator_stats';
 
-//  re-judge queue. An ok finalization is TERMINAL: onRequestFinalized
+// Re-judge queue. An ok finalization is TERMINAL: onRequestFinalized
 // deletes the queue entry before judging, so a judge that could not answer used
 // to drop the spot-check permanently and no later event re-triggered it. These
 // bound the recovery queue that now holds those cases until the judge answers.
@@ -114,7 +112,7 @@ class AttestationSpotChecker {
         // Per-validator failure history: Map<pubkeyLower, [{ requestId, timestamp }]>
         this._failures = new Map();
 
-        // : spot-checks whose judge was unavailable, held for re-judging.
+        // Spot-checks whose judge was unavailable, held for re-judging.
         // Map<requestIdLower, { providerId, expectedPattern, publishedBody, meta,
         //                       signatures, blockIndex, attempts, firstSeen }>
         this._pendingReJudge = new Map();
@@ -215,7 +213,7 @@ class AttestationSpotChecker {
     // provider/encoder failure cannot abort the batch or throw out of the timer.
     async _schedulerTick(){
         if (!this._injector || this.corpus.length === 0) return 0;
-        // Scheduler self-overlap guard (, house convention:
+        // Scheduler self-overlap guard (house convention:
         // FullNodeChallengeRound._tick). The injector is an operator-supplied hook that
         // emits a real on-chain ATTEST v0 request, and nothing here bounds its round
         // trip, so a hung encoder/BTC send parks a tick until the socket dies and the
@@ -268,7 +266,7 @@ class AttestationSpotChecker {
         }
     }
 
-    // : drive the re-judge sweep on its own timer rather than folding it
+    // Drive the re-judge sweep on its own timer rather than folding it
     // into _schedulerTick. The injection scheduler is inert unless SPOT_CHECK_ENABLED
     // plus an injector plus a non-empty corpus are all present, and in exactly that
     // state the module still judges externally-registered spot-checks (see header),
@@ -300,7 +298,7 @@ class AttestationSpotChecker {
     // _recordFailure paths the inline judge uses. Still-inconclusive records stay
     // until they run out of attempts or age out; each record is independently
     // guarded so one provider failure cannot abort the pass or throw out of the
-    // timer. Overlap-guarded for the reason _schedulerTick is : nothing
+    // timer. Overlap-guarded for the same reason _schedulerTick is: nothing
     // bounds a judge round trip, so a hung provider would otherwise let passes
     // stack up and re-ask the same records concurrently.
     async _sweepReJudge(){
@@ -465,7 +463,7 @@ class AttestationSpotChecker {
         let expectedBody  = Buffer.from(String(entry.expectedPattern || ''), 'utf8');
 
         let blockIndex = Number(event.request && event.request.block_index) || 0;
-        // : everything the sweep needs to re-ask the judge later. Built
+        // Everything the sweep needs to re-ask the judge later. Built
         // before the call so both failure branches below can hand it straight to
         // _deferReJudge; the queue entry is already gone by this point (line above),
         // and an ok finalization is terminal, so this record is the only way back.
@@ -516,7 +514,7 @@ class AttestationSpotChecker {
             // method (lines above: non-ok finalization, provider mismatch). Unlike
             // the two branches directly above it is also FINAL: the reason is a
             // property of this round's own bytes, so re-asking cannot change it and
-            // holding the record would only burn attempts ().
+            // holding the record would only burn attempts.
             console.warn('AttestationSpotChecker: inconclusive judge verdict on ' + rid.substring(0, 16) +
                          '... (reason=' + outcome.reason + '); no evidence recorded');
             return;
@@ -562,7 +560,7 @@ class AttestationSpotChecker {
     async rollback(height){
         this._failures.clear();
         let h = Number(height);
-        // : a spot-check held for re-judging is anchored to the same
+        // A spot-check held for re-judging is anchored to the same
         // orphaned block, so purge it before the sweep can score a rolled-back
         // round into the stats the DELETE below is clearing.
         if (Number.isFinite(h)) {

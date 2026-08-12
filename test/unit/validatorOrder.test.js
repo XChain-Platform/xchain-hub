@@ -10,7 +10,7 @@
  *
  **********************************************************************
  *
- * : canonical validator-set ordering.
+ * canonical validator-set ordering.
  *
  * The engine-level consequences (leader election agreeing across hubs) are
  * pinned in Consensus.test.js, OracleConsensus.test.js and Governance.test.js.
@@ -23,7 +23,7 @@ const { canonicalValidatorOrder } = require('../../src/validator_order.js');
 
 const V = (pubkey, addr) => ({ pubkey: pubkey, addr: addr });
 
-describe('validator_order.canonicalValidatorOrder ', function () {
+describe('validator_order.canonicalValidatorOrder', function () {
 
     it('sorts by pubkey ascending', function () {
         let out = canonicalValidatorOrder([V('cc', 'ws://3'), V('aa', 'ws://1'), V('bb', 'ws://2')]);

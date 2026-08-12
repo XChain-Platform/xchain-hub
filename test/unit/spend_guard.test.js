@@ -25,7 +25,7 @@ function clearEnv(){
     }
 }
 
-describe('SpendGuard ', function () {
+describe('SpendGuard', function () {
 
     afterEach(function () {
         clearEnv();
@@ -146,7 +146,7 @@ describe('SpendGuard ', function () {
         });
     });
 
-    describe('reserve()/commit()/release() ()', function () {
+    describe('reserve()/commit()/release()', function () {
 
         it('consumes budget at reserve time, before any send can be awaited', function () {
             const g = new SpendGuard(PFX, { [PFX + '_MAX_PUBLISHES_PER_WINDOW']: '1' });
@@ -202,7 +202,7 @@ describe('SpendGuard ', function () {
         });
     });
 
-    // : both windows were memory-only, so restarting a hub handed every
+    // both windows were memory-only, so restarting a hub handed every
     // effector its full per-window allowance back - a gate a crash-loop can make
     // spend MORE, which is what this file's first invariant forbids. persistTo() is
     // opt-in BY CALL (from an effector's start()), so a bare constructor stays IO-free.

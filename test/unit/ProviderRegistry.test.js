@@ -375,7 +375,7 @@ describe('ProviderRegistry', function () {
         });
     });
 
-    // ── Block-anchored provider stake floor  ──────────────────────────
+    // ── Block-anchored provider stake floor ──────────────────────────
 
     describe('normalizeMinStakeXchain', function () {
         it('passes plain decimal strings through unchanged', function () {

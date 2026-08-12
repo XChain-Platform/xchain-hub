@@ -21,7 +21,7 @@ const { VALIDATORS_4, SAMPLE_PRICES }  = require('../../helpers/fixtures');
 const { buildEnvelope }                = require('../../helpers/testPeerNetwork');
 const { runExperiment }                = require('../helpers/chaosRunner');
 
-describe('Chaos: Reorg During Oracle Round (XC-2)', function () {
+describe('Chaos: Reorg During Oracle Round', function () {
     this.timeout(15000);
 
     let hub, oracle, oracleCon, reorgHandler;

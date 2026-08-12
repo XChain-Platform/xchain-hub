@@ -61,7 +61,7 @@ const DEFAULT_LEADER_TIMEOUT_MS = 30000;  // 30 seconds (< finalization window)
 const FINALIZE_RETRY_BASE_MS = 1000;
 const FINALIZE_RETRY_MAX_MS  = 30000;
 
-// Per-pair override for the aggregation move clamp ( D4). Most pairs track
+// Per-pair override for the aggregation move clamp (D4). Most pairs track
 // deep external markets and share ORACLE_MAX_CHANGE_PER_ROUND; XCHAIN/USD is
 // derived from a thin on-platform market and gets a tighter bound.
 //
@@ -172,7 +172,7 @@ class OracleConsensus extends EventEmitter {
         // deployments set ORACLE_MIN_SUBMISSIONS=1 explicitly.
         this.minSubmissions      = parseInt(process.env.ORACLE_MIN_SUBMISSIONS) || 2;
         this.leaderTimeout       = parseInt(process.env.ORACLE_LEADER_TIMEOUT_MS) || DEFAULT_LEADER_TIMEOUT_MS;
-        // : a proposed pair this follower can verify against NOTHING (no live
+        // A proposed pair this follower can verify against NOTHING (no live
         // local aggregate AND no finalized history) used to fall through with only
         // the (0, PRICE_MAX) clamp, letting a Byzantine leader who is the sole
         // submitter for a brand-new pair get any value up to PRICE_MAX co-signed.
@@ -183,10 +183,10 @@ class OracleConsensus extends EventEmitter {
         this.allowUnverifiedPairs = String(process.env.ORACLE_ALLOW_UNVERIFIED_PAIRS || '') === 'true';
     }
 
-    // : canonicalize the set's ORDER on the way in, so _getLeader's
+    // Canonicalize the set's ORDER on the way in, so _getLeader's
     // legacy live-set path (`validatorSet[round % N]`, taken whenever a round
     // has no usable block-locked snapshot) elects the same leader on every hub
-    // for identical membership.  already fixed the snapshot path by
+    // for identical membership. The snapshot path was already fixed by
     // sorting the member pubkeys; this closes the same hole on the fallback.
     // See validator_order.js.
     setValidatorSet(validators) {
@@ -722,7 +722,7 @@ class OracleConsensus extends EventEmitter {
         if (!registry) return false;
         if (registry.size === 0) {
             // Empty-registry leniency is for the genuine pre-bootstrap window ONLY
-            // (G-1/): once the on-chain snapshot has produced a non-empty
+            // (G-1): once the on-chain snapshot has produced a non-empty
             // effective signer set, an empty registry is a misconfiguration or
             // wipe window, not bootstrap, and counting unattributable senders
             // would reopen count-mode quorum forgery. Fail closed instead.
@@ -1050,12 +1050,12 @@ class OracleConsensus extends EventEmitter {
                 }
                 let local = localByPair.get(p.coinPair);
                 if (local !== undefined && local !== null && bcmath.bcgt(local, '0')) {
-                    // Canonical mean-relative band (, shared deviation_band helper):
+                    // Canonical mean-relative band (shared deviation_band helper):
                     // deviation = |local - proposed| / proposed, i.e. the follower's own
                     // aggregate measured against the PROPOSED price as reference, the same
                     // reference orientation as the publish-side 2-source gate ((hi-lo)/(hi+lo)
                     // = each submitter vs the mean) and SlashDetector (submission vs the
-                    // finalized price). Dividing by `local` instead (pre-) opened a
+                    // finalized price). Dividing by `local` instead (the previous approach) opened a
                     // ratio window r in (1.10, 1.10526] at the 5% band where the leader
                     // publishes a 2-source pair the follower then withholds the whole round
                     // over, with no durable record. CONSENSUS-CRITICAL: deploy fleet-wide
@@ -1075,7 +1075,7 @@ class OracleConsensus extends EventEmitter {
                     // quorum co-signers happened to not fetch in this round.
                     let lastPrice = this._getLastFinalizedPrice(p.coinPair);
                     if (lastPrice !== null && bcmath.bcgt(lastPrice, '0')) {
-                        // Shared deviation_band helper ; reference = last finalized
+                        // Shared deviation_band helper; reference = last finalized
                         // price, already the canonical orientation here (behavior-preserving).
                         let deviation = devband.deviationFrom(p.price, lastPrice, 18);
                         // Use a wider band than the live-submission check to allow for
@@ -1106,7 +1106,7 @@ class OracleConsensus extends EventEmitter {
                             return;
                         }
                     } else if (!this.allowUnverifiedPairs) {
-                        // : no live local aggregate AND no finalized history means
+                        // No live local aggregate AND no finalized history means
                         // this follower can verify the value against nothing; only the
                         // (0, PRICE_MAX) clamp would apply. Withhold co-sign (same
                         // fail-safe path as a deviation disagreement) so a Byzantine
@@ -1468,7 +1468,7 @@ class OracleConsensus extends EventEmitter {
                 results.push({ coinPair: pair, price: price });
             }
         }
-        // : emit in canonical pair order rather than coinPairs Set
+        // Emit in canonical pair order rather than coinPairs Set
         // insertion order (first-seen across submissions, i.e. a function of
         // arrival order). The per-pair VALUES were already order-invariant; the
         // ARRAY was not, and this array is what gets propagated on PROPOSE and
@@ -1537,12 +1537,12 @@ class OracleConsensus extends EventEmitter {
         // gates identically. CONSENSUS-CRITICAL: deploy fleet-wide atomically.
         if (values.length === 2) {
             let lo = values[0].s, hi = values[1].s; // sorted ascending, both > 0
-            // Shared deviation_band helper : (hi-lo)/(hi+lo), no rounded
+            // Shared deviation_band helper: (hi-lo)/(hi+lo), no rounded
             // intermediate mean. Scale 18, NOT the original inline scale 8: the
             // co-sign gate (_handlePropose) and SlashDetector both round at 18, so
             // a scale-8 publish gate truncates a boundary spread back inside the
             // band and federation-signs a price the other two gates then withhold
-            // or slash ().
+            // or slash.
             if (devband.twoSourceSpreadExceeds(lo, hi, ORACLE_DEVIATION_THRESHOLD, 18)) {
                 console.warn('Oracle: dropping ' + coinPair + ' this round: only 2 sources and they '
                     + 'disagree beyond the ' + (ORACLE_DEVIATION_THRESHOLD * 100) + '% mean-deviation gate ('
@@ -1579,7 +1579,7 @@ class OracleConsensus extends EventEmitter {
         return this._clampToLastFinalized(coinPair, median);
     }
 
-    // Per-pair bounded-change clamp . The trim + median above bound what a
+    // Per-pair bounded-change clamp. The trim + median above bound what a
     // MINORITY of bad feeds can do; nothing bounds the aggregate itself, so a real
     // fat-tail print (or a majority of correlated bad sources) still lands in one
     // round and immediately drives USD-pegged fee math. Bound the finalized price's
@@ -1589,7 +1589,7 @@ class OracleConsensus extends EventEmitter {
     // Deterministic federation-wide: every hub's _lastFinalizedPrices holds the same
     // finalized history (DB-seeded on start), so followers re-deriving the aggregate
     // clamp identically. No history (brand-new pair, cold standalone cache) means no
-    // clamp; the  unverifiable-pair gate covers that case on the co-sign side.
+    // clamp; the unverifiable-pair gate covers that case on the co-sign side.
     // CONSENSUS-CRITICAL: deploy fleet-wide atomically.
     _clampToLastFinalized(coinPair, price) {
         let last = this._getLastFinalizedPrice(coinPair);
@@ -1873,7 +1873,7 @@ class OracleConsensus extends EventEmitter {
         }
     }
 
-    //  (Hub F3): when the round has a block-locked snapshot, the leader
+    // Hub F3: when the round has a block-locked snapshot, the leader
     // is derived from the snapshot's member pubkeys (sorted, round % N), NOT
     // the live registered validatorSet. The live set drifts with registration
     // churn mid-round, so live-set indexing lets two hubs elect different
@@ -1951,7 +1951,7 @@ class OracleConsensus extends EventEmitter {
             N = peers.length + 1;
         }
         // N<=1: single node, no peer to reach (0 = caller bypasses). Above that,
-        // the majority-floored BFT threshold (bft_quorum.js, ).
+        // the majority-floored BFT threshold (bft_quorum.js).
         return bftQuorumOrSingle(N, 0);
     }
 
@@ -1973,7 +1973,7 @@ class OracleConsensus extends EventEmitter {
         return empty && this._getQuorum() > 0;
     }
 
-    // : canonicalize the digest PREIMAGE, not just hash whatever array
+    // Canonicalize the digest PREIMAGE, not just hash whatever array
     // arrived. `_aggregateAll` emits its results in coinPairs Set insertion
     // order (first-seen across submissions), which is a function of submission
     // ARRIVAL order, not of the round's content. Raw JSON.stringify therefore
@@ -1997,7 +1997,7 @@ class OracleConsensus extends EventEmitter {
     // untouched.
     //
     // Consensus-breaking (every round digest changes), so it ships ungated with
-    // the  pre-launch batch and its mandatory fleet-wide rebase.
+    // the pre-launch batch and its mandatory fleet-wide rebase.
     _canonicalDigestPrices(prices) {
         if (!Array.isArray(prices)) return prices;
         return prices

@@ -293,7 +293,7 @@ describe('SlashDetector', function () {
     // Non-participation detection
     // -----------------------------------------------------------------
 
-    describe('non-participation (windowed rate, )', function () {
+    describe('non-participation (windowed rate)', function () {
 
         // Seed a validator's sliding window with `misses` missed rounds
         // (newest last), as if _checkParticipation had run that many times.

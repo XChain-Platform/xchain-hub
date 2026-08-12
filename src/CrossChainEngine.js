@@ -46,7 +46,7 @@ const ALLOWED_CHAINS = [...coins.ALLOWED_COINS];
 
 const DEFAULT_ATTESTATION_TIMEOUT = 60000; // 60 seconds
 
-// Bounded retry for persisting a quorum-finalized attestation ().
+// Bounded retry for persisting a quorum-finalized attestation.
 // Sized to ride out a DB blip well inside DEFAULT_ATTESTATION_TIMEOUT, which
 // remains the terminal backstop for a store that never lands.
 const DEFAULT_STORE_RETRY_ATTEMPTS = 4;
@@ -90,7 +90,7 @@ class CrossChainEngine extends EventEmitter {
         // Config
         this.timeout = parseInt(process.env.ATTESTATION_TIMEOUT) || DEFAULT_ATTESTATION_TIMEOUT;
 
-        // Persistence retry for a quorum-finalized attestation (). The
+        // Persistence retry for a quorum-finalized attestation. The
         // INSERT is idempotent (ON DUPLICATE KEY UPDATE), so re-running it after
         // a partial failure is safe.
         this.storeRetryAttempts = positiveIntConfig(process.env.XCHAIN_ATTEST_STORE_RETRIES,
@@ -99,7 +99,7 @@ class CrossChainEngine extends EventEmitter {
             DEFAULT_STORE_RETRY_BASE_MS, 'XCHAIN_ATTEST_STORE_RETRY_MS');
 
         // Per-chain cross-chain confirmation thresholds (env/p2pConfig overridable;
-        // mainnet floor-clamped, see coins.resolveConfirmations - ).
+        // mainnet floor-clamped, see coins.resolveConfirmations).
         this.confirmations = coins.resolveConfirmations(
             this.hub && this.hub.p2pConfig, this.hub && this.hub.network);
 
@@ -177,7 +177,7 @@ class CrossChainEngine extends EventEmitter {
         // accepts a prefix, so '1junk' and '01' cleared the guard as index 1 and then
         // built 'BTC:1junk:DOGE': followers drop that on their canonical-id regex and the
         // round times out, while a single-node hub mints a distinct row per spelling of
-        // one action. The stored row and the PROPOSE payload below already parse ().
+        // one action. The stored row and the PROPOSE payload below already parse.
         let attestationId = sourceChain + ':' + idx + ':' + destChain;
         let confirmations = this.confirmations[sourceChain] || DEFAULT_CONFIRMATIONS[sourceChain] || 6;
 
@@ -226,7 +226,7 @@ class CrossChainEngine extends EventEmitter {
             // 'attested' row that nothing downstream ever heard about: SwapTracker
             // subscribes to 'attestation:finalized', so its swap_records rows sat at
             // 'initiated' forever, and a repeat request re-ran the whole path instead
-            // of short-circuiting on the finalized ring .
+            // of short-circuiting on the finalized ring.
             this._markFinalized(attestationId);
             this.emit('attestation:finalized', attestation);
             return attestation;
@@ -317,7 +317,7 @@ class CrossChainEngine extends EventEmitter {
         if (!registry) return false;
         if (registry.size === 0) {
             // Empty-registry leniency is for the genuine pre-bootstrap window ONLY
-            // (G-1/): once the on-chain snapshot has produced a non-empty
+            // (G-1): once the on-chain snapshot has produced a non-empty
             // effective signer set, an empty registry is a misconfiguration or
             // wipe window, not bootstrap, and counting unattributable senders
             // would reopen count-mode quorum forgery. Fail closed instead.
@@ -385,7 +385,7 @@ class CrossChainEngine extends EventEmitter {
             try {
                 quorum = await this._resolveQuorum(sourceChain, destChain, btcBlockHeight);
             } catch (err) {
-                // Fail closed (#1223): _resolveQuorum throws when federated but no
+                // Fail closed: _resolveQuorum throws when federated but no
                 // deterministic snapshot resolved. Drop the PROPOSE (don't co-sign)
                 // rather than PREPARE over a locally-derived quorum peers aren't using.
                 console.warn('CrossChain: refusing to PREPARE ' + attestationId + ': ' + err.message);
@@ -566,7 +566,7 @@ class CrossChainEngine extends EventEmitter {
                     if (pending.resolve) pending.resolve(attestation);
                 })
                 .catch(err => {
-                    // Retain the round instead of deleting it (). Both
+                    // Retain the round instead of deleting it. Both
                     // _handleCommit and this method return early once the id is
                     // gone from pendingAttestations, so dropping it here destroys
                     // a quorum-signed attestation that peer hubs have already
@@ -584,7 +584,7 @@ class CrossChainEngine extends EventEmitter {
     // --- Storage ---
 
     // Persist a quorum-finalized attestation, retrying a transient DB failure
-    // with exponential backoff before giving up (). Safe to re-run:
+    // with exponential backoff before giving up. Safe to re-run:
     // _storeAttestation upserts on attestation_id.
     async _storeWithRetry(attestation) {
         let delay = this.storeRetryBaseMs;
@@ -653,11 +653,11 @@ class CrossChainEngine extends EventEmitter {
     // on the BTC indexer and arrives at the same N, so two hubs processing the
     // same attestation at different wall-clock times lock the same quorum).
     // Federation-split guard (fail closed), mirroring Consensus.js:170-173 and
-    // OraclePublisher's retired live-registry fallback (#686/#925/#930). The prior
+    // OraclePublisher's retired live-registry fallback. The prior
     // form fell back to this hub's LOCAL live validator set (or, worse, open-peer
     // count + 1 in _getQuorum) whenever the snapshot was unresolved -- so a hub with
     // an unreachable BTC indexer locked a DIFFERENT N/quorum than a healthy peer for
-    // the same (cross_chain, block) round (#1223). When federated, refuse rather than
+    // the same (cross_chain, block) round. When federated, refuse rather than
     // split. Single-node / regtest hubs (no snapshot AND a live quorum of 0, i.e. no
     // peers) have no peer to diverge from, so they keep the live fallback for
     // bootstrap. btcBlockHeight is compared `!= null` (not truthiness) so a genuine
@@ -690,7 +690,7 @@ class CrossChainEngine extends EventEmitter {
             N = peers.length + 1;
         }
         // N<=1: single node, no peer to reach (0 = caller bypasses). Above that,
-        // the majority-floored BFT threshold (bft_quorum.js, ).
+        // the majority-floored BFT threshold (bft_quorum.js).
         return bftQuorumOrSingle(N, 0);
     }
 

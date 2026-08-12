@@ -58,7 +58,7 @@ describe('XChainHub', function () {
             expect(hub.p2pConfig.P2P_PORT).to.equal(10001);
             // The constructor also seeds the canonical NODEPROOF parameters from the
             // pinned coin bundle, because startP2P builds FullNodeChallengeRound
-            // before startCapabilities runs .
+            // before startCapabilities runs.
             expect(hub.p2pConfig.FULLNODE.REWARD_SHARE).to.equal('0');
             expect(Object.keys(hub.p2pConfig).sort()).to.deep.equal(['FULLNODE', 'P2P_PORT']);
         });
@@ -648,7 +648,7 @@ describe('XChainHub', function () {
             expect(mockDb.doQuery.getCall(0).args[0]).to.include("status = 'active'");
         });
 
-        // : the documented getvalidators response carries `chains`
+        // the documented getvalidators response carries `chains`
         // (components/hub/api.md), and the explorer folds addr/chains/status onto
         // its on-chain /validators table. Dropping the column from the SELECT
         // blanks the served chains everywhere downstream.

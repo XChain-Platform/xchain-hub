@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// CONSENSUS GUARD : config-PBFT leader election must read the same
+// CONSENSUS GUARD: config-PBFT leader election must read the same
 // population the round's quorum was sized from. Everything below the quorum
 // line is pinned to the block-locked capability snapshot
 // (getQuorum(snapshot), proposal.validators, the weighted tally), but leader
@@ -45,7 +45,7 @@ function memberSetOf(validators) {
     return new Set(validators.map(v => v.pubkey.toLowerCase()));
 }
 
-describe('Consensus: snapshot-pinned leader election ', function () {
+describe('Consensus: snapshot-pinned leader election', function () {
 
     let hub, pm, consensus, snapshot;
 
@@ -122,7 +122,7 @@ describe('Consensus: snapshot-pinned leader election ', function () {
         });
     });
 
-    //  blocker (2): a snapshot member whose addr binding differs between
+    // blocker (2): a snapshot member whose addr binding differs between
     // hubs must still be recognized as leader, or the fix reintroduces the very
     // divergence it removes.
     describe('_isLeaderIdentity()', function () {
@@ -336,7 +336,7 @@ describe('Consensus: snapshot-pinned leader election ', function () {
     // _handleNewView(): the deliberately PARTIAL half (operator-accepted)
     // -----------------------------------------------------------------
 
-    describe('_handleNewView() (partial pin,  operator ruling)', function () {
+    describe('_handleNewView() (partial pin, operator ruling)', function () {
 
         const PINNED_NEW_LEADER = VALIDATORS_4[2];     // (5 + 1) % 4 = 2
         const LIVE_NEW_LEADER   = DRIFTED_LIVE_SET[1]; // (5 + 1) % 5 = 1

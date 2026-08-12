@@ -116,7 +116,7 @@ class OraclePublisher {
         // without tearing down the broadcast pipeline config. Default: enabled.
         this.enabled = String(process.env.ORACLE_PUBLISH_ENABLED || cfg.ORACLE_PUBLISH_ENABLED || 'true') !== 'false';
 
-        //  - shared SpendGuard (supersedes the old per-publisher SpendCeiling).
+        // Shared SpendGuard (supersedes the old per-publisher SpendCeiling).
         // Composes the per-window spend ceiling (count + a $2000-clamped USD-cents
         // budget, default-ON), the wallet balance floor, and a per-capability runtime
         // pause. Folding the pause into allow() is what lets an operator halt this
@@ -223,7 +223,7 @@ class OraclePublisher {
         }
     }
 
-    // Classify a broadcast failure (: delegates to the shared classifier so
+    // Classify a broadcast failure (delegates to the shared classifier so
     // all four hub effectors answer "could this send have landed?" identically).
     _isAmbiguousSendError(e){
         return isAmbiguousSendError(e);
@@ -231,7 +231,7 @@ class OraclePublisher {
 
     // Initialize the publisher: ensure queue directory exists, load any pending rounds
     async start() {
-        // : the per-window spend ceilings were memory-only, so every restart
+        // The per-window spend ceilings were memory-only, so every restart
         // restored a full allowance. Reload the saved window before anything publishes.
         this.spendGuard.persistTo();
         // Ensure queue directory exists
@@ -542,7 +542,7 @@ class OraclePublisher {
     // Read the durable marker for a round, or null when none exists / no DB is wired.
     // Shape: { round, txid, sent_at }. A row with a non-null sent_at is the
     // authoritative "already broadcast" signal (txid may legitimately be null if the
-    // broadcaster returned none, so sent_at — not txid — gates re-broadcast).
+    // broadcaster returned none, so sent_at, not txid, gates re-broadcast).
     // Throws on a DB error so the caller can FAIL CLOSED (never broadcast when we
     // cannot prove the round is unpublished).
     async _getPublishedMarker(round) {
@@ -588,7 +588,7 @@ class OraclePublisher {
     // (sent_at set) round into the in-process guard so a queued-but-already-published
     // round is never re-broadcast after a restart, and QUARANTINES every intent-only
     // (sent_at NULL) round: a crash between intent and confirmation leaves the on-chain
-    // state unknown, so those are never auto-rebroadcast — only surfaced for an operator
+    // state unknown, so those are never auto-rebroadcast: only surfaced for an operator
     // to verify and replay by hand (no price-by-round indexer query exists to reconcile
     // them automatically). Best-effort: a DB error is logged and startup continues; the
     // in-process guard still covers this process lifetime.
@@ -673,7 +673,7 @@ class OraclePublisher {
             }
 
             // Quarantined round (an intent-only durable marker from a pre-crash broadcast
-            // whose on-chain state is unknown). NEVER re-broadcast — drop the stale queue
+            // whose on-chain state is unknown). NEVER re-broadcast: drop the stale queue
             // entry and leave it for operator replay. Surfaced at startup in _hydratePublishedMarkers.
             if (this._quarantinedRounds.has(entry.round)) {
                 console.warn('OraclePublisher: round ' + entry.round + ' is quarantined (publish intent recorded before a crash, on-chain state unknown); dropping queue entry without re-broadcast, awaiting operator replay');
@@ -684,7 +684,7 @@ class OraclePublisher {
             // a restart (empty in-process Set, round still on the durable queue) can never
             // re-broadcast an already-published round. FAIL CLOSED on any DB error: if we
             // cannot prove the round is unpublished we defer rather than risk a duplicate
-            // spend (kept on the queue, retried next tick; attempts NOT incremented — this
+            // spend (kept on the queue, retried next tick; attempts NOT incremented, this
             // is not a broadcast failure).
             if (this.db) {
                 let marker;

@@ -1,4 +1,4 @@
-//  doctrine test-coverage program: unit coverage for the docs component
+// doctrine test-coverage program: unit coverage for the docs component
 // (docs/openrpc.build.js -> docs/openrpc.json). The OpenRPC document is the
 // published contract for the hub's JSON-RPC surface; this pins the generated
 // artifact's shape without invoking the side-effecting build script.

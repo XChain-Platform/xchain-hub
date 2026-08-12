@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// : governance-mediated penalty execution over slash_proposals.
+// governance-mediated penalty execution over slash_proposals.
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
@@ -28,7 +28,7 @@ function evidenceRow(over = {}) {
     }, over);
 }
 
-describe('SlashGovernance ', function () {
+describe('SlashGovernance', function () {
 
     let hub, sg;
 
@@ -201,7 +201,7 @@ describe('SlashGovernance ', function () {
             expect(hub._propagateValidatorSet.called).to.equal(false);
         });
 
-        it(': rows added after propose are NOT swept (dismiss only rejects the voted subset)', async function () {
+        it('rows added after propose are NOT swept (dismiss only rejects the voted subset)', async function () {
             let votedRows = [evidenceRow(), evidenceRow({ id: 2, round_number: 43 })];
             // A new offense detected mid-vote (higher id) sits alongside them.
             let midVoteRow = evidenceRow({ id: 7, offense_type: 'non_participation', round_number: 90, evidence: '{"missedRounds":31}' });
@@ -218,7 +218,7 @@ describe('SlashGovernance ', function () {
             expect(warn.getCalls().some(c => String(c.args[0]).includes('detected after proposal'))).to.equal(true);
         });
 
-        it(': dismiss fails closed when no local subset matches the voted evidence hash', async function () {
+        it('dismiss fails closed when no local subset matches the voted evidence hash', async function () {
             let votedRows = [evidenceRow()];
             let driftedRows = [evidenceRow({ evidence: '{"different":true}' })];
             hub.db.doQuery.onCall(0).resolves(driftedRows);
@@ -232,7 +232,7 @@ describe('SlashGovernance ', function () {
             expect(warn.getCalls().some(c => String(c.args[0]).includes('no local pending-evidence subset'))).to.equal(true);
         });
 
-        it(': suspend on evidence mismatch still suspends the validator but leaves rows pending', async function () {
+        it('suspend on evidence mismatch still suspends the validator but leaves rows pending', async function () {
             let votedRows = [evidenceRow()];
             let driftedRows = [evidenceRow({ evidence: '{"different":true}' })];
             hub.db.doQuery.onCall(0).resolves(driftedRows);
@@ -249,7 +249,7 @@ describe('SlashGovernance ', function () {
             expect(warn.getCalls().some(c => String(c.args[0]).includes('no local pending-evidence subset'))).to.equal(true);
         });
 
-        it(': fails closed (executes nothing) when the pending-evidence read errors', async function () {
+        it('fails closed (executes nothing) when the pending-evidence read errors', async function () {
             hub.db.doQuery.onCall(0).rejects(new Error('db down'));
             let err = sinon.stub(console, 'error');
 

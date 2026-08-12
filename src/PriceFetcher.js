@@ -125,7 +125,7 @@ class PriceFetcher {
         }
 
         // Fetch from all sources in parallel. CoinGecko and Kraken are both keyless,
-        // so every hub has two uncorrelated upstreams out of the box (seq 3898);
+        // so every hub has two uncorrelated upstreams out of the box;
         // CoinMarketCap is added as a third only when an API key is configured.
         // Each fetcher fails soft (returns null on error), so one source erroring
         // never drops the others.
@@ -172,7 +172,7 @@ class PriceFetcher {
                     sources:  values.length
                 });
             } else {
-                // Surface a pair every source stopped returning (item 9162297b): without
+                // Surface a pair every source stopped returning: without
                 // this the pair silently vanishes from the submission, masking a per-hub
                 // degradation while the round still looks healthy.
                 console.warn('Oracle PriceFetcher: no source returned a value for ' + pair
@@ -267,8 +267,8 @@ class PriceFetcher {
 
     // Fetch coin/fiat pairs from Kraken's keyless public ticker in a single request,
     // retrying on 429/503 with the same backoff+jitter as CoinGecko. Kraken is a
-    // second uncorrelated keyless upstream so every hub has 2 sources by default
-    // (seq 3898). Only the pairs Kraken lists are requested (KRAKEN_PAIRS); the
+    // second uncorrelated keyless upstream so every hub has 2 sources by default.
+    // Only the pairs Kraken lists are requested (KRAKEN_PAIRS); the
     // others stay CoinGecko-only. Mirrors fetchFromCoinGecko's fetch+parse+normalize
     // shape: jitter, _fetchWithRetry, then a { 'COIN/FIAT': number } map (or null).
     // Returns: { 'BTC/USD': number, ... } for the listed pairs, or null on failure.

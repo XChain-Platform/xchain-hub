@@ -9,10 +9,11 @@ CREATE TABLE anchor_published_checkpoints (
     KEY idx_intent (intent_at)
 );
 
--- : the restart-surviving half of the checkpoint-anchor at-most-once guard,
+-- The restart-surviving half of the checkpoint-anchor at-most-once guard,
 -- the same marker the three sibling hub effectors already carry (OraclePublisher's
--- oracle_published_rounds, AttestationPublisher's attest_published_requests per , AttestationRelay's WAL). StateAnchorPublisher stamps state_checkpoints
--- .anchor_txid only AFTER the broadcast returns, and the  existence check reads
+-- oracle_published_rounds, AttestationPublisher's attest_published_requests,
+-- AttestationRelay's WAL). StateAnchorPublisher stamps state_checkpoints
+-- .anchor_txid only AFTER the broadcast returns, and the existence check reads
 -- getanchoraction, which resolves txids through MINED blocks only, so a crash between
 -- an accepted-but-unmined send and that stamp left nothing anywhere recording that DOGE
 -- had already paid. This table is that record.

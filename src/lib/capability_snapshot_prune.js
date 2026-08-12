@@ -14,7 +14,7 @@
  *
  **********************************************************************
  *
- * XChain Hub - stale capability_snapshots prune 
+ * XChain Hub - stale capability_snapshots prune
  *
  * capability_snapshots rows are keyed UNIQUE on
  * (snapshot_block, capability, signing_pubkey, source) and every writer

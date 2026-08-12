@@ -33,7 +33,7 @@ const { PRICE_MAX, DEFAULT_ORACLE_ROUND_INTERVAL_MS,
 
 const ORACLE_PRICE_SUBMIT = 'ORACLE_PRICE_SUBMIT';
 
-// Render the XCHAIN/USD derivation metadata for the round log ( §10 step 6).
+// Render the XCHAIN/USD derivation metadata for the round log (§10 step 6).
 //
 // §5 claims manipulation of this pair is "visible". That claim is only true if the
 // inputs behind a print are recorded somewhere an operator can read after the fact,
@@ -152,7 +152,7 @@ class OracleRound {
         // (e.g. BTC/ZZZ) that would flow into the aggregate and finalize with no
         // deviation history to gate it.
         //
-        // ADMISSION set = the 36 API pairs PLUS DERIVED_PAIRS . A derived pair
+        // ADMISSION set = the 36 API pairs PLUS DERIVED_PAIRS. A derived pair
         // is not fetched from any API, so it is absent from getCoinPairs() and would
         // otherwise read here as fabricated - which withholds co-sign on the WHOLE
         // round (OracleConsensus reads this same Set), not merely on that pair. This
@@ -160,7 +160,7 @@ class OracleRound {
         // this hub produce" keeps using getCoinPairs() directly.
         this.canonicalPairs = new Set([...PriceFetcher.getCoinPairs(), ...DERIVED_PAIRS]);
 
-        // Producer for the derived pair . Constructed unconditionally but
+        // Producer for the derived pair. Constructed unconditionally but
         // inert unless the operator configured read-only access to this validator's
         // own BTC indexer database; isConfigured() false means this hub abstains from
         // the pair, which is a supported state, not a misconfiguration to fail on.
@@ -188,7 +188,7 @@ class OracleRound {
             || Math.floor((2 * this.roundInterval) / 1000);
 
         // BTC network for this hub, resolved once per round from the configs table and
-        // read by the  composition gate. Undefined until the first successful
+        // read by the derived-pair composition gate. Undefined until the first successful
         // resolve, which the gate treats as "do not compose the pair".
         this.currentBtcNetwork = undefined;
 
@@ -222,7 +222,7 @@ class OracleRound {
         this.oracleConsensus = oracleConsensus;
     }
 
-    //  §8 / step 5: has the derived pair's composition gate opened for the round
+    // §8 / step 5: has the derived pair's composition gate opened for the round
     // being composed right now?
     //
     // Keyed on the round's canonical start instant, which every hub in the federation
@@ -510,7 +510,7 @@ class OracleRound {
 
     // Execute a single round: fetch prices, broadcast submission.
     //
-    // Round self-overlap guard (, house convention:
+    // Round self-overlap guard (house convention:
     // FullNodeChallengeRound._tick). The round-number test below looks like a guard but
     // is not one: it fences a REPEAT of the same round, and the next interval fires with
     // a NEW round number, so it passes. Everything after it reads and writes
@@ -559,7 +559,7 @@ class OracleRound {
         // hub serves mainnet, testnet, or regtest BTC indexers.
         try {
             let network = await this.hub._resolveBtcNetwork();
-            // Remembered for the  composition gate below, which needs the network
+            // Remembered for the derived-pair composition gate below, which needs the network
             // synchronously. Left UNSET when this resolve throws, so a hub that could
             // not determine its own network fails the gate closed rather than guessing.
             this.currentBtcNetwork = network;
@@ -661,7 +661,7 @@ class OracleRound {
             return;
         }
 
-        // Append the derived XCHAIN/USD pair , if the activation gate has
+        // Append the derived XCHAIN/USD pair, if the activation gate has
         // opened on this network for this round. Deliberately OUTSIDE fetchPrices():
         // it is not fetched, it is computed from this validator's own BTC indexer
         // rows, and it must not be able to disturb the 36 API pairs. The source never
@@ -772,7 +772,7 @@ class OracleRound {
         if (!registry) return false;
         if (registry.size === 0) {
             // Empty-registry leniency is for the genuine pre-bootstrap window ONLY
-            // (G-1/): once the on-chain snapshot has produced a non-empty
+            // (G-1): once the on-chain snapshot has produced a non-empty
             // effective signer set, an empty registry is a misconfiguration or
             // wipe window, not bootstrap, and counting unattributable senders
             // would reopen count-mode quorum forgery. Fail closed instead.

@@ -23,8 +23,6 @@
  * Pure: SlashDetector / RewardTracker are driven with stubbed persistence so
  * no DB / network is needed (runs in CI on every change). The DB write path is
  * covered separately at L2 (xchain-e2e multiHubRewards).
- *
- * Spec: claude/reports/specs/2026-05-30_validator-test-spec.md §2 (#10).
  */
 
 const assert = require('assert');

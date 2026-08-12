@@ -1,4 +1,4 @@
-//  doctrine test-coverage program: unit coverage for src/hub-schema-version.js.
+// doctrine test-coverage program: unit coverage for src/hub-schema-version.js.
 // The hub stamps (and version-gates) this schema-version into every mirror
 // broadcast; a wrong shape silently disables the consumer fork-guard. Pins the
 // module to a single positive-integer export and nothing else.

@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-//  multi-source-pubkey checkpoint/anchor family. Every defect here manifests
+// multi-source-pubkey checkpoint/anchor family. Every defect here manifests
 // ONLY at/above STAKE_WEIGHTED_QUORUM and ONLY when a signing key is delegated by two
 // or more stake sources (the weighted snapshot then emits one row per (source, pubkey)).
 // regtest activation is 0, so a scoped regtest engine is always in weighted mode: the
@@ -116,7 +116,7 @@ function buildEngine(weightSnapshot, opts) {
     return { engine, identity, db, hub, broadcasts, finalized, pubkey: identity.getPubkeyHex().toLowerCase() };
 }
 
-describe(' multi-source pubkey (checkpoint/anchor family)', function () {
+describe('multi-source pubkey (checkpoint/anchor family)', function () {
 
     let engines = [];
     afterEach(async function () { for (let e of engines) { try { await e.stop(); } catch (_) {} } engines = []; });
@@ -171,7 +171,7 @@ describe(' multi-source pubkey (checkpoint/anchor family)', function () {
         expect(mirrored.map(b => b.row.source).sort()).to.deep.equal(['srcA', 'srcB']);
     });
 
-    // : the SAME persist path must write NOTHING when the resolved set overflowed
+    // the SAME persist path must write NOTHING when the resolved set overflowed
     // its source cap. `.truncated` is a JS array property with no capability_snapshots
     // column behind it, so the capped rows would reach the off-BTC (DOGE/LTC) ANCHOR
     // verifier as a COMPLETE oracle_publish set: it would clear the strict 2/3 bar against

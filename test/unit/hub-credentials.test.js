@@ -165,7 +165,7 @@ describe('resolveHubLlmAuth: credential resolution chain', function () {
         expect(r.ok).to.equal(false);
     });
 
-    // : the gate accepted mere non-emptiness, so a dir holding only
+    // the gate accepted mere non-emptiness, so a dir holding only
     // settings/logs/state - or one the operator logged out of - masked the valid
     // downstream candidate. healthCheck then reported ready while paid calls
     // spawned an unauthenticated CLI and mapped to provider_error.

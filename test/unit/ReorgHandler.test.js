@@ -591,7 +591,7 @@ describe('ReorgHandler', function () {
             expect(ic.getCalls().filter(c => c.args[1] === 'getblockhashes').length).to.equal(1);
         });
 
-        // REORG-OLDHASH-UNVERIFIED-1 : the "before" half of the reorg.
+        // REORG-OLDHASH-UNVERIFIED-1: the "before" half of the reorg.
         it('abstains when reorg history has no event orphaning oldHash at reorgHeight (fabricated oldHash)', async function () {
             stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
                         { block_index: 500, block_hash: NEW_HASH, network: 'regtest' },
@@ -613,10 +613,10 @@ describe('ReorgHandler', function () {
             expect(await rh._probeOwnNode('BTC', 500, OLD_HASH, NEW_HASH)).to.be.false;
         });
 
-        // : this case USED to accept (fail open). It now abstains. An unrecorded
+        // this case USED to accept (fail open). It now abstains. An unrecorded
         // hash means this node cannot check the claim, and accepting it reduced the
-        //  verification to "some reorg happened at this height", which is enough
-        // to re-open the  divergent-digest mode. Measured reachable on mainnet
+        // verification to "some reorg happened at this height", which is enough
+        // to re-open the divergent-digest mode. Measured reachable on mainnet
         // (DOGE 6280198 + 6279100, LTC 3137602), so this is a live path, not a legacy one.
         it('ABSTAINS when the REORG event at that height has an unrecorded (null) hash', async function () {
             stubIndexer({ block_index: 600, block_hash: 'f'.repeat(64), network: 'regtest' },
@@ -1095,7 +1095,7 @@ describe('ReorgHandler', function () {
             catch (e) { expect(e.message).to.include('Rate limit'); }
         });
 
-        it('an ALREADY-PROCESSED reorg is ignored, not rate-limited ', async function () {
+        it('an ALREADY-PROCESSED reorg is ignored, not rate-limited', async function () {
             // Re-reporting a reorg this hub has already rolled back must stay a silent
             // no-op even inside the 60s window; it used to throw 'Rate limit ...'
             // because the limiter sat in front of the dedup return.

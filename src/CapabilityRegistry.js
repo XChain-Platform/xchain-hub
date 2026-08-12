@@ -21,8 +21,6 @@
  * AND self_test_ok    = true   (per-capability selfTest() passed)
  * AND enabled         = true   (operator has not opted out via config)
  *
- * Spec: claude/reports/specs/2026-05-24_capability-staking-model.md
- *
  ********************************************************************/
 
 const KNOWN_CAPABILITIES = ['price', 'cross_chain', 'oracle_publish', 'attestation', 'full_node'];
@@ -39,7 +37,7 @@ function parseCapabilityMinStakeParam(parameter) {
     return { capability: capability };
 }
 
-// Pre-launch pin (#4352): hub governance CAPABILITY_*_MIN_STAKE changes are disabled.
+// Pre-launch pin: hub governance CAPABILITY_*_MIN_STAKE changes are disabled.
 // The indexer's on-chain acceptance re-derives quorum N from the FROZEN configs/<COIN>.js
 // MIN_STAKE constant (no caller override), so the instant a hub governance MIN_STAKE change
 // activated, the hub's block-anchored snapshot threshold would diverge from the chain's
@@ -68,7 +66,7 @@ class CapabilityRegistry {
         // the threshold for a given block (getMinStake(cap, blockIndex)) is then a deterministic
         // function of block height (identical on every hub regardless of when each wall-clock
         // applied the change), which is what makes CapabilitySnapshot's qualifying validator set
-        // (and therefore the quorum N it locks) federation-deterministic. See #3703.
+        // (and therefore the quorum N it locks) federation-deterministic.
         this.minStakeHistory = {};
         this._seedGenesisHistory();
         // Operator opt-out list (capabilities the operator does not want to serve even when qualified + self_test_ok)
@@ -127,7 +125,7 @@ class CapabilityRegistry {
     //   getMinStake(cap, blockIndex) -> the threshold effective AT blockIndex = the value of the
     //     history entry with the greatest activation_block <= blockIndex. This is the
     //     CONSENSUS path: every hub resolves the same value for the same block, so the
-    //     qualifying validator set (and quorum N) is federation-deterministic (#3703).
+    //     qualifying validator set (and quorum N) is federation-deterministic.
     //   getMinStake(cap)           -> the latest configured threshold (no block context). Used by
     //     non-consensus callers (operator status display, self-test/qualification gossip).
     // Returns null when the capability has no configured threshold (preserve fail-closed

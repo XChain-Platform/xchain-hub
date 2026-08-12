@@ -8,7 +8,7 @@
 // This file is part of XChain Platform. Licensed under the GNU Affero
 // General Public License v3.0 or later; see LICENSE.md.
 //
-//  P1 (): the hub half of the shared fill-quantization
+// The hub half of the shared fill-quantization
 // contract. bcmath.js declares itself byte-equivalent to the indexer's helpers;
 // this is what makes that claim testable rather than aspirational.
 //

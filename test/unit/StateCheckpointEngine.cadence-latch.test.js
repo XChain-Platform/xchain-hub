@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-//  (Pkg 8, item 929): the checkpoint cadence latch must advance on
+// (Pkg 8, item 929): the checkpoint cadence latch must advance on
 // PEER-led rounds too, not only on the rounds this hub leads.
 //
 // `_loadLastCheckpointLatch` seeds the latch fleet-wide (MAX(snapshot_block)
@@ -38,7 +38,7 @@ const TIP = {
     block_merkle_root: 'e5'.repeat(32), block_merkle_version: 1
 };
 
-describe('StateCheckpointEngine cadence latch ', function () {
+describe('StateCheckpointEngine cadence latch', function () {
 
     let meshes = [];
 

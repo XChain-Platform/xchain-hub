@@ -57,7 +57,7 @@ async function bootRoute({ identity } = {}) {
     Object.assign(process.env, {
         HUB_DB_HOST: 'localhost', HUB_DB_PORT: '3306', HUB_DB_NAME: 'testdb',
         HUB_DB_USER: 'root', HUB_DB_PASS: 'pass', HUB_PORT: '9999',
-        // : a keyless boot refuses unless keyless is declared, and this
+        // a keyless boot refuses unless keyless is declared, and this
         // harness deliberately boots keyless (the route under test is public).
         HUB_ALLOW_UNAUTHENTICATED: 'true'
     });
@@ -107,7 +107,7 @@ describe('GET /api/v1/chain-registry', function () {
     // filesystem); the async IIFE it then waits on costs single-digit ms. Mocha
     // charges that load to whichever test runs first, so on a cold venue this
     // file failed its first case on the clock while every assertion in it was
-    // sound - a red that was misread as descriptor drift . Absorb the
+    // sound - a red that was misread as descriptor drift. Absorb the
     // load in a hook with its own budget, so a test's timeout measures the route
     // rather than the module loader. Do NOT fold this into the tests by raising
     // their timeouts: that would hide a genuinely slow boot instead of paying it
@@ -182,7 +182,7 @@ describe('chain-registry snapshot consistency', function () {
     // mis-resolved sibling path cannot silently retire this byte-parity guard (item 2435).
     //
     // The skip is no longer the only thing standing between a descriptor fix and a
-    // superseded snapshot : it used to be, and a corrected bitcoin-regtest
+    // superseded snapshot: it used to be, and a corrected bitcoin-regtest
     // encoder port sat unmirrored on origin for both repos because a hub-only run
     // skipped here and a wallet-only run looked at nothing. The wallet now commits
     // bin/chain-registry.sync.json beside its descriptors and fails its own unit

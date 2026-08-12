@@ -1,4 +1,4 @@
--- Per-validator attestation spot-check outcomes (, Phase 4 quality
+-- Per-validator attestation spot-check outcomes (Phase 4 quality
 -- enforcement). One row per (validator, spot-checked request): passed=1 when
 -- the validator's signed response matched the platform's expected answer,
 -- passed=0 when it diverged. block_index is the request's creation block, so a

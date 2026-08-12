@@ -13,7 +13,7 @@
  **********************************************************************
  * test/unit/price_pair_activation.test.js
  *
- * PRICE v0 pair-name widening flag-day , hub side.
+ * PRICE v0 pair-name widening flag-day, hub side.
  *
  * The hub and the chain must agree on which pair names are well-formed. The hub
  * decides twice per round - once when a follower co-signs a PROPOSE, once when a

@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Integration: GOV-VOTE-REPLAY-1  monotonic vote seq, against a real
+// Integration: GOV-VOTE-REPLAY-1 monotonic vote seq, against a real
 // MariaDB.
 //
 // WHY THIS EXISTS SEPARATELY FROM THE UNIT SUITE. The replay guard is one atomic
@@ -77,7 +77,7 @@ describe('Integration: governance vote seq is monotonic (GOV-VOTE-REPLAY-1)', fu
             "SELECT COLUMN_NAME, IS_NULLABLE, COLUMN_DEFAULT FROM information_schema.columns " +
             "WHERE table_name = 'governance_votes' AND COLUMN_NAME = 'vote_seq'");
         expect(cols.length, 'vote_seq is present').to.equal(1);
-        expect(String(cols[0].COLUMN_DEFAULT), 'pre- rows backfill to 0').to.equal('0');
+        expect(String(cols[0].COLUMN_DEFAULT), 'rows created before vote_seq existed backfill to 0').to.equal('0');
     });
 
     it('THE ATTACK: replaying a captured earlier vote does NOT reinstate it', async function () {

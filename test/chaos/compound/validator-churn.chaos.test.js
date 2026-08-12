@@ -43,7 +43,7 @@ function wireFederationSnapshot(hub, quorum) {
     return snapshot;
 }
 
-describe('Chaos: Validator Churn During Consensus (XC-5)', function () {
+describe('Chaos: Validator Churn During Consensus', function () {
     this.timeout(15000);
 
     beforeEach(function () {

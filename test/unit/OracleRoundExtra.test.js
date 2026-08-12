@@ -524,7 +524,7 @@ describe('OracleRound (extra coverage)', function () {
         });
     });
 
-    // ── ORACLE_MAX_SUBMISSIONS_PER_ROUND is actually reachable (item ) ─
+    // ── ORACLE_MAX_SUBMISSIONS_PER_ROUND is actually reachable ─
     //
     // Same dead-knob mechanism as ORACLE_SUBMISSIONS_RETENTION_ROUNDS above: the key
     // was missing from the api.js p2pConfig literal, so this.config.ORACLE_MAX_

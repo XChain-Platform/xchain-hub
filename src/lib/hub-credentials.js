@@ -58,7 +58,7 @@ const DEFAULT_HUB_CLAUDE_CONFIG_DIR = path.join(os.homedir(), '.claude-xchain');
 
 function _trim(v) { return (v == null) ? '' : String(v).trim(); }
 
-//  - a config dir counts as authenticated only when it carries the
+// A config dir counts as authenticated only when it carries the
 // `.credentials.json` the module header names as the source of its authority.
 // The gate used to accept mere non-emptiness, so a logged-out or merely-configured
 // dir (settings, logs, state) outranked the later OAuth-token and API-key

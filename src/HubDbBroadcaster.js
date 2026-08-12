@@ -56,10 +56,10 @@ class HubDbBroadcaster {
         // emitted synchronously at insert time in this same process, so a quiet
         // stream genuinely means no new rows exist, and the indexer's sync
         // barriers can distinguish "mirror is behind" from "the world is quiet"
-        // (the row-content watermark deadlock: review items #1984/#1986).
+        // (the row-content watermark deadlock).
         this.watermarkIntervalMs = parseInt(process.env.WS_WATERMARK_INTERVAL_MS || this.config.WS_WATERMARK_INTERVAL_MS || 10000);
 
-        // Heartbeat-cadence instrumentation . Whether a consumer's price
+        // Heartbeat-cadence instrumentation. Whether a consumer's price
         // stream watermark sits within one heartbeat of wall clock used to be
         // observable only from the indexer's barrier-timeout log line, which was
         // the sole place the stream watermark was ever printed. The action-scoped
@@ -248,7 +248,7 @@ class HubDbBroadcaster {
     // ts" on a wall clock that never learns a broadcast was dropped, and a consumer's
     // only gap repair (the max_ids catch-up in its bootstrap) runs at connect time, so
     // a silently-dropped row leaves the consumer certifying completeness past a
-    // committed row forever (item 4459). Closing the socket is the sanctioned repair:
+    // committed row forever. Closing the socket is the sanctioned repair:
     // the consumer resets its drain gate on close, reconnects, and re-drains from the
     // max_ids in the next 'ready' frame. 1012 (Service Restart) is a retryable close
     // code. Returns how many sockets were dropped, so the caller can log the repair.
@@ -285,8 +285,8 @@ class HubDbBroadcaster {
     // Broadcast a reorg retraction to all subscribers so they prune their local
     // price-table copies. event: { table, source_chain, from_action_index, to_action_index?, retraction_generation? }
     // to_action_index is included only for a CLOSED-range (deferred) retraction so subscribers
-    // bound their mirrored delete identically to the hub (item 5296); absent => open-ended.
-    // retraction_generation (item 5308) is the source chain's rollback generation; subscribers
+    // bound their mirrored delete identically to the hub; absent => open-ended.
+    // retraction_generation is the source chain's rollback generation; subscribers
     // fence their mirrored delete to rows with push_generation <= it, so a re-published row at a
     // recycled action_index survives. Absent => no fence (older hub/indexer == prior behavior).
     broadcastDeletion(event) {
@@ -304,7 +304,7 @@ class HubDbBroadcaster {
                 payload.to_action_index = event.to_action_index;
             if (event.retraction_generation !== undefined && event.retraction_generation !== null)
                 payload.retraction_generation = event.retraction_generation;
-            //  signed retraction: the RetractionConsensus round stamps the
+            // Signed retraction: the RetractionConsensus round stamps the
             // BTC-anchored snapshot_block that selects the validator set plus the
             // 2f+1 cross_chain co-signature set over the XRETRACTV1 canonical.
             // Mirrors past the RETRACTION_SIGNING flag-day refuse quorum-class

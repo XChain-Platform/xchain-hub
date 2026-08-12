@@ -12,7 +12,7 @@
  *
  **********************************************************************
  *
- * XChain Hub - ConsensusInputMonitor 
+ * XChain Hub - ConsensusInputMonitor
  *
  * Alarm surface for CONSENSUS-INPUT fetches: the reads of the BTC
  * indexer that lock a round's validator set (getcapabilityvalidators,

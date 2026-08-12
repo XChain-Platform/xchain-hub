@@ -53,7 +53,7 @@ function makeDexHub(overrides) {
 
 // A minimal SWAP offer (no `kind` → swap path).
 // give_decimals is the give-side decimal grid the offer's HOME indexer reports
-// (getopencrosschainorders, ). The ORDER path quantizes its derived fills
+// (getopencrosschainorders). The ORDER path quantizes its derived fills
 // on it and DECLINES the match when it is absent, so every offer fixture carries it,
 // exactly as a real book page does.
 function makeOffer(overrides) {
@@ -781,7 +781,7 @@ describe('CrossChainDexEngine', function () {
                 { table: 'cross_chain_matches', source_chain: 'BTC', from_action_index: 5, to_action_index: 75, retraction_generation: 9 });
         });
 
-        // : a supplied-but-malformed bound must ABORT before the SELECT. Fail-open
+        // a supplied-but-malformed bound must ABORT before the SELECT. Fail-open
         // here widened a fenced rollback into an open-ended retraction that also restored
         // capacity via _applyCommit(-1) and broadcast the widened event to peers.
         it('aborts on a supplied-but-malformed bound instead of widening the retraction', async function () {
@@ -908,13 +908,13 @@ describe('CrossChainDexEngine', function () {
             expect(n).to.equal(0);
         });
 
-        // SWQ-TRUNC-MIRROR (). The .truncated marker is a JS array property and
+        // SWQ-TRUNC-MIRROR. The .truncated marker is a JS array property and
         // capability_snapshots has no column for it, so mirroring a capped set hands the
         // off-BTC verifiers a partial stake denominator they read back as COMPLETE and
         // finalize against, while this hub's own meetsStakeThreshold rejects it. Persist
         // must fail closed instead: no rows, no mirror stream, and the 0 return that the
         // _writeFinalizedMatch caller already treats as "defer this match".
-        it('refuses to persist or mirror a TRUNCATED set ()', async function () {
+        it('refuses to persist or mirror a TRUNCATED set', async function () {
             let hub = makeDexHub();
             hub.db.doQuery = sinon.stub().resolves([]);
             let eng = new CrossChainDexEngine(hub);
@@ -1017,7 +1017,7 @@ describe('CrossChainDexEngine', function () {
     describe('_discoverAndMatch(): confirmation-depth floor', function () {
         it('drops offers shallower than minConfirmations on the discovery path', async function () {
             let eng = new CrossChainDexEngine(makeDexHub());
-            eng.minConfirmations = { BTC: 6, LTC: 6, DOGE: 6 }; // per-coin map 
+            eng.minConfirmations = { BTC: 6, LTC: 6, DOGE: 6 }; // per-coin map
             eng.indexers.BTC.url = 'http://btc';   // pass the per-coin URL guard
             // latest tip 20: block 11 is 10 deep (kept), block 19 is 2 deep (dropped at floor 6).
             sinon.stub(eng, '_indexerCall').resolves({
@@ -1034,7 +1034,7 @@ describe('CrossChainDexEngine', function () {
 
         it('keeps every offer at an explicit floor of 1 (regtest-style venue pin)', async function () {
             let eng = new CrossChainDexEngine(makeDexHub());
-            eng.minConfirmations = { BTC: 1, LTC: 1, DOGE: 1 }; // XDEX_MIN_CONFIRMATIONS=1 venue pin (: defaults are now per-coin 6/12/60)
+            eng.minConfirmations = { BTC: 1, LTC: 1, DOGE: 1 }; // XDEX_MIN_CONFIRMATIONS=1 venue pin (defaults are now per-coin 6/12/60)
             eng.indexers.BTC.url = 'http://btc';
             sinon.stub(eng, '_indexerCall').resolves({
                 network: 'regtest', latest_block_index: 20,
@@ -1125,9 +1125,9 @@ describe('CrossChainDexEngine', function () {
         });
     });
 
-    // ──  / XDEX-CONF-1: the confirmation floor is per-coin, defaulting to the
-    // chain-registry attestation depths the sibling CrossChainCallEngine already uses. ──
-    describe('minConfirmations per-coin resolution ', function () {
+    // ── The confirmation floor is per-coin, defaulting to the chain-registry
+    // attestation depths the sibling CrossChainCallEngine already uses. ──
+    describe('minConfirmations per-coin resolution', function () {
         const CLEAR = ['XDEX_MIN_CONFIRMATIONS', 'XDEX_MIN_CONFIRMATIONS_BTC', 'XDEX_MIN_CONFIRMATIONS_DOGE'];
         let saved = {};
         beforeEach(function () { for (let k of CLEAR) { saved[k] = process.env[k]; delete process.env[k]; } });

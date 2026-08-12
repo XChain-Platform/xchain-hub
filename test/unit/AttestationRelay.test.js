@@ -12,8 +12,8 @@
  *
  **********************************************************************
  *
- * AttestationRelay ( request leg /  response leg): the hub half of the
- *  §12 cross-chain relay.
+ * AttestationRelay (request leg / response leg): the hub half of the
+ * §12 cross-chain relay.
  *
  * What these protect, in priority order:
  *   1. THE CANONICAL. The hub signs bytes an indexer must reproduce exactly. A
@@ -22,7 +22,7 @@
  *      against the indexer's own implementation when the sibling repo is present.
  *   2. INERTNESS. Off unless ATTEST_RELAY_ENABLED=1, and below
  *      ATTEST_RELAY_ACTIVATION nothing is proposed or broadcast, so a deployed
- *      but unarmed fleet behaves exactly as it did before .
+ *      but unarmed fleet behaves exactly as it did before activation.
  *   3. NO DOUBLE SPEND. A v3 that already exists on BTC and a v4 for a request the
  *      origin has already closed are both rejected on-chain, so re-broadcasting
  *      either only burns a real fee.
@@ -117,7 +117,7 @@ function homeRelayedRow(overrides = {}) {
 // request, nothing yet on BTC. Consensus is stubbed so the tests observe what
 // WOULD be proposed without running a real PBFT round. `homeRows` drives the
 // relayed-requests read that feeds the response leg; empty by default so the
-// request-leg tests see exactly the world  gave them.
+// request-leg tests run against a clean world.
 function makeRelay(hubOverrides = {}, rows = [originRow()], homeRows = []) {
     const relay = new AttestationRelay(makeHub(hubOverrides));
     for (const coin of Object.keys(relay.indexers)) relay.indexers[coin].url = 'http://127.0.0.1:1/';
@@ -143,7 +143,7 @@ function proposedRows(relay, phase) {
         .filter(r => r.phase === phase);
 }
 
-describe('AttestationRelay ', function () {
+describe('AttestationRelay', function () {
 
     let envSnapshot;
 
@@ -469,7 +469,7 @@ describe('AttestationRelay ', function () {
         });
     });
 
-    // ── 3b. Response-leg discovery  ─────────────────────────────────
+    // ── 3b. Response-leg discovery ─────────────────────────────────
 
     describe('home response discovery', function () {
 
@@ -700,7 +700,7 @@ describe('AttestationRelay ', function () {
         });
     });
 
-    // ── 4b. Follower re-verification, response leg  ─────────────────
+    // ── 4b. Follower re-verification, response leg ─────────────────
 
     describe('validateProposedMatch, response leg', function () {
 
@@ -1006,7 +1006,7 @@ describe('AttestationRelay ', function () {
             expect(both._publishedResponses.has(REQ_ID)).to.equal(true);
         });
 
-        it('reads a leg-less record written before  as a request-leg record', function () {
+        it('reads a leg-less record written before the response leg existed as a request-leg record', function () {
             const relay = relayWithWal([{ rid: REQ_ID, phase: 'sent' }]);
             expect(relay._published.has(REQ_ID)).to.equal(true);
             expect(relay._publishedResponses.has(REQ_ID)).to.equal(false);
@@ -1277,7 +1277,7 @@ describe('AttestationRelay ', function () {
         });
 
         it('stamps the eviction key onto every WAL record it writes', async function () {
-            // : a record with no deadline is one no later process can ever retire,
+            // a record with no deadline is one no later process can ever retire,
             // so the stamp is applied centrally in _appendWal rather than per call site.
             const relay = new AttestationRelay(makeHub());
             relay._noteDeadline('LTC', REQ_ID, 3160010);
@@ -1309,7 +1309,7 @@ describe('AttestationRelay ', function () {
         });
     });
 
-    // ── 8. Deadline-anchored eviction and WAL compaction  ──────────
+    // ── 8. Deadline-anchored eviction and WAL compaction ──────────
     //
     // Both idempotency sets and the WAL behind them used to grow for the process
     // lifetime. The bound the operator ruled for on 2026-08-11 (proposal A) anchors on
@@ -1404,7 +1404,7 @@ describe('AttestationRelay ', function () {
             expect(await relay.validateProposedMatch(responseRow({ origin_deadline_block: DEADLINE }))).to.equal(true);
             // A leader cannot push this node's eviction clock forward.
             expect(await relay.validateProposedMatch(responseRow({ origin_deadline_block: DEADLINE + 5000 }))).to.equal(false);
-            // Absent is tolerated: a pre- leader must not wedge the settling leg.
+            // Absent is tolerated: an older leader must not wedge the settling leg.
             expect(await relay.validateProposedMatch(responseRow())).to.equal(true);
             // Either way this node has indexed its OWN reading.
             expect(relay._deadlines.get(REQ_ID)).to.deep.equal({ coin: 'LTC', block: DEADLINE });

@@ -8,7 +8,7 @@
 // This file is part of XChain Platform. Licensed under the GNU Affero
 // General Public License v3.0 or later; see LICENSE.md.
 //
-// : a validator hub resolves BTC network and per-coin indexer URL from
+// a validator hub resolves BTC network and per-coin indexer URL from
 // its validated HUB_NETWORK, never from the configs table's regtest>testnet>
 // mainnet preference order. Both resolvers used to take the first configured
 // network, so a multi-network configs tree anchored a mainnet round to the
@@ -21,7 +21,7 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 
-describe('XChainHub network resolution honours HUB_NETWORK ()', function () {
+describe('XChainHub network resolution honours HUB_NETWORK', function () {
 
     let XChainHub, axiosStub, mockDb, errorLog;
 

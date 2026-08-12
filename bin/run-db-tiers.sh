@@ -25,9 +25,9 @@
 # xchain-indexer dies with MODULE_NOT_FOUND at module load, before a single test runs,
 # and mocha reports it as an exception during the run rather than as a missing
 # dependency. That is strictly worse than the indexer tier, which at least honours
-# XCHAIN_SDK_PATH / XCHAIN_DECODER_SQL_PATH, and it cost a wasted run to discover
-# . So this script checks the sibling FIRST and refuses rather than handing
-# back a failure that looks like broken code.
+# XCHAIN_SDK_PATH / XCHAIN_DECODER_SQL_PATH, and it cost a wasted run to discover.
+# So this script checks the sibling FIRST and refuses rather than handing back a
+# failure that looks like broken code.
 #
 # USAGE
 #   bin/run-db-tiers.sh                       # integration tier (default)

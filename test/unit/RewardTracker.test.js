@@ -264,7 +264,7 @@ describe('RewardTracker', function () {
             expect(post.getCall(0).args[1].params.reward_type).to.equal('anchor_archive');
         });
 
-        it('does NOT push anchor_archive once the ARCHIVE_REWARD flag-day is active (indexer derives it from v6, )', async function () {
+        it('does NOT push anchor_archive once the ARCHIVE_REWARD flag-day is active (indexer derives it from v6)', async function () {
             hub.network = 'regtest';                                       // archive flag-day = genesis
             rt.btcIndexerApiUrl = 'http://indexer:3000';
             await rt.recordAnchorReward('anchor_archive', 3, hexPk(2), 100);
@@ -331,7 +331,7 @@ describe('RewardTracker', function () {
             expect(h2.db.doQuery.getCall(1).args[1][3]).to.equal('2.50000000');
         });
 
-        it('records the FROZEN archive amount for a derived anchor_archive reward, ignoring an env override ', async function () {
+        it('records the FROZEN archive amount for a derived anchor_archive reward, ignoring an env override', async function () {
             // Same divergence argument as the per-chain frozen amount: the indexer credits
             // the frozen ARCHIVE_REWARD_AMOUNT from the on-chain v6, so the hub's recorded
             // (and therefore archived) amount has to match or recovery forks the COLLECT rail.

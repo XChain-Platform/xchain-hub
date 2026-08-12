@@ -1,4 +1,4 @@
-// : CONFIGURATION.md drift guard.
+// CONFIGURATION.md drift guard.
 //
 // Every ANCHOR_/XDEX_/CHECKPOINT_/FULLNODE_ env var read anywhere in src/
 // must be documented in CONFIGURATION.md. These families were the ~42-var
@@ -29,7 +29,7 @@ function walkJs(dir, out) {
     return out;
 }
 
-describe('CONFIGURATION.md env-var coverage ', function () {
+describe('CONFIGURATION.md env-var coverage', function () {
 
     it('documents every ANCHOR_/XDEX_/CHECKPOINT_/FULLNODE_ env var read in src/', function () {
         const doc = fs.readFileSync(DOC, 'utf8');
@@ -56,7 +56,7 @@ describe('CONFIGURATION.md env-var coverage ', function () {
             'env vars read in src/ but undocumented in CONFIGURATION.md: ' + missing.join(', '));
     });
 
-    // : the guard above scans for literal process.env.NAME, so it is blind to
+    // the guard above scans for literal process.env.NAME, so it is blind to
     // the per-coin rails the attestation relay builds by string concatenation
     // (process.env[coin + '_ENCODER_URL']). That blindness is exactly how the relay
     // shipped with four undocumented origin-chain variables whose absence silently

@@ -12,7 +12,7 @@
  *
  **********************************************************************
  *
- * XChain Hub - Shared SpendGuard (, flag-day Pkg 9 effector spend policy)
+ * XChain Hub - Shared SpendGuard (flag-day Pkg 9 effector spend policy)
  *
  * One pre-send choke point for every hub effector that spends real coin on-chain
  * (OraclePublisher, AttestationPublisher, StateAnchorPublisher,
@@ -27,7 +27,7 @@
  *      cap, CLAMPED at $2000   that both trip: a broadcast COUNT (the legacy
  *                             SpendCeiling) and a cost-weighted USD-cents budget.
  *                             The USD budget is HARD-CLAMPED at $2000 (the
- *                             platform review admission ceiling, operator-decided
+ *                             platform AML admission ceiling, operator-decided
  *                             2026-07-17): an operator can lower it but can never
  *                             configure a hub to spend more than $2000 per window.
  *   3. Per-capability        - an in-memory runtime pause, togglable per effector
@@ -44,14 +44,14 @@
  *     a broadcast actually went out, so deferred/failed sends consume no budget.
  *   - A caller that AWAITS its send uses reserve()/commit()/release() instead: the
  *     pure-predicate pair leaves a window in which concurrent callers all pass the
- *     same check before any of them records, and all spend past the cap ().
+ *     same check before any of them records, and all spend past the cap.
  *     release() on every non-send exit keeps "failed sends consume no budget" true.
  *   - The window SURVIVES a restart for any effector that calls persistTo() at
- *     start() (). Without it both windows are memory-only, so a restart
+ *     start(). Without it both windows are memory-only, so a restart
  *     restores the full allowance and a crash-loop spends one window's budget per
  *     restart - a gate that a misconfiguration (or a bad deploy) can make spend
  *     MORE, which is exactly what the first invariant forbids.
- *   - The USD cap is default-ON (config-default-enabled per ): unset config
+ *   - The USD cap is default-ON (config-default-enabled): unset config
  *     yields the $2000 clamp, not "disabled". Per-broadcast cost defaults to a
  *     conservative estimate; a caller that knows the real fee passes it to
  *     record()/check() and the budget tracks actual spend.
@@ -75,7 +75,7 @@ const path = require('path');
 
 const SpendCeiling = require('./spend_ceiling.js');
 
-// $2000 review admission ceiling, in USD cents. The hard clamp on the per-window
+// $2000 AML admission ceiling, in USD cents. The hard clamp on the per-window
 // spend budget: no operator config can raise the effective cap above this.
 const HARD_CAP_USD_CENTS = 200000;
 
@@ -133,8 +133,8 @@ class SpendGuard {
         // Diagnostics: why spends were skipped, per gate.
         this.blocked = { pause: 0, spend: 0, balance: 0 };
 
-        // Restart persistence: OFF until an effector's start() calls persistTo()
-        // (). Opt-in by CALL rather than by config so constructing a guard
+        // Restart persistence: OFF until an effector's start() calls persistTo().
+        // Opt-in by CALL rather than by config so constructing a guard
         // is still pure and IO-free - the pure-construction contract every existing
         // call site and test relies on - while a real hub turns it on at boot.
         //
@@ -144,7 +144,7 @@ class SpendGuard {
         // left no handle to override, so every unit test that reached a real start()
         // wrote a durable window into the checkout and inherited it on the next run;
         // at ~$870 an hour of ordinary test runs that is a suite that goes red on a
-        // schedule ( rework).
+        // schedule.
         this.statePath = env[prefix + '_SPEND_STATE_PATH'] || cfg[prefix + '_SPEND_STATE_PATH'] ||
                          path.join('./data', 'spend-state', String(this.label).replace(/[^A-Za-z0-9_.-]/g, '_') + '.json');
         this._statePath   = null;
@@ -239,7 +239,7 @@ class SpendGuard {
     }
 
     // ---- Await-safe gate: reserve before the send, release if it never went out ----
-    // . check()/allow() are pure predicates and record() runs after the
+    // check()/allow() are pure predicates and record() runs after the
     // awaited broadcast, so every caller that awaits between the two leaves a window
     // in which concurrent callers all read the same pre-send budget and all spend.
     // reserve() runs the same gates and CONSUMES the budget in the same synchronous
@@ -282,7 +282,7 @@ class SpendGuard {
         this._persist();
     }
 
-    // ---- Restart persistence () ----
+    // ---- Restart persistence ----
     // Both windows lived only in memory, so a restart emptied them and handed the
     // effector its FULL per-window allowance again - which breaks the invariant at
     // the top of this file, since a crash-loop then spends a whole window's budget

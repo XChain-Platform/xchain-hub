@@ -12,7 +12,7 @@
  *
  **********************************************************************
  *
- * XChain Hub - Count-based PBFT quorum threshold (, flag-day Pkg 7)
+ * XChain Hub - Count-based PBFT quorum threshold (flag-day Pkg 7)
  *
  * THE single hub-side definition of the count-based (non-stake-weighted) PBFT
  * quorum size. Before this extraction the identical arithmetic

@@ -458,7 +458,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         expect(victim.consensus.pending.get(mid).commits.size).to.equal(0);
     });
 
-    it('guard: a replayed PREPARE (valid canonical sig, no commit_sig) never counts as a COMMIT vote ', async function () {
+    it('guard: a replayed PREPARE (valid canonical sig, no commit_sig) never counts as a COMMIT vote', async function () {
         // A-F6: PREPARE and COMMIT signatures were interchangeable (a COMMIT
         // re-sends the prepare sig verbatim), so one Byzantine member could
         // replay everyone's PREPAREs as COMMITs and finalize a round no honest
@@ -489,7 +489,7 @@ describe('CrossChainDexConsensus (PBFT mesh)', function () {
         expect(p.signatures.size).to.be.at.least(3);           // artifact sigs still collected
     });
 
-    it('phase-bound COMMIT votes with a verifying commit_sig finalize the round ', async function () {
+    it('phase-bound COMMIT votes with a verifying commit_sig finalize the round', async function () {
         let bus = buildMesh(4, { drop: () => true });   // isolate: no real gossip
         await startAll(bus);
         let mid = 'c4'.repeat(32), row = sampleRow(mid);

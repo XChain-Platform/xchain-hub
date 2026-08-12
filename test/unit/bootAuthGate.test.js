@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// , both halves:
+// Boot auth posture, both halves:
 //   1. boot REFUSES while the write surface is unauthenticated and undeclared
 //      (it used to warn and serve on every non-validator hub);
 //   2. /health reports the consensus-input alarm and degrades on it, so a hub
@@ -24,7 +24,7 @@ const { evaluateAuthPosture } = require('../../src/lib/auth_posture.js');
 const { ConsensusInputMonitor, REASONS } = require('../../src/lib/consensus_input_monitor.js');
 const { waitUntil } = require('../helpers/waitUntil');
 
-describe('boot auth posture ', function () {
+describe('boot auth posture', function () {
 
     describe('evaluateAuthPosture()', function () {
 

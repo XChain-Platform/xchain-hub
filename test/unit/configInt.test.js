@@ -18,10 +18,10 @@ const CrossChainDexConsensus = require('../../src/CrossChainDexConsensus.js');
 const PeerManager = require('../../src/PeerManager.js');
 const { createMockHub } = require('../helpers/mockHub');
 
-// : `parseInt(cfg) || DEFAULT` accepted a negative cap, and a negative
+// `parseInt(cfg) || DEFAULT` accepted a negative cap, and a negative
 // ring cap makes `length > max` true for the entry just inserted, so the
 // duplicate-suppression set stays permanently empty.
-describe('positiveIntConfig ()', function () {
+describe('positiveIntConfig', function () {
 
     let warn;
     beforeEach(function () { warn = sinon.stub(console, 'warn'); });
@@ -51,7 +51,7 @@ describe('positiveIntConfig ()', function () {
     });
 });
 
-describe('ring caps reject a negative operator value ()', function () {
+describe('ring caps reject a negative operator value', function () {
 
     afterEach(function () { sinon.restore(); });
 

@@ -33,7 +33,7 @@
  *     than sending; the work stays queued for a later window.
  *   - reserve()/release() are the await-safe form of the same pair: a caller that
  *     awaits its send consumes the slot up front and hands it back on failure, so
- *     concurrent callers cannot all pass the same allow() (). A slot that
+ *     concurrent callers cannot all pass the same allow(). A slot that
  *     is never released over-counts, which blocks rather than overspends, and it
  *     ages out of the window on its own.
  *
@@ -100,7 +100,8 @@ class SpendCeiling {
         this._spends.push(now);
     }
 
-    // Consume a count slot SYNCHRONOUSLY, before the caller awaits its send (). allow() is a pure predicate, so two callers that both await between
+    // Consume a count slot SYNCHRONOUSLY, before the caller awaits its send.
+    // allow() is a pure predicate, so two callers that both await between
     // allow() and record() each see the same pre-send count and both broadcast past
     // the cap. Returns the timestamp used as the release handle, or null when the
     // ceiling is disabled (nothing to give back).
@@ -123,7 +124,7 @@ class SpendCeiling {
 
     // Fill the count window so the next allow() is false until it rolls over. Used
     // only on SpendGuard's fail-closed path, when the persisted spend state cannot be
-    // read (): an unreadable store must never read as an empty window.
+    // read: an unreadable store must never read as an empty window.
     seedConsumed(now){
         if (this.disabled) return;
         now = now || Date.now();

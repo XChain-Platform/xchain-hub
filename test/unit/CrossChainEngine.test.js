@@ -232,7 +232,7 @@ describe('CrossChainEngine', function () {
             expect(hub.db.doQuery.called).to.be.true;
         });
 
-        it('single-node emits attestation:finalized so downstream listeners run ', async function () {
+        it('single-node emits attestation:finalized so downstream listeners run', async function () {
             // SwapTracker progresses swap_records off this event. Without it a
             // single-operator hub wrote the attested row and left every swap at
             // 'initiated' forever.
@@ -275,7 +275,7 @@ describe('CrossChainEngine', function () {
             expect(result.attestation_id).to.equal('BTC:42:LTC');
         });
 
-        // . The id used to be built from the RAW argument while the guard
+        // The id used to be built from the RAW argument while the guard
         // parsed it, so every spelling parseInt accepts minted its own id: followers
         // dropped 'BTC:1junk:LTC' on their canonical-id regex (_handlePropose) and the
         // round timed out, and a single-node hub stored one row per spelling.
@@ -436,7 +436,7 @@ describe('CrossChainEngine', function () {
             expect(engine.finalized.has(attestationId)).to.be.true;
         });
 
-        // : a transient DB failure used to delete the round outright, and
+        // a transient DB failure used to delete the round outright, and
         // both _handleCommit and _checkCommitQuorum return early once the round is
         // gone, so the quorum proof was unrecoverable while peer hubs advanced.
         describe('store failure on a quorum-finalized round', function () {

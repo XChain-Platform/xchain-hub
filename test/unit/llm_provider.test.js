@@ -143,7 +143,7 @@ describe('llm provider, agree (judge_model)', function () {
     });
 });
 
-// : max_completion_tokens was the one governance key installed on a bare
+// max_completion_tokens was the one governance key installed on a bare
 // truthy check, so -1 / 1.5 / Infinity became the federation-wide token budget.
 // MAX_TOKENS_DEFAULT has no getter; the observable is the budget the vendor is sent.
 describe('llm provider, governance max_completion_tokens bounds (#4466)', function () {
@@ -209,7 +209,7 @@ describe('llm provider, governance max_completion_tokens bounds (#4466)', functi
     });
 });
 
-// : the Anthropic branch emitted `temperature` for every model, but the
+// the Anthropic branch emitted `temperature` for every model, but the
 // Opus 4.7+ / Sonnet 5 / Fable 5 contract REMOVED the sampling parameters (HTTP 400,
 // not accepted-and-ignored). claude-opus-4-7 is the default approved_models fallback
 // and the pinned temperature-0 judge, so those calls were deterministic vendor 400s.
@@ -581,7 +581,7 @@ describe('llm provider, fetch via claude_spawn', function () {
         expect(stub.firstCall.args[0].maxBudgetUsd).to.equal(0.5);
     });
 
-    //  - these two used to pin the OPPOSITE contract (an unconfigured hub
+    // - these two used to pin the OPPOSITE contract (an unconfigured hub
     // omits the flag, "behavior unchanged"). That omission was the gap: the CLI
     // transport carries no token cap of its own, so every paid invocation on a
     // stock hub ran uncapped. The ceiling is now default-on and these pin it.
@@ -619,9 +619,9 @@ describe('llm provider, fetch via claude_spawn', function () {
         expect(stub.called).to.equal(false);
     });
 
-    //  - a crash mid-call must still leave local evidence that a vendor
+    // - a crash mid-call must still leave local evidence that a vendor
     // charge was initiated, on the CLI transport most of all: it recorded nothing.
-    describe('durable spend audit ()', function () {
+    describe('durable spend audit', function () {
 
         const fsSync = require('fs');
         let sinkPath, savedSink;
@@ -775,7 +775,7 @@ describe('llm provider, kill switch + budget (items 2680 / 2679)', function () {
         const llm = _reloadProvider();
         llm._setConfig({ additional_config: { max_budget_usd: 1.25 } });
         expect(llm._resolveMaxBudgetUsd()).to.equal(1.25);
-        // : clearing the governance value no longer means "no ceiling".
+        // clearing the governance value no longer means "no ceiling".
         llm._setConfig({ additional_config: { max_budget_usd: 0 } });
         expect(llm._resolveMaxBudgetUsd()).to.equal(llm._DEFAULT_MAX_BUDGET_USD);
     });
@@ -917,7 +917,7 @@ describe('llm provider, fetch via anthropic_api', function () {
         expect(capturedBody.temperature).to.equal(0.7);
     });
 
-    //  - the audit wraps the dispatch, so it must cover the HTTP
+    // - the audit wraps the dispatch, so it must cover the HTTP
     // transports too, not only the CLI branch its own tests live in.
     it('writes an intent/settle pair carrying real usage on the API transport', async function () {
         const fsSync   = require('fs');
@@ -1700,7 +1700,7 @@ describe('llm provider, reasoning-family classification (item 3535)', function (
         expect(llm._isReasoningModel('gpt-5-nano')).to.equal(true);
         expect(llm._isReasoningModel('o3')).to.equal(true);
         expect(llm._isReasoningModel('o1-mini')).to.equal(true);
-        // : a version segment must not by itself demote a reasoning id.
+        // a version segment must not by itself demote a reasoning id.
         expect(llm._isReasoningModel('gpt-5.1')).to.equal(true);
         expect(llm._isReasoningModel('gpt-5.1-mini')).to.equal(true);
     });
@@ -1711,7 +1711,7 @@ describe('llm provider, reasoning-family classification (item 3535)', function (
         expect(llm._isReasoningModel('gpt-5-chat')).to.equal(false);
         expect(llm._isReasoningModel('gpt-4o')).to.equal(false);
         expect(llm._isReasoningModel('claude-sonnet-4-6')).to.equal(false);
-        // : the version segment sits between `gpt-5` and `-chat`, so the
+        // the version segment sits between `gpt-5` and `-chat`, so the
         // old literal `(?!-chat)` lookahead cleared and these read as reasoning.
         expect(llm._isReasoningModel('gpt-5.1-chat-latest')).to.equal(false);
         expect(llm._isReasoningModel('gpt-5.2-chat-latest')).to.equal(false);
@@ -2251,7 +2251,7 @@ describe('hub-credentials, resolveOpenAiAuth / resolveLlmVendorAuth', function (
 });
 
 /*********************************************************************
- * : agree() must not canonicalize an unvouched `meta`.
+ * agree() must not canonicalize an unvouched `meta`.
  *
  * `meta` (the model that served a response) is consensus-visible: the canonical
  * signature binds it and the ATTEST v1 wire records it on-chain. But proposals
@@ -2263,7 +2263,7 @@ describe('hub-credentials, resolveOpenAiAuth / resolveLlmVendorAuth', function (
  * function: an exact allowlist against the block-anchored approved identifiers,
  * and corroboration across proposals.
  ********************************************************************/
-describe('llm provider, agree() meta canonicalization (#3070)', function () {
+describe('llm provider, agree() meta canonicalization', function () {
 
     const APPROVED = 'claude-sonnet-4-6';
     const body = (s) => Buffer.from(s, 'utf8');
@@ -2395,7 +2395,7 @@ describe('llm provider, agree() meta canonicalization (#3070)', function () {
         });
     });
 
-    // . fetch() honours the block-anchored pinned model, so the gate that
+    // fetch() honours the block-anchored pinned model, so the gate that
     // judges the meta it returns has to read the same block-anchored list. Reading
     // the live one made a governance delisting permanent: every retry re-pinned the
     // removed model, every meta came back unrecognized, and the request expired at
@@ -2431,7 +2431,7 @@ describe('llm provider, agree() meta canonicalization (#3070)', function () {
 
         it('does not widen the allowlist: a meta in neither list is still refused', async function () {
             // The pinned list REPLACES the live one, it does not union with arbitrary
-            // values. The #3070 control has to survive the liveness fix intact.
+            // values. This control has to survive the liveness fix intact.
             const llm = _reloadProvider();
             llm._setConfig({ additional_config: { approved_models: ['claude-opus-4-7'] } });
             const outcome = {};

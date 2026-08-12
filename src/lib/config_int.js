@@ -12,7 +12,7 @@
  *
  **********************************************************************
  *
- * XChain Hub - positive-integer operator config ()
+ * XChain Hub - positive-integer operator config
  *
  * `parseInt(cfg) || DEFAULT` accepts any NEGATIVE integer, because a negative
  * is truthy. Every duplicate-suppression ring in the hub sizes itself that

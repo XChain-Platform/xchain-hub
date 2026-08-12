@@ -28,13 +28,11 @@
  * still includes it. This is what makes the snapshot cross-hub
  * deterministic.
  *
- * Spec: claude/reports/specs/2026-05-24_capability-staking-model.md §6
- *
  ********************************************************************/
 
 const axios = require('axios');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
-// : consensus-input fetches fail closed but used to fail SILENTLY for
+// Consensus-input fetches fail closed but used to fail SILENTLY for
 // every reason except auth and echo mismatch. The monitor counts every outcome,
 // owns the log throttle, and raises the alert that /health reports.
 const { ConsensusInputMonitor, REASONS, classifyFetchError } = require('./lib/consensus_input_monitor.js');
@@ -48,7 +46,7 @@ const MALFORMED_DETAIL  = 'The response carried no `validators` array. Refusing 
     'shape as an empty validator set (quorum 0 is indistinguishable from single-node mode).';
 const WEIGHTLESS_DETAIL = 'A row in the source-keyed weight snapshot carried no usable `weight`. Refusing the whole ' +
     'snapshot: a missing weight read as 0 keeps the source in the dedupe map with no stake, shrinking the ' +
-    'denominator S and LOWERING the two-thirds bar it is measured against .';
+    'denominator S and LOWERING the two-thirds bar it is measured against.';
 
 // A weight is a plain decimal string, exactly as stake_weighted_quorum.bcnum
 // accepts one. Kept identical to that predicate's own pattern so a row this
@@ -60,7 +58,7 @@ const NUMERIC_WEIGHT = /^[+-]?(\d+\.?\d*|\.\d+)$/;
 // buried (XCHAIN_CONFIRMATIONS_BTC). Named once so the default and the
 // divergence assertion below can never drift apart.
 //
-// : the literal now comes from the shared, byte-vendored
+// The literal now comes from the shared, byte-vendored
 // snapshot_reorg_buffer.js rather than living here, because the three verifier
 // families outside this repo (indexer attest.js, indexer recovery.js, sdk
 // light.js) must bury by the SAME depth the signer buried by. A hub-local 6 and
@@ -85,7 +83,7 @@ class CapabilitySnapshot {
         this.cache = new Map();
         // How long to keep a snapshot. 60s default, enough to span a PBFT round.
         this.cacheTtlMs = 60 * 1000;
-        // Reorg-depth buffer (#S-F7 / ): every snapshot resolves at
+        // Reorg-depth buffer (#S-F7): every snapshot resolves at
         // (requested block - buffer), clamped at 0, instead of at the requested
         // height itself. Callers pass a tip-derived height, and stake state at
         // the tip is not reorg-safe: a shallow BTC reorg can rewrite the stake
@@ -105,7 +103,7 @@ class CapabilitySnapshot {
         // cross-hub deterministic), so it is not a monitor failure and keeps
         // its own throttle stamp: one warning per cacheTtlMs, not one per call.
         this._truncWarnAt = 0;
-        // : every path that returns a null snapshot reports here. The
+        // Every path that returns a null snapshot reports here. The
         // monitor owns counting, per-reason log throttling and the alert flag
         // that /health turns into a degraded status, so a fail-closed hub is
         // visible instead of merely silent.
@@ -152,7 +150,8 @@ class CapabilitySnapshot {
 
     // Record a consensus-input failure and return the null sentinel every fetch
     // path already uses. Single choke point so no future null-return can be
-    // added without also raising the alarm (the exact regression  closes).
+    // added without also raising the alarm (the exact regression the
+    // consensus-input monitor closes).
     _fail(method, reason, detail, throttleKey) {
         this.monitor.recordFailure(method, reason, detail, throttleKey);
         return null;
@@ -168,7 +167,7 @@ class CapabilitySnapshot {
     // fail-closed gate instead of silently yielding a zero-validator snapshot
     // (quorum=0) that is indistinguishable from single-node.
     //
-    // : on the WEIGHT fetchers the caller passes requireWeight, and a row
+    // On the WEIGHT fetchers the caller passes requireWeight, and a row
     // whose weight is missing/blank/nonnumeric makes the whole snapshot MALFORMED.
     // stake_weighted_quorum fails closed on such a row, but only if it ever sees
     // one: every consumer of this snapshot re-maps it through
@@ -474,7 +473,7 @@ class CapabilitySnapshot {
         let N = Number(snapshot.count);
         if (!Number.isInteger(N) || N < 0) N = Array.isArray(snapshot.validators) ? snapshot.validators.length : 0;
         // N<=1: single node (0 = caller bypasses consensus). Above that, the
-        // majority-floored BFT threshold (bft_quorum.js, ).
+        // majority-floored BFT threshold (bft_quorum.js).
         return bftQuorumOrSingle(N, 0);
     }
 

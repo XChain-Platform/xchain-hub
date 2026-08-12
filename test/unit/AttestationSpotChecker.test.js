@@ -467,7 +467,7 @@ describe('AttestationSpotChecker: non-ok finalizations (Phase 4)', function () {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// : reorg-safe stats persistence + rollback
+// reorg-safe stats persistence + rollback
 // ────────────────────────────────────────────────────────────────────────────
 
 // Minimal in-memory stand-in for the hub DB. Models the ON DUPLICATE KEY on
@@ -519,7 +519,7 @@ function okEvent(rid, blockIndex, signers) {
     };
 }
 
-describe('AttestationSpotChecker: reorg-safe stats ', function () {
+describe('AttestationSpotChecker: reorg-safe stats', function () {
 
     afterEach(function () { sinon.restore(); });
 
@@ -615,10 +615,10 @@ describe('AttestationSpotChecker: reorg-safe stats ', function () {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// : injection scheduler
+// injection scheduler
 // ────────────────────────────────────────────────────────────────────────────
 
-describe('AttestationSpotChecker: injection scheduler ', function () {
+describe('AttestationSpotChecker: injection scheduler', function () {
 
     afterEach(function () { sinon.restore(); });
 
@@ -748,7 +748,7 @@ describe('AttestationSpotChecker: injection scheduler ', function () {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// : an unavailable judge no longer discards the spot-check
+// an unavailable judge no longer discards the spot-check
 // ────────────────────────────────────────────────────────────────────────────
 
 // A judge that is unavailable (inconclusive with `reason`) for its first
@@ -768,7 +768,7 @@ function makeFlakyRegistry(reason, unavailableFor, then) {
     return { calls: () => calls, getModule: () => ({ agree }) };
 }
 
-describe('AttestationSpotChecker: re-judge queue ()', function () {
+describe('AttestationSpotChecker: re-judge queue', function () {
 
     afterEach(function () { sinon.restore(); });
 

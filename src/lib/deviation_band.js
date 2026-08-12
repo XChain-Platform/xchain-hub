@@ -12,7 +12,7 @@
  *
  **********************************************************************
  *
- * XChain Hub - Oracle deviation band (, reviews-store seq 2400)
+ * XChain Hub - Oracle deviation band
  *
  * ONE deviation formula for every oracle price gate, so the accept/withhold/
  * slash boundary is a single band federation-wide:
@@ -29,11 +29,11 @@
  *      as `twoSourceSpreadExceeds` WITHOUT computing a rounded intermediate
  *      mean. Rounds at scale 18 like sites 2 and 3: the pre-helper code used
  *      scale 8, which truncated a boundary spread back INSIDE the band the
- *      other two gates already read as outside it ()
+ *      other two gates already read as outside it
  *      (CONSENSUS-CRITICAL: deploy fleet-wide atomically).
  *   2. Co-sign admission gate (OracleConsensus._handlePropose): the
  *      follower's local aggregate measured against the PROPOSED price as
- *      reference. (Before  this divided by the local value, opening a
+ *      reference. (Previously this divided by the local value, opening a
  *      price-ratio window where the leader publishes a pair the follower
  *      then withholds the whole round over.)
  *   3. Slash detection (SlashDetector._checkDeviations): a submission

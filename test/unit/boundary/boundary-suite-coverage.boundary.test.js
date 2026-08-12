@@ -1,4 +1,4 @@
-// : the boundary suite lives in TWO directories and the `test:boundary`
+// the boundary suite lives in TWO directories and the `test:boundary`
 // script used to glob only one of them, so `npm run test:boundary` reported 14
 // passing while 270 more boundary cases sat in test/unit/boundary and were only
 // ever reached incidentally by `npm test`. That mismatch is what made the README
@@ -51,7 +51,7 @@ function globToRegExp(glob) {
     return new RegExp('^' + out + '$');
 }
 
-describe('boundary suite coverage ', function () {
+describe('boundary suite coverage', function () {
     const script = require(path.join(repoRoot, 'package.json')).scripts['test:boundary'];
 
     it('package.json defines a test:boundary script', function () {

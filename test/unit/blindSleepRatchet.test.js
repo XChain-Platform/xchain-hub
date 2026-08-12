@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-//  ratchet: the test tree carries no fixed-duration sleep standing in for
+// ratchet: the test tree carries no fixed-duration sleep standing in for
 // a poll on an observable condition. The 43 that existed were converted to
 // test/helpers/waitUntil.js; this keeps the count at zero, because the shape
 // re-enters one `await sleep(200)` at a time and only fails on someone else's
@@ -21,7 +21,7 @@
 const { expect } = require('chai');
 const { scan, blindSleepSites } = require('../../bin/check-blind-sleeps');
 
-describe('blind-sleep ratchet ', function () {
+describe('blind-sleep ratchet', function () {
 
     it('the test tree contains no blind-sleep waits', function () {
         let findings = scan();

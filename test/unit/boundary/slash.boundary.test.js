@@ -181,7 +181,7 @@ describe('Boundary: SlashDetector', function () {
             expect(slashCalls()).to.have.length(1);
         });
 
-        it('recovery below the windowed threshold then re-accumulate to 30 → YES slash again ', async function () {
+        it('recovery below the windowed threshold then re-accumulate to 30 → YES slash again', async function () {
             await simulateMisses(30);
             expect(slashCalls()).to.have.length(1);
 

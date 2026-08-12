@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// : consensus-input fetch failures must ALERT, not merely fail closed in
+// consensus-input fetch failures must ALERT, not merely fail closed in
 // silence. Before this, only a 401/403 and a block-echo mismatch logged; an
 // unreachable indexer, a JSON-RPC error, a malformed body or an unresolvable
 // indexer URL each returned null with no output at all, so a hub that had
@@ -23,7 +23,7 @@ const proxyquire = require('proxyquire');
 const { ConsensusInputMonitor, REASONS, classifyFetchError } =
     require('../../src/lib/consensus_input_monitor.js');
 
-describe('ConsensusInputMonitor ', function () {
+describe('ConsensusInputMonitor', function () {
 
     // Injected clock + log sink: the monitor's throttle and streak are
     // time-based, and a real clock would make these tests either slow or flaky.
@@ -188,7 +188,7 @@ describe('ConsensusInputMonitor ', function () {
 // the regression that matters, because the fail-closed nulls are correct
 // and would stay correct while going silent again.
 // -----------------------------------------------------------------
-describe('CapabilitySnapshot consensus-input alarms ', function () {
+describe('CapabilitySnapshot consensus-input alarms', function () {
 
     let axiosStub, CapabilitySnapshot;
 
@@ -269,7 +269,7 @@ describe('CapabilitySnapshot consensus-input alarms ', function () {
     });
 
     it('a fault-injected outage raises the alert after the third failed fetch', async function () {
-        // The ledger's verify for : fault-inject the consensus input and
+        // Fault-inject the consensus input and
         // the alert must fire. Distinct methods/heights so the 60s snapshot
         // cache cannot short-circuit any of the three calls.
         axiosStub.post.rejects(new Error('ETIMEDOUT'));

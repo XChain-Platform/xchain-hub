@@ -253,7 +253,7 @@ class ReorgHandler extends EventEmitter {
         // costs nothing here (no DB, no broadcast, no verification), but sitting behind
         // the limiter it threw 'Rate limit ...' instead - so the ordinary retry a
         // monitor or a peer makes after a confirmed reorg surfaced as an error rather
-        // than the intended silent ignore .
+        // than the intended silent ignore.
         if (this.processed.has(reorgId)) return;
 
         // Rate limit: 1 report per chain per 60 seconds. CHECK the budget here, but do
@@ -321,7 +321,7 @@ class ReorgHandler extends EventEmitter {
         if (!registry) return false;
         if (registry.size === 0) {
             // Empty-registry leniency is for the genuine pre-bootstrap window ONLY
-            // (G-1/): once the on-chain snapshot has produced a non-empty
+            // (G-1): once the on-chain snapshot has produced a non-empty
             // effective signer set, an empty registry is a misconfiguration or
             // wipe window, not bootstrap, and counting unattributable senders
             // would reopen count-mode quorum forgery. Fail closed instead.
@@ -736,18 +736,18 @@ class ReorgHandler extends EventEmitter {
             if (!ev || !Array.isArray(ev.blocks)) continue;
             for (let b of ev.blocks) {
                 if (!b || Number(b.block_index) !== Number(reorgHeight)) continue;
-                // : an unrecorded hash is NOT a confirmation. The indexer sets
+                // An unrecorded hash is NOT a confirmation. The indexer sets
                 // block_hash null deliberately so a caller can tell "no hash recorded"
                 // apart from "hash did not match" (reorg-history-query.js parseReorgEvent);
                 // treating them alike fails OPEN and accepts ANY claimed oldHash at this
-                // height, which reduces the  check to "some reorg happened here" and
-                // re-opens the  divergent-digest mode. Keep scanning: another event
+                // height, which reduces the orphaned-hash check to "some reorg happened here" and
+                // re-opens the divergent-digest mode. Keep scanning: another event
                 // may carry the real hash for the same height.
                 if (b.block_hash === null || b.block_hash === undefined) { sawUnrecorded = true; continue; }
                 if (String(b.block_hash).toLowerCase() === oldHash) return true;
             }
         }
-        // Escape hatch, off by default. Restores the pre- fail-open for an
+        // Escape hatch, off by default. Restores the earlier fail-open behavior for an
         // operator who knowingly runs against history with unrecorded hashes and
         // would rather co-sign than abstain. Measured 2026-07-29: 3 of 171 recorded
         // orphaned blocks on mainnet carry a null hash (DOGE 6280198 + 6279100,
@@ -755,13 +755,13 @@ class ReorgHandler extends EventEmitter {
         if (sawUnrecorded && String(process.env.REORG_ALLOW_UNRECORDED_OLDHASH || '') === '1') {
             console.warn('Reorg: accepting UNVERIFIED oldHash at ' + chain + ':' + reorgHeight +
                 ' because REORG_ALLOW_UNRECORDED_OLDHASH=1 (the orphaned hash is unrecorded, so this ' +
-                'co-signs a claim this node cannot check; )');
+                'co-signs a claim this node cannot check)');
             return true;
         }
         if (sawUnrecorded)
             console.warn('Reorg: abstaining at ' + chain + ':' + reorgHeight +
                 ': a reorg IS recorded at this height but its orphaned hash was never recorded, so the ' +
-                'claimed oldHash cannot be verified ');
+                'claimed oldHash cannot be verified)');
         return false;
     }
 
@@ -804,7 +804,7 @@ class ReorgHandler extends EventEmitter {
             }
         }
         // N<=1: single node, no peer to reach (0 = caller bypasses). Above that,
-        // the majority-floored BFT threshold (bft_quorum.js, ).
+        // the majority-floored BFT threshold (bft_quorum.js).
         return bftQuorumOrSingle(N, 0);
     }
 

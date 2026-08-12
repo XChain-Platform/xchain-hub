@@ -18,7 +18,7 @@ const { expect } = require('chai');
 const { isAmbiguousSendError, AtMostOnce, broadcastOnce } = require('../../src/lib/idempotent_broadcast.js');
 const SpendGuard = require('../../src/lib/spend_guard.js');
 
-describe('idempotent-broadcast helper ', function () {
+describe('idempotent-broadcast helper', function () {
 
     describe('isAmbiguousSendError', function () {
         it('treats a node/encoder RPC rejection as DEFINITIVE (safe to retry)', function () {

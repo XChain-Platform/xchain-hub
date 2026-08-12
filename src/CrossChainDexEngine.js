@@ -37,8 +37,7 @@
  * Trust boundary: indexers verify the signatures, so a bad mirror can delay but
  * not forge a settlement. This is why the capability snapshot is propagated.
  *
- * Spec: claude/reports/2026-06-08_cross-chain-dex-mirror-settlement-design.md
- *       xchain-documentation/protocol/Cross_Chain_DEX.md
+ * Spec: xchain-documentation/protocol/Cross_Chain_DEX.md
  *
  ********************************************************************/
 
@@ -57,7 +56,7 @@ const { allCanonicalInts }   = require('./lib/canonical_int.js');
 const coins                  = require('./coins');
 
 // The INT-backed fields _canonicalMatch signs VERBATIM while the indexer's
-// settlement pass rebuilds them from the mirrored BIGINT row (#4204). The fill and
+// settlement pass rebuilds them from the mirrored BIGINT row. The fill and
 // filled-before fields are bcmath DECIMAL strings compared through _amountsEqual,
 // and ticks / addresses / kinds / payout legs are string compares, so none of them
 // belong here.
@@ -125,7 +124,7 @@ class CrossChainDexEngine extends EventEmitter {
         // _insertMatchRow is INSERT IGNORE so a slipped duplicate is still harmless.
         this._inflight = new Set();
 
-        // Per-coin confirmation-depth floor for a give-side escrow ( / XDEX-CONF-1).
+        // Per-coin confirmation-depth floor for a give-side escrow (XDEX-CONF-1).
         // A 1-conf escrow that reorgs after the counter-leg settled on the other chain is
         // a cross-chain value loss, worst on DOGE; the sibling CrossChainCallEngine already
         // uses the per-chain defaults (BTC 6 / LTC 12 / DOGE 60) for the identical concern.
@@ -243,7 +242,7 @@ class CrossChainDexEngine extends EventEmitter {
     }
 
     async _discoverAndMatch(){
-        // Poll self-overlap guard (, house convention: FullNodeChallengeRound._tick,
+        // Poll self-overlap guard (house convention: FullNodeChallengeRound._tick,
         // AttestationRound._pollPending). The poll is a bare setInterval at 15s while one
         // pass makes three paged indexer round trips plus a PBFT round and its DB writes,
         // so a slow indexer lets the next interval fire on top of this one. Two overlapping
@@ -286,7 +285,7 @@ class CrossChainDexEngine extends EventEmitter {
                     // WITHOUT ever calling the follower check, so without this gate XDEX_MIN_CONFIRMATIONS
                     // is silently inert on a single operator and a match can settle against a
                     // reorg-able escrow. Deep-enough = (latest - block_index + 1) >= the offer's
-                    // home-chain floor (per-coin defaults BTC 6 / LTC 12 / DOGE 60, ); an
+                    // home-chain floor (per-coin defaults BTC 6 / LTC 12 / DOGE 60); an
                     // offer with no resolvable depth is kept (an indexed order is >= 1 deep).
                     let deepEnough = (o) => !(Number.isFinite(latest) && Number.isFinite(Number(o.block_index)) &&
                                               (latest - Number(o.block_index) + 1) < this.minConfirmations[coin]);
@@ -401,7 +400,7 @@ class CrossChainDexEngine extends EventEmitter {
         // Bottleneck clamp (order_match.js:134-150), orderInfo = taker / matchInfo = maker.
         let max_give = bc.bclt(makerRem.get, takerRem.give) ? makerRem.get : takerRem.give;
         let max_get  = bc.bclt(makerRem.give, takerRem.get) ? makerRem.give : takerRem.get;
-        // : PRECISION 64, matching order_match.js:197/202 exactly.
+        // PRECISION 64, matching order_match.js:197/202 exactly.
         //
         // These two multiplications ran at precision 18 while the indexer's identical
         // bottleneck-clamp derivation runs at the mathjs default 64, and getPrice above
@@ -420,7 +419,7 @@ class CrossChainDexEngine extends EventEmitter {
             takerGive = String(give_from_get);
             takerGet  = String(max_get);
         }
-        // Grid snap (, gap CLOSED): the indexer follows the clamp with
+        // Grid snap (gap CLOSED): the indexer follows the clamp with
         // bcround(amount, <that tick's DECIMALS>) on BOTH derived amounts
         // (order_match.js:219-220). That is what enforces indivisibility (a 0-decimal NFT
         // tick settles whole units) and clears sub-unit dust, so a hub that skipped it
@@ -680,7 +679,7 @@ class CrossChainDexEngine extends EventEmitter {
     // match. A Byzantine leader cannot get us to sign a match we can't independently see.
     async validateProposedMatch(row){
         if(!row || row.a_chain === row.b_chain) return false;
-        // Canonical integer spellings (#4204). These fields are signed verbatim but the
+        // Canonical integer spellings. These fields are signed verbatim but the
         // indexer's settlement pass rebuilds the canonical from the mirrored BIGINT row,
         // so a leader-supplied '041' for an action index passes every Number()-based
         // re-derivation below yet finalizes a match whose signatures no settling indexer
@@ -869,7 +868,7 @@ class CrossChainDexEngine extends EventEmitter {
     // verify against capability_snapshots.
     async _persistCapabilitySnapshot(capability, block, network){
         let validators = await this._resolveCapabilityValidators(capability, block, network);
-        // SWQ-TRUNC-MIRROR (): a TRUNCATED set is never mirrored. The `.truncated`
+        // SWQ-TRUNC-MIRROR: a TRUNCATED set is never mirrored. The `.truncated`
         // marker fails this hub's own meetsStakeThreshold closed, but it is a JS array
         // property with no capability_snapshots column behind it, so persisting the capped
         // rows lets the off-BTC cross_chain verifiers read a partial set as COMPLETE and
@@ -912,7 +911,7 @@ class CrossChainDexEngine extends EventEmitter {
     // requires that leg's generation <= it, so a leg re-finalized at a recycled source action_index
     // (higher generation, post-rollback) survives. Omitted (older indexer) => no fence.
     async retractMatchesForReorg(chain, fromActionIndex, toActionIndex, retractionGeneration){
-        // Fail-closed on a SUPPLIED-but-invalid bound (): a malformed to/generation used to
+        // Fail-closed on a SUPPLIED-but-invalid bound: a malformed to/generation used to
         // collapse into the absent branch and widen this into an open-ended retraction, which also
         // restores capacity via _applyCommit below; the raw lower bound went into SQL uncoerced.
         let bounds = normalizeRetractionBounds(fromActionIndex, toActionIndex, retractionGeneration);
@@ -945,7 +944,7 @@ class CrossChainDexEngine extends EventEmitter {
                 let evt = { table: 'cross_chain_matches', source_chain: chain, from_action_index: from };
                 if(bounded) evt.to_action_index = to;
                 if(fenced) evt.retraction_generation = gen;
-                // : ride the retraction-signing round when active (the round
+                // Ride the retraction-signing round when active (the round
                 // dedups the per-row repeats by canonical); legacy unsigned otherwise.
                 if(this.hub && this.hub.retractionConsensus)
                     this.hub.retractionConsensus.submitLocal(evt).catch(e => console.error('CrossChainDex: retraction submit error: ' + (e && e.message)));

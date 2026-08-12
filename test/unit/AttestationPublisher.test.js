@@ -1683,8 +1683,8 @@ describe('AttestationPublisher: effector-safety guards', function () {
         expect(readQueue(pub.queuePath).length).to.equal(0);
     });
 
-    // ── : the spend ceiling must hold across the awaited broadcast ──
-    it('two concurrent finalized events cannot both pass a ceiling of 1 ()', async function () {
+    // ── The spend ceiling must hold across the awaited broadcast ──
+    it('two concurrent finalized events cannot both pass a ceiling of 1', async function () {
         process.env.ATTEST_MAX_PUBLISHES_PER_WINDOW = '1';
         const pub = makePublisher(MY_PUB);
         fs.writeFileSync(pub.queuePath, '');
@@ -1709,7 +1709,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
         expect(pub.spendGuard.stats().count.inWindow).to.equal(1);
     });
 
-    // ── : the at-most-once guard must survive a restart ──
+    // ── The at-most-once guard must survive a restart ──
 
     // Minimal hub DB double over the attest_published_requests marker table.
     function makeMarkerDb(rows, failOn) {
@@ -1745,7 +1745,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
         };
     }
 
-    it('startup hydration adopts sent markers and quarantines intent-only rows ()', async function () {
+    it('startup hydration adopts sent markers and quarantines intent-only rows', async function () {
         const sent = 'd4'.repeat(32), intent = 'e5'.repeat(32);
         const db = makeMarkerDb([
             { request_id: sent,   txid: 'tx-1', sent_at: new Date() },
@@ -1759,7 +1759,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
         expect(pub.getPublisherStats().quarantined).to.equal(1);
     });
 
-    it('sweep does NOT re-broadcast a still-pending request with a durable sent marker ()', async function () {
+    it('sweep does NOT re-broadcast a still-pending request with a durable sent marker', async function () {
         // The restart case: fresh process (empty in-process guards), the response was
         // broadcast before the crash and is still PENDING because it is not yet mined.
         const rid = 'd6'.repeat(32);
@@ -1775,7 +1775,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
         expect(readQueue(pub.queuePath).length).to.equal(0);
     });
 
-    it('sweep never re-broadcasts a quarantined request ()', async function () {
+    it('sweep never re-broadcasts a quarantined request', async function () {
         const rid = 'd7'.repeat(32);
         const db = makeMarkerDb([{ request_id: rid, txid: null, sent_at: null }]);
         const pub = makePublisher(MY_PUB, { db });
@@ -1790,7 +1790,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
         expect(readQueue(pub.queuePath).length).to.equal(0);
     });
 
-    it('sweep FAILS CLOSED and retains the entry when the marker is unreadable ()', async function () {
+    it('sweep FAILS CLOSED and retains the entry when the marker is unreadable', async function () {
         const rid = 'd8'.repeat(32);
         const db = makeMarkerDb([], /^SELECT request_id, txid/);
         const pub = makePublisher(MY_PUB, { db });
@@ -1804,7 +1804,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
         expect(readQueue(pub.queuePath).length).to.equal(1);
     });
 
-    it('live path records durable intent BEFORE the send and confirms it after ()', async function () {
+    it('live path records durable intent BEFORE the send and confirms it after', async function () {
         const rid = 'd9'.repeat(32);
         const rows = [];
         const db = makeMarkerDb(rows);
@@ -1831,7 +1831,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
     // replay), so a routine ceiling trip or RPC rejection plus a restart would strand a
     // request the pre-marker code would simply have published in a later window.
 
-    it('a ceiling-blocked (never sent) request leaves NO intent row and survives a restart ()', async function () {
+    it('a ceiling-blocked (never sent) request leaves NO intent row and survives a restart', async function () {
         process.env.ATTEST_MAX_PUBLISHES_PER_WINDOW = '1';
         const sent = 'e1'.repeat(32), blocked = 'e2'.repeat(32);
         const rows = [];
@@ -1861,7 +1861,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
         expect(bcast2.called, 'the deferred response must publish in the later window').to.equal(true);
     });
 
-    it('a definitive send failure withdraws its intent row ()', async function () {
+    it('a definitive send failure withdraws its intent row', async function () {
         const rid = 'e3'.repeat(32);
         const rows = [];
         const db = makeMarkerDb(rows);
@@ -1875,7 +1875,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
         expect(rows.length, 'a rejected pre-send leaves nothing to quarantine').to.equal(0);
     });
 
-    it('an AMBIGUOUS send failure KEEPS its intent row ()', async function () {
+    it('an AMBIGUOUS send failure KEEPS its intent row', async function () {
         // The mirror of the test above: the tx may have reached the BTC node, so the
         // intent must survive and quarantine on restart rather than risk a second fee.
         const rid = 'e4'.repeat(32);
@@ -1894,7 +1894,7 @@ describe('AttestationPublisher: effector-safety guards', function () {
         expect(rows[0].sent_at, 'an ambiguous send stays intent-only, which is what quarantines it').to.equal(null);
     });
 
-    it('a send that never went out releases its reservation ()', async function () {
+    it('a send that never went out releases its reservation', async function () {
         process.env.ATTEST_MAX_PUBLISHES_PER_WINDOW = '1';
         const pub = makePublisher(MY_PUB);
         fs.writeFileSync(pub.queuePath, '');

@@ -13,7 +13,7 @@
  *
  **********************************************************************
  *
- * Blind-sleep ratchet for the test tree .
+ * Blind-sleep ratchet for the test tree.
  *
  * A BLIND SLEEP is a fixed-duration wait standing in for a poll on an
  * observable condition: `await sleep(200)` between "make it happen" and

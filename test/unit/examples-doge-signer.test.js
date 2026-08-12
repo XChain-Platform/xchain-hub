@@ -1,4 +1,4 @@
-//  doctrine test-coverage program: coverage for the examples component
+// doctrine test-coverage program: coverage for the examples component
 // (examples/doge-signer.example.js), the reference HUB_SIGNER_MODULE. It is a
 // copy-and-run template that fails at load without a configured .env (so a
 // broken signer never boots quietly), which means loading it here would throw.

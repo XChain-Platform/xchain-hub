@@ -13,7 +13,7 @@
  **********************************************************************
  * test/unit/XchainPriceVendorParity.test.js
  *
- * The XCHAIN derivation is vendored from xchain-indexer into the hub .
+ * The XCHAIN derivation is vendored from xchain-indexer into the hub.
  * The hub COMPUTES the price and the indexer's rows are what it computes from, so a
  * divergence between the two copies is not a tidiness problem: the federation would
  * publish a number the chain's own data does not support, and every validator whose
@@ -51,7 +51,7 @@ describe('XCHAIN derivation: vendored-copy parity with xchain-indexer @regressio
             const twinPath = path.join(INDEXER_DIR, 'src', file);
             // Skip per FILE, not just per sibling-repo. A sibling checkout can exist
             // while a given twin does not: a standalone deploy, or a CI venue serving
-            // a sibling from origin while this file is still only local . A
+            // a sibling from origin while this file is still only local. A
             // hard read there fails the whole suite for a reason that has nothing to
             // do with drift, and the gate would report it as something else entirely.
             if (!fs.existsSync(twinPath)) {

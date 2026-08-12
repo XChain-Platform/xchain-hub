@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// : scheduler self-overlap (TOCTOU) guards.
+// scheduler self-overlap (TOCTOU) guards.
 //
 // Four hub loops poll on a bare setInterval while their pass awaits network I/O
 // whose duration nothing here bounds, so a slow dependency lets the next interval
@@ -51,7 +51,7 @@ function flush() {
 
 // ── CrossChainDexEngine._discoverAndMatch ───────────────────────────────────
 
-describe(': CrossChainDexEngine._discoverAndMatch overlap guard', function () {
+describe('CrossChainDexEngine._discoverAndMatch overlap guard', function () {
 
     let CrossChainDexEngine, axiosStub;
 
@@ -135,7 +135,7 @@ describe(': CrossChainDexEngine._discoverAndMatch overlap guard', function () {
 
 // ── AttestationSpotChecker._schedulerTick ───────────────────────────────────
 
-describe(': AttestationSpotChecker._schedulerTick overlap guard', function () {
+describe('AttestationSpotChecker._schedulerTick overlap guard', function () {
 
     const AttestationSpotChecker = require('../../src/AttestationSpotChecker');
 
@@ -192,7 +192,7 @@ describe(': AttestationSpotChecker._schedulerTick overlap guard', function () {
 
 // ── AttestationPublisher._processQueue ──────────────────────────────────────
 
-describe(': AttestationPublisher._processQueue overlap guard', function () {
+describe('AttestationPublisher._processQueue overlap guard', function () {
 
     const AttestationPublisher = require('../../src/AttestationPublisher');
     const MY_PUB = 'aa'.repeat(32);
@@ -281,7 +281,7 @@ describe(': AttestationPublisher._processQueue overlap guard', function () {
 
 // ── OracleRound._executeRound ───────────────────────────────────────────────
 
-describe(': OracleRound._executeRound overlap guard', function () {
+describe('OracleRound._executeRound overlap guard', function () {
 
     let hub, pm, or, OracleRound, fetchPrices, clock;
 
@@ -345,7 +345,7 @@ describe(': OracleRound._executeRound overlap guard', function () {
 
 // ── XChainHub._runOwnCapabilityCheck ────────────────────────────────────────
 
-describe(': XChainHub._runOwnCapabilityCheck overlap guard', function () {
+describe('XChainHub._runOwnCapabilityCheck overlap guard', function () {
 
     let hub, runAllSelfTests, broadcast;
 
@@ -399,7 +399,7 @@ describe(': XChainHub._runOwnCapabilityCheck overlap guard', function () {
 
 // ── XChainHub._pollOwnStake ─────────────────────────────────────────────────
 
-describe(': XChainHub._pollOwnStake overlap guard', function () {
+describe('XChainHub._pollOwnStake overlap guard', function () {
 
     let hub, axiosStub, refreshOwnQualification;
 

@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-//  (flag-day Pkg 8) residual hub-side checkpoint/anchor signing legs:
+// (flag-day Pkg 8) residual hub-side checkpoint/anchor signing legs:
 //   - item 687: the publisher-attestation rounds must ABSTAIN on an unresolved
 //     (empty) oracle_publish set instead of self-attesting a 1-of-N quorum the
 //     chain rejects while this hub banks the anchor reward.
@@ -51,7 +51,7 @@ function buildPub(opts) {
     return { pub, hub, identity };
 }
 
-describe('StateAnchorPublisher publisher-attestation abstains on an unresolved set ( / item 687)', () => {
+describe('StateAnchorPublisher publisher-attestation abstains on an unresolved set', () => {
 
     it('v4/v5 round: an EMPTY oracle_publish set abstains instead of self-attesting', async () => {
         let { pub } = buildPub();
@@ -97,7 +97,7 @@ describe('StateAnchorPublisher publisher-attestation abstains on an unresolved s
     });
 });
 
-describe('StateAnchorPublisher archive wrapper is picked on the consensus key ( / item 933)', () => {
+describe('StateAnchorPublisher archive wrapper is picked on the consensus key', () => {
 
     // Two checkpoints whose hub-local insertion order (id) DISAGREES with the
     // consensus order (checkpoint_seq): the later-inserted row is the OLDER
@@ -188,7 +188,7 @@ describe('StateAnchorPublisher archive wrapper is picked on the consensus key ( 
     });
 });
 
-describe('StateAnchorPublisher follower co-sign gate follows the flag-day ( / item 931)', () => {
+describe('StateAnchorPublisher follower co-sign gate follows the flag-day', () => {
 
     function snapshotHub(calls) {
         return {
@@ -254,13 +254,13 @@ describe('StateAnchorPublisher follower co-sign gate follows the flag-day ( / it
     });
 });
 
-//  / item 683: the publisher broadcasts XANC_V0_DONE the instant the DOGE
+// The publisher broadcasts XANC_V0_DONE the instant the DOGE
 // broadcast returns a txid (0 confirmations), while the receiver only stamps at
 // dogeConfirmations depth (60 on DOGE, ~1h). Because the announcement is one-shot,
 // every peer used to answer 'absent' and drop it, so anchor_txid stayed NULL forever
 // and the duplicate-anchor suppression that the `anchor_txid IS NULL` selector exists
 // for could never engage: each hub re-anchored (real DOGE) as its rank unlocked.
-describe('StateAnchorPublisher defers a not-yet-buried V0_DONE instead of dropping it ( / item 683)', () => {
+describe('StateAnchorPublisher defers a not-yet-buried V0_DONE instead of dropping it', () => {
 
     // A receiver whose on-chain verdict is scripted, with the DB reduced to the two
     // statements the V0_DONE path touches.

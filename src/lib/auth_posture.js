@@ -12,7 +12,7 @@
  *
  **********************************************************************
  *
- * XChain Hub - boot auth posture 
+ * XChain Hub - boot auth posture
  *
  * Decides, from env alone, whether the hub may boot with its write
  * surface unauthenticated. Pure and side-effect free so the decision is

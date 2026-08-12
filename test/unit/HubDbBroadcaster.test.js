@@ -347,7 +347,7 @@ describe('HubDbBroadcaster', function () {
         });
     });
 
-    // ── broadcastWatermark / heartbeat cadence  ───────────────────────
+    // ── broadcastWatermark / heartbeat cadence ───────────────────────
 
     describe('broadcastWatermark() cadence instrumentation', function () {
 

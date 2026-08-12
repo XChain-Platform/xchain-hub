@@ -8,12 +8,12 @@
 // This file is part of XChain Platform. Licensed under the GNU Affero
 // General Public License v3.0 or later; see LICENSE.md.
 //
-// : _resolveBtcIndexerUrl must not hand back an indexer that serves a
+// _resolveBtcIndexerUrl must not hand back an indexer that serves a
 // different coin. Capability staking is BTC-only, so every consumer of this URL
 // reads BTC-anchored state; on a DOGE-only venue the configs-table fallback
 // resolved the DOGE indexer and the hub elected publishers off a set that did
 // not exist and snapshotted checkpoints at a height where the stake was not
-// active, silently ( A2 drill). Only a POSITIVE identification of another
+// active, silently. Only a POSITIVE identification of another
 // coin fails closed: an unreachable or silent indexer stays on legacy behavior,
 // because "cannot verify" is not evidence of a misconfiguration.
 
@@ -21,7 +21,7 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 
-describe('XChainHub BTC indexer coin guard ', function () {
+describe('XChainHub BTC indexer coin guard', function () {
 
     let XChainHub, axiosStub, mockDb, hub, errorLog;
 

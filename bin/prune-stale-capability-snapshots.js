@@ -15,9 +15,9 @@
  *
  **********************************************************************
  *
- * Operator tool: prune capability_snapshots rows left behind by a chain reset
- * . See src/lib/capability_snapshot_prune.js for why stale rows are
- * dangerous rather than merely untidy.
+ * Operator tool: prune capability_snapshots rows left behind by a chain reset.
+ * See src/lib/capability_snapshot_prune.js for why stale rows are dangerous
+ * rather than merely untidy.
  *
  * Connection settings come from the hub's own env (HUB_DB_HOST / HUB_DB_PORT /
  * HUB_DB_NAME / HUB_DB_USER / HUB_DB_SECRET) so this runs with the same
@@ -67,7 +67,7 @@ function parseArgs(argv){
 
 function usage(){
     console.log([
-        'Prune stale capability_snapshots rows .',
+        'Prune stale capability_snapshots rows.',
         '',
         '  --from <block>        REQUIRED. First block of the dead range (inclusive).',
         '  --to <block>          Last block of the dead range (inclusive). Omit for open-ended.',

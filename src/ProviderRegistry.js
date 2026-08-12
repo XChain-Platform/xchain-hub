@@ -23,8 +23,6 @@
  * to the configs table override the defaults; hotReload() picks them up
  * without a hub restart.
  *
- * Spec: claude/reports/specs/2026-05-24_external-attestation-framework.md (§6)
- *
  ********************************************************************/
 
 const DEFAULTS = {
@@ -45,7 +43,6 @@ const DEFAULTS = {
         deadline_window_blocks: 100,
         additional_config:      {}
     },
-    // Spec: claude/reports/specs/2026-05-24_llm-attestation-provider.md §3
     llm: {
         provider_id:            'llm',
         version:                1,
@@ -135,8 +132,8 @@ class ProviderRegistry {
         // of when each one applied the change. This is what makes the LLM fetch/judge
         // model federation-deterministic (mirror of CapabilityRegistry.minStakeHistory).
         //
-        // The same entries also anchor min_stake_xchain, the PROVIDER stake floor
-        // : a higher, per-provider bar layered on top of the capability-wide
+        // The same entries also anchor min_stake_xchain, the PROVIDER stake floor:
+        // a higher, per-provider bar layered on top of the capability-wide
         // MIN_STAKE (serving an `llm` attestation costs more stake than an `http_get`
         // one). It is anchored for exactly the reason additional_config is: any
         // responsible-set or serve decision keyed on a LIVE, non-anchored value would

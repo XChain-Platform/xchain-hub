@@ -25,7 +25,7 @@ When `HUB_API_KEY` is set, authentication fails closed: mutating methods
 `reportreorg`, `initiateswap`, the oracle/price push methods) and the hub-DB
 WebSocket upgrade return 401 unless the caller presents the configured key.
 
-When it is unset or empty those paths are **open**, so since  the hub
+When it is unset or empty those paths are **open**, so the hub
 **refuses to boot** unless keyless operation is declared with
 `HUB_ALLOW_UNAUTHENTICATED=true`. Keyless remains supported (single-host
 regtest, a hub reachable only on a private network or behind an authenticating
@@ -103,8 +103,7 @@ signatures.
 Automatic secret redaction, in terminals, CI logs and assistant transcripts,
 keys on the variable **name** and matches `_SECRET` / `_KEY` / `_TOKEN`. A name
 like `HUB_DB_PASS` matches nothing, so the value prints in full every time
-someone reads the env file. In 2026-07 exactly that happened to a regtest hub
-.
+someone reads the env file. In 2026-07 exactly that happened to a regtest hub.
 
 Three hub secrets therefore accept a `_SECRET` name, with the historical name
 kept as a deprecated fallback so no running deployment breaks:
@@ -135,7 +134,7 @@ a keyed one-way hash, then discards the IP.
 | `TELEMETRY_IP_SALT` | No | _empty_ | Secret salt for the one-way IP hash. Without it, `ip_hash` is left null (an unsalted hash would be trivially reversible). |
 | `TELEMETRY_ADMIN_KEY` | No | _empty_ | `x-api-key` gate for the telemetry admin/query surface (empty leaves it fail-closed). Must match the value the dashboard service is configured with. |
 
-## Metrics and log shipping 
+## Metrics and log shipping
 
 The shared observability module (`src/observability/`, vendored byte-identically
 into the other services) adds a Prometheus scrape endpoint and a structured log
@@ -233,9 +232,9 @@ Wallet and encoder the hub uses to publish ATTEST responses on Bitcoin.
 | `ATTESTATION_TIMEOUT` | No | `60000` | Attestation timeout (ms). |
 | `ATTESTATION_ROUND_TTL_MS` | No | `3600000` (1h) | Time-to-live for in-memory attestation round entries before lazy eviction. |
 | `REORG_TIMEOUT` | No | `60000` | Reorg-handler timeout (ms). |
-| `REORG_ALLOW_UNRECORDED_OLDHASH` | No | unset (fail closed) | Escape hatch . When a reorg IS recorded at the claimed height but its orphaned hash was never recorded, this hub abstains rather than co-sign, because it cannot verify the claimed `oldHash`. Set to `1` to restore the pre- behaviour and accept such claims; it logs loudly every time it does. Leaving it unset costs abstention only at heights whose orphaned hash is missing (measured 2026-07-29: 3 of 171 recorded orphaned blocks on mainnet, DOGE 6280198 and 6279100, LTC 3137602). |
+| `REORG_ALLOW_UNRECORDED_OLDHASH` | No | unset (fail closed) | Escape hatch. When a reorg IS recorded at the claimed height but its orphaned hash was never recorded, this hub abstains rather than co-sign, because it cannot verify the claimed `oldHash`. Set to `1` to restore the previous behaviour and accept such claims; it logs loudly every time it does. Leaving it unset costs abstention only at heights whose orphaned hash is missing (measured 2026-07-29: 3 of 171 recorded orphaned blocks on mainnet, DOGE 6280198 and 6279100, LTC 3137602). |
 
-## Attestation relay (`AttestationRelay`, )
+## Attestation relay (`AttestationRelay`)
 
 Attestation staking lives on Bitcoin, so an ATTEST request made on an origin
 chain (LTC, DOGE) is relayed to BTC as a v3 request and the finalized answer is
@@ -311,7 +310,7 @@ precedence override.
 | `XCHAIN_CONFIRMATIONS_<COIN>` | No | per-coin | Cross-chain attestation/swap confirmation depth for `<COIN>` (e.g. `XCHAIN_CONFIRMATIONS_BTC`). Consensus-affecting: read by `CrossChainEngine` / `CrossChainCallEngine`. |
 | `CHECKPOINT_CONFIRMATIONS` | No | `6` | State-checkpoint confirmation depth (`StateCheckpointEngine`). Consensus-affecting. |
 
-## Cross-chain attestation persistence (`CrossChainEngine`, )
+## Cross-chain attestation persistence (`CrossChainEngine`)
 
 A commit-quorum-finalized cross-chain attestation used to be **destroyed** by a
 single transient DB error: the store's `.catch` deleted the round, and both
@@ -369,7 +368,7 @@ variable also resolves from `p2pConfig`; the env var wins.
 | `ANCHOR_CHUNK_MAX_BYTES` | No | `6000` | Max payload bytes per on-chain anchor chunk. |
 | `ANCHOR_CHUNK_RETRY_MS` | No | `2500` | Delay (ms) between chunk broadcast retries. |
 | `ANCHOR_ROUND_TIMEOUT_MS` | No | `120000` | Quorum signing-round timeout (ms). |
-| `ANCHOR_AMBIGUOUS_POLL_ATTEMPTS` | No | `3` |  ambiguous-send existence poll: attempts to find a maybe-accepted anchor in the indexer's mined view before deferring. |
+| `ANCHOR_AMBIGUOUS_POLL_ATTEMPTS` | No | `3` | Ambiguous-send existence poll: attempts to find a maybe-accepted anchor in the indexer's mined view before deferring. |
 | `ANCHOR_AMBIGUOUS_POLL_MS` | No | `5000` | Delay (ms) between ambiguous-send poll attempts. |
 | `ANCHOR_ELECTION_TOLERANCE_BLOCKS` | No | `36` | Failover ladder: BTC blocks of elected-publisher silence before the next-ranked validator's publish slot unlocks. |
 | `ANCHOR_RANK_WAKE_MS` | No | `900000` (15m) | How often a BACKUP re-checks whether its failover rank has unlocked, between `ANCHOR_INTERVAL_MS` ticks. The wake flush runs in failover-only mode, so it never publishes an election this hub leads and a healthy leader keeps its interval and size-trigger cadence. |
@@ -415,11 +414,11 @@ constructor comment and pinned by
   round << 15 min << 36 blocks), and it publishes only where this hub is a BACKUP,
   so a slow-but-healthy leader is still never overtaken by it.
 
-## Effector spend policy (`SpendGuard`, )
+## Effector spend policy (`SpendGuard`)
 
 Every hub effector that spends real coin on-chain runs behind a shared
 `SpendGuard`: a balance floor, a rolling per-window spend ceiling (hard-clamped
-at the $2000 review admission ceiling), and a per-capability runtime pause. The
+at the $2000 AML admission ceiling), and a per-capability runtime pause. The
 knobs below take a per-effector `<PREFIX>`; the four prefixes are
 `ORACLE_PUBLISH`, `ATTEST`, `ANCHOR`, and `FULLNODE`. Each variable also
 resolves from `p2pConfig`; the env var wins. The spend ceiling is

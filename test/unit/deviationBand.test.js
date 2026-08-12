@@ -8,7 +8,7 @@
 // This file is part of XChain Platform. Licensed under the GNU Affero
 // General Public License v3.0 or later; see LICENSE.md.
 //
-//  (reviews-store seq 2400): ONE mean-relative deviation band shared by the
+// (reviews-store seq 2400): ONE mean-relative deviation band shared by the
 // publish-side 2-source liveness gate, the co-sign admission gate, and SlashDetector.
 // Pre-fix the co-sign gate divided by the follower's LOCAL value while the publish
 // gate was mean-relative, so a price ratio r in (1.10, 1.10526] at the 5% band made
@@ -23,7 +23,7 @@ const { ORACLE_DEVIATION_THRESHOLD } = require('../../src/constants');
 const { createMockHub } = require('../helpers/mockHub');
 const { VALIDATORS_3, buildSubmissions } = require('../helpers/fixtures');
 
-describe('deviation_band helper ( shared band)', function () {
+describe('deviation_band helper (shared band)', function () {
 
     describe('deviationFrom / exceedsBand', function () {
         it('computes |value - reference| / reference symmetrically in sign', function () {
@@ -98,7 +98,7 @@ describe('deviation_band helper ( shared band)', function () {
 
         it('co-signs a proposed mean the publish-side 2-source gate accepted (window closed)', async function () {
             // proposed = mean(100000, 110400) = 105200; local = 100000.
-            // Pre-: 5200/100000 = 0.052 > 0.05 -> withheld the whole round.
+            // Old behavior: 5200/100000 = 0.052 > 0.05 -> withheld the whole round.
             // Canonical:  5200/105200 = 0.04943 <= 0.05 -> co-signs.
             await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '105200' }]));
             expect(oc.pendingRounds.has(ROUND)).to.be.true;

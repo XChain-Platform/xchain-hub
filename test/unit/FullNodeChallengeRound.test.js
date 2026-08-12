@@ -41,7 +41,7 @@ function makeIdentity(pubkey) {
     return { getPubkeyHex: () => pubkey, sign: (s) => 'sig:' + pubkey };
 }
 
-// : the consensus-relevant FULLNODE params (interval, depths, windows,
+// the consensus-relevant FULLNODE params (interval, depths, windows,
 // genesis verifiers) now come from the PINNED coin registry, not from p2pConfig.
 // p2pConfig keeps only the operational knobs, so this fixture does too. Tests that
 // need different consensus values drive the registry's documented regtest override
@@ -142,7 +142,7 @@ describe('FullNodeChallengeRound', function () {
         });
     });
 
-    // ── : consensus params come from the PINNED registry ─────────────
+    // ── Consensus params come from the PINNED registry ─────────────
     // These used to resolve `process.env.FULLNODE_* || p2pConfig || '<literal>'`,
     // env FIRST, on every network. On mainnet that let an operator env var silently
     // override a pinned consensus parameter while CONSENSUS_CONFIG_PIN still verified
@@ -583,7 +583,7 @@ describe('FullNodeChallengeRound', function () {
             fs.rmSync(dir, { recursive: true, force: true });
         });
 
-        // : item 3463 wrote the intent but nothing read it back, so the guard
+        // item 3463 wrote the intent but nothing read it back, so the guard
         // only bound one process lifetime. The epoch is recomputed deterministically
         // from the tip, so a restart inside acceptWindow rebuilds the SAME round and
         // re-wins leadership; these pin that the recovered log, not the empty in-memory

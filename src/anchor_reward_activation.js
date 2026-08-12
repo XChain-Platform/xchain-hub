@@ -64,7 +64,7 @@ function isAnchorRewardActive(snapshotBlock, network){
     return sb >= threshold;
 }
 
-// Archive-reward re-derivation flag-day . Same shape as ANCHOR_REWARD_ACTIVATION,
+// Archive-reward re-derivation flag-day. Same shape as ANCHOR_REWARD_ACTIVATION,
 // gating the ARCHIVE leg: at/above this BTC-anchored snapshot_block the elected archive
 // leader emits a publisher-bearing archive anchor (v6 = the v1 archive anchor + the same
 // PUBLISHER|ATTEST_SIG_COUNT|... tail as v4/v5, attested over an 'anchor_archive' XANCPUB
@@ -73,7 +73,7 @@ function isAnchorRewardActive(snapshotBlock, network){
 // insider-with-key forge surface the per-chain flag-day left open. Below the threshold the
 // legacy v1 + push path stands and v6 is rejected.
 const ARCHIVE_REWARD_ACTIVATION = {
-    mainnet: 963000,      // ARMED 2026-07-16 , RE-PINNED 2026-08-12  off 969500 onto the  pre-freeze train boundary (tip 959,853 on 07-27 at ~144 blocks/day + 21d); deploy every consumer before this era
+    mainnet: 963000,      // ARMED 2026-07-16, RE-PINNED 2026-08-12 off 969500 onto the shared pre-freeze train boundary (tip 959,853 on 07-27 at ~144 blocks/day + 21d); deploy every consumer before this era
     testnet: 0,
     regtest: 0,
 };
@@ -94,7 +94,7 @@ function isArchiveRewardActive(snapshotBlock, network){
     return sb >= threshold;
 }
 
-// ─── ANCHOR_REWARD_DERIVE_ACTIVATION (, Option C derive-on-BTC-side) ────────────
+// ANCHOR_REWARD_DERIVE_ACTIVATION (Option C derive-on-BTC-side)
 // The flag-day that RELOCATES anchor-reward derivation from the DOGE indexer to the BTC
 // indexer. ANCHOR is DOGE-only, but capability staking (hence the resolvable stake source
 // createValidatorReward needs) is BTC-only, so the DOGE-side derivation gated by
@@ -117,11 +117,11 @@ function isArchiveRewardActive(snapshotBlock, network){
 // testnet/regtest, so riding them would flip the DOGE-skip + BTC-derive relocation the instant
 // code deploys, with no coordinated deploy-first-then-flip window, risking a COLLECT-mediated
 // fork across a mid-upgrade fleet; and one gate must cover BOTH the per-chain (v4/v5) and archive
-// (v6) reward families uniformly. Per the  flag-day placeholder-guard doctrine, mainnet and
+// (v6) reward families uniformly. Per the flag-day placeholder-guard doctrine, mainnet and
 // testnet stay INERT (null = never active) until the operator ratifies a coordinated height;
 // regtest activates from genesis so the fix is exercised where the bug lives.
 //
-// PRE-ARMING BLOCKERS (): three consensus defects sit on the derive path
+// PRE-ARMING BLOCKERS (#4170, #4171, #4172): three consensus defects sit on the derive path
 // and are harmless ONLY while this table is inert. Arming either mainnet or testnet before they
 // land forks the COLLECT rail, so ratifying a height is gated on all three being fixed, not just
 // on picking a number.
@@ -148,7 +148,7 @@ function isArchiveRewardActive(snapshotBlock, network){
 //       re-verify the XANCPUB quorum against its own oracle_publish set rather than trust the
 //       wire, and it lands after (1) so the broadcast sits at the confirmed write.
 //
-// PRE-ARMING DEPLOY STEP (, , FIXED in code): a derived reward is EARNED at the
+// PRE-ARMING DEPLOY STEP (#4173, FIXED in code): a derived reward is EARNED at the
 // checkpoint's snapshot_block but MATERIALIZED at a later BTC block, and the reorg delete used to
 // scope only on the earn-block, so a rollback landing between the two heights left a COLLECT-
 // spendable reward a from-genesis replay had not derived yet. validator_rewards now carries

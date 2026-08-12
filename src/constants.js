@@ -54,7 +54,7 @@ const XCALL_MAX_HOPS = 2;
 // never drift between hubs. 0.05 = 5%.
 const ORACLE_DEVIATION_THRESHOLD = 0.05;
 
-// Per-pair bounded-change clamp for the aggregation step : a round's
+// Per-pair bounded-change clamp for the aggregation step: a round's
 // trimmed-median aggregate may move at most this fraction from the pair's last
 // FINALIZED price per round. A fat-tail spike (or a coordinated set of
 // manipulated feeds that survives the trim) walks toward the new level at
@@ -73,12 +73,12 @@ const ORACLE_MAX_CHANGE_PER_ROUND = 0.25;
 // (api.js env parsing, OracleRound scheduling, XChainHub tip-freshness bound)
 // must fall back to the SAME value, or a hub constructed without a populated
 // p2pConfig numbers rounds on a different cadence than its peers. Previously
-// each site kept its own bare literal linked only by a prose comment (#2653);
+// each site kept its own bare literal linked only by a prose comment;
 // requiring these from one module makes the loader enforce the sync.
 const DEFAULT_ORACLE_ROUND_INTERVAL_MS   = 600000;
 const DEFAULT_ORACLE_SUBMISSION_WINDOW_MS = 180000;
 
-// PRICE v1 wire-format bounds . Mirror xchain-indexer/src/config.js
+// PRICE v1 wire-format bounds. Mirror xchain-indexer/src/config.js
 // (COINS, FIATS, MAX_TICK_LENGTH, MAX_MEMO_LENGTH) and actions/price.js
 // parse_v1: the indexer rejects these on-chain, so any push carrying a value
 // outside them is malformed or Byzantine and must not reach oracle_prices
@@ -88,10 +88,9 @@ const PRICE_V1_COINS  = ['BTC', 'LTC', 'DOGE'];
 const PRICE_V1_FIATS  = ['USD', 'CAD', 'AUD', 'MXN', 'GBP', 'JPY', 'CNY', 'CHF', 'BRL', 'INR', 'EUR', 'KRW'];
 const MAX_TICK_LENGTH = 250;
 const MAX_MEMO_LENGTH = 250;
-// DERIVED_PAIRS : pairs the federation may carry in a PRICE v0 round that
+// DERIVED_PAIRS: pairs the federation may carry in a PRICE v0 round that
 // are NOT fetched from an external API. XCHAIN is listed on no exchange, so its
-// USD price is derived from platform-realized fills (see
-// claude/specs/XCHAIN_PRICE_DERIVATION_SPEC.md); every native-coin fee decision on
+// USD price is derived from platform-realized fills; every native-coin fee decision on
 // LTC and DOGE needs the pair, and without it those chains cannot price a fee at all.
 //
 // ADMISSION ONLY, deliberately. This list widens what a hub will ACCEPT - the
@@ -115,7 +114,7 @@ const MAX_MEMO_LENGTH = 250;
 // fail fee validation on every chain once the 1800s staleness bound elapses.
 const DERIVED_PAIRS = ['XCHAIN/USD'];
 
-// ── XCHAIN derived-price parameters (, spec §4 / D1+D4) ────────────────
+// XCHAIN derived-price parameters (spec §4 / D1+D4)
 // CONSENSUS-UNIFORM. Every validator must compute the same window over the same
 // fills, so these deploy fleet-wide in lockstep; a hub running different values
 // produces a different XCHAIN/BTC leg and lands outside the co-sign deviation band.

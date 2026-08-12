@@ -69,7 +69,7 @@ class PeerManager extends EventEmitter {
         this.peerMsgCounts  = new Map();
 
         // Dedup cache size bound; a non-positive value would evict the entry just
-        // inserted (), leaving the cache holding one id and gossip dedup
+        // inserted, leaving the cache holding one id and gossip dedup
         // effectively off, so re-broadcast loops amplify across the mesh.
         this.dedupCacheMax  = positiveIntConfig(config.P2P_DEDUP_CACHE_MAX, 100000,
             'P2P_DEDUP_CACHE_MAX');
@@ -433,7 +433,7 @@ class PeerManager extends EventEmitter {
         if (envelope.type === 'HEARTBEAT') {
             this.emit('heartbeat', envelope.sender, envelope.timestamp);
         }
-        // Capability gossip; see CapabilityRegistry / spec 2026-05-24_capability-staking-model.md
+        // Capability gossip; see CapabilityRegistry.
         if (envelope.type === 'CAPABILITY_ACTIVATED' ||
             envelope.type === 'CAPABILITY_DEACTIVATED' ||
             envelope.type === 'CAPABILITY_SELF_TEST') {

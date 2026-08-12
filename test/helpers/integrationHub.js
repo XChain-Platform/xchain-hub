@@ -18,7 +18,7 @@
 // (read by OracleRound at the top of every round) existed on only one of them, so
 // each round threw, the chain-tip anchor went to fallback, and finalization was
 // suppressed - which surfaced as six unrelated-looking oracle and dispenser
-// failures rather than as "the fixture is missing a method" .
+// failures rather than as "the fixture is missing a method".
 //
 // So: one definition, and a check that keeps it honest. HUB_SURFACE below lists
 // the members the hub must expose for the subsystems under test; assertHubSurface

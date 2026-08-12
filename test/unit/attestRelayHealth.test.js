@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// : /health carries the attestation relay's stats.
+// /health carries the attestation relay's stats.
 //
 // The relay drives the v3 request / v4 response legs across chains and its
 // only instrument was the process log, so the one failure that costs a real
@@ -26,7 +26,7 @@ const proxyquire = require('proxyquire').noPreserveCache();
 const { ConsensusInputMonitor } = require('../../src/lib/consensus_input_monitor.js');
 const { waitUntil } = require('../helpers/waitUntil');
 
-describe('/health attestation relay stats ', function () {
+describe('/health attestation relay stats', function () {
 
     // The first proxyquire boot pays the cold require of the whole hub tree,
     // which can exceed mocha's 2s default on its own.

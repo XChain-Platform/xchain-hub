@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// GOV-VOTE-REPLAY-1 : a governance vote must not be replayable.
+// GOV-VOTE-REPLAY-1: a governance vote must not be replayable.
 //
 // Before this fix the signed payload was a pure function of
 // (proposalId, vote, voter), so a captured (payload, signature) pair stayed
@@ -41,7 +41,7 @@ const { VALIDATORS_3 }  = require('../helpers/fixtures');
 
 const PROPOSAL = 'gov:MIN_STAKE:1';
 
-describe('Governance GOV-VOTE-REPLAY-1 ', function () {
+describe('Governance GOV-VOTE-REPLAY-1', function () {
 
     let hub, gov, kp, idn;
 
@@ -106,7 +106,7 @@ describe('Governance GOV-VOTE-REPLAY-1 ', function () {
 
     // ---- the refusal paths ------------------------------------------------
 
-    it('DROPS a validly-signed vote that carries no seq (pre- peer or a stripped replay)', async function () {
+    it('DROPS a validly-signed vote that carries no seq (older peer or a stripped replay)', async function () {
         let sig = idn.sign(JSON.stringify({ proposalId: PROPOSAL, vote: 'approve', voter: kp.pubkeyHex }));
         await gov._handleVote({
             sender: 'peer', type: 'GOV_VOTE',

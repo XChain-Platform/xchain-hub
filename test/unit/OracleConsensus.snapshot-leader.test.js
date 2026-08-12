@@ -8,7 +8,7 @@
 // This file is part of XChain Platform. Licensed under the GNU Affero
 // General Public License v3.0 or later; see LICENSE.md.
 //
-// CONSENSUS GUARD (Hub F3 / ): the round leader must be derived from the
+// CONSENSUS GUARD: the round leader must be derived from the
 // block-locked capability snapshot, not the live registered validatorSet. The
 // live set drifts with registration churn mid-round, so live-set indexing lets
 // two hubs elect different leaders for the same round and reject each other's
@@ -40,7 +40,7 @@ function memberSetOf(validators) {
     return new Set(validators.map(v => v.pubkey.toLowerCase()));
 }
 
-describe('OracleConsensus: block-locked snapshot leader (Hub F3 / )', function () {
+describe('OracleConsensus: block-locked snapshot leader', function () {
     let hub, pm, oc, oracleRound;
     // Round 3 over a 3-member snapshot: sorted pubkeys [v1,v2,v3], 3 % 3 = 0 = v1.
     const ROUND = 3;

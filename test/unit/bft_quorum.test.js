@@ -14,13 +14,13 @@ const { expect } = require('chai');
 const { bftQuorum, bftQuorumOrSingle } = require('../../src/lib/bft_quorum.js');
 
 // The pre-extraction inline expression, hand-copied at ~15 consensus sites.
-// The whole point of the extraction  is that bftQuorum must reproduce
+// The whole point of the extraction is that bftQuorum must reproduce
 // THIS exactly, for every N, or a divergent copy forks the chain.
 function legacyInline(n){
     return Math.max(2 * Math.floor((n - 1) / 3) + 1, Math.ceil((n + 1) / 2));
 }
 
-describe('lib/bft_quorum ( count-quorum extraction)', () => {
+describe('lib/bft_quorum (count-quorum extraction)', () => {
     it('reproduces the legacy inline formula for every N in 2..5000', () => {
         for(let n = 2; n <= 5000; n++){
             expect(bftQuorum(n), `bftQuorum(${n})`).to.equal(legacyInline(n));

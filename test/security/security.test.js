@@ -1243,9 +1243,9 @@ describe('Security Hardening', function () {
             let requiredVars = {
                 HUB_DB_HOST: 'localhost', HUB_DB_PORT: '3306', HUB_DB_NAME: 'testdb',
                 HUB_DB_USER: 'root', HUB_DB_PASS: 'pass', HUB_PORT: '9999',
-                // : a keyless boot refuses unless keyless is declared, and
-                // this harness boots keyless on purpose (it drives the RPC
-                // controller directly, not the auth middleware).
+                // A keyless boot refuses unless keyless is declared, and this
+                // harness boots keyless on purpose (it drives the RPC controller
+                // directly, not the auth middleware).
                 HUB_ALLOW_UNAUTHENTICATED: 'true'
             };
             for (let [k, v] of Object.entries(requiredVars)) {
@@ -1302,9 +1302,9 @@ describe('Security Hardening', function () {
             expect(result.error).to.include('limit');
         });
 
-        // . parseInt admitted anything with an integer PREFIX, so these all
-        // passed validation and then reached a `LIMIT ?` bind: '50junk' as 50, '1e3'
-        // as 1, '50.5' as 50. Callers disagreed on whether the raw or the parsed value
+        // parseInt admitted anything with an integer PREFIX, so these all passed
+        // validation and then reached a `LIMIT ?` bind: '50junk' as 50, '1e3' as 1,
+        // '50.5' as 50. Callers disagreed on whether the raw or the parsed value
         // was forwarded, so the public limit contract differed per method.
         ['50junk', '1e3', '50.5', '-5', ' 50', '0x32', ''].forEach((bad) => {
             it(`getpricesnapshots rejects a partial-integer limit ${JSON.stringify(bad)}`, async function () {

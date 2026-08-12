@@ -406,9 +406,9 @@ function createCluster(nodeCount, overrides) {
             }
 
             // (No schema patching here: reorg_attestations.updated_at is declared in
-            // src/sql/reorg_attestations.sql as of . The hand-run ALTER that used
-            // to sit at this point hid a real product/schema mismatch from every tier
-            // except the integration one, which had no such workaround and went red.)
+            // src/sql/reorg_attestations.sql. The hand-run ALTER that used to sit at
+            // this point hid a real product/schema mismatch from every tier except
+            // the integration one, which had no such workaround and went red.)
 
             // Phase 5: Start subsystems
             for (let i = 0; i < nodeCount; i++) {

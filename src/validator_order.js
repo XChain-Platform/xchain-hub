@@ -10,7 +10,7 @@
  *
  **********************************************************************
  *
- * XChain Platform: canonical validator-set ordering .
+ * XChain Platform: canonical validator-set ordering.
  *
  * Three hub engines elect a leader by indexing into their in-memory validator
  * set: Consensus (`validatorSet[(seq + view) % N]`), OracleConsensus and
@@ -26,13 +26,13 @@
  * than of the query that produced it, which is the property the federation
  * actually needs. The sort key mirrors the one already used by
  * Governance._buildValidatorSnapshot and OracleConsensus._getLeader's
- * snapshot path : lowercased signing pubkey ascending.
+ * snapshot path: lowercased signing pubkey ascending.
  *
  * Consensus-breaking by construction (it moves the leader for any set a hub
- * previously held unsorted), so it ships inside the  pre-launch batch,
+ * previously held unsorted), so it ships inside the same pre-launch batch,
  * ungated, and is made safe by that batch's mandatory fleet-wide
- * wipe-and-replay rebase rather than by an activation height. Per the 
- * spec §2 and §4 the batch carries no activation constants and must not ride
+ * wipe-and-replay rebase rather than by an activation height. That batch
+ * carries no activation constants by design, and this must not ride
  * on an existing one.
  *
  * CrossChainEngine and ReorgHandler also hold a validator set but only ever

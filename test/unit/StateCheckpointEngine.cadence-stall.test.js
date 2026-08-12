@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// : the checkpoint cadence must never fail silently.
+// the checkpoint cadence must never fail silently.
 //
 // Every pre-leadership bail in `_tick` used to be a bare `return`. A hub whose
 // oracle_publish capability had gone unqualified therefore produced zero
@@ -36,7 +36,7 @@ const TIP = {
     block_merkle_root: 'e5'.repeat(32), block_merkle_version: 1
 };
 
-describe('StateCheckpointEngine cadence stall meter ', function () {
+describe('StateCheckpointEngine cadence stall meter', function () {
 
     let engines = [];
 

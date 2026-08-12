@@ -159,7 +159,7 @@ async function runClaudePrint(opts) {
                 // manifests on this path. Either way it is non-transient and must
                 // not re-judge; only the recorded KIND differs.
                 //
-                // item 3484: the subtype test is anchored to refusal words only. It
+                // The subtype test is anchored to refusal words only. It
                 // used to also fire on is_error===true and on a bare 'error'
                 // substring, which swallowed the CLI's own session-level failure
                 // subtypes (error_max_turns, error_during_execution) -- both carry
@@ -177,10 +177,10 @@ async function runClaudePrint(opts) {
             // The empty-result branch above only fires when the text is empty, so a
             // reached-CLI failure that emitted partial text resolved as a sound
             // verdict -- the same fail-open the HTTP transports had in
-            // providers/llm.js (item 4467).
+            // providers/llm.js.
             //
-            // item 4468: gate on is_error/subtype, NOT stop_reason. The item's title
-            // names a stop_reason, but `claude --print --output-format json` emits no
+            // Gate on is_error/subtype, NOT stop_reason: that field looks like the
+            // obvious signal, but `claude --print --output-format json` emits no
             // such field (it is on the direct Anthropic Messages API, a different
             // transport); is_error + subtype is this CLI's whole failure contract, so
             // a stop_reason check here would be dead code.

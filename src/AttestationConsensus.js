@@ -38,8 +38,6 @@
  * CapabilitySnapshot: every hub derives the same responsible set (and thus
  * the same PBFT quorum over it) for the round.
  *
- * Spec: claude/reports/specs/2026-05-24_external-attestation-framework.md
- *
  ********************************************************************/
 
 const crypto            = require('crypto');
@@ -54,7 +52,7 @@ const ATTEST_PREPARE = 'ATTEST_PREPARE';
 const ATTEST_COMMIT  = 'ATTEST_COMMIT';
 
 const DEFAULT_ROUND_TIMEOUT_MS = 120000;  // 2 minutes per request lifecycle
-// Default cap for the nonOkPublished throttle ring . Floor derives
+// Default cap for the nonOkPublished throttle ring. Floor derives
 // from the LONGEST provider deadline window (deadline_window_blocks, currently
 // 100 BTC blocks for http_get), not the ok/BTC-confirmation horizon that sizes
 // `finalizedMax`: non-ok entries must survive until deadline expiry. 40000
@@ -120,7 +118,7 @@ class AttestationConsensus extends EventEmitter {
         // per poll cycle for no new information. One publication per
         // (request_id, status) is the audit trail; the deadline-expiry path
         // remains the terminal backstop. Ring-bounded like `finalized`, but
-        // with its OWN cap : a finalized-ok rid only needs suppression
+        // with its OWN cap: a finalized-ok rid only needs suppression
         // until the indexer flips it out of the pending poll (the short BTC
         // confirmation horizon), while a non-ok rid stays RETRYABLE until its
         // provider deadline expires, a much longer window (the widest
@@ -416,7 +414,7 @@ class AttestationConsensus extends EventEmitter {
         // never sets the gate today. Do NOT wire it into a new path expecting it
         // to bind without first re-checking this invariant.
         let responsible = roundState.responsible || [];
-        // : majority-floored BFT quorum over the responsible set (0 when
+        // Majority-floored BFT quorum over the responsible set (0 when
         // size <= 1). Same threshold as the full-count engines, computed over
         // responsible.length rather than N per the invariant documented above.
         let quorum      = bftQuorumOrSingle(responsible.length, 0);
@@ -483,7 +481,7 @@ class AttestationConsensus extends EventEmitter {
             pinnedVendors: roundState.pinnedVendors || null,
             // Block-anchored approved_models from that same config, so the meta
             // allowlist gate judges against the set the fetch model was pinned
-            // from rather than this hub's live one (). Without it a
+            // from rather than this hub's live one. Without it a
             // governance delisting of the pinned model froze the round at
             // no_quorum forever, since every retry re-pinned the same model.
             pinnedApprovedModels: roundState.pinnedApprovedModels || null,
@@ -870,7 +868,7 @@ class AttestationConsensus extends EventEmitter {
 
     // Record that a non-ok status has been published for a request, bounding
     // the map with the same FIFO ring discipline as `finalized` but under the
-    // deadline-window-derived `nonOkPublishedMax` cap , NOT
+    // deadline-window-derived `nonOkPublishedMax` cap, NOT
     // `finalizedMax`: non-ok entries stay retry-suppression-relevant until
     // their provider deadline, a far longer horizon than an ok finalization.
     _recordNonOkPublished(rid, status){

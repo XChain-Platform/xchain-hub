@@ -314,7 +314,7 @@ describe('AttestationConsensus: _markFinalized ring buffer', function () {
     });
 });
 
-describe('AttestationConsensus: nonOkPublished ring buffer ', function () {
+describe('AttestationConsensus: nonOkPublished ring buffer', function () {
 
     afterEach(() => sinon.restore());
 
@@ -814,13 +814,13 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         // need = min(redundancy=2, responsible.length=3) = 2 (item 2642).
         // pinnedVendors rides alongside the pinned judge model (item 3482): the
         // block-anchored model_vendors map, null when the round carried none.
-        // pinnedApprovedModels rides the same way (): the block-anchored
+        // pinnedApprovedModels rides the same way: the block-anchored
         // allowlist the meta gate judges against, null when the round carried none.
         expect(agreeSpy.firstCall.args[1]).to.deep.equal({ pinnedJudgeModel: 'claude-opus-4-7',
             pinnedVendors: null, pinnedApprovedModels: null, timeoutMs: 10000, expectedN: 2 });
     });
 
-    // : fetch() honours the block-anchored pinned model, so the allowlist
+    // fetch() honours the block-anchored pinned model, so the allowlist
     // that judges the meta it returns has to be block-anchored too. Read from the
     // hub's live set instead, a governance delisting of the pinned model froze the
     // round at no_quorum on every retry until the request expired.

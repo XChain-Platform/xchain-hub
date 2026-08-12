@@ -12,7 +12,7 @@
  *
  **********************************************************************
  *
- * XChain Hub - quorum-network resolver 
+ * XChain Hub - quorum-network resolver
  *
  * The STAKE_WEIGHTED_QUORUM gate (swq.isStakeWeightedQuorumActive) keys on a
  * NETWORK. The consensus/verification authority is the RECORD's network (the

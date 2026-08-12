@@ -8,7 +8,7 @@
 // This file is part of XChain Platform. Licensed under the GNU Affero
 // General Public License v3.0 or later; see LICENSE.md.
 //
-// CONSENSUS GUARD (Oracle M1 / ): the oracle round sizes its quorum from
+// CONSENSUS GUARD: the oracle round sizes its quorum from
 // the price capability snapshot, so submissions and count-mode votes must be
 // restricted to SNAPSHOT MEMBERS and tallied by VERIFIED PUBKEY, not raw
 // envelope.sender. A merely-registered validator (no qualifying stake), or a
@@ -41,7 +41,7 @@ function snapshotOf(validators, blockIndex) {
 
 describe('OracleConsensus: snapshot membership gate (Oracle M1)', function () {
     let hub, pm, oc, oracleRound;
-    // : the leader now derives from the locked snapshot (validators 1+2),
+    // the leader now derives from the locked snapshot (validators 1+2),
     // so round 2 -> sorted-pubkeys[2 % 2] = validator-1 (this hub).
     const ROUND = 2;
 

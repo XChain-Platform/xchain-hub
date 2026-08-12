@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// : the shared /metrics exporter and structured log shim. The suite
+// the shared /metrics exporter and structured log shim. The suite
 // pins the three properties services depend on: valid Prometheus exposition
 // text, default-off wiring (no route, no timer, no socket without env), and a
 // log shim that redacts credentials and never throws at a dead collector.

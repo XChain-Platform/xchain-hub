@@ -13,7 +13,7 @@
  **********************************************************************
  * test/unit/DerivedPairs.test.js
  *
- * DERIVED_PAIRS admission allow-list (, spec step 3d).
+ * DERIVED_PAIRS admission allow-list.
  *
  * XCHAIN is listed on no exchange, so its USD price is derived from
  * platform-realized fills rather than fetched. That makes it absent from

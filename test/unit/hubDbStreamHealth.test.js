@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// : /health carries the hub DB stream heartbeat.
+// /health carries the hub DB stream heartbeat.
 //
 // Consumers gate their price-sync barriers on the watermark this hub
 // broadcasts, and the only place its cadence was ever visible was the
@@ -27,7 +27,7 @@ const proxyquire = require('proxyquire').noPreserveCache();
 const { ConsensusInputMonitor } = require('../../src/lib/consensus_input_monitor.js');
 const { waitUntil } = require('../helpers/waitUntil');
 
-describe('/health hub DB stream heartbeat ', function () {
+describe('/health hub DB stream heartbeat', function () {
 
     // Boot src/api.js with everything heavy stubbed and capture its RPC methods.
     async function bootApi(broadcaster) {

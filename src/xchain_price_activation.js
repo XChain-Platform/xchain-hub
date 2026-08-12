@@ -10,7 +10,7 @@
  *
  **********************************************************************
  *
- * XCHAIN/USD round-composition activation gate (, spec §8 / §10 step 5).
+ * XCHAIN/USD round-composition activation gate (spec §8 / §10 step 5).
  *
  * WHAT ACTIVATES IS ROUND COMPOSITION, nothing else. At/above the gate a
  * price-capability validator includes the derived XCHAIN/USD pair in the round it
@@ -35,7 +35,7 @@
  * the signed payload - but at COMPOSITION time each hub has read its own chain tip,
  * and those differ. Two hubs a block apart across the gate instant would disagree
  * about whether the pair belongs in the round: one submits it, one does not. That
- * is not a benign split. The  unverifiable-pair gate withholds co-sign from
+ * is not a benign split. The unverifiable-pair gate withholds co-sign from
  * any follower that has neither a local submission for a pair nor finalized history
  * for it, and at the gate instant there is BY DEFINITION no finalized history, so
  * the abstaining hub withholds co-sign on the WHOLE round - all 36 pairs - and 1800
@@ -68,7 +68,7 @@ const { PRICE_PAIR_WIDEN_ACTIVATION } = require('./price_pair_activation.js');
 // uses so the two are directly comparable.
 //
 // UNARMED on mainnet: 9999999999 is a far-future sentinel (year 2286), NOT a
-// scheduled flag-day. The arming instant is  D6, an open operator decision,
+// scheduled flag-day. The arming instant is D6, an open operator decision,
 // and it is the same decision that arms PRICE_PAIR_WIDEN_ACTIVATION - the two are
 // armed together, this one at or after that one. The usual contract-era stamp
 // 1786060800 (2026-08-07) is unusable because it postdates the early-September
@@ -78,7 +78,7 @@ const { PRICE_PAIR_WIDEN_ACTIVATION } = require('./price_pair_activation.js');
 // in the suites today. §8 notes testnet is EXPECTED to be steerable (free public
 // MINT plus open venues), so monitoring must not alert on testnet price excursions.
 const XCHAIN_PRICE_ACTIVATION = {
-    mainnet: 9999999999,  // UNARMED sentinel - see  D6
+    mainnet: 9999999999,  // UNARMED sentinel, not a scheduled flag-day
     testnet: 0,
     regtest: 0,
 };

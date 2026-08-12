@@ -12,7 +12,7 @@
  *
  **********************************************************************
  *
- * XChain Hub - Slash Governance 
+ * XChain Hub - Slash Governance
  *
  * The governance-mediated penalty execution lever over slash_proposals.
  * SlashDetector only ever RECORDS offenses (status 'pending'); nothing
@@ -30,7 +30,7 @@
  *
  * proposed_value is the penalty action:
  *   - 'suspend': mark the validator's VOTED pending slash_proposals rows
- *     'approved' (: only rows that are members of the content-hashed
+ *     'approved' (only rows that are members of the content-hashed
  *     evidence set the electorate approved; rows detected mid-vote stay
  *     pending), set validators.status='suspended', and propagate the
  *     shrunken active set to every running consensus engine. This is the
@@ -39,7 +39,7 @@
  *     indexer's WI-2 rail for provable equivocation).
  *   - 'dismiss': mark the validator's VOTED pending rows 'rejected' (the
  *     federation reviewed the evidence and cleared it). Fails closed when
- *     local evidence does not contain the voted set .
+ *     local evidence does not contain the voted set.
  *
  * Execution runs on EVERY hub via the same 'proposal:finalized' event
  * the capability/provider governance appliers use: the leader emits it
@@ -140,7 +140,7 @@ class SlashGovernance {
         });
     }
 
-    // : resolve which local pending rows are MEMBERS of the voted
+    // Resolve which local pending rows are MEMBERS of the voted
     // evidence set. SlashDetector keeps inserting pending rows during the
     // 7-day vote window, so "all pending rows" can be a strict superset of
     // what the electorate audited; sweeping the superset would let a single
@@ -178,7 +178,7 @@ class SlashGovernance {
 
         let pk = parsed.validatorPubkey;
 
-        //  evidence-set gate: the electorate approved a CONTENT-hashed
+        // Evidence-set gate: the electorate approved a CONTENT-hashed
         // evidence set, so only rows that are members of that set may be
         // status-swept. Rows SlashDetector added mid-vote stay 'pending' and
         // remain eligible for a future proposal; without this gate a 'dismiss'

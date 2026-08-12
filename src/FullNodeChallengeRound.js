@@ -57,7 +57,7 @@ const { isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
 const eq                = require('./equivocation_header.js');
 const activation        = require('./lib/fullnode_activation.js');
 // Pinned coin registry: the single source for the consensus-relevant FULLNODE
-// parameters (). See the constructor.
+// parameters. See the constructor.
 const coins             = require('./coins/index.js');
 
 const XNODE_ANSWER   = 'XNODE_ANSWER';
@@ -67,7 +67,7 @@ const XNODE_DONE     = 'XNODE_DONE';
 
 // PASS-list byte comparator. The sorted list is joined into the signed verdict
 // preimage, so its order is consensus, and a bare .sort() is a total order here
-// only because every element happens to be lowercase 64-hex (#3859). Pin it the
+// only because every element happens to be lowercase 64-hex. Pin it the
 // way the other consensus-feeding sorts do (indexer sweep.js / price.js). Every
 // PASS sort on BOTH sides of the seam uses this one comparator; pinning one side
 // alone would make the pinned verifier diverge from a still-bare producer.
@@ -86,7 +86,7 @@ class FullNodeChallengeRound {
 
         this.network       = hub.network || cfg.HUB_NETWORK || '';
 
-        // : the CONSENSUS-relevant full-node params come from the PINNED coin
+        // The CONSENSUS-relevant full-node params come from the PINNED coin
         // registry, never from env or literals.
         //
         // These used to resolve `process.env.FULLNODE_* || cfg.FULLNODE.* || '<literal>'`.
@@ -106,7 +106,7 @@ class FullNodeChallengeRound {
         // act on. getCoinConfig would throw "Unknown network: " here, which names
         // neither the caller nor the fix. A hub that cannot name its network cannot
         // resolve pinned consensus params, and running the round on literals is the
-        // exact hazard #3215 closes, so this is a refusal rather than a fallback.
+        // exact hazard this refusal exists to close, so it refuses rather than falls back.
         if(this.network !== 'mainnet' && this.network !== 'testnet' && this.network !== 'regtest')
             throw new Error('FullNodeChallengeRound: cannot resolve the pinned FULLNODE params because ' +
                 'the hub network is ' + JSON.stringify(this.network) + ' (expected mainnet/testnet/regtest). ' +
@@ -139,7 +139,7 @@ class FullNodeChallengeRound {
             if(!Number.isFinite(value))
                 throw new Error('FullNodeChallengeRound: pinned FULLNODE.' + key + ' is missing or ' +
                     'non-numeric in the coin registry for BTC/' + this.network + '. These are consensus ' +
-                    'inputs and have no env or literal fallback by design (); fix the bundled ' +
+                    'inputs and have no env or literal fallback by design; fix the bundled ' +
                     'coin registry rather than supplying the value out of band.');
         }
 
@@ -153,7 +153,7 @@ class FullNodeChallengeRound {
         // verified on-chain, so a key dropped here shrinks the quorum denominator: it is
         // a consensus input and comes from the pinned registry with the rest.
         // Malformed entries are dropped (the indexer's admission rule does the same,
-        // so keeping them would only fork this hub's view), but : say so, or a
+        // so keeping them would only fork this hub's view), but say so, or a
         // typo'd activation looks identical to a correct one.
         let rawGenesis     = Array.isArray(registry.GENESIS_VERIFIERS) ? registry.GENESIS_VERIFIERS : [];
         this.genesis       = new Set(rawGenesis
@@ -185,7 +185,7 @@ class FullNodeChallengeRound {
         this.walletSignFn = null;   // fn(psbtHex) -> Promise<txHex>
         this.btcAddress   = process.env.BTC_ADDRESS || cfg.BTC_ADDRESS || '';
 
-        //  - shared SpendGuard for the on-chain NODEPROOF verdict spend. Adds a
+        // Shared SpendGuard for the on-chain NODEPROOF verdict spend. Adds a
         // per-window spend ceiling (count + $2000-clamped USD budget, default-ON) and a
         // per-capability runtime pause so an operator can halt verdict BTC spend at
         // runtime; gated at _maybeFinalize before the leader broadcasts. Config reads
@@ -194,7 +194,7 @@ class FullNodeChallengeRound {
         // knobs; the guard's knobs are the FULLNODE_*-prefixed ones).
         this.spendGuard = new SpendGuard('FULLNODE', cfg, 'FullNodeChallengeRound');
 
-        // item 3463 - durable spend audit for the fee-bearing verdict send. The other
+        // Durable spend audit for the fee-bearing verdict send. The other
         // three hub effectors all leave a recoverable trace of a fee-bearing INTENT
         // before the money moves (AttestationPublisher's fsync'd queue plus
         // spend.jsonl, AttestationRelay's intent WAL, StateAnchorPublisher's
@@ -207,7 +207,7 @@ class FullNodeChallengeRound {
         this.rounds   = new Map();  // epoch -> round state
         // Epochs whose verdict fee a PRIOR process already committed, recovered from
         // the spend log at start(). The in-memory `rounds` map is empty after a
-        // restart, so it cannot answer that question ().
+        // restart, so it cannot answer that question.
         this._committedEpochs = new Set();
         this._timer   = null;
         this._ticking = false;      // in-flight guard, see _tick()
@@ -225,8 +225,8 @@ class FullNodeChallengeRound {
         }
         if(this.peerManager) this.peerManager.on('message', this._handler);
         // Consume the spend log BEFORE the first tick, or the recovered epochs arrive
-        // too late to gate the round that tick reconstructs (). Same reason
-        // the spend window is reloaded here and not lazily ().
+        // too late to gate the round that tick reconstructs. Same reason
+        // the spend window is reloaded here and not lazily.
         this._loadSpendLog();
         this.spendGuard.persistTo();
         let tick = async () => { try { await this._tick(); } catch(e){ console.warn('FullNodeChallengeRound tick:', e && e.message ? e.message : e); } };
@@ -535,8 +535,8 @@ class FullNodeChallengeRound {
         state.txid = d.txid || state.txid;
     }
 
-    // item 3463 wrote the durable intent but nothing ever read it back, so the guard
-    // it was built to be only worked inside one process lifetime (). Fold the
+    // The verdict spend log originally wrote the durable intent but nothing ever read
+    // it back, so the guard it was built for only worked inside one process lifetime. Fold the
     // append-only log into the set of epochs whose fee is already committed, using the
     // same sticky rules as AttestationRelay._loadWal: a terminal 'sent' or 'ambiguous'
     // is committed and never cleared, a bare 'intent' counts as committed (fail closed
@@ -550,7 +550,7 @@ class FullNodeChallengeRound {
     // that intent must re-arm the guard exactly like the first one. Keying the intent
     // clause on 'no prior record' instead dropped it, so intent/failed/intent - retry,
     // then crash after the node accepted - reloaded as uncommitted and re-broadcast,
-    // which is the very failure mode  names.
+    // which is the very failure mode this durable guard exists to prevent.
     _loadSpendLog(){
         let text;
         try { text = fs.readFileSync(this.spendLogPath, 'utf8'); }
@@ -578,7 +578,7 @@ class FullNodeChallengeRound {
         // A prior process already committed this epoch's BTC fee. The epoch is
         // recomputed deterministically from the tip, so a restart inside acceptWindow
         // rebuilds the same round and can re-win leadership; without this the verdict
-        // goes out a second time (). Claim the round rather than merely
+        // goes out a second time. Claim the round rather than merely
         // returning, so the reconstructed round stops re-entering every incoming sig.
         if(this._committedEpochs.has(epoch)){
             state.finalized = true;
@@ -591,7 +591,7 @@ class FullNodeChallengeRound {
         let quorum = Math.floor((2 * state.eligible.size) / 3) + 1;
         if(state.sigs.size < quorum) return;
 
-        //  - shared SpendGuard gate on the PRIMARY (leader) verdict spend path.
+        // Shared SpendGuard gate on the PRIMARY (leader) verdict spend path.
         // A runtime pause (per-capability) or an exhausted per-window spend ceiling
         // DEFERS finalization (return without claiming the round) so a later tick
         // retries once resumed/budget frees. Checked BEFORE the finalize lock so a
@@ -609,7 +609,7 @@ class FullNodeChallengeRound {
         state.finalized = true;
         let wire = this._buildVerdictWire(state);
 
-        // item 3463 - durable intent record BEFORE the money moves, and the broadcast
+        // Durable intent record BEFORE the money moves, and the broadcast
         // is GATED on it, matching the rule AttestationPublisher states at its own
         // durable append: an unwritable audit path must not let a real BTC fee be
         // spent with no recoverable trace. Failing here reverts the finalize lock, so
@@ -625,17 +625,17 @@ class FullNodeChallengeRound {
 
         try {
             let res = await this._broadcastVerdict(wire);
-            this.spendGuard.record();   // : a fresh verdict tx spent a BTC fee
+            this.spendGuard.record();   // a fresh verdict tx spent a BTC fee
             state.txid = res && res.txid ? res.txid : null;
             // Mirror the reload rule in-process, so a spend is gated identically
-            // whether the log was read at start() or written this run ().
+            // whether the log was read at start() or written this run.
             this._committedEpochs.add(epoch);
             this._recordSpend({ phase: 'sent', epoch, challengeId: state.challengeId, txid: state.txid });
             this.peerManager && this.peerManager.broadcast(XNODE_DONE, { epoch, challengeId: state.challengeId, txid: state.txid });
             console.log('FullNodeChallengeRound: verdict broadcast epoch=' + epoch + ' pass=' + state.passList.length +
                         ' sigs=' + state.sigs.size + '/' + quorum + (state.txid ? ' txid=' + state.txid : ''));
         } catch(e){
-            //  - never blind-retry an AMBIGUOUS send. A timeout / reset / 5xx
+            // Never blind-retry an AMBIGUOUS send. A timeout / reset / 5xx
             // after the request left the wire may mean the BTC node accepted the
             // verdict tx; reverting the finalize lock would let a later tick
             // re-broadcast and double-spend the fee (same-challenge NODEPROOF replay).
@@ -646,7 +646,7 @@ class FullNodeChallengeRound {
                 // The whole point of the intent record: an ambiguous send may have cost
                 // a fee, and the round is deliberately left claimed. Say so on disk, so
                 // the operator reconciling on-chain has the challenge_id without stdout.
-                this._committedEpochs.add(epoch);   // : a fee may have been paid
+                this._committedEpochs.add(epoch);   // a fee may have been paid
                 this._recordSpend({ phase: 'ambiguous', epoch, challengeId: state.challengeId,
                                     error: e && e.message ? String(e.message).slice(0, 200) : String(e) });
                 console.warn('FullNodeChallengeRound: AMBIGUOUS verdict send (epoch ' + epoch +
@@ -660,7 +660,7 @@ class FullNodeChallengeRound {
         }
     }
 
-    // item 3463 - append one fsync'd spend-audit line. Returns true only on a
+    // Append one fsync'd spend-audit line. Returns true only on a
     // confirmed durable write; the intent call SITES the gate on that result, the
     // outcome calls are best-effort (the fee is already committed by then, so
     // refusing to proceed would help nobody). Mirrors AttestationPublisher._recordSpend,

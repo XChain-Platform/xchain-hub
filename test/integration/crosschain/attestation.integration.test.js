@@ -58,8 +58,8 @@ describe('Integration: Cross-Chain Attestation (SC-4.x)', function () {
             expect(attestation.status).to.equal('attested');
             // Read the threshold from the canonical coin bundles instead of pinning a
             // literal. The BTC/LTC/DOGE cross-chain confirmation depths were raised
-            // ( mainnet floor clamp) and this assertion still demanded the old
-            // 3, which read as a product regression rather than a stale fixture.
+            // (mainnet floor clamp) and this assertion still demanded the old 3,
+            // which read as a product regression rather than a stale fixture.
             expect(attestation.confirmations).to.equal(CONFIRMATIONS.BTC);
             expect(attestation.validatorCount).to.equal(1);
 

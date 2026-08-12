@@ -31,18 +31,18 @@
  *
  ********************************************************************/
 
-// v2 : capability_snapshots.uq_cap_snap gained `source`, so a key
+// v2: capability_snapshots.uq_cap_snap gained `source`, so a key
 // delegated by two sources keeps BOTH (source, pubkey) rows in the mirror stream
 // instead of collapsing to one. A stale indexer on the 3-column key would
 // INSERT-IGNORE-drop the second source row and understate stake, so it must
 // reject a v2 snapshot stream until it has migrated.
 //
-// v3 : the mirror set gained anchor_reward_attestations (hub_db_sync
+// v3: the mirror set gained anchor_reward_attestations (hub_db_sync
 // HUB_STATE_TABLES). It carries the XANCPUB publisher-attestation quorum the BTC
 // indexer derives the COLLECT-spendable anchor/archive reward from, so an indexer
 // that predates it does not merely miss rows, it under-derives a money rail while
-// still advertising a matching handshake. v2 was never bumped for that table, so a
-// pre- indexer accepted a current hub instead of failing closed; v3 restores
+// still advertising a matching handshake. v2 was never bumped for that table, so
+// an indexer predating v3 accepted a current hub instead of failing closed; v3 restores
 // the gate. A stale indexer must reject this stream until it has applied the
 // 2026-07-21 anchor-reward-attestations migration.
 const HUB_SCHEMA_VERSION = 3;

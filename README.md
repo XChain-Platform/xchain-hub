@@ -182,7 +182,7 @@ starts and no socket opens. Turn the endpoint on with `METRICS_ENABLED=1` (add
 [CONFIGURATION.md](CONFIGURATION.md); the exported metric names and the wiring
 API are in [`src/observability/README.md`](src/observability/README.md).
 
-This directory is the CANONICAL copy of the shared module . After
+This directory is the CANONICAL copy of the shared module. After
 editing it, re-run `bin/sync-observability.sh` to refresh the vendored copies in
 the sibling services; drift fails `bin/check-observability-parity.js` in CI.
 

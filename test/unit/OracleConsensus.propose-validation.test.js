@@ -67,7 +67,7 @@ describe('OracleConsensus: follower price validation / minSubmissions / broadcas
         const { PRICE_MAX } = require('../../src/constants');
         expect(PRICE_MAX).to.be.greaterThan(1.35e8);
         oracleRound.getSubmissions.returns(new Map()); // bound-only (no local aggregate to deviate against)
-        oc.allowUnverifiedPairs = true; // isolate the PRICE_MAX bound from the  unverifiable-pair gate
+        oc.allowUnverifiedPairs = true; // isolate the PRICE_MAX bound from the unverifiable-pair gate
         await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/KRW', price: '135000000' }])); // 1.35e8, realistic
         expect(oc.pendingRounds.has(ROUND)).to.be.true;
     });
@@ -79,12 +79,12 @@ describe('OracleConsensus: follower price validation / minSubmissions / broadcas
 
     it('accepts (bound-only) an unverifiable pair only with ORACLE_ALLOW_UNVERIFIED_PAIRS opt-in', async function () {
         oracleRound.getSubmissions.returns(new Map()); // no local aggregate, no finalized history
-        oc.allowUnverifiedPairs = true;                // deliberate single-fetcher opt-in 
+        oc.allowUnverifiedPairs = true;                // deliberate single-fetcher opt-in
         await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '100000' }]));
         expect(oc.pendingRounds.has(ROUND)).to.be.true;
     });
 
-    it(': withholds co-sign on a pair with no local submission and no finalized history', async function () {
+    it('withholds co-sign on a pair with no local submission and no finalized history', async function () {
         oracleRound.getSubmissions.returns(new Map()); // nothing to verify against
         expect(oc.allowUnverifiedPairs).to.equal(false); // fail-closed default
         await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '100000' }]));
@@ -92,7 +92,7 @@ describe('OracleConsensus: follower price validation / minSubmissions / broadcas
         expect(pm.broadcast.called).to.be.false;
     });
 
-    it(': a finalized-history pair still co-signs within the 5x historical band', async function () {
+    it('a finalized-history pair still co-signs within the 5x historical band', async function () {
         oracleRound.getSubmissions.returns(new Map()); // no local aggregate
         oc._lastFinalizedPrices = new Map([['BTC/USD', '100000']]); // but history exists
         await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '110000' }])); // +10% < 5x band
@@ -202,7 +202,7 @@ describe('OracleConsensus: follower price validation / minSubmissions / broadcas
     it('rejects (no sign/PREPARE) a proposal carrying a non-canonical pair', async function () {
         oracleRound.canonicalPairs = new Set(['BTC/USD', 'XCHAIN/USD']);
         oracleRound.getSubmissions.returns(new Map());
-        // Finalized history so the  unverifiable-pair gate stays out of the
+        // Finalized history so the unverifiable-pair gate stays out of the
         // way; the whitelist behavior is the thing under test here.
         oc._lastFinalizedPrices = new Map([['BTC/USD', '100000'], ['XCHAIN/USD', '0.50000000']]); // no local aggregate: only bound + whitelist apply
         // Honest aggregate for a canonical pair PLUS one fabricated pair the fetcher never serves.
@@ -230,7 +230,7 @@ describe('OracleConsensus: follower price validation / minSubmissions / broadcas
     it('accepts an all-canonical proposal when the whitelist is active (no false positives)', async function () {
         oracleRound.canonicalPairs = new Set(['BTC/USD', 'XCHAIN/USD']);
         oracleRound.getSubmissions.returns(new Map());
-        // Finalized history so the  unverifiable-pair gate stays out of the
+        // Finalized history so the unverifiable-pair gate stays out of the
         // way; the whitelist behavior is the thing under test here.
         oc._lastFinalizedPrices = new Map([['BTC/USD', '100000'], ['XCHAIN/USD', '0.50000000']]);
         await oc._handlePropose(proposeEnvelope([
@@ -245,7 +245,7 @@ describe('OracleConsensus: follower price validation / minSubmissions / broadcas
         // followers withhold on real pairs (over-strict = self-inflicted liveness loss).
         oracleRound.canonicalPairs = new Set();          // size 0 -> whitelist skipped
         oracleRound.getSubmissions.returns(new Map());
-        oc._lastFinalizedPrices = new Map([['BTC/USD', '100000']]); // keep the  gate out of the way
+        oc._lastFinalizedPrices = new Map([['BTC/USD', '100000']]); // keep the unverifiable-pair gate out of the way
         await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '100000' }]));
         expect(oc.pendingRounds.has(ROUND)).to.be.true;
     });

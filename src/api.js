@@ -65,7 +65,7 @@ const path      = require('path');
 const geoip     = require('geoip-lite');   // self-contained country/region DB; we read only country + region
 const { HUB_SCHEMA_VERSION } = require('./hub-schema-version');   // stamped on every mirror snapshot so a stale indexer rejects a mismatch
 const { buildOraclePricesSnapshotQuery } = require('./oraclePricesSnapshotQuery');   // page (indexer bootstrap) vs latest-per-feed (dashboard) query selection
-const { evaluateAuthPosture } = require('./lib/auth_posture.js');   // : boot refuses on an undeclared unauthenticated write surface
+const { evaluateAuthPosture } = require('./lib/auth_posture.js');   // boot refuses on an undeclared unauthenticated write surface
 const { parseCorsOrigin } = require('./lib/corsOrigin.js');
 // #1299: single source of truth for the co-sign/slash deviation band (no re-declared 0.05 literal).
 // #2653: oracle round-interval/submission-window defaults shared with OracleRound.js and XChainHub.js.
@@ -78,7 +78,7 @@ const HUB_DB_KEEPALIVE_INTERVAL = parseInt(process.env.HUB_DB_KEEPALIVE_INTERVAL
 
 // HUB_API_KEY gates the write/WS-subscribe surface: set, those paths fail closed
 // (401) without a valid key. Unset, the hub REFUSES TO BOOT unless keyless
-// operation is declared with HUB_ALLOW_UNAUTHENTICATED ; see the posture
+// operation is declared with HUB_ALLOW_UNAUTHENTICATED; see the posture
 // block below.
 const HUB_API_KEY        = process.env.HUB_API_KEY || '';
 // Explicit declaration that this hub runs keyless (private network, fronting
@@ -110,8 +110,8 @@ const TELEMETRY_IP_SALT        = process.env.TELEMETRY_IP_SALT || '';
 const TELEMETRY_ADMIN_KEY      = process.env.TELEMETRY_ADMIN_KEY || '';
 
 const coins          = require('./coins');
-const SpendGuard     = require('./lib/spend_guard.js');   // : per-capability effector-spend pause registry
-const { installObservability } = require('./observability');   // : default-off /metrics + structured log shim
+const SpendGuard     = require('./lib/spend_guard.js');   // per-capability effector-spend pause registry
+const { installObservability } = require('./observability');   // default-off /metrics + structured log shim
 const { installHubOracleMetrics } = require('./hubMetrics');   // item a98d6746: oracle-round heartbeat gauges
 const ALLOWED_CHAINS = new Set(coins.ALLOWED_COINS);
 
@@ -128,14 +128,14 @@ const WRITE_METHODS  = new Set([
     'pushdexreorg', 'anchorflush', 'pauseeffectorspend', 'resumeeffectorspend'
 ]);
 
-//  interim credential scoping: the reorg-retraction rails feed row:deleted
+// Interim credential scoping: the reorg-retraction rails feed row:deleted
 // broadcasts that durably delete quorum-signed relay rows fleet-wide, a strictly
 // more destructive tier than the other writes sharing the bulk HUB_API_KEY. When
 // HUB_REORG_API_KEY is set, these three methods require THAT key and the bulk key
 // no longer authorizes them (and the reorg key authorizes nothing else), so a
 // bulk-key compromise cannot fabricate retractions. Unset = legacy behavior
 // (bulk-key gated), rolling-deploy safe. Full fix (2f+1 co-signed retractions)
-// rides the  flag-day set.
+// rides the shared flag-day set.
 const REORG_WRITE_METHODS = new Set(['pushpricereorg', 'pushxcallreorg', 'pushdexreorg']);
 const HUB_REORG_API_KEY   = process.env.HUB_REORG_API_KEY || '';
 
@@ -160,7 +160,7 @@ function validateChain(chain) {
 // 50, '1e3' as 1 and '50.5' as 50, and several of the ~16 call sites forward the
 // ORIGINAL value into a `LIMIT ?` bind rather than the parsed one. The queries stayed
 // bounded and parameterized, but the public limit contract differed per caller. One
-// helper guards every call site, so tightening it here repairs all of them ().
+// helper guards every call site, so tightening it here repairs all of them.
 function validateLimit(limit) {
     if (limit !== undefined && limit !== null) {
         let err = { error: 'limit must be a positive integer no greater than 10000' };
@@ -186,7 +186,7 @@ function validateSince(since) {
 // Parse optional P2P config (P2P is enabled when P2P_VALIDATOR_ADDR is set)
 const P2P_VALIDATOR_ADDR = process.env.P2P_VALIDATOR_ADDR || '';
 
-// Write-method auth posture . Keyless, every write method is callable by
+// Write-method auth posture. Keyless, every write method is callable by
 // anyone who can reach the port, on a validator AND on a config-oracle hub. The
 // decision itself lives in lib/auth_posture.js so it is unit-testable; here we
 // only log it and refuse the boot. Keyless operation is still available, but it
@@ -241,7 +241,7 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     P2P_MAX_CONNECTIONS_PER_IP: parseInt(process.env.P2P_MAX_CONNECTIONS_PER_IP) || 3,
     P2P_MSG_DEDUP_TTL:      parseInt(process.env.P2P_MSG_DEDUP_TTL) || 60000,
     P2P_MAX_PAYLOAD:        parseInt(process.env.P2P_MAX_PAYLOAD) || 1048576,
-    // XCHAIN derived-price source . Read-only access to THIS validator's own
+    // XCHAIN derived-price source. Read-only access to THIS validator's own
     // BTC indexer database; XCHAIN is listed on no exchange, so the pair is computed
     // from realized on-chain fills rather than fetched. Unset = this hub abstains from
     // XCHAIN/USD and submits the 36 API pairs exactly as before, which is a supported
@@ -362,7 +362,7 @@ async function startApi(){
         legacyHeaders: false
     }));
 
-    // : Prometheus /metrics plus a structured log shim, both DEFAULT OFF.
+    // Prometheus /metrics plus a structured log shim, both DEFAULT OFF.
     // Nothing is registered and no timer starts unless METRICS_ENABLED (and, for
     // log shipping, LOG_SHIP_ENABLED + LOG_SHIP_URL) are set, so a hub deploy
     // gains no new listening surface by accident. See src/observability/README.md.
@@ -403,7 +403,7 @@ async function startApi(){
             jsonrpc: '2.0', id: (Array.isArray(req.body) ? null : (req.body && req.body.id)) || null,
             error: { code: -32001, message: 'Unauthorized' }
         });
-        // : with HUB_REORG_API_KEY set, the retraction rails answer ONLY to
+        // With HUB_REORG_API_KEY set, the retraction rails answer ONLY to
         // it (a batch mixing reorg and non-reorg gated methods can never satisfy
         // both tiers with the single x-api-key header a request carries; callers
         // do not mix tiers). Unset, they stay in the bulk tier below.
@@ -499,7 +499,7 @@ async function startApi(){
             }
             if (oracleStale) healthy = false;
 
-            // Consensus-input reachability . The snapshot fetches that lock
+            // Consensus-input reachability. The snapshot fetches that lock
             // a round's validator set fail CLOSED, so a hub that cannot reach its BTC
             // indexer stops participating in every capability / attestation /
             // config-change round while its process and port stay perfectly healthy.
@@ -513,7 +513,7 @@ async function startApi(){
 
             let anchorStats = hub.stateAnchorPublisher ? hub.stateAnchorPublisher.getAnchorStats() : null;
             let attestStats = hub.attestationPublisher ? hub.attestationPublisher.getPublisherStats() : null;
-            // Attestation relay . The relay drives the v3 request /v4 response
+            // Attestation relay. The relay drives the v3 request /v4 response
             // legs across chains and until now its only instrument was the process log,
             // so an operator could not see that a finalized v4 was sitting held for want
             // of an origin-chain broadcast rail. The typeof guard is for a hub built
@@ -542,7 +542,7 @@ async function startApi(){
             // rather than a sick hub, and 503-ing the config oracle over it would
             // take the federation's config rail down with it.
             if (relayStats) healthResult.attest_relay = relayStats;
-            // Hub DB stream heartbeat . Consumers gate their price-sync
+            // Hub DB stream heartbeat. Consumers gate their price-sync
             // barriers on this watermark, and until now the cadence was only ever
             // visible from the consumer's own timeout logs. Body-only telemetry,
             // like config_fetch above: a stalled heartbeat is worth alerting on but
@@ -867,7 +867,7 @@ async function startApi(){
             }
         },
 
-        // : surface individual XCALL relay rows (the hub's own cross_chain_calls
+        // Surface individual XCALL relay rows (the hub's own cross_chain_calls
         // table), the read companion to getcrosschaincallstats' aggregate counters.
         // getcrosschaincall returns one call's full lifecycle by call_id as
         // {call_id, dispatch, result}; getxcall is a shorter alias (mirrors the
@@ -961,15 +961,15 @@ async function startApi(){
             return { active: true, ...hub.oraclePublisher.getStats() };
         },
 
-        //  effector-spend control surface. Read: every registered SpendGuard
+        // Effector-spend control surface. Read: every registered SpendGuard
         // (one per on-chain effector: oracle-publish, attest, anchor, full-node) with
         // its pause state, balance floor, and rolling per-window spend ceiling (clamped
-        // at the $2000 review admission ceiling). Read-only, always 200.
+        // at the $2000 AML admission ceiling). Read-only, always 200.
         async geteffectorspendstatus(){
             return { effectors: SpendGuard.list() };
         },
 
-        //  per-capability runtime pause (write, auth-gated). Halts a single
+        // Per-capability runtime pause (write, auth-gated). Halts a single
         // effector's on-chain spend immediately, INCLUDING its primary/leader path,
         // without a restart. `label` is the guard label (e.g. 'OraclePublisher',
         // 'AttestationPublisher', 'StateAnchorPublisher', 'FullNodeChallengeRound').
@@ -1029,7 +1029,7 @@ async function startApi(){
             }
         },
 
-        // : create a SLASH_PENALTY governance proposal over a validator's
+        // Create a SLASH_PENALTY governance proposal over a validator's
         // pending slash_proposals evidence. penalty: 'suspend' | 'dismiss'. The
         // evidence hash is computed hub-side; the vote executes the penalty.
         async proposeslashpenalty({validator_pubkey, penalty, rationale}){
@@ -1365,7 +1365,7 @@ async function startApi(){
         }
     });
 
-    // GET /hub-db/snapshot/anchor_reward_attestations: full snapshot of the 
+    // GET /hub-db/snapshot/anchor_reward_attestations: full snapshot of the
     // anchor-reward attestation table. Explicit column list (id-parity mirror; the BTC
     // indexer rebuilds the XANCPUB canonical from reward_type/round_reference/snapshot_block/
     // publisher and re-verifies publisher_attestations against its OWN oracle_publish set).

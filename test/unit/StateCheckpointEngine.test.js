@@ -79,7 +79,7 @@ describe('StateCheckpointEngine', function () {
                 }
                 if (sql.startsWith('INSERT IGNORE INTO state_checkpoints')) {
                     let [chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures] = params;
-                    // : append-only INSERT IGNORE keyed by the TIGHTENED unique index
+                    // append-only INSERT IGNORE keyed by the TIGHTENED unique index
                     // (chain, network, checkpoint_seq). A second row at an already-seated seq
                     // (even a different block_index) is dropped, exactly as the real DB's
                     // uq_chain_seq collapses a same-seq split-brain to one admitted row.
@@ -315,7 +315,7 @@ describe('StateCheckpointEngine', function () {
     it('followers never co-sign a stale checkpoint_seq (replay guard)', async function () {
         let bus = buildMesh(4, { btcBlock: 101 });
         await startAll(bus);
-        // : seq is derived from snapshot_block, so the leader proposes seq 101
+        // seq is derived from snapshot_block, so the leader proposes seq 101
         // (btcBlock 101). Pre-record that same seq on every follower so the proposal
         // is a genuine replay (cp.checkpoint_seq 101 <= recorded maxSeq 101).
         let leader = leaderNode(bus, 101);
@@ -339,7 +339,7 @@ describe('StateCheckpointEngine', function () {
         let cp = {
             chain: 'BTC', network: TIP.network, block_index: TIP.block_index, block_hash: TIP.block_hash,
             ledger_hash: TIP.ledger_hash, actions_hash: TIP.actions_hash, contract_hash: TIP.contract_hash,
-            // : seq must match the value derived from snapshot_block, so the REQ
+            // seq must match the value derived from snapshot_block, so the REQ
             // clears the deterministic-seq guard and is rejected specifically by the
             // non-leader (cadence) check we are exercising here.
             checkpoint_seq: 101, snapshot_block: 101
@@ -439,7 +439,7 @@ describe('StateCheckpointEngine', function () {
                 chain: 'BTC', network: TIP.network, block_index: TIP.block_index,
                 block_hash: TIP.block_hash, ledger_hash: TIP.ledger_hash,
                 actions_hash: TIP.actions_hash, contract_hash: TIP.contract_hash,
-                // : seq is derived from snapshot_block; use the derived value so
+                // seq is derived from snapshot_block; use the derived value so
                 // these freshness-bound cases exercise the freshness guard, not the seq guard.
                 checkpoint_seq: snapshotBlock, snapshot_block: snapshotBlock,
                 state_root: TIP.state_root, state_root_version: TIP.state_root_version,
@@ -495,14 +495,14 @@ describe('StateCheckpointEngine', function () {
         });
     });
 
-    // ── : snapshot_block-derived checkpoint_seq + split-brain fence ─────
+    // ── snapshot_block-derived checkpoint_seq + split-brain fence ─────
     // The old COALESCE(MAX(seq))+1 allocation let two one-block-tip-skewed leaders
     // mint the SAME seq for DIFFERENT blocks (split-brain), which the anchor
     // publisher then double-spent on DOGE. seq is now a deterministic function of
     // snapshot_block, followers refuse a leader whose seq does not match, and the
     // tightened (chain, network, checkpoint_seq) unique key collapses any residual
     // same-seq race to one admitted row.
-    describe('snapshot_block-derived seq + split-brain fence ', function () {
+    describe('snapshot_block-derived seq + split-brain fence', function () {
 
         it('deriveCheckpointSeq is the identity on snapshot_block, and a produced checkpoint uses it', async function () {
             expect(StateCheckpointEngine.deriveCheckpointSeq(900120)).to.equal(900120);
@@ -567,7 +567,7 @@ describe('StateCheckpointEngine', function () {
                 chain: 'BTC', network: 'regtest', block_hash: TIP.block_hash,
                 ledger_hash: TIP.ledger_hash, actions_hash: TIP.actions_hash,
                 contract_hash: TIP.contract_hash, checkpoint_seq: 200, snapshot_block: 200,
-                // Roots are populated (): regtest has checkpoint-commitment active
+                // Roots are populated: regtest has checkpoint-commitment active
                 // from genesis, so a rootless checkpoint at this snapshot_block is now
                 // refused on every path (propose, co-sign and persist). The propose path
                 // already refused it before this change, so a rootless regtest checkpoint
@@ -587,7 +587,7 @@ describe('StateCheckpointEngine', function () {
         });
     });
 
-    // ── : the rootless-checkpoint guard runs on EVERY path ──────────
+    // ── The rootless-checkpoint guard runs on EVERY path ──────────
     //
     // The propose path always refused to sign a post-flag-day checkpoint with no
     // light-client roots. That was the only place the rule lived, and it is the one
@@ -648,11 +648,11 @@ describe('StateCheckpointEngine', function () {
             expect(nd.db.checkpoints.length, 'no row written').to.equal(before);
         });
 
-        // ── : SWQ gate plane, asserted rather than silently switched ──
+        // ── SWQ gate plane, asserted rather than silently switched ──
         //
         // This engine resolves the stake-weighted-quorum gate on the DEPLOYMENT network
         // while StateAnchorPublisher resolves the same gate on the RECORD's network
-        // (resolveQuorumNetwork, ). Two files, one gate, two planes. The v1 call is
+        // (resolveQuorumNetwork). Two files, one gate, two planes. The v1 call is
         // kept on purpose: switching to cp.network would let a PEER choose this hub's
         // quorum rule by asserting a network in a gossiped checkpoint, which is worse
         // than the drift being fixed. So a genuine disagreement is refused loudly.

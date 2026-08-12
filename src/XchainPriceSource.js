@@ -12,7 +12,7 @@
  *
  **********************************************************************
  *
- * XChain Hub - XCHAIN/USD derived price source (, spec step 2)
+ * XChain Hub - XCHAIN/USD derived price source
  *
  * Every other pair in a round comes from an exchange API. This one comes from the
  * chain: XCHAIN is listed nowhere, so its price is derived from realized fills in
@@ -21,8 +21,6 @@
  * computing the same round see byte-identical fill sets; only the final multiply by
  * each one's own BTC/USD varies, which is exactly the variance every existing pair
  * already has and which aggregation already resolves.
- *
- * Spec: claude/specs/XCHAIN_PRICE_DERIVATION_SPEC.md (§4 formula, §6 plumbing/taxonomy, §7 bootstrap)
  *
  * The arithmetic and the row selection are NOT here. They are xchainPrice.js and
  * xchainPriceQuery.js, vendored byte-identically from xchain-indexer and guarded by
@@ -47,7 +45,7 @@
  * PUBLICATION IS UNCONDITIONAL (§7). An empty window is not an abstention: it
  * publishes the carry-forward value (last finalized, else the bootstrap). Abstaining
  * on a quiet market would let the pair age past the 1800s staleness bound within a
- * few rounds and re-brick LTC/DOGE fees, which is the exact bug  exists to fix.
+ * few rounds and re-brick LTC/DOGE fees, which is the exact bug this file exists to fix.
  * Abstention is reserved for "this hub cannot compute", never "the market was quiet".
  *
  * THE INDEXER DATABASE IS UNTRUSTED INPUT. Amounts are VARCHAR(250) that a wedged or

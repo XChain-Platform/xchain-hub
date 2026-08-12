@@ -13,13 +13,13 @@
  **********************************************************************
  * test/unit/XchainPriceSource.test.js
  *
- * Validator-side XCHAIN/USD source (, spec step 2).
+ * Validator-side XCHAIN/USD source.
  *
  * The formula and the row selection are tested in xchain-indexer against real dumped
  * rows; this file tests the DECISION this module owns, which is the one with teeth:
  * abstain, or publish. Get it backwards in either direction and the damage is
  * asymmetric but real - abstaining on a quiet market ages the pair past the 1800s
- * staleness bound and re-bricks LTC/DOGE fees (the exact bug  exists to fix),
+ * staleness bound and re-bricks LTC/DOGE fees (the exact bug this source exists to fix),
  * while publishing when the hub could not actually look asserts a market observation
  * it never made.
  */

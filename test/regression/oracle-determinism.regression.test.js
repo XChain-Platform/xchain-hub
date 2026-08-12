@@ -28,7 +28,6 @@
  *      because pairs are sorted before serialization.
  *
  * Pure (no DB / no network) so it runs in CI on every change.
- * Spec: claude/reports/specs/2026-05-30_validator-test-spec.md §6 (determinism).
  */
 
 const assert = require('assert');
@@ -87,10 +86,10 @@ describe('Regression: Oracle determinism', function () {
         const build = (order) => oc._buildPriceV0Payload(round, ts, oc._aggregateAll(submissions(ENTRIES, order)));
         const fwd = build(FWD), rev = build(REV), mix = build(MIX);
         // Sanity: the payload sort must still absorb a genuinely out-of-order
-        // input, so feed it one explicitly. (Before  the sanity check read
-        // this divergence straight off _aggregateAll; that method now emits
-        // canonical order itself, so the un-canonical array has to be built by
-        // hand or the assertion below would be a tautology.)
+        // input, so feed it one explicitly. (The sanity check used to read this
+        // divergence straight off _aggregateAll; that method now emits canonical
+        // order itself, so the un-canonical array has to be built by hand or the
+        // assertion below would be a tautology.)
         const agg = oc._aggregateAll(submissions(ENTRIES, FWD));
         assert.ok(agg.length > 1, 'need >1 pair for the sort to be observable');
         const scrambled = oc._buildPriceV0Payload(round, ts, agg.slice().reverse());
@@ -99,11 +98,10 @@ describe('Regression: Oracle determinism', function () {
         assert.strictEqual(fwd, mix);
     });
 
-    // : the aggregate ARRAY itself is now canonical, not just the payload
-    // built from it. It is what PROPOSE propagates and what price_snapshots
-    // stores, so two hubs with identical prices now produce identical bytes.
-    // Consensus-breaking; ships ungated with the  pre-launch batch.
-    it('aggregate array order is canonical, not arrival-dependent  @regression-p0', function () {
+    // The aggregate ARRAY itself is canonical, not just the payload built from
+    // it. It is what PROPOSE propagates and what price_snapshots stores, so two
+    // hubs with identical prices produce identical bytes. Consensus-breaking.
+    it('aggregate array order is canonical, not arrival-dependent @regression-p0', function () {
         const a = oc._aggregateAll(submissions(ENTRIES, FWD));
         const b = oc._aggregateAll(submissions(ENTRIES, REV));
         const c = oc._aggregateAll(submissions(ENTRIES, MIX));
@@ -112,9 +110,9 @@ describe('Regression: Oracle determinism', function () {
         assert.deepStrictEqual(a.map((p) => p.coinPair), ['BTC/USD', 'LTC/USD']);
     });
 
-    // : the round digest is canonical over its own preimage too, so a
-    // digest re-derived from LOCAL aggregation matches the leader's.
-    it('round digest is invariant to arrival order and to array order  @regression-p0', function () {
+    // The round digest is canonical over its own preimage too, so a digest
+    // re-derived from LOCAL aggregation matches the leader's.
+    it('round digest is invariant to arrival order and to array order @regression-p0', function () {
         const dFwd = oc._digest(42, oc._aggregateAll(submissions(ENTRIES, FWD)));
         const dRev = oc._digest(42, oc._aggregateAll(submissions(ENTRIES, REV)));
         assert.strictEqual(dFwd, dRev, 'digest diverged with arrival order');

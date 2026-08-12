@@ -58,10 +58,10 @@ function makeWeightSnapshot(validators, blockIndex) {
 }
 
 // Build a getActiveValidatorSnapshot-shaped whole-federation snapshot whose
-// members are the validators under test.  made Consensus elect its
-// leader from the snapshot population rather than the live validatorSet, so a
-// snapshot carrying a placeholder pubkey no longer stands in for a real one:
-// it now describes a federation with exactly one unaddressable member.
+// members are the validators under test. Consensus elects its leader from the
+// snapshot population rather than the live validatorSet, so a snapshot
+// carrying a placeholder pubkey no longer stands in for a real one: it now
+// describes a federation with exactly one unaddressable member.
 function makeFederationSnapshot(validators, blockIndex, amount) {
     return {
         capability: '*',

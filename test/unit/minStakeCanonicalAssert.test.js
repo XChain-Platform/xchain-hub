@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// : startup assertion that operator capability MIN_STAKE thresholds match
+// startup assertion that operator capability MIN_STAKE thresholds match
 // the canonical coins registry. The configured value is the qualifying floor
 // every CapabilitySnapshot query sends the indexer, so a divergent value forks
 // the qualified validator set / quorum N across hubs. mainnet/testnet refuse
@@ -42,7 +42,7 @@ function canonicalCaps() {
     return caps;
 }
 
-describe('XChainHub._assertCanonicalMinStakes ', function () {
+describe('XChainHub._assertCanonicalMinStakes', function () {
 
     let warnStub;
     beforeEach(function () { warnStub = sinon.stub(console, 'warn'); });

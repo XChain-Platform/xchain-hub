@@ -1,5 +1,5 @@
-//  doctrine test-coverage program: boundary coverage for the two
-// consensus flag-day gates checkpoint_commitment_activation.js and
+// Boundary coverage for the two consensus flag-day gates
+// checkpoint_commitment_activation.js and
 // retraction_signing_activation.js. Both gate a change to a SIGNED consensus
 // preimage, so their threshold arithmetic and fail-closed handling of
 // malformed input decide whether federation quorum verification forks. This
@@ -15,9 +15,9 @@ const {
 } = require('../../src/retraction_signing_activation.js');
 
 // Fourth tuple element: the expected testnet threshold. checkpoint_commitment
-// arms testnet at 146000 ( lead 0e418c8c: the SPV root suffix must not be
-// signed before every chain is past its STATE_COMMITMENT height, else the hub
-// refuses to sign every testnet checkpoint); retraction_signing stays genesis (0).
+// arms testnet at 146000 (the SPV root suffix must not be signed before every
+// chain is past its STATE_COMMITMENT height, else the hub refuses to sign
+// every testnet checkpoint); retraction_signing stays genesis (0).
 const cases = [
     ['checkpoint_commitment', isCheckpointCommitmentActive, CHECKPOINT_COMMITMENT_ACTIVATION, 146000],
     ['retraction_signing', isRetractionSigningActive, RETRACTION_SIGNING_ACTIVATION, 0],

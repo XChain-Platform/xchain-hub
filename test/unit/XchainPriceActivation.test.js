@@ -13,14 +13,14 @@
  **********************************************************************
  * test/unit/XchainPriceActivation.test.js
  *
- * XCHAIN/USD round-composition gate (, spec §8 / step 5).
+ * XCHAIN/USD round-composition gate.
  *
  * The gate decides one thing - does this round carry the derived pair - and both
  * ways of getting it wrong are federation-scale. Composing too early puts a pair in
  * a signed round that peers reject wholesale, taking the other 36 pairs down with
  * it; composing inconsistently across hubs strands followers with no local
  * submission for a pair that has no finalized history either, which is exactly the
- * state the  gate withholds co-sign on.
+ * state the unverifiable-pair gate withholds co-sign on.
  */
 
 'use strict';
@@ -35,7 +35,7 @@ const {
 } = require('../../src/xchain_price_activation.js');
 const { PRICE_PAIR_WIDEN_ACTIVATION } = require('../../src/price_pair_activation.js');
 
-describe('XCHAIN/USD composition gate ( step 5) @regression', function () {
+describe('XCHAIN/USD composition gate @regression', function () {
 
     describe('the activation map', function () {
         it('is UNARMED on mainnet, at a sentinel rather than a schedule', function () {

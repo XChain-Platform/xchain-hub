@@ -41,7 +41,7 @@ const { bcgt }          = require('./bcmath.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { normalizeRetractionBounds } = require('./lib/retraction_bounds.js');
 
-// : minimum gap between ingest-fence rejection warnings for the SAME source
+// Minimum gap between ingest-fence rejection warnings for the SAME source
 // chain. Sized so a stalled rail keeps re-announcing itself in any log tail while a
 // replaying pusher cannot drown the log; the suppressed count rides on the next line.
 const FENCE_WARN_INTERVAL_MS = 60_000;
@@ -52,12 +52,12 @@ class PriceAggregator extends EventEmitter {
         super();
         this.hub = hub;
         this.db  = hub.db;
-        // : per-source-chain throttle state for the ingest-fence rejection
+        // Per-source-chain throttle state for the ingest-fence rejection
         // warning ({ last: ms, suppressed: n }). See _warnIngestFenceRejection.
         this._fenceWarnState = new Map();
     }
 
-    // : an ingest-fence rejection USED TO BE silent (a bare
+    // An ingest-fence rejection USED TO BE silent (a bare
     // { accepted:false } return), and that is how it killed a price rail: reset an
     // indexer DB and its push_generations counter restarts at 0, so every push from
     // it sits at or below a kept retraction_generation and is dropped. The operator
@@ -91,7 +91,7 @@ class PriceAggregator extends EventEmitter {
             + ' / XCHAIN-USD path fails with it. If the ' + chain + ' indexer DB was reset or rebuilt,'
             + ' its push_generations counter restarted at 0 and this fence row is stale: clear it with'
             + " DELETE FROM price_ingest_watermarks WHERE source_chain = '" + chain + "'"
-            + ' on the hub DB . Otherwise this is a stale replay of a retracted action and the'
+            + ' on the hub DB. Otherwise this is a stale replay of a retracted action and the'
             + ' drop is correct.');
     }
 
@@ -163,7 +163,7 @@ class PriceAggregator extends EventEmitter {
         // indexer's PRICE v0 parser) so the canonical payload reconstruction
         // below is byte-exact with what the validators signed.
         //
-        // The pair-name bound is flag-day gated (, price_pair_activation.js,
+        // The pair-name bound is flag-day gated (price_pair_activation.js,
         // vendored byte-identically from the indexer): below it the ticker side caps
         // at 5 characters and the 6-character XCHAIN/USD pair is unrepresentable;
         // at/above it, 6 is accepted. UNARMED on mainnet today.
@@ -243,7 +243,7 @@ class PriceAggregator extends EventEmitter {
         let seenPubkey = new Set();
         let verifiedSigs = [];
 
-        // PRICE_SIG_TALLY : WHERE the pubkey enters the dedupe set. At/above
+        // PRICE_SIG_TALLY: WHERE the pubkey enters the dedupe set. At/above
         // the gate it enters only after a successful verify, so a garbage signature
         // carrying a qualified oracle's pubkey cannot be ordered ahead of that
         // oracle's real one to consume its slot and under-count the round. Below the
@@ -274,7 +274,7 @@ class PriceAggregator extends EventEmitter {
         // max(2 * floor((N - 1) / 3) + 1, ceil((N + 1) / 2)).
         // This is the same threshold the indexer enforces when validating the action.
         let setSize = Number.isFinite(parseInt(snapshot.count)) ? parseInt(snapshot.count) : snapshot.validators.length;
-        let quorum  = bftQuorumOrSingle(setSize, 1);   // : majority-floored BFT quorum
+        let quorum  = bftQuorumOrSingle(setSize, 1);   // majority-floored BFT quorum
         if (verifiedSigs.length < quorum) {
             return { accepted: false, reason: 'insufficient quorum (' + verifiedSigs.length + '/' + quorum + ')' };
         }
@@ -298,7 +298,7 @@ class PriceAggregator extends EventEmitter {
         if (Number.isFinite(roundActionIndex)) {
             let wm = await this.db.getPriceIngestWatermark(sourceChain || '');
             if (wm && pushGeneration <= wm.retraction_generation && roundActionIndex >= wm.from_action_index) {
-                // Never silent : a rebuilt indexer trips this fence on every push.
+                // Never silent: a rebuilt indexer trips this fence on every push.
                 this._warnIngestFenceRejection(sourceChain, 'PRICE v0 round', pushGeneration, roundActionIndex, wm);
                 return { accepted: false, reason: 'stale (retracted generation)' };
             }
@@ -383,7 +383,7 @@ class PriceAggregator extends EventEmitter {
         // hub cannot re-check that cryptographically; the gates here are the
         // authenticated push channel, strict field validation (mirroring the
         // indexer's wire-format rules), and the uniform 24h effective_at delay.
-        // : bound coin/tick/fiat/memo to the indexer's PRICE v1 wire-format
+        // Bound coin/tick/fiat/memo to the indexer's PRICE v1 wire-format
         // rules (actions/price.js parse_v1). The indexer already rejects these
         // on-chain, so anything outside them here is a malformed or Byzantine
         // push; without the bounds an attacker on the push channel could write
@@ -466,7 +466,7 @@ class PriceAggregator extends EventEmitter {
         // exists until the first retraction, so genuine pre-reorg generation-0 pushes are never hit.
         let wm = await this.db.getPriceIngestWatermark(sourceChain || '');
         if (wm && pushGeneration <= wm.retraction_generation && actionIndex >= wm.from_action_index) {
-            // Never silent : a rebuilt indexer trips this fence on every push.
+            // Never silent: a rebuilt indexer trips this fence on every push.
             this._warnIngestFenceRejection(sourceChain, 'PRICE v1 oracle', pushGeneration, actionIndex, wm);
             return { accepted: false, reason: 'stale (retracted generation)' };
         }
@@ -576,7 +576,7 @@ class PriceAggregator extends EventEmitter {
     // inside [from, to]. Omitted (older indexer) => no fence == today's behavior; the bound is
     // mirrored onto row:deleted so replicas fence identically.
     async retractFromActionIndex(sourceChain, fromActionIndex, toActionIndex, retractionGeneration) {
-        // Fail-closed on a SUPPLIED-but-invalid bound (): a malformed to/generation used to
+        // Fail-closed on a SUPPLIED-but-invalid bound: a malformed to/generation used to
         // collapse into the absent branch and widen this into the open-ended DELETE below.
         let bounds = normalizeRetractionBounds(fromActionIndex, toActionIndex, retractionGeneration);
         if (bounds.error) return { error: bounds.error };

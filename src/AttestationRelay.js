@@ -12,7 +12,7 @@
  *
  **********************************************************************
  *
- * XChain Hub - Attestation cross-chain relay driver 
+ * XChain Hub - Attestation cross-chain relay driver
  *
  * Materializes an LTC/DOGE-origin ATTEST v0 onto BTC as an ATTEST v3, so the
  * existing BTC attestation machinery can service it unchanged.
@@ -41,7 +41,7 @@
  *   4. The round leader broadcasts ATTEST v3 on BTC carrying the quorum's
  *      cross_chain signatures.
  *
- * The RESPONSE leg (BTC -> origin, ATTEST v4, ) closes the round trip:
+ * The RESPONSE leg (BTC -> origin, ATTEST v4) closes the round trip:
  *   5. The existing Phase 2 machinery fulfills the materialized request on BTC as
  *      an ordinary ATTEST v1, with local callback injection suppressed because the
  *      contract lives on the origin chain.
@@ -62,7 +62,7 @@
  * xexec.js applies to an XCALL dispatch, mirrored rather than reinvented: both
  * are the same trust decision on the same capability set.
  *
- * WHAT BOUNDS THE AT-MOST-ONCE STATE . Both legs' idempotency sets and the
+ * WHAT BOUNDS THE AT-MOST-ONCE STATE. Both legs' idempotency sets and the
  * WAL behind them used to grow for the process lifetime: every relayed leg stayed
  * remembered forever, and the WAL was append-only with a whole-file read at startup.
  * The bound is DEADLINE-ANCHORED (the operator's 2026-08-11 ruling, proposal A over
@@ -89,8 +89,6 @@
  * ATTEST_RELAY_ACTIVATION before the whole fleet is upgraded, the correct action
  * is to leave this driver disabled, never to move the constant.
  *
- * Spec: claude/reports/2026-07-30_xc087-attestation-phase5-crosschain-relay.md
- *
  ********************************************************************/
 
 const crypto = require('crypto');
@@ -110,7 +108,7 @@ const { AtMostOnce, isAmbiguousSendError } = require('./lib/idempotent_broadcast
 const { allCanonicalInts } = require('./lib/canonical_int.js');
 
 // The integer fields each relay leg signs VERBATIM and the indexer re-derives with
-// parseInt() off the v3/v4 wire (#4204). request_id / response_hash are hex, and
+// parseInt() off the v3/v4 wire. request_id / response_hash are hex, and
 // provider_id / status / meta are string compares, so none of them belong here.
 const RELAY_CANONICAL_INT_FIELDS = {
     request:  ['snapshot_block', 'origin_action_index', 'redundancy', 'deadline_blocks'],
@@ -150,7 +148,7 @@ const SNAPSHOT_DRIFT_BLOCKS = 144;
 const DEFAULT_FAILOVER_WINDOW_MS = 20 * 60 * 1000;
 
 // How far past an origin request's own absolute deadline_block that chain's tip must
-// travel before this driver forgets the request's at-most-once records .
+// travel before this driver forgets the request's at-most-once records.
 // Added to the chain's confirmation depth, so the total covers both a reorg that
 // could un-expire the request and the indexer's own expiry lag: the deadline sweep
 // (xchain-indexer getExpiredAttestationRequests) is capped per block, so a batch of
@@ -185,14 +183,14 @@ class AttestationRelay {
         this.pollMs = parseInt(process.env.ATTEST_RELAY_POLL_MS || cfg.ATTEST_RELAY_POLL_MS || DEFAULT_POLL_MS);
 
         // Per-chain confirmation depth, shared with the swap/XCALL engines so an
-        // operator tunes ONE depth per chain (mainnet floor-clamped, ).
+        // operator tunes ONE depth per chain (mainnet floor-clamped).
         this.confirmations = coins.resolveConfirmations(cfg, this.network);
 
         this.failoverWindowMs = parseInt(process.env.ATTEST_RELAY_FAILOVER_MS ||
                                          cfg.ATTEST_RELAY_FAILOVER_MS || DEFAULT_FAILOVER_WINDOW_MS);
 
-        // Origin blocks past a request's deadline before its records are evicted
-        // . A garbage or negative value falls back rather than shrinking the
+        // Origin blocks past a request's deadline before its records are evicted.
+        // A garbage or negative value falls back rather than shrinking the
         // window: this is the guard that stops an early eviction from re-spending.
         this.evictGraceBlocks = parseInt(process.env.ATTEST_RELAY_EVICT_GRACE_BLOCKS ||
                                          cfg.ATTEST_RELAY_EVICT_GRACE_BLOCKS || DEFAULT_EVICTION_GRACE_BLOCKS);
@@ -299,7 +297,7 @@ class AttestationRelay {
         this._originPending = {};
         for(let coin of ORIGIN_CHAINS) this._originPending[coin] = null;
 
-        // . request_id -> { coin, block }: the ABSOLUTE deadline_block of the
+        // request_id -> { coin, block }: the ABSOLUTE deadline_block of the
         // origin request behind a leg, on the chain that issued it. This is what the
         // at-most-once sets are evicted against, and it is deliberately keyed on the
         // request rather than on (leg, request): one request has ONE origin deadline,
@@ -379,12 +377,12 @@ class AttestationRelay {
         }
 
         let wal = this._loadWal();
-        // : fold the file down as soon as it carries more than one record per
+        // Fold the file down as soon as it carries more than one record per
         // surviving key. Without this a long-lived hub re-reads (whole-file, readFileSync)
         // an ever-growing history of intent/sent/failed pairs at every restart, even on a
         // fleet whose legs all evict cleanly.
         if(wal.records > wal.keys) this._compactWal('startup');
-        // : the WAL kept at-most-once sends across a restart, but the spend
+        // The WAL kept at-most-once sends across a restart, but the spend
         // ceilings behind them did not; reload the saved window from the same idiom.
         this.spendGuard.persistTo();
         await this.consensus.start();
@@ -429,7 +427,7 @@ class AttestationRelay {
             responses_relayed:    this._publishedResponses.size,
             awaiting_broadcast:   this._finalizedWire.size + this._finalizedResponse.size,
             inflight_rounds:      this._inflight.size,
-            // : the three numbers that show the bound is working. tracked_deadlines
+            // The three numbers that show the bound is working. tracked_deadlines
             // is the eviction index; legs_evicted and wal_compactions should both climb on
             // a fleet that is actually relaying, and a flat legs_evicted next to a rising
             // relayed_count means deadlines are not reaching the index.
@@ -523,7 +521,7 @@ class AttestationRelay {
 
         let latest = Number(res.latest);
         if(!Number.isFinite(latest)) return;
-        // The tip the eviction pass measures this chain's deadlines against .
+        // The tip the eviction pass measures this chain's deadlines against.
         this._originLatest[coin] = latest;
         for(let req of res.rows){
             try { await this._maybeMaterialize(coin, latest, req); }
@@ -576,8 +574,8 @@ class AttestationRelay {
         if(!pending || !pending.has(rid)) return;
         let originReq = pending.get(rid);
 
-        // Index the origin's ABSOLUTE deadline BEFORE the already-relayed guards below
-        // . Eviction can only forget a record it holds a deadline for, and the
+        // Index the origin's ABSOLUTE deadline BEFORE the already-relayed guards below.
+        // Eviction can only forget a record it holds a deadline for, and the
         // record most in need of forgetting is precisely one already marked published:
         // indexing after those returns would leave every relayed leg pinned forever.
         this._noteDeadline(coin, rid, originReq && originReq.deadline_block);
@@ -629,7 +627,7 @@ class AttestationRelay {
             snapshot_block:             Number(snapshotBlock),
             network:                    this.network,
             origin_chain:               coin,
-            // , the operator's proposal-A record-shape change. The home chain's
+            // The operator's proposal-A record-shape change. The home chain's
             // relayed-request row carries no deadline of its own (the v3 put a RELATIVE
             // block count on BTC), so the origin's absolute deadline_block travels on the
             // round row, paired with the origin_chain it is a height on. It is BOOKKEEPING,
@@ -873,7 +871,7 @@ class AttestationRelay {
     // unrecognised is refused rather than falling through to a permissive default.
     async validateProposedMatch(row){
         if(!row) return false;
-        // Canonical integer spellings (#4204). These fields are signed verbatim into
+        // Canonical integer spellings. These fields are signed verbatim into
         // _relayRequestCanonical / _relayResponseCanonical and ride the v3/v4 wire, but
         // the indexer re-parses them with parseInt() before rebuilding the canonical it
         // verifies against. A leader-supplied '041' therefore passes the Number()-based
@@ -939,7 +937,7 @@ class AttestationRelay {
                this._sha256(fields.requestPayload) === this._sha256(String(row.request_payload == null ? '' : row.request_payload));
     }
 
-    // The response leg's re-verification, which is what replaces 's blanket
+    // The response leg's re-verification, which is what replaces the old blanket
     // refusal of phase != 'request'. It has to confirm BOTH ends independently,
     // because the v4 is the only leg that irreversibly SETTLES anything: it closes
     // the origin request, releases its escrow and fires the contract's callback.
@@ -971,11 +969,11 @@ class AttestationRelay {
         // never reproduce, and the v4 would be dropped as unquorate.
         if(String(originReq.provider_id || '') !== String(row.provider_id)) return false;
 
-        // : re-derive the threaded deadline rather than trusting it. A leader that
+        // Re-derive the threaded deadline rather than trusting it. A leader that
         // named a deadline this node's own origin indexer does not hold is refused, so the
         // eviction clock can never be moved forward by a peer. An ABSENT field is tolerated
-        // (a pre- leader): the value is bookkeeping, and refusing over it would wedge
-        // a mixed-version fleet on the leg that settles.
+        // (a leader running code that predates this field): the value is bookkeeping,
+        // and refusing over it would wedge a mixed-version fleet on the leg that settles.
         if(!this._checkOriginDeadline(row, originReq)) return false;
         if(Number.isFinite(Number(origin.latest))) this._originLatest[coin] = Number(origin.latest);
         // The leg the leader proposed is past recall on this node's own view of the
@@ -1012,7 +1010,7 @@ class AttestationRelay {
     // same rows. Same contract as CrossChainCallEngine._persistCapabilitySnapshot.
     async _persistCapabilitySnapshot(capability, block, network){
         let validators = await this._resolveCapabilityValidators(capability, block, network);
-        // SWQ-TRUNC-MIRROR (): a TRUNCATED set is never mirrored, for the reason
+        // SWQ-TRUNC-MIRROR: a TRUNCATED set is never mirrored, for the reason
         // spelled out in CrossChainDexEngine._persistCapabilitySnapshot. This writer has no
         // caller today, which is exactly why the guard goes in now: the next caller would
         // otherwise inherit the fifth unguarded path into the shared capability_snapshots
@@ -1332,7 +1330,7 @@ class AttestationRelay {
     // ----- durable at-most-once -----
 
     _appendWal(entry){
-        // Stamp the eviction key  from one place rather than at each call site,
+        // Stamp the eviction key from one place rather than at each call site,
         // so no record can be written that a later process cannot re-anchor: a record
         // without a deadline is one the eviction pass can never retire.
         let d = this._deadlines.get(String((entry && entry.rid) || '').toLowerCase());
@@ -1358,12 +1356,14 @@ class AttestationRelay {
     //
     // Records are keyed on (leg, request_id), the same idempotency key the round ids
     // use, so one request's v3 and v4 never occupy the same slot. A record written
-    // before  carries no `leg` and is a request-leg record by construction.
+    // before the response leg existed carries no `leg` and is a request-leg record by
+    // construction.
     //
-    // Each record also carries the eviction key , so the deadline index that
-    // bounds these sets survives the restart with them. A record written before 
-    // carries none: that leg is simply never evicted, which retains state rather than
-    // spending, and the first poll that still sees the request re-indexes it anyway.
+    // Each record also carries the eviction key, so the deadline index that
+    // bounds these sets survives the restart with them. A record written before this
+    // key existed carries none: that leg is simply never evicted, which retains state
+    // rather than spending, and the first poll that still sees the request re-indexes
+    // it anyway.
     //
     // Returns { records, keys } so start() can tell a file that is one record per live
     // key from a history that has earned a compaction.
@@ -1399,7 +1399,7 @@ class AttestationRelay {
         return { records: records, keys: keys };
     }
 
-    // ----- deadline-anchored eviction  -----
+    // ----- deadline-anchored eviction -----
 
     // The absolute deadline_block of an origin request row, or null when the row cannot
     // supply a usable one. Null means "never evict this leg": retention is the safe
@@ -1412,7 +1412,7 @@ class AttestationRelay {
 
     // A follower's re-derivation of the threaded deadline. Indexes its OWN reading first,
     // then accepts the row only if the leader's copy agrees (or is absent, from a
-    // pre- leader). Never adopts the leader's number.
+    // leader running code that predates this field). Never adopts the leader's number.
     _checkOriginDeadline(row, originReq){
         let rid  = String(row.request_id || '').toLowerCase();
         let mine = this._absoluteOriginDeadline(originReq);

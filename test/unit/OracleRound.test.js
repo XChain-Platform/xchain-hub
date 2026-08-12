@@ -68,7 +68,7 @@ describe('OracleRound', function () {
     });
 
     // -----------------------------------------------------------------
-    //  step 5: the XCHAIN/USD composition gate
+    // step 5: the XCHAIN/USD composition gate
     // -----------------------------------------------------------------
 
     describe('_xchainPriceGateOpen(): whether this round carries the derived pair', function () {
@@ -119,7 +119,7 @@ describe('OracleRound', function () {
     });
 
     // -----------------------------------------------------------------
-    //  step 6: the per-round derivation audit line
+    // step 6: the per-round derivation audit line
     // -----------------------------------------------------------------
 
     describe('formatXchainPriceMeta(): the derivation audit line', function () {

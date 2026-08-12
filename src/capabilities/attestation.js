@@ -23,8 +23,6 @@
  *     - omit a key to enable the provider (the common case)
  *     - set a key to `false` to opt out of a provider on this hub
  *
- * Spec: claude/reports/specs/2026-05-24_external-attestation-framework.md (§8)
- *
  ********************************************************************/
 
 // Providers this self-test knows how to probe. Each module must export

@@ -18,17 +18,17 @@ const coins      = require('../../src/coins');
 // address role, fee value, gas-schedule entry, or staking param changes a hash
 // and fails here. Updating a value is a deliberate act, so update the golden
 // alongside it (and bump the per-service CONSENSUS_CONFIG_PIN in lockstep).
-// REGENERATED 2026-07-28 ( batch, ): `wireFormat` is now folded
+// REGENERATED 2026-07-28: `wireFormat` is now folded
 // into consensusSubset(), so every one of these nine hashes moved by construction.
 // The testnet/regtest values are the ones bundled as CONSENSUS_CONFIG_PIN in all
 // nine vendoring services; mainnet stays `null` in the pin (pre-arm) and is
 // pinned only here.
-// BTC REGENERATED 2026-07-31 : minStandardTxNonWitnessSize 65 -> 82 on all
+// BTC REGENERATED 2026-07-31: minStandardTxNonWitnessSize 65 -> 82 on all
 // three networks. It sits in the `net` block, which consensusSubset() hashes whole,
 // so a relay-policy correction moves all three BTC hashes; LTC and DOGE are
 // deliberately untouched, and their unchanged goldens are the check that nothing
 // else drifted with it.
-// REGENERATED 2026-08-06 (): `firstBlock` is now folded into
+// REGENERATED 2026-08-06: `firstBlock` is now folded into
 // consensusSubset(), so all nine hashes moved by construction again. Same rollout
 // rule as the wireFormat fold: every vendoring service ships the new pins in one
 // wave, and a straggler fail-closes rather than forking.
@@ -110,7 +110,7 @@ describe('coins registry', () => {
         }
     });
 
-    // . This test previously asserted the OPPOSITE: that wireFormat stayed
+    // This test previously asserted the OPPOSITE: that wireFormat stayed
     // OUT of the consensus hash. That was the bug. wireFormat selects the block
     // parser (XChainBlockDecoder keys default/mweb/auxpow off it, and XChainDecoder
     // derives auxPow from it), so it decides how a block's bytes are read. Leaving it
@@ -149,7 +149,7 @@ describe('coins registry', () => {
         expect(subset).to.not.have.any.keys('genesis', 'displayName', 'confirmations');
     });
 
-    // , the firstBlock twin of the wireFormat fold above. This test used to
+    // The firstBlock twin of the wireFormat fold above. This test used to
     // assert firstBlock stayed OUT of the subset on the reading that a scan start is
     // node-local. It is not: the decoder sets startBlockIndex from it
     // (xchain-decoder/src/XChainDecoder.js) and never processes a block below it, so a
@@ -186,14 +186,14 @@ describe('coins registry', () => {
         'decimals', 'confirmations',               // display / operator-tunable depth
         'network',                                 // redundant with the (tick, network) hash key
         'genesis',                                 // deliberately excluded: genesis.js fail-closes on its own hashes
-        'chainGenesisHash',                        // : identifies the ENDPOINT's chain, not how bytes are read; pinning one must not move CONSENSUS_CONFIG_PIN
+        'chainGenesisHash',                        // identifies the ENDPOINT's chain, not how bytes are read; pinning one must not move CONSENSUS_CONFIG_PIN
         'FEE_PAYMENT_MODE',                        // informational only; not read at runtime (see coin files)
         'wireFormat',                              // block/tx parse family (decoder/utxo-tracker); not hashed, mirrors the pre-existing decoder-local constant
         'DISPLAY_ONLY_ADDRESS_ROLES',              // classification metadata, not coin data; drives the address exclusion above
         'networks',                                // the per-network container itself; its OWN keys are enumerated by the guard
     ]);
 
-    //  (item 1074): the guard's anchor is the COIN FILE's key set, never
+    // (item 1074): the guard's anchor is the COIN FILE's key set, never
     // getCoinConfig's output. getCoinConfig is itself a hand-maintained allowlist
     // that copies ~22 named fields out of the coin file, and consensusSubset is a
     // second, parallel hand-maintained allowlist. Iterating the resolved object
@@ -248,13 +248,13 @@ describe('coins registry', () => {
         }
     });
 
-    // . The chain-tier gate in xchain-decoder can prove an endpoint is on the
+    // The chain-tier gate in xchain-decoder can prove an endpoint is on the
     // wrong TIER, never that it is on our COIN: BTC-mainnet and DOGE-mainnet both report
     // chain="main", and testnet3/testnet4 both report a testnet string. The block-0 hash
     // is the only constant that separates them, so it lives in the registry beside the
     // other per-network identity data - but OUTSIDE the hashed consensus subset, because
     // it says which node we are talking to, not how a block's bytes are read.
-    describe('chainGenesisHash (endpoint chain identity, )', () => {
+    describe('chainGenesisHash (endpoint chain identity)', () => {
         it('every coin/network declares the field, unpinned (null) or a 64-char hex hash', () => {
             for(const tick of coins.ALLOWED_COINS){
                 const coinFile = require(`../../src/coins/${tick}.js`);
@@ -382,7 +382,7 @@ describe('coins registry', () => {
             expect(coins.getCoinConfig('DOGE', 'testnet').genesis.block).to.equal(0);
         });
 
-        //  / . The airdrop bucket set decides how much XCHAIN each
+        // The airdrop bucket set decides how much XCHAIN each
         // snapshot holder mints and which synthetic tx hashes carry the credits, so it
         // belongs to the bundle everywhere the bundle is frozen.
         it('binds the regtest airdrop set from env, index-aligned, without moving the consensus hash', () => {
@@ -461,11 +461,11 @@ describe('coins registry', () => {
         });
     });
 
-    //  / CF-1: on mainnet an XCHAIN_CONFIRMATIONS_<COIN> override may only
+    // / CF-1: on mainnet an XCHAIN_CONFIRMATIONS_<COIN> override may only
     // raise the depth above the per-coin default, never lower it. A validator
     // running a lowered depth would co-sign source actions the rest of the
     // federation still considers reorg-able.
-    describe('resolveConfirmations mainnet floor ', () => {
+    describe('resolveConfirmations mainnet floor', () => {
         const saved = {};
         beforeEach(() => {
             for(const tick of coins.ALLOWED_COINS){
