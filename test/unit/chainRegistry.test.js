@@ -102,6 +102,21 @@ function run(handler) {
 
 describe('GET /api/v1/chain-registry', function () {
 
+    // The first bootRoute() pays a one-time SYNCHRONOUS require of src/api.js's
+    // whole module tree (~650ms with a warm page cache, seconds on a cold CI
+    // filesystem); the async IIFE it then waits on costs single-digit ms. Mocha
+    // charges that load to whichever test runs first, so on a cold venue this
+    // file failed its first case on the clock while every assertion in it was
+    // sound - a red that was misread as descriptor drift . Absorb the
+    // load in a hook with its own budget, so a test's timeout measures the route
+    // rather than the module loader. Do NOT fold this into the tests by raising
+    // their timeouts: that would hide a genuinely slow boot instead of paying it
+    // once, and the byte-parity guard below is what must never be papered over.
+    before(async function () {
+        this.timeout(60000);
+        await bootRoute();
+    });
+
     afterEach(function () { sinon.restore(); });
 
     it('serves {schema_version, generatedAt, descriptors} with public caching', async function () {
