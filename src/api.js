@@ -112,6 +112,7 @@ const TELEMETRY_ADMIN_KEY      = process.env.TELEMETRY_ADMIN_KEY || '';
 const coins          = require('./coins');
 const SpendGuard     = require('./lib/spend_guard.js');   // : per-capability effector-spend pause registry
 const { installObservability } = require('./observability');   // : default-off /metrics + structured log shim
+const { installHubOracleMetrics } = require('./hubMetrics');   // item a98d6746: oracle-round heartbeat gauges
 const ALLOWED_CHAINS = new Set(coins.ALLOWED_COINS);
 
 // Per-network { coin -> consensusHash } of the bundled canonical coin files,
@@ -155,11 +156,20 @@ function validateChain(chain) {
     return null;
 }
 
+// Strict, because parseInt admits anything with an integer PREFIX: '50junk' passed as
+// 50, '1e3' as 1 and '50.5' as 50, and several of the ~16 call sites forward the
+// ORIGINAL value into a `LIMIT ?` bind rather than the parsed one. The queries stayed
+// bounded and parameterized, but the public limit contract differed per caller. One
+// helper guards every call site, so tightening it here repairs all of them ().
 function validateLimit(limit) {
     if (limit !== undefined && limit !== null) {
-        let n = parseInt(limit);
+        let err = { error: 'limit must be a positive integer no greater than 10000' };
+        let n;
+        if (typeof limit === 'number')                                 n = limit;
+        else if (typeof limit === 'string' && /^[0-9]+$/.test(limit))  n = Number(limit);
+        else                                                           return err;
         if (!Number.isInteger(n) || n <= 0 || n > 10000)
-            return { error: 'limit must be a positive integer no greater than 10000' };
+            return err;
     }
     return null;
 }
@@ -363,6 +373,13 @@ async function startApi(){
         version: hubVersion,
         network: process.env.HUB_NETWORK || ''
     });
+
+    // Oracle-round heartbeat (item a98d6746). Round freshness was reachable only
+    // through getoraclesubmissions and /health, which are the same DB/RPC path,
+    // so a regression in that monitoring path hid a wedged round loop from every
+    // surface at once. No-ops when metrics are off, and resolves the oracle
+    // lazily at scrape time (startOracle runs later; a config-only hub has none).
+    installHubOracleMetrics(observability, hub);
 
     // API key enforcement for write methods and sensitive reads (only when a
     // key is configured; see the HUB_API_KEY and SENSITIVE_READ_METHODS notes
@@ -581,7 +598,18 @@ async function startApi(){
         async getoraclesubmissions(){
             let oracle = hub.getOracle();
             if(!oracle) return {error: "oracle not active"};
-            return await oracle.getSubmissionsInfo();
+            let info = await oracle.getSubmissionsInfo();
+            // Publish the authoritative price-age bound alongside the cadence
+            // (item #4479). ORACLE_ROUND_INTERVAL is an unbounded deployment
+            // knob, so a health consumer deriving freshness from the cadence
+            // alone (the dashboard's cadenceThresholds) can call a row 'ok'
+            // that getprice already rejects as stale. Reuse _oracleMaxAgeSeconds
+            // rather than a literal, so the exposed number can never diverge
+            // from what getprice enforces; called without a pair it resolves to
+            // the registry default, the correct representative scalar while all
+            // registry coins share one bound. Additive: callers that ignore the
+            // field are unaffected, and it is null when the registry read fails.
+            return {...info, oracleMaxPriceAgeSeconds: hub._oracleMaxAgeSeconds()};
         },
 
         // status is optional and additive: omitted/'finalized' preserves the

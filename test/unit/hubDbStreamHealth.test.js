@@ -25,6 +25,7 @@ const { expect } = require('chai');
 const proxyquire = require('proxyquire').noPreserveCache();
 
 const { ConsensusInputMonitor } = require('../../src/lib/consensus_input_monitor.js');
+const { waitUntil } = require('../helpers/waitUntil');
 
 describe('/health hub DB stream heartbeat ', function () {
 
@@ -82,7 +83,10 @@ describe('/health hub DB stream heartbeat ', function () {
                 else process.env[k] = v;
             }
         }
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        // The boot is an async IIFE, so the RPC methods land some ticks after
+        // proxyquire returns; poll for them rather than guessing a settle.
+        await waitUntil(() => captured.methods,
+            { timeoutMs: 10000, label: 'api.js boot to register its RPC methods' });
         return { methods: captured.methods, hub: mockHub };
     }
 

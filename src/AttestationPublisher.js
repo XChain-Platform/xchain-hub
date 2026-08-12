@@ -189,6 +189,9 @@ class AttestationPublisher {
     setEncoder(encoder){ this.encoder = encoder; }
 
     async start(){
+        // : the per-window spend ceilings were memory-only, so every restart
+        // restored a full allowance. Reload the saved window before anything publishes.
+        this.spendGuard.persistTo();
         // Ensure the queue exists. The queue is load-bearing: it is the durable
         // write-ahead log that lets a finalized response survive a leader crash
         // and lets followers step in if the leader goes silent.

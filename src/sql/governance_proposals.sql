@@ -7,8 +7,16 @@ CREATE TABLE governance_proposals (
     proposed_value  TEXT NOT NULL,
     rationale       TEXT,
     status          ENUM('voting','passed','failed','expired') NOT NULL DEFAULT 'voting',
-    voting_start    TIMESTAMP NOT NULL,
-    voting_end      TIMESTAMP NOT NULL,
+    -- DATETIME, not TIMESTAMP: TIMESTAMP is bounded by the signed 32-bit epoch
+    -- (2038-01-19 03:14:07 UTC), and these two carry a FUTURE instant. voting_end is
+    -- NOW() + GOV_VOTING_PERIOD, so once the horizon is inside one voting period every
+    -- propose() writes an out-of-range value and governance stops (#4315). The session
+    -- is pinned to UTC on every connection (db.js connectionPoolParams.timezone 'Z'),
+    -- so the literal DATETIME stores the same instant TIMESTAMP did. Deployed tables are
+    -- converted by _migrateColumnType in runMigrations; the drift reconciler adds columns
+    -- but never changes a type.
+    voting_start    DATETIME NOT NULL,
+    voting_end      DATETIME NOT NULL,
     -- Block-anchored activation: for CAPABILITY_<CAP>_MIN_STAKE proposals this is the
     -- proposer-declared block height at which the new threshold takes effect. Every hub
     -- resolves the threshold for block N as the latest activation_block <= N, so the

@@ -121,6 +121,16 @@ class SpendCeiling {
         if (i >= 0) this._spends.splice(i, 1);
     }
 
+    // Fill the count window so the next allow() is false until it rolls over. Used
+    // only on SpendGuard's fail-closed path, when the persisted spend state cannot be
+    // read (): an unreadable store must never read as an empty window.
+    seedConsumed(now){
+        if (this.disabled) return;
+        now = now || Date.now();
+        this._prune(now);
+        while (this._spends.length < this.maxPerWindow) this._spends.push(now);
+    }
+
     // Count a tripped-ceiling skip and return an actionable message for the log.
     noteBlocked(now){
         this.blockedCount++;

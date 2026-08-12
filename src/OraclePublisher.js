@@ -231,6 +231,9 @@ class OraclePublisher {
 
     // Initialize the publisher: ensure queue directory exists, load any pending rounds
     async start() {
+        // : the per-window spend ceilings were memory-only, so every restart
+        // restored a full allowance. Reload the saved window before anything publishes.
+        this.spendGuard.persistTo();
         // Ensure queue directory exists
         let dir = path.dirname(this.queuePath);
         try {

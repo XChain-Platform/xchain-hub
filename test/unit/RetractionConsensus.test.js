@@ -251,4 +251,34 @@ describe('RetractionConsensus ( signed retractions) @regression @tier1', functio
         rc.stop();
     });
 
+    // SWQ-TRUNC-MIRROR (). The retraction rail is a fourth writer into the
+    // shared capability_snapshots mirror, and `.truncated` is a JS array property with
+    // no column behind it: mirroring a capped set hands the off-BTC verifiers a partial
+    // stake denominator they read back as COMPLETE, while this class rejects the same
+    // set at its own meetsStakeThreshold. Persist must write nothing and stream nothing.
+    it('refuses to persist or mirror a TRUNCATED capability set ()', async function () {
+        let id  = makeIdentity();
+        let pk  = id.getPubkeyHex().toLowerCase();
+        let hub = makeHub({ identity: id, validators: [{ pubkey: pk, source: 'srcA', weight: '100' }] });
+        hub.capabilitySnapshot.getWeightSnapshot = async () => ({
+            validators: [{ pubkey: pk, source: 'srcA', weight: '100' }], truncated: true });
+        let rc = new RetractionConsensus(hub);
+        await rc._persistCapabilitySnapshot('cross_chain', 5000);
+        assert.ok(!hub._queries.some(q => /INSERT IGNORE INTO capability_snapshots/.test(q.sql)),
+            'no capability_snapshots row may be written from a truncated set');
+        assert.strictEqual(hub.hubDbBroadcaster.rows.length, 0, 'nothing may be mirrored either');
+        rc.stop();
+    });
+
+    it('still persists an untruncated capability set (the guard is not a blanket refusal)', async function () {
+        let id  = makeIdentity();
+        let pk  = id.getPubkeyHex().toLowerCase();
+        let hub = makeHub({ identity: id, validators: [{ pubkey: pk, source: 'srcA', weight: '100' }] });
+        let rc  = new RetractionConsensus(hub);
+        await rc._persistCapabilitySnapshot('cross_chain', 5000);
+        assert.ok(hub._queries.some(q => /INSERT IGNORE INTO capability_snapshots/.test(q.sql)));
+        assert.ok(hub.hubDbBroadcaster.rows.some(r => r.table === 'capability_snapshots'));
+        rc.stop();
+    });
+
 });

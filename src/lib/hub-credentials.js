@@ -58,11 +58,17 @@ const DEFAULT_HUB_CLAUDE_CONFIG_DIR = path.join(os.homedir(), '.claude-xchain');
 
 function _trim(v) { return (v == null) ? '' : String(v).trim(); }
 
+//  - a config dir counts as authenticated only when it carries the
+// `.credentials.json` the module header names as the source of its authority.
+// The gate used to accept mere non-emptiness, so a logged-out or merely-configured
+// dir (settings, logs, state) outranked the later OAuth-token and API-key
+// candidates: healthCheck reported the transport ready while paid calls spawned an
+// unauthenticated CLI and mapped to provider_error, instead of falling through to
+// the credential that would have served the round.
 function _checkConfigDir(dirPath) {
     try {
-        const stat = fs.statSync(dirPath);
-        if (!stat.isDirectory()) return false;
-        return fs.readdirSync(dirPath).length > 0;
+        if (!fs.statSync(dirPath).isDirectory()) return false;
+        return fs.statSync(path.join(dirPath, '.credentials.json')).isFile();
     } catch { return false; }
 }
 

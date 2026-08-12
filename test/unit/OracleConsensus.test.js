@@ -78,6 +78,16 @@ describe('OracleConsensus', function () {
             expect(oc._aggregate(subs, 'BTC/USD')).to.be.null;
         });
 
+        it('two submissions a hair past the gate: drops the pair at scale 18 ()', function () {
+            // (110.52631579-100)/(110.52631579+100) = 0.050000000047500000, which the
+            // old scale-8 publish gate truncated to 0.05000000 and passed while the
+            // scale-18 co-sign gate and SlashDetector both read it as over the band.
+            // Publishing here federation-signed a median the followers withhold and
+            // the slash detector punishes the low submitter for.
+            let subs = submissionsForPair(['100.00000000', '110.52631579']);
+            expect(oc._aggregate(subs, 'BTC/USD')).to.be.null;
+        });
+
         it('deviation gate is 2-source only: three divergent submissions still finalize', function () {
             // The gate never applies for N >= 3 (the trim provides outlier protection); a
             // 3-source round with a wide spread still returns the trimmed median.

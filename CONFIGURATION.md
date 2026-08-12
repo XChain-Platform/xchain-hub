@@ -310,6 +310,32 @@ precedence override.
 | `XCHAIN_CONFIRMATIONS_<COIN>` | No | per-coin | Cross-chain attestation/swap confirmation depth for `<COIN>` (e.g. `XCHAIN_CONFIRMATIONS_BTC`). Consensus-affecting: read by `CrossChainEngine` / `CrossChainCallEngine`. |
 | `CHECKPOINT_CONFIRMATIONS` | No | `6` | State-checkpoint confirmation depth (`StateCheckpointEngine`). Consensus-affecting. |
 
+## Cross-chain attestation persistence (`CrossChainEngine`, )
+
+A commit-quorum-finalized cross-chain attestation used to be **destroyed** by a
+single transient DB error: the store's `.catch` deleted the round, and both
+`_handleCommit` and `_checkCommitQuorum` return early once the id is gone, so no
+later COMMIT could re-drive persistence. The store is now retried with bounded
+exponential backoff (the `INSERT` upserts on `attestation_id`, so re-running it
+is safe), and on exhaustion the round is **retained** with its finalize flag
+reset so a retransmitted COMMIT re-drives it.
+
+Both values must be strictly positive integers; anything else falls back to the
+default with a startup warning. Keep the total retry budget well inside
+`ATTESTATION_TIMEOUT`, because the round timer is the terminal backstop.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `XCHAIN_ATTEST_STORE_RETRIES` | No | `4` | Attempts to persist a quorum-finalized cross-chain attestation before giving up. `1` disables retrying. |
+| `XCHAIN_ATTEST_STORE_RETRY_MS` | No | `100` | Base backoff (ms) between those attempts; doubles per attempt, capped at 2000ms. |
+
+**Residual risk.** Retention is not durability. Once retries are exhausted the
+round survives only until its own timer fires (`ATTESTATION_TIMEOUT` on the
+initiating hub, twice that on a follower), so a DB outage outlasting that window
+with no further COMMIT due still loses the attestation locally while peers keep
+it. Closing that gap needs cross-hub reconciliation (a `FINAL_SYNC`-style state
+transfer, as `CrossChainDexConsensus` already does), which is not built.
+
 ## State checkpoints (`StateCheckpointEngine`)
 
 Quorum-signed per-chain ledger/actions/contract hash checkpoints, written to
@@ -345,9 +371,11 @@ variable also resolves from `p2pConfig`; the env var wins.
 | `ANCHOR_AMBIGUOUS_POLL_ATTEMPTS` | No | `3` |  ambiguous-send existence poll: attempts to find a maybe-accepted anchor in the indexer's mined view before deferring. |
 | `ANCHOR_AMBIGUOUS_POLL_MS` | No | `5000` | Delay (ms) between ambiguous-send poll attempts. |
 | `ANCHOR_ELECTION_TOLERANCE_BLOCKS` | No | `36` | Failover ladder: BTC blocks of elected-publisher silence before the next-ranked validator's publish slot unlocks. |
+| `ANCHOR_RANK_WAKE_MS` | No | `900000` (15m) | How often a BACKUP re-checks whether its failover rank has unlocked, between `ANCHOR_INTERVAL_MS` ticks. The wake flush runs in failover-only mode, so it never publishes an election this hub leads and a healthy leader keeps its interval and size-trigger cadence. |
 | `ANCHOR_ANNOUNCE_RETRY_MS` | No | `300000` | How often a receiver re-verifies queued `XANC_V0_DONE` announcements. The publisher announces at 0 confirmations, so peers queue the announcement and stamp `anchor_txid` once the anchor is buried `XCHAIN_CONFIRMATIONS_DOGE` deep. |
 | `ANCHOR_ANNOUNCE_RETRY_TTL_MS` | No | `21600000` | How long a queued announcement is retried before it is dropped, so a never-mined (evicted or replaced) anchor tx cannot suppress a needed re-anchor forever. |
 | `ANCHOR_ANNOUNCE_QUEUE_MAX` | No | `500` | Max queued announcements per hub; the oldest entry is evicted past this. |
+| `ANCHOR_INTENT_TTL_MS` | No | `21600000` | How long a durable broadcast intent (`anchor_published_checkpoints`) HOLDS its checkpoint when no anchor has mined for it. The publisher arms the marker before the send and stamps `anchor_txid` after it, so a crash in between is the one state where DOGE may have paid with nothing recording it; the hold stops the next flush rebuilding a second transaction from different UTXOs. Same `~6x` the 60-conf DOGE window bound as `ANCHOR_ANNOUNCE_RETRY_TTL_MS`, past which a send that never relayed is not coming back and holding the row costs more than re-broadcasting it. |
 | `ANCHOR_REWARD_PER_PUBLISH` | No | `10.00000000` | XCHAIN reward recorded per anchor publish (`RewardTracker`). |
 
 ### Why those magnitudes (before you retune them)
@@ -379,6 +407,12 @@ constructor comment and pinned by
   slow leader from being overtaken while still giving ranks 1-3 a slot (~6/12/18h)
   inside one publishing cycle. Roughly 6 to 144 blocks preserves both bounds; a
   wrong value costs duplicate DOGE or delayed anchoring, never a divergence.
+- **`ANCHOR_RANK_WAKE_MS` = 900000** is what makes that ladder reachable. Rank is
+  evaluated only inside a flush, so with flushes on the 24h interval plus size
+  triggers, a backup's ~6h unlock was noticed only by phase luck and a dead rank 0
+  stranded work for a cycle. The wake sits inside the same ordering (120s signing
+  round << 15 min << 36 blocks), and it publishes only where this hub is a BACKUP,
+  so a slow-but-healthy leader is still never overtaken by it.
 
 ## Effector spend policy (`SpendGuard`, )
 
@@ -397,6 +431,7 @@ default-enabled: unset config yields the $2000 clamp, never "off".
 | `<PREFIX>_MAX_PUBLISHES_PER_WINDOW` | No | `0` (off) | Optional per-window broadcast **count** cap (defense in depth alongside the USD budget). `<=0` disables the count cap. |
 | `<PREFIX>_SPEND_WINDOW_MS` | No | `3600000` (1h) | Rolling window length (ms) for both the count and USD ceilings. |
 | `<PREFIX>_MIN_BALANCE` | No | `0` | Wallet floor (native coin). A balance below the floor, or an unreadable (null) balance, skips the spend fail-closed. |
+| `<PREFIX>_SPEND_STATE_PATH` | No | `./data/spend-state/<label>.json` | Durable copy of the live spend window, armed at the effector's `start()`. Without it both ceilings are memory-only, so every restart hands the effector its full allowance back and a crash-loop spends one window's budget per restart. A relative path resolves once against the cwd the hub booted in; a corrupt or unreadable file is read as a SPENT window, never an empty one. |
 
 Runtime pause is operator-driven via JSON-RPC (auth-gated): `pauseeffectorspend`
 / `resumeeffectorspend` take `{ label }` (the effector's guard label, e.g.

@@ -160,6 +160,10 @@ class AttestationRound {
         // requests can be re-evaluated once their blocking condition clears.
         this._evictStaleSeen();
 
+        // Same window, durable half (): drop recorded fetches whose
+        // retry window has lapsed so the table cannot grow with request volume.
+        await this._evictStaleFetchCache();
+
         // Drop `rounds` entries older than the round TTL so completed/abandoned
         // round state doesn't accumulate for the process lifetime.
         this._evictStaleRounds();
@@ -237,6 +241,80 @@ class AttestationRound {
         let cutoff = Date.now() - this.retryAfterMs;
         for(let [rid, ts] of this.seen){
             if(ts < cutoff) this.seen.delete(rid);
+        }
+    }
+
+    // ----- Durable fetch cache () -----
+    //
+    // Fail-OPEN, deliberately, and unlike AttestationPublisher's spend WAL: this
+    // table only prevents paying a second time for the same fetch, so a DB fault
+    // must degrade to today's behavior (fetch again) rather than drop a round.
+    // Every method below therefore swallows its error and returns the
+    // no-cache answer.
+    _cacheCutoffEpochSec(){
+        return Math.floor((Date.now() - this.retryAfterMs) / 1000);
+    }
+
+    // The recorded outcome for a request, or null when there is none, it has
+    // aged past the retry window, or the DB is unreachable.
+    async _readFetchCache(rid){
+        if(!this.db || typeof this.db.doQuery !== 'function') return null;
+        try {
+            let rows = await this.db.doQuery(
+                'SELECT status, body, meta FROM attestation_fetch_cache ' +
+                'WHERE request_id = ? AND created_at >= FROM_UNIXTIME(?)',
+                [rid, this._cacheCutoffEpochSec()]);
+            let row = (rows && rows.length) ? rows[0] : null;
+            if(!row) return null;
+            // Providers return { body: Buffer, meta: string } and agree() drops a
+            // proposal whose body is not a Buffer, so restore the BLOB as one.
+            return {
+                status: String(row.status || 'ok'),
+                body:   Buffer.isBuffer(row.body) ? row.body : Buffer.from(row.body || ''),
+                meta:   (row.meta === null || row.meta === undefined) ? '' : String(row.meta)
+            };
+        } catch (e) {
+            console.warn('AttestationRound: fetch-cache read failed for ' + String(rid).substring(0,16) +
+                         '...; falling back to a fresh fetch:', e && e.message ? e.message : e);
+            return null;
+        }
+    }
+
+    // Upsert the completed outcome, success and provider_error alike: a durable
+    // error is what keeps a restart from re-proposing a different answer for a
+    // round that already carries this hub's signed non-ok proposal.
+    async _writeFetchCache(rid, providerId, status, fetched, model){
+        if(!this.db || typeof this.db.doQuery !== 'function') return;
+        try {
+            let body = (fetched && fetched.body !== null && fetched.body !== undefined)
+                ? fetched.body : Buffer.alloc(0);
+            if(!Buffer.isBuffer(body)) body = Buffer.from(String(body));
+            let meta = (fetched && fetched.meta !== null && fetched.meta !== undefined)
+                ? String(fetched.meta) : '';
+            await this.db.doQuery(
+                'INSERT INTO attestation_fetch_cache ' +
+                '(request_id, provider_id, status, body, meta, model) VALUES (?, ?, ?, ?, ?, ?) ' +
+                'ON DUPLICATE KEY UPDATE provider_id = VALUES(provider_id), status = VALUES(status), ' +
+                'body = VALUES(body), meta = VALUES(meta), model = VALUES(model), ' +
+                'created_at = CURRENT_TIMESTAMP',
+                [rid, String(providerId || ''), String(status || 'ok'), body, meta,
+                 model ? String(model) : null]);
+        } catch (e) {
+            console.warn('AttestationRound: fetch-cache write failed for ' + String(rid).substring(0,16) +
+                         '...; a restart may re-pay this fetch:', e && e.message ? e.message : e);
+        }
+    }
+
+    // Bound growth on the same window `seen` uses; a finalized or expired round
+    // has no further use for its recorded fetch.
+    async _evictStaleFetchCache(){
+        if(!this.db || typeof this.db.doQuery !== 'function') return;
+        try {
+            await this.db.doQuery(
+                'DELETE FROM attestation_fetch_cache WHERE created_at < FROM_UNIXTIME(?)',
+                [this._cacheCutoffEpochSec()]);
+        } catch (e) {
+            console.warn('AttestationRound: fetch-cache eviction failed:', e && e.message ? e.message : e);
         }
     }
 
@@ -395,22 +473,43 @@ class AttestationRound {
             return;
         }
 
+        //  - durable, request_id-keyed twin of the in-memory `seen`
+        // window. Both guards above die with the process (`seen` is cleared on
+        // stop(), isRoundActive reads live consensus state), so a restart inside
+        // the round window re-paid the provider for a request this hub had
+        // already fetched, and on a non-deterministic provider (llm) re-signed a
+        // DIFFERENT body under the same rid. Reusing the recorded result makes a
+        // restart behave exactly like no restart. Cache rows age out on the same
+        // retryAfterMs window as `seen`, so a genuinely timed-out round still
+        // re-fetches rather than replaying a stale answer forever.
+        let cached    = await this._readFetchCache(rid);
         let fetched   = null;
         let myStatus  = 'ok';
-        try {
-            fetched = await providerModule.fetch(request.payload, {
-                maxResponseBytes: providerDef.max_response_bytes,
-                timeoutMs:        this.fetchTimeoutMs,
-                pinnedModel:      pinnedFetchModel,
-                // Block-anchored model->vendor map for the pinned id (item 3482).
-                pinnedVendors:    pinnedVendors,
-                // Rank of the pinned model on the fallback ladder; providers
-                // enforce request-level fallback policy on it (llm 'strict').
-                modelRank:        modelIdx
-            });
-        } catch (e) {
-            console.warn('AttestationRound: fetch failed for ' + rid.substring(0,16) + '...: ', e);
-            myStatus = 'provider_error';
+        if(cached){
+            fetched  = { body: cached.body, meta: cached.meta };
+            myStatus = cached.status;
+            console.log('AttestationRound: reusing recorded fetch for ' + rid.substring(0,16) +
+                        '... (status=' + myStatus + '); no provider call issued');
+        } else {
+            try {
+                fetched = await providerModule.fetch(request.payload, {
+                    maxResponseBytes: providerDef.max_response_bytes,
+                    timeoutMs:        this.fetchTimeoutMs,
+                    pinnedModel:      pinnedFetchModel,
+                    // Block-anchored model->vendor map for the pinned id (item 3482).
+                    pinnedVendors:    pinnedVendors,
+                    // Rank of the pinned model on the fallback ladder; providers
+                    // enforce request-level fallback policy on it (llm 'strict').
+                    modelRank:        modelIdx
+                });
+            } catch (e) {
+                console.warn('AttestationRound: fetch failed for ' + rid.substring(0,16) + '...: ', e);
+                myStatus = 'provider_error';
+            }
+            // Record the COMPLETED outcome only. A claim written before the call
+            // would let a crash mid-fetch skip a round this hub never finished,
+            // trading bounded duplicate spend for a liveness hole.
+            await this._writeFetchCache(rid, providerId, myStatus, fetched, pinnedFetchModel);
         }
 
         let roundState = {
@@ -430,6 +529,15 @@ class AttestationRound {
                 : { body: Buffer.alloc(0), meta: '', status: myStatus },
             pinnedJudgeModel: pinnedJudgeModel,
             pinnedVendors:    pinnedVendors,
+            // : the allowlist that judges the winning proposal's meta has
+            // to be the SAME block-anchored list this round pinned the fetch model
+            // from. Judged against the live hotReloadable set instead, a governance
+            // DELISTING of the pinned model made every honestly-served meta
+            // unrecognized, mapping the round to no_quorum on every retry, so the
+            // request could never finalize and expired despite successful provider
+            // calls. A provider with no approved_models at this block travels as
+            // null, leaving the live-set fallback exactly as it was.
+            pinnedApprovedModels: approvedModels.length ? approvedModels.slice() : null,
             error:          (myStatus === 'ok') ? undefined : myStatus,
             proposedAt:     Date.now()
         };
@@ -520,6 +628,13 @@ class AttestationRound {
             stats.nonok_published_count               = this.consensus.nonOkPublished.size;
             stats.nonok_published_max                 = this.consensus.nonOkPublishedMax;
             stats.nonok_evicted_while_pending_count   = this.consensus.nonOkEvictedWhilePendingCount;
+            // Consensus round timeouts (item 8c1148c0). failed_count above
+            // counts only THIS hub's local provider-fetch failures (entry.error)
+            // over the TTL-evicting `rounds` map; a round torn down by the PBFT
+            // timeout never reaches that map with an error and so was invisible
+            // to every consumer of these stats. Monotonic for the process life,
+            // so consumers alert on a rise, not on a nonzero snapshot.
+            stats.consensus_timeout_count            = this.consensus.roundTimeoutCount;
         }
         return stats;
     }

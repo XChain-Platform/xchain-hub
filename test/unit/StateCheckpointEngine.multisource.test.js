@@ -172,6 +172,30 @@ describe(' multi-source pubkey (checkpoint/anchor family)', function () {
         expect(mirrored.map(b => b.row.source).sort()).to.deep.equal(['srcA', 'srcB']);
     });
 
+    // : the SAME persist path must write NOTHING when the resolved set overflowed
+    // its source cap. `.truncated` is a JS array property with no capability_snapshots
+    // column behind it, so the capped rows would reach the off-BTC (DOGE/LTC) ANCHOR
+    // verifier as a COMPLETE oracle_publish set: it would clear the strict 2/3 bar against
+    // an under-counted stake denominator S while this hub's own meetsStakeThreshold
+    // rejects the identical set. Zero rows makes the off-BTC read S=0, which fails closed
+    // through the same predicate. Paired with the 2650 case above so the guard is pinned
+    // as a truncation refusal, not a blanket one.
+    it('a TRUNCATED set persists NO rows and streams nothing to the mirror (#4175)', async function () {
+        let PK = new ValidatorIdentity('55'.repeat(32)).getPubkeyHex().toLowerCase();
+        let ctx = buildEngine({ validators: [
+            { pubkey: PK, source: 'srcA', weight: '100' },
+            { pubkey: PK, source: 'srcB', weight: '250' }
+        ], truncated: true });
+        engines.push(ctx.engine);
+
+        await ctx.engine._persistCapabilitySnapshot('oracle_publish', 970001);
+
+        let rows = ctx.db.snapshots.filter(r => r.capability === 'oracle_publish' && r.snapshot_block === 970001);
+        expect(rows.length, 'a truncated snapshot must not reach the mirrored table').to.equal(0);
+        expect(ctx.broadcasts.filter(b => b.table === 'capability_snapshots').length,
+            'and must not be streamed to indexers either').to.equal(0);
+    });
+
     // 2648: the archive verifier accepts an archive whose capability_snapshots group
     // holds a multi-source key. Pre-fix it keyed the group map on pubkey alone, so two
     // source rows collapsed to one, archived.size (1) != resolved.length (2), and every

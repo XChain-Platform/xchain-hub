@@ -15,6 +15,7 @@ const { expect }     = require('chai');
 const EventEmitter   = require('events');
 const SwapTracker    = require('../../src/SwapTracker');
 const { createMockHub }     = require('../helpers/mockHub');
+const { waitUntil }         = require('../helpers/waitUntil');
 
 describe('SwapTracker', function () {
 
@@ -186,7 +187,10 @@ describe('SwapTracker', function () {
                 sourceChain: 'BTC', sourceActionIndex: 1, attestationId: 'BTC:1:LTC'
             });
 
-            await new Promise(r => setTimeout(r, 20));
+            // The listener is async, so poll for the second query rather than
+            // guessing how long the handler takes.
+            await waitUntil(() => hub.db.doQuery.callCount >= 2,
+                { label: 'the finalized attestation to drive the status update' });
             expect(hub.db.doQuery.callCount).to.equal(2);
         });
     });

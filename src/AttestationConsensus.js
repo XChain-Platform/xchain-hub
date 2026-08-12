@@ -47,6 +47,7 @@ const EventEmitter      = require('events');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const eq                = require('./equivocation_header.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
+const { positiveIntConfig } = require('./lib/config_int.js');
 
 const ATTEST_PROPOSE = 'ATTEST_PROPOSE';
 const ATTEST_PREPARE = 'ATTEST_PREPARE';
@@ -110,7 +111,7 @@ class AttestationConsensus extends EventEmitter {
         // re-deriving the floor from the confirmation horizon and poll cadence.
         this.finalized       = new Set();
         this._finalizedOrder = [];
-        this.finalizedMax    = parseInt(this.config.ATTESTATION_FINALIZED_MAX) || 10000;
+        this.finalizedMax    = positiveIntConfig(this.config.ATTESTATION_FINALIZED_MAX, 10000, 'ATTESTATION_FINALIZED_MAX');
 
         // Non-ok publication throttle (Phase 4). A non-ok finalization leaves
         // the request PENDING on the indexer (retryable), so without a throttle
@@ -142,8 +143,23 @@ class AttestationConsensus extends EventEmitter {
         // Map<rid, Set<status>>
         this.nonOkPublished       = new Map();
         this._nonOkPublishedOrder = [];
-        this.nonOkPublishedMax    = parseInt(this.config.ATTESTATION_NONOK_PUBLISHED_MAX) || DEFAULT_NONOK_PUBLISHED_MAX;
+        this.nonOkPublishedMax    = positiveIntConfig(this.config.ATTESTATION_NONOK_PUBLISHED_MAX,
+            DEFAULT_NONOK_PUBLISHED_MAX, 'ATTESTATION_NONOK_PUBLISHED_MAX');
         this.nonOkEvictedWhilePendingCount = 0;
+
+        // Process-lifetime count of rounds torn down by the PBFT round timeout
+        // (item 8c1148c0). Quorum loss is terminal for that round but touches
+        // NO counter otherwise: the timeout handler warns and deletes, and
+        // AttestationRound.getStats' failed_count only sees rounds this hub
+        // failed to FETCH locally, so a hub losing every round to quorum
+        // timeout reported a perfectly healthy attestation rail. Monotonic and
+        // process-scoped (resets to 0 on hub restart), so consumers alert on a
+        // RISE between reads, never on a raw nonzero snapshot. Deliberately a
+        // counter of its own rather than folded into failed_count: failed_count
+        // is a live gauge over the TTL-evicting `rounds` map, so a timeout
+        // landing in the same tick as an eviction would net out flat and be
+        // swallowed by the consumer's rising-count comparison.
+        this.roundTimeoutCount = 0;
 
         // Early-arrival buffer. With staggered hub polls, the first proposer's
         // PROPOSE often reaches peers before they start their own round.
@@ -196,7 +212,8 @@ class AttestationConsensus extends EventEmitter {
         // `finalized` so it cannot leak under requestId flooding.
         this.tornDown       = new Set();
         this._tornDownOrder = [];
-        this.tornDownMax    = parseInt(this.config.ATTESTATION_TORNDOWN_MAX) || 10000;
+        this.tornDownMax    = positiveIntConfig(this.config.ATTESTATION_TORNDOWN_MAX, 10000,
+            'ATTESTATION_TORNDOWN_MAX');
 
         this._messageHandler = null;
         this.roundTimeoutMs  = parseInt(this.config.ATTESTATION_ROUND_TIMEOUT_MS) || DEFAULT_ROUND_TIMEOUT_MS;
@@ -464,6 +481,12 @@ class AttestationConsensus extends EventEmitter {
             // judge model, so the judge's vendor is not resolved from this hub's
             // live hotReloaded map while the id came from the block (item 3482).
             pinnedVendors: roundState.pinnedVendors || null,
+            // Block-anchored approved_models from that same config, so the meta
+            // allowlist gate judges against the set the fetch model was pinned
+            // from rather than this hub's live one (). Without it a
+            // governance delisting of the pinned model froze the round at
+            // no_quorum forever, since every retry re-pinned the same model.
+            pinnedApprovedModels: roundState.pinnedApprovedModels || null,
             finalized:    false,
             timer:        null
         };
@@ -475,6 +498,9 @@ class AttestationConsensus extends EventEmitter {
         pending.timer = setTimeout(() => {
             if(!pending.finalized){
                 console.warn('AttestationConsensus: round timeout for ' + rid.substring(0,16) + '...');
+                // Count before teardown so the metric rail carries the quorum
+                // loss even when the warn above is never scraped (item 8c1148c0).
+                this.roundTimeoutCount++;
                 this.pending.delete(rid);
                 this.earlyCommits.delete(rid);
                 // Clear the early-message buffer and suppress post-teardown
@@ -674,6 +700,7 @@ class AttestationConsensus extends EventEmitter {
             // ignores it. `need` is the responsible-set bound computed above.
             winner = await Promise.resolve(providerModule.agree(proposalsArr,
                 { pinnedJudgeModel: pending.pinnedJudgeModel || null, pinnedVendors: pending.pinnedVendors || null,
+                  pinnedApprovedModels: pending.pinnedApprovedModels || null,
                   timeoutMs: judgeTimeoutMs, expectedN: need }));
         } catch (e) {
             console.warn('AttestationConsensus: agree() threw for ' + rid.substring(0,16) + '...: ', e);

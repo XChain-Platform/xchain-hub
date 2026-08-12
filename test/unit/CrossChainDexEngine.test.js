@@ -473,10 +473,13 @@ describe('CrossChainDexEngine', function () {
                 b_chain: d.hi.home_coin, b_action_index: d.hi.action_index, b_kind: d.hiKind, b_tick: d.hi.give_tick,
                 b_amount: d.hiFill, b_filled_before: d.hiFilledBefore, b_ownership: d.hi.give_ownership, b_payout_addr: d.hi.get_address,
                 b_payout_legs: d.hi.payout_legs || null,
-                // Honest leaders stamp _nowSeconds(); validateProposedMatch bounds this to
-                // +/-3600s of the follower's clock (a Byzantine far-future stamp would lock
-                // the escrows), so use the engine's own clock rather than a fixed timestamp.
-                effective_time: eng._nowSeconds()
+                // Honest leaders stamp _nowSeconds() plus a forward propagation margin sized to
+                // the slower leg; validateProposedMatch bounds it ASYMMETRICALLY against the
+                // follower's clock. A far-future stamp would lock both escrows, and a stamp at
+                // or behind now would make the match settleable before it had reached both
+                // chains' indexers (#4202). So: the engine's own clock plus a margin, never a
+                // fixed timestamp.
+                effective_time: eng._nowSeconds() + 600
             };
         }
 
@@ -577,6 +580,74 @@ describe('CrossChainDexEngine', function () {
             row.effective_time = 'not-a-time';
             sinon.stub(eng, '_findOpenOffer').callsFake(async (coin) => coin === 'DOGE' ? b : a);
             expect(await eng.validateProposedMatch(row)).to.be.false;
+        });
+
+        // #4202, the other half of the effective_time bound. The window used to be
+        // symmetric, so a match stamped AT the leader's clock second passed. Such a match
+        // is settleable on both legs the moment it is mirrored, so the indexer that
+        // already holds the row settles a block ahead of one still receiving it and the
+        // two legs' settlement action indexes diverge. _finalizeMatch stamped exactly
+        // that (bare _nowSeconds()) before this fix, so the guard and the producer
+        // margin land together.
+        it('returns false when the match is effective on arrival (no propagation window)', async function () {
+            let eng = new CrossChainDexEngine(makeDexHub());
+            let { a, b } = makeOrderPair();
+            sinon.stub(eng, '_findOpenOffer').callsFake(async (coin) => coin === 'DOGE' ? b : a);
+            for (const delta of [0, -30, 5]) {
+                let row = orderRow(eng, a, b, 100);
+                row.effective_time = eng._nowSeconds() + delta;
+                expect(await eng.validateProposedMatch(row),
+                    'co-signed a match effective at now' + (delta >= 0 ? '+' : '') + delta).to.be.false;
+            }
+        });
+
+        it('_finalizeMatch stamps a forward margin sized to the slower leg, never the bare clock second', async function () {
+            let hub = makeDexHub();
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(100);
+            hub.db.doQuery = sinon.stub().resolves({ affectedRows: 1 });
+            let eng = new CrossChainDexEngine(hub);
+            eng._snapshotBlockOverride = 100;
+            eng._seedLocalValidator = true;
+            sinon.stub(eng, '_persistCapabilitySnapshot').resolves(1);
+            let proposed = null;
+            sinon.stub(eng.consensus, 'propose').callsFake(async (id, payload) => { proposed = payload.row; });
+
+            let { a, b } = makeOrderPair();
+            const now = eng._nowSeconds();
+            let desc = eng._tryMatch(a, b);
+            await eng._finalizeMatch(desc);
+            expect(proposed, 'no row was proposed').to.not.equal(null);
+            // 4 blocks of the SLOWER leg: both chains must hold the mirrored row before
+            // either reaches its eligible block.
+            const NOMINAL = { BTC: 600, LTC: 150, DOGE: 60 };
+            const want = Math.min(3000, 4 * Math.max(NOMINAL[desc.lo.home_coin], NOMINAL[desc.hi.home_coin]));
+            expect(want, 'fixture pair carries no margin to assert').to.be.greaterThan(0);
+            expect(proposed.effective_time - now).to.equal(want);
+        });
+
+        // #4204. The indexer's settlement pass rebuilds the signed canonical from the
+        // mirrored BIGINT row, so a leader-supplied '041' for an action index passes
+        // every Number()-based re-derivation here yet finalizes a match no settling
+        // indexer can verify - leaving both escrows locked with nothing to retry.
+        it('returns false for a noncanonical integer spelling on a signed field', async function () {
+            let eng = new CrossChainDexEngine(makeDexHub());
+            let { a, b } = makeOrderPair();
+            sinon.stub(eng, '_findOpenOffer').callsFake(async (coin) => coin === 'DOGE' ? b : a);
+
+            // The canonical spelling of the same value, as a number or a string, passes.
+            let ok = orderRow(eng, a, b, 100);
+            ok.a_action_index = String(Number(ok.a_action_index));
+            expect(await eng.validateProposedMatch(ok)).to.be.true;
+
+            for (const field of ['a_action_index', 'b_action_index', 'snapshot_block', 'effective_time']) {
+                let row = orderRow(eng, a, b, 100);
+                row[field] = '0' + String(Number(row[field]));
+                expect(await eng.validateProposedMatch(row),
+                    'signed a match with a leading-zero ' + field).to.be.false;
+            }
+            let nulled = orderRow(eng, a, b, 100);
+            nulled.a_ownership = null;   // signs the literal 'null', persists as 0
+            expect(await eng.validateProposedMatch(nulled)).to.be.false;
         });
 
         // ── XDEX-GEN-FORGE-1: the per-leg source-reorg fence (a_/b_push_generation) is not
@@ -835,6 +906,38 @@ describe('CrossChainDexEngine', function () {
             let n = await eng._persistCapabilitySnapshot('cross_chain', 100);
             expect(hub.db.doQuery.called).to.be.false;
             expect(n).to.equal(0);
+        });
+
+        // SWQ-TRUNC-MIRROR (). The .truncated marker is a JS array property and
+        // capability_snapshots has no column for it, so mirroring a capped set hands the
+        // off-BTC verifiers a partial stake denominator they read back as COMPLETE and
+        // finalize against, while this hub's own meetsStakeThreshold rejects it. Persist
+        // must fail closed instead: no rows, no mirror stream, and the 0 return that the
+        // _writeFinalizedMatch caller already treats as "defer this match".
+        it('refuses to persist or mirror a TRUNCATED set ()', async function () {
+            let hub = makeDexHub();
+            hub.db.doQuery = sinon.stub().resolves([]);
+            let eng = new CrossChainDexEngine(hub);
+            let capped = [{ pubkey: 'pub1', source: 'srcA', weight: '50000', amount: '50000' }];
+            capped.truncated = true;
+            sinon.stub(eng, '_resolveCapabilityValidators').resolves(capped);
+
+            let n = await eng._persistCapabilitySnapshot('cross_chain', 100);
+            expect(n, 'zero rows is the caller\'s fail-closed signal').to.equal(0);
+            expect(hub.db.doQuery.called, 'no capability_snapshots row may be written').to.be.false;
+        });
+
+        it('still persists an untruncated set (the guard is not a blanket refusal)', async function () {
+            let hub = makeDexHub();
+            hub.db.doQuery = sinon.stub().resolves([]);
+            let eng = new CrossChainDexEngine(hub);
+            let full = [{ pubkey: 'pub1', source: 'srcA', weight: '50000', amount: '50000' }];
+            full.truncated = false;
+            sinon.stub(eng, '_resolveCapabilityValidators').resolves(full);
+
+            let n = await eng._persistCapabilitySnapshot('cross_chain', 100);
+            expect(n).to.equal(1);
+            expect(hub.db.doQuery.calledWith(sinon.match(/INSERT IGNORE INTO capability_snapshots/))).to.be.true;
         });
     });
 

@@ -293,6 +293,50 @@ class Database {
             'source',
             '(snapshot_block, capability, signing_pubkey, source)'
         );
+        // #4315: governance_proposals.voting_start/voting_end shipped as TIMESTAMP, which
+        // MariaDB bounds to the signed 32-bit epoch (2038-01-19 03:14:07 UTC). Both hold a
+        // FUTURE instant (voting_end is NOW() + GOV_VOTING_PERIOD), so they run out of range
+        // one voting period BEFORE every 'now'-recording audit column does. alterTableForDrift
+        // never MODIFYs a type, so the DDL edit alone would fix only fresh installs.
+        await this._migrateColumnType('governance_proposals', 'voting_start', 'datetime', 'DATETIME NOT NULL');
+        await this._migrateColumnType('governance_proposals', 'voting_end', 'datetime', 'DATETIME NOT NULL');
+    }
+
+    // Convert a column to a new type in place. Idempotent: reads the live DATA_TYPE from
+    // information_schema and no-ops when it already matches `targetType`, so a fresh install
+    // (which gets the type from the CREATE TABLE) and an already-migrated node both skip it.
+    //
+    // Safe for the TIMESTAMP -> DATETIME conversion it was added for: TIMESTAMP is stored
+    // UTC-normalized and rendered through the SESSION time zone while DATETIME stores the
+    // literal, so the conversion preserves the instant only under a UTC session. It is one:
+    // the pool pins timezone 'Z' and the driver issues SET time_zone='+00:00' per connection
+    // (connectionPoolParams, ), so no host's local zone can shift a stored value here.
+    async _migrateColumnType(table, column, targetType, columnDef){
+        let db = await this.getConnection();
+        try {
+            let rows = await db.query(
+                "SELECT DATA_TYPE FROM information_schema.columns " +
+                "WHERE table_schema = ? AND table_name = ? AND column_name = ?",
+                [this.dbName, table, column]
+            );
+            if(!rows[0]) return; // table/column not present yet; CREATE TABLE covers it
+            let liveType = String(rows[0].DATA_TYPE || '').toLowerCase();
+            if(liveType === String(targetType).toLowerCase()) return; // already converted
+            await db.query('ALTER TABLE `' + table + '` MODIFY `' + column + '` ' + columnDef);
+            console.log('Migration: converted ' + table + '.' + column + ' ' + liveType + ' -> ' + targetType);
+        } catch(e){
+            // Swallowed on purpose, and loudly. runMigrations runs every migration in one
+            // sequential pass at startup, so a throw here would take the remaining migrations
+            // and the hub boot down with it - the wrong trade for a column that fails in 2038,
+            // not today. What it must never be is invisible, so the line names the consequence
+            // and the exact statement an operator runs to finish the job by hand.
+            console.error('MIGRATION FAILED: ' + table + '.' + column + ' is still ' +
+                'the old type. Until it is converted, any value past the TIMESTAMP epoch ' +
+                'limit (2038-01-19 03:14:07 UTC) cannot be stored. Run by hand: ' +
+                'ALTER TABLE `' + table + '` MODIFY `' + column + '` ' + columnDef, e);
+        } finally {
+            await db.release();
+        }
     }
 
     // Drop an index if it exists (idempotent). Used to retire an index that a

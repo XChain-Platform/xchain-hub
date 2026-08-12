@@ -205,6 +205,10 @@ class FullNodeChallengeRound {
                             './data/fullnode-verdict.spend.jsonl';
 
         this.rounds   = new Map();  // epoch -> round state
+        // Epochs whose verdict fee a PRIOR process already committed, recovered from
+        // the spend log at start(). The in-memory `rounds` map is empty after a
+        // restart, so it cannot answer that question ().
+        this._committedEpochs = new Set();
         this._timer   = null;
         this._ticking = false;      // in-flight guard, see _tick()
         this._handler = (env) => this._handleMessage(env);
@@ -220,12 +224,18 @@ class FullNodeChallengeRound {
             return;
         }
         if(this.peerManager) this.peerManager.on('message', this._handler);
+        // Consume the spend log BEFORE the first tick, or the recovered epochs arrive
+        // too late to gate the round that tick reconstructs (). Same reason
+        // the spend window is reloaded here and not lazily ().
+        this._loadSpendLog();
+        this.spendGuard.persistTo();
         let tick = async () => { try { await this._tick(); } catch(e){ console.warn('FullNodeChallengeRound tick:', e && e.message ? e.message : e); } };
         this._timer = setInterval(tick, this.pollMs);
         await tick();
         console.log('FullNodeChallengeRound started (interval=' + this.interval + ' blocks, depth=' + this.confirmDepth +
                     ', verifier=' + (this.coinRpcUrl ? 'yes' : 'NO coin RPC (observe-only)') + ', tier=' +
-                    activation.describeActivation(this.cfg.FULLNODE) + ')');
+                    activation.describeActivation(this.cfg.FULLNODE) + ', ' +
+                    this._committedEpochs.size + ' epoch(s) already spent per the spend log)');
     }
 
     async stop(){
@@ -525,9 +535,57 @@ class FullNodeChallengeRound {
         state.txid = d.txid || state.txid;
     }
 
+    // item 3463 wrote the durable intent but nothing ever read it back, so the guard
+    // it was built to be only worked inside one process lifetime (). Fold the
+    // append-only log into the set of epochs whose fee is already committed, using the
+    // same sticky rules as AttestationRelay._loadWal: a terminal 'sent' or 'ambiguous'
+    // is committed and never cleared, a bare 'intent' counts as committed (fail closed
+    // toward NOT spending twice, since the tx may have reached the node), and only a
+    // 'failed' - the definitive pre-send failure where _maybeFinalize itself unlocks
+    // the round - clears a bare intent so a genuine retry still runs. Read-only: the
+    // log stays append-only and is never rewritten here.
+    //
+    // The fold is LAST-RECORD-WINS below the sticky 'sent', not first-record-wins: an
+    // epoch that failed definitively and then retried appends a SECOND intent, and
+    // that intent must re-arm the guard exactly like the first one. Keying the intent
+    // clause on 'no prior record' instead dropped it, so intent/failed/intent - retry,
+    // then crash after the node accepted - reloaded as uncommitted and re-broadcast,
+    // which is the very failure mode  names.
+    _loadSpendLog(){
+        let text;
+        try { text = fs.readFileSync(this.spendLogPath, 'utf8'); }
+        catch(e){ return; }   // absent on a first run
+        let outcome = new Map();
+        for(let line of text.split('\n')){
+            if(!line.trim()) continue;
+            let rec;
+            try { rec = JSON.parse(line); } catch(_){ continue; }   // a torn tail line
+            let epoch = Number(rec.epoch);
+            if(!Number.isFinite(epoch)) continue;
+            let prior = outcome.get(epoch);
+            if(rec.phase === 'sent' || rec.phase === 'ambiguous') outcome.set(epoch, 'sent');
+            else if(prior === 'sent') continue;                                    // terminal, never cleared
+            else if(rec.phase === 'failed') outcome.set(epoch, 'failed');          // clears a bare intent
+            else if(rec.phase === 'intent') outcome.set(epoch, 'intent');          // including a retry's
+        }
+        for(let [epoch, state] of outcome)
+            if(state === 'sent' || state === 'intent') this._committedEpochs.add(epoch);
+    }
+
     async _maybeFinalize(epoch){
         let state = this.rounds.get(epoch);
         if(!state || state.finalized || !state.passList) return;
+        // A prior process already committed this epoch's BTC fee. The epoch is
+        // recomputed deterministically from the tip, so a restart inside acceptWindow
+        // rebuilds the same round and can re-win leadership; without this the verdict
+        // goes out a second time (). Claim the round rather than merely
+        // returning, so the reconstructed round stops re-entering every incoming sig.
+        if(this._committedEpochs.has(epoch)){
+            state.finalized = true;
+            console.warn('FullNodeChallengeRound: epoch ' + epoch + ' already carries a committed verdict spend ' +
+                         'in ' + this.spendLogPath + '; NOT re-broadcasting after restart');
+            return;
+        }
         let myPubkey = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
         if(!this._isLeader(state, myPubkey)) return;            // only the leader broadcasts
         let quorum = Math.floor((2 * state.eligible.size) / 3) + 1;
@@ -569,6 +627,9 @@ class FullNodeChallengeRound {
             let res = await this._broadcastVerdict(wire);
             this.spendGuard.record();   // : a fresh verdict tx spent a BTC fee
             state.txid = res && res.txid ? res.txid : null;
+            // Mirror the reload rule in-process, so a spend is gated identically
+            // whether the log was read at start() or written this run ().
+            this._committedEpochs.add(epoch);
             this._recordSpend({ phase: 'sent', epoch, challengeId: state.challengeId, txid: state.txid });
             this.peerManager && this.peerManager.broadcast(XNODE_DONE, { epoch, challengeId: state.challengeId, txid: state.txid });
             console.log('FullNodeChallengeRound: verdict broadcast epoch=' + epoch + ' pass=' + state.passList.length +
@@ -585,6 +646,7 @@ class FullNodeChallengeRound {
                 // The whole point of the intent record: an ambiguous send may have cost
                 // a fee, and the round is deliberately left claimed. Say so on disk, so
                 // the operator reconciling on-chain has the challenge_id without stdout.
+                this._committedEpochs.add(epoch);   // : a fee may have been paid
                 this._recordSpend({ phase: 'ambiguous', epoch, challengeId: state.challengeId,
                                     error: e && e.message ? String(e.message).slice(0, 200) : String(e) });
                 console.warn('FullNodeChallengeRound: AMBIGUOUS verdict send (epoch ' + epoch +

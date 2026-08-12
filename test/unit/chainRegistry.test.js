@@ -23,6 +23,7 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire').noPreserveCache();
 const coins      = require('../../src/coins');
+const { waitUntil } = require('../helpers/waitUntil');
 
 const SNAPSHOT_PATH = path.join(__dirname, '../../src/chain-registry.json');
 const SNAPSHOT = JSON.parse(fs.readFileSync(SNAPSHOT_PATH, 'utf8'));
@@ -79,8 +80,10 @@ async function bootRoute({ identity } = {}) {
             else process.env[k] = v;
         }
     }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    const handler = gets.get('/api/v1/chain-registry');
+    // The boot is an async IIFE, so the route appears some ticks after
+    // proxyquire returns; poll for it rather than guessing a settle.
+    const handler = await waitUntil(() => gets.get('/api/v1/chain-registry'),
+        { label: 'route /api/v1/chain-registry to register' });
     expect(handler, 'route /api/v1/chain-registry not registered').to.be.a('function');
     return handler;
 }

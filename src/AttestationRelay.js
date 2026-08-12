@@ -86,6 +86,15 @@ const EncoderClient          = require('./EncoderClient.js');
 const SpendGuard             = require('./lib/spend_guard.js');
 const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
 const { AtMostOnce, isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
+const { allCanonicalInts } = require('./lib/canonical_int.js');
+
+// The integer fields each relay leg signs VERBATIM and the indexer re-derives with
+// parseInt() off the v3/v4 wire (#4204). request_id / response_hash are hex, and
+// provider_id / status / meta are string compares, so none of them belong here.
+const RELAY_CANONICAL_INT_FIELDS = {
+    request:  ['snapshot_block', 'origin_action_index', 'redundancy', 'deadline_blocks'],
+    response: ['snapshot_block', 'home_response_action_index']
+};
 
 // The chain attestation staking lives on, and therefore the only chain a
 // responsible set can be keyed on. Must equal HOME_CHAIN in the indexer's attest.js.
@@ -312,6 +321,9 @@ class AttestationRelay {
         }
 
         this._loadWal();
+        // : the WAL kept at-most-once sends across a restart, but the spend
+        // ceilings behind them did not; reload the saved window from the same idiom.
+        this.spendGuard.persistTo();
         await this.consensus.start();
 
         this._pollTimer = setInterval(() => {
@@ -755,6 +767,15 @@ class AttestationRelay {
     // unrecognised is refused rather than falling through to a permissive default.
     async validateProposedMatch(row){
         if(!row) return false;
+        // Canonical integer spellings (#4204). These fields are signed verbatim into
+        // _relayRequestCanonical / _relayResponseCanonical and ride the v3/v4 wire, but
+        // the indexer re-parses them with parseInt() before rebuilding the canonical it
+        // verifies against. A leader-supplied '041' therefore passes the Number()-based
+        // field checks below, collects an honest quorum, and lands an action the origin
+        // chain stores as invalid ('cross_chain quorum') with no path to re-relay: the
+        // request sits until its deadline expires. Fail closed before either leg runs.
+        if(!RELAY_CANONICAL_INT_FIELDS[row.phase]) return false;
+        if(!allCanonicalInts(row, RELAY_CANONICAL_INT_FIELDS[row.phase])) return false;
         if(row.phase === 'request')  return await this._validateRequestRow(row);
         if(row.phase === 'response') return await this._validateResponseRow(row);
         return false;
@@ -866,6 +887,17 @@ class AttestationRelay {
     // same rows. Same contract as CrossChainCallEngine._persistCapabilitySnapshot.
     async _persistCapabilitySnapshot(capability, block, network){
         let validators = await this._resolveCapabilityValidators(capability, block, network);
+        // SWQ-TRUNC-MIRROR (): a TRUNCATED set is never mirrored, for the reason
+        // spelled out in CrossChainDexEngine._persistCapabilitySnapshot. This writer has no
+        // caller today, which is exactly why the guard goes in now: the next caller would
+        // otherwise inherit the fifth unguarded path into the shared capability_snapshots
+        // mirror. Keep every writer's guard in lockstep.
+        if(validators && validators.truncated === true){
+            console.warn('AttestationRelay: refusing to persist a TRUNCATED ' + capability +
+                         ' capability snapshot at block ' + block +
+                         ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
+            return;
+        }
         for(let v of validators){
             let pubkey = String(v.pubkey).toLowerCase();
             let amount = String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0'));

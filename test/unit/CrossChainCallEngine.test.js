@@ -327,6 +327,28 @@ describe('CrossChainCallEngine', function () {
                 else process.env.XCALL_RELAY_MARGIN_BLOCKS = prev;
             }
         });
+
+        // The config is tunable UPWARD only. XCALL_RELAY_MARGIN_BLOCKS=0 used to make
+        // _relayEffectiveTime return the bare clock second, which is precisely the
+        // live/replay fork the margin exists to prevent - a misconfiguration could
+        // re-open a consensus hole (#4202). The default margin is now a hard floor.
+        it('floors the margin at the default: XCALL_RELAY_MARGIN_BLOCKS=0 cannot stamp the bare clock second', function () {
+            const prev = process.env.XCALL_RELAY_MARGIN_BLOCKS;
+            try {
+                for (const blocks of ['0', '-5', '1']) {
+                    process.env.XCALL_RELAY_MARGIN_BLOCKS = blocks;
+                    const { engine } = makeEngine();
+                    const now = Math.floor(Date.now() / 1000);
+                    expect(engine._relayEffectiveTime('DOGE') - now,
+                        'DOGE margin floor breached at XCALL_RELAY_MARGIN_BLOCKS=' + blocks).to.be.at.least(240);
+                    expect(engine._relayEffectiveTime('LTC') - now).to.be.at.least(600);
+                    expect(engine._relayEffectiveTime('BTC') - now).to.be.at.least(2400);
+                }
+            } finally {
+                if (prev === undefined) delete process.env.XCALL_RELAY_MARGIN_BLOCKS;
+                else process.env.XCALL_RELAY_MARGIN_BLOCKS = prev;
+            }
+        });
     });
 
     describe('canonical strings (consensus-critical, byte-matched fleet-wide)', function () {
@@ -367,6 +389,12 @@ describe('CrossChainCallEngine', function () {
 
     describe('independent peer re-verification (validateProposedMatch)', function () {
 
+        // An honest leader's effective_time: now + the gating chain's forward relay
+        // margin, never the bare clock second. A follower refuses a row that is not at
+        // least RELAY_MIN_FUTURE_S ahead of its OWN clock, because a row effective on
+        // arrival forks the injecting indexers' action-index counters (#4202).
+        function honestEffectiveTime() { return Math.floor(Date.now() / 1000) + 240; }
+
         function dispatchRow(overrides) {
             return Object.assign({
                 round_id: sha256('XCALLROUND|dispatch|' + CALL_ID),
@@ -374,7 +402,7 @@ describe('CrossChainCallEngine', function () {
                 source_chain: 'BTC', source_action_index: 41, source_contract_index: 5,
                 target_chain: 'DOGE', target_contract_index: 99, method: 'onArrival',
                 params_json: '["x"]', gas_limit: 50000, cross_hops: 1,
-                effective_time: Math.floor(Date.now() / 1000)   // leader-choice field, clock-bounded by validation
+                effective_time: honestEffectiveTime()   // leader-choice field, clock-bounded by validation
             }, overrides);
         }
 
@@ -422,6 +450,88 @@ describe('CrossChainCallEngine', function () {
             expect(await engine.validateProposedMatch(dispatchRow({ snapshot_block: 1000 }))).to.equal(false);
         });
 
+        // #4202. The old bound was symmetric (|effective_time - now| > 3600), so a row
+        // stamped AT or BEHIND the follower's clock sailed through. Such a row is
+        // eligible the instant it finalizes: the indexer that already holds it injects
+        // at block N while one still receiving it injects at N+1, and since
+        // EMITTER_ACTION_INDEX feeds the call_id preimage their ledgers fork for good.
+        // The bound is now asymmetric, and a leader whose own producer floor was
+        // bypassed (XCALL_RELAY_MARGIN_BLOCKS=0, or a Byzantine one) is refused here.
+        it('refuses a dispatch that is effective on arrival (no propagation window)', async function () {
+            const { engine } = makeEngine();
+            sinon.stub(engine, '_indexerCall').resolves({
+                exists: true, network: 'regtest', latest_block_index: 200, call: pendingCall()
+            });
+            const now = Math.floor(Date.now() / 1000);
+            expect(await engine.validateProposedMatch(dispatchRow({ effective_time: now })),
+                'a row effective at the finalization instant must not be co-signed').to.equal(false);
+            expect(await engine.validateProposedMatch(dispatchRow({ effective_time: now - 30 }))).to.equal(false);
+            expect(await engine.validateProposedMatch(dispatchRow({ effective_time: now + 5 }))).to.equal(false);
+            // ...while the margin an honest leader stamps still passes, on every chain.
+            expect(await engine.validateProposedMatch(dispatchRow({ effective_time: engine._relayEffectiveTime('DOGE') }))).to.equal(true);
+            expect(await engine.validateProposedMatch(dispatchRow({ effective_time: engine._relayEffectiveTime('BTC') }))).to.equal(true);
+        });
+
+        // #4199. The leader path polls getpendingcrosschaincalls (SQL-filtered to
+        // request_status='pending') and refuses to start a round once the deadline is
+        // reached; the follower re-fetches by call_id through getcrosschaincall, which
+        // serves the row whatever its lifecycle state. Without the mirror below, a round
+        // begun just before expiry finalizes after it: the target executes the dispatch
+        // while the source has already delivered the terminal 'expired' callback.
+        it('refuses a dispatch whose source request has expired or gone terminal', async function () {
+            const { engine } = makeEngine();
+            const stub = sinon.stub(engine, '_indexerCall');
+
+            // Deadline already reached at OUR tip: refused (mirrors _maybeDispatch's gate).
+            stub.resolves({ exists: true, network: 'regtest', latest_block_index: 200,
+                            call: pendingCall({ deadline_block: 200 }) });
+            expect(await engine.validateProposedMatch(dispatchRow())).to.equal(false);
+            stub.resolves({ exists: true, network: 'regtest', latest_block_index: 200,
+                            call: pendingCall({ deadline_block: 150 }) });
+            expect(await engine.validateProposedMatch(dispatchRow())).to.equal(false);
+
+            // A deadline still ahead of our tip is fine.
+            stub.resolves({ exists: true, network: 'regtest', latest_block_index: 200,
+                            call: pendingCall({ deadline_block: 201 }) });
+            expect(await engine.validateProposedMatch(dispatchRow())).to.equal(true);
+
+            // A non-pending lifecycle is refused whatever the deadline says.
+            for (const status of ['expired', 'completed']) {
+                stub.resolves({ exists: true, network: 'regtest', latest_block_index: 200,
+                                call: pendingCall({ request_status: status }) });
+                expect(await engine.validateProposedMatch(dispatchRow()),
+                    'co-signed a dispatch for a request the source reports as ' + status).to.equal(false);
+            }
+            stub.resolves({ exists: true, network: 'regtest', latest_block_index: 200,
+                            call: pendingCall({ request_status: 'pending' }) });
+            expect(await engine.validateProposedMatch(dispatchRow())).to.equal(true);
+        });
+
+        // #4204. Number()-based field equality accepts '041' against indexer value 41,
+        // but _canonicalMatch signs the spelling VERBATIM while the row round-trips a
+        // BIGINT column back to 41 - so xexec.js and the archive verifier rebuild
+        // different bytes, reject the quorum, and strand the call permanently (the
+        // finalized row still satisfies _rowExists, so it is never re-relayed).
+        it('refuses a noncanonical integer spelling on any signed field', async function () {
+            const { engine } = makeEngine();
+            sinon.stub(engine, '_indexerCall').resolves({
+                exists: true, network: 'regtest', latest_block_index: 200, call: pendingCall()
+            });
+            // Canonical spellings of the same values, as a number or as a string, pass.
+            expect(await engine.validateProposedMatch(dispatchRow({ source_action_index: 41 }))).to.equal(true);
+            expect(await engine.validateProposedMatch(dispatchRow({ source_action_index: '41' }))).to.equal(true);
+            // Every equivalent spelling a Byzantine leader could reach for is refused.
+            for (const spelling of ['041', '+41', ' 41', '41 ', '4.1e1', '0041']) {
+                expect(await engine.validateProposedMatch(dispatchRow({ source_action_index: spelling })),
+                    'signed a dispatch spelling source_action_index as ' + JSON.stringify(spelling)).to.equal(false);
+            }
+            expect(await engine.validateProposedMatch(dispatchRow({ gas_limit: '050000' }))).to.equal(false);
+            expect(await engine.validateProposedMatch(dispatchRow({ target_contract_index: '099' }))).to.equal(false);
+            // cross_hops signs String(r.cross_hops) but compares (Number(x) || 0), so a
+            // null would sign the literal 'null' and persist as 0. Refused too.
+            expect(await engine.validateProposedMatch(dispatchRow({ cross_hops: null }))).to.equal(false);
+        });
+
         it('signs a result only when its OWN target indexer reports the identical outcome at depth, for a KNOWN dispatch', async function () {
             const { engine, db } = makeEngine();
             db.rows.push(Object.assign(dispatchRow(), { status: 'finalized' }));
@@ -432,7 +542,7 @@ describe('CrossChainCallEngine', function () {
                 // Dispatch-inherited reorg-fence metadata (must match the local dispatch row).
                 source_action_index: 41, push_generation: 0,
                 result_status: 'ok', return_payload_b64: 'cGF5bG9hZA',
-                effective_time: Math.floor(Date.now() / 1000)
+                effective_time: honestEffectiveTime()
             };
             const stub = sinon.stub(engine, '_indexerCall').resolves({
                 exists: true, latest_block_index: 600, executed_block_index: 500,   // depth 101 >= DOGE 60
@@ -455,7 +565,7 @@ describe('CrossChainCallEngine', function () {
                 source_chain: 'BTC', target_chain: 'DOGE',
                 source_action_index: 41, push_generation: 3,
                 result_status: 'ok', return_payload_b64: 'cGF5bG9hZA',
-                effective_time: Math.floor(Date.now() / 1000)
+                effective_time: honestEffectiveTime()
             };
             sinon.stub(engine, '_indexerCall').resolves({
                 exists: true, latest_block_index: 600, executed_block_index: 500,
@@ -761,6 +871,41 @@ describe('CrossChainCallEngine', function () {
             const { engine } = makeEngine();
             const vals = await engine._resolveCapabilityValidators('cross_chain', 100, 'regtest');
             expect(vals.truncated).to.not.equal(true);
+        });
+
+        // : carrying the flag is only half the guard. capability_snapshots has no
+        // column for it, so a truncated set that gets MIRRORED reaches the off-BTC
+        // cross_chain verifiers as a COMPLETE one and finalizes over an under-counted stake
+        // denominator this hub itself rejects. Persist has to refuse the write.
+        function countSnapshotWrites(engine) {
+            const inner = engine.db.doQuery.bind(engine.db);
+            const seen = { n: 0 };
+            engine.db.doQuery = async (sql, params) => {
+                if (/INSERT IGNORE INTO capability_snapshots/.test(sql)) seen.n++;
+                return inner(sql, params);
+            };
+            return seen;
+        }
+
+        it('persist writes NO capability_snapshots row for a truncated set (#4175)', async function () {
+            const { engine } = makeEngine();
+            const capped = [{ pubkey: 'a'.repeat(64), source: 's1', weight: '1', amount: '1' }];
+            capped.truncated = true;
+            engine._resolveCapabilityValidators = async () => capped;
+            const seen = countSnapshotWrites(engine);
+
+            await engine._persistCapabilitySnapshot('cross_chain', 100, 'regtest');
+            expect(seen.n, 'a truncated snapshot must not reach the mirrored table').to.equal(0);
+        });
+
+        it('persist still writes an untruncated set (the #4175 guard is not a blanket refusal)', async function () {
+            const { engine } = makeEngine();
+            engine._resolveCapabilityValidators = async () =>
+                [{ pubkey: 'a'.repeat(64), source: 's1', weight: '1', amount: '1' }];
+            const seen = countSnapshotWrites(engine);
+
+            await engine._persistCapabilitySnapshot('cross_chain', 100, 'regtest');
+            expect(seen.n).to.equal(1);
         });
     });
 

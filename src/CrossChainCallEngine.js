@@ -91,20 +91,22 @@ const RESULT_STATUSES = ['ok', 'reverted', 'out_of_gas', 'no_contract', 'not_cal
 // has landed, injecting the execution/callback a block (or more) late and
 // permanently shifting its action-index counter relative to a node that sees
 // the row on time (EMITTER_ACTION_INDEX is in the call_id preimage -> ledger
-// fork). Tunable via XCALL_RELAY_MARGIN_BLOCKS (env / p2pConfig).
-const DEFAULT_RELAY_MARGIN_BLOCKS = 4;
+// fork). Tunable UPWARD via XCALL_RELAY_MARGIN_BLOCKS (env / p2pConfig); the
+// default doubles as a HARD FLOOR, so a 0 no longer zeroes the margin (#4202).
+// Sizing, the ceiling and the follower-side floor live in lib/relay_margin.js.
+const { DEFAULT_RELAY_MARGIN_BLOCKS, RELAY_MIN_FUTURE_S, relayMarginS } = require('./lib/relay_margin.js');
 
-// Nominal block interval (seconds) per chain, used ONLY to size the relay
-// margin in wall-clock seconds. Not consensus-critical: the margin need only
-// comfortably exceed realistic hub->indexer row-arrival lag, so an approximate
-// interval is fine.
-const NOMINAL_BLOCK_INTERVAL_S = { BTC: 600, LTC: 150, DOGE: 60 };
+// Canonical integer-spelling guard for the signed fields (see lib/canonical_int.js).
+const { allCanonicalInts } = require('./lib/canonical_int.js');
 
-// Hard ceiling (seconds) on the computed margin. validateProposedMatch refuses
-// a row whose effective_time is more than 3600s off the validator's clock, so
-// the margin must stay safely under that or a follower would reject the
-// leader's row and break the round. Caps a mis-set XCALL_RELAY_MARGIN_BLOCKS.
-const RELAY_MARGIN_MAX_S = 3000;
+// The INT/BIGINT-backed fields each phase signs VERBATIM into _canonicalMatch and
+// every verifier re-derives from a normalized integer. Decimal, address, method,
+// payload, chain and status fields are compared as strings and are NOT listed.
+const CANONICAL_INT_FIELDS = {
+    dispatch: ['snapshot_block', 'source_action_index', 'source_contract_index',
+               'target_contract_index', 'gas_limit', 'cross_hops', 'effective_time'],
+    result:   ['snapshot_block', 'effective_time']
+};
 
 // Result-relay backoff (deepdive M-14). A dispatch row whose target execution
 // never yields a result at confirmation depth (e.g. the execution was reorged
@@ -573,13 +575,36 @@ class CrossChainCallEngine extends EventEmitter {
         if(row.source_chain === row.target_chain) return false;
         if(String(row.round_id).toLowerCase() !== this._roundId(row.phase, String(row.call_id).toLowerCase())) return false;
 
+        // Canonical integer spellings (#4204). These fields are signed verbatim but
+        // re-derived from a BIGINT round-trip by xexec.js and the archive verifier, so
+        // a leader-supplied '041' would pass every Number()-based check below, collect
+        // an honest quorum, and finalize a row whose signatures no verifier can ever
+        // rebuild - permanently stranding the call, because _rowExists still sees it.
+        // Fail closed BEFORE any numeric comparison; honest leaders build these with
+        // Number(), so this never fires on an honest round.
+        if(!CANONICAL_INT_FIELDS[row.phase]) return false;
+        if(!allCanonicalInts(row, CANONICAL_INT_FIELDS[row.phase])) return false;
+
         // Leader-choice fields are adopted (not byte-matched) by followers, so
-        // bound them: effective_time within an hour of our clock, snapshot_block
+        // bound them: effective_time in a window ahead of our clock, snapshot_block
         // within a day of BTC blocks of our own tip view (when we can resolve
         // one). Pinning an ancient snapshot_block would let a Byzantine leader
         // select a stale validator set for indexer-side signature verification.
+        //
+        // The window is ASYMMETRIC (#4202). The upper guard is the old griefing
+        // bound: a far-future row would never settle. The lower guard is a
+        // propagation floor: an effective_time at or behind our clock makes the row
+        // eligible the instant it finalizes, so an indexer that already holds it
+        // injects a block earlier than one still receiving it, and their action-index
+        // counters (which feed the call_id preimage) fork for good. A faulty leader,
+        // or one whose XCALL_RELAY_MARGIN_BLOCKS was zeroed, is refused here even
+        // though its own producer-side floor was bypassed. RELAY_MIN_FUTURE_S is far
+        // below any producer margin, so this costs an honest round nothing: it still
+        // tolerates 3600 - RELAY_MIN_FUTURE_S seconds of adverse clock skew.
+        let now = this._nowSeconds();
         if(!Number.isFinite(Number(row.effective_time)) ||
-           Math.abs(Number(row.effective_time) - this._nowSeconds()) > 3600) return false;
+           Number(row.effective_time) - now > 3600 ||
+           Number(row.effective_time) - now < RELAY_MIN_FUTURE_S) return false;
         let myBlock = await this._resolveSnapshotBlock();
         if(myBlock != null && Math.abs(Number(row.snapshot_block) - Number(myBlock)) > 144) return false;
 
@@ -599,6 +624,19 @@ class CrossChainCallEngine extends EventEmitter {
         let latest = Number(res.latest_block_index);
         let depth  = latest - Number(call.block_index) + 1;
         if(!Number.isFinite(depth) || depth < this.confirmations[row.source_chain]) return false;
+
+        // Lifecycle gates, mirroring _maybeDispatch (#4199). The leader path never
+        // even sees an expired or settled request: it polls getpendingcrosschaincalls
+        // (SQL-filtered to request_status='pending') and refuses to START a round once
+        // the deadline is reached. The follower path re-fetches by call_id through
+        // getcrosschaincall, which serves the row whatever its lifecycle state, so
+        // without these two lines a round begun just before expiry finalizes after it:
+        // honest followers co-sign, the target executes the dispatch, and the source
+        // has meanwhile fired the terminal 'expired' callback for the same request.
+        // The deadline predicate is the leader's byte-for-byte, so a follower can only
+        // ever be as strict as the hub that proposed the round, never stricter.
+        if(call.deadline_block != null && Number(call.deadline_block) <= latest) return false;
+        if(call.request_status != null && String(call.request_status) !== 'pending') return false;
 
         return Number(call.action_index)           === Number(row.source_action_index) &&
                Number(call.source_contract_index)  === Number(row.source_contract_index) &&
@@ -703,6 +741,17 @@ class CrossChainCallEngine extends EventEmitter {
     // same contract as CrossChainDexEngine._persistCapabilitySnapshot).
     async _persistCapabilitySnapshot(capability, block, network){
         let validators = await this._resolveCapabilityValidators(capability, block, network);
+        // SWQ-TRUNC-MIRROR (): a TRUNCATED set is never mirrored, for the reason
+        // spelled out in CrossChainDexEngine._persistCapabilitySnapshot. Mirroring the
+        // capped rows would let the off-BTC cross_chain verifiers finalize over an
+        // under-counted stake denominator that this hub's own meetsStakeThreshold rejects.
+        // Keep the three engines' guards in lockstep.
+        if(validators && validators.truncated === true){
+            console.warn('CrossChainCall: refusing to persist a TRUNCATED ' + capability +
+                         ' capability snapshot at block ' + block +
+                         ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
+            return;
+        }
         for(let v of validators){
             let pubkey = String(v.pubkey).toLowerCase();
             let amount = String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0'));
@@ -844,11 +893,14 @@ class CrossChainCallEngine extends EventEmitter {
     // before any chain reaches the block it applies at, so a live node and a
     // replaying node always inject at the same block. Capped under the follower
     // clock-skew bound (RELAY_MARGIN_MAX_S) so a large XCALL_RELAY_MARGIN_BLOCKS
-    // can never produce a row a peer would reject.
+    // can never produce a row a peer would reject, and FLOORED at the default
+    // margin so XCALL_RELAY_MARGIN_BLOCKS=0 can no longer stamp the bare clock
+    // second and re-open the very race the margin exists to close (#4202). The
+    // operator tunes the margin up; the floor is not tunable, because followers
+    // enforce a fixed floor of their own and a hub stamping under it would never
+    // collect a quorum.
     _relayEffectiveTime(gatingChain){
-        let interval = NOMINAL_BLOCK_INTERVAL_S[gatingChain] || NOMINAL_BLOCK_INTERVAL_S.BTC;
-        let margin   = Math.min(this.relayMarginBlocks * interval, RELAY_MARGIN_MAX_S);
-        return this._nowSeconds() + margin;
+        return this._nowSeconds() + relayMarginS(gatingChain, this.relayMarginBlocks);
     }
 }
 

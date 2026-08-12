@@ -25,6 +25,7 @@ const EventEmitter     = require('events');
 const http             = require('http');
 const WebSocket        = require('ws');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
+const { positiveIntConfig } = require('./lib/config_int.js');
 
 class PeerManager extends EventEmitter {
 
@@ -67,8 +68,11 @@ class PeerManager extends EventEmitter {
         this.knownMsgRateLimit = parseInt(config.P2P_MSG_RATE_LIMIT_KNOWN) || Math.max(this.msgRateLimit * 20, 2000);
         this.peerMsgCounts  = new Map();
 
-        // Dedup cache size bound
-        this.dedupCacheMax  = parseInt(config.P2P_DEDUP_CACHE_MAX) || 100000;
+        // Dedup cache size bound; a non-positive value would evict the entry just
+        // inserted (), leaving the cache holding one id and gossip dedup
+        // effectively off, so re-broadcast loops amplify across the mesh.
+        this.dedupCacheMax  = positiveIntConfig(config.P2P_DEDUP_CACHE_MAX, 100000,
+            'P2P_DEDUP_CACHE_MAX');
 
         // Peer connections: Map<addr, { ws, state, lastSeen, reconnectDelay, reconnectTimer, inbound }>
         this.peers = new Map();

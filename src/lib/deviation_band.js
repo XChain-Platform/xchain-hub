@@ -27,7 +27,9 @@
  *      each of two sorted submissions {lo, hi} deviates from their mean
  *      m = (lo+hi)/2 by |hi-m|/m = (hi-lo)/(hi+lo), so the gate is expressed
  *      as `twoSourceSpreadExceeds` WITHOUT computing a rounded intermediate
- *      mean; the arithmetic is byte-identical to the pre-helper code
+ *      mean. Rounds at scale 18 like sites 2 and 3: the pre-helper code used
+ *      scale 8, which truncated a boundary spread back INSIDE the band the
+ *      other two gates already read as outside it ()
  *      (CONSENSUS-CRITICAL: deploy fleet-wide atomically).
  *   2. Co-sign admission gate (OracleConsensus._handlePropose): the
  *      follower's local aggregate measured against the PROPOSED price as

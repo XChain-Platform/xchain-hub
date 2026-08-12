@@ -274,6 +274,42 @@ describe('CrossChainEngine', function () {
             expect(result.attestation_id).to.equal('BTC:42:LTC');
         });
 
+        // . The id used to be built from the RAW argument while the guard
+        // parsed it, so every spelling parseInt accepts minted its own id: followers
+        // dropped 'BTC:1junk:LTC' on their canonical-id regex (_handlePropose) and the
+        // round timed out, and a single-node hub stored one row per spelling.
+        describe('attestationId canonicalization', function () {
+
+            const CANONICAL_ID = /^[A-Z]{2,6}:\d+:[A-Z]{2,6}$/;   // the follower's own gate
+
+            ['42', 42, '042', ' 42', '42junk', '42.9'].forEach((spelling) => {
+                it(`spelling ${JSON.stringify(spelling)} yields the canonical BTC:42:LTC`, async function () {
+                    engine.setValidatorSet([]);
+                    pm.getPeerStatus.returns([]);
+
+                    let result = await engine.requestAttestation('BTC', spelling, 'LTC');
+                    expect(result.attestationId).to.equal('BTC:42:LTC');
+                    expect(result.attestationId).to.match(CANONICAL_ID);
+                    expect(result.sourceActionIndex).to.equal(42);
+                });
+            });
+
+            it('two spellings of one index collapse onto a single finalized entry', async function () {
+                engine.setValidatorSet([]);
+                pm.getPeerStatus.returns([]);
+
+                await engine.requestAttestation('BTC', '7', 'LTC');
+                expect(engine.finalized.has('BTC:7:LTC')).to.be.true;
+                const size = engine.finalized.size;
+
+                // Previously '07' minted a second, distinct id for the same action.
+                hub.db.doQuery.resolves([{ attestation_id: 'BTC:7:LTC', status: 'attested' }]);
+                let again = await engine.requestAttestation('BTC', '07', 'LTC');
+                expect(again.attestation_id).to.equal('BTC:7:LTC');
+                expect(engine.finalized.size).to.equal(size);
+            });
+        });
+
         it('uses correct confirmation counts per chain', async function () {
             engine.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
@@ -397,6 +433,82 @@ describe('CrossChainEngine', function () {
             expect(emitted.status).to.equal('attested');
             expect(resolvedValue).to.not.be.null;
             expect(engine.finalized.has(attestationId)).to.be.true;
+        });
+
+        // : a transient DB failure used to delete the round outright, and
+        // both _handleCommit and _checkCommitQuorum return early once the round is
+        // gone, so the quorum proof was unrecoverable while peer hubs advanced.
+        describe('store failure on a quorum-finalized round', function () {
+
+            function quorateRound(attestationId, digest) {
+                return {
+                    attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
+                    destChain: 'LTC', confirmations: 3, digest,
+                    prepares: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr, VALIDATORS_4[2].addr]),
+                    commits: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr]),
+                    finalized: false, timer: null, _commitSent: true,
+                    resolve: null, reject: null
+                };
+            }
+
+            beforeEach(function () {
+                engine.storeRetryBaseMs = 1;
+            });
+
+            it('retries a transient failure and finalizes exactly once', async function () {
+                let attestationId = 'BTC:1:LTC';
+                let digest = engine._digest(attestationId, 3);
+                let emitted = [];
+                engine.on('attestation:finalized', (a) => emitted.push(a));
+
+                hub.db.doQuery.onCall(0).rejects(new Error('ER_LOCK_DEADLOCK'));
+                hub.db.doQuery.onCall(1).rejects(new Error('ER_LOCK_DEADLOCK'));
+                hub.db.doQuery.resolves([]);
+
+                engine.pendingAttestations.set(attestationId, quorateRound(attestationId, digest));
+                engine._handleCommit({ sender: VALIDATORS_4[2].addr, data: { attestationId, digest } });
+
+                await new Promise(r => setTimeout(r, 60));
+
+                expect(hub.db.doQuery.callCount).to.equal(3);
+                expect(emitted).to.have.lengthOf(1);
+                expect(engine.pendingAttestations.has(attestationId)).to.be.false;
+                expect(engine.finalized.has(attestationId)).to.be.true;
+            });
+
+            it('retains the round when every attempt fails, and a later COMMIT re-drives it', async function () {
+                let attestationId = 'BTC:2:LTC';
+                let digest = engine._digest(attestationId, 3);
+                let emitted = [];
+                engine.on('attestation:finalized', (a) => emitted.push(a));
+
+                hub.db.doQuery.rejects(new Error('ER_CON_COUNT_ERROR'));
+
+                engine.pendingAttestations.set(attestationId, quorateRound(attestationId, digest));
+                engine._handleCommit({ sender: VALIDATORS_4[2].addr, data: { attestationId, digest } });
+
+                await new Promise(r => setTimeout(r, 120));
+
+                // Round retained (not deleted) with the finalize flag reset, so the
+                // collected quorum proof survives the outage.
+                expect(hub.db.doQuery.callCount).to.equal(engine.storeRetryAttempts);
+                expect(emitted).to.have.lengthOf(0);
+                expect(engine.pendingAttestations.has(attestationId)).to.be.true;
+                expect(engine.pendingAttestations.get(attestationId).finalized).to.be.false;
+                expect(engine.finalized.has(attestationId)).to.be.false;
+
+                // DB recovers; a retransmitted COMMIT re-enters the quorum check.
+                hub.db.doQuery.resetBehavior();
+                hub.db.doQuery.resolves([]);
+                engine._handleCommit({ sender: VALIDATORS_4[3].addr, data: { attestationId, digest } });
+
+                await new Promise(r => setTimeout(r, 40));
+
+                expect(emitted).to.have.lengthOf(1);
+                expect(emitted[0].attestationId).to.equal(attestationId);
+                expect(engine.pendingAttestations.has(attestationId)).to.be.false;
+                expect(engine.finalized.has(attestationId)).to.be.true;
+            });
         });
 
         it('already-finalized attestation is ignored', function () {

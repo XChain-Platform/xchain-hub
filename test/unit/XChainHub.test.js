@@ -398,6 +398,18 @@ describe('XChainHub', function () {
             // A non-registry advisory pair (XCHAIN/USD) still resolves via the BTC fallback.
             expect(hub._oracleMaxAgeSeconds('XCHAIN/USD')).to.equal(pinned);
         });
+
+        // Item #4479: getoraclesubmissions publishes this bound as the scalar
+        // oracleMaxPriceAgeSeconds, so a cadence-derived health consumer cannot
+        // call a row fresh that getprice already rejects. The RPC calls it with
+        // NO pair, so that arity must resolve to the registry default rather
+        // than null, or the consumer's clamp silently no-ops.
+        it('resolves the representative scalar when called with no coin pair (#4479)', function () {
+            const coins = require('../../src/coins');
+            const pinned = Number(coins.getCoinConfig('BTC', 'mainnet').ORACLE_MAX_PRICE_AGE_SECONDS);
+            expect(hub._oracleMaxAgeSeconds()).to.equal(pinned);
+            expect(hub._oracleMaxAgeSeconds()).to.be.greaterThan(0);
+        });
     });
 
     // -----------------------------------------------------------------

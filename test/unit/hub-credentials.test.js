@@ -164,4 +164,43 @@ describe('resolveHubLlmAuth: credential resolution chain', function () {
         });
         expect(r.ok).to.equal(false);
     });
+
+    // : the gate accepted mere non-emptiness, so a dir holding only
+    // settings/logs/state - or one the operator logged out of - masked the valid
+    // downstream candidate. healthCheck then reported ready while paid calls
+    // spawned an unauthenticated CLI and mapped to provider_error.
+    it('falls through an uncredentialed but NON-EMPTY config dir to the API key', function () {
+        const dir = _tmpDir();
+        fs.writeFileSync(path.join(dir, 'settings.json'), '{}');
+        const r = resolveHubLlmAuth({
+            env: { HUB_CLAUDE_CONFIG_DIR: dir, ANTHROPIC_API_KEY: 'sk-ant-test' },
+            defaultConfigDir: hermeticDefaultDir
+        });
+        expect(r.ok).to.equal(true);
+        expect(r.transport).to.equal('anthropic_api');
+        expect(r.source).to.equal('api_key');
+    });
+
+    it('falls through an uncredentialed CLAUDE_CONFIG_DIR to the OAuth token', function () {
+        const dir = _tmpDir();
+        fs.mkdirSync(path.join(dir, 'logs'));
+        const r = resolveHubLlmAuth({
+            env: { CLAUDE_CONFIG_DIR: dir, CLAUDE_CODE_OAUTH_TOKEN: 'tok-xyz' },
+            defaultConfigDir: hermeticDefaultDir
+        });
+        expect(r.ok).to.equal(true);
+        expect(r.source).to.equal('cli_token');
+        expect(r.env.CLAUDE_CODE_OAUTH_TOKEN).to.equal('tok-xyz');
+    });
+
+    it('reports no credential when an uncredentialed dir is the only candidate', function () {
+        const dir = _tmpDir();
+        fs.writeFileSync(path.join(dir, 'settings.json'), '{}');
+        const r = resolveHubLlmAuth({
+            env: { HUB_CLAUDE_CONFIG_DIR: dir },
+            defaultConfigDir: hermeticDefaultDir
+        });
+        expect(r.ok).to.equal(false);
+        expect(r.reason).to.equal('no_credential_configured');
+    });
 });

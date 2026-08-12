@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- A durable broadcast intent survives a crash between an accepted anchor send and its `anchor_txid` stamp, so the next flush holds the checkpoint instead of paying a second DOGE fee ().
 - Governance bounds the absolute slash-deviation threshold, not just its rate of change, so a passing proposal cannot leave the hub refusing to boot ().
 - Timer-driven passes carry the in-flight guard its nine sibling loops already enforce ().
 - A governance default temperature is clamped to the vendor-accepted range instead of reaching the request body verbatim and drawing a 400 ().

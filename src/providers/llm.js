@@ -57,6 +57,8 @@
 
 const https = require('https');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { resolveLlmVendorAuth } = require('../lib/hub-credentials');
 const { runClaudePrint } = require('../lib/claude-spawn');
 
@@ -68,6 +70,80 @@ const { runClaudePrint } = require('../lib/claude-spawn');
 const MAX_JUDGE_CANDIDATE_CHARS = 4096;
 
 const _tokenUsage = { inputTokens: 0, outputTokens: 0, calls: 0 };
+
+// ---- Durable spend audit () -------------------------------------
+//
+// Every billed dispatch used to leave nothing on disk: usage accrued to the
+// in-memory _tokenUsage AFTER a successful response, and the claude_spawn
+// branch recorded nothing at all, so a crash mid-call erased every local trace
+// that a vendor charge had been initiated. This is the same append-only,
+// fsync'd audit AttestationPublisher._recordSpend (item 2681) keeps for BTC
+// fees, applied to the other money path: an `intent` line lands BEFORE the
+// vendor is dialed and a `settle` line after, so an intent with no settle is
+// exactly the operator's post-crash reconciliation list.
+//
+// Best-effort by design, and deliberately NOT fail-closed like the publisher's
+// WAL: an unwritable log there defers a broadcast that stays queued, whereas
+// refusing to dispatch here would turn an audit-sink fault into a federation-
+// wide provider_error, i.e. a wrong on-chain outcome. The write is still
+// ordered before the call, which is what the audit needs.
+const _spendLogPath = () =>
+    process.env.LLM_SPEND_LOG_PATH || './data/llm-spend.jsonl';
+
+function _appendSpendRecord(record) {
+    try {
+        fs.mkdirSync(path.dirname(_spendLogPath()), { recursive: true });
+        let fd = fs.openSync(_spendLogPath(), 'a');
+        try {
+            fs.writeSync(fd, JSON.stringify(record) + '\n');
+            fs.fsyncSync(fd);
+        } finally { fs.closeSync(fd); }
+    } catch (e) {
+        console.warn('llm: spend-audit write failed (' + _spendLogPath() + '); ' +
+                     'a crash during this call will leave no local record:', e && e.message ? e.message : e);
+    }
+}
+
+// Record the intent to spend, BEFORE dispatch. Returns the record (whose id
+// ties the settle to it), or null when the call cannot reach a vendor at all
+// (no credentials / unmapped model): those never bill, so they never enter the
+// reconciliation list.
+function _recordSpendIntent({ model, maxTokens, pinnedVendors }) {
+    let vendor, auth;
+    try {
+        vendor = vendorOfModel(model, pinnedVendors);
+        auth   = resolveLlmVendorAuth(vendor);
+    } catch (_) { return null; }
+    if (!auth || !auth.ok) return null;
+    let rec = {
+        id:        crypto.randomUUID(),
+        ts:        new Date().toISOString(),
+        phase:     'intent',
+        vendor:    vendor,
+        transport: auth.transport,
+        model:     String(model || ''),
+        maxTokens: Number.isFinite(Number(maxTokens)) ? Number(maxTokens) : null
+    };
+    _appendSpendRecord(rec);
+    return rec;
+}
+
+// Close an intent out. `usage` is the per-call collector the transport branch
+// filled (token counts, and the CLI's own total_cost_usd).
+function _recordSpendSettle(intent, status, usage, err) {
+    if (!intent) return;
+    _appendSpendRecord({
+        id:        intent.id,
+        ts:        new Date().toISOString(),
+        phase:     'settle',
+        vendor:    intent.vendor,
+        transport: intent.transport,
+        model:     intent.model,
+        status:    status,
+        usage:     (usage && Object.keys(usage).length) ? usage : null,
+        error:     err ? String(err.message || err).substring(0, 200) : undefined
+    });
+}
 
 // Provider-def-injected configuration. ProviderRegistry calls _setConfig
 // after loading the def from the configs table; these defaults are the
@@ -110,10 +186,44 @@ const FETCH_REASONING_TOKEN_HEADROOM = 2048;
 // temperature, and classifying it as reasoning would silently drop the
 // temperature-0 judge contract and over-grant reasoning headroom (item 3535).
 // Shared by the OpenAI transport gate and the judge-budget selection in agree().
+//
+// item 4465: the exclusion absorbs an optional `.N` version segment. `(?!-chat)`
+// only rejected a LITERAL `-chat` directly after `gpt-5`, so every versioned Chat
+// id (gpt-5.1-chat-latest, gpt-5.2-chat-latest, ...) cleared the lookahead and
+// classified as reasoning - the exact inversion item 3535 exists to prevent.
+// Versioned REASONING ids (gpt-5.1, gpt-5.1-mini) still classify as reasoning.
 function _isReasoningModel(model) {
-    return /^o[0-9]/.test(String(model)) || /^gpt-5(?!-chat)/.test(String(model));
+    return /^o[0-9]/.test(String(model)) || /^gpt-5(?!(?:\.\d+)?-chat)/.test(String(model));
 }
 exports._isReasoningModel = _isReasoningModel;
+
+// True for Anthropic models whose Messages API contract REMOVED the sampling
+// parameters: temperature, top_p and top_k are rejected with an HTTP 400 rather
+// than accepted-and-ignored. Depth on these models is governed by the effort /
+// adaptive-thinking controls instead, so there is no temperature to send at all.
+//
+// : the anthropic_api branch emitted `temperature` unconditionally while
+// claude-opus-4-7 sits in the DEFAULT approved_models ladder, so every fetch that
+// escalated to the fallback - and every Opus-4.7 judge call, which is pinned at
+// temperature 0 - was a deterministic vendor 400 mapped to provider_error.
+// Omitting the field is not a determinism regression: the parameter does not
+// exist on these models, so the temperature-0 contract was never reachable there.
+//
+// Deliberately an exact-id list, not a version-range regex. Membership is a vendor
+// fact per model id, an unrecognised id keeps today's send-temperature behavior,
+// and an id admitted here in error would silently drop the temperature-0 contract
+// from a model that does honor it. Entries match the bare id or a dated snapshot
+// of it (claude-opus-4-7-20260101). Contract reference: the claude-api knowledge
+// pack, "Thinking & Effort" and shared/error-codes.md model-specific 400s.
+const ANTHROPIC_NO_SAMPLING_MODELS = [
+    'claude-opus-4-7', 'claude-opus-4-8', 'claude-opus-5',
+    'claude-sonnet-5', 'claude-fable-5', 'claude-mythos-5', 'claude-mythos-preview'
+];
+function _anthropicRejectsSampling(model) {
+    let m = String(model || '');
+    return ANTHROPIC_NO_SAMPLING_MODELS.some(id => m === id || m.startsWith(id + '-'));
+}
+exports._anthropicRejectsSampling = _anthropicRejectsSampling;
 
 // item 2680 - operator kill switch for this paid provider. The only pre-existing
 // lever was failing healthCheck (which the hub penalizes: the validator is still
@@ -141,23 +251,44 @@ exports._llmEnabled = _llmEnabled;
 // Test seam for the #3070 meta gate. The corroboration half only runs on the
 // judge-winner return, which needs a live judge transport to reach, so the suite
 // exercises the same function directly rather than mocking a vendor.
-exports._canonicalMetaForTest = (proposals, idx, outcome) =>
-    _canonicalMeta(proposals, idx, { outcome: outcome || {} });
+// `pinnedApprovedModels` is the round's block-anchored allowlist ();
+// omit it to exercise the live-module-global fallback the seam has always used.
+exports._canonicalMetaForTest = (proposals, idx, outcome, pinnedApprovedModels) =>
+    _canonicalMeta(proposals, idx, {
+        outcome: outcome || {},
+        pinnedApprovedModels: pinnedApprovedModels || null
+    });
 
 // item 2679 - per-call spend ceiling for the claude_spawn transport. The callee
 // (lib/claude-spawn.js) fully plumbs --max-budget-usd but no caller ever supplied
 // it, so the guard was dead. Resolve a positive number from env or governance;
-// anything unset / non-numeric / non-positive means "no budget" (unchanged today).
 //   - LLM_MAX_BUDGET_USD (env)          : operator-local per-call cap
 //   - additional_config.max_budget_usd  : governance per-call cap
+//   - DEFAULT_MAX_BUDGET_USD            : built-in fail-safe floor
 // Env wins when both are set and positive.
+//
+//  - the resolver used to return undefined at the end, and the
+// claude_spawn branch omits the flag for an undefined budget, so an operator who
+// configured nothing ran every paid CLI invocation with NO ceiling at all. This
+// is the one transport with no other bound: the two HTTP branches pass an
+// explicit max_tokens / max_completion_tokens, while the CLI exposes no token
+// cap, so --max-budget-usd is the only thing standing between a pathological
+// payload and unbounded spend. Defaulting it on is fail-safe in the direction
+// every other effector gate here already leans (spend_guard's USD budget is
+// likewise default-ON rather than default-disabled).
+const DEFAULT_MAX_BUDGET_USD = 5;
 let MAX_BUDGET_USD_CONFIG = null;   // governance additional_config.max_budget_usd
 function _resolveMaxBudgetUsd() {
     let envVal = parseFloat(process.env.LLM_MAX_BUDGET_USD);
     if (Number.isFinite(envVal) && envVal > 0) return envVal;
     if (Number.isFinite(MAX_BUDGET_USD_CONFIG) && MAX_BUDGET_USD_CONFIG > 0) return MAX_BUDGET_USD_CONFIG;
-    return undefined;
+    // Sized so it cannot cut off legitimate work: one attestation call is a
+    // single --print turn with tools disabled, bounded by fetchTimeoutMs (10s
+    // stock, 60s ceiling in _runLlm), which is orders of magnitude under $5. It
+    // bounds the runaway shape instead, and env/governance can widen it.
+    return DEFAULT_MAX_BUDGET_USD;
 }
+exports._DEFAULT_MAX_BUDGET_USD = DEFAULT_MAX_BUDGET_USD;
 exports._resolveMaxBudgetUsd = _resolveMaxBudgetUsd;
 
 // Map a model id to its vendor. A BLOCK-ANCHORED per-call map wins, then the
@@ -197,7 +328,23 @@ exports._setConfig = (def) => {
         MODEL_VENDORS = { ...ac.model_vendors };
     if (typeof ac.require_all_vendors === 'boolean')
         REQUIRE_ALL_VENDORS = ac.require_all_vendors;
-    if (Number(ac.max_completion_tokens))  MAX_TOKENS_DEFAULT  = Number(ac.max_completion_tokens);
+    //  - validate before installing. A bare truthy check admitted -1, 1.5
+    // and Infinity as the federation-wide token budget: the clamp in fetch() is a
+    // min() against this same value so a negative survives it, chat/Anthropic then
+    // send it verbatim for a deterministic vendor 400, and the reasoning path's
+    // +FETCH_REASONING_TOKEN_HEADROOM flips it positive into a silently wrong
+    // budget instead. Same positive-integer rule the per-request envelope.max_tokens
+    // boundary already enforces (item 3890); warn-and-keep rather than throw, so one
+    // bad key holds the prior default instead of aborting the whole config install,
+    // matching the sibling default_temperature handling directly below.
+    if (ac.max_completion_tokens !== undefined) {
+        let mt = Number(ac.max_completion_tokens);
+        if (Number.isInteger(mt) && mt > 0)
+            MAX_TOKENS_DEFAULT = mt;
+        else
+            console.warn('llm: ignoring additional_config.max_completion_tokens ' + ac.max_completion_tokens +
+                ' (must be a positive integer); keeping ' + MAX_TOKENS_DEFAULT);
+    }
     // Range-check the governance default against the cross-vendor intersection. This one
     // value serves EVERY vendor and every fetch that omits envelope.temperature,
     // and Anthropic's Messages API rejects anything outside [0, 1] with a 400, so
@@ -402,15 +549,27 @@ function _markInconclusive(options, reason){
 //      inconclusive rather than recording a claim the federation cannot support.
 const META_MIN_CORROBORATION = 2;
 
-// The approved identifiers, resolved at call time so a governance hotReload of
-// approved_models is reflected. Judge fallbacks are deliberately NOT unioned in:
+// The approved identifiers. Judge fallbacks are deliberately NOT unioned in:
 // a proposal's meta is only ever the FETCH model (fetch() returns `meta: model`,
 // pinned off the block-anchored approved_models ladder), while the judge chain
 // picks who EVALUATES bodies and never serves a fetch. Admitting a judge-fallback
 // id would widen the allowlist by values no honest proposal can carry, which is
 // exactly what gate 1 exists to refuse.
-function _approvedMetaSet(){
-    return new Set(APPROVED_MODELS.filter(m => typeof m === 'string' && m));
+//
+// : prefer options.pinnedApprovedModels, the SAME block-anchored
+// approved_models list AttestationRound resolved at the request's block to pin
+// the fetch model. Reading the live module-global instead left gate 1 unanchored
+// while the value it judges is anchored: a governance hotReload that DELISTS the
+// pinned model makes every honestly-served meta unrecognized, so the round maps
+// to no_quorum, and because each retry re-resolves the same block-anchored model
+// the request can never finalize and expires despite successful provider calls.
+// Same anchoring rationale as pinnedModel/pinnedJudgeModel/pinnedVendors; the
+// live set remains the fallback for callers that pin nothing (the test seam and
+// any non-round caller).
+function _approvedMetaSet(options){
+    const pinned = options && options.pinnedApprovedModels;
+    const source = (Array.isArray(pinned) && pinned.length > 0) ? pinned : APPROVED_MODELS;
+    return new Set(source.filter(m => typeof m === 'string' && m));
 }
 
 // Validate the winning proposal's meta. Returns the value to canonicalize, or
@@ -424,7 +583,7 @@ function _canonicalMeta(proposals, idx, options){
         _markInconclusive(options, 'meta_unrecognized');
         return null;
     }
-    if (!_approvedMetaSet().has(raw)){
+    if (!_approvedMetaSet(options).has(raw)){
         console.warn('llm: winning proposal meta "' + raw + '" is not an approved model identifier; ' +
             'failing closed rather than canonicalizing an unvouched value on-chain (#3070)');
         _markInconclusive(options, 'meta_unrecognized');
@@ -693,7 +852,27 @@ exports.healthCheck = async (ctx) => {
 
 // Pick the model's vendor + configured transport and execute the LLM call.
 // Returns the response text (string). Throws on transport-level failure.
-async function _runLlm({ prompt, system, model, maxTokens, temperature, format, timeoutMs, pinnedVendors }) {
+//
+//  - the durable spend audit wraps the dispatch rather than living
+// inside it: one intent record before ANY of the three billed transports is
+// dialed, one settle record on every exit, including the throwing ones (a
+// refusal or a truncation is a REACHED vendor, so it was still billed).
+async function _runLlm(opts) {
+    const intent = _recordSpendIntent(opts || {});
+    // Per-call collector; a module-level one would cross-talk between the
+    // concurrent rounds AttestationRound can have in flight at once.
+    const usage  = {};
+    try {
+        const text = await _runLlmDispatch({ ...opts, _usage: usage });
+        _recordSpendSettle(intent, 'ok', usage, null);
+        return text;
+    } catch (e) {
+        _recordSpendSettle(intent, 'error', usage, e);
+        throw e;
+    }
+}
+
+async function _runLlmDispatch({ prompt, system, model, maxTokens, temperature, format, timeoutMs, pinnedVendors, _usage }) {
     const vendor = vendorOfModel(model, pinnedVendors);
     const auth   = resolveLlmVendorAuth(vendor);
     if (!auth.ok) throw new Error('llm: ' + (auth.detail || auth.reason || 'no credentials'));
@@ -745,6 +924,9 @@ async function _runLlm({ prompt, system, model, maxTokens, temperature, format, 
         const isReasoningModel = _isReasoningModel(model);
         if (!isReasoningModel && typeof temperature === 'number') reqBody.temperature = temperature;
         const result = await _callOpenAi('/v1/chat/completions', reqBody, auth.apiKey, { timeoutMs });
+        // : the vendor is billed from here on, whichever branch below
+        // throws, so the settle record carries this call's real usage.
+        if (_usage && result && result.usage) _usage.tokens = result.usage;
         let choice = Array.isArray(result.choices) ? result.choices[0] : null;
         // A model refusal (choice.message.refusal populated, content null) or a
         // content_filter stop is a MODEL-level outcome, not a transport failure.
@@ -765,15 +947,21 @@ async function _runLlm({ prompt, system, model, maxTokens, temperature, format, 
             throw err;
         }
         let text   = (msg && typeof msg.content === 'string') ? msg.content : '';
-        // A 'length' stop with empty content is a budget-exhaustion outcome (for
-        // reasoning models, the max_completion_tokens cap was consumed by internal
-        // reasoning before any verdict was emitted). Surface it as a distinct
-        // classified error rather than returning an empty string, which is
-        // indistinguishable from a genuine empty verdict and silently maps to
-        // no_quorum. transient=false so the judge chain does not re-ask a
-        // different model for what is a reached-judge outcome.
-        if (choice && choice.finish_reason === 'length' && text.length === 0) {
-            let err = new Error('llm: OpenAI response truncated (finish_reason=length) with empty content; max_completion_tokens too low');
+        // A 'length' stop is a budget-exhaustion outcome (for reasoning models, the
+        // max_completion_tokens cap was consumed by internal reasoning before the
+        // verdict was emitted). Classify it distinctly (kind='truncation',
+        // transient=false) rather than returning the text, so the judge chain does
+        // not re-ask a different model for what is a reached-judge outcome.
+        //
+        // item 4467: this guard used to also require text.length===0, which failed
+        // OPEN on the case that matters. A 'length' stop means the response is
+        // INCOMPLETE whether or not bytes were emitted, and a partial one reaches the
+        // hub's two highest-integrity paths: fetch() signs it as the on-chain
+        // attestation answer, and agree() can read a coincidentally-parseable partial
+        // JSON object as a finalized verdict. Emitted length is not evidence against
+        // truncation, so a partial is never salvaged.
+        if (choice && choice.finish_reason === 'length') {
+            let err = new Error('llm: OpenAI response truncated (finish_reason=length); max_completion_tokens too low');
             err.kind = 'truncation';
             err.transient = false;
             throw err;
@@ -786,7 +974,8 @@ async function _runLlm({ prompt, system, model, maxTokens, temperature, format, 
         // redundancy>=3's judge_model step is what converges spreads.
         // item 2679: thread the resolved per-call budget so --max-budget-usd is
         // actually emitted (claude-spawn.js only appends the flag for a positive
-        // number, so an undefined budget preserves today's uncapped behavior).
+        // number). : the resolver now always yields one, so this
+        // transport is capped unless env/governance widens it.
         const budget = _resolveMaxBudgetUsd();
         const spawnOpts = {
             prompt,
@@ -795,7 +984,21 @@ async function _runLlm({ prompt, system, model, maxTokens, temperature, format, 
             timeoutMs:    timeoutMs || 60000
         };
         if (budget !== undefined) spawnOpts.maxBudgetUsd = budget;
-        const { result } = await runClaudePrint(spawnOpts);
+        const { result, json } = await runClaudePrint(spawnOpts);
+        // : this branch used to drop `json` and record nothing, so
+        // subscription spend was the one billed path with no accounting at all.
+        // `claude --print --output-format json` returns total_cost_usd + usage.
+        if (json) {
+            if (_usage) {
+                if (Number.isFinite(Number(json.total_cost_usd))) _usage.costUsd = Number(json.total_cost_usd);
+                if (json.usage) _usage.tokens = json.usage;
+            }
+            if (json.usage) {
+                _tokenUsage.inputTokens  += json.usage.input_tokens  ?? 0;
+                _tokenUsage.outputTokens += json.usage.output_tokens ?? 0;
+            }
+            _tokenUsage.calls += 1;
+        }
         return result;
     }
 
@@ -814,11 +1017,17 @@ async function _runLlm({ prompt, system, model, maxTokens, temperature, format, 
         const reqBody = {
             model,
             max_tokens:  maxTokens,
-            temperature: anthropicTemperature,
             messages:    [{ role: 'user', content: prompt }]
         };
+        // : omit the field entirely for the model families that removed it
+        // (400, not accepted-and-ignored). Mirrors the OpenAI branch's reasoning-model
+        // gate above; every other Anthropic model keeps the clamped explicit value, so
+        // the temperature-0 contract is unchanged wherever it is actually reachable.
+        if (!_anthropicRejectsSampling(model)) reqBody.temperature = anthropicTemperature;
         if (sys) reqBody.system = sys;
         const result = await _callAnthropic('/v1/messages', reqBody, auth.apiKey, { timeoutMs });
+        // : billed from here on, whichever branch below throws.
+        if (_usage && result && result.usage) _usage.tokens = result.usage;
         // A Claude-family refusal stop (stop_reason: "refusal") is a MODEL-level
         // outcome, not a transport failure. Surface it with the same distinct
         // kind='refusal' error the OpenAI path raises so the outcome is recorded
@@ -836,14 +1045,21 @@ async function _runLlm({ prompt, system, model, maxTokens, temperature, format, 
                 if (c.type === 'text' && typeof c.text === 'string') text += c.text;
             }
         }
-        // Anthropic's budget-exhaustion signal is stop_reason='max_tokens', the
-        // counterpart to OpenAI's finish_reason='length'. With no text emitted
-        // this is the same reached-model truncation outcome; classify it distinctly
-        // (kind='truncation', transient=false) rather than returning an empty
-        // string that is indistinguishable from a genuine empty verdict, keeping
-        // per-vendor outcome classification symmetric.
-        if (result && result.stop_reason === 'max_tokens' && text.length === 0) {
-            let err = new Error('llm: Anthropic response truncated (stop_reason=max_tokens) with empty content; max_tokens too low');
+        // Anthropic's truncation stops are the counterpart to OpenAI's
+        // finish_reason='length': 'max_tokens' is the per-response output cap, and
+        // 'model_context_window_exceeded' is the distinct context-window limit the
+        // Claude 4.5+ contract added. Both mean the response is incomplete; classify
+        // them the same way (kind='truncation', transient=false) so per-vendor
+        // outcome classification stays symmetric.
+        //
+        // item 4467: the max_tokens guard used to also require text.length===0 and
+        // model_context_window_exceeded was not handled at all, so both fell through
+        // as complete answers. See the OpenAI branch above for why emitted length is
+        // not evidence against truncation on a path that signs its result on-chain.
+        if (result && (result.stop_reason === 'max_tokens' ||
+                       result.stop_reason === 'model_context_window_exceeded')) {
+            let err = new Error('llm: Anthropic response truncated (stop_reason=' +
+                String(result.stop_reason) + '); max_tokens or context window too low');
             err.kind = 'truncation';
             err.transient = false;
             throw err;

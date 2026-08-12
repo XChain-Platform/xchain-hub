@@ -26,13 +26,17 @@
 //         follower co-signs, and recovery (which rebuilds each set FROM the archived
 //         rows) then rejects the anchor for good.
 //
-//   #4180 (partial) _handleFinalized back-filled rows as archived with no on-chain
-//         check at all, so an elected leader could announce real rows at their true
-//         terminal statuses with a NULL txid and suppress them from every future
-//         archive round. An honest publish marks every row '__partial__' when the
+//   #4180 _handleFinalized back-filled rows as archived with no on-chain check at
+//         all, so an elected leader could announce real rows at their true terminal
+//         statuses and suppress them from every future archive round. Closed in two
+//         halves. NULL txid: an honest publish marks every row '__partial__' when the
 //         broadcast returned no txid, so that shape is unproducible honestly and is
-//         now refused. The fabricated-txid half stays open (see the comment at the
-//         guard: it needs the V0_DONE-style defer-and-re-verify queue).
+//         refused outright. FABRICATED txid: the announced archive HEAD must be on
+//         DOGE at depth before the suppressing column is written, and because the
+//         announcement rides at 0 confirmations the back-fill splits - the seq stamps
+//         now under the '__partial__' sentinel (which keeps the rows eligible) and the
+//         announced statuses + txid stamp later, from the same V0_DONE-style
+//         defer-and-re-verify queue.
 
 const { expect }           = require('chai');
 const StateAnchorPublisher = require('../../src/StateAnchorPublisher');
@@ -176,27 +180,36 @@ describe('StateAnchorPublisher #4185 archive must carry every expected snapshot 
     });
 });
 
-describe('StateAnchorPublisher #4180 a null-txid FINALIZED may not stamp terminal rows', () => {
+describe('StateAnchorPublisher #4180 a FINALIZED may not stamp terminal rows unverified', () => {
+
+    const TXID = 'd'.repeat(64);
 
     // An authenticated FINALIZED from an observed elected leader. Everything the
     // guard is NOT about (membership, signature, observed-leader, content re-check)
-    // is satisfied, so only the txid/status combination decides the outcome.
-    function finalized(txid, status) {
+    // is satisfied, so only the txid/status combination and the on-chain verdict
+    // decide the outcome. `onChain` is what the archive-head check answers with.
+    function finalized(txid, status, onChain) {
         let { pub } = buildPub({});
         let leader  = new ValidatorIdentity('22'.repeat(32));
         let sender  = leader.getPubkeyHex().toLowerCase();
         let matches = [{ match_id: MATCH_ROW.match_id, status: status }];
         let stamped = [];
+        let asked   = [];
 
         pub._getActiveOraclePublishPubkeys = async () => [sender];
         pub._isObservedArchiveLeader       = () => true;
         pub._verifyFinalizedAgainstLocal   = async () => true;   // statuses genuinely match our rows
         pub._backfillBatch                 = async (...a) => { stamped.push(a); };
+        pub._recordReward                  = async () => {};     // reward rail is #4180-adjacent, not the subject
+        pub._verifyArchiveCheckpointOnChain = async (seq, tx, expect) => {
+            asked.push({ seq: seq, txid: tx, expect: expect });
+            return onChain === undefined ? 'verified' : onChain;
+        };
 
         let d = { batch_seq: 7, txid: txid, matches: matches, calls: [], rewards: [],
                   snapshot_block: BLOCK, sig_pubkey: sender };
         d.sig = leader.sign(pub._finalizedCanonical(7, txid, matches.length));
-        return { pub, envelope: { data: d }, stamped };
+        return { pub, envelope: { data: d }, stamped, asked, sender };
     }
 
     it('REFUSES a null-txid FINALIZED announcing terminal statuses (permanent suppression)', async () => {
@@ -212,9 +225,56 @@ describe('StateAnchorPublisher #4180 a null-txid FINALIZED may not stamp termina
         expect(stamped[0][2], 'no txid is stamped').to.equal(null);
     });
 
-    it('still back-fills terminal statuses when a txid IS announced (unchanged path)', async () => {
-        let { pub, envelope, stamped } = finalized('d'.repeat(64), 'settled');
+    it('back-fills terminal statuses once the archive head is CONFIRMED on DOGE', async () => {
+        let { pub, envelope, stamped, asked } = finalized(TXID, 'settled', 'verified');
         await pub._handleFinalized(envelope);
         expect(stamped.length).to.equal(1);
+        expect(stamped[0][1][0].status, 'the announced terminal status lands').to.equal('settled');
+        expect(stamped[0][2], 'the confirmed txid is stamped').to.equal(TXID);
+        expect(asked[0].expect.rejectVersions, 'the head is checked against the SET {1,6}, not exact v1')
+            .to.deep.equal([0, 2, 3, 4, 5]);
+    });
+
+    it('stamps ONLY the sentinel seq while the head is unconfirmed, and queues the rest', async () => {
+        // The fabricated-txid attack and an honest 0-conf announcement are the same
+        // bytes on the wire, so neither may write archived_status = status here.
+        let { pub, envelope, stamped } = finalized(TXID, 'settled', 'absent');
+        await pub._handleFinalized(envelope);
+        expect(stamped.length, 'the seq still advances fleet-wide').to.equal(1);
+        expect(stamped[0][1][0].status, 'the suppressing status is NOT written').to.equal('__partial__');
+        expect(stamped[0][2], 'no txid is stamped from an unconfirmed head').to.equal(null);
+        expect(stamped[0][4], 'reward rows are never staged (their only pending test is batch_seq IS NULL)')
+            .to.deep.equal([]);
+        expect(pub._deferredFinalized.size, 'queued for re-verification').to.equal(1);
+    });
+
+    it('stamps NOTHING and queues nothing when the head is positively rejected on-chain', async () => {
+        let { pub, envelope, stamped } = finalized(TXID, 'settled', 'rejected:txid');
+        await pub._handleFinalized(envelope);
+        expect(stamped.length).to.equal(0);
+        expect(pub._deferredFinalized.size).to.equal(0);
+    });
+
+    it('the drain stamps the queued announcement once the head buries', async () => {
+        let { pub, envelope, stamped } = finalized(TXID, 'settled', 'absent');
+        await pub._handleFinalized(envelope);
+        expect(stamped.length).to.equal(1);                       // sentinel only
+
+        let onChain = 'verified';
+        pub._verifyArchiveCheckpointOnChain = async () => onChain;
+        await pub._drainDeferredFinalized();
+        expect(stamped.length, 'the confirmed stamp lands from the drain').to.equal(2);
+        expect(stamped[1][1][0].status).to.equal('settled');
+        expect(stamped[1][2]).to.equal(TXID);
+        expect(pub._deferredFinalized.size, 'entry is consumed').to.equal(0);
+    });
+
+    it('the drain drops a queued announcement the chain later REJECTS', async () => {
+        let { pub, envelope, stamped } = finalized(TXID, 'settled', 'absent');
+        await pub._handleFinalized(envelope);
+        pub._verifyArchiveCheckpointOnChain = async () => 'rejected:txid';
+        await pub._drainDeferredFinalized();
+        expect(stamped.length, 'no terminal stamp ever lands').to.equal(1);
+        expect(pub._deferredFinalized.size).to.equal(0);
     });
 });

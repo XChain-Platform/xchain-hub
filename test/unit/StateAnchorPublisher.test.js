@@ -18,6 +18,8 @@
 const { expect }            = require('chai');
 const zlib                  = require('zlib');
 const crypto                = require('crypto');
+const os                    = require('os');
+const path                  = require('path');
 const StateAnchorPublisher  = require('../../src/StateAnchorPublisher');
 const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
 const ValidatorIdentity     = require('../../src/ValidatorIdentity');
@@ -242,6 +244,12 @@ describe('StateAnchorPublisher', function () {
     function buildMesh(n, opts) {
         opts = opts || {};
         let bus = { nodes: [], onchain: [] };   // onchain = mined checkpoint anchors ( existence gate)
+        // txid -> the ANCHOR version that txid really carries on-chain. A receiver asking
+        // for no EXACT version (the #4180 archive-head gate sends a version SET, and
+        // rejectVersions is a client-side check the indexer never sees) must get the real
+        // version back. Filled automatically for anything broadcast on the mesh; a test
+        // that names a synthetic archive txid declares it here.
+        bus.anchorVersions = new Map();
         // Network stamped on the checkpoint/match/call rows. Defaults to CP_ROW's
         // regtest.  routes the archive/attestation quorum gates through the
         // RECORD's network (matching the indexer), and regtest activates
@@ -330,6 +338,13 @@ describe('StateAnchorPublisher', function () {
             };
             self.db  = db;
             self.pub = new StateAnchorPublisher(hub);
+            // start() arms the spend guard's durable window (), so point it
+            // at a per-node temp file the way this suite already points queuePath and
+            // walPath. Left on its ./data default, every mesh node in every run wrote
+            // into the checkout and the NEXT run inherited the spends, which reddens
+            // this file once an hour of runs adds up to the window budget.
+            self.pub.spendGuard.statePath = path.join(
+                os.tmpdir(), 'anchor-spend-' + process.pid + '-' + Math.floor(Math.random() * 1e9) + '.json');
             // Default on-chain ANCHOR oracle: answer getanchoraction from this
             // node's own checkpoint rows so the honest receiver path (V0_DONE /
             // FINALIZED for a checkpoint we actually hold) verifies at full depth.
@@ -362,7 +377,9 @@ describe('StateAnchorPublisher', function () {
                 if (!r) return { exists: false, checkpoint_anchored: false, confirmations: 0 };
                 return {
                     exists: true, checkpoint_anchored: true, status: 'valid',
-                    version: (params.version != null) ? Number(params.version) : 0,
+                    version: (params.version != null) ? Number(params.version)
+                             : (params.txid != null && bus.anchorVersions.has(String(params.txid))
+                                ? Number(bus.anchorVersions.get(String(params.txid))) : 0),
                     txid: params.txid || 'onchain-txid',
                     confirmations: self.pub.dogeConfirmations,
                     block_hash: r.block_hash, ledger_hash: r.ledger_hash,
@@ -378,6 +395,11 @@ describe('StateAnchorPublisher', function () {
                 if (f[0] === 'ANCHOR' && ['0', '3', '4', '5'].includes(f[1])) {
                     bus.onchain.push({ chain: f[2], network: f[3], block_index: Number(f[4]) });
                 }
+                // Record what version this txid actually is, so a version-SET lookup
+                // (the #4180 archive-head gate) gets the truth rather than a default.
+                // v2 continuation chunks are excluded: they are not an anchor HEAD.
+                if (f[0] === 'ANCHOR' && f[1] !== '2')
+                    bus.anchorVersions.set('txid' + self.published.length, Number(f[1]));
                 return { txid: 'txid' + self.published.length };
             });
             bus.nodes.push(self);
@@ -1724,6 +1746,7 @@ describe('StateAnchorPublisher', function () {
         let follower = bus.nodes[0];
         let leader   = bus.nodes[1];          // signature-verified sender; both are oracle_publish validators
         let txid = 'dogetx_partialtest', snap = 100;
+        bus.anchorVersions.set(txid, 1);      // the announced head really is a v1 archive on-chain (#4180 gate)
 
         // This test drives _handleFinalized directly (bypassing the SIGN_REQ round
         // that normally binds the elected leader), so seed the observed-leader
@@ -1766,6 +1789,7 @@ describe('StateAnchorPublisher', function () {
         let follower = bus.nodes[0];
         let attacker = bus.nodes[1];        // a real oracle_publish member, but no observed archive election for seq 7
         let txid = 'dogetx_forged', snap = 100;
+        bus.anchorVersions.set(txid, 1);      // a real v1 archive head, so ONLY the observed-leader gate decides
         let fMatches = [matchRow('m1', 'finalized')];
         let env = () => ({ data: {
             batch_seq: 7, txid: txid, snapshot_block: snap, matches: fMatches, calls: [], rewards: [],
@@ -1825,6 +1849,7 @@ describe('StateAnchorPublisher', function () {
         let follower = bus.nodes[0];
         let leader   = bus.nodes[1];
         expect(follower.pub.network).to.equal('');              // unscoped hub: the drift precondition
+        bus.anchorVersions.set('dogetx_scoped', 1);             // real v1 head, so the flag-day gate is what decides
         // Observe the leader AND stash the batch's checkpoint identity (regtest), the
         // same way _handleSignReq would. The checkpoint verifies on-chain via the
         // default honest oracle, so the ONLY thing keeping the mirror from firing is
@@ -2119,19 +2144,58 @@ describe('StateAnchorPublisher', function () {
             total_chunks: 1, sig_pubkey: leader.pubkey, sig: 'deadbeef'
         }});
 
-        // (1) EXCLUDED: election set ≤1 (skips the rank ladder); snapshot_block set omits the follower
-        // → bail at the membership gate, never builds the archive canonical.
+        // The election set must RESOLVE for either case to reach the membership gate at
+        // all (#4184 made an empty election set fail closed), so the leader is the sole
+        // elected publisher at election_block and ranks 0 on the ladder. Only the
+        // snapshot_block set differs between the two cases.
+        // (1) EXCLUDED: snapshot_block set omits the follower → bail at the membership
+        // gate, never builds the archive canonical.
         follower.pub._getActiveOraclePublishPubkeys = async (blk) =>
-            (Number(blk) === Number(cp.snapshot_block)) ? [leader.pubkey] : [];
+            (Number(blk) === Number(cp.snapshot_block)) ? [leader.pubkey] : [leader.pubkey];
         await follower.pub._handleSignReq(mkReq());
         expect(canonCalls, 'excluded follower stops before the archive canonical').to.equal(0);
 
         // (2) CONTROL - INCLUDED in the snapshot_block set → proceeds to build the canonical (then the
         // bogus sig fails verification harmlessly). Proves the membership gate is what stops case (1).
         follower.pub._getActiveOraclePublishPubkeys = async (blk) =>
-            (Number(blk) === Number(cp.snapshot_block)) ? [leader.pubkey, follower.pubkey] : [];
+            (Number(blk) === Number(cp.snapshot_block)) ? [leader.pubkey, follower.pubkey] : [leader.pubkey];
         await follower.pub._handleSignReq(mkReq());
         expect(canonCalls, 'included follower builds the archive canonical').to.equal(1);
+    });
+
+    it('_handleSignReq: an UNRESOLVED election set fails closed instead of skipping the ladder (#4184)', async function () {
+        // The leader path already defers on an empty oracle_publish election set; the
+        // follower fell through it, so during an unresolved window a NON-MEMBER could
+        // solicit co-signatures from the historical wrapper set and assemble a duplicate
+        // v1 under a batch_seq of its own choosing (honest content, doubled DOGE, two
+        // archives able to claim one seq).
+        let bus = buildMesh(2, { btcBlock: 500 });
+        let follower = bus.nodes[0];
+        let outsider = new ValidatorIdentity('99'.repeat(32)).getPubkeyHex().toLowerCase();
+        let cp = Object.assign({}, CP_ROW);                       // snapshot_block = 100
+
+        let canonCalls = 0;
+        let origCanon = follower.pub._archiveCanonical.bind(follower.pub);
+        follower.pub._archiveCanonical = (...a) => { canonCalls++; return origCanon(...a); };
+
+        let mkReq = () => ({ data: {
+            checkpoint: cp, election_block: 500, batch_seq: 0, match_count: 1, batch_crc32: '0',
+            total_chunks: 1, sig_pubkey: outsider, sig: 'deadbeef'
+        }});
+
+        // (1) Election set UNRESOLVED while this follower IS in the snapshot_block signing
+        // set - the exact combination the old fall-through admitted.
+        follower.pub._getActiveOraclePublishPubkeys = async (blk) =>
+            (Number(blk) === Number(cp.snapshot_block)) ? [follower.pubkey] : [];
+        await follower.pub._handleSignReq(mkReq());
+        expect(canonCalls, 'an unresolved election set may not reach the co-sign path').to.equal(0);
+
+        // (2) CONTROL - the SAME request with a resolved election set naming the sender
+        // (rank 0) proceeds to the canonical, proving the empty-set gate stopped (1).
+        follower.pub._getActiveOraclePublishPubkeys = async (blk) =>
+            (Number(blk) === Number(cp.snapshot_block)) ? [follower.pubkey] : [outsider];
+        await follower.pub._handleSignReq(mkReq());
+        expect(canonCalls, 'a resolved election set naming the sender still co-signs').to.equal(1);
     });
 
     // XANC-V0DONE partial: the peer back-fill UPDATE now keys on checkpoint_seq, exactly like
@@ -2674,5 +2738,158 @@ describe('StateAnchorPublisher._recordRewardAttestation ', function () {
         const { pub, queries } = makePub();
         await pub._recordRewardAttestation('BTC', 'regtest', 'anchor_BTC', 5, 0, 'ab'.repeat(32), []);
         expect(queries.length).to.equal(0);
+    });
+});
+
+// ── : the attestation row waits for a MINED anchor, not a broadcast one ────
+// _broadcastWithRetry returns on DOGE mempool acceptance, so writing the append-only,
+// never-retracted mirror row there minted a permanent COLLECT-spendable reward for an
+// anchor that could still be evicted or reorged away. Both producer sites now queue.
+describe('StateAnchorPublisher reward attestation confirm-then-write (#4456)', function () {
+    const sinon = require('sinon');
+
+    const TXID = 'ab'.repeat(32);
+    const ATTEST = [{ pubkey: 'cd'.repeat(32), sig: 'ef'.repeat(64) }];
+
+    // A publisher whose DB serves CP_ROW for the checkpoint re-SELECT and records every
+    // write, with a wired (stubbable) DOGE indexer so _verifyAnchorOnChain can run.
+    function makeRewardPub() {
+        const queries = [];
+        const broadcast = [];
+        const db = {
+            async doQuery(sql, params) {
+                queries.push({ sql, params });
+                if (sql.indexOf('SELECT * FROM state_checkpoints') === 0) return [Object.assign({}, CP_ROW)];
+                if (sql.indexOf('SELECT') === 0) return [{ id: 1, publisher: params[5] }];
+                return { affectedRows: 1 };
+            }
+        };
+        const hub = { db, getIdentity: () => null, hubDbBroadcaster: { broadcastRow: (ev) => broadcast.push(ev) } };
+        const pub = new StateAnchorPublisher(hub);
+        pub.indexers.DOGE = { url: 'http://doge.indexer.invalid', key: '' };
+        pub.dogeConfirmations = 60;
+        return { pub, queries, broadcast };
+    }
+
+    function entry(extra) {
+        return Object.assign({
+            chain: CP_ROW.chain, network: CP_ROW.network,
+            blockIndex: CP_ROW.block_index, checkpointSeq: CP_ROW.checkpoint_seq,
+            txid: TXID, anchorVersion: 4,
+            rewardType: 'anchor_BTC', roundReference: CP_ROW.checkpoint_seq,
+            snapshotBlock: CP_ROW.snapshot_block,
+            publisher: 'ab'.repeat(32), attestSigs: ATTEST
+        }, extra || {});
+    }
+
+    const onChain = (over) => Object.assign({
+        exists: true, checkpoint_anchored: true, status: 'valid', version: 4,
+        confirmations: 60, txid: TXID,
+        block_hash: CP_ROW.block_hash, ledger_hash: CP_ROW.ledger_hash,
+        actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash
+    }, over || {});
+
+    const inserts = (queries) => queries.filter(q => q.sql.indexOf('INSERT IGNORE INTO anchor_reward_attestations') === 0);
+
+    afterEach(() => sinon.restore());
+
+    it('below the derive gate it queues nothing (the table has no rows at all)', function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(false);
+        const { pub } = makeRewardPub();
+        pub._deferRewardAttestation(entry());
+        expect(pub._deferredRewardAttest.size).to.equal(0);
+    });
+
+    it('at/above the gate the publish path QUEUES instead of writing (mempool txid)', function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const { pub, queries } = makeRewardPub();
+        pub._deferRewardAttestation(entry());
+        expect(pub._deferredRewardAttest.size, 'entry queued').to.equal(1);
+        expect(inserts(queries).length, 'nothing written at broadcast time').to.equal(0);
+    });
+
+    it('writes the row once the anchor is buried at the bound txid AND version', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const { pub, queries, broadcast } = makeRewardPub();
+        pub._deferRewardAttestation(entry());
+        pub._indexerCall = async () => onChain();
+        await pub._drainDeferredRewardAttest();
+        expect(inserts(queries).length, 'confirmed anchor writes the attestation').to.equal(1);
+        expect(broadcast.length, 'and streams it to this hub\'s indexer subscribers').to.equal(1);
+        expect(pub._deferredRewardAttest.size, 'entry cleared').to.equal(0);
+    });
+
+    it('does NOT write while the anchor is still shallow (the mempool/reorg window)', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const { pub, queries } = makeRewardPub();
+        pub._deferRewardAttestation(entry());
+        pub._indexerCall = async () => onChain({ confirmations: 3 });
+        await pub._drainDeferredRewardAttest();
+        expect(inserts(queries).length, 'no reward for an unburied anchor').to.equal(0);
+        expect(pub._deferredRewardAttest.size, 'entry retained for retry').to.equal(1);
+    });
+
+    it('does NOT write when the anchor is absent, i.e. the tx was evicted and never mined', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const { pub, queries } = makeRewardPub();
+        pub._deferRewardAttestation(entry());
+        pub._indexerCall = async () => ({ exists: false, checkpoint_anchored: false, confirmations: 0 });
+        await pub._drainDeferredRewardAttest();
+        expect(inserts(queries).length, 'evicted anchor mints nothing').to.equal(0);
+    });
+
+    it('does NOT write when a DIFFERENT anchor confirmed for this checkpoint (txid unbound)', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const { pub, queries } = makeRewardPub();
+        pub._deferRewardAttestation(entry());
+        pub._indexerCall = async () => onChain({ txid: 'cc'.repeat(32) });
+        await pub._drainDeferredRewardAttest();
+        expect(inserts(queries).length).to.equal(0);
+    });
+
+    it('drops on a decided content rejection (a v0 fallback landed, not the attested v4)', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const { pub, queries } = makeRewardPub();
+        pub._deferRewardAttestation(entry());
+        pub._indexerCall = async () => onChain({ version: 0 });
+        await pub._drainDeferredRewardAttest();
+        expect(inserts(queries).length, 'a legacy v0 anchor derives no reward').to.equal(0);
+        expect(pub._deferredRewardAttest.size, 'terminal verdict clears the entry').to.equal(0);
+    });
+
+    it('expires the entry after the TTL rather than writing on a never-confirming anchor', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const { pub, queries } = makeRewardPub();
+        pub._deferRewardAttestation(entry());
+        pub._deferredRewardAttest.get([...pub._deferredRewardAttest.keys()][0]).at =
+            Date.now() - (pub.announceRetryTtlMs + 1);
+        pub._indexerCall = async () => onChain();
+        await pub._drainDeferredRewardAttest();
+        expect(inserts(queries).length, 'an expired entry must not write').to.equal(0);
+        expect(pub._deferredRewardAttest.size).to.equal(0);
+    });
+
+    it('binds version 6 for the archive leg, so a legacy v1 head derives nothing', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const { pub, queries } = makeRewardPub();
+        const archive = () => entry({ anchorVersion: 6, rewardType: 'anchor_archive', roundReference: 42 });
+        pub._deferRewardAttestation(archive());
+        pub._indexerCall = async () => onChain({ version: 1 });
+        await pub._drainDeferredRewardAttest();
+        expect(inserts(queries).length, 'a degraded v1 archive head derives no reward').to.equal(0);
+        pub._deferRewardAttestation(archive());
+        pub._indexerCall = async () => onChain({ version: 6 });
+        await pub._drainDeferredRewardAttest();
+        expect(inserts(queries).length, 'the attested v6 head does').to.equal(1);
+    });
+
+    it('is bounded: a flood evicts the OLDEST entry and never writes one', function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const { pub, queries } = makeRewardPub();
+        pub.announceQueueMax = 3;
+        for (let i = 0; i < 6; i++)
+            pub._deferRewardAttestation(entry({ roundReference: i, txid: (i + 10).toString(16).repeat(32) }));
+        expect(pub._deferredRewardAttest.size).to.equal(3);
+        expect(inserts(queries).length).to.equal(0);
     });
 });

@@ -15,6 +15,7 @@ const { expect }   = require('chai');
 const Consensus    = require('../../../src/Consensus');
 const { createMockHub }   = require('../../helpers/mockHub');
 const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7, makeValidator } = require('../../helpers/fixtures');
+const { waitUntil }       = require('../../helpers/waitUntil');
 
 describe('Boundary: Consensus (PBFT)', function () {
 
@@ -343,7 +344,10 @@ describe('Boundary: Consensus (PBFT)', function () {
 
             // Third commit reaches quorum
             consensus._handleCommit({ sender: VALIDATORS_4[2].addr, data: { seq: 5, configDigest: digest } });
-            await new Promise(r => setTimeout(r, 20));
+            // _handleCommit resolves the round asynchronously. The anchor is the
+            // round CLEARING, not applyConfig being called: the clear happens
+            // after that call, so anchoring on the call races the assertion.
+            await waitUntil(() => !consensus.pendingProposals.has(5), { label: 'the quorum commit to apply and clear round 5' });
 
             // Applied once and the round cleared (no digest set involved).
             expect(hub.applyConfig.calledOnce).to.be.true;

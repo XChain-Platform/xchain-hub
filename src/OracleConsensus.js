@@ -33,6 +33,7 @@ const { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD, ORACLE_MAX_CHANGE_PER_ROUND,
         XCHAIN_PRICE_MAX_CHANGE_PER_ROUND, DERIVED_PAIRS } = require('./constants.js');
 const swq               = require('./stake_weighted_quorum.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
+const { positiveIntConfig } = require('./lib/config_int.js');
 const eq                = require('./equivocation_header.js');
 const bcmath            = require('./bcmath.js');
 const devband           = require('./lib/deviation_band.js');
@@ -121,7 +122,7 @@ class OracleConsensus extends EventEmitter {
         // live round and will never be re-proposed.
         this.finalized = new Set();
         this._finalizedOrder = [];
-        this.finalizedMax = parseInt(process.env.ORACLE_FINALIZED_MAX, 10) || 10000;
+        this.finalizedMax = positiveIntConfig(process.env.ORACLE_FINALIZED_MAX, 10000, 'ORACLE_FINALIZED_MAX');
 
         // Rounds this hub stored as 'skipped' for a LOCAL reason (its gossip lagged
         // below minSubmissions at the block boundary, or its own aggregate was
@@ -1536,9 +1537,13 @@ class OracleConsensus extends EventEmitter {
         // gates identically. CONSENSUS-CRITICAL: deploy fleet-wide atomically.
         if (values.length === 2) {
             let lo = values[0].s, hi = values[1].s; // sorted ascending, both > 0
-            // Shared deviation_band helper : (hi-lo)/(hi+lo), byte-identical
-            // to the original inline arithmetic (no rounded intermediate mean).
-            if (devband.twoSourceSpreadExceeds(lo, hi, ORACLE_DEVIATION_THRESHOLD, 8)) {
+            // Shared deviation_band helper : (hi-lo)/(hi+lo), no rounded
+            // intermediate mean. Scale 18, NOT the original inline scale 8: the
+            // co-sign gate (_handlePropose) and SlashDetector both round at 18, so
+            // a scale-8 publish gate truncates a boundary spread back inside the
+            // band and federation-signs a price the other two gates then withhold
+            // or slash ().
+            if (devband.twoSourceSpreadExceeds(lo, hi, ORACLE_DEVIATION_THRESHOLD, 18)) {
                 console.warn('Oracle: dropping ' + coinPair + ' this round: only 2 sources and they '
                     + 'disagree beyond the ' + (ORACLE_DEVIATION_THRESHOLD * 100) + '% mean-deviation gate ('
                     + lo + ' vs ' + hi + ')');
@@ -1676,13 +1681,22 @@ class OracleConsensus extends EventEmitter {
         // is written via a bare INSERT that emits nothing, so a replica's price mirror never
         // receives it live and _priceSyncSatisfied passes while the round is absent, causing
         // the replica to validate native-coin fees against the prior round (ledger divergence).
-        // Best-effort; never block finalize.
+        // Never block finalize, but never SWALLOW a failure either: the watermark heartbeat
+        // advances on its own wall-clock timer and would certify the stream complete past a
+        // round no subscriber ever received, re-opening the exact divergence this broadcast
+        // closes. A failed re-read therefore drops the subscribers so each one reconnects and
+        // its bootstrap max-id gap detection re-drains the round (item 4459).
         if (this.hub && this.hub.hubDbBroadcaster) {
             try {
                 let rows = await this.db.doQuery(
                     'SELECT * FROM price_snapshots WHERE round_number=? ORDER BY coin_pair', [round]);
                 for (let row of rows) this.hub.hubDbBroadcaster.broadcastRow({ table: 'price_snapshots', row });
-            } catch (e) { /* broadcast is best-effort */ }
+            } catch (e) {
+                console.error('Oracle: post-commit price-round broadcast failed for round ' + round
+                    + '; forcing subscriber resync: ' + (e && e.message));
+                try { this.hub.hubDbBroadcaster.dropAllForResync('price-round broadcast gap'); }
+                catch (err) { /* the repair itself must not fail finalize */ }
+            }
         }
     }
 

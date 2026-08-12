@@ -185,6 +185,44 @@ describe('HubDbBroadcaster', function () {
         });
     });
 
+    // ── dropAllForResync (item 4459) ─────────────────────────────────────────
+
+    describe('dropAllForResync()', function () {
+        it('closes every subscriber with a retryable code and deregisters it', async function () {
+            let b   = new HubDbBroadcaster({});
+            let ws1 = makeMockWs();
+            let ws2 = makeMockWs();
+            await b.addSubscriber(ws1);
+            await b.addSubscriber(ws2);
+            let dropped = b.dropAllForResync('price-round broadcast gap');
+            expect(dropped).to.equal(2);
+            expect(b.getSubscriberCount()).to.equal(0);
+            for (let ws of [ws1, ws2]) {
+                expect(ws.close.calledOnce).to.be.true;
+                expect(ws.close.firstCall.args[0]).to.equal(1012);
+                expect(ws.close.firstCall.args[1]).to.equal('price-round broadcast gap');
+            }
+        });
+
+        it('clears the per-IP bookkeeping so the reconnect is not counted twice', async function () {
+            let b  = new HubDbBroadcaster({});
+            let ws = makeMockWs();
+            await b.addSubscriber(ws, { socket: { remoteAddress: '10.0.0.9' } });
+            b.dropAllForResync('gap');
+            expect(b.ipConnections.has('10.0.0.9')).to.be.false;
+        });
+
+        it('is a no-op with no subscribers and survives a close() that throws', async function () {
+            let b = new HubDbBroadcaster({});
+            expect(b.dropAllForResync('gap')).to.equal(0);
+            let ws = makeMockWs();
+            await b.addSubscriber(ws);
+            ws.close.throws(new Error('already closed'));
+            expect(b.dropAllForResync('gap')).to.equal(1);
+            expect(b.getSubscriberCount()).to.equal(0);
+        });
+    });
+
     // ── broadcastRow ─────────────────────────────────────────────────────────
 
     describe('broadcastRow()', function () {

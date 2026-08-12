@@ -37,32 +37,57 @@
       "result": {
         "name": "result",
         "schema": {
-          "type": "object"
+          "type": "object",
+          "description": "status is \"degraded\", with HTTP 503, when the DB probe fails or times out.",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "success",
+                "degraded"
+              ]
+            },
+            "db": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "status",
+            "db"
+          ]
         }
       }
     },
     {
       "name": "health",
-      "summary": "Detailed health: DB, oracle staleness, consensus-input reachability, P2P state (503 when degraded).",
+      "summary": "Detailed health: DB, oracle staleness, P2P state (503 when degraded).",
       "paramStructure": "by-name",
       "params": [],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       }
     },
     {
       "name": "getallconfigs",
-      "summary": "Service discovery: connection parameters for every platform service on this chain (mesh-internal: includes DB credentials, keyed like a write).",
+      "summary": "Service discovery: connection parameters for every platform service on this chain (mesh-internal: includes DB credentials, keyed like a write). since_updated_at returns only entries changed after that timestamp.",
       "paramStructure": "by-name",
-      "params": [],
+      "params": [
+        {
+          "name": "since_updated_at",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       },
       "x-auth": "x-api-key header, when HUB_API_KEY is configured"
     },
@@ -85,31 +110,49 @@
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       },
       "x-auth": "x-api-key header, when HUB_API_KEY is configured"
     },
     {
       "name": "getoraclesubmissions",
-      "summary": "Raw per-validator oracle price submissions for recent rounds.",
+      "summary": "Raw per-validator oracle price submissions for recent rounds, plus round cadence, skipped/dropped-pair diagnostics and oracleMaxPriceAgeSeconds (the price-age bound getprice enforces).",
       "paramStructure": "by-name",
       "params": [],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       }
     },
     {
       "name": "getpricesnapshots",
-      "summary": "PBFT-finalized price snapshots (trimmed-median rounds).",
+      "summary": "PBFT-finalized price snapshots (trimmed-median rounds). status='all' also returns skipped/disputed rows; with_watermark wraps the rows as {watermark, snapshots} with a hub-clock epoch-seconds watermark.",
       "paramStructure": "by-name",
       "params": [
         {
           "name": "limit",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "status",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "with_watermark",
           "required": false,
           "schema": {
             "type": [
@@ -123,7 +166,125 @@
       "result": {
         "name": "result",
         "schema": {
-          "type": "object"
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "round_number": {
+                    "type": "number"
+                  },
+                  "coin_pair": {
+                    "type": "string"
+                  },
+                  "price": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "reference_block": {
+                    "type": "number"
+                  },
+                  "reference_chain": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "block_timestamp": {
+                    "type": "number"
+                  },
+                  "validator_count": {
+                    "type": "number"
+                  },
+                  "consensus_round": {
+                    "type": "number"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "finalized",
+                      "skipped",
+                      "disputed"
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "description": "Returned when with_watermark is truthy: hub-clock epoch seconds plus the rows.",
+              "properties": {
+                "watermark": {
+                  "type": "number"
+                },
+                "snapshots": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "round_number": {
+                        "type": "number"
+                      },
+                      "coin_pair": {
+                        "type": "string"
+                      },
+                      "price": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "reference_block": {
+                        "type": "number"
+                      },
+                      "reference_chain": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "block_timestamp": {
+                        "type": "number"
+                      },
+                      "validator_count": {
+                        "type": "number"
+                      },
+                      "consensus_round": {
+                        "type": "number"
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "finalized",
+                          "skipped",
+                          "disputed"
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "required": [
+                "watermark",
+                "snapshots"
+              ]
+            },
+            {
+              "type": "object",
+              "description": "In-result error envelope: this handler validates arguments itself and returns {error} rather than raising a JSON-RPC error.",
+              "properties": {
+                "error": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "error"
+              ]
+            }
+          ]
         }
       }
     },
@@ -146,42 +307,27 @@
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       }
     },
     {
       "name": "getfeequote",
       "summary": "Protocol fee quote for an action (native-coin USD-pegged fees).",
       "paramStructure": "by-name",
-      "params": [],
-      "result": {
-        "name": "result",
-        "schema": {
-          "type": "object"
-        }
-      }
-    },
-    {
-      "name": "getcapabilitythresholds",
-      "summary": "Governance-set minimum stake per capability (price, cross_chain, oracle_publish, attestation).",
-      "paramStructure": "by-name",
-      "params": [],
-      "result": {
-        "name": "result",
-        "schema": {
-          "type": "object"
-        }
-      }
-    },
-    {
-      "name": "registervalidator",
-      "summary": "Register a validator with the federation.",
-      "paramStructure": "by-name",
       "params": [
         {
-          "name": "validator",
+          "name": "action",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "chain",
           "required": false,
           "schema": {
             "type": [
@@ -194,9 +340,50 @@
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
+        "schema": {}
+      }
+    },
+    {
+      "name": "getcapabilitythresholds",
+      "summary": "Governance-set minimum stake per capability (price, cross_chain, oracle_publish, attestation).",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      }
+    },
+    {
+      "name": "registervalidator",
+      "summary": "Register a validator with the federation.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "signing_pubkey",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "addr",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
         }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
       },
       "x-auth": "x-api-key header, when HUB_API_KEY is configured"
     },
@@ -230,9 +417,7 @@
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       },
       "x-auth": "x-api-key header, when HUB_API_KEY is configured"
     },
@@ -266,9 +451,7 @@
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       },
       "x-auth": "x-api-key header, when HUB_API_KEY is configured"
     },
@@ -276,12 +459,22 @@
       "name": "syncvalidators",
       "summary": "Sync the validator set from a peer.",
       "paramStructure": "by-name",
-      "params": [],
+      "params": [
+        {
+          "name": "validators",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       },
       "x-auth": "x-api-key header, when HUB_API_KEY is configured",
       "x-internal": true
@@ -293,21 +486,29 @@
       "params": [],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       }
     },
     {
       "name": "getvalidatorstatus",
-      "summary": "Status of one validator.",
+      "summary": "Status of one validator, by signing key.",
       "paramStructure": "by-name",
-      "params": [],
+      "params": [
+        {
+          "name": "signing_pubkey",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       }
     },
     {
@@ -317,9 +518,7 @@
       "params": [],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       }
     },
     {
@@ -329,9 +528,7 @@
       "params": [],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       }
     },
     {
@@ -353,9 +550,7 @@
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       }
     },
     {
@@ -377,9 +572,7 @@
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       }
     },
     {
@@ -445,9 +638,7 @@
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       }
     },
     {
@@ -457,9 +648,7 @@
       "params": [],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       }
     },
     {
@@ -469,9 +658,7 @@
       "params": [],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       },
       "x-auth": "x-api-key header, when HUB_API_KEY is configured"
     },
@@ -482,9 +669,7 @@
       "params": [],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       }
     },
     {
@@ -494,21 +679,17 @@
       "params": [],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       }
     },
     {
       "name": "geteffectorspendstatus",
-      "summary": "Effector-spend policy status: each on-chain effector (oracle-publish, attest, anchor, full-node) with its runtime pause state, balance floor, and rolling per-window spend ceiling clamped at the $2000 review admission ceiling.",
+      "summary": "Effector-spend policy status: each on-chain effector (oracle-publish, attest, anchor, full-node) with its runtime pause state, balance floor, and rolling per-window spend ceiling clamped at the $2000 AML admission ceiling.",
       "paramStructure": "by-name",
       "params": [],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       }
     },
     {
@@ -541,9 +722,7 @@
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       },
       "x-auth": "x-api-key header, when HUB_API_KEY is configured"
     },
@@ -566,19 +745,50 @@
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       },
       "x-auth": "x-api-key header, when HUB_API_KEY is configured"
     },
     {
       "name": "propose",
-      "summary": "Submit a governance proposal.",
+      "summary": "Submit a governance proposal over one parameter.",
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "proposal",
+          "name": "parameter",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "current_value",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "proposed_value",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "rationale",
           "required": false,
           "schema": {
             "type": [
@@ -591,9 +801,7 @@
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       },
       "x-auth": "x-api-key header, when HUB_API_KEY is configured"
     },
@@ -638,9 +846,7 @@
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       },
       "x-auth": "x-api-key header, when HUB_API_KEY is configured"
     },
@@ -674,9 +880,7 @@
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       },
       "x-auth": "x-api-key header, when HUB_API_KEY is configured"
     },
@@ -721,9 +925,7 @@
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       }
     },
     {
@@ -745,9 +947,7 @@
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       }
     },
     {
@@ -791,9 +991,7 @@
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       }
     },
     {
@@ -837,18 +1035,38 @@
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       }
     },
     {
       "name": "requestattestation",
-      "summary": "Request a cross-chain attestation for an action.",
+      "summary": "Request a cross-chain attestation for a source-chain action.",
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "attestation",
+          "name": "source_chain",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "source_action_index",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "dest_chain",
           "required": false,
           "schema": {
             "type": [
@@ -861,31 +1079,28 @@
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       },
       "x-auth": "x-api-key header, when HUB_API_KEY is configured"
     },
     {
       "name": "getattestations",
-      "summary": "List cross-chain attestations.",
-      "paramStructure": "by-name",
-      "params": [],
-      "result": {
-        "name": "result",
-        "schema": {
-          "type": "object"
-        }
-      }
-    },
-    {
-      "name": "getattestation",
-      "summary": "One cross-chain attestation.",
+      "summary": "List cross-chain attestations, optionally filtered by status.",
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "attestation_id",
+          "name": "status",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "limit",
           "required": false,
           "schema": {
             "type": [
@@ -898,9 +1113,40 @@
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
+        "schema": {}
+      }
+    },
+    {
+      "name": "getattestation",
+      "summary": "One cross-chain attestation, keyed by source chain + action index.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "source_chain",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "source_action_index",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
         }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
       }
     },
     {
@@ -909,7 +1155,51 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "reorg",
+          "name": "chain",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "reorg_height",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "timestamp",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "old_hash",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "new_hash",
           "required": false,
           "schema": {
             "type": [
@@ -922,9 +1212,7 @@
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       },
       "x-auth": "x-api-key header, when HUB_API_KEY is configured"
     },
@@ -932,12 +1220,22 @@
       "name": "getreorghistory",
       "summary": "Recent reorg attestations.",
       "paramStructure": "by-name",
-      "params": [],
+      "params": [
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       }
     },
     {
@@ -946,7 +1244,40 @@
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "swap",
+          "name": "source_chain",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "source_action_index",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "dest_chain",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "dest_action_index",
           "required": false,
           "schema": {
             "type": [
@@ -959,19 +1290,28 @@
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       },
       "x-auth": "x-api-key header, when HUB_API_KEY is configured"
     },
     {
       "name": "getswap",
-      "summary": "One tracked swap.",
+      "summary": "One tracked swap, keyed by source chain + action index.",
       "paramStructure": "by-name",
       "params": [
         {
-          "name": "swap_id",
+          "name": "source_chain",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "source_action_index",
           "required": false,
           "schema": {
             "type": [
@@ -984,21 +1324,40 @@
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       }
     },
     {
       "name": "getswaps",
-      "summary": "List tracked swaps.",
+      "summary": "List tracked swaps, optionally filtered by status.",
       "paramStructure": "by-name",
-      "params": [],
+      "params": [
+        {
+          "name": "status",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       }
     },
     {
@@ -1053,9 +1412,7 @@
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       },
       "x-auth": "x-api-key header, when HUB_API_KEY is configured",
       "x-internal": true
@@ -1064,12 +1421,110 @@
       "name": "pushpriceround",
       "summary": "Indexer push: finalized price round for cross-validation.",
       "paramStructure": "by-name",
-      "params": [],
+      "params": [
+        {
+          "name": "source_chain",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "timestamp",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "btc_block_height",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "pairs",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "sigs",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "action_index",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "block_index",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "push_generation",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       },
       "x-auth": "x-api-key header, when HUB_API_KEY is configured",
       "x-internal": true
@@ -1078,12 +1533,132 @@
       "name": "pushoracleprice",
       "summary": "Indexer push: user-published PRICE v1 oracle row.",
       "paramStructure": "by-name",
-      "params": [],
+      "params": [
+        {
+          "name": "source_chain",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "source_address",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "coin",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "tick",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "fiat",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "value",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "fee",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "memo",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "block_time",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "action_index",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "push_generation",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       },
       "x-auth": "x-api-key header, when HUB_API_KEY is configured",
       "x-internal": true
@@ -1092,12 +1667,55 @@
       "name": "pushpricereorg",
       "summary": "Indexer push: price reorg rollback.",
       "paramStructure": "by-name",
-      "params": [],
+      "params": [
+        {
+          "name": "source_chain",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "from_action_index",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "to_action_index",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "retraction_generation",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       },
       "x-auth": "x-api-key header, when HUB_API_KEY is configured",
       "x-internal": true
@@ -1128,13 +1746,33 @@
               "object"
             ]
           }
+        },
+        {
+          "name": "to_action_index",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "retraction_generation",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
         }
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       },
       "x-auth": "x-api-key header, when HUB_API_KEY is configured",
       "x-internal": true
@@ -1165,13 +1803,33 @@
               "object"
             ]
           }
+        },
+        {
+          "name": "to_action_index",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "retraction_generation",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
         }
       ],
       "result": {
         "name": "result",
-        "schema": {
-          "type": "object"
-        }
+        "schema": {}
       },
       "x-auth": "x-api-key header, when HUB_API_KEY is configured",
       "x-internal": true

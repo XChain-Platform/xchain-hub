@@ -27,6 +27,7 @@ const crypto       = require('crypto');
 const EventEmitter = require('events');
 const coins        = require('./coins');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
+const { positiveIntConfig } = require('./lib/config_int.js');
 
 const XCHAIN_ATTEST_PROPOSE = 'XCHAIN_ATTEST_PROPOSE';
 const XCHAIN_ATTEST_PREPARE = 'XCHAIN_ATTEST_PREPARE';
@@ -44,6 +45,13 @@ const DEFAULT_CONFIRMATIONS = { ...coins.DEFAULT_CONFIRMATIONS };
 const ALLOWED_CHAINS = [...coins.ALLOWED_COINS];
 
 const DEFAULT_ATTESTATION_TIMEOUT = 60000; // 60 seconds
+
+// Bounded retry for persisting a quorum-finalized attestation ().
+// Sized to ride out a DB blip well inside DEFAULT_ATTESTATION_TIMEOUT, which
+// remains the terminal backstop for a store that never lands.
+const DEFAULT_STORE_RETRY_ATTEMPTS = 4;
+const DEFAULT_STORE_RETRY_BASE_MS  = 100;
+const STORE_RETRY_MAX_DELAY_MS     = 2000;
 
 class CrossChainEngine extends EventEmitter {
 
@@ -71,7 +79,7 @@ class CrossChainEngine extends EventEmitter {
         // (the DB row keyed on attestationId is idempotent via ON DUPLICATE KEY).
         this.finalized = new Set();
         this._finalizedOrder = [];
-        this.finalizedMax = parseInt(process.env.XCHAIN_ATTEST_FINALIZED_MAX, 10) || 10000;
+        this.finalizedMax = positiveIntConfig(process.env.XCHAIN_ATTEST_FINALIZED_MAX, 10000, 'XCHAIN_ATTEST_FINALIZED_MAX');
 
         // Message handler
         this._messageHandler = null;
@@ -81,6 +89,14 @@ class CrossChainEngine extends EventEmitter {
 
         // Config
         this.timeout = parseInt(process.env.ATTESTATION_TIMEOUT) || DEFAULT_ATTESTATION_TIMEOUT;
+
+        // Persistence retry for a quorum-finalized attestation (). The
+        // INSERT is idempotent (ON DUPLICATE KEY UPDATE), so re-running it after
+        // a partial failure is safe.
+        this.storeRetryAttempts = positiveIntConfig(process.env.XCHAIN_ATTEST_STORE_RETRIES,
+            DEFAULT_STORE_RETRY_ATTEMPTS, 'XCHAIN_ATTEST_STORE_RETRIES');
+        this.storeRetryBaseMs   = positiveIntConfig(process.env.XCHAIN_ATTEST_STORE_RETRY_MS,
+            DEFAULT_STORE_RETRY_BASE_MS, 'XCHAIN_ATTEST_STORE_RETRY_MS');
 
         // Per-chain cross-chain confirmation thresholds (env/p2pConfig overridable;
         // mainnet floor-clamped, see coins.resolveConfirmations - ).
@@ -157,7 +173,12 @@ class CrossChainEngine extends EventEmitter {
         if (!Number.isInteger(idx) || idx <= 0)
             throw new Error('sourceActionIndex must be a positive integer');
 
-        let attestationId = sourceChain + ':' + sourceActionIndex + ':' + destChain;
+        // The id is derived from the VALIDATED index, never the raw argument. parseInt
+        // accepts a prefix, so '1junk' and '01' cleared the guard as index 1 and then
+        // built 'BTC:1junk:DOGE': followers drop that on their canonical-id regex and the
+        // round times out, while a single-node hub mints a distinct row per spelling of
+        // one action. The stored row and the PROPOSE payload below already parse ().
+        let attestationId = sourceChain + ':' + idx + ':' + destChain;
         let confirmations = this.confirmations[sourceChain] || DEFAULT_CONFIRMATIONS[sourceChain] || 6;
 
         // Check if already attested
@@ -516,7 +537,8 @@ class CrossChainEngine extends EventEmitter {
         let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
         if (pending.commits.size >= quorum) {
             pending.finalized = true;
-            if (pending.timer) clearTimeout(pending.timer);
+            // Do NOT clear the round timer here: it is the backstop for a store
+            // that never succeeds. It is cleared on the success path instead.
 
             let attestation = {
                 attestationId:     pending.attestationId,
@@ -529,8 +551,9 @@ class CrossChainEngine extends EventEmitter {
                 consensusProof:    JSON.stringify([...pending.commits])
             };
 
-            this._storeAttestation(attestation)
+            this._storeWithRetry(attestation)
                 .then(() => {
+                    if (pending.timer) clearTimeout(pending.timer);
                     this._markFinalized(attestationId);
                     this.pendingAttestations.delete(attestationId);
 
@@ -543,14 +566,42 @@ class CrossChainEngine extends EventEmitter {
                     if (pending.resolve) pending.resolve(attestation);
                 })
                 .catch(err => {
-                    console.error('CrossChain: Error storing attestation:', err.message);
-                    this.pendingAttestations.delete(attestationId);
-                    if (pending.reject) pending.reject(err);
+                    // Retain the round instead of deleting it (). Both
+                    // _handleCommit and this method return early once the id is
+                    // gone from pendingAttestations, so dropping it here destroys
+                    // a quorum-signed attestation that peer hubs have already
+                    // persisted, with no later COMMIT able to re-drive the store.
+                    // Reset the finalize flag so a retransmitted COMMIT does, and
+                    // leave the round timer (never cleared above) as the terminal
+                    // backstop that rejects and evicts the round.
+                    console.error('CrossChain: Error storing attestation after ' +
+                        this.storeRetryAttempts + ' attempt(s), retaining round for retry: ' + err.message);
+                    pending.finalized = false;
                 });
         }
     }
 
     // --- Storage ---
+
+    // Persist a quorum-finalized attestation, retrying a transient DB failure
+    // with exponential backoff before giving up (). Safe to re-run:
+    // _storeAttestation upserts on attestation_id.
+    async _storeWithRetry(attestation) {
+        let delay = this.storeRetryBaseMs;
+        for (let attempt = 1; ; attempt++) {
+            try {
+                await this._storeAttestation(attestation);
+                return;
+            } catch (err) {
+                if (attempt >= this.storeRetryAttempts) throw err;
+                console.warn('CrossChain: attestation store attempt ' + attempt + '/' +
+                    this.storeRetryAttempts + ' failed for ' + attestation.attestationId +
+                    ' (' + err.message + '); retrying in ' + delay + 'ms');
+                await new Promise(resolve => setTimeout(resolve, delay));
+                delay = Math.min(delay * 2, STORE_RETRY_MAX_DELAY_MS);
+            }
+        }
+    }
 
     async _storeAttestation(attestation) {
         let query = `INSERT INTO attestations

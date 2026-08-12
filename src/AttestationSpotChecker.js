@@ -67,6 +67,23 @@ const DEFAULT_SCHEDULER_INTERVAL_MS = 60 * 60 * 1000;    // 1h between injection
 const DEFAULT_MAX_INJECTIONS_PER_TICK = 1;
 const STATS_TABLE                = 'attestation_validator_stats';
 
+//  re-judge queue. An ok finalization is TERMINAL: onRequestFinalized
+// deletes the queue entry before judging, so a judge that could not answer used
+// to drop the spot-check permanently and no later event re-triggered it. These
+// bound the recovery queue that now holds those cases until the judge answers.
+const MAX_PENDING_REJUDGE        = 256;
+const REJUDGE_MAX_ATTEMPTS       = 5;
+const DEFAULT_REJUDGE_MAX_AGE_MS = 30 * 60 * 1000;       // 30m, then give up and drop
+const DEFAULT_REJUDGE_SWEEP_MS   = 5 * 60 * 1000;        // 5m between re-judge passes
+
+// Which inconclusive reasons can change on a later attempt. Only a reason whose
+// cause is the JUDGE being unavailable is retried: the provider is paused
+// (llm.js _markInconclusive 'provider_paused') or its endpoint is unreachable.
+// Every other reason is a property of the round's own bytes (meta_unrecognized,
+// meta_uncorroborated, no_proposals, unparseable, empty_verdict, truncated_pick)
+// so re-asking returns the same neutral verdict; those keep today's drop.
+const TRANSIENT_INCONCLUSIVE = ['provider_paused', 'unreachable'];
+
 class AttestationSpotChecker {
 
     constructor(hub, providerRegistry){
@@ -97,10 +114,19 @@ class AttestationSpotChecker {
         // Per-validator failure history: Map<pubkeyLower, [{ requestId, timestamp }]>
         this._failures = new Map();
 
+        // : spot-checks whose judge was unavailable, held for re-judging.
+        // Map<requestIdLower, { providerId, expectedPattern, publishedBody, meta,
+        //                       signatures, blockIndex, attempts, firstSeen }>
+        this._pendingReJudge = new Map();
+        this.rejudgeSweepMs  = parseInt(cfg.SPOT_CHECK_REJUDGE_SWEEP_MS)  || DEFAULT_REJUDGE_SWEEP_MS;
+        this.rejudgeMaxAgeMs = parseInt(cfg.SPOT_CHECK_REJUDGE_MAX_AGE_MS) || DEFAULT_REJUDGE_MAX_AGE_MS;
+
         this._messageHandler = null;
         this._reorgHandler   = null;
         this._scheduler      = null;
+        this._sweeper        = null;
         this._tickInFlight   = false;   // scheduler self-overlap guard, see _schedulerTick()
+        this._sweepInFlight  = false;   // same guard for the re-judge sweep
     }
 
     _isTruthy(v){
@@ -144,6 +170,8 @@ class AttestationSpotChecker {
             };
             reorg.on('reorg:confirmed', this._reorgHandler);
         }
+
+        this._startReJudgeSweep();
 
         let consensus = this.hub.attestationConsensus;
         if (!consensus) {
@@ -240,6 +268,107 @@ class AttestationSpotChecker {
         }
     }
 
+    // : drive the re-judge sweep on its own timer rather than folding it
+    // into _schedulerTick. The injection scheduler is inert unless SPOT_CHECK_ENABLED
+    // plus an injector plus a non-empty corpus are all present, and in exactly that
+    // state the module still judges externally-registered spot-checks (see header),
+    // so a sweep hung off the scheduler would never run for the deployments that
+    // most need it. Unref'd, and a no-op pass over an empty map when nothing is held.
+    _startReJudgeSweep(){
+        if (this._sweeper) return;
+        this._sweeper = setInterval(() => {
+            this._sweepReJudge().catch(err =>
+                console.warn('AttestationSpotChecker: re-judge sweep error: ' + (err && err.message ? err.message : err)));
+        }, this.rejudgeSweepMs);
+        if (this._sweeper.unref) this._sweeper.unref();
+    }
+
+    // Hold a spot-check whose judge could not answer, so a later sweep can score it.
+    // Bounded: at capacity the OLDEST held record is dropped, matching register()'s
+    // eviction rule, because an unbounded map here would cache response bodies for
+    // the process lifetime.
+    _deferReJudge(rid, record){
+        if (this._pendingReJudge.size >= MAX_PENDING_REJUDGE) {
+            let firstKey = this._pendingReJudge.keys().next().value;
+            if (firstKey) this._pendingReJudge.delete(firstKey);
+        }
+        this._pendingReJudge.set(rid, record);
+    }
+
+    // One re-judge pass: re-ask the judge about every held spot-check and score the
+    // ones that now have a conclusive verdict, through the same _persistStats /
+    // _recordFailure paths the inline judge uses. Still-inconclusive records stay
+    // until they run out of attempts or age out; each record is independently
+    // guarded so one provider failure cannot abort the pass or throw out of the
+    // timer. Overlap-guarded for the reason _schedulerTick is : nothing
+    // bounds a judge round trip, so a hung provider would otherwise let passes
+    // stack up and re-ask the same records concurrently.
+    async _sweepReJudge(){
+        if (this._pendingReJudge.size === 0) return 0;
+        if (this._sweepInFlight) return 0;
+        this._sweepInFlight = true;
+        try {
+            let scored = 0;
+            let now = Date.now();
+            for (let [rid, rec] of Array.from(this._pendingReJudge.entries())) {
+                if (now - rec.firstSeen > this.rejudgeMaxAgeMs || rec.attempts >= REJUDGE_MAX_ATTEMPTS) {
+                    this._pendingReJudge.delete(rid);
+                    console.warn('AttestationSpotChecker: giving up on deferred spot-check ' + rid.substring(0, 16) +
+                                 '... after ' + rec.attempts + ' attempt(s); no evidence recorded');
+                    continue;
+                }
+                rec.attempts++;
+                let provider = this.providerRegistry && this.providerRegistry.getModule(rec.providerId);
+                if (!provider || typeof provider.agree !== 'function') continue;
+                let outcome = {};
+                let verdict;
+                try {
+                    verdict = await Promise.resolve(provider.agree([
+                        { body: rec.publishedBody, meta: rec.meta },
+                        { body: Buffer.from(String(rec.expectedPattern || ''), 'utf8'), meta: rec.meta }
+                    ], { outcome }));
+                } catch (e) {
+                    console.warn('AttestationSpotChecker: re-judge threw for ' + rid.substring(0, 16) + '...: ' +
+                                 (e && e.message ? e.message : e));
+                    continue;
+                }
+                if (!verdict && outcome.inconclusive) {
+                    // Still could not judge. A reason that is no longer transient can
+                    // never change, so stop holding the record rather than burning the
+                    // remaining attempts on it.
+                    if (TRANSIENT_INCONCLUSIVE.indexOf(String(outcome.reason)) < 0) {
+                        this._pendingReJudge.delete(rid);
+                        console.warn('AttestationSpotChecker: deferred spot-check ' + rid.substring(0, 16) +
+                                     '... resolved inconclusive (reason=' + outcome.reason + '); no evidence recorded');
+                    }
+                    continue;
+                }
+                this._pendingReJudge.delete(rid);
+                await this._scoreVerdict(rec.providerId, rid, rec.signatures, rec.blockIndex, !!verdict);
+                scored++;
+            }
+            return scored;
+        } finally {
+            this._sweepInFlight = false;
+        }
+    }
+
+    // The scoring half of a judged spot-check, shared by the inline judge in
+    // onRequestFinalized and the re-judge sweep so the two can never drift.
+    // Persists one row per signer (reorg-safe, keyed by the request's creation
+    // block) and accrues a failure against every signer on a judged-wrong round.
+    async _scoreVerdict(providerId, rid, signatures, blockIndex, passed){
+        for (let s of (signatures || [])) {
+            await this._persistStats(s.pubkey, providerId, rid, blockIndex, passed);
+        }
+        if (passed) return;
+        console.warn('AttestationSpotChecker: failed spot-check on ' + rid.substring(0, 16) +
+                     '... (provider=' + providerId + ', signers=' + (signatures || []).length + ')');
+        for (let s of (signatures || [])) {
+            this._recordFailure(s.pubkey, rid);
+        }
+    }
+
     async stop(){
         let consensus = this.hub.attestationConsensus;
         if (consensus && this._messageHandler) {
@@ -255,8 +384,13 @@ class AttestationSpotChecker {
             clearInterval(this._scheduler);
             this._scheduler = null;
         }
+        if (this._sweeper) {
+            clearInterval(this._sweeper);
+            this._sweeper = null;
+        }
         this._queue.clear();
         this._failures.clear();
+        this._pendingReJudge.clear();
     }
 
     // Register a synthetic request as a spot-check. Called by the
@@ -330,6 +464,22 @@ class AttestationSpotChecker {
             : Buffer.from(String(event.responseBody || ''), 'utf8');
         let expectedBody  = Buffer.from(String(entry.expectedPattern || ''), 'utf8');
 
+        let blockIndex = Number(event.request && event.request.block_index) || 0;
+        // : everything the sweep needs to re-ask the judge later. Built
+        // before the call so both failure branches below can hand it straight to
+        // _deferReJudge; the queue entry is already gone by this point (line above),
+        // and an ok finalization is terminal, so this record is the only way back.
+        let deferRecord = {
+            providerId:      entry.providerId,
+            expectedPattern: entry.expectedPattern,
+            publishedBody:   publishedBody,
+            meta:            String(event.meta || ''),
+            signatures:      event.signatures || [],
+            blockIndex:      blockIndex,
+            attempts:        0,
+            firstSeen:       Date.now()
+        };
+
         let verdict;
         let outcome = {};
         try {
@@ -338,44 +488,46 @@ class AttestationSpotChecker {
                 { body: expectedBody,  meta: String(event.meta || '') }
             ], { outcome }));
         } catch (e) {
-            console.warn('AttestationSpotChecker: judge call threw for ' + rid.substring(0, 16) + '...: ', e);
+            // A throw is a judge TRANSPORT failure, not a verdict about the round,
+            // so hold it for re-judging rather than dropping the spot-check.
+            console.warn('AttestationSpotChecker: judge call threw for ' + rid.substring(0, 16) +
+                         '...; deferred for re-judge: ', e);
+            this._deferReJudge(rid, deferRecord);
+            return;
+        }
+
+        if (!verdict && outcome.inconclusive && TRANSIENT_INCONCLUSIVE.indexOf(String(outcome.reason)) >= 0) {
+            // The judge was unavailable (paused provider, unreachable endpoint), which
+            // says nothing about the round. Dropping it here lost the check for good:
+            // llm.js pauses deliberately, and no later consensus event re-judges a
+            // finalized request. Hold it and let the sweep score it once the judge is
+            // back. Still neutral in the meantime: no evidence is recorded either way.
+            console.warn('AttestationSpotChecker: judge unavailable on ' + rid.substring(0, 16) +
+                         '... (reason=' + outcome.reason + '); deferred for re-judge');
+            this._deferReJudge(rid, deferRecord);
             return;
         }
 
         if (!verdict && outcome.inconclusive) {
-            // The judge could not reach a verdict (unreachable chain, refusal,
-            // unparseable output, or a truncated-candidate fail-closed pick).
-            // That is neutral, not a failure: it must not accrue slash
-            // evidence against the signers, matching every other inconclusive
-            // branch in this method (lines above: non-ok finalization,
-            // provider mismatch, judge call threw).
+            // The judge answered but could not reach a verdict (refusal, unparseable
+            // output, unrecognized meta, or a truncated-candidate fail-closed pick).
+            // That is neutral, not a failure: it must not accrue slash evidence
+            // against the signers, matching every other inconclusive branch in this
+            // method (lines above: non-ok finalization, provider mismatch). Unlike
+            // the two branches directly above it is also FINAL: the reason is a
+            // property of this round's own bytes, so re-asking cannot change it and
+            // holding the record would only burn attempts ().
             console.warn('AttestationSpotChecker: inconclusive judge verdict on ' + rid.substring(0, 16) +
                          '... (reason=' + outcome.reason + '); no evidence recorded');
             return;
         }
 
-        let passed = !!verdict;
-        let blockIndex = Number(event.request && event.request.block_index) || 0;
-
         // Reorg-safe record: persist the outcome for every signer, keyed by the
         // request's creation block so a reorg can roll it back. Best-effort; a
         // DB hiccup must not abort judging or throw out of the event handler.
-        for (let s of (event.signatures || [])) {
-            await this._persistStats(s.pubkey, entry.providerId, rid, blockIndex, passed);
-        }
-
-        if (passed) {
-            // Match: clear nothing; failures accumulate over the window
-            // regardless of intervening passes (per spec: 3 failures in
-            // 24h is the trigger, not a streak).
-            return;
-        }
-
-        console.warn('AttestationSpotChecker: failed spot-check on ' + rid.substring(0, 16) +
-                     '... (provider=' + entry.providerId + ', signers=' + (event.signatures || []).length + ')');
-        for (let s of (event.signatures || [])) {
-            this._recordFailure(s.pubkey, rid);
-        }
+        // A match clears nothing: failures accumulate over the window regardless
+        // of intervening passes (per spec: 3 failures in 24h, not a streak).
+        await this._scoreVerdict(entry.providerId, rid, event.signatures, blockIndex, !!verdict);
     }
 
     // Persist one judged spot-check outcome to attestation_validator_stats.
@@ -410,6 +562,14 @@ class AttestationSpotChecker {
     async rollback(height){
         this._failures.clear();
         let h = Number(height);
+        // : a spot-check held for re-judging is anchored to the same
+        // orphaned block, so purge it before the sweep can score a rolled-back
+        // round into the stats the DELETE below is clearing.
+        if (Number.isFinite(h)) {
+            for (let [rid, rec] of Array.from(this._pendingReJudge.entries())) {
+                if (Number(rec.blockIndex) > h) this._pendingReJudge.delete(rid);
+            }
+        }
         let db = this.hub && this.hub.db;
         if (!db || typeof db.doQuery !== 'function' || !Number.isFinite(h)) return 0;
         try {
@@ -484,6 +644,7 @@ class AttestationSpotChecker {
         return (this._failures.get(String(pubkey || '').toLowerCase()) || []).slice();
     }
     _queueSize(){ return this._queue.size; }
+    _pendingReJudgeSize(){ return this._pendingReJudge.size; }
 }
 
 module.exports = AttestationSpotChecker;

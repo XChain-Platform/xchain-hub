@@ -47,6 +47,7 @@ const EventEmitter      = require('events');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const swq               = require('./stake_weighted_quorum.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
+const { positiveIntConfig } = require('./lib/config_int.js');
 
 const XDEX_MATCH_PROPOSE     = 'XDEX_MATCH_PROPOSE';
 const XDEX_MATCH_PREPARE     = 'XDEX_MATCH_PREPARE';
@@ -97,7 +98,7 @@ class CrossChainDexConsensus extends EventEmitter {
         // AttestationConsensus.finalized). Suppresses duplicate finalize/late COMMITs.
         this.finalized       = new Set();
         this._finalizedOrder = [];
-        this.finalizedMax    = parseInt(this.config.XDEX_FINALIZED_MAX) || 10000;
+        this.finalizedMax    = positiveIntConfig(this.config.XDEX_FINALIZED_MAX, 10000, 'XDEX_FINALIZED_MAX');
 
         // Finalized round payloads (row + quorum signatures), same eviction as
         // `finalized`. Serves FINAL_SYNC catch-up: a straggler that missed a

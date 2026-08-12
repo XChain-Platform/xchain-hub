@@ -173,6 +173,25 @@ async function runClaudePrint(opts) {
                     isRefusal ? 'refusal' : undefined);
                 return;
             }
+            // Fail closed when the CLI reports its own failure alongside result text.
+            // The empty-result branch above only fires when the text is empty, so a
+            // reached-CLI failure that emitted partial text resolved as a sound
+            // verdict -- the same fail-open the HTTP transports had in
+            // providers/llm.js (item 4467).
+            //
+            // item 4468: gate on is_error/subtype, NOT stop_reason. The item's title
+            // names a stop_reason, but `claude --print --output-format json` emits no
+            // such field (it is on the direct Anthropic Messages API, a different
+            // transport); is_error + subtype is this CLI's whole failure contract, so
+            // a stop_reason check here would be dead code.
+            if (json && json.is_error === true) {
+                let subtype = String((json && json.subtype) || '');
+                let isRefusal = /refus|declin|blocked/i.test(subtype);
+                rejectHard('claude-spawn: CLI reported a non-success outcome (is_error) with result text' +
+                    (subtype ? ' (subtype=' + subtype.slice(0, 60) + ')' : ''),
+                    isRefusal ? 'refusal' : undefined);
+                return;
+            }
             safeResolve({ result, json, stderr });
         });
 

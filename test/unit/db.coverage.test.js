@@ -270,6 +270,7 @@ describe('Database: extended coverage', function () {
             const mig = sinon.stub(db, '_migrateUniqueKey').resolves();
             const idx = sinon.stub(db, '_migrateIndex').resolves();
             const en  = sinon.stub(db, '_migrateEnumColumn').resolves();
+            sinon.stub(db, '_migrateColumnType').resolves();
             await db.runMigrations();
             expect(mig.calledWith('oracle_submissions', 'uq_submission')).to.be.true;
             expect(mig.calledWith('validator_rewards', 'uq_reward')).to.be.true;
@@ -278,6 +279,78 @@ describe('Database: extended coverage', function () {
             expect(enCall.args[0]).to.equal('validator_capabilities');
             expect(enCall.args[1]).to.equal('capability');
             expect(enCall.args[2]).to.include('full_node');
+        });
+
+        // #4315: a DDL-only fix converts fresh installs and leaves every DEPLOYED hub
+        // TIMESTAMP-bound, because alterTableForDrift never MODIFYs a type. The migration
+        // being wired is therefore part of the fix, not a detail of it.
+        it('runMigrations converts both governance voting deadline columns to DATETIME', async function () {
+            const { db } = makeDb();
+            sinon.stub(db, '_migrateUniqueKey').resolves();
+            sinon.stub(db, '_migrateIndex').resolves();
+            sinon.stub(db, '_migrateEnumColumn').resolves();
+            const col = sinon.stub(db, '_migrateColumnType').resolves();
+            await db.runMigrations();
+            for (const column of ['voting_start', 'voting_end']) {
+                const call = col.getCalls().find(c => c.args[1] === column);
+                expect(call, column + ' is not migrated').to.exist;
+                expect(call.args[0]).to.equal('governance_proposals');
+                expect(call.args[2]).to.equal('datetime');
+                expect(call.args[3]).to.include('DATETIME');
+                expect(call.args[3]).to.include('NOT NULL');
+            }
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // _migrateColumnType()   (#4315)
+    // -----------------------------------------------------------------
+
+    describe('_migrateColumnType()', function () {
+
+        it('skips when the live DATA_TYPE already matches the target', async function () {
+            const { db, mockConn } = makeDb();
+            mockConn.query.resolves([{ DATA_TYPE: 'datetime' }]);
+            await db._migrateColumnType('governance_proposals', 'voting_end', 'datetime', 'DATETIME NOT NULL');
+            // only the information_schema SELECT runs; no ALTER
+            expect(mockConn.query.callCount).to.equal(1);
+            expect(mockConn.release.called).to.be.true;
+        });
+
+        it('converts the column in place when the live type differs', async function () {
+            const { db, mockConn } = makeDb();
+            mockConn.query
+                .onCall(0).resolves([{ DATA_TYPE: 'timestamp' }])
+                .onCall(1).resolves([]); // ALTER MODIFY
+            await db._migrateColumnType('governance_proposals', 'voting_end', 'datetime', 'DATETIME NOT NULL');
+            const alter = mockConn.query.getCall(1).args[0];
+            expect(alter).to.include('ALTER TABLE `governance_proposals` MODIFY `voting_end`');
+            expect(alter).to.include('DATETIME NOT NULL');
+            expect(console.log.calledWithMatch(/converted governance_proposals\.voting_end timestamp -> datetime/)).to.be.true;
+            expect(mockConn.release.called).to.be.true;
+        });
+
+        it('is a no-op when the table/column is absent (fresh install)', async function () {
+            const { db, mockConn } = makeDb();
+            mockConn.query.resolves([]); // information_schema returns no row
+            await db._migrateColumnType('governance_proposals', 'voting_end', 'datetime', 'DATETIME NOT NULL');
+            expect(mockConn.query.callCount).to.equal(1); // no ALTER
+            expect(mockConn.release.called).to.be.true;
+        });
+
+        // The conversion failure is swallowed so one bad ALTER cannot take the hub's boot
+        // down with it, but it must be LOUD: the line names what it costs and the exact
+        // statement an operator runs to finish the job by hand.
+        it('catches a failed ALTER, says what it costs, and still releases the connection', async function () {
+            const { db, mockConn } = makeDb();
+            mockConn.query
+                .onCall(0).resolves([{ DATA_TYPE: 'timestamp' }])
+                .onCall(1).rejects(new Error('alter failed'));
+            await db._migrateColumnType('governance_proposals', 'voting_end', 'datetime', 'DATETIME NOT NULL');
+            expect(console.error.calledWithMatch(/MIGRATION FAILED: governance_proposals\.voting_end/)).to.be.true;
+            expect(console.error.calledWithMatch(/2038-01-19/)).to.be.true;
+            expect(console.error.calledWithMatch(/ALTER TABLE `governance_proposals` MODIFY `voting_end` DATETIME NOT NULL/)).to.be.true;
+            expect(mockConn.release.called).to.be.true;
         });
     });
 

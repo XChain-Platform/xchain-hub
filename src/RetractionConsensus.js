@@ -382,6 +382,20 @@ class RetractionConsensus {
     async _persistCapabilitySnapshot(capability, block){
         if(!this.db) return;
         let validators = await this._resolveCapabilityValidators(capability, block, this.network);
+        // SWQ-TRUNC-MIRROR (): a TRUNCATED set is never mirrored, for the reason
+        // spelled out in CrossChainDexEngine._persistCapabilitySnapshot. The retraction
+        // rail is a fourth writer into the SAME shared capability_snapshots mirror, so an
+        // unguarded write here re-opens the accept/reject divergence the three engines
+        // close: off-BTC verifiers read the capped rows back as COMPLETE
+        // (getCapabilitySnapshotWeights sets no `truncated`) and clear 2/3 over an
+        // under-counted denominator this class itself rejects at the `vset.truncated`
+        // check in _handleFinalized. Keep every writer's guard in lockstep.
+        if(validators && validators.truncated === true){
+            console.warn('RetractionConsensus: refusing to persist a TRUNCATED ' + capability +
+                         ' capability snapshot at block ' + block +
+                         ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
+            return;
+        }
         for(let v of validators){
             let pubkey = String(v.pubkey).toLowerCase();
             let amount = String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0'));

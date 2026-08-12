@@ -16,6 +16,7 @@ const Consensus      = require('../../src/Consensus');
 const { createMockHub }     = require('../helpers/mockHub');
 const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7, VALIDATORS_10, VALIDATORS_13,
         makeValidator, WEIGHTED_VALIDATORS_4, makeWeightSnapshot } = require('../helpers/fixtures');
+const { waitUntil }  = require('../helpers/waitUntil');
 
 describe('Consensus (PBFT)', function () {
 
@@ -531,8 +532,10 @@ describe('Consensus (PBFT)', function () {
                 data: { seq: 5, configDigest: digest }
             });
 
-            // Wait for async apply
-            await new Promise(r => setTimeout(r, 20));
+            // Wait for the async apply to run to completion. The anchor is the
+            // proposer promise settling, not applyConfig being CALLED: the seq
+            // save and the round clear both happen after that call.
+            await waitUntil(() => resolved, { label: 'the quorum commit to resolve the proposal' });
 
             expect(hub.applyConfig.calledOnce).to.be.true;
             expect(hub.applyConfig.calledWith(config)).to.be.true;
@@ -566,7 +569,9 @@ describe('Consensus (PBFT)', function () {
             expect(hub.applyConfig.calledOnce).to.be.true;
 
             release();
-            await new Promise(r => setTimeout(r, 20));
+            // The in-flight apply now completes and clears the round; poll for
+            // the clear rather than guessing how long the release takes.
+            await waitUntil(() => !consensus.pendingProposals.has(6), { label: 'the released apply to clear round 6' });
             expect(hub.applyConfig.calledOnce).to.be.true;       // still applies exactly once
             expect(consensus.pendingProposals.has(6)).to.be.false; // applied and cleared
         });
@@ -1097,7 +1102,7 @@ describe('Consensus (PBFT)', function () {
             });
 
             consensus._handleCommit({ sender: VALIDATORS_4[2].addr, data: { seq: 5, configDigest: digest } });
-            await new Promise(r => setTimeout(r, 20));
+            await waitUntil(() => rejected, { label: 'the failed apply to reject the proposer promise' });
 
             expect(rejected).to.be.an('error');
             expect(consensus.pendingProposals.has(5)).to.be.false;
@@ -1132,7 +1137,7 @@ describe('Consensus (PBFT)', function () {
             });
 
             consensus._handleCommit({ sender: VALIDATORS_4[2].addr, data: { seq: 5, configDigest: digest } });
-            await new Promise(r => setTimeout(r, 20));
+            await waitUntil(() => rejected, { label: 'the failed seq write to reject the proposer promise' });
 
             expect(rejected).to.be.an('error');
             expect(rejected.message).to.equal('seq write failed');
@@ -1266,7 +1271,7 @@ describe('Consensus (PBFT)', function () {
                 resolved: false, applied: false, timer: null, resolve: null, reject: null, quorum: 3
             });
             consensus._handleCommit({ sender: VALIDATORS_4[2].addr, data: { seq: 5, configDigest: digest } });
-            await new Promise(r => setTimeout(r, 20));
+            await waitUntil(() => !consensus.pendingProposals.has(5), { label: 'the follower apply to clear round 5' });
             expect(hub.applyConfig.calledOnce).to.be.true;
             expect(consensus.pendingProposals.has(5)).to.be.false; // applied and cleared
         });
@@ -1286,6 +1291,10 @@ describe('Consensus (PBFT)', function () {
                 resolved: false, applied: false, timer: null, resolve: null, reject: null, quorum: 3
             });
             consensus._handleCommit({ sender: VALIDATORS_4[2].addr, data: { seq: 5, configDigest: digest } });
+            // A bounded settle, deliberately, not a missed poll: the assertion is
+            // that the failed apply did NOT drop the proposal, and an absence has
+            // no condition to poll for. Polling on `applyConfig.called` would
+            // pass before the catch handler runs and stop guarding the drop.
             await new Promise(r => setTimeout(r, 20));
             // Proposal stays pending (retry path) and applied is still false.
             expect(consensus.pendingProposals.has(5)).to.be.true;

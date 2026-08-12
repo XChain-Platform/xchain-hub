@@ -1485,7 +1485,12 @@ class XChainHub {
     //      development) so block-boundary snapshotting Just Works.
     // Returns null when both paths fail.
     async _resolveBtcLatestBlock(){
-        let network = await this._resolveBtcNetwork();
+        // A cross-network configs tree makes this throw (). Degrade to the
+        // null return this method already documents rather than crashing the
+        // scheduler tick that called it.
+        let network;
+        try { network = await this._resolveBtcNetwork(); }
+        catch (err) { console.error('XChainHub: cannot resolve BTC latest block:', err.message); return null; }
         try {
             let tip = await this.db.getChainTip('BTC', network);
             // Freshness bound on the indexer-pushed tip (path 1). If the co-located
@@ -1556,18 +1561,38 @@ class XChainHub {
         return true;
     }
 
-    // Which BTC network does this hub talk to? Looks at the hub's own
-    // configs table for an installed BTC indexer. Single-network hubs
-    // (the common case) return whichever network is installed.
-    // Multi-network hubs (rare) get the first match per the preference
-    // order, matching _resolveBtcIndexerUrl.
+    // Which BTC network does this hub talk to? In validator mode the answer is
+    // this.network (the validated HUB_NETWORK) and nothing else: the configs
+    // table is only consulted to confirm that network has an indexer, and a
+    // tree carrying only OTHER networks fails closed by throwing. Before  this loop returned the first of regtest>testnet>mainnet found, so a
+    // multi-network configs tree let a mainnet validator anchor its oracle
+    // round to the REGTEST tip while every consensus gate still read mainnet;
+    // the _indexerCoinMismatch guard cannot see it, because a regtest BTC
+    // indexer truthfully reports coin=BTC. Standalone hubs (this.network === '',
+    // no consensus) keep the preference order so dev loops Just Work.
     // Defaults to 'mainnet' for safety when no configs are loaded yet.
     async _resolveBtcNetwork(){
-        if(!this.db) return 'mainnet';
+        // Never guess a network for a hub that was told which one it is: with no
+        // configs to consult, its own is the only safe answer.
+        if(!this.db) return this.network || 'mainnet';
         let configs;
         try { configs = await this.db.getAllConfigs(); }
-        catch (err) { console.error('XChainHub: failed to resolve BTC network from configs:', err); return 'mainnet'; }
+        catch (err) {
+            console.error('XChainHub: failed to resolve BTC network from configs:', err);
+            return this.network || 'mainnet';
+        }
         let btc = configs && configs['bitcoin'];
+        if(this.network){
+            if(btc && btc[this.network] && btc[this.network]['xchain-indexer']) return this.network;
+            // Nothing configured at all is not a cross-network hazard; a tree that
+            // carries other networks but not ours is, so refuse rather than resolve
+            // one. OracleRound leaves currentBtcNetwork unset on a throw here and
+            // fails its composition gate closed, which is the intended outcome.
+            if(!btc || Object.keys(btc).length === 0) return this.network;
+            throw new Error('XChainHub: HUB_NETWORK=' + this.network + ' has no bitcoin xchain-indexer in the ' +
+                'configs table (present: ' + Object.keys(btc).join(', ') + '); refusing to anchor consensus to ' +
+                'another network. Set BTC_INDEXER_API_URL, or push the ' + this.network + ' indexer via updateconfig.');
+        }
         if(!btc) return 'mainnet';
         for(let net of ['regtest', 'testnet', 'mainnet']){
             if(btc[net] && btc[net]['xchain-indexer']) return net;
@@ -1673,16 +1698,26 @@ class XChainHub {
         const COIN_CONFIG_KEY = { BTC: 'bitcoin', LTC: 'litecoin', DOGE: 'dogecoin' };
         let cc = configs && configs[COIN_CONFIG_KEY[coin] || coin.toLowerCase()];
         if(!cc) return null;
-        // Prefer regtest > testnet > mainnet so dev loops Just Work. Production
-        // deployments should set <COIN>_INDEXER_API_URL explicitly.
-        for(let net of ['regtest', 'testnet', 'mainnet']){
-            let netConfig = cc[net];
-            if(!netConfig) continue;
-            // xchain-node's updateconfig push uses nested {host, port, ...} under the module key
+        // xchain-node's updateconfig push uses nested {host, port, ...} under the module key
+        let urlFor = (netConfig) => {
+            if(!netConfig) return null;
             let nested = netConfig['xchain-indexer'];
             let host = (nested && nested['host']) || netConfig['INDEXER_URL'];
             let port = (nested && nested['port']) || netConfig['INDEXER_API_PORT'];
-            if(host && port) return 'http://' + host + ':' + port;
+            return (host && port) ? ('http://' + host + ':' + port) : null;
+        };
+        // A validator hub reads ONLY its own network's indexer and returns null
+        // otherwise (). The preference order below is a dev-loop
+        // convenience, and on a multi-network configs tree it silently handed a
+        // mainnet-gated hub the regtest indexer, which then fed the checkpoint,
+        // attestation and cross-chain engines another chain's state.
+        if(this.network) return urlFor(cc[this.network]);
+        // Standalone/dev (no HUB_NETWORK, no consensus): prefer regtest > testnet >
+        // mainnet so dev loops Just Work. Production deployments should set
+        // <COIN>_INDEXER_API_URL explicitly.
+        for(let net of ['regtest', 'testnet', 'mainnet']){
+            let url = urlFor(cc[net]);
+            if(url) return url;
         }
         return null;
     }

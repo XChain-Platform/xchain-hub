@@ -143,6 +143,141 @@ describe('llm provider, agree (judge_model)', function () {
     });
 });
 
+// : max_completion_tokens was the one governance key installed on a bare
+// truthy check, so -1 / 1.5 / Infinity became the federation-wide token budget.
+// MAX_TOKENS_DEFAULT has no getter; the observable is the budget the vendor is sent.
+describe('llm provider, governance max_completion_tokens bounds (#4466)', function () {
+
+    afterEach(function () { nock.cleanAll(); sinon.restore(); });
+
+    async function anthropicMaxTokensFor(additionalConfig) {
+        return await _withEnv({ ANTHROPIC_API_KEY: 'sk-ant-test' }, async () => {
+            const llm = _reloadProvider();
+            const warn = sinon.stub(console, 'warn');
+            llm._setConfig({ additional_config: additionalConfig });
+            warn.restore();
+            let capturedBody;
+            nock('https://api.anthropic.com')
+                .post('/v1/messages', (body) => { capturedBody = body; return true; })
+                .reply(200, { content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 1, output_tokens: 1 } });
+            await llm.fetch(JSON.stringify({ prompt: 'q' }), {});
+            return capturedBody.max_tokens;
+        });
+    }
+
+    it('installs a valid positive-integer budget', async function () {
+        expect(await anthropicMaxTokensFor({ max_completion_tokens: 2048 })).to.equal(2048);
+    });
+
+    it('ignores a negative budget instead of sending it to the vendor', async function () {
+        // -1 survived the min() clamp in fetch() and was sent verbatim.
+        expect(await anthropicMaxTokensFor({ max_completion_tokens: -1 })).to.equal(1024);
+    });
+
+    it('ignores a fractional budget', async function () {
+        expect(await anthropicMaxTokensFor({ max_completion_tokens: 1.5 })).to.equal(1024);
+    });
+
+    it('ignores a non-finite budget', async function () {
+        expect(await anthropicMaxTokensFor({ max_completion_tokens: Number.POSITIVE_INFINITY })).to.equal(1024);
+    });
+
+    it('ignores a non-numeric budget', async function () {
+        expect(await anthropicMaxTokensFor({ max_completion_tokens: 'abc' })).to.equal(1024);
+    });
+
+    it('ignores zero rather than installing a zero-token budget', async function () {
+        expect(await anthropicMaxTokensFor({ max_completion_tokens: 0 })).to.equal(1024);
+    });
+
+    it('does not let a negative budget reach a reasoning model as headroom-corrected', async function () {
+        // -1 + FETCH_REASONING_TOKEN_HEADROOM = 2047: a valid-LOOKING budget, which is
+        // why this path never surfaced a 400 and produced a silently wrong one instead.
+        const sent = await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            const warn = sinon.stub(console, 'warn');
+            llm._setConfig({ additional_config: { max_completion_tokens: -1 } });
+            warn.restore();
+            let capturedBody;
+            nock('https://api.openai.com')
+                .post('/v1/chat/completions', (body) => { capturedBody = body; return true; })
+                .reply(200, { choices: [{ message: { content: 'ok' } }] });
+            await llm.fetch(JSON.stringify({ prompt: 'q' }), { pinnedModel: 'gpt-5-mini' });
+            return capturedBody.max_completion_tokens;
+        });
+        expect(sent).to.equal(1024 + 2048);
+    });
+});
+
+// : the Anthropic branch emitted `temperature` for every model, but the
+// Opus 4.7+ / Sonnet 5 / Fable 5 contract REMOVED the sampling parameters (HTTP 400,
+// not accepted-and-ignored). claude-opus-4-7 is the default approved_models fallback
+// and the pinned temperature-0 judge, so those calls were deterministic vendor 400s.
+describe('llm provider, anthropic sampling-parameter gate (#4464)', function () {
+
+    afterEach(function () { nock.cleanAll(); sinon.restore(); });
+
+    function withApiKey(fn) { return _withEnv({ ANTHROPIC_API_KEY: 'sk-ant-test' }, fn); }
+
+    async function anthropicBodyForModel(pinnedModel) {
+        return await withApiKey(async () => {
+            const llm = _reloadProvider();
+            let capturedBody;
+            nock('https://api.anthropic.com')
+                .post('/v1/messages', (body) => { capturedBody = body; return true; })
+                .reply(200, { content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 1, output_tokens: 1 } });
+            await llm.fetch(JSON.stringify({ prompt: 'q' }), { pinnedModel });
+            return capturedBody;
+        });
+    }
+
+    it('classifies the sampling-free Anthropic families, bare and dated', function () {
+        const llm = _reloadProvider();
+        for (const id of ['claude-opus-4-7', 'claude-opus-4-8', 'claude-opus-5',
+                          'claude-sonnet-5', 'claude-fable-5', 'claude-mythos-5'])
+            expect(llm._anthropicRejectsSampling(id), id).to.equal(true);
+        expect(llm._anthropicRejectsSampling('claude-opus-4-7-20260101')).to.equal(true);
+    });
+
+    it('leaves every other Anthropic id on the explicit-temperature path', function () {
+        const llm = _reloadProvider();
+        for (const id of ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5',
+                          'claude-future-not-yet-listed', '', undefined])
+            expect(llm._anthropicRejectsSampling(id), String(id)).to.equal(false);
+        // Prefix-only ids must not match by substring: 4-6 is not 4-7's family.
+        expect(llm._anthropicRejectsSampling('claude-opus-4-70')).to.equal(false);
+    });
+
+    it('omits temperature for the default claude-opus-4-7 fallback', async function () {
+        const body = await anthropicBodyForModel('claude-opus-4-7');
+        expect(body).to.not.have.property('temperature');
+        expect(body.model).to.equal('claude-opus-4-7');
+    });
+
+    it('keeps the temperature-0 contract for claude-sonnet-4-6, which still honors it', async function () {
+        const body = await anthropicBodyForModel('claude-sonnet-4-6');
+        expect(body.temperature).to.equal(0);
+    });
+
+    it('omits temperature on the Opus 4.7 judge call too', async function () {
+        const captured = await withApiKey(async () => {
+            const llm = _reloadProvider();
+            let capturedBody;
+            nock('https://api.anthropic.com')
+                .post('/v1/messages', (body) => { capturedBody = body; return true; })
+                .reply(200, {
+                    content: [{ type: 'text', text: '{"equivalent":true,"canonical_index":1}' }],
+                    usage:   { input_tokens: 1, output_tokens: 1 }
+                });
+            const proposals = [{ body: Buffer.from('a'), meta: 'm' }, { body: Buffer.from('a'), meta: 'm' }];
+            await llm.agree(proposals, { pinnedJudgeModel: 'claude-opus-4-7' });
+            return capturedBody;
+        });
+        expect(captured.model).to.equal('claude-opus-4-7');
+        expect(captured).to.not.have.property('temperature');
+    });
+});
+
 describe('llm provider, _setConfig', function () {
 
     it('applies approved_models / judge_model / token caps from the registry def', function () {
@@ -446,7 +581,11 @@ describe('llm provider, fetch via claude_spawn', function () {
         expect(stub.firstCall.args[0].maxBudgetUsd).to.equal(0.5);
     });
 
-    it('omits maxBudgetUsd when no budget is configured (behavior unchanged)', async function () {
+    //  - these two used to pin the OPPOSITE contract (an unconfigured hub
+    // omits the flag, "behavior unchanged"). That omission was the gap: the CLI
+    // transport carries no token cap of its own, so every paid invocation on a
+    // stock hub ran uncapped. The ceiling is now default-on and these pin it.
+    it('applies the built-in ceiling when no budget is configured', async function () {
         const savedBudget = process.env.LLM_MAX_BUDGET_USD;
         delete process.env.LLM_MAX_BUDGET_USD;
         const { llm, stub } = reloadWithSpawnStub({ result: 'ok' });
@@ -454,16 +593,17 @@ describe('llm provider, fetch via claude_spawn', function () {
             await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {}));
         } finally { if (savedBudget !== undefined) process.env.LLM_MAX_BUDGET_USD = savedBudget; }
         expect(stub.calledOnce).to.equal(true);
-        expect(stub.firstCall.args[0]).to.not.have.property('maxBudgetUsd');
+        expect(stub.firstCall.args[0].maxBudgetUsd).to.equal(llm._DEFAULT_MAX_BUDGET_USD);
+        expect(stub.firstCall.args[0].maxBudgetUsd).to.be.a('number').greaterThan(0);
     });
 
-    it('omits maxBudgetUsd for a non-numeric / non-positive budget', async function () {
+    it('falls back to the built-in ceiling for a non-numeric / non-positive budget', async function () {
         const { llm, stub } = reloadWithSpawnStub({ result: 'ok' });
         process.env.LLM_MAX_BUDGET_USD = 'not-a-number';
         try {
             await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {}));
         } finally { delete process.env.LLM_MAX_BUDGET_USD; }
-        expect(stub.firstCall.args[0]).to.not.have.property('maxBudgetUsd');
+        expect(stub.firstCall.args[0].maxBudgetUsd).to.equal(llm._DEFAULT_MAX_BUDGET_USD);
     });
 
     // item 2680: a paused provider must not dial the spawn transport at all.
@@ -477,6 +617,96 @@ describe('llm provider, fetch via claude_spawn', function () {
         expect(err).to.exist;
         expect(err.paused).to.equal(true);
         expect(stub.called).to.equal(false);
+    });
+
+    //  - a crash mid-call must still leave local evidence that a vendor
+    // charge was initiated, on the CLI transport most of all: it recorded nothing.
+    describe('durable spend audit ()', function () {
+
+        const fsSync = require('fs');
+        let sinkPath, savedSink;
+
+        beforeEach(function () {
+            savedSink = process.env.LLM_SPEND_LOG_PATH;
+            sinkPath = path.join(os.tmpdir(),
+                'llm-spend-' + process.pid + '-' + Math.random().toString(36).slice(2) + '.jsonl');
+            process.env.LLM_SPEND_LOG_PATH = sinkPath;
+        });
+
+        afterEach(function () {
+            if (savedSink === undefined) delete process.env.LLM_SPEND_LOG_PATH;
+            else process.env.LLM_SPEND_LOG_PATH = savedSink;
+            try { fsSync.unlinkSync(sinkPath); } catch { /* never written */ }
+        });
+
+        function readSink() {
+            let raw = '';
+            try { raw = fsSync.readFileSync(sinkPath, 'utf8'); } catch { return []; }
+            return raw.split('\n').filter(Boolean).map(l => JSON.parse(l));
+        }
+
+        it('writes the intent BEFORE the vendor is dialed, and settles it after', async function () {
+            let sinkAtDispatch = null;
+            const { llm, stub } = reloadWithSpawnStub({ result: 'ok' });
+            stub.callsFake(async () => {
+                // Observed from inside the call: the durable record already exists.
+                sinkAtDispatch = readSink();
+                return { result: 'ok', json: {} };
+            });
+
+            await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {}));
+
+            expect(sinkAtDispatch, 'the intent must be on disk before the call').to.have.length(1);
+            expect(sinkAtDispatch[0].phase).to.equal('intent');
+            expect(sinkAtDispatch[0].transport).to.equal('claude_spawn');
+
+            const lines = readSink();
+            expect(lines.map(l => l.phase)).to.deep.equal(['intent', 'settle']);
+            expect(lines[1].id).to.equal(lines[0].id);
+            expect(lines[1].status).to.equal('ok');
+        });
+
+        it('settles the CLI cost the branch used to discard', async function () {
+            const { llm, stub } = reloadWithSpawnStub({
+                result: 'ok',
+                json: { total_cost_usd: 0.0123, usage: { input_tokens: 11, output_tokens: 7 } }
+            });
+            expect(stub.called).to.equal(false);
+
+            await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {}));
+
+            const settle = readSink().find(l => l.phase === 'settle');
+            expect(settle.usage.costUsd).to.equal(0.0123);
+            expect(settle.usage.tokens).to.deep.equal({ input_tokens: 11, output_tokens: 7 });
+            // The same numbers now reach healthCheck's in-memory accounting, which
+            // the CLI transport was absent from entirely.
+            const health = await withSpawnEnv(() => llm.healthCheck());
+            expect(health.tokenUsage.calls).to.equal(1);
+            expect(health.tokenUsage.inputTokens).to.equal(11);
+        });
+
+        it('leaves an intent with an error settle when the call throws', async function () {
+            const { llm, stub } = reloadWithSpawnStub({ result: 'ok' });
+            stub.rejects(new Error('cli exploded'));
+
+            try {
+                await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {}));
+            } catch { /* expected */ }
+
+            const lines = readSink();
+            expect(lines.map(l => l.phase)).to.deep.equal(['intent', 'settle']);
+            expect(lines[1].status).to.equal('error');
+            expect(lines[1].error).to.contain('cli exploded');
+        });
+
+        it('is best-effort: an unwritable sink never blocks the round', async function () {
+            process.env.LLM_SPEND_LOG_PATH = '/dev/null/not-a-dir/spend.jsonl';
+            const { llm } = reloadWithSpawnStub({ result: 'still served' });
+
+            const out = await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {}));
+
+            expect(out.body.toString('utf8')).to.equal('still served');
+        });
     });
 });
 
@@ -540,13 +770,14 @@ describe('llm provider, kill switch + budget (items 2680 / 2679)', function () {
         expect(err.paused).to.equal(true);
     });
 
-    it('_setConfig max_budget_usd feeds _resolveMaxBudgetUsd; 0 clears it', function () {
+    it('_setConfig max_budget_usd feeds _resolveMaxBudgetUsd; 0 falls back to the default', function () {
         delete process.env.LLM_MAX_BUDGET_USD;
         const llm = _reloadProvider();
         llm._setConfig({ additional_config: { max_budget_usd: 1.25 } });
         expect(llm._resolveMaxBudgetUsd()).to.equal(1.25);
+        // : clearing the governance value no longer means "no ceiling".
         llm._setConfig({ additional_config: { max_budget_usd: 0 } });
-        expect(llm._resolveMaxBudgetUsd()).to.equal(undefined);
+        expect(llm._resolveMaxBudgetUsd()).to.equal(llm._DEFAULT_MAX_BUDGET_USD);
     });
 
     it('LLM_MAX_BUDGET_USD env overrides the governance budget', function () {
@@ -608,6 +839,50 @@ describe('llm provider, fetch via anthropic_api', function () {
         expect(typeof result.meta).to.equal('string');
     });
 
+    // item 4467: the truncation guards used to fire only when the emitted text was
+    // EMPTY, so a truncated-but-non-empty response was returned as a complete answer
+    // -- and on this path that partial is what fetch() signs as the on-chain
+    // attestation body. Both Anthropic truncation stops must fail closed at any
+    // emitted length, including model_context_window_exceeded, which was previously
+    // not handled at all.
+    for (const stopReason of ['max_tokens', 'model_context_window_exceeded']) {
+        it('fails closed on a NON-EMPTY Anthropic response truncated by ' + stopReason, async function () {
+            const llm = _reloadProvider();
+            nock('https://api.anthropic.com')
+                .post('/v1/messages')
+                .reply(200, {
+                    stop_reason: stopReason,
+                    content: [{ type: 'text', text: 'Paris is the capital of Fra' }],
+                    usage:   { input_tokens: 10, output_tokens: 8 }
+                });
+
+            let err;
+            try {
+                await withApiKey(() => llm.fetch(JSON.stringify({ prompt: 'Capital of France?' }), {}));
+            } catch (e) { err = e; }
+
+            expect(err, 'a partial answer must never be signed on-chain').to.exist;
+            expect(err.kind).to.equal('truncation');
+            expect(err.transient).to.equal(false);
+        });
+    }
+
+    it('still returns a complete Anthropic response whose stop_reason is end_turn', async function () {
+        const llm = _reloadProvider();
+        nock('https://api.anthropic.com')
+            .post('/v1/messages')
+            .reply(200, {
+                stop_reason: 'end_turn',
+                content: [{ type: 'text', text: 'Paris.' }],
+                usage:   { input_tokens: 10, output_tokens: 2 }
+            });
+
+        const result = await withApiKey(() =>
+            llm.fetch(JSON.stringify({ prompt: 'Capital of France?' }), {})
+        );
+        expect(result.body.toString('utf8')).to.equal('Paris.');
+    });
+
     it('respects custom max_tokens in the envelope', async function () {
         const llm = _reloadProvider();
         let capturedBody;
@@ -640,6 +915,36 @@ describe('llm provider, fetch via anthropic_api', function () {
         );
 
         expect(capturedBody.temperature).to.equal(0.7);
+    });
+
+    //  - the audit wraps the dispatch, so it must cover the HTTP
+    // transports too, not only the CLI branch its own tests live in.
+    it('writes an intent/settle pair carrying real usage on the API transport', async function () {
+        const fsSync   = require('fs');
+        const sinkPath = path.join(os.tmpdir(), 'llm-spend-api-' + process.pid + '.jsonl');
+        const saved    = process.env.LLM_SPEND_LOG_PATH;
+        process.env.LLM_SPEND_LOG_PATH = sinkPath;
+        try {
+            const llm = _reloadProvider();
+            nock('https://api.anthropic.com')
+                .post('/v1/messages')
+                .reply(200, {
+                    content: [{ type: 'text', text: 'ok' }],
+                    usage:   { input_tokens: 9, output_tokens: 4 }
+                });
+
+            await withApiKey(() => llm.fetch(JSON.stringify({ prompt: 'Q?' }), {}));
+
+            const lines = fsSync.readFileSync(sinkPath, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l));
+            expect(lines.map(l => l.phase)).to.deep.equal(['intent', 'settle']);
+            expect(lines[0].transport).to.equal('anthropic_api');
+            expect(lines[1].id).to.equal(lines[0].id);
+            expect(lines[1].usage.tokens).to.deep.equal({ input_tokens: 9, output_tokens: 4 });
+        } finally {
+            if (saved === undefined) delete process.env.LLM_SPEND_LOG_PATH;
+            else process.env.LLM_SPEND_LOG_PATH = saved;
+            try { fsSync.unlinkSync(sinkPath); } catch { /* never written */ }
+        }
     });
 
     it('includes system prompt in the request when provided', async function () {
@@ -1395,6 +1700,9 @@ describe('llm provider, reasoning-family classification (item 3535)', function (
         expect(llm._isReasoningModel('gpt-5-nano')).to.equal(true);
         expect(llm._isReasoningModel('o3')).to.equal(true);
         expect(llm._isReasoningModel('o1-mini')).to.equal(true);
+        // : a version segment must not by itself demote a reasoning id.
+        expect(llm._isReasoningModel('gpt-5.1')).to.equal(true);
+        expect(llm._isReasoningModel('gpt-5.1-mini')).to.equal(true);
     });
 
     it('does NOT classify the non-reasoning gpt-5-chat variants as reasoning', function () {
@@ -1403,6 +1711,27 @@ describe('llm provider, reasoning-family classification (item 3535)', function (
         expect(llm._isReasoningModel('gpt-5-chat')).to.equal(false);
         expect(llm._isReasoningModel('gpt-4o')).to.equal(false);
         expect(llm._isReasoningModel('claude-sonnet-4-6')).to.equal(false);
+        // : the version segment sits between `gpt-5` and `-chat`, so the
+        // old literal `(?!-chat)` lookahead cleared and these read as reasoning.
+        expect(llm._isReasoningModel('gpt-5.1-chat-latest')).to.equal(false);
+        expect(llm._isReasoningModel('gpt-5.2-chat-latest')).to.equal(false);
+        expect(llm._isReasoningModel('gpt-5.3-chat-latest')).to.equal(false);
+    });
+
+    it('sends the explicit temperature and plain budget for a VERSIONED chat id (#4465)', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            const scope = nock('https://api.openai.com')
+                .post('/v1/chat/completions', (body) => {
+                    expect(body.temperature, 'temperature-0 contract must survive').to.equal(0);
+                    expect(body.max_completion_tokens, 'no reasoning headroom').to.equal(1024);
+                    return true;
+                })
+                .reply(200, { choices: [{ message: { content: 'ok' } }] });
+            const res = await llm.fetch(JSON.stringify({ prompt: 'q' }), { pinnedModel: 'gpt-5.1-chat-latest' });
+            expect(res.body.toString('utf8')).to.equal('ok');
+            expect(scope.isDone()).to.equal(true);
+        });
     });
 
     it('sends the explicit temperature and the plain token budget for gpt-5-chat-latest', async function () {
@@ -1724,6 +2053,31 @@ describe('llm provider, judge fallback chain', function () {
         });
     });
 
+    // item 4467: the same length-stop with NON-EMPTY content was returned as a
+    // complete verdict, so a coincidentally-parseable partial JSON object could be
+    // finalized as consensus truth. A 'length' stop is truncation at any emitted
+    // length; it must classify identically to the empty case above and still not
+    // advance the chain.
+    it('classifies a truncated (finish_reason length, NON-empty content) judge outcome and does not advance the chain', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            llm._setConfig({ additional_config: { judge_fallback_models: ['gpt-5-nano'] } });
+            // A partial verdict that still parses as JSON. No mock for the fallback
+            // gpt-5-nano: if the chain advanced, nock would throw.
+            nock('https://api.openai.com')
+                .post('/v1/chat/completions', (body) => body.model === 'gpt-5-mini')
+                .reply(200, { choices: [{
+                    finish_reason: 'length',
+                    message: { content: '{"equivalent": true, "canonical_index": 1}' }
+                }] });
+            const outcome = {};
+            const winner = await llm.agree(PROPOSALS, { pinnedJudgeModel: 'gpt-5-mini', outcome });
+            expect(winner, 'a truncated partial must not become the verdict').to.equal(null);
+            expect(outcome.inconclusive).to.equal(true);
+            expect(outcome.reason).to.equal('judge_truncation');
+        });
+    });
+
     // item 3481: a reached judge can also fail hard for reasons that are NOT a model
     // refusal (a 4xx from a retired model id, an auth misconfiguration, a non-zero
     // claude CLI exit). Those arrive with err.transient false and err.kind undefined.
@@ -2038,6 +2392,76 @@ describe('llm provider, agree() meta canonicalization (#3070)', function () {
             ], 0, outcome);
             expect(r).to.be.null;
             expect(outcome.reason).to.equal('meta_unrecognized');
+        });
+    });
+
+    // . fetch() honours the block-anchored pinned model, so the gate that
+    // judges the meta it returns has to read the same block-anchored list. Reading
+    // the live one made a governance delisting permanent: every retry re-pinned the
+    // removed model, every meta came back unrecognized, and the request expired at
+    // no_quorum despite successful provider responses.
+    describe('block-anchored allowlist (options.pinnedApprovedModels)', function () {
+
+        it('accepts a meta pinned at the request block after governance delists the model', async function () {
+            const llm = _reloadProvider();
+            // Governance hot reload removes 'retired-model-1' from the live set.
+            llm._setConfig({ additional_config: { approved_models: ['claude-opus-4-7'] } });
+            const outcome = {};
+            const r = llm._canonicalMetaForTest([
+                { body: body('A'), meta: 'retired-model-1' },
+                { body: body('B'), meta: 'retired-model-1' }
+            ], 0, outcome, ['retired-model-1', 'claude-opus-4-7']);
+            expect(r).to.equal('retired-model-1');
+            expect(outcome.inconclusive).to.be.undefined;
+        });
+
+        it('still rejects that same meta when no block-anchored list is threaded', async function () {
+            // The regression this fix removes, kept as the control: without the pinned
+            // list the live set decides and the round is frozen at no_quorum.
+            const llm = _reloadProvider();
+            llm._setConfig({ additional_config: { approved_models: ['claude-opus-4-7'] } });
+            const outcome = {};
+            const r = llm._canonicalMetaForTest([
+                { body: body('A'), meta: 'retired-model-1' },
+                { body: body('B'), meta: 'retired-model-1' }
+            ], 0, outcome);
+            expect(r).to.be.null;
+            expect(outcome.reason).to.equal('meta_unrecognized');
+        });
+
+        it('does not widen the allowlist: a meta in neither list is still refused', async function () {
+            // The pinned list REPLACES the live one, it does not union with arbitrary
+            // values. The #3070 control has to survive the liveness fix intact.
+            const llm = _reloadProvider();
+            llm._setConfig({ additional_config: { approved_models: ['claude-opus-4-7'] } });
+            const outcome = {};
+            const r = llm._canonicalMetaForTest([
+                { body: body('A'), meta: 'evil-model-9000' },
+                { body: body('B'), meta: 'evil-model-9000' }
+            ], 0, outcome, ['retired-model-1', 'claude-opus-4-7']);
+            expect(r).to.be.null;
+            expect(outcome.reason).to.equal('meta_unrecognized');
+        });
+
+        it('keeps corroboration in force under a block-anchored list', async function () {
+            const llm = _reloadProvider();
+            const outcome = {};
+            const r = llm._canonicalMetaForTest([
+                { body: body('A'), meta: 'retired-model-1' },
+                { body: body('B'), meta: 'claude-opus-4-7' }
+            ], 0, outcome, ['retired-model-1', 'claude-opus-4-7']);
+            expect(r).to.be.null;
+            expect(outcome.reason).to.equal('meta_uncorroborated');
+        });
+
+        it('falls back to the live set when the pinned list is empty or absent', async function () {
+            const llm = _reloadProvider();
+            const outcome = {};
+            const r = llm._canonicalMetaForTest([
+                { body: body('A'), meta: APPROVED },
+                { body: body('B'), meta: APPROVED }
+            ], 0, outcome, []);
+            expect(r).to.equal(APPROVED);
         });
     });
 });

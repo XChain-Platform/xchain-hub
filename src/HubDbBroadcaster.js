@@ -243,6 +243,28 @@ class HubDbBroadcaster {
         }
     }
 
+    // Force every subscriber to reconnect after a row event this producer could NOT
+    // deliver. The watermark heartbeat certifies "you have every row produced through
+    // ts" on a wall clock that never learns a broadcast was dropped, and a consumer's
+    // only gap repair (the max_ids catch-up in its bootstrap) runs at connect time, so
+    // a silently-dropped row leaves the consumer certifying completeness past a
+    // committed row forever (item 4459). Closing the socket is the sanctioned repair:
+    // the consumer resets its drain gate on close, reconnects, and re-drains from the
+    // max_ids in the next 'ready' frame. 1012 (Service Restart) is a retryable close
+    // code. Returns how many sockets were dropped, so the caller can log the repair.
+    dropAllForResync(reason) {
+        let why = reason || 'resync';
+        let dropped = 0;
+        for (let ws of Array.from(this.subscribers)) {
+            try { ws.close(1012, why); } catch (e) { /* ignore */ }
+            this.removeSubscriber(ws);
+            dropped++;
+        }
+        if (dropped > 0)
+            console.warn('HubDbBroadcaster: dropped ' + dropped + ' subscriber(s) for resync (' + why + ')');
+        return dropped;
+    }
+
     // event: { table, row }
     broadcastRow(event) {
         if (this.subscribers.size === 0) return;

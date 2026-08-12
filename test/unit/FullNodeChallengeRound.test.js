@@ -583,6 +583,144 @@ describe('FullNodeChallengeRound', function () {
             fs.rmSync(dir, { recursive: true, force: true });
         });
 
+        // : item 3463 wrote the intent but nothing read it back, so the guard
+        // only bound one process lifetime. The epoch is recomputed deterministically
+        // from the tip, so a restart inside acceptWindow rebuilds the SAME round and
+        // re-wins leadership; these pin that the recovered log, not the empty in-memory
+        // rounds map, is what decides whether the fee has already been committed.
+        describe('#4249 restart replay of a committed verdict', function () {
+            const fs   = require('fs');
+            const os   = require('os');
+            const path = require('path');
+            let dir;
+            beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fnc-replay-')); });
+            afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
+
+            function writeLog(records) {
+                const p = path.join(dir, 'verdict.spend.jsonl');
+                fs.writeFileSync(p, records.map(r => JSON.stringify(Object.assign({ effector: 'FULLNODE_VERDICT', ts: 1 }, r))).join('\n') + '\n');
+                return p;
+            }
+            // A restarted engine: same config, spend log of the PREVIOUS process.
+            async function restartWith(logPath) {
+                const hub = makeHub();
+                const eng = await startEpoch(hub);
+                eng.spendLogPath = logPath;
+                eng._loadSpendLog();                 // what start() now does before the first tick
+                return { hub, eng };
+            }
+
+            it('a sent verdict is not re-broadcast after a restart', async function () {
+                const { eng } = await restartWith(writeLog([
+                    { phase: 'intent', epoch: 288 }, { phase: 'sent', epoch: 288, txid: 'TXPRIOR' },
+                ]));
+                const st = eng.rounds.get(288);
+                eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+                await eng._closeCollection(288);
+                expect(eng.broadcastFn.called, 'no second BTC fee for an epoch already spent').to.equal(false);
+                expect(st.finalized, 'the round is claimed, not left retrying').to.equal(true);
+            });
+
+            it('a bare intent (crashed mid-flight) also blocks the re-broadcast', async function () {
+                const { eng } = await restartWith(writeLog([{ phase: 'intent', epoch: 288 }]));
+                const st = eng.rounds.get(288);
+                eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+                await eng._closeCollection(288);
+                expect(eng.broadcastFn.called, 'a dangling intent may already have paid').to.equal(false);
+            });
+
+            it('an ambiguous send blocks it too (the case the audit trail exists for)', async function () {
+                const { eng } = await restartWith(writeLog([
+                    { phase: 'intent', epoch: 288 }, { phase: 'ambiguous', epoch: 288, error: 'socket hang up' },
+                ]));
+                const st = eng.rounds.get(288);
+                eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+                await eng._closeCollection(288);
+                expect(eng.broadcastFn.called).to.equal(false);
+            });
+
+            // The liveness half: only a DEFINITIVE pre-send failure spent nothing, and
+            // that is the one shape that must still retry after a restart.
+            it('a definitively failed send still retries after a restart', async function () {
+                const { eng } = await restartWith(writeLog([
+                    { phase: 'intent', epoch: 288 }, { phase: 'failed', epoch: 288, error: 'rejected' },
+                ]));
+                const st = eng.rounds.get(288);
+                eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+                await eng._closeCollection(288);
+                expect(eng.broadcastFn.calledOnce, 'a never-sent verdict must still land').to.equal(true);
+            });
+
+            // The retry's OWN intent has to re-arm the guard. A first-record-wins fold
+            // reads this log as 'failed' and re-broadcasts, which is the double spend
+            // the whole item is about, reached through the one path that appends twice.
+            it('a retry after a definitive failure re-arms the guard when it crashes mid-flight', async function () {
+                const { eng } = await restartWith(writeLog([
+                    { phase: 'intent', epoch: 288 }, { phase: 'failed', epoch: 288, error: 'rejected' },
+                    { phase: 'intent', epoch: 288 },
+                ]));
+                const st = eng.rounds.get(288);
+                eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+                await eng._closeCollection(288);
+                expect(eng.broadcastFn.called, 'the retry may already have paid the fee').to.equal(false);
+            });
+
+            it('two definitive failures in a row still leave the verdict retryable', async function () {
+                const { eng } = await restartWith(writeLog([
+                    { phase: 'intent', epoch: 288 }, { phase: 'failed', epoch: 288, error: 'rejected' },
+                    { phase: 'intent', epoch: 288 }, { phase: 'failed', epoch: 288, error: 'rejected again' },
+                ]));
+                const st = eng.rounds.get(288);
+                eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+                await eng._closeCollection(288);
+                expect(eng.broadcastFn.calledOnce, 'nothing was ever spent, so liveness wins').to.equal(true);
+            });
+
+            it('a paid epoch is never unlocked by a later record', async function () {
+                const { eng } = await restartWith(writeLog([
+                    { phase: 'intent', epoch: 288 }, { phase: 'sent', epoch: 288, txid: 'TXPRIOR' },
+                    { phase: 'failed', epoch: 288, error: 'a trailing line must not clear a paid epoch' },
+                ]));
+                const st = eng.rounds.get(288);
+                eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+                await eng._closeCollection(288);
+                expect(eng.broadcastFn.called).to.equal(false);
+            });
+
+            it('another epoch in the log never gates this one', async function () {
+                const { eng } = await restartWith(writeLog([
+                    { phase: 'intent', epoch: 144 }, { phase: 'sent', epoch: 144, txid: 'TXOLD' },
+                ]));
+                const st = eng.rounds.get(288);
+                eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+                await eng._closeCollection(288);
+                expect(eng.broadcastFn.calledOnce).to.equal(true);
+            });
+
+            it('an absent log (first run) and a torn tail line both load quietly', async function () {
+                const hub = makeHub();
+                const eng = await startEpoch(hub);
+                eng.spendLogPath = path.join(dir, 'does-not-exist.jsonl');
+                expect(() => eng._loadSpendLog()).to.not.throw();
+                expect(eng._committedEpochs.size).to.equal(0);
+                const p = path.join(dir, 'torn.jsonl');
+                fs.writeFileSync(p, JSON.stringify({ phase: 'sent', epoch: 288 }) + '\n{"phase":"sen');
+                eng.spendLogPath = p;
+                eng._loadSpendLog();
+                expect([...eng._committedEpochs]).to.deep.equal([288]);
+            });
+
+            it('an in-process send marks the epoch committed, matching the reload rule', async function () {
+                const hub = makeHub();
+                const eng = await startEpoch(hub);
+                const st  = eng.rounds.get(288);
+                eng._recordSpend = () => true;
+                eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+                await eng._closeCollection(288);
+                expect(eng._committedEpochs.has(288)).to.equal(true);
+            });
+        });
+
         it('a non-leader does not broadcast a verdict', async function () {
             // identity V2 is eligible (we add it to genesis) but rank may not be 0;
             // force two verifiers so quorum is 2 and a single self-sign cannot finalize.

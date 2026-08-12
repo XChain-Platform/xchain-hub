@@ -52,7 +52,17 @@ const eq                     = require('./equivocation_header.js');
 const ccr                    = require('./cross_chain_royalty_activation.js');
 const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
 const { normalizeRetractionBounds } = require('./lib/retraction_bounds.js');
+const { RELAY_MIN_FUTURE_S, relayMarginFloorS } = require('./lib/relay_margin.js');
+const { allCanonicalInts }   = require('./lib/canonical_int.js');
 const coins                  = require('./coins');
+
+// The INT-backed fields _canonicalMatch signs VERBATIM while the indexer's
+// settlement pass rebuilds them from the mirrored BIGINT row (#4204). The fill and
+// filled-before fields are bcmath DECIMAL strings compared through _amountsEqual,
+// and ticks / addresses / kinds / payout legs are string compares, so none of them
+// belong here.
+const DEX_CANONICAL_INT_FIELDS = ['snapshot_block', 'a_action_index', 'b_action_index',
+                                  'a_ownership', 'b_ownership', 'effective_time'];
 
 const ALLOWED_CHAINS = [...coins.ALLOWED_COINS];
 const DEFAULT_POLL_MS = 15000;
@@ -544,7 +554,15 @@ class CrossChainDexEngine extends EventEmitter {
         let lo = desc.lo, hi = desc.hi;
         let matchId       = this._deriveMatchId(lo, hi, snapshotBlock, desc.loFilledBefore, desc.hiFilledBefore);
         if(this._inflight.has(matchId)) return;        // already in a round this poll
-        let effectiveTime = this._nowSeconds();
+        // Forward propagation margin (#4202). A match settles on BOTH legs at the
+        // first block whose block_time reaches effective_time, so stamping the bare
+        // clock second made the match eligible the instant it finalized: an indexer
+        // that already held the mirrored row settled a block earlier than one still
+        // receiving it, and the two then carried different settlement action indexes
+        // for the same match. Size the margin to the SLOWER of the two legs, since
+        // both chains must hold the row before either reaches its eligible block.
+        let effectiveTime = this._nowSeconds() +
+            Math.max(relayMarginFloorS(lo.home_coin), relayMarginFloorS(hi.home_coin));
 
         // lo = canonical-lower. On lo's chain, lo's escrow releases to hi's payout
         // (hi.get_address, hi's receive addr on lo's chain). On hi's chain, hi's escrow
@@ -662,17 +680,30 @@ class CrossChainDexEngine extends EventEmitter {
     // match. A Byzantine leader cannot get us to sign a match we can't independently see.
     async validateProposedMatch(row){
         if(!row || row.a_chain === row.b_chain) return false;
+        // Canonical integer spellings (#4204). These fields are signed verbatim but the
+        // indexer's settlement pass rebuilds the canonical from the mirrored BIGINT row,
+        // so a leader-supplied '041' for an action index passes every Number()-based
+        // re-derivation below yet finalizes a match whose signatures no settling indexer
+        // can reproduce - both escrows locked with no path to retry. Fail closed first;
+        // an honest leader builds these with Number(), so an honest round never sees it.
+        if(!allCanonicalInts(row, DEX_CANONICAL_INT_FIELDS)) return false;
         // Leader-chosen effective_time is ADOPTED (it is not part of the match_id, so a
         // follower cannot re-derive it) and signed into the canonical. Bound it to a sane
         // window of our own clock, exactly as CrossChainCallEngine.validateProposedMatch
-        // does for relay rows. Without this a Byzantine leader could stamp a far-future
-        // effective_time and finalize a match whose indexer settlement (applied at
-        // effective_time <= block_time) never fires, locking BOTH matched escrows
-        // indefinitely (a griefing / liveness attack). Honest leaders stamp _nowSeconds(),
-        // so the +/-3600s window never rejects an honest proposal (same clock-skew
-        // tolerance as the call relay).
+        // does for relay rows. The window is ASYMMETRIC. Its upper half stops a Byzantine
+        // leader stamping a far-future effective_time and finalizing a match whose indexer
+        // settlement (applied at effective_time <= block_time) never fires, locking BOTH
+        // matched escrows indefinitely (a griefing / liveness attack). Its lower half is
+        // the propagation floor (#4202): a match effective at or behind our clock is
+        // eligible the instant it finalizes, so the indexer that already holds the
+        // mirrored row settles a block ahead of one still receiving it and the two legs'
+        // settlement action indexes diverge. Honest leaders now stamp a forward margin
+        // sized to the slower leg, comfortably above RELAY_MIN_FUTURE_S, so neither half
+        // rejects an honest proposal (same clock-skew tolerance as the call relay).
+        let now = this._nowSeconds();
         if(!Number.isFinite(Number(row.effective_time)) ||
-           Math.abs(Number(row.effective_time) - this._nowSeconds()) > 3600) return false;
+           Number(row.effective_time) - now > 3600 ||
+           Number(row.effective_time) - now < RELAY_MIN_FUTURE_S) return false;
         let a = await this._findOpenOffer(row.a_chain, Number(row.a_action_index));
         let b = await this._findOpenOffer(row.b_chain, Number(row.b_action_index));
         if(!a || !b) return false;
@@ -838,6 +869,21 @@ class CrossChainDexEngine extends EventEmitter {
     // verify against capability_snapshots.
     async _persistCapabilitySnapshot(capability, block, network){
         let validators = await this._resolveCapabilityValidators(capability, block, network);
+        // SWQ-TRUNC-MIRROR (): a TRUNCATED set is never mirrored. The `.truncated`
+        // marker fails this hub's own meetsStakeThreshold closed, but it is a JS array
+        // property with no capability_snapshots column behind it, so persisting the capped
+        // rows lets the off-BTC cross_chain verifiers read a partial set as COMPLETE and
+        // finalize over an under-counted stake denominator the hub itself rejects. Zero
+        // rows is the fail-closed answer here in both directions: the mirror read yields
+        // S=0, and the 0 return is the money-path signal this method's header already
+        // defines (callers defer the match instead of committing it). Parity with
+        // StateCheckpointEngine/CrossChainCallEngine; keep the three in lockstep.
+        if(validators && validators.truncated === true){
+            console.warn('CrossChainDex: refusing to persist a TRUNCATED ' + capability +
+                         ' capability snapshot at block ' + block +
+                         ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
+            return 0;
+        }
         for(let v of validators){
             let pubkey = String(v.pubkey).toLowerCase();
             let amount = String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0'));

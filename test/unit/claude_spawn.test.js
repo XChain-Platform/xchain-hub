@@ -255,6 +255,44 @@ describe('claude-spawn runClaudePrint()', function () {
         expect(err.kind).to.equal('refusal');
     });
 
+    // item 4468 / 4467: a reached-CLI failure that still emitted result text used to
+    // resolve as a sound verdict, because only the EMPTY-result branch inspected the
+    // failure signal. The text of a failed run is partial, and this wrapper feeds the
+    // trusted attestation/judge path, so is_error must fail closed at any length.
+    it('fails closed on a NON-EMPTY result carrying is_error', async function () {
+        let jsonOut = JSON.stringify({
+            is_error: true, subtype: 'error_max_turns', result: 'partial verdict text...'
+        });
+        let { runClaudePrint } = loadClaudeSpawn({ exitCode: 0, stdout: jsonOut });
+        let err;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { err = e; }
+        expect(err, 'a partial result from a failed run must not resolve').to.exist;
+        expect(err.transient).to.equal(false);
+        expect(err.kind, 'a session failure is not a refusal').to.equal(undefined);
+        expect(err.message).to.include('error_max_turns');
+    });
+
+    it('tags a NON-EMPTY refusal-subtype result as kind=refusal', async function () {
+        let jsonOut = JSON.stringify({
+            is_error: true, subtype: 'refusal', result: 'I cannot help with that be'
+        });
+        let { runClaudePrint } = loadClaudeSpawn({ exitCode: 0, stdout: jsonOut });
+        let err;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.transient).to.equal(false);
+        expect(err.kind).to.equal('refusal');
+    });
+
+    it('still resolves a non-empty result when the CLI reports no error', async function () {
+        let jsonOut = JSON.stringify({ is_error: false, subtype: 'success', result: 'the verdict' });
+        let { runClaudePrint } = loadClaudeSpawn({ exitCode: 0, stdout: jsonOut });
+        let out = await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' });
+        expect(out.result).to.equal('the verdict');
+    });
+
     it('classifies a timeout as a transport failure (transient=true)', async function () {
         // Never emit close: let the internal timeout fire.
         let { runClaudePrint } = loadClaudeSpawn({ noClose: true });

@@ -213,6 +213,23 @@ class StateAnchorPublisher {
         // sit from our own BTC tip in _handleSignReq (anti-spam only; the security
         // property there is the DB byte-match).
         this.electionToleranceBlocks = parseInt(process.env.ANCHOR_ELECTION_TOLERANCE_BLOCKS || cfg.ANCHOR_ELECTION_TOLERANCE_BLOCKS || '36');
+        //  failover wake. The ladder above only unlocks a rank when
+        // something RE-EVALUATES it, and rank is evaluated only inside flush(); with
+        // flush on the 24h interval plus size triggers, the "ranks 1-3 get a slot
+        // inside one publishing cycle" bound was unreachable except by phase luck, so
+        // a dead rank 0 stranded v0/archive work for a whole cycle exactly as the
+        // right inequality above says it must not. This is the cadence at which a
+        // BACKUP re-checks whether its rank has come up. It sits inside the ordering
+        // rather than beside it:
+        //   round timeout (120s)  <<  15 min  <<  36 blocks (~6h)
+        // Left: a wake never fires inside a leader's own publish attempt. Right: the
+        // wake is a fraction of a ladder step, so it costs at most that much latency
+        // on top of the unlock it is watching for. It does NOT change how often a
+        // healthy leader anchors: a wake flush runs in failover-only mode, which
+        // skips every election this hub leads (see flush / _publishPendingCheckpoints
+        // / _startArchiveRound), so rank-0 publishing keeps its interval and size
+        // triggers and the federation still pays for one anchor per checkpoint.
+        this.rankWakeMs = parseInt(process.env.ANCHOR_RANK_WAKE_MS || cfg.ANCHOR_RANK_WAKE_MS || '900000');  // 15 min
         this.lowBalanceThreshold = parseFloat(process.env.DOGE_LOW_BALANCE_THRESHOLD || cfg.DOGE_LOW_BALANCE_THRESHOLD || '10');
         //  - shared SpendGuard for the on-chain anchor spend path. Adds the
         // per-window spend ceiling (count + $2000-clamped USD budget, default-ON) and
@@ -324,10 +341,32 @@ class StateAnchorPublisher {
         // size and TTL so a never-mined (evicted or replaced) tx cannot suppress a
         // needed re-anchor indefinitely.
         this._deferredV0Done      = new Map();
+        // #4180 (fabricated-txid half): the SAME queue shape for XANC_FINALIZED. The
+        // announcement rides at 0 confirmations too, so the archive head is normally
+        // 'absent' at receipt; the entry is re-verified here until the head is buried
+        // (then it stamps) or the TTL clears it. Bounded by the same size + TTL knobs.
+        this._deferredFinalized   = new Map();
+        // : the PUBLISHER's own half of the same 0-confirmation problem. This
+        // hub used to write its anchor_reward_attestations row the instant
+        // _broadcastWithRetry returned a txid, i.e. on mempool acceptance, and that row
+        // is append-only and never retracted (hub_db_sync HUB_STATE_TABLES) while the
+        // BTC indexer derives a COLLECT-spendable validator_rewards row from it. An
+        // evicted or reorged anchor therefore minted a permanent reward for a
+        // transaction the chain never carried. Confirm THEN write: the attestation is
+        // queued here and only written by _drainDeferredRewardAttest, on the same size +
+        // TTL knobs as the two announcement queues.
+        this._deferredRewardAttest = new Map();
         this.announceRetryMs      = parseInt(process.env.ANCHOR_ANNOUNCE_RETRY_MS      || cfg.ANCHOR_ANNOUNCE_RETRY_MS      || '300000');    // 5 min
         this.announceRetryTtlMs   = parseInt(process.env.ANCHOR_ANNOUNCE_RETRY_TTL_MS  || cfg.ANCHOR_ANNOUNCE_RETRY_TTL_MS  || '21600000');  // 6 h, ~6x the 60-conf DOGE window
         this.announceQueueMax     = parseInt(process.env.ANCHOR_ANNOUNCE_QUEUE_MAX     || cfg.ANCHOR_ANNOUNCE_QUEUE_MAX     || '500');
         this._deferTimer          = null;
+        this._rankWakeTimer       = null;   //  failover wake, see rankWakeMs
+        // : how long a durable broadcast intent with no mined anchor HOLDS its
+        // checkpoint (see the anchor_published_checkpoints block below). Same bound and
+        // same reasoning as announceRetryTtlMs above: ~6x the 60-conf DOGE window, past
+        // which a send that never relayed is not coming back and holding the row costs
+        // more than re-broadcasting it.
+        this.anchorIntentTtlMs    = parseInt(process.env.ANCHOR_INTENT_TTL_MS || cfg.ANCHOR_INTENT_TTL_MS || '21600000');   // 6 h
     }
 
     setBroadcastHook(fn){ this.broadcastFn = fn; }
@@ -354,6 +393,9 @@ class StateAnchorPublisher {
 
     async start(){
         if(!this.enabled){ console.log('StateAnchorPublisher: disabled (ANCHOR_ENABLED=false)'); return; }
+        // : the per-window spend ceilings were memory-only, so every restart
+        // restored a full allowance. Reload the saved window before anything anchors.
+        this.spendGuard.persistTo();
         // Fill any indexer URL left empty at construction (configs-table-
         // provisioned hubs carry no *_INDEXER_URL env var) via the hub's
         // configs-aware resolver, so anchor on-chain verification reaches the
@@ -398,14 +440,25 @@ class StateAnchorPublisher {
         // not the anchor publishing window.
         this._deferTimer = setInterval(() => {
             this._drainDeferredV0Done().catch(err => console.error('StateAnchorPublisher: deferred V0_DONE drain error:', err && err.message));
+            this._drainDeferredFinalized().catch(err => console.error('StateAnchorPublisher: deferred FINALIZED drain error:', err && err.message));
+            this._drainDeferredRewardAttest().catch(err => console.error('StateAnchorPublisher: deferred reward-attestation drain error:', err && err.message));
         }, this.announceRetryMs);
         if(this._deferTimer.unref) this._deferTimer.unref();
+        // : the failover wake. Re-runs flush in failover-only mode so a
+        // backup notices its rank unlocking between the (daily by default) ticks
+        // instead of leaving a dead leader's work stranded for a whole cycle.
+        this._rankWakeTimer = setInterval(() => {
+            this.flush({ failoverOnly: true })
+                .catch(err => console.error('StateAnchorPublisher: failover-wake flush error:', err && err.message));
+        }, this.rankWakeMs);
+        if(this._rankWakeTimer.unref) this._rankWakeTimer.unref();
         console.log('StateAnchorPublisher started (interval ' + this.intervalMs + 'ms, batch ' + this.batchSize + ', address ' + (this.dogeAddress || '<unset>') + ')');
     }
 
     async stop(){
         if(this._timer){ clearInterval(this._timer); this._timer = null; }
         if(this._deferTimer){ clearInterval(this._deferTimer); this._deferTimer = null; }
+        if(this._rankWakeTimer){ clearInterval(this._rankWakeTimer); this._rankWakeTimer = null; }
         if(this._messageHandler && this.peerManager){
             this.peerManager.removeListener('message', this._messageHandler);
             this._messageHandler = null;
@@ -438,7 +491,14 @@ class StateAnchorPublisher {
     // Returns a summary (also served by the hub's `anchorflush` RPC):
     // { anchored: [{chain, network, block_index, txid}], archive: 'published'|
     //   'round_started'|'none', skipped: 'already_flushing'|'no_pipeline'? }
-    async flush(){
+    // opts.failoverOnly (): publish only what this hub is a BACKUP for,
+    // i.e. elections it does not lead but whose failover rank has unlocked. The
+    // failover wake passes it so re-checking the ladder between interval ticks
+    // cannot turn into a higher anchoring cadence for a healthy leader; every
+    // other caller (interval, size triggers, tests) leaves it off and behaves
+    // exactly as before.
+    async flush(opts){
+        let failoverOnly = !!(opts && opts.failoverOnly);
         if(this._flushing) return { anchored: [], archive: 'none', skipped: 'already_flushing' };
         this._flushing = true;
         try {
@@ -448,6 +508,10 @@ class StateAnchorPublisher {
             // abort the flush: the queue is bookkeeping, publishing is the job.
             await this._drainDeferredV0Done()
                 .catch(err => console.warn('StateAnchorPublisher: deferred V0_DONE drain error: ' + (err && err.message)));
+            await this._drainDeferredFinalized()
+                .catch(err => console.warn('StateAnchorPublisher: deferred FINALIZED drain error: ' + (err && err.message)));
+            await this._drainDeferredRewardAttest()
+                .catch(err => console.warn('StateAnchorPublisher: deferred reward-attestation drain error: ' + (err && err.message)));
             let btcBlock = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
 
             let signer = this._resolveSigner();
@@ -497,8 +561,8 @@ class StateAnchorPublisher {
                 return { anchored: [], archive: 'none', skipped: 'spend_ceiling' };
             }
 
-            let anchored = await this._publishPendingCheckpoints(signer, btcBlock);
-            let archive  = await this._startArchiveRound(signer, btcBlock);
+            let anchored = await this._publishPendingCheckpoints(signer, btcBlock, failoverOnly);
+            let archive  = await this._startArchiveRound(signer, btcBlock, failoverOnly);
             return { anchored: anchored, archive: archive };
         } catch(e){
             console.error('StateAnchorPublisher: flush failed:', e && e.message);
@@ -538,11 +602,18 @@ class StateAnchorPublisher {
         return this._rankUnlocked(order, String(this.identity.getPubkeyHex()).toLowerCase(), sinceBlocks);
     }
 
+    // Does this hub LEAD `order` (rank 0)? The failover wake's whole job is to act
+    // only where this is false, so the leader's publishing cadence is untouched.
+    _isRankZero(order){
+        if(!this.identity || !order || order.length === 0) return false;
+        return order[0] === String(this.identity.getPubkeyHex()).toLowerCase();
+    }
+
     // v0: one per chain/network (the LATEST checkpoint that has no anchor yet).
     // Older unanchored checkpoints are superseded (the chained hashes commit to
     // all prior history), so only the newest per chain costs DOGE bytes.
     // Each row elects its own publisher (hash-order at its snapshot_block).
-    async _publishPendingCheckpoints(signer, btcBlock){
+    async _publishPendingCheckpoints(signer, btcBlock, failoverOnly){
         // Pick, per chain, the latest ANCHOR-ELIGIBLE checkpoint (seq divisible by
         // anchorEveryNCheckpoints) that is not yet on-chain. Selecting the max
         // eligible seq rather than the absolute max means accumulated
@@ -578,6 +649,12 @@ class StateAnchorPublisher {
                 let order = StateAnchorPublisher.hashOrder(this._v0ElectionKey(row), eligible);
                 let since = Number.isFinite(btcBlock) ? btcBlock - Number(row.snapshot_block) : null;
                 if(!this._mayPublish(order, since)) continue;            // someone else's anchor (or not unlocked yet)
+                // : on a failover wake, publish only as a BACKUP. Rank 0 is
+                // always unlocked, so without this the 15-minute wake would replace the
+                // leader's ANCHOR_INTERVAL_MS cadence and it would anchor a fresh
+                // checkpoint every wake instead of one per cycle (each superseding the
+                // last, all real DOGE). A row this hub leads keeps its normal cadence.
+                if(failoverOnly && this._isRankZero(order)) continue;
                 // SPV Phase 2: emit ANCHOR v3 (carries + signs the light-client roots) when the
                 // checkpoint was signed post-flag-day AND actually carries the roots; otherwise the
                 // legacy v0. The roots-present check keeps a legacy/null-root row (signed over the
@@ -615,6 +692,28 @@ class StateAnchorPublisher {
                     payload = useV3 ? this._buildV3Payload(row) : this._buildV0Payload(row);
                 }
                 let broadcaster = signer.broadcastFn || ((p) => this._defaultBroadcast(p, signer));
+                // : consult the durable at-most-once marker BEFORE building a
+                // fresh PSBT. 's existence check below reads mined state only, so
+                // it cannot see a send this hub made and then crashed on; the marker can.
+                // A surviving intent means DOGE may already have paid for this exact
+                // checkpoint, so hold the row (bounded by anchorIntentTtlMs) unless the
+                // anchor has since mined, in which case fall through and let the retry
+                // loop adopt it on attempt 0 exactly as it does for a peer's anchor.
+                let intent = await this._getAnchorIntent(row);
+                if(this._anchorIntentHolds(intent)){
+                    let mined = null;
+                    try { mined = await this._findExistingCheckpointAnchor(row); }
+                    catch(_e){ mined = null; }        // undetermined indexer: hold, never spend
+                    if(!(mined && mined.exists)){
+                        console.warn('StateAnchorPublisher: v0 anchor for ' + row.chain + '/' + row.network +
+                                     ' @ ' + row.block_index + ' held: a broadcast intent recorded at ' +
+                                     String(intent.intent_at) + (intent.txid ? ' (txid ' + intent.txid + ')' : '') +
+                                     ' has no mined anchor yet; not rebuilding a second transaction until it ' +
+                                     'mines or the intent ages past ' + this.anchorIntentTtlMs + 'ms');
+                        continue;
+                    }
+                }
+                await this._recordAnchorIntent(row);
                 // Multiple chains' v0 anchors go out back-to-back from the same
                 // wallet; without the retry, every cycle lands only the first
                 // and the rest stagger one chain per 30-min flush (live prod
@@ -622,8 +721,19 @@ class StateAnchorPublisher {
                 // : the existence check makes a lost ACK (this flush OR a
                 // previous one) adopt the already-mined anchor instead of paying
                 // for a second one.
-                let result = await this._broadcastWithRetry(broadcaster, payload, undefined,
-                    () => this._findExistingCheckpointAnchor(row));
+                let result;
+                try {
+                    result = await this._broadcastWithRetry(broadcaster, payload, undefined,
+                        () => this._findExistingCheckpointAnchor(row));
+                } catch(e){
+                    // : a definitive failure means nothing reached the DOGE node
+                    // (pre-send build/sign errors, a spend-ceiling refusal, an RPC
+                    // rejection), so withdraw the intent rather than hold the checkpoint
+                    // for the TTL over a send that never happened. An AMBIGUOUS send keeps
+                    // its intent: that case is exactly what the marker is for.
+                    if(!(e && e.anchorAmbiguousSend)) await this._withdrawAnchorIntent(row);
+                    throw e;
+                }
                 let txid = result && result.txid ? result.txid : null;
                 if(!txid){
                     // A confirmed DOGE broadcast always returns a txid; a null txid
@@ -635,11 +745,16 @@ class StateAnchorPublisher {
                     // it re-anchors and re-burns DOGE every flush, and peers ignore a
                     // null-txid announcement anyway (_handleV0Done early-returns on
                     // !d.txid). A later flush retries the publish cleanly.
+                    // : the intent is NOT withdrawn here. An empty return from
+                    // broadcast_tx is not proof nothing was sent, so the marker holds the
+                    // row for the TTL and the "later flush retries cleanly" above now
+                    // means after that bound rather than immediately.
                     console.error('StateAnchorPublisher: v0 broadcast returned no txid for ' +
                                   row.chain + '/' + row.network + ' @ ' + row.block_index +
                                   '; treating as failed publish (row stays pending)');
                     continue;
                 }
+                await this._markAnchorSent(row, txid);
                 // First-writer-wins, exactly like the peer path in _handleV0Done
                 // (`... AND anchor_txid IS NULL`). In the documented failover race
                 // (a late rank-0 and an early rank-1 both publish because the
@@ -679,10 +794,19 @@ class StateAnchorPublisher {
                     // XANCPUB quorum to the append-only anchor_reward_attestations mirror so the
                     // BTC indexer (where the stake source resolves) derives the reward. Only when
                     // the v4/v5 attestation actually landed on-chain, so reward <=> anchor published.
+                    // : "landed" now means MINED, not broadcast. `txid` above is a mempool
+                    // txid, so the row is queued and written by _drainDeferredRewardAttest once
+                    // this exact txid is buried at this exact ANCHOR version; an evicted or
+                    // reorged anchor never produces one.
                     if(attested)
-                        await this._recordRewardAttestation(row.chain, row.network, 'anchor_' + row.chain,
-                                                            Number(row.checkpoint_seq), Number(row.snapshot_block),
-                                                            String(me).toLowerCase(), attestSigs);
+                        this._deferRewardAttestation({
+                            chain: row.chain, network: row.network,
+                            blockIndex: Number(row.block_index), checkpointSeq: Number(row.checkpoint_seq),
+                            txid: txid, anchorVersion: useV3 ? 5 : 4,
+                            rewardType: 'anchor_' + row.chain, roundReference: Number(row.checkpoint_seq),
+                            snapshotBlock: Number(row.snapshot_block),
+                            publisher: String(me).toLowerCase(), attestSigs: attestSigs
+                        });
                 } else {
                     console.log('StateAnchorPublisher: degraded legacy anchor at/above the reward flag-day for ' +
                                 row.chain + '/' + row.network + ' @ ' + row.block_index +
@@ -728,14 +852,34 @@ class StateAnchorPublisher {
 
     //  Option C (derive-on-BTC-side): after a v4/v5/v6 anchor lands on-chain, publish
     // the XANCPUB publisher-attestation quorum to the append-only anchor_reward_attestations
-    // table, mirrored to every indexer via hub_db_sync (HUB_STATE_TABLES). ANCHOR is DOGE-only
-    // but capability staking (hence the resolvable stake source createValidatorReward needs) is
-    // BTC-only, so the BTC indexer keys reward derivation on these rows: it re-verifies the sigs
+    // table, mirrored via hub_db_sync (HUB_STATE_TABLES) to every indexer ATTACHED TO THIS HUB.
+    // ANCHOR is DOGE-only but capability staking (hence the resolvable stake source
+    // createValidatorReward needs) is BTC-only, so the BTC indexer keys reward derivation on
+    // these rows: it re-verifies the sigs
     // against its OWN local oracle_publish set at snapshot_block (mirror = transport, not trust)
     // and materializes validator_rewards at block_index = snapshot_block. Gated by the NEW derive
     // flag-day so below the gate no rows exist (byte-identical legacy: DOGE-side write still
     // attempted + silently dropped). INSERT IGNORE keeps it idempotent on the tuple identity; a
     // failover double-publish inserts a second row and the indexer winner-reconcile collapses it.
+    //
+    // : "every indexer attached to this hub" is the whole reach, and the qualifier is
+    // load-bearing. HubDbSync holds ONE hubUrl (xchain-indexer/src/hub_db_sync.js), this row is
+    // written only here on the ELECTED publisher, and the v0 publisher rotates per checkpoint by
+    // hashOrder, so a federation's hubs hold DISJOINT subsets and an indexer derives only the
+    // subset its own hub happened to publish. The gap is the PRODUCER's, not the mirror's, and
+    // that is where a fix belongs. Two notes for the lane that lands it, both measured:
+    //   - Do NOT "correct" the sibling sentence in src/sql/anchor_reward_attestations.sql. Its
+    //     "exactly like state_checkpoints" is TRUE and scoped to the MIRROR semantics (id-parity
+    //     INSERT IGNORE, never retracted); hub_db_sync.js states the identical property for both
+    //     tables in HUB_STATE_TABLES. It makes no hub-to-hub federation claim, so replacing it
+    //     with one would trade a true sentence for a false one on a consensus table.
+    //   - The XANCPUB quorum a receiver must re-verify is ALREADY on the wire today: XANCPUB_SIGN
+    //     is peerManager.broadcast, and every peer verifies each signature in _handleAttestSign.
+    //     Whatever transport the fix picks, the receiver mints money rows and so must re-verify
+    //     that quorum against its OWN oracle_publish set at snapshot_block, never trust the wire.
+    //   Ordering is pinned by the indexer's PRE-ARMING BLOCKERS note
+    //   (xchain-indexer/src/anchor_reward_activation.js): this lands AFTER #4171's mined-anchor
+    //   proof, or federation just fans an unproven-mined row out to every hub.
     async _recordRewardAttestation(chain, network, rewardType, roundReference, snapshotBlock, publisher, attestSigs){
         if(!ar.isAnchorRewardDeriveActive(Number(snapshotBlock), network)) return;
         if(!publisher || !Array.isArray(attestSigs) || attestSigs.length === 0) return;
@@ -756,6 +900,96 @@ class StateAnchorPublisher {
         } catch(e){
             console.warn('StateAnchorPublisher: anchor_reward_attestations record failed (' +
                          rewardType + '/' + roundReference + '): ' + (e && e.message));
+        }
+    }
+
+    // : hold a reward attestation until its anchor is actually MINED.
+    // _broadcastWithRetry returns when DOGE ACCEPTS the transaction, not when it is
+    // confirmed (the  note at the top of this file says so), so both producer
+    // sites used to write the mirror row against a mempool txid. Because the row is
+    // append-only and never retracted and the BTC indexer mints a COLLECT-spendable
+    // validator_rewards from it, an evicted or reorged anchor left a permanent reward
+    // for a transaction the chain never carried; nothing downstream can undo it.
+    //
+    // Queuing grants no authority: the entry writes nothing until
+    // _drainDeferredRewardAttest sees _verifyAnchorOnChain bind this exact txid at this
+    // exact ANCHOR version, buried dogeConfirmations deep. `e` carries the checkpoint
+    // identity (chain/network/blockIndex/checkpointSeq) that verification re-SELECTs, the
+    // txid and anchorVersion it must bind, and the attestation tuple to write.
+    //
+    // RESIDUAL, deliberate: this queue is in memory, so a restart inside the confirmation
+    // window forfeits THIS hub's own reward for that anchor. That is fail-closed and
+    // fleet-uniform (no row exists, so every indexer derives the same nothing), where the
+    // behavior it replaces was fail-open (a permanent mint for an anchor that never
+    // landed). Making it durable means persisting the XANCPUB sigs, which exist only in
+    // the attestation round's memory today.
+    _deferRewardAttestation(e){
+        if(!e || !ar.isAnchorRewardDeriveActive(Number(e.snapshotBlock), e.network)) return;   // gate INERT: no rows exist at all
+        if(!e.txid || !e.publisher || !Array.isArray(e.attestSigs) || e.attestSigs.length === 0) return;
+        let key = [e.rewardType, String(e.roundReference), String(e.snapshotBlock),
+                   String(e.publisher), String(e.txid)].join('|');
+        if(this._deferredRewardAttest.has(key)) return;
+        // Bounded: drop the OLDEST entry rather than the new one (Map preserves insertion
+        // order), matching the two announcement queues. Dropping only ever forfeits this
+        // hub's own reward; it can never write one.
+        if(this._deferredRewardAttest.size >= this.announceQueueMax){
+            let oldest = this._deferredRewardAttest.keys().next().value;
+            this._deferredRewardAttest.delete(oldest);
+            console.warn('StateAnchorPublisher: deferred reward-attestation queue full (' + this.announceQueueMax +
+                         '); dropped the oldest entry ' + oldest);
+        }
+        this._deferredRewardAttest.set(key, Object.assign({}, e, { at: Date.now() }));
+        console.log('StateAnchorPublisher: reward attestation ' + e.rewardType + '/' + e.roundReference +
+                    ' held until anchor ' + e.txid + ' is ' + this.dogeConfirmations + ' deep on DOGE (' +
+                    this._deferredRewardAttest.size + ' pending)');
+    }
+
+    // Write the queued reward attestations whose anchor has since been buried. Runs on
+    // the announceRetryMs timer and at the head of every flush, beside the V0_DONE and
+    // FINALIZED drains.
+    //
+    // Only 'verified' writes: _verifyAnchorOnChain binds the exact txid AND the exact
+    // ANCHOR version, so neither a never-mined transaction nor a different anchor for the
+    // same checkpoint can stand in as proof. A decided CONTENT verdict
+    // ('rejected:status' / ':mismatch' / ':version') is terminal for this txid and drops
+    // the entry. 'rejected:txid' is deliberately NOT terminal here: getanchoraction
+    // reports checkpoint_anchored UNFILTERED, so that verdict also fires while our own tx
+    // is merely unmined on a checkpoint that already carries an earlier anchor, which is
+    // the v6 archive head's normal state. Retrying it until the TTL costs a queue slot;
+    // dropping it would forfeit a legitimate reward. Every non-verified outcome writes
+    // nothing either way, so the safety property does not depend on this choice.
+    async _drainDeferredRewardAttest(){
+        if(this._deferredRewardAttest.size === 0) return;
+        for(let [key, e] of [...this._deferredRewardAttest]){
+            if(Date.now() - e.at > this.announceRetryTtlMs){
+                this._deferredRewardAttest.delete(key);
+                console.warn('StateAnchorPublisher: deferred reward attestation ' + key + ' expired after ' +
+                             this.announceRetryTtlMs + 'ms without its anchor confirming; dropped (no reward is ' +
+                             'derived for an anchor that never landed)');
+                continue;
+            }
+            try {
+                // Re-SELECT our OWN checkpoint row (never a cached copy): _verifyAnchorOnChain
+                // byte-matches the decoded on-chain payload against it.
+                let rows = await this.db.doQuery(
+                    'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? LIMIT 1',
+                    [String(e.chain), String(e.network), Number(e.blockIndex), Number(e.checkpointSeq)]);
+                if(!rows || rows.length === 0) continue;              // checkpoint gone (reorg): let the TTL clear it
+                let v = await this._verifyAnchorOnChain(rows[0], { txid: String(e.txid), version: Number(e.anchorVersion) });
+                if(v === 'verified'){
+                    this._deferredRewardAttest.delete(key);
+                    await this._recordRewardAttestation(e.chain, e.network, e.rewardType, Number(e.roundReference),
+                                                        Number(e.snapshotBlock), e.publisher, e.attestSigs);
+                    console.log('StateAnchorPublisher: reward attestation ' + key + ' anchor confirmed on DOGE; row written');
+                } else if(v === 'rejected:status' || v === 'rejected:mismatch' || v === 'rejected:version'){
+                    this._deferredRewardAttest.delete(key);
+                    console.warn('StateAnchorPublisher: reward attestation ' + key + ' REJECTED on re-verification (' +
+                                 v + '); dropped, no reward');
+                }
+            } catch(err){
+                console.warn('StateAnchorPublisher: reward attestation ' + key +
+                             ' re-verification error: ' + (err && err.message));
+            }
         }
     }
 
@@ -1173,7 +1407,7 @@ class StateAnchorPublisher {
     // leader stalled archiving (live on a 3-hub test cluster: only 1-of-3 elections could
     // publish; on a static regtest tip the same leader won forever). Returns
     // the flush summary's archive status.
-    async _startArchiveRound(signer, electionBlock){
+    async _startArchiveRound(signer, electionBlock, failoverOnly){
         if(this._archiveRound) return 'round_pending';                       // one at a time
 
         // Leader ELECTION runs over the set at the current BTC block (liveness: a
@@ -1273,6 +1507,12 @@ class StateAnchorPublisher {
             // rank 0 (always unlocked), so this is uniform, not a behavior change.
             let order = StateAnchorPublisher.hashOrder(this._archiveElectionKey(cp, batchSeq), electionPubkeys);
             let since = Number.isFinite(electionBlock) ? electionBlock - Number(cp.snapshot_block) : null;
+            // : same backup-only rule as the v0 path. A leader driving its
+            // own batch on the wake cadence would archive whatever few rows are
+            // pending every 15 minutes instead of accumulating them to the interval
+            // or the size trigger, which is the over-anchoring this mode exists to
+            // avoid. Backups are exactly who the wake is for.
+            if(failoverOnly && this._isRankZero(order)) return 'none';
             if(!this._rankUnlocked(order, me, since)){
                 // Operator visibility: a hub that never wins the archive
                 // election (e.g. signer-less peers keep ranking first) is
@@ -1997,14 +2237,28 @@ class StateAnchorPublisher {
         let myBtc = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
         if(Number.isFinite(myBtc) && Math.abs(myBtc - electionBlock) > this.electionToleranceBlocks) return;
         let electionPubkeys = await this._getActiveOraclePublishPubkeys(electionBlock);
-        if(electionPubkeys.length > 0){
+        // #4184: fail CLOSED on an unresolved election set, the same way the LEADER does
+        // at the identical condition (_startArchiveRound: "empty oracle_publish set,
+        // deferring round (fail closed)") and the same way _handleFinalized and
+        // _handleV0Done already do. The old fall-through skipped BOTH the rank ladder and
+        // every membership tie to the federation, so during an unresolved window a
+        // NON-MEMBER could solicit co-signatures from the historical wrapper set and
+        // assemble a duplicate v1 under a batch_seq of its own choosing: honest CONTENT
+        // (the DB byte-match still holds) but real DOGE burned twice, and two archives
+        // able to claim one seq, which is what the ladder exists to serialize.
+        // The liveness the asymmetry protected is nearly nil: the snapshot_block
+        // signing-set gate a few lines below already returns on an empty answer from THIS
+        // SAME resolver, so an indexer outage that empties the election set almost always
+        // empties the signing set too and this hub was not going to co-sign either way.
+        // The residual case (electionBlock unresolvable while snapshot_block is cached)
+        // costs one co-signature on one round, which the round timeout re-runs.
+        if(electionPubkeys.length === 0) return;
+        {
             // Same content-anchored key + failover ladder the leader used.
             // Accept any sender whose rank has unlocked, not just rank 0, or a
             // signer-less rank-0 hub stalls archiving federation-wide.
             // Runs for a single-member set too (previously skipped), so the
-            // sole elected leader cannot be impersonated by a non-member;
-            // the empty-set (unresolvable election) path keeps its existing
-            // behavior of deferring to the DB byte-match below.
+            // sole elected leader cannot be impersonated by a non-member.
             let order = StateAnchorPublisher.hashOrder(this._archiveElectionKey(cp, Number(d.batch_seq)), electionPubkeys);
             let since = electionBlock - Number(cp.snapshot_block);
             if(!this._rankUnlocked(order, sender, since)) return;            // not unlocked on the failover ladder
@@ -2488,12 +2742,21 @@ class StateAnchorPublisher {
                                    Number(round.cp.snapshot_block), round.cp.network);
                 //  Option C: mirror the archive XANCPUB quorum so the BTC indexer derives
                 // the anchor_archive reward (only when the v6 attestation actually landed).
+                // : same confirm-then-write rule as the v4/v5 site. onChainValid above
+                // is a signature-quorum verdict, not proof the v6 head was mined, and `txid` is
+                // the mempool txid _broadcastWithRetry returned, so the row is queued until the
+                // head is buried at version 6.
                 if(attested){
                     let mePk = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
                     if(mePk)
-                        await this._recordRewardAttestation(round.cp.chain, round.cp.network, 'anchor_archive',
-                                                            Number(round.batchSeq), Number(round.cp.snapshot_block),
-                                                            mePk, attestSigs);
+                        this._deferRewardAttestation({
+                            chain: round.cp.chain, network: round.cp.network,
+                            blockIndex: Number(round.cp.block_index), checkpointSeq: Number(round.cp.checkpoint_seq),
+                            txid: txid, anchorVersion: 6,
+                            rewardType: 'anchor_archive', roundReference: Number(round.batchSeq),
+                            snapshotBlock: Number(round.cp.snapshot_block),
+                            publisher: mePk, attestSigs: attestSigs
+                        });
                 }
             } else {
                 console.log('StateAnchorPublisher: degraded legacy v1 archive at/above the archive-reward ' +
@@ -2580,6 +2843,88 @@ class StateAnchorPublisher {
                          'back-fill (rows stay pending and re-archive under a fresh seq)');
             return;
         }
+        // XANC-FINALIZED-FORGE-1 (fabricated-txid half of #4180). The guard above closes
+        // only the shape an honest leader cannot produce; a plausible FABRICATED txid
+        // still stamps archived_status = status, which the pending selectors then skip
+        // for a terminal row forever. Close it the way the v0 rail closes
+        // XANC-ELECTED-FORGE-1: the announced ARCHIVE HEAD must be on DOGE at
+        // dogeConfirmations depth before the suppressing column is written.
+        //
+        // FINALIZED is broadcast at 0 confirmations (the broadcast returns a mempool
+        // txid), so 'absent'/'shallow'/'unreachable' is the NORMAL first answer for a
+        // perfectly honest archive; refusing outright would be a liveness bug. Split the
+        // back-fill exactly the way an honest lost-chunk publish already splits it:
+        //   now   - stamp batch_seq under the '__partial__' sentinel, no txid,
+        //   later - stamp the announced statuses + txid once the head is buried.
+        // Staging the seq is load-bearing: _getNextBatchSeq is MAX(batch_seq)+1
+        // fleet-wide, so a follower that stamped nothing would hand its own next round
+        // the seq the leader just used, and two v1 anchors sharing one seq corrupt chunk
+        // reassembly. The sentinel keeps `archived_status <> status` true, so nothing is
+        // suppressed and the rows re-archive under a fresh seq if the head never
+        // confirms. Reward rows are deliberately NOT staged: their pending test is
+        // `batch_seq IS NULL` alone, so an early stamp is itself permanent suppression.
+        //
+        // LANDING NOTE (#4180 closeout): this inverts a contract pinned OUTSIDE this repo,
+        // but in ONE harness, not two, and the distinction decides what a landing lane may
+        // touch. The two xchain-e2e-test suites that assert on this back-fill run under
+        // OPPOSITE conditions, so a single "the harness has no chain" claim is wrong:
+        //   multiHubStateAnchor.integration.test.js:282 is CHAINLESS. Its own header says
+        //     "no chain in this harness" and it publishes through a captured broadcast
+        //     hook, so nothing answers getanchoraction, the verify abstains, every follower
+        //     stamps '__partial__', and its archived_status === 'finalized' assertion does
+        //     genuinely have to move with this diff.
+        //   anchorElection.test.js:412 is LIVE. Its header says "on a LIVE DOGE regtest
+        //     chain" and its prerequisites boot the real indexer, which serves
+        //     getanchoraction as a federation read (xchain-indexer/src/api.js:163, :1266).
+        //     That repo ships no getanchoraction STUB because it has the real RPC; absence
+        //     of a stub is not absence of a chain. Its assertion is therefore a live-chain
+        //     assertion and must NOT be relaxed to accept '__partial__': that would delete
+        //     the only coverage proving this gate stamps a REAL archive. What it actually
+        //     faces is the confirmation-DEPTH question, the same one the already-landed v0
+        //     gate faces at its own back-fill assertion (:283), and XANC-ELECTED-FORGE-1
+        //     landed (31b7475) without editing that file.
+        // One residual stays open: the gate proves the CHECKPOINT is anchored, not the
+        // BATCH, since nothing binds match_batch_seq and two batch_seqs can share one
+        // checkpoint. getanchoraction neither ACCEPTS it (validateAnchorActionParams takes
+        // chain/network/block_index/checkpoint_seq/txid/version) nor EMITS it
+        // (ANCHOR_ACTIONS_SQL selects no batch column and buildAnchorActionResponse returns
+        // none), so binding it needs an xchain-indexer change before this hub can.
+        if(!d.txid){
+            // Every announced row is '__partial__' here (the guard above proves it), so
+            // this is the honest failed-broadcast shape: seq bookkeeping, nothing to verify.
+            await this._backfillBatch(Number(d.batch_seq), d.matches, null, calls, rewards);
+            return;
+        }
+        // Archive-head version SET {1, 6}: below the  flag-day _publishArchive
+        // emits a v1 head, at/above it a v6. This gate runs at ALL heights (row
+        // suppression has nothing to do with reward retirement), so it cannot use the
+        // reward gate's exact-v1 expectation. Rejecting {0,2,3,4,5} still stops a
+        // checkpoint anchor or a v2 continuation chunk standing in for the head.
+        let archiveOnChain = await this._verifyArchiveCheckpointOnChain(
+            Number(d.batch_seq), String(d.txid), { rejectVersions: [0, 2, 3, 4, 5] });
+        if(archiveOnChain === 'verified'){
+            await this._applyFinalized(d, sender, calls, rewards);
+            return;
+        }
+        if(String(archiveOnChain).startsWith('rejected')){
+            console.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') archive head REJECTED ' +
+                         'on-chain (' + archiveOnChain + '); stamping nothing (rows stay pending and ' +
+                         're-archive under a fresh seq)');
+            return;
+        }
+        await this._backfillBatch(Number(d.batch_seq),
+                                  (d.matches || []).map(m => Object.assign({}, m, { status: '__partial__' })),
+                                  null,
+                                  calls.map(c => Object.assign({}, c, { status: '__partial__' })),
+                                  []);
+        this._deferFinalized(d, sender, calls, rewards, archiveOnChain);
+    }
+
+    // Apply a FINALIZED whose archive head is confirmed on DOGE at depth: stamp the
+    // announced statuses + txid, then mirror the leader's reward. Shared by the
+    // immediate-receipt path and the deferred drain, so an announcement that arrives at
+    // 0 confirmations lands EXACTLY the same rows as one that arrives already buried.
+    async _applyFinalized(d, sender, calls, rewards){
         await this._backfillBatch(Number(d.batch_seq), d.matches, d.txid ? String(d.txid) : null,
                                   calls, rewards);
         // Mirror the leader's archive-publish reward (sender is signature-
@@ -2635,6 +2980,67 @@ class StateAnchorPublisher {
                 else
                     console.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') archive checkpoint ' +
                                  'not on-chain verified (' + archiveVerified + '); NOT mirroring the archive reward');
+            }
+        }
+    }
+
+    // Queue an authenticated FINALIZED whose archive head is not yet buried. Keyed on
+    // the announcement's full identity INCLUDING the txid, so two competing txids for
+    // one batch are tracked separately and whichever actually confirms wins. Queuing
+    // grants no authority: the entry is re-verified in full before it can stamp.
+    _deferFinalized(d, sender, calls, rewards, reason){
+        let key = [Number(d.batch_seq), String(d.txid), String(sender)].join('|');
+        if(this._deferredFinalized.has(key)) return;
+        // Bounded: drop the OLDEST entry rather than the new one (Map preserves
+        // insertion order), so a flood cannot pin the queue on stale announcements.
+        if(this._deferredFinalized.size >= this.announceQueueMax){
+            let oldest = this._deferredFinalized.keys().next().value;
+            this._deferredFinalized.delete(oldest);
+            console.warn('StateAnchorPublisher: deferred FINALIZED queue full (' + this.announceQueueMax +
+                         '); dropped the oldest entry ' + oldest);
+        }
+        this._deferredFinalized.set(key, { d: d, sender: sender, calls: calls, rewards: rewards, at: Date.now() });
+        console.log('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') archive head not yet buried (' +
+                    reason + '); seq staged under the __partial__ sentinel, queued for re-verification (' +
+                    this._deferredFinalized.size + ' pending)');
+    }
+
+    // Re-verify queued FINALIZED announcements and stamp the ones whose archive head has
+    // since been buried. Runs on the announceRetryMs timer and at the head of every
+    // flush, alongside the V0_DONE drain. Authenticity (membership, signature over the
+    // txid-bearing canonical, observed-leader) was settled at receipt and cannot change;
+    // what is re-checked is the head's on-chain depth, plus the announced CONTENT, which
+    // can move (a row may have advanced status while the entry sat in the queue).
+    async _drainDeferredFinalized(){
+        if(this._deferredFinalized.size === 0) return;
+        for(let [key, entry] of [...this._deferredFinalized]){
+            let d = entry.d;
+            if(Date.now() - entry.at > this.announceRetryTtlMs){
+                this._deferredFinalized.delete(key);
+                console.warn('StateAnchorPublisher: deferred FINALIZED ' + key + ' expired after ' +
+                             this.announceRetryTtlMs + 'ms without confirming; dropping (the staged rows are ' +
+                             'still archive-eligible and re-archive under a fresh seq)');
+                continue;
+            }
+            try {
+                let v = await this._verifyArchiveCheckpointOnChain(Number(d.batch_seq), String(d.txid),
+                                                                   { rejectVersions: [0, 2, 3, 4, 5] });
+                if(v === 'verified'){
+                    this._deferredFinalized.delete(key);
+                    if(!(await this._verifyFinalizedAgainstLocal(d.matches, entry.calls, entry.rewards))){
+                        console.warn('StateAnchorPublisher: deferred FINALIZED ' + key + ' confirmed on DOGE but its ' +
+                                     'announced content no longer matches our DB; dropping the back-fill');
+                        continue;
+                    }
+                    await this._applyFinalized(d, entry.sender, entry.calls, entry.rewards);
+                    console.log('StateAnchorPublisher: deferred FINALIZED ' + key + ' confirmed on DOGE; stamped');
+                } else if(String(v).startsWith('rejected')){
+                    this._deferredFinalized.delete(key);
+                    console.warn('StateAnchorPublisher: deferred FINALIZED ' + key + ' REJECTED on re-verification (' +
+                                 v + '); dropped');
+                }
+            } catch(e){
+                console.warn('StateAnchorPublisher: deferred FINALIZED ' + key + ' re-verification error: ' + (e && e.message));
             }
         }
     }
@@ -2735,7 +3141,10 @@ class StateAnchorPublisher {
     // because an elected leader could reference a real-but-different anchored checkpoint
     // and still mirror itself the anchor_archive reward (below the  flag-day;
     // at/above it the mirror is retired outright).
-    async _verifyArchiveCheckpointOnChain(batchSeq, announcedTxid){
+    // `expect` overrides the version expectation for callers that run at ALL heights
+    // (the #4180 back-fill gate passes rejectVersions [0,2,3,4,5], i.e. the archive-head
+    // SET {1, 6}); omitted, it keeps the reward gate's exact-v1 expectation below.
+    async _verifyArchiveCheckpointOnChain(batchSeq, announcedTxid, expect){
         let id = this._observedArchiveCheckpoint(batchSeq);
         if(!id) return 'no-checkpoint-id';
         let rows = await this.db.doQuery(
@@ -2743,10 +3152,12 @@ class StateAnchorPublisher {
             [id.chain, id.network, Number(id.block_index), Number(id.checkpoint_seq)]);
         if(!rows || rows.length === 0) return 'absent-local';
         if(!announcedTxid) return 'no-txid';
-        // version 1 stays exact: this gate only runs BELOW the archive-reward flag-day
-        // (at/above it the FINALIZED reward mirror is retired outright, ), and
-        // every pre-flag-day archive head is a v1.
-        return this._verifyAnchorOnChain(rows[0], { txid: String(announcedTxid), version: 1 });
+        // Default version 1 stays exact for the REWARD gate: that caller only runs BELOW
+        // the archive-reward flag-day (at/above it the FINALIZED reward mirror is retired
+        // outright, ), and every pre-flag-day archive head is a v1. The back-fill
+        // gate runs at every height and passes its own archive-head SET instead.
+        return this._verifyAnchorOnChain(rows[0],
+            Object.assign({ txid: String(announcedTxid) }, expect || { version: 1 }));
     }
 
     // XMATCH canonical: byte-identical to CrossChainDexEngine._canonicalMatch /
@@ -3163,6 +3574,100 @@ class StateAnchorPublisher {
         // malformed tx, not our lost ACK).
         if(/^invalid/i.test(String(res.status || ''))) return null;
         return { exists: true, txid: res.txid || null };
+    }
+
+    // ----- Durable at-most-once for the anchor spend (anchor_published_checkpoints, ) -----
+    //
+    // The  check above closes a lost ACK only where it can SEE the earlier send,
+    // and getanchoraction resolves a txid through mined blocks, so an anchor sitting in
+    // the DOGE mempool reads as DEFINITIVELY ABSENT. Everything else that knows a send
+    // went out is in memory (_broadcastWithRetry's lastErr / ambiguous-poll loop) and
+    // `anchor_txid` is stamped only after the broadcast returns. A crash in between
+    // therefore leaves the row still matching the `anchor_txid IS NULL` selector with
+    // nothing anywhere recording that DOGE already paid, and the next flush rebuilds a
+    // FRESH PSBT from different UTXOs: a second fee, and two anchors that can both
+    // confirm.
+    //
+    // These four methods are the restart-surviving half, ported from the three sibling
+    // effectors that already carry it (OraclePublisher's oracle_published_rounds,
+    // AttestationPublisher's attest_published_requests per , AttestationRelay's
+    // WAL). Intent is armed before the send, confirmed after it, and withdrawn when the
+    // send definitively never went out; a surviving intent HOLDS the row rather than
+    // re-broadcasting.
+    //
+    // Two deliberate choices. It does not re-broadcast the earlier bytes: that turns on
+    // how this encoder classifies a duplicate submission, which is not established here,
+    // and holding costs latency where guessing costs money. And the hold is bounded by
+    // anchorIntentTtlMs, because an unbounded marker for a never-mined tx would suppress
+    // a needed re-anchor forever, which is the failure the announcement queues above are
+    // TTL-bounded for as well.
+
+    // Read the durable marker for a checkpoint, or null when none exists. Throws on a DB
+    // error so the caller FAILS CLOSED (the row stays pending) rather than spending on a
+    // checkpoint whose publish history it could not read.
+    async _getAnchorIntent(row){
+        let rows = await this.db.doQuery(
+            'SELECT chain, network, checkpoint_seq, txid, intent_at, sent_at FROM anchor_published_checkpoints ' +
+            'WHERE chain = ? AND network = ? AND checkpoint_seq = ?',
+            [row.chain, row.network, Number(row.checkpoint_seq)]);
+        return (rows && rows.length > 0) ? rows[0] : null;
+    }
+
+    // Does this marker still cover a send that might be live? Measured from intent_at,
+    // which is written BEFORE the broadcast, so the window starts at the earliest moment
+    // money could have moved. An unreadable stamp holds (fail closed): the TTL is a
+    // liveness bound, not a licence to spend.
+    _anchorIntentHolds(marker){
+        if(!marker) return false;
+        let at = marker.intent_at ? new Date(marker.intent_at).getTime() : NaN;
+        if(!Number.isFinite(at)) return true;
+        return (Date.now() - at) < this.anchorIntentTtlMs;
+    }
+
+    // Durably arm broadcast intent before the send. Re-arming refreshes the window
+    // rather than leaving the row untouched: the caller reaches this only when no
+    // unexpired intent holds the checkpoint AND `anchor_txid` is still NULL, so the
+    // marker being overwritten is an expired one and the write is this retry opening its
+    // own window. Throws on a DB error so the caller fails closed.
+    async _recordAnchorIntent(row){
+        await this.db.doQuery(
+            'INSERT INTO anchor_published_checkpoints (chain, network, checkpoint_seq) VALUES (?, ?, ?) ' +
+            'ON DUPLICATE KEY UPDATE intent_at = CURRENT_TIMESTAMP, sent_at = NULL, txid = NULL',
+            [row.chain, row.network, Number(row.checkpoint_seq)]);
+    }
+
+    // Record that the broadcast returned a txid. Logged, never thrown: the DOGE fee is
+    // already spent, and the surviving intent-only row makes the next flush HOLD instead
+    // of re-broadcasting, which is the fail-safe direction.
+    async _markAnchorSent(row, txid){
+        try {
+            await this.db.doQuery(
+                'UPDATE anchor_published_checkpoints SET txid = ?, sent_at = NOW() ' +
+                'WHERE chain = ? AND network = ? AND checkpoint_seq = ?',
+                [txid || null, row.chain, row.network, Number(row.checkpoint_seq)]);
+        } catch(e){
+            console.error('StateAnchorPublisher: anchor for ' + row.chain + '/' + row.network + ' @ ' +
+                          row.block_index + ' broadcast as ' + txid + ' but its durable sent marker could not be ' +
+                          'persisted; the intent still holds the row, so nothing re-broadcasts. Error:', e && e.message);
+        }
+    }
+
+    // Withdraw an intent for a send that DEFINITIVELY never went out (a pre-send build,
+    // sign, ceiling or RPC-rejection failure). Without this a routine failure would hold
+    // the checkpoint for the whole TTL, which is worse than the replay risk the marker
+    // exists for. Scoped `AND sent_at IS NULL` so a confirmed marker can never be deleted
+    // by a late or misordered call. Logged, never thrown: leaving the row is fail-closed.
+    async _withdrawAnchorIntent(row){
+        try {
+            await this.db.doQuery(
+                'DELETE FROM anchor_published_checkpoints ' +
+                'WHERE chain = ? AND network = ? AND checkpoint_seq = ? AND sent_at IS NULL',
+                [row.chain, row.network, Number(row.checkpoint_seq)]);
+        } catch(e){
+            console.warn('StateAnchorPublisher: could not withdraw the broadcast intent for ' + row.chain + '/' +
+                         row.network + ' @ ' + row.block_index + '; it will hold the row until the TTL expires: ' +
+                         (e && e.message));
+        }
     }
 
     async _checkBalance(signer){

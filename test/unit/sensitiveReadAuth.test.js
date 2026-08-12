@@ -18,6 +18,7 @@
 const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire').noPreserveCache();
+const { waitUntil } = require('../helpers/waitUntil');
 
 const KEY = 'test-hub-key';
 
@@ -79,7 +80,10 @@ async function bootApi(env) {
             else process.env[k] = v;
         }
     }
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // server.listen() is the last step of the async boot IIFE, so it is the
+    // signal that every app.use() middleware has been registered; poll for it
+    // rather than guessing how long the boot takes on this box.
+    await waitUntil(() => mockServer.listen.called, { label: 'api.js boot to reach server.listen' });
 
     // The auth middleware is the app.use() function that 401s an unkeyed
     // write when a key is configured (or, keyless boot, the one that calls

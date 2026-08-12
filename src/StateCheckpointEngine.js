@@ -903,6 +903,25 @@ class StateCheckpointEngine extends EventEmitter {
     // on the DOGE indexer resolves oracle_publish from the mirrored snapshots.
     async _persistCapabilitySnapshot(capability, block){
         let validators = await this._resolveCapabilityValidators(capability, block);
+        // SWQ-TRUNC-MIRROR (): never mirror a TRUNCATED set. The `.truncated`
+        // marker _resolveCapabilityValidators carries is what makes this hub's own
+        // meetsStakeThreshold fail closed on an over-cap snapshot, but it is a JS array
+        // property and capability_snapshots has no column for it, so persisting the capped
+        // rows hands the off-BTC (DOGE/LTC) indexer verifiers a partial set they read back
+        // as COMPLETE (xchain-indexer getCapabilitySnapshotWeights sets no `truncated`).
+        // They would then clear the strict 2/3 bar against an under-counted stake
+        // denominator S and finalize what this hub rejects: an accept/reject divergence on
+        // a consensus path, reachable organically once the federation outgrows the source
+        // cap and deliberately via key-spam stake eviction. Writing nothing leaves the
+        // mirror empty, so the off-BTC read yields S=0 and fails closed through the same
+        // predicate as everything else. The window ends when operators raise the cap
+        // (coordinated), which is the design's already-stated posture.
+        if(validators && validators.truncated === true){
+            console.warn('StateCheckpointEngine: refusing to persist a TRUNCATED ' + capability +
+                         ' capability snapshot at block ' + block +
+                         ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
+            return;
+        }
         for(let v of validators){
             let pubkey = String(v.pubkey).toLowerCase();
             let amount = String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0'));

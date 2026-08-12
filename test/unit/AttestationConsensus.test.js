@@ -475,6 +475,19 @@ describe('AttestationConsensus: propose() guards', function () {
         expect(c.earlyCommits.has(RID)).to.equal(false);
         clock.restore();
     });
+
+    it('counts a timed-out round so quorum loss reaches the stats rail (item 8c1148c0)', async function () {
+        // Before this counter the timeout handler only warned, so a hub losing
+        // every round to quorum timeout still reported a clean attestation rail:
+        // the only other counter, failed_count, sees local fetch errors alone.
+        let clock = sinon.useFakeTimers();
+        c.roundTimeoutMs = 1000;
+        expect(c.roundTimeoutCount).to.equal(0);
+        await c.propose(RID, roundState(me, [me, mkIdentity(), mkIdentity()], Buffer.from('b'), 'http_get', 3));
+        clock.tick(1001);
+        expect(c.roundTimeoutCount).to.equal(1);
+        clock.restore();
+    });
 });
 
 describe('AttestationConsensus: single-validator round finalizes end-to-end', function () {
@@ -801,8 +814,28 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         // need = min(redundancy=2, responsible.length=3) = 2 (item 2642).
         // pinnedVendors rides alongside the pinned judge model (item 3482): the
         // block-anchored model_vendors map, null when the round carried none.
+        // pinnedApprovedModels rides the same way (): the block-anchored
+        // allowlist the meta gate judges against, null when the round carried none.
         expect(agreeSpy.firstCall.args[1]).to.deep.equal({ pinnedJudgeModel: 'claude-opus-4-7',
-            pinnedVendors: null, timeoutMs: 10000, expectedN: 2 });
+            pinnedVendors: null, pinnedApprovedModels: null, timeoutMs: 10000, expectedN: 2 });
+    });
+
+    // : fetch() honours the block-anchored pinned model, so the allowlist
+    // that judges the meta it returns has to be block-anchored too. Read from the
+    // hub's live set instead, a governance delisting of the pinned model froze the
+    // round at no_quorum on every retry until the request expired.
+    it('threads the round-snapshotted pinnedApprovedModels into agree()', async function () {
+        let agreeSpy = sinon.spy(proposals => proposals[0]);
+        c = new AttestationConsensus(hub, makeRealProviderRegistry(agreeSpy, 'judge_model'));
+        let rs = roundState(me, [me, p1, p2], BODY, 'llm', 2);
+        rs.pinnedApprovedModels = ['retired-model-1', 'claude-opus-4-7'];
+        await c.propose(RID, rs);
+        await flush();
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
+        await flush();
+        expect(agreeSpy.called).to.equal(true);
+        expect(agreeSpy.firstCall.args[1].pinnedApprovedModels)
+            .to.deep.equal(['retired-model-1', 'claude-opus-4-7']);
     });
 
     // item 3482: a governance change can add a new-family model id and its

@@ -631,6 +631,31 @@ describe('AttestationRelay ', function () {
             expect(await relay.validateProposedMatch(proposedRow({ round_id: sha256('nope') }))).to.equal(false);
         });
 
+        // #4204. The relay legs sign these integers VERBATIM (String(r.field) inside
+        // _relayRequestCanonical) and put the same spelling on the v3 wire, but the
+        // indexer re-parses that wire with parseInt() before rebuilding the canonical it
+        // verifies against. '4242' and '04242' therefore pass the Number()-based field
+        // checks below identically, while only one produces a canonical the origin chain
+        // can verify: the other lands as 'invalid: cross_chain quorum' with no path to
+        // re-relay, and the request sits until its deadline expires.
+        it('refuses a noncanonical integer spelling on a signed field', async function () {
+            const relay = makeRelay();
+            // The canonical spelling passes as a number or as a string.
+            expect(await relay.validateProposedMatch(proposedRow({ origin_action_index: '4242' }))).to.equal(true);
+            for (const bad of [
+                { origin_action_index: '04242' },
+                { origin_action_index: '+4242' },
+                { origin_action_index: ' 4242' },
+                { redundancy: '03' },
+                { deadline_blocks: '010' },
+                { snapshot_block: '01000' },
+                { redundancy: null }
+            ]) {
+                expect(await relay.validateProposedMatch(proposedRow(bad)),
+                    'co-signed a relay leg spelled ' + JSON.stringify(bad)).to.equal(false);
+            }
+        });
+
         it('refuses a leader-inflated field the origin chain does not agree with', async function () {
             const relay = makeRelay();
             for (const bad of [

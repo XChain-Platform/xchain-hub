@@ -22,6 +22,7 @@ const proxyquire = require('proxyquire').noPreserveCache();
 
 const { evaluateAuthPosture } = require('../../src/lib/auth_posture.js');
 const { ConsensusInputMonitor, REASONS } = require('../../src/lib/consensus_input_monitor.js');
+const { waitUntil } = require('../helpers/waitUntil');
 
 describe('boot auth posture ', function () {
 
@@ -136,8 +137,16 @@ describe('boot auth posture ', function () {
                 else process.env[k] = v;
             }
         }
-        await new Promise((resolve) => setTimeout(resolve, 50));
-        exitStub.restore();
+        // The boot is an async IIFE with two terminal outcomes: it either
+        // registers the JSON-RPC methods or refuses via process.exit. Poll for
+        // whichever arrives; a fixed settle has to be sized for the slower one
+        // on the slowest box, which is dead time on every other run.
+        try {
+            await waitUntil(() => captured.methods || captured.exits.length > 0,
+                { label: 'api.js boot to serve or refuse' });
+        } finally {
+            exitStub.restore();
+        }
         return { exits: captured.exits, methods: captured.methods, hub: mockHub };
     }
 
