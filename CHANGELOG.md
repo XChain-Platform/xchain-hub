@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.2.18] - 2026-08-13
 
 ### Fixed
 - A durable broadcast intent survives a crash between an accepted anchor send and its txid stamp, avoiding a duplicate DOGE fee on the next flush.
