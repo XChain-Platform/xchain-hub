@@ -1377,7 +1377,7 @@ async function startApi(){
             let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
             let rows = await hub.db.doQuery(
                 'SELECT id, chain, network, reward_type, round_reference, snapshot_block, ' +
-                'publisher, reward_amount, publisher_attestations, created_at ' +
+                'publisher, reward_amount, publisher_attestations, doge_anchor_txid, created_at ' +
                 'FROM anchor_reward_attestations WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );

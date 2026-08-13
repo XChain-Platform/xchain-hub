@@ -2902,3 +2902,231 @@ describe('StateAnchorPublisher reward attestation confirm-then-write (#4456)', f
         expect(inserts(queries).length).to.equal(0);
     });
 });
+
+// ── XANCREWARD: hub-to-hub federation of the confirmed attestation row (AML #4170) ──
+//
+// Before this, the anchor_reward_attestations row reached only the PUBLISHING hub's own
+// indexer subscribers. The publisher rotates per checkpoint, so a federation's hubs held
+// disjoint subsets and each indexer derived only the slice its own hub happened to publish.
+// The fix broadcasts the CONFIRMED row, and the security property is entirely on the
+// receiving side: the message supplies identity, never authority. Every one of these cases
+// is a way a receiver must refuse to turn a wire message into a money row.
+describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
+    const sinon = require('sinon');
+    const XANCREWARD = require('../../src/StateAnchorPublisher.js').XANCREWARD;
+
+    const TXID = 'ab'.repeat(32);
+
+    // A hub with an identity, a wired DOGE indexer, and a resolvable oracle_publish set.
+    // `members` are the pubkeys in that set; the receiver's own key is always a member.
+    function makeReceiver(members) {
+        const queries   = [];
+        const broadcast = [];
+        const sent      = [];
+        const db = {
+            async doQuery(sql, params) {
+                queries.push({ sql, params });
+                if (sql.indexOf('SELECT * FROM state_checkpoints') === 0) return [Object.assign({}, CP_ROW)];
+                if (sql.indexOf('SELECT') === 0) return [{ id: 1, publisher: params[5] }];
+                return { affectedRows: 1 };
+            }
+        };
+        const hub = { db, getIdentity: () => null, hubDbBroadcaster: { broadcastRow: (ev) => broadcast.push(ev) } };
+        const pub = new StateAnchorPublisher(hub);
+        pub.identity    = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
+        pub.peerManager = { broadcast: (type, data) => sent.push({ type, data }), on: () => {} };
+        pub.indexers.DOGE = { url: 'http://doge.indexer.invalid', key: '' };
+        pub.dogeConfirmations = 60;
+        pub.network = CP_ROW.network;
+        const set = (members || []).concat([pub.identity.getPubkeyHex().toLowerCase()]);
+        pub._resolveCapabilitySet = async () => set.map(pk => ({ pubkey: pk, source: pk, amount: '1' }));
+        return { pub, queries, broadcast, sent, set };
+    }
+
+    // A signed XANCREWARD payload for the per-chain (v4) reward on CP_ROW, attested by
+    // `signers` (ValidatorIdentity instances) and relayed by `sender`.
+    function payloadFrom(pub, sender, signers, over) {
+        const publisher = (over && over.publisher) || sender.getPubkeyHex().toLowerCase();
+        const d = Object.assign({
+            chain: CP_ROW.chain, network: CP_ROW.network,
+            reward_type: 'anchor_' + CP_ROW.chain, round_reference: CP_ROW.checkpoint_seq,
+            snapshot_block: CP_ROW.snapshot_block, publisher: publisher,
+            doge_anchor_txid: TXID, anchor_version: 4,
+            block_index: CP_ROW.block_index, checkpoint_seq: CP_ROW.checkpoint_seq
+        }, over || {});
+        const cp = { chain: d.chain, network: d.network, checkpoint_seq: d.round_reference, snapshot_block: d.snapshot_block };
+        const canonical = (d.reward_type === 'anchor_archive')
+            ? pub._archiveAttestationCanonical({ network: d.network, snapshot_block: d.snapshot_block }, d.round_reference, d.publisher)
+            : pub._attestationCanonical(cp, d.publisher);
+        d.attest_sigs = (over && over.attest_sigs) || signers.map(s => ({
+            pubkey: s.getPubkeyHex().toLowerCase(), sig: s.sign(canonical)
+        }));
+        d.sig_pubkey = sender.getPubkeyHex().toLowerCase();
+        d.sig        = sender.sign(pub._rewardFederationCanonical(d));
+        return d;
+    }
+
+    const onChain = (over) => Object.assign({
+        exists: true, checkpoint_anchored: true, status: 'valid', version: 4,
+        confirmations: 60, txid: TXID,
+        block_hash: CP_ROW.block_hash, ledger_hash: CP_ROW.ledger_hash,
+        actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash
+    }, over || {});
+
+    const inserts = (queries) => queries.filter(q => q.sql.indexOf('INSERT IGNORE INTO anchor_reward_attestations') === 0);
+
+    afterEach(() => sinon.restore());
+
+    it('the publisher federates the row at the CONFIRMED write, never at broadcast time', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const { pub, queries, sent } = makeReceiver([]);
+        const me = pub.identity.getPubkeyHex().toLowerCase();
+        pub._deferRewardAttestation({
+            chain: CP_ROW.chain, network: CP_ROW.network,
+            blockIndex: CP_ROW.block_index, checkpointSeq: CP_ROW.checkpoint_seq,
+            txid: TXID, anchorVersion: 4,
+            rewardType: 'anchor_' + CP_ROW.chain, roundReference: CP_ROW.checkpoint_seq,
+            snapshotBlock: CP_ROW.snapshot_block, publisher: me,
+            attestSigs: [{ pubkey: me, sig: 'ef'.repeat(64) }],
+            federate: true
+        });
+        expect(sent.filter(m => m.type === XANCREWARD).length, 'nothing federated while unconfirmed').to.equal(0);
+
+        pub._indexerCall = async () => onChain();
+        await pub._drainDeferredRewardAttest();
+        expect(inserts(queries).length, 'the row is written locally first').to.equal(1);
+        const msg = sent.find(m => m.type === XANCREWARD);
+        expect(msg, 'the confirmed row is federated').to.exist;
+        expect(msg.data.doge_anchor_txid, 'bound to the PROVEN txid').to.equal(TXID);
+        expect(msg.data.reward_amount, 'the frozen amount is never put on the wire').to.equal(undefined);
+    });
+
+    it('the proven txid is persisted on the row (doge_anchor_txid)', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const { pub, queries } = makeReceiver([]);
+        const me = pub.identity.getPubkeyHex().toLowerCase();
+        pub._deferRewardAttestation({
+            chain: CP_ROW.chain, network: CP_ROW.network,
+            blockIndex: CP_ROW.block_index, checkpointSeq: CP_ROW.checkpoint_seq,
+            txid: TXID, anchorVersion: 4,
+            rewardType: 'anchor_' + CP_ROW.chain, roundReference: CP_ROW.checkpoint_seq,
+            snapshotBlock: CP_ROW.snapshot_block, publisher: me,
+            attestSigs: [{ pubkey: me, sig: 'ef'.repeat(64) }]
+        });
+        pub._indexerCall = async () => onChain();
+        await pub._drainDeferredRewardAttest();
+        const ins = inserts(queries)[0];
+        expect(ins.sql).to.contain('doge_anchor_txid');
+        expect(ins.params[8]).to.equal(TXID);
+    });
+
+    it('a receiver queues a quorum-valid message and writes it only once IT proves the anchor mined', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
+        const { pub, queries, sent } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
+        // A 2-member set needs both signatures: the relayer's and this receiver's own.
+        await pub._handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer, pub.identity]) });
+        expect(pub._deferredRewardAttest.size, 'queued behind its own mined-anchor proof').to.equal(1);
+        expect(inserts(queries).length, 'nothing written on receipt alone').to.equal(0);
+
+        pub._indexerCall = async () => onChain();
+        await pub._drainDeferredRewardAttest();
+        expect(inserts(queries).length, 'written once this hub proved the anchor itself').to.equal(1);
+        expect(sent.filter(m => m.type === XANCREWARD).length, 'a receiver never re-broadcasts').to.equal(0);
+    });
+
+    it('a receiver writes NOTHING when its own DOGE view cannot confirm the anchor', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
+        const { pub, queries } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
+        await pub._handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer, pub.identity]) });
+        expect(pub._deferredRewardAttest.size, 'the quorum was valid, so it queued').to.equal(1);
+        pub._indexerCall = async () => ({ exists: false, checkpoint_anchored: false });
+        await pub._drainDeferredRewardAttest();
+        expect(inserts(queries).length).to.equal(0);
+    });
+
+    it('below the derive gate a receiver ignores the message entirely', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(false);
+        const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
+        const { pub, queries } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
+        await pub._handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer]) });
+        expect(pub._deferredRewardAttest.size).to.equal(0);
+        expect(queries.length).to.equal(0);
+    });
+
+    it('refuses a message whose XANCPUB quorum does not verify against the RECEIVER\'s own set', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
+        const outsider = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
+        // The relayer is a member, but the only attestation signature belongs to a
+        // non-member: a quorum the receiver's own oracle_publish set does not support.
+        const { pub } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
+        const d = payloadFrom(pub, relayer, [outsider]);
+        await pub._handleRewardAttestation({ data: d });
+        expect(pub._deferredRewardAttest.size).to.equal(0);
+    });
+
+    it('refuses a message relayed by a non-member (no free verification work for outsiders)', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const outsider = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
+        const { pub } = makeReceiver([]);                       // outsider is NOT in the set
+        await pub._handleRewardAttestation({ data: payloadFrom(pub, outsider, [outsider]) });
+        expect(pub._deferredRewardAttest.size).to.equal(0);
+    });
+
+    it('refuses a message crediting a publisher outside the receiver\'s oracle_publish set', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
+        const { pub } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
+        await pub._handleRewardAttestation({
+            data: payloadFrom(pub, relayer, [relayer], { publisher: 'cd'.repeat(32) })
+        });
+        expect(pub._deferredRewardAttest.size).to.equal(0);
+    });
+
+    it('refuses a message whose transport signature does not verify (a tampered tuple)', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
+        const { pub } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
+        const d = payloadFrom(pub, relayer, [relayer]);
+        d.round_reference = d.round_reference + 1;              // signed over the ORIGINAL tuple
+        await pub._handleRewardAttestation({ data: d });
+        expect(pub._deferredRewardAttest.size).to.equal(0);
+    });
+
+    it('refuses a malformed txid, an unattested ANCHOR version, and a mismatched reward_type', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
+        const { pub } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
+        for (const over of [{ doge_anchor_txid: 'nope' }, { anchor_version: 0 }, { reward_type: 'anchor_LTC' }]) {
+            await pub._handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer], over) });
+            expect(pub._deferredRewardAttest.size, JSON.stringify(over)).to.equal(0);
+        }
+    });
+
+    it('refuses to act on an unresolved oracle_publish set (fail closed)', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
+        const { pub } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
+        pub._resolveCapabilitySet = async () => [];
+        await pub._handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer]) });
+        expect(pub._deferredRewardAttest.size).to.equal(0);
+    });
+
+    it('ignores its own broadcast echoing back', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const { pub } = makeReceiver([]);
+        await pub._handleRewardAttestation({ data: payloadFrom(pub, pub.identity, [pub.identity]) });
+        expect(pub._deferredRewardAttest.size).to.equal(0);
+    });
+
+    it('the transport canonical is tagged so it can never be replayed as an attestation signature', function () {
+        const { pub } = makeReceiver([]);
+        const d = { chain: 'BTC', network: 'regtest', reward_type: 'anchor_BTC', round_reference: 7,
+                    snapshot_block: 100, publisher: 'ab'.repeat(32), doge_anchor_txid: TXID,
+                    anchor_version: 4, block_index: 494, checkpoint_seq: 7 };
+        expect(pub._rewardFederationCanonical(d)).to.equal(
+            'XANCREWARD|BTC|regtest|anchor_BTC|7|100|' + 'ab'.repeat(32) + '|' + TXID + '|4|494|7');
+    });
+});

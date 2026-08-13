@@ -45,6 +45,15 @@
 // an indexer predating v3 accepted a current hub instead of failing closed; v3 restores
 // the gate. A stale indexer must reject this stream until it has applied the
 // 2026-07-21 anchor-reward-attestations migration.
-const HUB_SCHEMA_VERSION = 3;
+//
+// v4: anchor_reward_attestations gained doge_anchor_txid, the MINED DOGE anchor
+// each attested reward is proof-bound to. It is the column every independent
+// re-proof binds against (a peer's XANCREWARD check, the BTC indexer's
+// getanchorconfirmations check before it mints validator_rewards), so an indexer
+// that predates it silently loses the bind and is back to deriving a
+// COLLECT-spendable reward for an anchor it cannot show ever landed. Fail closed
+// instead: a stale indexer must reject this stream until it has applied the
+// 2026-08-13-anchor-reward-attestations-doge-anchor-txid migration.
+const HUB_SCHEMA_VERSION = 4;
 
 module.exports = { HUB_SCHEMA_VERSION };
