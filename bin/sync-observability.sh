@@ -20,8 +20,8 @@
 # shared /metrics exporter cannot be an internal npm dependency without a
 # publish step and six lockfile bumps. Instead xchain-hub/src/observability/ is
 # CANONICAL and this script copies it verbatim into each consumer. Copies are
-# byte-identical by construction; bin/check-observability-parity.js at the
-# platform root fails on drift.
+# byte-identical by construction; `--check` below, and the same check in CI,
+# fail on drift.
 #
 # Usage:
 #   bin/sync-observability.sh            copy canonical -> every sibling found

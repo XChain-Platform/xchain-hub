@@ -15,8 +15,8 @@
  * Service-specific Prometheus metrics for xchain-hub (item a98d6746).
  *
  * Lives outside src/observability/ on purpose: that directory is the canonical
- * copy vendored byte-identically into five sibling services, and
- * bin/check-observability-parity.js fails on drift, so a hub-only metric may
+ * copy vendored byte-identically into five sibling services, and the parity
+ * check across those copies fails on drift, so a hub-only metric may
  * only use the shared module's public API from hub code. It is its own module
  * rather than inline in api.js because api.js self-starts on require, so
  * nothing in it is reachable from a unit test.

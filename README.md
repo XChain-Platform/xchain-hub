@@ -184,7 +184,8 @@ API are in [`src/observability/README.md`](src/observability/README.md).
 
 This directory is the CANONICAL copy of the shared module. After
 editing it, re-run `bin/sync-observability.sh` to refresh the vendored copies in
-the sibling services; drift fails `bin/check-observability-parity.js` in CI.
+the sibling services; drift fails the parity check CI runs across those copies,
+which you can run locally with `bin/sync-observability.sh --check`.
 
 ## Scripts
 

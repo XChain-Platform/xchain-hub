@@ -1,7 +1,0 @@
-XChain-Hub TODO
-- Price oracles (BTC, LTC, DOGE, XCHAIN)
-- Validate cross-chain swaps
-- Validate cross-chain orders
-- Validate cross-chain links
-- Sync all changes out to 'slave' xchain-hub instances
-
