@@ -6,3 +6,10 @@ CREATE TABLE oracle_published_rounds (
     PRIMARY KEY (round),
     KEY idx_sent (sent_at)
 );
+
+-- Retention: OraclePublisher prunes rows older than
+-- ORACLE_PUBLISHED_ROUNDS_RETENTION_ROUNDS (default 12960 rounds, ~90 days at the
+-- 10-minute round default; 0 disables) after each publish pass. ONLY confirmed rows
+-- (sent_at IS NOT NULL) are ever deleted. A sent_at NULL row is a quarantine marker
+-- for a round whose on-chain state is unknown and which an operator reconciles by
+-- hand, so it is retained forever regardless of age.

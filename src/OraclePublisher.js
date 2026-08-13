@@ -109,6 +109,27 @@ class OraclePublisher {
         this.dogePubkeyHex      = process.env.DOGE_PUBKEY_HEX || cfg.DOGE_PUBKEY_HEX || '';
         this.lowBalanceThreshold = parseFloat(process.env.DOGE_LOW_BALANCE_THRESHOLD || cfg.DOGE_LOW_BALANCE_THRESHOLD || '10'); // DOGE
         this.maxAttempts        = parseInt(process.env.PUBLISHER_MAX_ATTEMPTS || cfg.PUBLISHER_MAX_ATTEMPTS || '5');
+        // Retention window (in rounds) for the durable oracle_published_rounds marker
+        // table. One row lands per published round forever, so on a money-bearing
+        // broadcast path the table grows without bound for the life of the deployment.
+        // Only CONFIRMED rows (sent_at IS NOT NULL) are ever pruned: a sent_at NULL row
+        // is the quarantine marker for a round whose on-chain state is unknown, which an
+        // operator reconciles by hand, so those must survive forever (see
+        // _hydratePublishedMarkers). Keep the most recent N rounds; 0 disables pruning.
+        // Default ~90 days at the 10-minute round default, mirroring the
+        // ORACLE_SUBMISSIONS_RETENTION_ROUNDS window on the sibling audit table.
+        this.publishedRoundsRetentionRounds = parseInt(
+            process.env.ORACLE_PUBLISHED_ROUNDS_RETENTION_ROUNDS ||
+            cfg.ORACLE_PUBLISHED_ROUNDS_RETENTION_ROUNDS);
+        if (!Number.isFinite(this.publishedRoundsRetentionRounds) || this.publishedRoundsRetentionRounds < 0) {
+            this.publishedRoundsRetentionRounds = 12960;
+        }
+        // Lifetime count of confirmed marker rows pruned by the retention sweep, and
+        // the promise of the in-flight sweep. The sweep is fire-and-forget on the
+        // publish path (a retention failure must never stall a broadcast), so the
+        // handle is what makes it awaitable in tests and diagnosable in getStats.
+        this.publishedRoundsPruned = 0;
+        this._retentionSweep       = null;
 
         // item 2677 - operator kill switch. Mirrors StateAnchorPublisher's
         // ANCHOR_ENABLED gate: a first-class lever to halt outbound DOGE spend
@@ -613,6 +634,57 @@ class OraclePublisher {
         }
     }
 
+    // Bound the durable oracle_published_rounds marker table to the retention window.
+    // Without this the table appends one row per published round forever.
+    //
+    // Two invariants dominate this DELETE, both load-bearing on a money-bearing path:
+    //
+    //   1. `sent_at IS NOT NULL` is mandatory. A sent_at NULL row is an intent-only
+    //      QUARANTINE marker: broadcast intent was recorded but the confirmation never
+    //      landed, so the round's on-chain state is unknown and only an operator can
+    //      reconcile it (_hydratePublishedMarkers surfaces them at startup and refuses
+    //      to auto-rebroadcast). Pruning one would erase the sole record that a round
+    //      needs hand-verification, and the round would then look never-attempted.
+    //   2. No round still on the durable queue may be pruned. The marker is what stops
+    //      a restart from re-broadcasting a queued-but-already-published round (a
+    //      duplicate DOGE spend). A queue entry older than the retention window means
+    //      the queue is not draining, so the cutoff is clamped below the oldest queued
+    //      round rather than trusting the window.
+    //
+    // Returns the number of rows deleted. Throws on a DB error; the caller decides
+    // (the publish path treats a retention failure as non-fatal).
+    async _prunePublishedRounds(anchorRound) {
+        if (!this.db) return 0;
+        if (!this.publishedRoundsRetentionRounds || this.publishedRoundsRetentionRounds <= 0) return 0;
+        let anchor = Number(anchorRound);
+        if (!Number.isFinite(anchor)) return 0;
+
+        let cutoff = anchor - this.publishedRoundsRetentionRounds;
+        if (cutoff <= 0) return 0;
+
+        // Invariant 2: never prune a marker whose round can still be read off the
+        // durable queue file. Best-effort read; an unreadable queue returns [] and the
+        // window applies unchanged (the file being unreadable is already loud elsewhere).
+        for (let entry of this._readQueue()) {
+            let r = Number(entry && entry.round);
+            if (Number.isFinite(r) && r < cutoff) cutoff = r;
+        }
+        if (cutoff <= 0) return 0;
+
+        let result = await this.db.doQuery(
+            'DELETE FROM oracle_published_rounds WHERE round < ? AND sent_at IS NOT NULL',
+            [cutoff]);
+        let deleted = result && result.affectedRows ? Number(result.affectedRows) : 0;
+        if (deleted > 0) {
+            this.publishedRoundsPruned += deleted;
+            console.log('OraclePublisher: published-rounds retention pruned ' + deleted +
+                ' confirmed marker row(s) older than round ' + cutoff + ' (keep ' +
+                this.publishedRoundsRetentionRounds + ' rounds; quarantined intent-only ' +
+                'rows are never pruned)');
+        }
+        return deleted;
+    }
+
     // Process pending rounds in the queue: build payload, check balance, broadcast
     async _processQueue() {
         // item 2677 kill switch: suppress the replay/sweep too, not just the live
@@ -651,6 +723,7 @@ class OraclePublisher {
         }
 
         let remaining = [];
+        let publishedThisPass = false;
         for (let entry of entries) {
             // Entries that have exhausted their broadcast attempts are moved to the
             // append-only dead-letter file rather than silently erased on the next
@@ -752,6 +825,7 @@ class OraclePublisher {
                 await this._markPublished(entry.round, (result && result.txid) || null);
                 console.log('OraclePublisher: published round ' + entry.round + ' (txid: ' + (result && result.txid) + ')');
                 this.publishedCount++;
+                publishedThisPass       = true;
                 this.lastPublishedRound = entry.round;
                 this.lastPublishedTxid  = (result && result.txid) || null;
                 // Successfully published. Drop from queue (do not add to remaining).
@@ -797,6 +871,20 @@ class OraclePublisher {
                 'queue file is repaired would re-broadcast already-published rounds (duplicate DOGE spend). ' +
                 'Fix the queue file writability now.');
         }
+
+        // Bound the durable marker table. Runs after the rewrite so the queue-floor
+        // clamp reads the post-pass queue, and only when a round actually published
+        // this pass (nothing new to age out otherwise). Fire-and-forget with the
+        // rejection swallowed: retention is housekeeping and must never fail, stall,
+        // or retry a broadcast pass that has already spent DOGE.
+        if (this.db && publishedThisPass && this.lastPublishedRound !== null) {
+            this._retentionSweep = this._prunePublishedRounds(this.lastPublishedRound)
+                .catch((e) => {
+                    console.warn('OraclePublisher: published-rounds retention sweep failed ' +
+                        '(marker table keeps growing until it succeeds): ', e);
+                    return 0;
+                });
+        }
     }
 
     // Snapshot of the publish rail's health for operator diagnostics. Intended to
@@ -812,6 +900,11 @@ class OraclePublisher {
             abandoned:           this.abandonedCount,
             oversizedDrops:      this.oversizedDrops,
             quarantined:         this._quarantinedRounds.size,
+            // Marker-table retention: the configured window plus the lifetime prune
+            // count, so an operator can tell a bounded table from one whose sweep has
+            // been failing (pruned stuck at 0 while rounds keep publishing).
+            publishedRoundsRetentionRounds: this.publishedRoundsRetentionRounds,
+            publishedRoundsPruned:          this.publishedRoundsPruned,
             lastPublishedRound:  this.lastPublishedRound,
             lastPublishedTxid:   this.lastPublishedTxid,
             lastObservedBalance: this.lastObservedBalance,

@@ -289,6 +289,7 @@ Wallet and encoder the hub uses to publish oracle prices on Dogecoin.
 | `DOGE_LOW_BALANCE_THRESHOLD` | No | `10` | Low-balance warning threshold (DOGE). |
 | `PUBLISHER_QUEUE_PATH` | No | `./data/publisher-queue.jsonl` | On-disk price publish queue. |
 | `PUBLISHER_MAX_ATTEMPTS` | No | `5` | Max publish retry attempts. |
+| `ORACLE_PUBLISHED_ROUNDS_RETENTION_ROUNDS` | No | `12960` | Retention window (in rounds, ~90 days at the default round interval) for the durable `oracle_published_rounds` marker table; `0` disables pruning. Only confirmed rows (`sent_at` set) are pruned, and never a round still on the publish queue: intent-only quarantine rows awaiting operator reconciliation are kept forever. Also resolves from `p2pConfig`; the env var wins. |
 | `ORACLE_PUBLISH_ENABLED` | No | `true` | Operator-local kill switch for the oracle price publisher (mirrors the `*_ENABLED` publisher idiom). `false` skips both publish rounds and queue processing. Also resolves from `p2pConfig`; the env var wins. |
 
 ## Reward tracker
