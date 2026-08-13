@@ -1499,6 +1499,27 @@ class StateAnchorPublisher {
         let cp = this._cpFromRow(cps[0]);
 
         let network  = String(cps[0].network);
+
+        // Durable at-most-once for the ARCHIVE spend, the twin of the
+        // anchor_published_checkpoints gate in _publishPendingCheckpoints. A crash
+        // between an accepted v1/v2 send and _backfillBatch leaves every source row
+        // pending, and the archive path has NO mined-state query surface to notice the
+        // earlier send (getanchoraction serves CHECKPOINT_VERSIONS only), so without
+        // this the next flush rebuilds the whole batch under a fresh seq and re-pays for
+        // the head plus every chunk. Checked here, before the batch seq is drawn and
+        // before the co-signing round burns a quorum, so a held round costs nothing.
+        // Bounded by anchorIntentTtlMs: an unbounded marker for a send that never
+        // relayed would stall archiving forever.
+        let liveIntent = await this._getLiveArchiveIntent(network);
+        if(this._anchorIntentHolds(liveIntent)){
+            console.warn('StateAnchorPublisher: archive round for ' + network + ' held: batch ' +
+                         liveIntent.batch_seq + ' recorded a broadcast intent at ' + String(liveIntent.intent_at) +
+                         (liveIntent.txid ? ' (v1 txid ' + liveIntent.txid + ')' : '') +
+                         ' and never finished its bookkeeping; not rebuilding a second archive until that ' +
+                         'intent ages past ' + this.anchorIntentTtlMs + 'ms (rows stay pending)');
+            return 'intent_held';
+        }
+
         let batchSeq = await this._getNextBatchSeq();
 
         {
@@ -1640,7 +1661,9 @@ class StateAnchorPublisher {
         };
 
         if(snapCount <= 1){                                                   // single-node: self-sign suffices
-            await this._publishArchive(round);
+            // A held publish never archived anything, so the pending counter must NOT be
+            // cleared: the rows really are still pending and the next flush re-checks.
+            if((await this._publishArchive(round)) === 'intent_held') return 'intent_held';
             this._pendingMatches = 0;
             return 'published';
         }
@@ -2605,15 +2628,36 @@ class StateAnchorPublisher {
         round.done = true;
         if(round.timer){ clearTimeout(round.timer); round.timer = null; }
         this._archiveRound = null;
-        await this._publishArchive(round);
-        this._pendingMatches = 0;
+        // Same rule as the single-node path: a round held by a surviving broadcast
+        // intent published nothing, so the pending counter stays as it was.
+        if((await this._publishArchive(round)) !== 'intent_held') this._pendingMatches = 0;
     }
 
     async _publishArchive(round){
         let sigs = [];
         for(let [pk, sg] of round.signatures) sigs.push({ pubkey: pk, sig: sg });
 
-        let cp = round.cp;
+        let cp      = round.cp;
+        let network = String(cp.network);
+
+        // Last gate before anything is spent, mirroring the pre-broadcast marker read in
+        // _publishPendingCheckpoints. _startArchiveRound checks this before the round
+        // opens, but a co-signed round reaches here minutes later and _publishArchive is
+        // reachable from other paths, so re-read: any UNSETTLED intent for this network
+        // belongs to an earlier round that may already have paid, and this round's own
+        // intent is not armed until just before its send. Checked ahead of the
+        // publisher-attestation round so a held publish does not burn a peer quorum
+        // either. Fails closed (a DB read error throws and the rows stay pending) rather
+        // than spending against publish history it could not read.
+        let liveIntent = await this._getLiveArchiveIntent(network);
+        if(this._anchorIntentHolds(liveIntent)){
+            console.warn('StateAnchorPublisher: archive batch ' + round.batchSeq + ' NOT published: batch ' +
+                         liveIntent.batch_seq + ' recorded a broadcast intent at ' + String(liveIntent.intent_at) +
+                         ' that never finished; rows stay pending and re-archive under a fresh seq once it ' +
+                         'settles or ages past ' + this.anchorIntentTtlMs + 'ms');
+            return 'intent_held';
+        }
+
         // Archive-reward re-derivation flag-day: at/above it, run the archive
         // publisher-attestation round (2f+1 oracle_publish quorum over the archive XANCPUB
         // canonical binding THIS hub as the earner) and emit ANCHOR v6 (the v1 archive
@@ -2649,15 +2693,59 @@ class StateAnchorPublisher {
         let v1Payload = parts.join('|');
 
         let broadcaster = round.signer.broadcastFn || ((p) => this._defaultBroadcast(p, round.signer));
-        let result = await this._broadcastWithRetry(broadcaster, v1Payload);
+
+        // Armed BEFORE the send, so the window this marker covers starts at the earliest
+        // moment DOGE could have moved, and stays armed across the whole v2 chunk loop:
+        // a crash anywhere in the round is one unfinished archive, not one per chunk.
+        await this._recordArchiveIntent(network, round.batchSeq);
+        let result;
+        try {
+            // The durable intent above holds a crashed round for anchorIntentTtlMs; this
+            // is the part that settles it, and the part that covers the window AFTER the
+            // TTL expires. getarchiveanchor answers "did we already publish THIS batch"
+            // from the batch's content (checkpoint identity + crc + count) rather than
+            // from the match_batch_seq the restart no longer preserves, so an archive
+            // that already reached DOGE is ADOPTED here instead of paid for twice.
+            result = await this._broadcastWithRetry(broadcaster, v1Payload, undefined,
+                () => this._findExistingArchiveAnchor(cp, round));
+        } catch(e){
+            // A definitive failure means nothing reached the DOGE node (pre-send
+            // build/sign errors, a spend-ceiling refusal, an RPC rejection), so withdraw
+            // rather than stall archiving for the whole TTL over a send that never
+            // happened. An AMBIGUOUS send KEEPS its intent: that case is exactly what the
+            // marker exists for.
+            if(!(e && e.anchorAmbiguousSend)) await this._withdrawArchiveIntent(network, round.batchSeq);
+            throw e;
+        }
         let txid = result && result.txid ? result.txid : null;
+        if(txid) await this._markArchiveSent(network, round.batchSeq, txid);
+
+        // The seq the chunks must be addressed to. Normally this round's own, but when
+        // the head above was ADOPTED it is the seq that head actually landed under,
+        // which this process could not know (the re-election allocated a different one).
+        // Chunks broadcast under any other number are orphans: they would carry the
+        // archive bytes but attach to no head, and the batch would never reassemble.
+        // Only the CHUNK addressing moves. Local bookkeeping (_backfillBatch, the
+        // FINALIZED announcement, the reward's round reference) stays on round.batchSeq,
+        // because peers observed this round's SIGN_REQ under that seq and authenticate
+        // the FINALIZED against it; nothing binds the local seq to match_batch_seq.
+        let chunkSeq = (result && result.archiveAnchor && result.archiveAnchor.match_batch_seq != null)
+            ? Number(result.archiveAnchor.match_batch_seq) : round.batchSeq;
+        if(chunkSeq !== round.batchSeq)
+            console.log('StateAnchorPublisher: adopted an already-published archive head (txid ' + txid +
+                        ', batch ' + chunkSeq + ') for round ' + round.batchSeq +
+                        '; remaining chunks go out under the adopted seq');
 
         let lostChunks = 0;
         for(let i = 1; i < round.chunks.length; i++){
-            let v2Payload = ['ANCHOR', '2', String(round.batchSeq), String(i), String(round.chunks.length), round.chunks[i]].join('|');
+            let v2Payload = ['ANCHOR', '2', String(chunkSeq), String(i), String(round.chunks.length), round.chunks[i]].join('|');
             // A lost chunk is a durability failure (recovery needs every chunk),
             // so the shared anchor-broadcast retry matters most here.
-            try { await this._broadcastWithRetry(broadcaster, v2Payload); }
+            // The same content-addressed check guards each chunk slot: a crash can land
+            // the head and only some of its chunks, and without per-slot resolution the
+            // resume would either re-pay for the chunks that landed or strand the batch.
+            try { await this._broadcastWithRetry(broadcaster, v2Payload, undefined,
+                      () => this._findExistingArchiveChunk(cp, round, i)); }
             catch(e){
                 lostChunks++;
                 this._archiveChunkLosses++;
@@ -2716,6 +2804,15 @@ class StateAnchorPublisher {
                               'txid; rows stay pending and re-archive under a new batch seq');
         }
         await this._backfillBatch(round.batchSeq, matchIds, txid, callIds, rewardIds);
+        // Bookkeeping is done, so the crash window this marker covers is closed: settle it
+        // and let the next round start immediately. Settling is gated on a real txid
+        // because a null one is a false/incomplete broadcast success, NOT proof that
+        // nothing was sent (the same reasoning that leaves the checkpoint marker armed on
+        // a null txid); leaving it unsettled makes the TTL, rather than this flush, decide
+        // when a possibly-paid batch may be rebuilt. A partial archive (lost chunks /
+        // invalid on-chain quorum) DOES settle: its rows re-archive under a fresh seq by
+        // design, and the head we paid for is accounted for.
+        if(txid) await this._settleArchiveIntent(network, round.batchSeq);
         if(this.peerManager){
             this.peerManager.broadcast(XANC_FINALIZED, {
                 batch_seq: round.batchSeq, txid: txid, matches: matchIds,
@@ -3559,7 +3656,8 @@ class StateAnchorPublisher {
     // double-spend regardless of whether it is deep enough to 'verify' yet.
     // (getanchoraction serves CHECKPOINT_VERSIONS only, so a v1/v2 archive
     // anchor can never satisfy this check; the archive path has no such query
-    // surface and relies on the ambiguous-error defer alone.)
+    // surface, so it pairs the ambiguous-error defer with its own durable marker,
+    // anchor_published_archives, instead of a mined lookup.)
     async _findExistingCheckpointAnchor(row){
         let ix = this.indexers && this.indexers.DOGE;
         if(!ix || !ix.url) throw new Error('no DOGE indexer wired');
@@ -3573,6 +3671,96 @@ class StateAnchorPublisher {
         // (our own payloads are built from the quorum row, so this is a peer's
         // malformed tx, not our lost ACK).
         if(/^invalid/i.test(String(res.status || ''))) return null;
+        return { exists: true, txid: res.txid || null };
+    }
+
+    // CONTENT-ADDRESSED existence check for an ARCHIVE anchor (v1/v6 head + its v2
+    // chunks), the archive-path sibling of _findExistingCheckpointAnchor above.
+    //
+    // The archive path publishes BEFORE it records: _publishArchive broadcasts the head
+    // and every continuation chunk, and only then does _backfillBatch stamp the rows. A
+    // crash in that window leaves the rows pending, so the next flush re-elects exactly
+    // the same matches and pays for the whole archive a second time. The checkpoint
+    // path's guard could not be reused, because the identity every archive read is keyed
+    // on (match_batch_seq) is precisely what the restart does not preserve:
+    // _getNextBatchSeq is MAX(batch_seq)+1 fleet-wide, so a peer that archived in the
+    // meantime moves the seq, and the re-election publishes the identical bytes under a
+    // number nothing on-chain carries.
+    //
+    // getarchiveanchor is keyed on what the batch IS instead: the checkpoint identity
+    // it wraps plus the batch's own content commitment (batch_crc32 + match_count),
+    // which the publisher signs into the v1 canonical and can therefore recompute after
+    // the restart. Scoped to OUR DOGE address, so the answer only ever covers spends
+    // this publisher made: unscoped, anyone who copied our mined head onto the chain
+    // would answer "already published" for a batch whose chunks they never sent, and we
+    // would skip our own head and strand the archive.
+    //
+    // Returns the usable response, or null when this batch is definitively not on-chain
+    // under our address. THROWS when undetermined (no indexer wired, unreachable, error
+    // reply, or an indexer too old to serve the method), so _broadcastWithRetry keeps
+    // its "absent" / "can't tell" distinction: an un-upgraded indexer therefore degrades
+    // to exactly today's behavior (publish) rather than blocking the archive.
+    async _archiveAnchorLookup(cp, round){
+        let ix = this.indexers && this.indexers.DOGE;
+        if(!ix || !ix.url)    throw new Error('no DOGE indexer wired');
+        if(!this.dogeAddress) throw new Error('no DOGE_ADDRESS configured');
+        let res = await this._indexerCall('DOGE', 'getarchiveanchor', {
+            chain: String(cp.chain), network: String(cp.network),
+            block_index: Number(cp.block_index), checkpoint_seq: Number(cp.checkpoint_seq),
+            batch_crc32: String(round.crc).toLowerCase(),
+            match_count: Number(round.count),
+            author: String(this.dogeAddress)
+        });
+        if(!res || res.error) throw new Error('getarchiveanchor failed: ' + (res && res.error));
+        if(!res.exists) return null;
+        // A decoded-invalid head anchored nothing, so it is not an archive we can adopt
+        // or attach chunks to. Same verdict as the checkpoint path.
+        if(/^invalid/i.test(String(res.status || ''))) return null;
+        // Adopting needs a txid: it is what _backfillBatch stamps and what the FINALIZED
+        // announcement carries, and a null txid drives the '__partial__' sentinel, which
+        // would leave the rows pending and adopt the same txid-less head again every
+        // flush (a livelock, not a saving). Treat it as absent and republish instead.
+        if(!res.txid){
+            console.warn('StateAnchorPublisher: archive head for batch crc ' + round.crc +
+                         ' is on-chain but carries no resolvable txid; treating as absent');
+            return null;
+        }
+        // Chunk geometry must match ours byte-for-byte before we attach to, or adopt,
+        // that head: an identical archive split into a different number of chunks (a
+        // changed chunk size across the restart) would make our chunk bytes land in
+        // slots the head never declared, and the batch would fail reassembly on-chain.
+        if(Number(res.total_chunks) !== Number(round.chunks.length)){
+            console.warn('StateAnchorPublisher: archive head for batch crc ' + round.crc + ' declares ' +
+                         res.total_chunks + ' chunk(s) but this round built ' + round.chunks.length +
+                         '; not adopting (republishing the batch whole)');
+            return null;
+        }
+        if(res.match_batch_seq == null) return null;
+        return res;
+    }
+
+    // existsCheck for the ARCHIVE HEAD broadcast (v1/v6). The head landing is the spend
+    // this guard exists to make at-most-once; the chunk-level check below covers the
+    // rest of the batch. `archiveAnchor` rides along on the adopt result so
+    // _publishArchive can address the remaining chunk slots under the seq the batch
+    // actually landed under, which this process no longer knows.
+    async _findExistingArchiveAnchor(cp, round){
+        let res = await this._archiveAnchorLookup(cp, round);
+        if(!res) return null;
+        return { exists: true, txid: res.txid || null, archiveAnchor: res };
+    }
+
+    // existsCheck for ONE v2 continuation chunk. A crash can land the head and some of
+    // its chunks, so per-chunk resolution is what makes the resume cheap: without it the
+    // only choices are re-sending every chunk (paying again for the ones that landed) or
+    // skipping the batch (stranding it). An absent head answers "chunk absent", which is
+    // right in both directions: on a fresh publish the head is still in the mempool and
+    // every chunk must go out, and with no head there is nothing for a chunk to attach to.
+    async _findExistingArchiveChunk(cp, round, chunkIndex){
+        let res = await this._archiveAnchorLookup(cp, round);
+        if(!res) return null;
+        let present = Array.isArray(res.chunks_present) ? res.chunks_present.map(Number) : [];
+        if(!present.includes(Number(chunkIndex))) return null;
         return { exists: true, txid: res.txid || null };
     }
 
@@ -3666,6 +3854,93 @@ class StateAnchorPublisher {
         } catch(e){
             console.warn('StateAnchorPublisher: could not withdraw the broadcast intent for ' + row.chain + '/' +
                          row.network + ' @ ' + row.block_index + '; it will hold the row until the TTL expires: ' +
+                         (e && e.message));
+        }
+    }
+
+    // Durable at-most-once for the ARCHIVE spend (anchor_published_archives).
+    //
+    // Same failure and the same remedy as the checkpoint marker above, with one
+    // structural difference that changes the key. A checkpoint is re-selected under its
+    // OWN identity (chain, network, checkpoint_seq) after a crash, so its marker can be
+    // read by that identity. An archive is not: the rows re-select as "pending" and the
+    // rebuild draws a FRESH batch_seq (two v1 anchors sharing one seq corrupt chunk
+    // reassembly), so a marker read by batch_seq could never match the round it has to
+    // stop. The hold is therefore per-NETWORK over any UNSETTLED intent, and settled_at
+    // is what keeps a finished round from blocking the next one.
+    //
+    // The archive path also has no mined-state fallback: getanchoraction serves
+    // CHECKPOINT_VERSIONS only, so there is no existsCheck to pass _broadcastWithRetry
+    // and no "has it mined yet?" question to fall through on. This marker plus the
+    // ambiguous-send defer are the whole guard, which is why the hold is unconditional
+    // within the TTL rather than conditional on a mined lookup.
+
+    // Read the newest unsettled marker for a network, or null when none exists. Throws on
+    // a DB error so the caller FAILS CLOSED (rows stay pending) rather than spending on a
+    // batch whose publish history it could not read.
+    async _getLiveArchiveIntent(network){
+        let rows = await this.db.doQuery(
+            'SELECT network, batch_seq, txid, intent_at, sent_at FROM anchor_published_archives ' +
+            'WHERE network = ? AND settled_at IS NULL ORDER BY intent_at DESC LIMIT 1',
+            [String(network)]);
+        return (rows && rows.length > 0) ? rows[0] : null;
+    }
+
+    // Durably arm archive-broadcast intent before the v1 send. The upsert form matches the
+    // checkpoint twin: the caller reaches this only when no unexpired intent holds the
+    // network, so an existing row for this seq is a stale one and the write is this round
+    // opening its own window. Throws on a DB error so the caller fails closed.
+    async _recordArchiveIntent(network, batchSeq){
+        await this.db.doQuery(
+            'INSERT INTO anchor_published_archives (network, batch_seq) VALUES (?, ?) ' +
+            'ON DUPLICATE KEY UPDATE intent_at = CURRENT_TIMESTAMP, sent_at = NULL, txid = NULL, settled_at = NULL',
+            [String(network), Number(batchSeq)]);
+    }
+
+    // Record that the v1 broadcast returned a txid. Logged, never thrown: the DOGE fee is
+    // already spent, and an intent-only row left behind makes the next round HOLD instead
+    // of re-archiving, which is the fail-safe direction.
+    async _markArchiveSent(network, batchSeq, txid){
+        try {
+            await this.db.doQuery(
+                'UPDATE anchor_published_archives SET txid = ?, sent_at = NOW() WHERE network = ? AND batch_seq = ?',
+                [txid || null, String(network), Number(batchSeq)]);
+        } catch(e){
+            console.error('StateAnchorPublisher: archive batch ' + batchSeq + ' broadcast as ' + txid +
+                          ' but its durable sent marker could not be persisted; the intent still holds the ' +
+                          'network, so nothing re-archives. Error:', e && e.message);
+        }
+    }
+
+    // Close the window once the round's bookkeeping has landed, so the next round is not
+    // blocked for the full TTL by a batch that completed normally. Scoped `AND sent_at IS
+    // NOT NULL` so it can only ever close a marker whose broadcast actually returned.
+    // Logged, never thrown: an unsettled marker costs latency (the TTL), never money.
+    async _settleArchiveIntent(network, batchSeq){
+        try {
+            await this.db.doQuery(
+                'UPDATE anchor_published_archives SET settled_at = NOW() ' +
+                'WHERE network = ? AND batch_seq = ? AND sent_at IS NOT NULL',
+                [String(network), Number(batchSeq)]);
+        } catch(e){
+            console.warn('StateAnchorPublisher: could not settle the archive intent for batch ' + batchSeq +
+                         '; it will hold ' + network + ' archiving until the TTL expires: ' + (e && e.message));
+        }
+    }
+
+    // Withdraw an intent for a v1 send that DEFINITIVELY never went out (a pre-send build,
+    // sign, ceiling or RPC-rejection failure). Without this a routine failure would stall
+    // archiving for the whole TTL, which is worse than the replay risk the marker exists
+    // for. Scoped `AND sent_at IS NULL` so a confirmed marker can never be deleted by a
+    // late or misordered call. Logged, never thrown: leaving the row is fail-closed.
+    async _withdrawArchiveIntent(network, batchSeq){
+        try {
+            await this.db.doQuery(
+                'DELETE FROM anchor_published_archives WHERE network = ? AND batch_seq = ? AND sent_at IS NULL',
+                [String(network), Number(batchSeq)]);
+        } catch(e){
+            console.warn('StateAnchorPublisher: could not withdraw the archive broadcast intent for batch ' +
+                         batchSeq + '; it will hold ' + network + ' archiving until the TTL expires: ' +
                          (e && e.message));
         }
     }
