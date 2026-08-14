@@ -691,8 +691,8 @@ class Governance extends EventEmitter {
                 }
             }
         } catch (e) {
-            console.error('Governance: cooldown re-check failed for inbound proposal ' + proposalId +
-                ' (' + parameter + '); proceeding (fail-open):', e && e.message ? e.message : e);
+            console.error('Governance: cooldown re-check failed for inbound proposal %s (%s); proceeding (fail-open):',
+                proposalId, parameter, e && e.message ? e.message : e);
         }
 
         this.db.doQuery(
@@ -702,7 +702,7 @@ class Governance extends EventEmitter {
              VALUES (?, ?, ?, ?, ?, ?, 'voting', NOW(), ?, ?, ?)`,
             [proposalId, proposerPubkey || '', parameter, currentValue, proposedValue,
              rationale || '', localVotingEnd, activation, snapshotJson]
-        ).catch(e => console.error('Governance: failed to persist inbound proposal ' + proposalId + ':', e));
+        ).catch(e => console.error('Governance: failed to persist inbound proposal %s:', proposalId, e));
         // INSERT IGNORE already absorbs a duplicate proposal_id without raising, so the only
         // failures reaching here are real (dropped DB connection, deadlock, value-too-long,
         // schema drift). Logging them ties "why didn't node X vote on proposal P?" to its cause.
@@ -779,7 +779,7 @@ class Governance extends EventEmitter {
                 "SELECT voting_end, validator_snapshot FROM governance_proposals WHERE proposal_id = ? AND status = 'voting' LIMIT 1",
                 [proposalId]);
         } catch (e) {
-            console.error('Governance: failed to look up proposal for inbound vote ' + proposalId + ':', e && e.message ? e.message : e);
+            console.error('Governance: failed to look up proposal for inbound vote %s:', proposalId, e && e.message ? e.message : e);
             return;
         }
         if (!prows.length || new Date(prows[0].voting_end).getTime() < Date.now()) return;
@@ -791,8 +791,8 @@ class Governance extends EventEmitter {
         if (electorate && !electorate.some(e => e.pubkey === pk)) return;
 
         this._upsertVote(proposalId, voterPubkey, vote, signature, voteSeq)
-            .catch(e => console.error('Governance: failed to persist inbound vote for proposal ' + proposalId +
-                ' from ' + voterPubkey + ':', e));
+            .catch(e => console.error('Governance: failed to persist inbound vote for proposal %s from %s:',
+                proposalId, voterPubkey, e));
         // A vote is consensus-tally-affecting state: a silently-dropped write here makes this
         // node's tally diverge from peers that succeeded, with no symptom until operators
         // compare counts. Log it so a tally mismatch is traceable to the specific dropped write.
@@ -935,8 +935,8 @@ class Governance extends EventEmitter {
             try {
                 await this._upsertVote(proposalId, v.voterPubkey, v.vote, v.signature, seq);
             } catch (e) {
-                console.error('Governance: failed to ingest GOV_RESULT vote evidence for ' + proposalId +
-                    ' from ' + v.voterPubkey + ':', e && e.message ? e.message : e);
+                console.error('Governance: failed to ingest GOV_RESULT vote evidence for %s from %s:',
+                    proposalId, v.voterPubkey, e && e.message ? e.message : e);
             }
         }
     }

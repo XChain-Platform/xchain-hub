@@ -412,14 +412,13 @@ class AttestationPublisher {
             // normally.
             if (this._isAmbiguousSendError(e) || (e && e.attestAmbiguousSend)){
                 this._ambiguousSends.set(rid, Date.now());
-                console.error('AttestationPublisher: AMBIGUOUS broadcast failure for ' + rid.substring(0,16) +
-                              '... (tx may have reached the BTC node); sweep will defer re-broadcast for ~' +
-                              Math.ceil(this.ambiguousCooldownMs / 1000) + 's before retrying: ', e);
+                console.error('AttestationPublisher: AMBIGUOUS broadcast failure for %s... (tx may have reached the BTC node); sweep will defer re-broadcast for ~%ds before retrying:',
+                              rid.substring(0,16), Math.ceil(this.ambiguousCooldownMs / 1000), e);
             } else {
                 // Definitively no send, so withdraw the intent: leaving it
                 // would quarantine an ordinary RPC rejection at the next restart.
                 await this._clearPublishIntent(rid);
-                console.error('AttestationPublisher: broadcast failed for ' + rid.substring(0,16) + '... (will retry via sweep): ', e);
+                console.error('AttestationPublisher: broadcast failed for %s... (will retry via sweep):', rid.substring(0,16), e);
             }
         }
     }
@@ -440,9 +439,8 @@ class AttestationPublisher {
             return true;
         } catch (e) {
             this._enqueueFailures++;
-            console.error('AttestationPublisher: CRITICAL - failed to durably enqueue ' +
-                          String(entry.requestId).substring(0,16) + '... to ' + this.queuePath +
-                          '; broadcast will be SKIPPED to preserve no-spend-without-a-durable-record:', e);
+            console.error('AttestationPublisher: CRITICAL - failed to durably enqueue %s... to %s; broadcast will be SKIPPED to preserve no-spend-without-a-durable-record:',
+                          String(entry.requestId).substring(0,16), this.queuePath, e);
             return false;
         }
     }
@@ -460,8 +458,8 @@ class AttestationPublisher {
             fs.fsyncSync(fd);
             fs.closeSync(fd);
         } catch (e) {
-            console.error('AttestationPublisher: failed to write spend-audit record for ' +
-                          String(rid).substring(0,16) + '... to ' + this.spendLogPath + ':', e);
+            console.error('AttestationPublisher: failed to write spend-audit record for %s... to %s:',
+                          String(rid).substring(0,16), this.spendLogPath, e);
         }
     }
 
@@ -517,9 +515,9 @@ class AttestationPublisher {
                 [txid || null, rid]
             );
         } catch (e) {
-            console.error('AttestationPublisher: broadcast for ' + String(rid).substring(0,16) + '... succeeded but its ' +
+            console.error('AttestationPublisher: broadcast for %s... succeeded but its ' +
                 'durable sent marker could not be persisted; a restart will QUARANTINE (not re-broadcast) this request. ' +
-                'Operator: confirm the txid on-chain. Error: ', e);
+                'Operator: confirm the txid on-chain. Error:', String(rid).substring(0,16), e);
         }
     }
 
@@ -565,9 +563,9 @@ class AttestationPublisher {
                 [rid]
             );
         } catch (e) {
-            console.error('AttestationPublisher: could not withdraw the publish-intent marker for ' +
-                String(rid).substring(0,16) + '... after a definitive send failure; a restart will QUARANTINE it ' +
-                'and it will need an operator replay. Error: ', e);
+            console.error('AttestationPublisher: could not withdraw the publish-intent marker for %s... ' +
+                'after a definitive send failure; a restart will QUARANTINE it ' +
+                'and it will need an operator replay. Error:', String(rid).substring(0,16), e);
         }
     }
 
@@ -594,8 +592,8 @@ class AttestationPublisher {
         try {
             marker = await this._getPublishedMarker(rid);
         } catch (e) {
-            console.error('AttestationPublisher: cannot read the durable publish marker for ' + rid.substring(0,16) +
-                '...; deferring broadcast (fail closed to avoid a duplicate BTC spend): ', e);
+            console.error('AttestationPublisher: cannot read the durable publish marker for %s...; deferring broadcast (fail closed to avoid a duplicate BTC spend):',
+                rid.substring(0,16), e);
             return 'defer';
         }
         if (marker && marker.sent_at !== null && marker.sent_at !== undefined){
@@ -619,8 +617,8 @@ class AttestationPublisher {
             await this._recordPublishIntent(rid);
             return true;
         } catch (e) {
-            console.error('AttestationPublisher: cannot record durable publish intent for ' + rid.substring(0,16) +
-                '...; deferring broadcast (fail closed): ', e);
+            console.error('AttestationPublisher: cannot record durable publish intent for %s...; deferring broadcast (fail closed):',
+                rid.substring(0,16), e);
             return false;
         }
     }

@@ -42,6 +42,12 @@ describe('Boundary: PriceFetcher', function () {
         return { data: body };
     }
 
+    // Helper: match a stubbed request by parsed hostname rather than a raw substring,
+    // so a lookalike host (e.g. api.coingecko.com.evil.example) cannot pass the check.
+    function hostIs(url, host) {
+        try { return new URL(url).hostname === host; } catch (e) { return false; }
+    }
+
     // -----------------------------------------------------------------
     // CoinGecko response edge-cases
     // -----------------------------------------------------------------
@@ -174,10 +180,10 @@ describe('Boundary: PriceFetcher', function () {
 
             // Stub by URL so order doesn't matter (CoinGecko has a random jitter delay)
             axiosStub.get.callsFake(function (url) {
-                if (url.includes('api.coingecko.com')) {
+                if (hostIs(url, 'api.coingecko.com')) {
                     return Promise.reject(new Error('CoinGecko down'));
                 }
-                if (url.includes('coinmarketcap.com')) {
+                if (hostIs(url, 'pro-api.coinmarketcap.com')) {
                     return Promise.resolve({ data: { data: {
                         BTC:  { quote: { USD: { price: 99000 } } },
                         LTC:  { quote: { USD: { price: 77 } } },
@@ -200,10 +206,10 @@ describe('Boundary: PriceFetcher', function () {
 
             // Stub by URL so order doesn't matter (CoinGecko has a random jitter delay)
             axiosStub.get.callsFake(function (url) {
-                if (url.includes('api.coingecko.com')) {
+                if (hostIs(url, 'api.coingecko.com')) {
                     return Promise.resolve(cgBody(100000, 80, 0.08));
                 }
-                if (url.includes('coinmarketcap.com')) {
+                if (hostIs(url, 'pro-api.coinmarketcap.com')) {
                     return Promise.resolve({ data: { data: {
                         // each symbol exists but has no quote.USD
                         BTC:  { quote: {} },
@@ -244,10 +250,10 @@ describe('Boundary: PriceFetcher', function () {
 
             // Stub by URL so order doesn't matter (CoinGecko has a random jitter delay)
             axiosStub.get.callsFake(function (url) {
-                if (url.includes('api.coingecko.com')) {
+                if (hostIs(url, 'api.coingecko.com')) {
                     return Promise.resolve(cgBody(100000, 80, 0.08));
                 }
-                if (url.includes('coinmarketcap.com')) {
+                if (hostIs(url, 'pro-api.coinmarketcap.com')) {
                     return Promise.resolve({ data: { data: {
                         BTC:  { quote: { USD: { price: 100000 } } },
                         LTC:  { quote: { USD: { price: 80 } } },
@@ -268,10 +274,10 @@ describe('Boundary: PriceFetcher', function () {
 
             // Stub by URL so order doesn't matter (CoinGecko has a random jitter delay)
             axiosStub.get.callsFake(function (url) {
-                if (url.includes('api.coingecko.com')) {
+                if (hostIs(url, 'api.coingecko.com')) {
                     return Promise.resolve(cgBody(100000, 80, 0.08));
                 }
-                if (url.includes('coinmarketcap.com')) {
+                if (hostIs(url, 'pro-api.coinmarketcap.com')) {
                     return Promise.resolve({ data: { data: {
                         BTC:  { quote: { USD: { price: 100002 } } },
                         LTC:  { quote: { USD: { price: 82 } } },

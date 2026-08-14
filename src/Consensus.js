@@ -414,8 +414,8 @@ class Consensus {
                 // call. Errors are caught and logged; they never bubble up to
                 // the gossip layer.
                 this._handlePrePrepare(envelope).catch(err =>
-                    console.error('Consensus: PRE_PREPARE handler error for seq ' +
-                        (envelope && envelope.data && envelope.data.seq) + ':',
+                    console.error('Consensus: PRE_PREPARE handler error for seq %s:',
+                        (envelope && envelope.data && envelope.data.seq),
                         err && err.message ? err.message : err));
                 break;
             case PBFT_PREPARE:     this._handlePrepare(envelope);    break;
@@ -885,7 +885,7 @@ class Consensus {
                 // pendingProposals so incoming COMMIT messages trigger a retry
                 // when the DB recovers. Reject the proposer's promise if present
                 // so the caller can surface the error.
-                console.error('PBFT: Error applying config (seq ' + seq + '):', err.message);
+                console.error('PBFT: Error applying config (seq %s):', seq, err.message);
                 // Clear the in-flight guard so a subsequent COMMIT can retry the apply
                 // when the DB recovers (proposal.applied is still false).
                 proposal._applying = false;

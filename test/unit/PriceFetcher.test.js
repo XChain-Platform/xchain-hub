@@ -14,6 +14,12 @@ const sinon        = require('sinon');
 const { expect }   = require('chai');
 const proxyquire   = require('proxyquire');
 
+// Match a stubbed request by parsed hostname rather than a raw substring, so a
+// lookalike host (e.g. api.coingecko.com.evil.example) cannot pass the check.
+function hostIs(url, host) {
+    try { return new URL(url).hostname === host; } catch (e) { return false; }
+}
+
 describe('PriceFetcher', function () {
 
     let axiosStub, PriceFetcher, pf;
@@ -175,12 +181,12 @@ describe('PriceFetcher', function () {
 
             // Stub by URL so order doesn't matter (CoinGecko has a random jitter delay)
             axiosStub.get.callsFake(function (url) {
-                if (url.includes('api.coingecko.com')) {
+                if (hostIs(url, 'api.coingecko.com')) {
                     return Promise.resolve({
                         data: { bitcoin: { usd: 100000 }, litecoin: { usd: 80 }, dogecoin: { usd: 0.14 } }
                     });
                 }
-                if (url.includes('coinmarketcap.com')) {
+                if (hostIs(url, 'pro-api.coinmarketcap.com')) {
                     return Promise.resolve({
                         data: {
                             data: {
@@ -207,12 +213,12 @@ describe('PriceFetcher', function () {
 
             // CoinGecko succeeds; CMC fails. Stub by URL for order-independence.
             axiosStub.get.callsFake(function (url) {
-                if (url.includes('api.coingecko.com')) {
+                if (hostIs(url, 'api.coingecko.com')) {
                     return Promise.resolve({
                         data: { bitcoin: { usd: 99000 }, litecoin: { usd: 78 }, dogecoin: { usd: 0.13 } }
                     });
                 }
-                if (url.includes('coinmarketcap.com')) {
+                if (hostIs(url, 'pro-api.coinmarketcap.com')) {
                     return Promise.reject(new Error('CMC down'));
                 }
                 return Promise.reject(new Error('unexpected URL: ' + url));
@@ -236,12 +242,12 @@ describe('PriceFetcher', function () {
         it('fetches CoinGecko + Kraken when no CMC key', async function () {
             pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0, PRICE_FETCH_JITTER_MS: 0 });
             axiosStub.get.callsFake(function (url) {
-                if (url.includes('api.coingecko.com')) {
+                if (hostIs(url, 'api.coingecko.com')) {
                     return Promise.resolve({
                         data: { bitcoin: { usd: 50000 }, litecoin: { usd: 40 }, dogecoin: { usd: 0.1 } }
                     });
                 }
-                if (url.includes('kraken.com')) {
+                if (hostIs(url, 'api.kraken.com')) {
                     // Kraken response shape: { error: [], result: { ALTNAME: { c: [price, lot] } } }
                     return Promise.resolve({
                         data: { error: [], result: { XBTUSD: { c: ['50000', '1'] } } }
@@ -253,8 +259,8 @@ describe('PriceFetcher', function () {
             let prices = await pf.fetchPrices();
             expect(axiosStub.get.calledTwice).to.be.true;
             let urls = [axiosStub.get.firstCall.args[0], axiosStub.get.secondCall.args[0]];
-            expect(urls.some(u => u.includes('coingecko.com'))).to.be.true;
-            expect(urls.some(u => u.includes('kraken.com'))).to.be.true;
+            expect(urls.some(u => hostIs(u, 'api.coingecko.com'))).to.be.true;
+            expect(urls.some(u => hostIs(u, 'api.kraken.com'))).to.be.true;
             expect(prices).to.have.lengthOf(3);
         });
 

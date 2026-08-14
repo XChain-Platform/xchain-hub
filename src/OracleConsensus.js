@@ -300,7 +300,7 @@ class OracleConsensus extends EventEmitter {
         this.earlyMessageTtl.delete(round);
         for (let env of arr) {
             try { this._handleMessage(env); }
-            catch (e) { console.error('Oracle: error replaying buffered message for round ' + round + ':', e.message); }
+            catch (e) { console.error('Oracle: error replaying buffered message for round %s:', round, e.message); }
         }
     }
 
@@ -789,8 +789,8 @@ class OracleConsensus extends EventEmitter {
                 // snapshot at the round's block boundary via an indexer call.
                 // Errors are caught and logged; they never bubble up to the gossip layer.
                 this._handlePropose(envelope).catch(err =>
-                    console.error('Oracle: PROPOSE handler error for round ' +
-                        (envelope && envelope.data && envelope.data.round) + ':',
+                    console.error('Oracle: PROPOSE handler error for round %s:',
+                        (envelope && envelope.data && envelope.data.round),
                         err && err.message ? err.message : err));
                 break;
             case ORACLE_PREPARE: this._handlePrepare(envelope); break;
@@ -1393,8 +1393,7 @@ class OracleConsensus extends EventEmitter {
                 });
                 return;
             } catch (err) {
-                console.error('Oracle: Error storing snapshot for round ' + round +
-                    ' (attempt ' + attempt + '/' + maxAttempts + '):', err.message);
+                console.error('Oracle: Error storing snapshot for round %s (attempt %d/%d):', round, attempt, maxAttempts, err.message);
                 if (attempt < maxAttempts) {
                     // Linear backoff between retries for a transient DB hiccup.
                     await new Promise(resolve => setTimeout(resolve, 500 * attempt));
@@ -1442,7 +1441,7 @@ class OracleConsensus extends EventEmitter {
             // start a second finalize and emit round:finalized twice.
             p.finalized = true;
             Promise.resolve(this._finalizeCommittedRound(round)).catch(err =>
-                console.error('Oracle: re-finalize of round ' + round + ' threw:', err && err.message));
+                console.error('Oracle: re-finalize of round %s threw:', round, err && err.message));
         }, delay);
         // Never hold the process open on a retry that may re-arm indefinitely; stop() is
         // what tears it down on a clean shutdown.
@@ -1667,7 +1666,7 @@ class OracleConsensus extends EventEmitter {
                      status = IF(status = 'skipped', 'skipped', status)`, skipParams);
             }
         } catch (e) {
-            console.error('Oracle: error recording per-pair skipped snapshot(s) for round ' + round + ':', e.message);
+            console.error('Oracle: error recording per-pair skipped snapshot(s) for round %s:', round, e.message);
         }
 
         // Update the in-memory last-finalized-price cache so the co-sign gate in

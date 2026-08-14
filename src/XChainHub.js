@@ -281,7 +281,7 @@ class XChainHub {
                     participantPubkeys, validators
                 );
             } catch (e){
-                console.error('round:finalized reward/slash handling failed for round ' + (event && event.round) + ':', e && e.message ? e.message : e);
+                console.error('round:finalized reward/slash handling failed for round %s:', (event && event.round), e && e.message ? e.message : e);
             }
         });
 
@@ -514,8 +514,8 @@ class XChainHub {
         this.slashGovernance = new SlashGovernance(this);
         this.governance.on('proposal:finalized', (ev) => {
             this.slashGovernance.applyFinalized(ev).catch(e =>
-                console.error('SlashGovernance: penalty execution failed for ' +
-                    (ev && ev.proposalId) + ':', e && e.message ? e.message : e));
+                console.error('SlashGovernance: penalty execution failed for %s:',
+                    (ev && ev.proposalId), e && e.message ? e.message : e));
         });
     }
 

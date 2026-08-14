@@ -503,7 +503,7 @@ class OraclePublisher {
             fs.fsyncSync(fd);
             fs.closeSync(fd);
         } catch (e) {
-            console.error('OraclePublisher: failed to enqueue round ' + round.round + ':', e);
+            console.error('OraclePublisher: failed to enqueue round %s:', round.round, e);
             // Fail loud: refuse to ack if queue is unwritable
             throw e;
         }
@@ -523,7 +523,7 @@ class OraclePublisher {
             fs.fsyncSync(fd);
             fs.closeSync(fd);
         } catch (e) {
-            console.error('OraclePublisher: failed to write dead-letter record for round ' + entry.round + ':', e);
+            console.error('OraclePublisher: failed to write dead-letter record for round %s:', entry.round, e);
         }
     }
 

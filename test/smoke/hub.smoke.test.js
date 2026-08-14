@@ -13,7 +13,7 @@
 const { expect }       = require('chai');
 const sinon            = require('sinon');
 const http             = require('http');
-const { execSync }     = require('child_process');
+const { execFileSync } = require('child_process');
 const path             = require('path');
 const express          = require('express');
 const helmet           = require('helmet');
@@ -97,7 +97,9 @@ describe('Smoke: xchain-hub', function () {
                 let threw = false;
                 let stderr = '';
                 try {
-                    execSync('node ' + API_ENTRY, { env: env, timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] });
+                    // execFileSync runs node directly (no shell), so an environment
+                    // value can never be reinterpreted as shell syntax.
+                    execFileSync('node', [API_ENTRY], { env: env, timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] });
                 } catch (e) {
                     threw = true;
                     stderr = (e.stderr || '').toString();
@@ -115,7 +117,9 @@ describe('Smoke: xchain-hub', function () {
             let threw  = false;
             let stderr = '';
             try {
-                execSync('node ' + API_ENTRY, { env: validEnv, timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] });
+                // execFileSync runs node directly (no shell), so an environment
+                // value can never be reinterpreted as shell syntax.
+                execFileSync('node', [API_ENTRY], { env: validEnv, timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] });
             } catch (e) {
                 threw  = true;
                 stderr = (e.stderr || '').toString();

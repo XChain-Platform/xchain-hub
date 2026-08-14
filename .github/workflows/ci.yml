@@ -8,6 +8,10 @@
 # the DB here means only the hub pays for it.
 name: CI
 
+# Least privilege for the default GITHUB_TOKEN: every job here only reads the repo.
+permissions:
+  contents: read
+
 on:
   push:
     # develop is where all work lands; master only ever receives release PRs.
@@ -19,7 +23,7 @@ on:
 
 jobs:
   ci:
-    uses: XChain-Platform/.github/.github/workflows/ci-reusable.yml@396700c32203bd276cfdc9fc34f825cb8c243c8b # pin: XChain-Platform/.github @ master 2026-08-13; bump deliberately
+    uses: XChain-Platform/.github/.github/workflows/ci-reusable.yml@e2d578827928e79ec71c9b6afc4595025dc025fe # pin: XChain-Platform/.github @ master 2026-08-13; bump deliberately
     # Perf now runs in the dedicated `perf` job below (with a database), so the
     # gate does not also run the self-skipping perf step.
 

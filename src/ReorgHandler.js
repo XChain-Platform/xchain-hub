@@ -581,7 +581,7 @@ class ReorgHandler extends EventEmitter {
             ).then(() => {
                 this.pendingReorgs.delete(reorgId);
             }).catch(err => {
-                console.error('Reorg: Error executing rollback for ' + reorgId + ':', err.message);
+                console.error('Reorg: Error executing rollback for %s:', reorgId, err.message);
                 this.pendingReorgs.delete(reorgId);
             });
         }
@@ -664,7 +664,7 @@ class ReorgHandler extends EventEmitter {
 
         let probe = this._probeOwnNode(chain, reorgHeight, oldHash, newHash)
             .catch(err => {
-                console.warn('Reorg: self-verification failed for ' + key + ':', err && err.message);
+                console.warn('Reorg: self-verification failed for %s:', key, err && err.message);
                 return false;
             });
         this._verifying.set(key, probe);
@@ -726,8 +726,8 @@ class ReorgHandler extends EventEmitter {
         try {
             hist = await this._indexerCall(chain, 'getreorghistory', { block_index: reorgHeight });
         } catch (err) {
-            console.warn('Reorg: getreorghistory probe failed for ' + chain + ':' + reorgHeight + ':',
-                err && err.message);
+            console.warn('Reorg: getreorghistory probe failed for %s:%s:',
+                chain, reorgHeight, err && err.message);
             return false;
         }
         if (!hist || hist.error || !Array.isArray(hist.events)) return false;

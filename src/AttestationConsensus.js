@@ -701,7 +701,7 @@ class AttestationConsensus extends EventEmitter {
                   pinnedApprovedModels: pending.pinnedApprovedModels || null,
                   timeoutMs: judgeTimeoutMs, expectedN: need }));
         } catch (e) {
-            console.warn('AttestationConsensus: agree() threw for ' + rid.substring(0,16) + '...: ', e);
+            console.warn('AttestationConsensus: agree() threw for %s...:', rid.substring(0,16), e);
             winner = null;
         }
         pending._agreeing = false;

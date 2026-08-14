@@ -488,8 +488,7 @@ class AttestationSpotChecker {
         } catch (e) {
             // A throw is a judge TRANSPORT failure, not a verdict about the round,
             // so hold it for re-judging rather than dropping the spot-check.
-            console.warn('AttestationSpotChecker: judge call threw for ' + rid.substring(0, 16) +
-                         '...; deferred for re-judge: ', e);
+            console.warn('AttestationSpotChecker: judge call threw for %s...; deferred for re-judge:', rid.substring(0, 16), e);
             this._deferReJudge(rid, deferRecord);
             return;
         }

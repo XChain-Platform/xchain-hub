@@ -335,8 +335,8 @@ class CrossChainEngine extends EventEmitter {
                 // indexer call. Errors are caught and logged; they never bubble up
                 // to the gossip layer (mirrors OracleConsensus).
                 this._handlePropose(envelope).catch(err =>
-                    console.error('CrossChain: PROPOSE handler error for ' +
-                        (envelope && envelope.data && envelope.data.attestationId) + ':',
+                    console.error('CrossChain: PROPOSE handler error for %s:',
+                        (envelope && envelope.data && envelope.data.attestationId),
                         err && err.message));
                 break;
             case XCHAIN_ATTEST_PREPARE: this._handlePrepare(envelope); break;

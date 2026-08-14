@@ -18,6 +18,12 @@ const { createMockHub }       = require('../helpers/mockHub');
 const { waitUntil }           = require('../helpers/waitUntil');
 const { VALIDATORS_4, buildSubmissions } = require('../helpers/fixtures');
 
+// Match a stubbed request by parsed hostname rather than a raw substring, so a
+// lookalike host (e.g. api.coingecko.com.evil.example) cannot pass the check.
+function hostIs(url, host) {
+    try { return new URL(url).hostname === host; } catch (e) { return false; }
+}
+
 describe('Regression: Oracle Pipeline', function () {
 
     // =================================================================
@@ -44,12 +50,12 @@ describe('Regression: Oracle Pipeline', function () {
                 // jitter delay and additional keyless upstreams (Kraken) exist,
                 // so positional stubs no longer line up.
                 axiosStub.get.callsFake(function (url) {
-                    if (url.includes('api.coingecko.com')) {
+                    if (hostIs(url, 'api.coingecko.com')) {
                         return Promise.resolve({
                             data: { bitcoin: { usd: 100000 }, litecoin: { usd: 80 }, dogecoin: { usd: 0.14 } }
                         });
                     }
-                    if (url.includes('coinmarketcap.com')) {
+                    if (hostIs(url, 'pro-api.coinmarketcap.com')) {
                         return Promise.resolve({
                             data: { data: {
                                 BTC: { quote: { USD: { price: 100010 } } },
@@ -87,7 +93,7 @@ describe('Regression: Oracle Pipeline', function () {
                 pf = new PriceFetcher({ COINMARKETCAP_API_KEY: 'key' });
 
                 axiosStub.get.callsFake(function (url) {
-                    if (url.includes('api.coingecko.com')) {
+                    if (hostIs(url, 'api.coingecko.com')) {
                         return Promise.resolve({
                             data: { bitcoin: { usd: 99000 }, litecoin: { usd: 78 }, dogecoin: { usd: 0.13 } }
                         });
