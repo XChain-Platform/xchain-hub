@@ -19,7 +19,7 @@ on:
 
 jobs:
   ci:
-    uses: XChain-Platform/.github/.github/workflows/ci-reusable.yml@aae44352361242d334234593c39d88be007d2ed3 # pin: XChain-Platform/.github @ master 2026-07-08; bump deliberately
+    uses: XChain-Platform/.github/.github/workflows/ci-reusable.yml@396700c32203bd276cfdc9fc34f825cb8c243c8b # pin: XChain-Platform/.github @ master 2026-08-13; bump deliberately
     # Perf now runs in the dedicated `perf` job below (with a database), so the
     # gate does not also run the self-skipping perf step.
 
