@@ -312,6 +312,38 @@ describe('AttestationConsensus: _markFinalized ring buffer', function () {
         expect(c.finalized.has('c')).to.equal(true);
         expect(c._finalizedOrder).to.deep.equal(['b', 'c']);
     });
+
+    it('tombstones evicted rids and bounds the tombstone ring by finalizedMax', function () {
+        let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
+        c.finalizedMax = 2;
+        ['a', 'b', 'c', 'd', 'e'].forEach(r => c._markFinalized(r));
+        // a/b/c were evicted, but the tombstone ring is itself capped at
+        // finalizedMax, so the oldest tombstone ('a') has aged out and cannot leak.
+        expect(c._finalizedEvictedOrder).to.deep.equal(['b', 'c']);
+        expect(c._finalizedEvicted.has('a')).to.equal(false);
+        expect(c._finalizedEvicted.has('c')).to.equal(true);
+        expect(c.finalizedEvictedWhilePendingCount).to.equal(0);   // nothing re-proposed yet
+    });
+
+    it('counts and warns when a round is proposed for an already-evicted finalized rid', async function () {
+        let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
+        c.finalizedMax = 1;
+        c._markFinalized('aa');
+        c._markFinalized('bb');            // evicts 'aa' -> tombstone
+        let warn = sinon.stub(console, 'warn');
+        // responsible=[] trips the unfinalizable-round guard immediately after the
+        // detector, so no signing or broadcast state is needed to exercise this path.
+        await c.propose('AA', { responsible: [], redundancy: 1 });
+        sinon.restore();
+        expect(c.finalizedEvictedWhilePendingCount).to.equal(1);
+        expect(warn.getCalls().some(x => String(x.args[0]).includes('already evicted'))).to.equal(true);
+    });
+
+    it('does not count a proposal for a rid that was never evicted', async function () {
+        let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
+        await c.propose('never-seen', { responsible: [], redundancy: 1 });
+        expect(c.finalizedEvictedWhilePendingCount).to.equal(0);
+    });
 });
 
 describe('AttestationConsensus: nonOkPublished ring buffer', function () {

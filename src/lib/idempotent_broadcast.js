@@ -19,12 +19,15 @@
  *
  *   isAmbiguousSendError(e)
  *     Classify a broadcast_tx failure: could the transaction still have reached
- *     the coin node despite the error? A definitive rejection (the node/encoder
- *     answered with an RPC error, or an HTTP 4xx refusal) and a never-connected
- *     transport error are SAFE to retry. Everything else (timeout, reset
- *     mid-flight, 5xx after the request left the wire) is AMBIGUOUS: a blind
- *     retry could double-spend the fee and double-anchor the work. Callers tag
- *     the error and defer instead of re-broadcasting. (Was duplicated verbatim
+ *     the coin node despite the error? A definitive rejection (the node named a
+ *     reject reason through the encoder's RPC error, or an HTTP 4xx refused the
+ *     call before processing) and a never-connected transport error are SAFE to
+ *     retry. Everything else (timeout, reset mid-flight, 5xx after the request
+ *     left the wire, and the encoder's sanitized fallback for its OWN transport
+ *     failure talking to the node) is AMBIGUOUS: a blind retry could double-spend
+ *     the fee and double-anchor the work. Callers tag the error and defer instead
+ *     of re-broadcasting. The RPC-error envelope alone is NOT proof of a
+ *     rejection; see ENCODER_TRANSPORT_FALLBACK below. (Was duplicated verbatim
  *     as _isAmbiguousSendError in Oracle/Attest/Anchor/FullNode.)
  *
  *   AtMostOnce
@@ -36,7 +39,9 @@
  *
  *   broadcastOnce({ key, tracker, guard, balance, cost, ambiguousTag, send })
  *     Convenience wrapper composing the at-most-once guard, the shared SpendGuard
- *     pre-send gate, the actual send, and ambiguous-error tagging. Returns
+ *     pre-send gate (wallet floor via check(), then a budget RESERVATION, because
+ *     the send is awaited and the check()/record() pair races), the actual send,
+ *     and ambiguous-error tagging. Returns
  *     { skipped: true, reason } when a guard blocked the send (no money moved),
  *     otherwise the broadcast result. Higher-level durability (dead-letter files,
  *     on-chain existence checks) stays in the caller; this only owns the shared
@@ -46,9 +51,30 @@
 
 'use strict';
 
+// The encoder's SANITIZED fallback for a broadcast_tx whose own call to the coin node
+// failed at the TRANSPORT layer (xchain-encoder/src/api.js broadcast_tx hands this string
+// to upstreamErrorMessage; errorSanitize.isTransportError covers ECONNRESET / ETIMEDOUT /
+// ERR_BAD_RESPONSE, which is every case where the tx MAY ALREADY have reached the node).
+// The sanitizer deliberately strips err.code and err.response so the internal host:port
+// never leaks, and the encoder returns the result as an ordinary JSON-RPC error body (HTTP
+// 200, code -32603). Without this constant it is textually indistinguishable from a
+// genuine node rejection like 'bad-txns-inputs-missingorspent', so the prefix rule below
+// read it as definitive and the publishers re-broadcast a tx that may have landed.
+// Matching the literal is a deliberate cross-repo coupling and the only discriminator the
+// wire carries today; the durable fix is a distinct RPC code for transport failures on the
+// encoder side, which is a change in that repo.
+const ENCODER_TRANSPORT_FALLBACK = 'Transaction broadcast failed';
+
 function isAmbiguousSendError(e){
     if (!e) return false;
-    if (/^Encoder RPC error/.test(String(e.message || ''))) return false;             // node/encoder rejected the tx
+    let message = String(e.message || '');
+    // A definitive rejection and an ambiguous transport failure share the SAME
+    // 'Encoder RPC error' envelope, so this case is read before the prefix is trusted.
+    // Guarded on the absence of a sub-500 HTTP response, the one shape that does prove
+    // the encoder refused the call before it ever reached the node.
+    if (message === 'Encoder RPC error: ' + ENCODER_TRANSPORT_FALLBACK &&
+        !(e.response && Number(e.response.status) < 500)) return true;
+    if (/^Encoder RPC error/.test(message)) return false;                             // node/encoder rejected the tx
     if (e.response && Number(e.response.status) < 500) return false;                   // refused before processing
     let code = String(e.code || '');
     if (code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'EAI_AGAIN') return false; // never sent
@@ -84,21 +110,37 @@ async function broadcastOnce({ key, tracker, guard, balance, cost, ambiguousTag,
         return { skipped: true, duplicate: true, reason: 'already broadcast this process lifetime' };
     }
 
+    // check() first for the WALLET FLOOR only: reserve() runs the pause, count-ceiling
+    // and USD-budget gates but has no balance argument, so dropping check() here would
+    // silently retire <PREFIX>_MIN_BALANCE for every caller of this wrapper.
+    let token = null;
     if (guard){
         let g = guard.check({ balance: balance, cost: cost });
         if (!g.ok) return { skipped: true, reason: g.reason };
+        // RESERVE, never check()/record(), because send() is AWAITED. The pure
+        // predicate pair leaves a window in which every concurrent caller reads the
+        // same pre-send budget and all of them spend past the ceiling; spend_guard's
+        // own contract forbids that composition for an awaited send. reserve()
+        // consumes the budget in this synchronous turn, so the window cannot open.
+        token = guard.reserve(cost);
+        if (!token) return { skipped: true, reason: guard.noteBlocked() };
     }
 
     let result;
     try {
         result = await send();
     } catch (e){
+        // The send did not go out, so it consumes no budget: release on EVERY throw,
+        // ambiguous included. That keeps the "failed sends consume no budget"
+        // invariant the old post-send record() gave for free, and matches
+        // AttestationPublisher, the in-repo reserve/commit/release exemplar.
+        if (guard) guard.release(token);
         if (ambiguousTag && isAmbiguousSendError(e)) e[ambiguousTag] = true;
         throw e;
     }
 
     if (tracker && key != null) tracker.mark(key);
-    if (guard) guard.record(cost);
+    if (guard) guard.commit(token);   // the reservation IS the recorded spend; never also record()
     return result || {};
 }
 

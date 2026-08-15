@@ -106,6 +106,7 @@ class XChainHub {
         this._capabilityCheckRunning  = false;
         this._stakePollRunning        = false;
         this._transportSetTimer       = null;
+        this._transportSetRefreshRunning = false;
         this._transportSignerSet      = new Set();  // last-known-good effective set, lowercased pubkey hex
         this._transportSignerSetAt    = 0;       // ms epoch of the last successful refresh (0 = never)
         this._latestBlockIndex        = null;
@@ -175,16 +176,29 @@ class XChainHub {
     // Refresh the chain-effective signer set from the on-chain validator snapshot. The
     // set is ADDITIVE to the registry, so transport auth follows key rotation; it is
     // NEVER cleared on an upstream failure, since the registry stays the auth floor.
+    // In-flight guard, the same one _pollOwnStake and _runOwnCapabilityCheck carry: the
+    // two awaits below are unbounded round trips, so a slow indexer lets the bare
+    // setInterval stack passes. Each pass resolves the BTC tip at its own START, so an
+    // older slow pass finishing last would write the OLDER block's validator snapshot
+    // over a newer one and drop a just-rotated key from transport auth. Serializing the
+    // passes orders the writes; a skipped tick costs at most one refresh interval of
+    // staleness, which the registry auth floor already covers.
     async _refreshTransportSignerSet(){
         if(!this.peerManager) return;
-        let block = await this._resolveBtcLatestBlock();
-        if(block == null){ this._warnTransportStale('BTC tip unresolved'); return; }
-        let snap = await this.capabilitySnapshot.getActiveValidatorSnapshot(block);
-        if(!snap || !Array.isArray(snap.validators)){ this._warnTransportStale('validator snapshot unavailable'); return; }
-        let set = new Set(snap.validators.map(v => String(v.pubkey).toLowerCase()));
-        this._transportSignerSet   = set;
-        this._transportSignerSetAt = Date.now();
-        this.peerManager.setEffectiveSignerSet(set);
+        if(this._transportSetRefreshRunning) return;
+        this._transportSetRefreshRunning = true;
+        try {
+            let block = await this._resolveBtcLatestBlock();
+            if(block == null){ this._warnTransportStale('BTC tip unresolved'); return; }
+            let snap = await this.capabilitySnapshot.getActiveValidatorSnapshot(block);
+            if(!snap || !Array.isArray(snap.validators)){ this._warnTransportStale('validator snapshot unavailable'); return; }
+            let set = new Set(snap.validators.map(v => String(v.pubkey).toLowerCase()));
+            this._transportSignerSet   = set;
+            this._transportSignerSetAt = Date.now();
+            this.peerManager.setEffectiveSignerSet(set);
+        } finally {
+            this._transportSetRefreshRunning = false;
+        }
     }
 
     // Warn once the last good refresh ages past a threshold. Never clears the set (the

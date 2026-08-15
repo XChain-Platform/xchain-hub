@@ -41,7 +41,33 @@ class EncoderClient {
         };
         let headers = { 'Content-Type': 'application/json' };
         if (this.apiKey) headers['x-api-key'] = this.apiKey;
-        let response = await axios.post(this.encoderUrl, body, { headers: headers, timeout: this.timeout });
+        // The encoder answers several failures with a non-2xx status AND a JSON-RPC error
+        // body carrying the actual reason (401 -32001 Unauthorized, 429 -32029 Too many
+        // requests, 400 -32600 Batch too large). axios rejects on those before the
+        // response.data.error check below ever runs, so every publisher surface logged the
+        // bare 'Request failed with status code 429' and lost the one thing an operator
+        // needs: whether the encoder is misconfigured, shedding load, or being handed an
+        // oversized batch. Unwrap the body the way CapabilitySnapshot._onFetchError does.
+        //
+        // Two constraints, both load-bearing:
+        //   - RETHROW THE SAME OBJECT, never a fresh Error. isAmbiguousSendError
+        //     (lib/idempotent_broadcast.js) reads e.response.status, and so do the
+        //     dead-letter records; a wrapper drops both.
+        //   - Rewrite the message ONLY below status 500. That classifier reads an
+        //     'Encoder RPC error' message as a definitive rejection that is safe to
+        //     re-broadcast. A 5xx may already have reached the coin node, so prefixing one
+        //     would turn an ambiguous send into a retry and risk a double spend. 5xx
+        //     messages therefore pass through untouched.
+        let response;
+        try {
+            response = await axios.post(this.encoderUrl, body, { headers: headers, timeout: this.timeout });
+        } catch (err) {
+            let rpcErr = err && err.response && err.response.data && err.response.data.error;
+            if (rpcErr && Number(err.response.status) < 500) {
+                err.message = 'Encoder RPC error: ' + (rpcErr.message || JSON.stringify(rpcErr));
+            }
+            throw err;
+        }
         if (response.data && response.data.error) {
             throw new Error('Encoder RPC error: ' + (response.data.error.message || JSON.stringify(response.data.error)));
         }

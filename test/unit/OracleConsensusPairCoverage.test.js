@@ -64,4 +64,50 @@ describe('OracleConsensus PROPOSE pair-coverage (stress-sweep 2026-07-08)', func
         await oc._handlePropose(envelope([{ coinPair: 'BTC/USD', price: '100000' }]));
         expect(oc.pendingRounds.has(ROUND)).to.be.true;
     });
+
+    // item 4939: coverage is owed only for pairs the LEADER's own aggregation prices.
+    // A pair submitted by the leader plus exactly one other hub, disagreeing past
+    // ORACLE_DEVIATION_THRESHOLD, is dropped by the leader's exactly-2-source gate and
+    // honestly omitted. The follower's reference excludes the proposer, so that pair
+    // looks single-source there, never meets the 2-source gate, and used to trip this
+    // check on every honest round the two feeds diverged - costing all 36+ pairs and
+    // leaving no price_snapshots row at all.
+    it('co-signs when the leader honestly drops a 2-source divergent pair', async function () {
+        oracleRound.getSubmissions.returns(buildSubmissions([
+            { sender: leader.addr, prices: [
+                { coinPair: 'BTC/USD', price: '100000' },
+                { coinPair: 'LTC/USD', price: '100' }
+            ] },
+            { sender: pm.validatorAddr, prices: [
+                { coinPair: 'BTC/USD', price: '100000' },
+                { coinPair: 'LTC/USD', price: '200' }   // (200-100)/300 = 33% > 5% gate
+            ] }
+        ]));
+        // The leader aggregates the full set, so LTC/USD drops out of its proposal.
+        let leaderPairs = oc._aggregateAll(oracleRound.getSubmissions(ROUND)).map(a => a.coinPair);
+        expect(leaderPairs).to.deep.equal(['BTC/USD']);
+
+        await oc._handlePropose(envelope([{ coinPair: 'BTC/USD', price: '100000' }]));
+        expect(oc.pendingRounds.has(ROUND), 'honest 2-source drop must not wedge the round').to.be.true;
+    });
+
+    it('still withholds when the leader suppresses a pair its own aggregate prices', async function () {
+        // Same shape, but the two feeds AGREE, so the leader's aggregate keeps
+        // LTC/USD: omitting it is suppression and the round is withheld.
+        oracleRound.getSubmissions.returns(buildSubmissions([
+            { sender: leader.addr, prices: [
+                { coinPair: 'BTC/USD', price: '100000' },
+                { coinPair: 'LTC/USD', price: '100' }
+            ] },
+            { sender: pm.validatorAddr, prices: [
+                { coinPair: 'BTC/USD', price: '100000' },
+                { coinPair: 'LTC/USD', price: '100' }
+            ] }
+        ]));
+        let events = [];
+        oc.on('oracle:propose-rejected', e => events.push(e));
+        await oc._handlePropose(envelope([{ coinPair: 'BTC/USD', price: '100000' }]));
+        expect(oc.pendingRounds.has(ROUND)).to.be.false;
+        expect(events.map(e => e.reason)).to.include('missing-pairs');
+    });
 });

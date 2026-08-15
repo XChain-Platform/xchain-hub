@@ -35,6 +35,9 @@ const axios  = require('axios');
 const bc     = require('./bcmath.js');
 const swq    = require('./stake_weighted_quorum.js');
 const esc    = require('./attestation_escalation.js');
+// The consensus round-timeout default the seen-window floor below is keyed to.
+// Required, never re-spelled: see the constant's own note in constants.js.
+const { DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS } = require('./constants.js');
 
 const ATTEST_PROPOSE = 'ATTEST_PROPOSE';
 
@@ -99,10 +102,14 @@ class AttestationRound {
         // on its `pending.has(rid)` guard. At stock defaults 5*15s=75s is already
         // shorter than the 120s round timeout, and lowering ATTESTATION_POLL_MS
         // widens the gap silently. Sourcing the round timeout from the same config
-        // key AttestationConsensus reads keeps the two windows coupled. The paid
+        // key AND the same shared default AttestationConsensus reads keeps the two
+        // windows coupled on both paths; a re-spelled literal here coupled them only
+        // while the two copies happened to be equal, so raising the consensus default
+        // one-sidedly re-nested the window on any hub with no explicit key. The paid
         // fetch is also short-circuited directly in _startRound via
         // consensus.isRoundActive(), but flooring closes the nesting at its root.
-        let roundTimeoutMs  = parseInt(this.config.ATTESTATION_ROUND_TIMEOUT_MS) || 120000;
+        let roundTimeoutMs  = parseInt(this.config.ATTESTATION_ROUND_TIMEOUT_MS)
+                            || DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS;
         this.retryAfterMs   = Math.max(
             parseInt(this.config.ATTESTATION_RETRY_AFTER_MS) || (5 * this.pollMs),
             roundTimeoutMs + this.pollMs
@@ -691,6 +698,14 @@ class AttestationRound {
             stats.nonok_published_count               = this.consensus.nonOkPublished.size;
             stats.nonok_published_max                 = this.consensus.nonOkPublishedMax;
             stats.nonok_evicted_while_pending_count   = this.consensus.nonOkEvictedWhilePendingCount;
+            // Same three for the ok/`finalized` suppression ring, which had no
+            // stats at all: an undersized ATTESTATION_FINALIZED_MAX surfaced only
+            // as unexplained duplicate rounds and re-burned BTC fees. Occupancy
+            // against the cap says how close the ring is to evicting; the count is
+            // monotonic for the process life, so consumers alert on a rise.
+            stats.finalized_count                    = this.consensus.finalized.size;
+            stats.finalized_max                      = this.consensus.finalizedMax;
+            stats.finalized_evicted_while_pending_count = this.consensus.finalizedEvictedWhilePendingCount;
             // Consensus round timeouts (item 8c1148c0). failed_count above
             // counts only THIS hub's local provider-fetch failures (entry.error)
             // over the TTL-evicting `rounds` map; a round torn down by the PBFT

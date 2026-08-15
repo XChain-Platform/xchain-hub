@@ -46,12 +46,14 @@ const ValidatorIdentity = require('./ValidatorIdentity.js');
 const eq                = require('./equivocation_header.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { positiveIntConfig } = require('./lib/config_int.js');
+// 2 minutes per request lifecycle. Lives in constants.js because
+// AttestationRound floors its `seen` window on the same default; see there.
+const { DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS } = require('./constants.js');
 
 const ATTEST_PROPOSE = 'ATTEST_PROPOSE';
 const ATTEST_PREPARE = 'ATTEST_PREPARE';
 const ATTEST_COMMIT  = 'ATTEST_COMMIT';
 
-const DEFAULT_ROUND_TIMEOUT_MS = 120000;  // 2 minutes per request lifecycle
 // Default cap for the nonOkPublished throttle ring. Floor derives
 // from the LONGEST provider deadline window (deadline_window_blocks, currently
 // 100 BTC blocks for http_get), not the ok/BTC-confirmation horizon that sizes
@@ -110,6 +112,25 @@ class AttestationConsensus extends EventEmitter {
         this.finalized       = new Set();
         this._finalizedOrder = [];
         this.finalizedMax    = positiveIntConfig(this.config.ATTESTATION_FINALIZED_MAX, 10000, 'ATTESTATION_FINALIZED_MAX');
+
+        // Violation detector for the sizing invariant above, which was otherwise
+        // unobservable: eviction is by count, nothing asked whether the evicted
+        // rid still needed suppression, and the first symptom was a re-proposed
+        // round and a burned BTC fee with no counter to attribute it to the cap.
+        // The sibling nonOk ring classifies its evictions against `finalized`; the
+        // ok ring has no such in-hub oracle (the answer lives in the indexer's
+        // pending list) and no BTC-confirmation horizon it could age an entry
+        // against, so this detects by PROOF instead of by proxy: evicted rids are
+        // kept as tombstones, and a later propose() for one is the indexer itself
+        // demonstrating the request was still pending when the ring dropped it.
+        // Sized to `finalizedMax`, which doubles the reach in rids at the same
+        // order of memory. Deliberately no start-time sizing-floor check, unlike
+        // checkNonOkSizingFloor(): that floor derives from a real provider
+        // deadline_window_blocks, and inventing a static ok horizon here would
+        // assert a number nothing in the hub can source.
+        this._finalizedEvicted      = new Set();
+        this._finalizedEvictedOrder = [];
+        this.finalizedEvictedWhilePendingCount = 0;
 
         // Non-ok publication throttle (Phase 4). A non-ok finalization leaves
         // the request PENDING on the indexer (retryable), so without a throttle
@@ -214,7 +235,7 @@ class AttestationConsensus extends EventEmitter {
             'ATTESTATION_TORNDOWN_MAX');
 
         this._messageHandler = null;
-        this.roundTimeoutMs  = parseInt(this.config.ATTESTATION_ROUND_TIMEOUT_MS) || DEFAULT_ROUND_TIMEOUT_MS;
+        this.roundTimeoutMs  = parseInt(this.config.ATTESTATION_ROUND_TIMEOUT_MS) || DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS;
     }
 
     async start(){
@@ -395,6 +416,26 @@ class AttestationConsensus extends EventEmitter {
         let rid = String(requestId).toLowerCase();
         if(this.finalized.has(rid)) return;
         if(this.pending.has(rid)) return;
+
+        // Premature-eviction proof. Reaching here for a rid this hub already
+        // ok-finalized and then evicted means the indexer still listed the request
+        // as pending after the ring dropped it, i.e. ATTESTATION_FINALIZED_MAX sits
+        // below the sizing invariant in the constructor. The round below will
+        // re-publish an already-fulfilled response and burn a BTC tx, so count and
+        // warn: the cap is the cause and nothing else names it. Observation only,
+        // never a gate - a reorg that rolled the fulfillment back also arrives here
+        // legitimately, and refusing the round would strand that request until its
+        // deadline. The tombstone is left in place: if this round finalizes ok the
+        // rid re-enters `finalized` and the guard above suppresses the next poll,
+        // and if it does not, the next poll's fee is real and worth warning about
+        // again.
+        if(this._finalizedEvicted.has(rid)){
+            this.finalizedEvictedWhilePendingCount++;
+            console.warn('AttestationConsensus: re-proposing request ' + rid.substring(0,16) +
+                '... whose finalized entry was already evicted (ring full at ' + this.finalizedMax +
+                '; raise ATTESTATION_FINALIZED_MAX; evictions_while_pending=' +
+                this.finalizedEvictedWhilePendingCount + ')');
+        }
 
         let snapshot = roundState.snapshot;
         // PBFT messages (PROPOSE/PREPARE/COMMIT) only flow within the
@@ -1433,7 +1474,19 @@ class AttestationConsensus extends EventEmitter {
         if(this._finalizedOrder.length > this.finalizedMax){
             let oldest = this._finalizedOrder.shift();
             this.finalized.delete(oldest);
+            this._rememberEvictedFinalized(oldest);
         }
+    }
+
+    // Tombstone an evicted ok rid so propose() can later prove the eviction was
+    // premature. Ring-bounded FIFO like every other set here, so the detector
+    // cannot itself become the unbounded growth `finalized` was capped to avoid.
+    _rememberEvictedFinalized(rid){
+        if(this._finalizedEvicted.has(rid)) return;
+        this._finalizedEvicted.add(rid);
+        this._finalizedEvictedOrder.push(rid);
+        if(this._finalizedEvictedOrder.length > this.finalizedMax)
+            this._finalizedEvicted.delete(this._finalizedEvictedOrder.shift());
     }
 
     // Build the indexer-canonical signing message (returned as UTF-8 Buffer):

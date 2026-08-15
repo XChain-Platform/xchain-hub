@@ -271,6 +271,11 @@ class OracleRound {
         if (this.oracleConsensus && typeof this.oracleConsensus.on === 'function') {
             this._finalizedHandler = () => this.markRoundFinalized();
             this.oracleConsensus.on('round:finalized', this._finalizedHandler);
+            // Symmetric wiring for the increment: the streak advances on the same
+            // durable event the reset does, so the live gauge and the hydrated value
+            // share one semantic (item 4942).
+            this._skippedHandler = () => this.noteRoundSkipped();
+            this.oracleConsensus.on('round:skipped', this._skippedHandler);
         }
 
         // Start the round timer; it handles both the first run and the aligned cadence
@@ -328,6 +333,10 @@ class OracleRound {
             this.oracleConsensus.removeListener('round:finalized', this._finalizedHandler);
             this._finalizedHandler = null;
         }
+        if (this._skippedHandler && this.oracleConsensus && typeof this.oracleConsensus.removeListener === 'function') {
+            this.oracleConsensus.removeListener('round:skipped', this._skippedHandler);
+            this._skippedHandler = null;
+        }
         if (this.initialRoundTimer) {
             clearTimeout(this.initialRoundTimer);
             this.initialRoundTimer = null;
@@ -358,6 +367,19 @@ class OracleRound {
     markRoundFinalized() {
         this.consecutiveSkippedRounds = 0;
         this.lastSuccessfulRoundTime  = Date.now();
+    }
+
+    // Advance the skip streak on a round that became a durable non-finalized record.
+    // Sole authoritative writer of the increment (wired to the consensus
+    // 'round:skipped' event in start()), because that event fires once per round from
+    // _markLocallySkipped's idempotent guard, which is precisely the round set
+    // _hydrateFreshnessCounters counts. The three local increments this replaced did
+    // not partition the round space the same way: a failed fetch that later also hit
+    // the chain-tip-fallback branch counted one round twice, and a round the local
+    // fetch survived but consensus stored as skipped counted zero, so /health read a
+    // different streak before and after a restart (item 4942).
+    noteRoundSkipped() {
+        this.consecutiveSkippedRounds++;
     }
 
     // Get submissions for a given round
@@ -647,17 +669,20 @@ class OracleRound {
             // Still schedule finalization so the round leaves a durable record.
             // If peers gossiped submissions the round can be salvaged; if nobody
             // has prices, OracleConsensus writes a 'skipped' price_snapshots row
-            // instead of the round vanishing without a trace.
+            // instead of the round vanishing without a trace. The skip streak is
+            // advanced by that durable write's 'round:skipped' event, not here: a
+            // local fetch failure the federation then salvages is not a skipped
+            // round, and counting it here also double-counted a round that went on
+            // to hit the chain-tip-fallback skip below (item 4942).
             this._scheduleFinalization(this.currentRound);
-            this.consecutiveSkippedRounds++;
             return;
         }
 
         if (!prices || prices.length === 0) {
             console.warn('Oracle: No prices available for round ' + this.currentRound);
-            // Same rationale as the fetch-failure path above: record the gap.
+            // Same rationale as the fetch-failure path above: record the gap, and
+            // let the durable skip write advance the streak.
             this._scheduleFinalization(this.currentRound);
-            this.consecutiveSkippedRounds++;
             return;
         }
 
@@ -747,10 +772,13 @@ class OracleRound {
                         console.error('Oracle: Skipping finalization for round ' + round +
                             '; chain-tip fallback active for >' + Math.round(this.roundInterval / 1000) +
                             's; btcBlockHeight anchor is unreliable, PRICE payload suppressed');
+                        // _storeSkippedRound emits 'round:skipped' once the row is
+                        // durable, which is what advances the streak (item 4942); a
+                        // local increment here would double-count a round whose fetch
+                        // had already failed.
                         this.oracleConsensus._storeSkippedRound(round, btcBlockHeight, btcBlockTime,
                             'chain-tip fallback active, anchor unreliable').catch(err =>
                             console.error('Oracle: Failed to store skipped round ' + round + ':', err.message));
-                        this.consecutiveSkippedRounds++;
                         return;
                     }
                 }

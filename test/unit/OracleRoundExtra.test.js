@@ -347,10 +347,15 @@ describe('OracleRound (extra coverage)', function () {
             setTimeout(() => {
                 // finalizeRound should NOT have been called because fallback was active too long
                 expect(finalizeStub.called).to.be.false;
-                // The skip is recorded durably and counted, unlike a silent drop.
+                // The skip is recorded durably, unlike a silent drop.
                 expect(storeSkippedStub.calledOnce).to.be.true;
                 expect(storeSkippedStub.firstCall.args[0]).to.equal(99);
-                expect(or.consecutiveSkippedRounds).to.equal(1);
+                // item 4942: the streak advances on the 'round:skipped' event that
+                // durable write emits, never at this call site. Incrementing here
+                // double-counted a round whose fetch had already failed and bumped it,
+                // so the live gauge disagreed with the hydrated value after a restart.
+                // The stubbed consensus emits nothing, so the gauge must stay put.
+                expect(or.consecutiveSkippedRounds).to.equal(0);
                 done();
             }, 50);
         });

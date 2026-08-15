@@ -35,6 +35,7 @@ const ValidatorIdentity = require('./ValidatorIdentity.js');
 const eq                = require('./equivocation_header.js');
 const pricePair         = require('./price_pair_activation.js');
 const priceSigTally     = require('./price_sig_tally_activation.js');
+const swq               = require('./stake_weighted_quorum.js');
 const { PRICE_MAX, PRICE_V1_COINS, PRICE_V1_FIATS,
         MAX_TICK_LENGTH, MAX_MEMO_LENGTH, MAX_SOURCE_ADDRESS_LENGTH } = require('./constants.js');
 const { bcgt }          = require('./bcmath.js');
@@ -222,15 +223,54 @@ class PriceAggregator extends EventEmitter {
             return { accepted: false, reason: 'duplicate' };
         }
 
+        // STAKE_WEIGHTED_QUORUM: at/above activation the chain finalizes a PRICE v0 on the
+        // summed STAKE of its qualified signers rather than their COUNT (actions/price.js).
+        // This method is the hub's MIRROR of that same verification, not a producer, so it
+        // has to switch on the identical key or hub and chain read one signed round under
+        // two rules: the hub withholds on a round the chain finalized under stake weight
+        // (fewer signatures than the count bar), or stores one the chain refused (many
+        // small signers, insufficient distinct-source stake).
+        //
+        // Keyed on btcBlockHeight, the round's signed BTC anchor, which is exactly what the
+        // indexer twin keys on. Keying on referenceBlock (the height of the chain the PRICE
+        // landed on) would flip LTC/DOGE months early, their heights already dwarfing the
+        // BTC activation height. Unlike the pair-name gate above there is no
+        // timestamp-vs-block-time asymmetry to accept: btc_block_height rides in the push
+        // payload and is validated at the top of this method, so hub and chain evaluate the
+        // same number and cannot straddle the flag day. Hub and indexer are PEERS here:
+        // deploy both before the activation height.
+        //
+        // The snapshot BLOCK stays referenceBlock in both modes. The twin resolves its
+        // weights at the PRICE's own BLOCK_INDEX, so moving this key would trade one
+        // divergence for another.
+        let weighted = swq.isStakeWeightedQuorumActive(btcBlockHeight, this.hub && this.hub.network);
+
         // Resolve the deterministic price-capability validator set at the
         // round's block. Fail closed: without the snapshot the sigs cannot be
         // checked against the qualified set, so the round is rejected rather
-        // than stored on trust.
-        let snapshot = this.hub.capabilitySnapshot
-            ? await this.hub.capabilitySnapshot.getSnapshot('price', referenceBlock)
-            : null;
+        // than stored on trust. A weight snapshot the hub cannot resolve rejects
+        // too and never falls back to the count quorum: unlike OracleConsensus
+        // (a producer, which may skip a round) this is the verifier, and
+        // downgrading its threshold locally would accept rounds the chain rejects.
+        let capSnap  = this.hub.capabilitySnapshot;
+        let snapshot = null;
+        if (capSnap) {
+            snapshot = weighted
+                ? (typeof capSnap.getWeightSnapshot === 'function'
+                    ? await capSnap.getWeightSnapshot('price', referenceBlock)
+                    : null)
+                : await capSnap.getSnapshot('price', referenceBlock);
+        }
         if (!snapshot || !Array.isArray(snapshot.validators)) {
             return { accepted: false, reason: 'validator snapshot unavailable' };
+        }
+        // SWQ-TRUNC parity: a truncated weight snapshot has silently-dropped sources, so
+        // its total stake S is under-counted and the strict 2/3 bar could pass a round the
+        // full set would refuse. meetsStakeThreshold fails closed on the flag, but reads it
+        // off the validators ARRAY while getWeightSnapshot carries it on the snapshot, so
+        // refuse here rather than relying on a flag that would never arrive.
+        if (weighted && snapshot.truncated === true) {
+            return { accepted: false, reason: 'validator snapshot truncated' };
         }
 
         // Verify each sig over the canonical payload, counting at most one per
@@ -270,13 +310,25 @@ class PriceAggregator extends EventEmitter {
             verifiedSigs.push(s);
         }
 
-        // PBFT quorum over the snapshot size, floored at a simple majority:
-        // max(2 * floor((N - 1) / 3) + 1, ceil((N + 1) / 2)).
-        // This is the same threshold the indexer enforces when validating the action.
-        let setSize = Number.isFinite(parseInt(snapshot.count)) ? parseInt(snapshot.count) : snapshot.validators.length;
-        let quorum  = bftQuorumOrSingle(setSize, 1);   // majority-floored BFT quorum
-        if (verifiedSigs.length < quorum) {
-            return { accepted: false, reason: 'insufficient quorum (' + verifiedSigs.length + '/' + quorum + ')' };
+        // Finalization threshold, in whichever mode the flag day above selected. Both
+        // branches are the same threshold the indexer enforces when validating the
+        // action, which is the whole point of the gate: at/above activation it tallies
+        // the summed source-deduped STAKE of the verified signers (3*tally > 2*S), below
+        // it the PBFT quorum over the snapshot size, floored at a simple majority
+        // (max(2 * floor((N - 1) / 3) + 1, ceil((N + 1) / 2))).
+        if (weighted) {
+            // Tallied over the verified signer PUBKEYS, the same set the twin passes as
+            // qualifiedSigners. meetsStakeThreshold source-dedupes internally, so a source
+            // that signed with several keys counts once.
+            if (!swq.meetsStakeThreshold(snapshot.validators, verifiedSigs.map(s => s.pubkey))) {
+                return { accepted: false, reason: 'insufficient signer stake (' + verifiedSigs.length + ' verified signers)' };
+            }
+        } else {
+            let setSize = Number.isFinite(parseInt(snapshot.count)) ? parseInt(snapshot.count) : snapshot.validators.length;
+            let quorum  = bftQuorumOrSingle(setSize, 1);   // majority-floored BFT quorum
+            if (verifiedSigs.length < quorum) {
+                return { accepted: false, reason: 'insufficient quorum (' + verifiedSigs.length + '/' + quorum + ')' };
+            }
         }
 
         // Only the verified signatures are stored as the consensus proof

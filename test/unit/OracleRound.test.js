@@ -254,26 +254,39 @@ describe('OracleRound', function () {
             expect(pm.broadcast.called).to.be.false;
         });
 
-        it('increments consecutiveSkippedRounds on fetch failure', async function () {
+        // item 4942: a local fetch failure is not a skipped ROUND. The round is still
+        // scheduled for finalization and peers may salvage it, so the streak advances
+        // only when consensus makes the skip durable - the same round set
+        // _hydrateFreshnessCounters counts back after a restart. Counting it here also
+        // double-counted a round that went on to hit the chain-tip-fallback skip.
+        it('does not advance the skip streak on fetch failure alone', async function () {
             mockPriceFetcher.fetchPrices.rejects(new Error('API down'));
             await or._executeRound();
 
-            expect(or.consecutiveSkippedRounds).to.equal(1);
+            expect(or.consecutiveSkippedRounds).to.equal(0);
             expect(or.lastSuccessfulRoundTime).to.be.null;
         });
 
-        it('increments consecutiveSkippedRounds on empty price set', async function () {
+        it('does not advance the skip streak on an empty price set alone', async function () {
             mockPriceFetcher.fetchPrices.resolves([]);
             await or._executeRound();
 
-            expect(or.consecutiveSkippedRounds).to.equal(1);
+            expect(or.consecutiveSkippedRounds).to.equal(0);
+            expect(or.lastSuccessfulRoundTime).to.be.null;
+        });
+
+        it('advances the skip streak once per durably-skipped round', function () {
+            // noteRoundSkipped() is wired to the consensus 'round:skipped' event, which
+            // _markLocallySkipped emits exactly once per round.
+            or.noteRoundSkipped();
+            or.noteRoundSkipped();
+            expect(or.consecutiveSkippedRounds).to.equal(2);
             expect(or.lastSuccessfulRoundTime).to.be.null;
         });
 
         it('does not clear the stall gauges on a successful local submission', async function () {
-            // Simulate prior skips
-            mockPriceFetcher.fetchPrices.rejects(new Error('API down'));
-            await or._executeRound();
+            // Simulate a prior durably-skipped round
+            or.noteRoundSkipped();
             expect(or.consecutiveSkippedRounds).to.equal(1);
 
             // Force idempotency guard to allow a second execution
@@ -291,8 +304,7 @@ describe('OracleRound', function () {
         });
 
         it('resets consecutiveSkippedRounds and sets lastSuccessfulRoundTime on finalization', async function () {
-            mockPriceFetcher.fetchPrices.rejects(new Error('API down'));
-            await or._executeRound();
+            or.noteRoundSkipped();
             expect(or.consecutiveSkippedRounds).to.equal(1);
 
             // markRoundFinalized() is wired to the consensus 'round:finalized' event.
@@ -379,6 +391,8 @@ describe('OracleRound', function () {
         it('reflects skipped count when rounds fail', async function () {
             mockPriceFetcher.fetchPrices.rejects(new Error('feed down'));
             await or._executeRound();
+            // The durable skip is what advances the streak (item 4942).
+            or.noteRoundSkipped();
             let info = await or.getSubmissionsInfo();
             expect(info.consecutiveSkippedRounds).to.equal(1);
             expect(info.lastSuccessfulRoundTime).to.be.null;

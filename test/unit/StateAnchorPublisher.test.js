@@ -2145,14 +2145,25 @@ describe('StateAnchorPublisher', function () {
         let leader   = bus.nodes[1];
         let cp = Object.assign({}, CP_ROW);                       // snapshot_block = 100
 
-        // Spy the first step AFTER the snapshot-set membership gate (line ~815).
-        let canonCalls = 0;
-        let origCanon = follower.pub._archiveCanonical.bind(follower.pub);
-        follower.pub._archiveCanonical = (...a) => { canonCalls++; return origCanon(...a); };
+        // Spy the first step AFTER the snapshot-set membership gate: the local
+        // state_checkpoints re-SELECT. This used to spy _archiveCanonical, but the
+        // proposer-signature verify now runs BEFORE the membership gate (it is what
+        // authenticates the observed-leader record against a spoofed d.sig_pubkey), so
+        // building the canonical no longer proves the gate was reached.
+        let selects = 0;
+        let origQuery = follower.pub.db.doQuery.bind(follower.pub.db);
+        follower.pub.db.doQuery = (sql, params) => {
+            if (/state_checkpoints/i.test(String(sql))) selects++;
+            return origQuery(sql, params);
+        };
 
+        // A GENUINE leader signature over the archive canonical: with the verify ahead
+        // of the membership gate, a bogus one would stop BOTH cases before the gate and
+        // the control below would prove nothing.
+        let reqCanonical = leader.pub._archiveCanonical(cp, 0, 1, '0', 1);
         let mkReq = () => ({ data: {
             checkpoint: cp, election_block: 500, batch_seq: 0, match_count: 1, batch_crc32: '0',
-            total_chunks: 1, sig_pubkey: leader.pubkey, sig: 'deadbeef'
+            total_chunks: 1, sig_pubkey: leader.pubkey, sig: leader.identity.sign(reqCanonical)
         }});
 
         // The election set must RESOLVE for either case to reach the membership gate at
@@ -2160,18 +2171,55 @@ describe('StateAnchorPublisher', function () {
         // elected publisher at election_block and ranks 0 on the ladder. Only the
         // snapshot_block set differs between the two cases.
         // (1) EXCLUDED: snapshot_block set omits the follower → bail at the membership
-        // gate, never builds the archive canonical.
+        // gate, never reads its own checkpoint row and never co-signs.
         follower.pub._getActiveOraclePublishPubkeys = async (blk) =>
             (Number(blk) === Number(cp.snapshot_block)) ? [leader.pubkey] : [leader.pubkey];
         await follower.pub._handleSignReq(mkReq());
-        expect(canonCalls, 'excluded follower stops before the archive canonical').to.equal(0);
+        expect(selects, 'excluded follower stops before the local checkpoint read').to.equal(0);
 
-        // (2) CONTROL - INCLUDED in the snapshot_block set → proceeds to build the canonical (then the
-        // bogus sig fails verification harmlessly). Proves the membership gate is what stops case (1).
+        // (2) CONTROL - INCLUDED in the snapshot_block set → proceeds past the gate to the
+        // local checkpoint read (then stops harmlessly on the absent archive body).
+        // Proves the membership gate is what stops case (1).
         follower.pub._getActiveOraclePublishPubkeys = async (blk) =>
             (Number(blk) === Number(cp.snapshot_block)) ? [leader.pubkey, follower.pubkey] : [leader.pubkey];
         await follower.pub._handleSignReq(mkReq());
-        expect(canonCalls, 'included follower builds the archive canonical').to.equal(1);
+        expect(selects, 'included follower reads its own checkpoint row').to.equal(1);
+    });
+
+    it('_handleSignReq: an UNSIGNED SIGN_REQ never records an observed archive leader', async function () {
+        // PeerManager authenticates the envelope RELAYER; d.sig_pubkey is a separate
+        // application-level field, so any member can name another member there. The rank
+        // ladder is no gate either: it is keyed on the WIRE checkpoint, so the sender
+        // picks its own rank. Only the proposer's signature over the archive canonical
+        // proves it holds the key it names, so nothing may be bound to that name before
+        // the signature verifies: a poisoned _observedArchiveCheckpoints entry (first
+        // observation wins) starves the genuine round's co-sign and makes the FINALIZED
+        // back-fill abstain, and a flood past the cap evicts the in-flight entries.
+        let bus = buildMesh(2, { btcBlock: 500 });
+        let follower = bus.nodes[0];
+        let leader   = bus.nodes[1];
+        let cp = Object.assign({}, CP_ROW);
+        const SEQ = 42;
+        follower.pub._getActiveOraclePublishPubkeys = async () => [leader.pubkey];   // leader ranks 0
+
+        let mkReq = (sig) => ({ data: {
+            checkpoint: cp, election_block: 500, batch_seq: SEQ, match_count: 1, batch_crc32: '0',
+            total_chunks: 1, sig_pubkey: leader.pubkey, sig: sig
+        }});
+
+        // Spoof: the leader's pubkey with a signature its key never produced.
+        await follower.pub._handleSignReq(mkReq('deadbeef'));
+        expect(follower.pub._isObservedArchiveLeader(SEQ, leader.pubkey),
+               'an unsigned SIGN_REQ must not bind the named leader').to.equal(false);
+        expect(follower.pub._observedArchiveCheckpoint(SEQ),
+               'nor stash a checkpoint identity for the batch').to.equal(null);
+
+        // CONTROL: the same REQ carrying the leader's real signature still records, so
+        // the guard is the signature and not some other gate.
+        let canonical = leader.pub._archiveCanonical(cp, SEQ, 1, '0', 1);
+        await follower.pub._handleSignReq(mkReq(leader.identity.sign(canonical)));
+        expect(follower.pub._isObservedArchiveLeader(SEQ, leader.pubkey)).to.equal(true);
+        expect(follower.pub._observedArchiveCheckpoint(SEQ).checkpoint_seq).to.equal(Number(cp.checkpoint_seq));
     });
 
     it('_handleSignReq: an UNRESOLVED election set fails closed instead of skipping the ladder (#4184)', async function () {
@@ -3112,6 +3160,24 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
         pub._resolveCapabilitySet = async () => [];
         await pub._handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer]) });
         expect(pub._deferredRewardAttest.size).to.equal(0);
+    });
+
+    // reward_type and anchor_version were validated INDEPENDENTLY, so a cross-paired
+    // tuple got in: v6 is the archive leg and v4/v5 the per-chain leg, and the BTC
+    // derive path (indexer anchor_proof_client._judge) enforces that pairing forever.
+    // A cross-paired row passes the drain's byte-match (an archive head wraps the same
+    // checkpoint, so the four core hashes agree) and lands permanently in an
+    // append-only table the derive path then rejects: a stranded credit, not a mint.
+    it('refuses a reward_type cross-paired with the other leg\'s anchor_version', async function () {
+        sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
+        const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
+        const { pub } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
+        for (const over of [{ anchor_version: 6 },                                  // per-chain leg on an archive version
+                            { reward_type: 'anchor_archive', anchor_version: 4 },   // archive leg on a per-chain version
+                            { reward_type: 'anchor_archive', anchor_version: 5 }]) {
+            await pub._handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer], over) });
+            expect(pub._deferredRewardAttest.size, JSON.stringify(over)).to.equal(0);
+        }
     });
 
     it('ignores its own broadcast echoing back', async function () {

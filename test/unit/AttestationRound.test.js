@@ -525,6 +525,11 @@ describe('AttestationRound', function () {
                 nonOkPublished:                 new Map(),
                 nonOkPublishedMax:              64,
                 nonOkEvictedWhilePendingCount:  0,
+                // The ok-ring counterparts getStats now reads alongside the nonOk
+                // three; a real AttestationConsensus always carries them.
+                finalized:                      new Set(),
+                finalizedMax:                   10000,
+                finalizedEvictedWhilePendingCount: 0,
                 roundTimeoutCount:              4
             });
             // Quorum loss must NOT be folded into failed_count: failed_count is a
@@ -533,6 +538,28 @@ describe('AttestationRound', function () {
             let stats = ar.getStats();
             expect(stats.consensus_timeout_count).to.equal(4);
             expect(stats.failed_count).to.equal(0);
+        });
+
+        it('surfaces ok-ring occupancy and premature evictions, not just the nonOk ring', function () {
+            let hub = makeHub();
+            let ar  = new AttestationRound(hub, makeProviderRegistry());
+            // Absent without a consensus, same as the nonOk and timeout fields.
+            expect(ar.getStats().finalized_count).to.equal(undefined);
+            ar.setConsensus({
+                nonOkPublished:                 new Map(),
+                nonOkPublishedMax:              64,
+                nonOkEvictedWhilePendingCount:  0,
+                finalized:                      new Set(['a', 'b']),
+                finalizedMax:                   7,
+                finalizedEvictedWhilePendingCount: 2,
+                roundTimeoutCount:              0
+            });
+            let stats = ar.getStats();
+            // Occupancy against the cap is how close the ring is to evicting; the
+            // count is why an undersized cap is no longer a silent fee burn.
+            expect(stats.finalized_count).to.equal(2);
+            expect(stats.finalized_max).to.equal(7);
+            expect(stats.finalized_evicted_while_pending_count).to.equal(2);
         });
     });
 

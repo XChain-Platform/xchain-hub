@@ -205,8 +205,23 @@ const XCHAIN_PRICE_MIN_BTC_VOLUME = null;
 // collide distinct submitters onto one dedupe key.
 const MAX_SOURCE_ADDRESS_LENGTH = 100;
 
+// Default ATTEST PBFT round lifetime (2 min per request lifecycle). Shared, not
+// copied, because AttestationRound floors its `seen` retry window at this value
+// plus one poll: that floor exists precisely to stop the seen window nesting
+// inside a live consensus round (a nested window re-`_startRound`s a request
+// whose round is still pending and pays for a second provider fetch). A bare
+// literal on each side kept the two coupled only while the copies happened to
+// be equal, so a one-sided raise of the consensus default silently re-opened
+// the paid duplicate fetch on any hub with no explicit
+// ATTESTATION_ROUND_TIMEOUT_MS. Requiring one definition makes the loader
+// enforce the coupling, as with the oracle cadence defaults above.
+// Attestation-scoped on purpose: CrossChainDexConsensus keeps its own round
+// timeout, a different engine's lifecycle that must not be tied to this one.
+const DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS = 120000;
+
 module.exports = { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD, ORACLE_MAX_CHANGE_PER_ROUND, XCALL_MAX_HOPS,
                    DEFAULT_ORACLE_ROUND_INTERVAL_MS, DEFAULT_ORACLE_SUBMISSION_WINDOW_MS,
+                   DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS,
                    PRICE_V1_COINS, PRICE_V1_FIATS, MAX_TICK_LENGTH, MAX_MEMO_LENGTH,
                    MAX_SOURCE_ADDRESS_LENGTH, DERIVED_PAIRS,
                    XCHAIN_PRICE_WINDOW_BLOCKS, XCHAIN_PRICE_CONFIRMATION_BUFFER,

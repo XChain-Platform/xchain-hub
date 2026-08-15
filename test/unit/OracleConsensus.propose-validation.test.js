@@ -121,6 +121,32 @@ describe('OracleConsensus: follower price validation / minSubmissions / broadcas
         expect(events.map(e => e.reason)).to.include('historical-deviation');
     });
 
+    // item 4940: the gate's bound must BE the clamp's bound, not an equal-threshold
+    // 18dp ratio. _clampToLastFinalized takes an 8dp ROUND_HALF_UP delta, so for a last
+    // price whose quarter misses the 8dp grid the clamped hi sits a hair above
+    // last*1.25 ('0.11111111' -> delta '0.02777778' -> hi '0.13888889' -> ratio
+    // 0.2500000225). The ratio test rejected exactly that, so every honest follower
+    // without a local submission withheld the whole round on the fat-tail move the
+    // clamp exists to absorb.
+    it('#4940 co-signs the maximally-clamped price when the clamp delta rounds up', async function () {
+        oracleRound.getSubmissions.returns(new Map()); // no local aggregate: historical band applies
+        oc._lastFinalizedPrices = new Map([['BTC/USD', '0.11111111']]);
+        // The value the clamp itself emits for a runaway aggregate on this last price.
+        let clamped = String(oc._clampToLastFinalized('BTC/USD', '999'));
+        expect(clamped).to.equal('0.13888889');
+
+        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: clamped }]));
+        expect(oc.pendingRounds.has(ROUND), 'a clamped aggregate must always co-sign').to.be.true;
+
+        oc.pendingRounds.delete(ROUND);
+        let events = [];
+        oc.on('oracle:propose-rejected', e => events.push(e));
+        // One 8dp tick beyond what the clamp can emit is still withheld.
+        await oc._handlePropose(proposeEnvelope([{ coinPair: 'BTC/USD', price: '0.13888890' }]));
+        expect(oc.pendingRounds.has(ROUND), 'beyond the clamp bound must withhold').to.be.false;
+        expect(events.map(e => e.reason)).to.include('historical-deviation');
+    });
+
     it('minSubmissions defaults to a 2-hub diversity floor', function () {
         let saved = process.env.ORACLE_MIN_SUBMISSIONS;
         delete process.env.ORACLE_MIN_SUBMISSIONS;
@@ -304,6 +330,57 @@ describe('OracleConsensus: follower price validation / minSubmissions / broadcas
             ]));
             await oc._handlePropose(proposeEnvelope([{ coinPair: PAIR, price: '123' }]));
             expect(oc.pendingRounds.has(ROUND)).to.be.true;
+        });
+    });
+
+    // ORACLE_ALLOW_UNVERIFIED_PAIRS disarms the unverifiable-pair co-sign defense above, so
+    // it is a regtest-only bring-up seam and follows the same rule as the platform's other
+    // regtest hatches (StateCheckpointEngine XDEX_SNAPSHOT_BLOCK, coins resolveFeeDestination):
+    // honored on regtest, set-but-IGNORED and warned on every other network. Without the gate
+    // a stray env var on a mainnet or testnet hub silently restores clamp-only leniency and
+    // lets a Byzantine sole submitter get an arbitrary price co-signed.
+    describe('ORACLE_ALLOW_UNVERIFIED_PAIRS network gate', function () {
+        let prevEnv;
+
+        function ocOnNetwork(network) {
+            let h = createMockHub();
+            h.network = network;
+            return new OracleConsensus(h, { getSubmissions: sinon.stub().returns(new Map()) });
+        }
+
+        beforeEach(function () {
+            prevEnv = process.env.ORACLE_ALLOW_UNVERIFIED_PAIRS;
+            process.env.ORACLE_ALLOW_UNVERIFIED_PAIRS = 'true';
+        });
+
+        afterEach(function () {
+            if (prevEnv === undefined) delete process.env.ORACLE_ALLOW_UNVERIFIED_PAIRS;
+            else process.env.ORACLE_ALLOW_UNVERIFIED_PAIRS = prevEnv;
+        });
+
+        it('honors the flag on regtest', function () {
+            expect(ocOnNetwork('regtest').allowUnverifiedPairs).to.equal(true);
+        });
+
+        ['mainnet', 'testnet', ''].forEach(function (network) {
+            it('ignores the flag on ' + (network || '<unset network>') + ' and warns', function () {
+                let logs = [];
+                let stub = sinon.stub(console, 'log').callsFake(m => logs.push(String(m)));
+                let flag;
+                try { flag = ocOnNetwork(network).allowUnverifiedPairs; } finally { stub.restore(); }
+                expect(flag).to.equal(false);
+                expect(logs.join('\n')).to.contain('ORACLE_ALLOW_UNVERIFIED_PAIRS is set but IGNORED');
+            });
+        });
+
+        it('stays silent and fail-closed on mainnet when the flag is unset', function () {
+            delete process.env.ORACLE_ALLOW_UNVERIFIED_PAIRS;
+            let logs = [];
+            let stub = sinon.stub(console, 'log').callsFake(m => logs.push(String(m)));
+            let flag;
+            try { flag = ocOnNetwork('mainnet').allowUnverifiedPairs; } finally { stub.restore(); }
+            expect(flag).to.equal(false);
+            expect(logs.join('\n')).to.not.contain('ORACLE_ALLOW_UNVERIFIED_PAIRS');
         });
     });
 });

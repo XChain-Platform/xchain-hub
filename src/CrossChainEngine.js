@@ -241,6 +241,10 @@ class CrossChainEngine extends EventEmitter {
 
         let digest = this._digest(attestationId, confirmations);
 
+        // Lock the VOTE POPULATION alongside the quorum, from the same snapshot that
+        // sized it, so N's divisor and its numerator read one set (see _countedVotes).
+        let memberPubkeys = await this._resolveMemberPubkeys(btcBlockHeight);
+
         return new Promise((resolve, reject) => {
             let pending = {
                 attestationId, sourceChain, sourceActionIndex: parseInt(sourceActionIndex),
@@ -249,6 +253,7 @@ class CrossChainEngine extends EventEmitter {
                 // for this attestation uses a consistent threshold, even if the
                 // validator set changes mid-round. Mirrors Consensus/OracleConsensus.
                 quorum,
+                memberPubkeys,
                 btcBlockHeight: btcBlockHeight || null,
                 prepares: new Set(),
                 commits:  new Set(),
@@ -325,6 +330,86 @@ class CrossChainEngine extends EventEmitter {
             return !(signerSet && signerSet.size > 0);
         }
         return registry.has(sender);
+    }
+
+    // Verified signing pubkey (lowercase hex) for a sender addr, or null. PeerManager
+    // enforces the registry binding on every verified envelope (a registered sender's
+    // envelope MUST carry its registered key's signature), so this resolves the identity
+    // that actually signed rather than a claim. Own addr falls back to the local identity
+    // for a hub absent from its own registry. Mirrors OracleConsensus._resolveSenderPubkey.
+    _resolveSenderPubkey(sender) {
+        let registry = this.peerManager && this.peerManager.validatorPubkeys;
+        let pk = (registry && typeof registry.get === 'function') ? registry.get(sender) : null;
+        if (!pk && this.peerManager && sender === this.peerManager.validatorAddr) {
+            let identity = this.hub && this.hub.getIdentity ? this.hub.getIdentity() : null;
+            if (identity) pk = identity.getPubkeyHex();
+        }
+        return pk ? String(pk).toLowerCase() : null;
+    }
+
+    // Pubkey set of the round's locked cross_chain snapshot, or null when no usable
+    // snapshot resolved. Null DISABLES the membership filter, which preserves the
+    // bootstrap / single-node path _resolveQuorum already keeps (there the quorum came
+    // from the live validator set, not from a snapshot, so there is no snapshot
+    // population to gate against). Mirrors OracleConsensus._memberPubkeySet.
+    _memberPubkeySet(snapshot) {
+        if (!snapshot || !Array.isArray(snapshot.validators) || snapshot.validators.length === 0) return null;
+        let set = new Set();
+        for (let v of snapshot.validators) {
+            if (v && v.pubkey) set.add(String(v.pubkey).toLowerCase());
+        }
+        return set.size > 0 ? set : null;
+    }
+
+    // Resolve the member-pubkey set for a round at the same block boundary _resolveQuorum
+    // sized N from. Read separately (rather than by widening _resolveQuorum's return) so
+    // the quorum contract callers and tests depend on is untouched; CapabilitySnapshot
+    // caches per (capability, block), so this is a cache hit behind the quorum resolve.
+    // Never throws: a failure here degrades to the legacy unfiltered tally, exactly as an
+    // unresolved snapshot already does, and _resolveQuorum has already refused the round
+    // outright in the federated case.
+    async _resolveMemberPubkeys(btcBlockHeight) {
+        if (!this.hub.capabilitySnapshot || btcBlockHeight == null) return null;
+        try {
+            return this._memberPubkeySet(
+                await this.hub.capabilitySnapshot.getSnapshot('cross_chain', btcBlockHeight));
+        } catch (err) {
+            console.warn('CrossChain: could not resolve the cross_chain member set at block ' +
+                btcBlockHeight + ' (' + (err && err.message) + '); tallying unfiltered');
+            return null;
+        }
+    }
+
+    // Count a PREPARE/COMMIT vote set against the round's SNAPSHOT population.
+    //
+    // The quorum N is sized from the stake-qualified block-locked snapshot, so the votes
+    // measured against it must come from that same population. _isKnownSender only proves
+    // the sender is in this hub's REGISTERED-validator registry, which admits keys with no
+    // qualifying cross_chain stake at the round's block; and the tally is addr-keyed while
+    // the registry can bind one signing key to several addrs, so one key could be counted
+    // twice. Either way the snapshot became the divisor without being the population, and
+    // an attestation SwapTracker settles from escrow could finalize on votes the qualified
+    // members never cast. Resolve each sender to its verified pubkey, keep only snapshot
+    // members, and count DISTINCT pubkeys. This is the invariant Consensus (leader
+    // election) and OracleConsensus (Oracle M1 submissions) already enforce.
+    //
+    // Two degradations keep the legacy raw count, and only two. A null memberPubkeys means
+    // no snapshot population resolved (single-node / bootstrap), which is the same state
+    // _resolveQuorum falls back to the live set in. An EMPTY validator registry means no
+    // sender can be resolved to a key at all, which is the same pre-bootstrap window
+    // _isKnownSender is deliberately lenient in; that leniency is already fenced there (a
+    // non-empty effective signer set makes an empty registry fail closed before a vote ever
+    // reaches this tally), so it is honoured here rather than second-guessed into a stall.
+    _countedVotes(pending, voteSet) {
+        if (!pending || !pending.memberPubkeys) return voteSet ? voteSet.size : 0;
+        let registry = this.peerManager && this.peerManager.validatorPubkeys;
+        if (!registry || registry.size === 0) return voteSet ? voteSet.size : 0;
+        let counted = new Set();
+        for (let sender of voteSet) {
+            let pk = this._resolveSenderPubkey(sender);
+            if (pk && pending.memberPubkeys.has(pk)) counted.add(pk);
+        }
+        return counted.size;
     }
 
     _handleMessage(envelope) {
@@ -406,9 +491,13 @@ class CrossChainEngine extends EventEmitter {
                     ': cross_chain snapshot resolved a 0 quorum (empty / bootstrap) at block ' + btcBlockHeight);
                 return;
             }
+            // Same block boundary the leader resolved, carried in the PROPOSE envelope, so
+            // follower and leader gate their tallies on the identical member set.
+            let memberPubkeys = await this._resolveMemberPubkeys(btcBlockHeight);
             this.pendingAttestations.set(attestationId, {
                 attestationId, sourceChain, sourceActionIndex, destChain,
                 confirmations, digest,
+                memberPubkeys,
                 btcBlockHeight: btcBlockHeight || null,
                 quorum,
                 prepares: new Set(),
@@ -515,8 +604,10 @@ class CrossChainEngine extends EventEmitter {
 
         // Use the round's locked quorum (captured at attestation creation),
         // not a live recompute; this keeps every hub in lockstep across the round.
+        // Votes are counted against the round's locked snapshot population (_countedVotes),
+        // so the threshold and the electorate come from one set.
         let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
-        if (pending.prepares.size >= quorum && !pending._commitSent) {
+        if (this._countedVotes(pending, pending.prepares) >= quorum && !pending._commitSent) {
             pending._commitSent = true;
             pending.commits.add(this.peerManager.validatorAddr);
 
@@ -533,9 +624,9 @@ class CrossChainEngine extends EventEmitter {
         let pending = this.pendingAttestations.get(attestationId);
         if (!pending || pending.finalized) return;
 
-        // Same locked quorum as _checkPrepareQuorum (see comment there).
+        // Same locked quorum and same snapshot-gated tally as _checkPrepareQuorum.
         let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
-        if (pending.commits.size >= quorum) {
+        if (this._countedVotes(pending, pending.commits) >= quorum) {
             pending.finalized = true;
             // Do NOT clear the round timer here: it is the backstop for a store
             // that never succeeds. It is cleared on the success path instead.
