@@ -317,7 +317,7 @@ describe('Regression: Governance', function () {
             // must never reach the DB.
             await gov._handleVote({
                 sender: 'peer', type: 'GOV_VOTE',
-                data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: 'abc', signature: 'sig' }
+                data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: 'abc', signature: 'sig', seq: 1 }
             });
             expect(hub.db.doQuery.called, 'forged vote must not be stored').to.be.false;
 
@@ -326,10 +326,15 @@ describe('Regression: Governance', function () {
             gov.setValidatorSet([...VALIDATORS_3, { pubkey: kp.pubkeyHex, addr: 'ws://voter:1' }]);
             hub.db.doQuery.withArgs(sinon.match(/SELECT voting_end.*FROM governance_proposals/))
                 .resolves([{ voting_end: new Date(Date.now() + 86400000) }]);
-            let sig = idn.sign(JSON.stringify({ proposalId: 'gov:P:1', vote: 'approve', voter: kp.pubkeyHex }));
+            // `seq` is inside the signed bytes (the anti-replay binding) and its key
+            // order is part of the wire contract, so the payload is built exactly as
+            // Governance builds it. A vote signed without a seq is dropped, not
+            // admitted at seq 0.
+            let seq = 1;
+            let sig = idn.sign(JSON.stringify({ proposalId: 'gov:P:1', vote: 'approve', voter: kp.pubkeyHex, seq }));
             await gov._handleVote({
                 sender: 'peer', type: 'GOV_VOTE',
-                data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: kp.pubkeyHex, signature: sig }
+                data: { proposalId: 'gov:P:1', vote: 'approve', voterPubkey: kp.pubkeyHex, signature: sig, seq }
             });
             expect(hub.db.doQuery.calledWithMatch(sinon.match(/INSERT INTO governance_votes/)),
                 'the authenticated vote row is inserted').to.be.true;

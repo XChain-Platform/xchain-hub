@@ -203,15 +203,21 @@ class Database {
         let dir   = path.join(__dirname, 'sql');
         let files = fs.readdirSync(dir);
         let db    = await this.getConnection();
+        // One summary line instead of a per-table pair; error paths below still
+        // name the table, so a failure stays attributable.
+        console.log('Verifying database and tables...');
+        let checked = 0;
+        let created = 0;
         for(let file of files){
             if(file.indexOf('.sql') !== -1){
                 let table = file.substring(0, file.indexOf('.sql'));
-                console.log('Verifying ' + table + ' table exists...');
+                checked++;
                 try {
                     let results = await db.query("SELECT * FROM information_schema.tables WHERE table_schema = ? AND table_name = ?", [this.dbName, table]);
-                    if(results.length === 0)
+                    if(results.length === 0){
                         await this._createTableFromFile(file);
-                    else
+                        created++;
+                    } else
                         // Existing table: reconcile column drift against the SQL
                         // source so columns added upstream are auto-applied on
                         // stacks created from an older release, instead of failing
@@ -224,6 +230,7 @@ class Database {
             }
         }
         await db.release();
+        console.log('Database and tables verified (' + checked + ' tables, ' + created + ' created).');
         return true;
     }
 
@@ -470,13 +477,11 @@ class Database {
     async _createTableFromFile(file){
         let dir     = path.join(__dirname, 'sql');
         let data    = fs.readFileSync(dir + '/' + file, "utf8");
-        let table   = file.substring(0, file.indexOf('.sql'));
         // Strip `--` line comments BEFORE splitting on ';'. A comment may contain a
         // ';' (e.g. "regtest; signed into the canonical"), which would otherwise split
         // the CREATE TABLE mid-statement and fail to parse. stripSqlLineComments
         // preserves quoted strings, so real SQL structure is untouched.
         let queries = this.stripSqlLineComments(data).split(';');
-        console.log('Creating ' + table + ' table...');
         for(let query of queries){
             query = query.trim();
             if(query === '') continue;

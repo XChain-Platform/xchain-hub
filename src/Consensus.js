@@ -45,6 +45,31 @@ const DEFAULT_TIMEOUT = 30000; // 30 seconds
 // only ever advances the view a handful of steps, so this clears real churn easily.
 const MAX_VIEW_SKEW = 100;
 
+// Early-arrival buffer bounds (the config-change twin of the OracleConsensus /
+// AttestationConsensus buffers, finding F7).
+//
+// _handlePrePrepare is ASYNC (it locks the validator snapshot at the leader's
+// block boundary, an out-of-process call) while _handlePrepare/_handleCommit are
+// synchronous and, before this buffer, dropped any vote for a seq this hub had
+// not opened yet. A leader whose own stake already meets the round's threshold
+// broadcasts PRE_PREPARE and COMMIT back to back, so on a busy host the COMMIT
+// routinely overtakes the follower's snapshot lock and is discarded with nothing
+// left to re-deliver it: the round finalizes on the leader and NO follower ever
+// applies it. Measured on 2026-08-14 (XC-1471) against a 1000/1000/1000/7000
+// weighted federation, where the 70% whale meets 3*7000 > 2*10000 alone: all
+// three followers logged the whale's COMMIT arriving before their own proposal
+// existed, then sat at three small COMMITs (9000, under the 20000 line) for as
+// long as the test waited. A stake-weighted round cannot self-heal from this the
+// way a count round usually does, because the vote it lost is the only one heavy
+// enough to carry the threshold.
+//
+// `seq` comes from attacker-controlled envelope data, so both dimensions are
+// bounded: distinct seq keys (FIFO eviction on the oldest) and votes per seq.
+// Replay goes through the normal handlers, so nothing here widens what counts as
+// a vote; it only stops one being thrown away.
+const EARLY_VOTE_MAX_SEQS     = 64;
+const EARLY_VOTE_MAX_PER_SEQ  = 64;
+
 class Consensus {
 
     constructor(hub) {
@@ -77,6 +102,17 @@ class Consensus {
         // here so view-change acceptance tallies against the proposal-creation
         // snapshot, matching PREPARE/COMMIT. Map<seq, quorum>.
         this.viewChangeQuorums = new Map();
+
+        // PREPARE/COMMIT votes that arrived for a seq this hub has not opened a
+        // proposal for yet, replayed the moment it does. Insertion-ordered so
+        // eviction is FIFO on the oldest seq key. The TTL is the round's own
+        // timeout: a vote older than that can no longer influence the round it
+        // votes on.
+        this.earlyVotes    = new Map();   // seq -> [envelope]
+        this.earlyVoteTtl  = new Map();   // seq -> expiresAt (ms)
+        // Set to the seq being replayed so a vote that still finds no proposal
+        // (an applied or expired round) cannot be buffered straight back.
+        this._replayingSeq = null;
 
         // Double-apply of a committed round is prevented by three live guards, not
         // by a digest set: the monotonic `lastAppliedSeq` gate rejects a replayed
@@ -186,6 +222,9 @@ class Consensus {
         // doesn't inherit stale entries from the previous run.
         this.pendingViewChanges.clear();
         this.pendingViewChangePubkeys.clear();
+        this.earlyVotes.clear();
+        this.earlyVoteTtl.clear();
+        this._replayingSeq = null;
     }
 
     // Propose a config change. Returns a Promise that resolves when consensus is reached.
@@ -594,6 +633,84 @@ class Consensus {
         }, this._equivVote(seq, proposal.view, proposal.digest, proposal.btcBlockHeight)));
 
         this._checkPrepareQuorum(seq);
+
+        // Now that the round is open locally, deliver anything that voted on it
+        // while the snapshot lock was still in flight. Without this the leader's
+        // own COMMIT can be lost for good and this hub never applies a config the
+        // federation finalized (XC-1471).
+        this._replayEarlyVotes(seq);
+    }
+
+    // --- Early-arrival vote buffering (the config-change twin of finding F7) ---
+
+    _pruneEarlyVotes(now) {
+        now = now || Date.now();
+        for (let [seq, expiresAt] of this.earlyVoteTtl) {
+            // Expired, or the round has since been applied and is finished.
+            if (expiresAt <= now || seq <= this.lastAppliedSeq) {
+                this.earlyVotes.delete(seq);
+                this.earlyVoteTtl.delete(seq);
+            }
+        }
+    }
+
+    // Hold a vote for a round this hub has not opened yet. Callers have already
+    // established that the sender is a registered validator, so nothing here
+    // accepts a message the handlers would have refused; it only defers one.
+    _bufferEarlyVote(envelope) {
+        let seq = envelope && envelope.data ? envelope.data.seq : null;
+        if (!Number.isInteger(seq) || seq <= 0) return false;
+        // An applied round is finished, and a replay in progress is already
+        // draining this very seq; buffering either would only churn.
+        if (seq <= this.lastAppliedSeq) return false;
+        if (this._replayingSeq === seq) return false;
+
+        let now = Date.now();
+        this._pruneEarlyVotes(now);
+
+        let bucket = this.earlyVotes.get(seq);
+        if (!bucket) {
+            // Bound the number of distinct buffered seqs (the sender picks seq).
+            // Map iteration is insertion-ordered, so evict the OLDEST key first.
+            while (this.earlyVotes.size >= EARLY_VOTE_MAX_SEQS) {
+                let oldest = this.earlyVotes.keys().next().value;
+                this.earlyVotes.delete(oldest);
+                this.earlyVoteTtl.delete(oldest);
+            }
+            bucket = [];
+            this.earlyVotes.set(seq, bucket);
+        }
+        if (bucket.length >= EARLY_VOTE_MAX_PER_SEQ) return false;
+
+        bucket.push(envelope);
+        this.earlyVoteTtl.set(seq, now + this.timeout);
+        return true;
+    }
+
+    // Deliver the votes this hub held for `seq`, now that it has a proposal to
+    // count them against. Replayed through the normal dispatch path, in arrival
+    // order, with the queue removed up front so a replay cannot re-buffer.
+    _replayEarlyVotes(seq) {
+        let bucket = this.earlyVotes.get(seq);
+        if (!bucket || bucket.length === 0) return 0;
+        this.earlyVotes.delete(seq);
+        this.earlyVoteTtl.delete(seq);
+
+        this._replayingSeq = seq;
+        try {
+            for (let env of bucket) {
+                try { this._handleMessage(env); }
+                catch (e) {
+                    console.error('PBFT: error replaying a buffered vote for seq %s:', seq,
+                        e && e.message ? e.message : e);
+                }
+            }
+        } finally {
+            this._replayingSeq = null;
+        }
+        console.log('PBFT: replayed ' + bucket.length + ' vote(s) that arrived for seq ' + seq +
+            ' before this hub opened the round');
+        return bucket.length;
     }
 
     _handlePrepare(envelope) {
@@ -604,7 +721,10 @@ class Consensus {
         if (!this._isKnownSender(envelope.sender)) return;
 
         let proposal = this.pendingProposals.get(seq);
-        if (!proposal) return;
+        // No proposal yet: this hub is still locking the snapshot for a
+        // PRE_PREPARE it has already received (or has yet to receive it). Hold
+        // the vote rather than discard it; see EARLY_VOTE_MAX_SEQS.
+        if (!proposal) { this._bufferEarlyVote(envelope); return; }
 
         if (configDigest !== proposal.digest) return;
 
@@ -820,7 +940,10 @@ class Consensus {
         if (!this._isKnownSender(envelope.sender)) return;
 
         let proposal = this.pendingProposals.get(seq);
-        if (!proposal) return;
+        // The vote that this buffer exists for: a leader heavy enough to meet the
+        // round's threshold alone sends COMMIT immediately after PRE_PREPARE, so
+        // it regularly overtakes the follower's snapshot lock.
+        if (!proposal) { this._bufferEarlyVote(envelope); return; }
 
         if (configDigest !== proposal.digest) return;
 

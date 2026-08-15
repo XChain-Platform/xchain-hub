@@ -40,7 +40,15 @@ function makeSlashDetector(threshold = '0.05', missed = '3') {
     const sd = new SlashDetector(hub);
     sd._resolveValidatorPubkey = (sender) => sender;   // sender IS the pubkey in these tests
     const slashed = [];
-    sd._recordSlashProposal = async (pubkey, offenseType, round) => { slashed.push({ pubkey, offenseType, round }); };
+    // The real _recordSlashProposal returns true once the row persists and false
+    // on a rejected pubkey or a failed write, and the non-participation latch
+    // re-arms on a falsy return so a failed write can be retried next round. A
+    // stub returning undefined therefore impersonates a permanently failing DB
+    // and re-fires the same offense every round.
+    sd._recordSlashProposal = async (pubkey, offenseType, round) => {
+        slashed.push({ pubkey, offenseType, round });
+        return true;
+    };
     return { sd, slashed };
 }
 
@@ -81,9 +89,15 @@ describe('Regression: slashing safety + reward split', function () {
         });
     });
 
+    // The trigger is a SLIDING WINDOW of missed rounds plus a one-shot latch: a
+    // consecutive-miss counter that any single participation reset was evadable
+    // (participate once every Nth round and never be slashed), so the counter was
+    // replaced. Two safety properties survive that change and are pinned here: an
+    // honest validator under the threshold is never slashed, and a genuine
+    // offender yields exactly ONE proposal per offense, not one per round.
     describe('non-participation slashing', function () {
-        it('slashes only at the missed-rounds threshold; participation resets the counter @regression-p0', async function () {
-            const { sd, slashed } = makeSlashDetector('0.05', '3');   // 3 consecutive misses
+        it('slashes at the missed-rounds threshold, once per offense @regression-p0', async function () {
+            const { sd, slashed } = makeSlashDetector('0.05', '3');   // 3 missed rounds in the window
             const all = [{ pubkey: PK('a') }, { pubkey: PK('b') }];
 
             await sd._checkParticipation(1, [PK('b')], all);   // a misses (1)
@@ -95,9 +109,32 @@ describe('Regression: slashing safety + reward split', function () {
             assert.strictEqual(slashed[0].pubkey, PK('a'));
             assert.strictEqual(slashed[0].offenseType, 'non_participation');
 
-            await sd._checkParticipation(4, [PK('a'), PK('b')], all);  // a returns → counter reset
-            await sd._checkParticipation(5, [PK('b')], all);           // a misses (back to 1)
-            assert.strictEqual(slashed.length, 1, 'counter did not reset: validator re-slashed too soon');
+            // One token participation leaves the window saturated, so it neither
+            // clears the offense nor earns a second proposal for the same one.
+            await sd._checkParticipation(4, [PK('a'), PK('b')], all);
+            await sd._checkParticipation(5, [PK('b')], all);
+            assert.strictEqual(slashed.length, 1, 'validator re-slashed for the same offense');
+        });
+
+        it('re-arms only after sustained participation clears the window @regression-p1', async function () {
+            const { sd, slashed } = makeSlashDetector('0.05', '3');
+            const all = [{ pubkey: PK('a') }, { pubkey: PK('b') }];
+            const both = [PK('a'), PK('b')];
+
+            for (let r = 1; r <= 3; r++) await sd._checkParticipation(r, [PK('b')], all);
+            assert.strictEqual(slashed.length, 1, 'first offense not slashed');
+
+            // A full window of participation is what re-arms the latch. Anything
+            // less and the next miss is still part of the offense already slashed.
+            let round = 4;
+            for (let i = 0; i < sd.participationWindowSize; i++, round++) {
+                await sd._checkParticipation(round, both, all);
+            }
+            assert.strictEqual(slashed.length, 1, 'slashed while participating');
+
+            for (let i = 0; i < 3; i++, round++) await sd._checkParticipation(round, [PK('b')], all);
+            assert.strictEqual(slashed.length, 2, 'a fresh offense after a clean window is not slashed');
+            assert.strictEqual(slashed[1].offenseType, 'non_participation');
         });
     });
 
