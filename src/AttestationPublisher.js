@@ -63,6 +63,7 @@ const fs            = require('fs');
 const path          = require('path');
 const crypto        = require('crypto');
 const swq           = require('./stake_weighted_quorum.js');
+const bcmath        = require('./bcmath.js');
 const axios         = require('axios');
 const EncoderClient = require('./EncoderClient.js');
 const SpendGuard    = require('./lib/spend_guard.js');
@@ -310,7 +311,13 @@ class AttestationPublisher {
         // but wrong timing means multiple followers can step in early or the true
         // rank-1 late.
         let redundancy   = Math.max(1, Number(event.request && event.request.redundancy) || 1);
-        let responsible  = (requestBlock != null) ? await this._computeResponsible(rid, requestBlock, redundancy) : null;
+        // Provider id for the block-anchored stake floor (XC-083). The event carries it
+        // directly; the request row is the fallback for an event shaped by an older
+        // publisher. Absent on both, _computeResponsible fails closed on the weighted
+        // path rather than rank against a set the other two copies do not agree with.
+        let eventProvider = (event.providerId != null) ? event.providerId
+                          : ((event.request && event.request.provider_id != null) ? event.request.provider_id : null);
+        let responsible  = (requestBlock != null) ? await this._computeResponsible(rid, requestBlock, redundancy, eventProvider) : null;
         let leaderPubkey = event.leaderPubkey ? String(event.leaderPubkey).toLowerCase()
                          : (responsible && responsible.length ? responsible[0] : null);
 
@@ -731,7 +738,15 @@ class AttestationPublisher {
     // AttestationRound._computeResponsibleSet and the indexer's attest.js,
     // including the caller's Math.max(1, Number(redundancy) || 1) normalization.
     // A silent change to any one copy is a fork surface; update all three together.
-    async _computeResponsible(rid, blockIndex, redundancy){
+    //
+    // PROVIDER STAKE FLOOR (XC-083, weighted only): sources below the request
+    // provider's block-anchored min_stake_xchain are dropped before the ranking, the
+    // same filter AttestationRound._computeResponsibleSet applies. This ordering only
+    // drives failover step-in timing, but ranking against a set the other copies do
+    // not agree with means followers step in early or the true rank-1 steps in late,
+    // so it tracks them exactly. An unresolvable floor returns null (rank unknown),
+    // which the caller already handles as "snapshot unavailable".
+    async _computeResponsible(rid, blockIndex, redundancy, providerId){
         try {
             if (!this.hub.capabilitySnapshot) return null;
             let weighted = swq.isStakeWeightedQuorumActive(blockIndex, this.hub.network);
@@ -739,7 +754,16 @@ class AttestationPublisher {
                 ? await this.hub.capabilitySnapshot.getWeightSnapshot('attestation', blockIndex)
                 : await this.hub.capabilitySnapshot.getSnapshot('attestation', blockIndex);
             if (!snapshot || !Array.isArray(snapshot.validators) || snapshot.validators.length === 0) return null;
-            let withHash = snapshot.validators.map(v => {
+            let validators = snapshot.validators;
+            if (weighted) {
+                let registry = this.hub.providerRegistry || null;
+                let floor = (registry && providerId != null)
+                    ? registry.getMinStake(String(providerId), blockIndex) : null;
+                if (floor === null) return null;
+                validators = validators.filter(v => this._meetsProviderFloor(v && v.weight, floor));
+                if (validators.length === 0) return null;
+            }
+            let withHash = validators.map(v => {
                 let pk = String(v.pubkey).toLowerCase();
                 let h  = crypto.createHash('sha256').update(rid, 'utf8').update(pk, 'utf8').digest('hex');
                 return { pubkey: pk, source: (v.source != null ? String(v.source) : null), hash: h };
@@ -758,6 +782,24 @@ class AttestationPublisher {
         } catch (e) {
             return null;
         }
+    }
+
+    // Byte-mirror of AttestationRound._meetsProviderFloor (and of the indexer's
+    // providerMinStakeHistory.meetsProviderFloor). Strict decimal-string acceptance
+    // plus decimal.js `.gte()`; an unusable weight or floor excludes the row. Kept as
+    // its own method rather than imported so all copies of the responsible-set rule
+    // read alike side by side in their own file.
+    _meetsProviderFloor(weight, minStake){
+        const usable = (v) => {
+            if (v === null || v === undefined || typeof v === 'boolean') return null;
+            let s = String(v).trim();
+            return /^\d+(\.\d+)?$/.test(s) ? s : null;
+        };
+        let floor = usable(minStake);
+        if (floor === null) return false;
+        let w = usable(weight);
+        if (w === null) return false;
+        return bcmath.bcgte(w, floor);
     }
 
     // ----- Failover / replay sweep -----

@@ -369,7 +369,28 @@ class AttestationRound {
             return;
         }
 
-        let responsible = this._computeResponsibleSet(snapshot.validators, rid, redundancy, weighted);
+        // PROVIDER STAKE FLOOR (XC-083). A HIGHER, per-provider bar on top of the
+        // capability MIN_STAKE the snapshot was already built at: serving an `llm`
+        // attestation costs more stake than serving an `http_get` one. Resolved from
+        // the BLOCK-ANCHORED provider history at the request's own block, for the same
+        // reason the model identity below is: a governance change that finalized at a
+        // different wall-clock moment on another hub must not make the two hubs filter
+        // the same request's validator set differently.
+        //
+        // Fail closed on an unresolvable floor, mirroring CapabilitySnapshot's #S-F3
+        // posture for the capability threshold: a floorless provider must not silently
+        // widen the serving set to everyone who clears the (lower) capability bar.
+        // typeof-guarded so a registry that cannot answer resolves to null and the
+        // weighted path skips the round, rather than throwing mid-poll and losing every
+        // other pending request in the same sweep. Fails closed either way.
+        let providerFloor = (this.providerRegistry && typeof this.providerRegistry.getMinStake === 'function')
+            ? this.providerRegistry.getMinStake(providerId, snapshotBlk) : null;
+        if(weighted && providerFloor === null){
+            console.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... provider "' + providerId +
+                         '" has no min_stake_xchain floor at block ' + snapshotBlk + ' (failing closed)');
+            return;
+        }
+        let responsible = this._computeResponsibleSet(snapshot.validators, rid, redundancy, weighted, providerFloor);
         // Unservable-redundancy guard (Pkg 7 / 87441a53): when the snapshot (or
         // its weighted source-dedupe) yields fewer responsible slots than
         // REDUNDANCY, the round can never finalize; the indexer requires
@@ -383,7 +404,8 @@ class AttestationRound {
         if(responsible.length < Math.max(1, redundancy)){
             console.warn('AttestationRound: skipping unfinalizable ' + rid.substring(0,16) +
                 '... (responsible=' + responsible.length + ' < redundancy=' + Math.max(1, redundancy) +
-                ' at block ' + snapshotBlk + (weighted ? ', weighted source-dedupe' : '') + ')');
+                ' at block ' + snapshotBlk +
+                (weighted ? ', weighted source-dedupe, provider floor ' + providerFloor : '') + ')');
             return;
         }
         // Leader rotation (Phase 4): a silent leader must not stall the request
@@ -569,10 +591,26 @@ class AttestationRound {
     //   3. AttestationPublisher._computeResponsible (failover-rank derivation)
     // All three are behaviorally identical (hash-order sort, source===null keep
     // branch, redundancy slice with the SAME Math.max(1, Number(redundancy) || 1)
-    // normalization). No cross-service test yet feeds the same validators +
-    // requestId through all three and asserts identical output. Any silent change
-    // to one copy is a fork surface; always update all three together.
-    _computeResponsibleSet(validators, requestId, redundancy, weighted){
+    // normalization). A FOURTH copy exists for the reorg recompute of missed_count:
+    // xchain-indexer/src/rollback.js _responsibleSet, which mirrors attest.js.
+    // Any silent change to one copy is a fork surface; always update all four together.
+    //
+    // All four now run the SAME canonical vectors
+    // (xchain-documentation/protocol/test-vectors/responsible_set.json): copies 1 and 3
+    // in AttestationRound.test.js, copies 2 and 4 in the indexer's
+    // test/unit/actions/attest-responsible-set-vectors.test.js. Add a vector there when
+    // you change the rule, or the copies can drift in a direction every suite calls green.
+    //
+    // PROVIDER STAKE FLOOR (XC-083, weighted only): `minStake` is the request
+    // provider's block-anchored min_stake_xchain. Sources whose aggregate weight is
+    // below it are dropped BEFORE the ranking, so the freed slot goes to the next
+    // qualifying validator rather than shrinking the set. Only the weighted snapshot
+    // carries the source-aggregate `weight` the floor is defined against, which is why
+    // the floor rides the STAKE_WEIGHTED_QUORUM anchor instead of minting its own
+    // flag-day height. Below the gate the capability threshold stays the only bar.
+    _computeResponsibleSet(validators, requestId, redundancy, weighted, minStake){
+        if(weighted)
+            validators = validators.filter(v => this._meetsProviderFloor(v && v.weight, minStake));
         let withHash = validators.map(v => {
             let pk = String(v.pubkey).toLowerCase();
             let h  = crypto.createHash('sha256').update(requestId, 'utf8').update(pk, 'utf8').digest('hex');
@@ -589,6 +627,33 @@ class AttestationRound {
             });
         }
         return withHash.slice(0, Math.max(1, redundancy));
+    }
+
+    // CONSENSUS-CRITICAL predicate: does a weighted-snapshot row clear the provider
+    // floor? `weight` is the row's SOURCE-AGGREGATE stake (every effective key of a
+    // source carries the same weight), so the bar is on the staking address, not on
+    // each delegated key: a source cannot clear a 25000 floor by splitting 25000
+    // across five keys, and does not have to stake 25000 per key.
+    //
+    // An unusable weight or an unusable floor EXCLUDES the row. Excluding is the safe
+    // direction (it can only shrink the responsible set, which the caller's
+    // unfinalizable-round guard already handles) and it is what keeps the rule
+    // writable identically in every copy. Byte-mirrors
+    // xchain-indexer/src/attestation/providerMinStakeHistory.js meetsProviderFloor,
+    // down to the strict decimal-string acceptance and the decimal.js `.gte()`
+    // comparison (bcmath.js bcgte), which is exact where mathjs's largerEq applies a
+    // ~1e-12 epsilon; a consensus predicate that rounds is a fork surface.
+    _meetsProviderFloor(weight, minStake){
+        const usable = (v) => {
+            if(v === null || v === undefined || typeof v === 'boolean') return null;
+            let s = String(v).trim();
+            return /^\d+(\.\d+)?$/.test(s) ? s : null;
+        };
+        let floor = usable(minStake);
+        if(floor === null) return false;
+        let w = usable(weight);
+        if(w === null) return false;
+        return bc.bcgte(w, floor);
     }
 
     // Look up the round state for a given requestId. Accessor over this.rounds;

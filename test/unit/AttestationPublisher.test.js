@@ -758,6 +758,62 @@ describe('AttestationPublisher: _computeResponsible', function () {
         const result = await pub._computeResponsible('11'.repeat(32), 100, 1);
         expect(result.length).to.equal(1);
     });
+
+    // ---- provider stake floor (XC-083) --------------------------------------
+    // This ordering only drives failover step-in timing, but ranking against a set
+    // AttestationRound and the indexer do not agree with means followers step in
+    // early or the true rank-1 steps in late. So the third copy applies the floor too.
+
+    function weightedHub(validators, minStake) {
+        return {
+            network: 'regtest',                       // SWQ armed at genesis
+            capabilitySnapshot: { getWeightSnapshot: async () => ({ validators }) },
+            providerRegistry: { getMinStake: () => minStake }
+        };
+    }
+
+    const RICH = [
+        { pubkey: MY_PUB,    source: 'sA', weight: '50000' },
+        { pubkey: LEADER_PUB, source: 'sB', weight: '9999.99999999' },
+        { pubkey: OTHER_PUB, source: 'sC', weight: '10000' }
+    ];
+
+    it('drops below-floor sources on the weighted path', async function () {
+        const pub = makePublisher(MY_PUB, weightedHub(RICH, '10000'));
+        const result = await pub._computeResponsible('11'.repeat(32), 100, 3, 'http_get');
+        expect(result).to.have.members([MY_PUB, OTHER_PUB]);
+        expect(result).to.not.include(LEADER_PUB);
+    });
+
+    it('returns null when the provider floor cannot be resolved', async function () {
+        const pub = makePublisher(MY_PUB, weightedHub(RICH, null));
+        expect(await pub._computeResponsible('11'.repeat(32), 100, 3, 'http_get')).to.be.null;
+    });
+
+    it('returns null when the floor excludes every source', async function () {
+        const pub = makePublisher(MY_PUB, weightedHub(RICH, '999999'));
+        expect(await pub._computeResponsible('11'.repeat(32), 100, 3, 'http_get')).to.be.null;
+    });
+
+    it('does not consult the floor below the STAKE_WEIGHTED_QUORUM gate', async function () {
+        // network mainnet + block 100 is far below the 961000 anchor, so the unweighted
+        // snapshot runs and its weightless rows must still select normally.
+        const pub = makePublisher(MY_PUB, {
+            network: 'mainnet',
+            capabilitySnapshot: { getSnapshot: async () => ({ validators: [{ pubkey: MY_PUB }, { pubkey: LEADER_PUB }] }) },
+            providerRegistry: { getMinStake: () => { throw new Error('must not be consulted below the gate'); } }
+        });
+        const result = await pub._computeResponsible('11'.repeat(32), 100, 2, 'http_get');
+        expect(result).to.have.lengthOf(2);
+    });
+
+    it('returns null on the weighted path when the event carried no provider id', async function () {
+        // Fail closed: without a provider id this copy cannot resolve the same floor the
+        // other three do, so ranking against an unfiltered set would be worse than not
+        // ranking at all (the caller falls back to event.leaderPubkey).
+        const pub = makePublisher(MY_PUB, weightedHub(RICH, '10000'));
+        expect(await pub._computeResponsible('11'.repeat(32), 100, 3)).to.be.null;
+    });
 });
 
 // ---------- _resolveBtcIndexerUrl -------------------------------------------

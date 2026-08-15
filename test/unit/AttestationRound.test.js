@@ -56,6 +56,10 @@ function makeProviderRegistry(overrides) {
         getModule: sinon.stub().returns({ fetch: sinon.stub().resolves({ body: 'data', meta: '200' }) }),
         getDef:    sinon.stub().returns({ max_response_bytes: 32768 }),
         getAdditionalConfig: sinon.stub().returns({ approved_models: ['claude-sonnet-4-6'], judge_model: 'claude-haiku-4-5' }),
+        // Block-anchored provider stake floor (XC-083). '0' keeps the pre-existing
+        // fixtures (whose snapshots carry no weight) selecting exactly as before on the
+        // unweighted path, which is the only path they exercise.
+        getMinStake: sinon.stub().returns('0'),
         ...(overrides || {})
     };
 }
@@ -328,10 +332,159 @@ describe('AttestationRound', function () {
                 let hub = makeHub();
                 let ar  = new AttestationRound(hub, makeProviderRegistry());
                 let got = ar
-                    ._computeResponsibleSet(c.validators, c.requestId, c.redundancy, c.weighted)
+                    ._computeResponsibleSet(c.validators, c.requestId, c.redundancy, c.weighted, c.minStake)
                     .map(v => v.pubkey);
                 expect(got).to.deep.equal(c.expected);
             });
+        });
+
+        // AttestationPublisher._computeResponsible is the SECOND hub-side copy of the
+        // same rule (it derives failover rank from it). Running the same vectors through
+        // it closes the gap this describe's header used to name: until now no test fed
+        // one input through more than one copy, so the two could drift in a direction
+        // both suites called green. It returns null rather than [] where the rule
+        // selects nobody, which is the caller's "rank unknown" signal.
+        describe('AttestationPublisher._computeResponsible over the same vectors', function () {
+            const AttestationPublisher = require('../../src/AttestationPublisher.js');
+            const os   = require('os');
+            const path = require('path');
+
+            (vec ? vec.computeResponsibleSet : []).forEach(function (c) {
+                it(c.name, async function () {
+                    const fresh = () => c.validators.map(v => Object.assign({}, v));
+                    const pub = new AttestationPublisher({
+                        getIdentity: () => ({ getPubkeyHex: () => 'ff'.repeat(32) }),
+                        p2pConfig:   {},
+                        network:     c.weighted ? 'regtest' : 'mainnet',
+                        capabilitySnapshot: {
+                            getWeightSnapshot: async () => ({ validators: fresh() }),
+                            getSnapshot:       async () => ({ validators: fresh() })
+                        },
+                        providerRegistry: { getMinStake: () => (c.minStake === undefined ? null : c.minStake) }
+                    });
+                    pub.queuePath = path.join(os.tmpdir(),
+                        'attest-vec-' + process.pid + '-' + Math.floor(Math.random() * 1e9) + '.jsonl');
+                    // Block 100: below the mainnet SWQ anchor (961000) and above the
+                    // regtest one (0), so the vector's `weighted` flag alone picks the branch.
+                    let got = await pub._computeResponsible(c.requestId, 100, c.redundancy, 'http_get');
+                    expect(got).to.deep.equal(c.expected.length ? c.expected : null);
+                });
+            });
+        });
+    });
+
+    // ── provider stake floor (XC-083) ───────────────────────────────────────
+    // The canonical vectors above cover the SELECTION rule, but they skip wholesale
+    // when the sibling xchain-documentation checkout is absent. These pin the same
+    // behaviour locally, plus the two things the vectors cannot express: that
+    // _startRound resolves the floor from the BLOCK-ANCHORED registry at the request's
+    // own block, and that it refuses the round (before the paid provider fetch) when
+    // the floor cannot be resolved.
+    describe('provider stake floor on the weighted path (XC-083)', function () {
+
+        function weightedValidators() {
+            return [
+                { pubkey: 'aa'.repeat(32), source: 'sRich', weight: '50000' },
+                { pubkey: 'bb'.repeat(32), source: 'sPoor', weight: '9999.99999999' },
+                { pubkey: 'cc'.repeat(32), source: 'sEven', weight: '10000' }
+            ];
+        }
+
+        function makeRequest(overrides) {
+            return {
+                request_id: 'rid-floor', provider_id: 'http_get', redundancy: 1,
+                block_index: 100, action_index: 1, payload: 'https://example.com/',
+                ...overrides
+            };
+        }
+
+        it('drops below-floor sources and keeps the boundary source', function () {
+            let ar = new AttestationRound(makeHub(), makeProviderRegistry());
+            let got = ar._computeResponsibleSet(weightedValidators(), 'rid-floor', 5, true, '10000')
+                        .map(v => v.pubkey);
+            expect(got).to.have.members(['aa'.repeat(32), 'cc'.repeat(32)]);
+            expect(got).to.not.include('bb'.repeat(32));
+        });
+
+        it('ignores the floor entirely below the STAKE_WEIGHTED_QUORUM gate', function () {
+            // Unweighted rows carry no weight at all, so applying the floor there would
+            // empty every pre-gate round. Replay of pre-anchor history must be unchanged.
+            let ar = new AttestationRound(makeHub(), makeProviderRegistry());
+            let got = ar._computeResponsibleSet(
+                [{ pubkey: 'aa'.repeat(32) }, { pubkey: 'bb'.repeat(32) }],
+                'rid-floor', 2, false, '25000').map(v => v.pubkey);
+            expect(got).to.have.lengthOf(2);
+        });
+
+        it('fails closed (empty set) when the floor is unresolvable', function () {
+            let ar = new AttestationRound(makeHub(), makeProviderRegistry());
+            expect(ar._computeResponsibleSet(weightedValidators(), 'rid-floor', 3, true, null)).to.deep.equal([]);
+        });
+
+        it('excludes a row whose weight is missing or unparseable rather than reading it as 0', function () {
+            let ar = new AttestationRound(makeHub(), makeProviderRegistry());
+            let got = ar._computeResponsibleSet([
+                { pubkey: 'aa'.repeat(32), source: 's1' },                    // no weight at all
+                { pubkey: 'bb'.repeat(32), source: 's2', weight: 'lots' },    // unparseable
+                { pubkey: 'cc'.repeat(32), source: 's3', weight: '50000' }
+            ], 'rid-floor', 3, true, '10000').map(v => v.pubkey);
+            expect(got).to.deep.equal(['cc'.repeat(32)]);
+        });
+
+        it('_startRound resolves the floor from the registry at the REQUEST block', async function () {
+            let capSS = { getWeightSnapshot: sinon.stub().resolves({ validators: weightedValidators() }) };
+            let hub   = makeHub({ capabilitySnapshot: capSS });
+            hub.network = 'regtest';                       // SWQ armed at genesis here
+            hub.getIdentity = () => makeIdentity('aa'.repeat(32));
+            let reg = makeProviderRegistry({ getMinStake: sinon.stub().returns('10000') });
+            let ar  = new AttestationRound(hub, reg);
+            await ar._startRound(makeRequest({ block_index: 4242 }), 4242);
+            expect(reg.getMinStake.calledWith('http_get', 4242)).to.be.true;
+        });
+
+        it('_startRound skips the round, and the paid fetch, when the floor is unresolvable', async function () {
+            let capSS = { getWeightSnapshot: sinon.stub().resolves({ validators: weightedValidators() }) };
+            let hub   = makeHub({ capabilitySnapshot: capSS });
+            hub.network = 'regtest';
+            hub.getIdentity = () => makeIdentity('aa'.repeat(32));
+            let fetchStub = sinon.stub().resolves({ body: 'data', meta: '200' });
+            let reg = makeProviderRegistry({
+                getMinStake: sinon.stub().returns(null),
+                getModule:   sinon.stub().returns({ fetch: fetchStub })
+            });
+            let ar = new AttestationRound(hub, reg);
+            await ar._startRound(makeRequest(), 100);
+            expect(ar.rounds.size).to.equal(0);
+            expect(fetchStub.called, 'a floorless provider must not trigger a paid fetch').to.be.false;
+        });
+
+        it('_startRound skips when the floor leaves fewer slots than REDUNDANCY', async function () {
+            // Two of the three sources clear a 10000 floor, so redundancy 3 is
+            // unfinalizable and the existing guard must catch the shrink the floor caused.
+            let capSS = { getWeightSnapshot: sinon.stub().resolves({ validators: weightedValidators() }) };
+            let hub   = makeHub({ capabilitySnapshot: capSS });
+            hub.network = 'regtest';
+            hub.getIdentity = () => makeIdentity('aa'.repeat(32));
+            let fetchStub = sinon.stub().resolves({ body: 'data', meta: '200' });
+            let reg = makeProviderRegistry({
+                getMinStake: sinon.stub().returns('10000'),
+                getModule:   sinon.stub().returns({ fetch: fetchStub })
+            });
+            let ar = new AttestationRound(hub, reg);
+            await ar._startRound(makeRequest({ redundancy: 3 }), 100);
+            expect(ar.rounds.size).to.equal(0);
+            expect(fetchStub.called).to.be.false;
+        });
+
+        it('_startRound proceeds normally when every responsible slot clears the floor', async function () {
+            let capSS = { getWeightSnapshot: sinon.stub().resolves({ validators: weightedValidators() }) };
+            let hub   = makeHub({ capabilitySnapshot: capSS });
+            hub.network = 'regtest';
+            hub.getIdentity = () => makeIdentity('aa'.repeat(32));
+            let reg = makeProviderRegistry({ getMinStake: sinon.stub().returns('10000') });
+            let ar  = new AttestationRound(hub, reg);
+            await ar._startRound(makeRequest({ redundancy: 2 }), 100);
+            expect(ar.rounds.size).to.equal(1);
         });
     });
 
