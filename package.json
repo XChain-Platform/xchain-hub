@@ -24,7 +24,7 @@
     "api": "node ./src/api.js",
     "test": "mocha 'test/unit/**/*.test.js' --timeout 5000 --recursive --exit",
     "coverage": "c8 --reporter=text --reporter=html --include 'src/**/*.js' mocha 'test/unit/**/*.test.js' --timeout 5000 --recursive --exit",
-    "coverage:check": "c8 --check-coverage --lines 91 --statements 91 --branches 80 --functions 88 --reporter=text-summary --include 'src/**/*.js' mocha 'test/unit/**/*.test.js' --timeout 5000 --recursive --exit",
+    "coverage:check": "c8 --check-coverage --lines 91.6 --statements 91.6 --branches 80.5 --functions 88.1 --reporter=text-summary --include 'src/**/*.js' mocha 'test/unit/**/*.test.js' --timeout 5000 --recursive --exit",
     "ci": "mocha 'test/unit/**/*.test.js' --timeout 5000 --recursive --exit && npm run ci:security && npm run ci:regression",
     "ci:security": "mocha 'test/security/**/*.test.js' --timeout 5000 --recursive --exit",
     "ci:regression": "mocha 'test/regression/**/*.regression.test.js' --timeout 5000 --recursive --exit",
