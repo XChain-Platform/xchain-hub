@@ -75,6 +75,9 @@ const SIBLINGS = [
     { repo: 'xchain-vm', envs: [],
       marker: path.join('src', 'protocol', 'constants.js'),
       guards: 'the oracle band constant mirror (PRICE_MAX, ORACLE_DEVIATION_THRESHOLD)' },
+    { repo: 'xchain-decoder', envs: [],
+      marker: path.join('src', 'protocol', 'constants.js'),
+      guards: 'the oracle band constant mirror (PRICE_MAX, ORACLE_DEVIATION_THRESHOLD)' },
 ];
 
 function resolve(entry) {

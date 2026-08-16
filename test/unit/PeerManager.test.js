@@ -560,6 +560,36 @@ describe('PeerManager', function () {
             pm._removeInboundPeer(ws);
             expect(pm.ipConnectionCounts.has('5.6.7.8')).to.be.false;
         });
+
+        // The per-IP count is incremented for every ACCEPTED socket, but ws._peerAddr
+        // is only set once a frame has passed signature verification, so a socket that
+        // closes before authenticating used to keep its increment forever and march the
+        // IP to maxConnectionsPerIp.
+        it('_removeInboundPeer releases the IP count for a socket that closed before authenticating', function () {
+            let ws = { _peerAddr: null, _remoteIp: '9.9.9.9' };
+            pm.ipConnectionCounts.set('9.9.9.9', 1);
+            pm._removeInboundPeer(ws);
+            expect(pm.ipConnectionCounts.has('9.9.9.9')).to.be.false;
+        });
+
+        it('_removeInboundPeer does not double-decrement when invoked twice for one socket', function () {
+            let ws = { _peerAddr: null, _remoteIp: '7.7.7.7' };
+            pm.ipConnectionCounts.set('7.7.7.7', 2);
+            pm._removeInboundPeer(ws);
+            pm._removeInboundPeer(ws);
+            expect(pm.ipConnectionCounts.get('7.7.7.7')).to.equal(1);
+        });
+
+        it('repeated pre-auth connect/close cycles never reach the per-IP cap', function () {
+            let ip = '203.0.113.77';
+            for (let i = 0; i < pm.maxConnectionsPerIp + 5; i++) {
+                let count = pm.ipConnectionCounts.get(ip) || 0;
+                expect(count).to.be.below(pm.maxConnectionsPerIp);
+                pm.ipConnectionCounts.set(ip, count + 1);
+                pm._removeInboundPeer({ _peerAddr: null, _remoteIp: ip });
+            }
+            expect(pm.ipConnectionCounts.has(ip)).to.be.false;
+        });
     });
 
     // -----------------------------------------------------------------

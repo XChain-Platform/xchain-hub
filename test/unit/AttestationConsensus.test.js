@@ -73,7 +73,15 @@ function makeRealProviderRegistry(agreeFn, strategy, maxBytes) {
 }
 
 // roundState passed to propose().
-function roundState(me, responsibleIds, body, providerId, redundancy, meta) {
+//
+// pinnedConsensusStrategy travels ON the round state, exactly as AttestationRound
+// resolves it: ONCE, from the BLOCK-ANCHORED provider history at the request's own
+// block, never from the live registry at each decision site (a hotReload between two
+// messages of one round would otherwise flip this hub's PBFT state machine). Defaulted
+// from the provider id against ProviderRegistry.DEFAULTS (http_get -> byte_equality,
+// llm -> judge_model) so a fixture cannot pin a strategy its provider does not have;
+// pass `strategy` to model a governance change that moved it.
+function roundState(me, responsibleIds, body, providerId, redundancy, meta, strategy) {
     return {
         request:      { request_id: 'req' },
         providerId,
@@ -82,7 +90,8 @@ function roundState(me, responsibleIds, body, providerId, redundancy, meta) {
         responsible:  responsibleIds.map(i => ({ pubkey: pub(i) })),
         leaderPubkey: pub(me),
         role:         'leader',
-        myProposal:   { body, meta: meta || '' }
+        myProposal:   { body, meta: meta || '' },
+        pinnedConsensusStrategy: strategy || (providerId === 'llm' ? 'judge_model' : 'byte_equality')
     };
 }
 
@@ -768,6 +777,31 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
 
     const RID  = 'b2'.repeat(16);
     const BODY = Buffer.from('body');
+
+    it('a hotReload flipping the LIVE strategy mid-round cannot move the round off judge_model', async function () {
+        // The registry is re-parsed from this hub's own configs table on EVERY
+        // proposal:finalized event, whatever that proposal was about, so a live read at
+        // each decision site let one hub run its own agree() while its peers deferred to
+        // the leader for the SAME round. The round runs on the strategy anchored at its
+        // request block, so the reload is invisible to it.
+        let agreeSpy = sinon.spy(proposals => proposals[0]);
+        let reg = makeRealProviderRegistry(agreeSpy, 'judge_model');
+        c = new AttestationConsensus(hub, reg);
+        let rs = roundState(me, [me, p1, p2], BODY, 'llm', 2);
+        rs.leaderPubkey = pub(p1); rs.role = 'follower';   // p1 is the elected leader
+        await c.propose(RID, rs);
+        await flush();
+        // hotReload lands: the live def now says byte_equality, which would make this
+        // follower run its own agree() and latch its own winner.
+        reg.getDef.returns({ max_response_bytes: 65536, consensus_strategy: 'byte_equality' });
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, Buffer.from('p1-body')));
+        await flush();
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.from('p2-body')));
+        await flush();
+        let pending = c.pending.get(RID);
+        expect(agreeSpy.called, 'a follower must not judge because the live def moved').to.equal(false);
+        expect(pending.winner).to.equal(null);
+    });
 
     it('a non-leader does NOT run agree() (waits to adopt the leader PREPARE)', async function () {
         let agreeSpy = sinon.spy(proposals => proposals[0]);

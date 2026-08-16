@@ -145,10 +145,14 @@ class SlashDetector {
                 // reference-relative pre-helper (behavior-preserving). Exact-decimal
                 // bcmath (no float ULP at the +-band boundary): both sides of the band
                 // must be decided by the same exact comparison, so an exactly-threshold
-                // submission is never co-signed yet slashed.
-                let deviation = devband.deviationFrom(String(p.price), String(finalPriceStr), 18);
-
-                if (bcmath.bcgt(deviation, String(this.deviationThreshold))) {
+                // submission is never co-signed yet slashed. Branch on the shared
+                // exceedsBand() comparator rather than a locally written bcgt, so that
+                // "same exact comparison" is one definition this gate and the co-sign
+                // admission gate both call, not two copies that agree today. deviation
+                // is recomputed inside the branch for the pct only, which costs a second
+                // bcdiv solely on the rare slash path.
+                if (devband.exceedsBand(String(p.price), String(finalPriceStr), this.deviationThreshold, 18)) {
+                    let deviation = devband.deviationFrom(String(p.price), String(finalPriceStr), 18);
                     let pct = bcmath.bcformat(bcmath.bcmul(deviation, '100', 4), 4);
                     console.warn('Slash: Validator ' + pubkey.substring(0, 16) + '... deviated ' +
                         pct + '% on ' + p.coinPair + ' in round ' + round);

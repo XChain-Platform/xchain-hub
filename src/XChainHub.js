@@ -1591,7 +1591,7 @@ class XChainHub {
                 ' has no activation_block; not applying (would be unanchored, risking cross-hub divergence)');
             return;
         }
-        let ac, ms;
+        let ac, ms, cs;
         try {
             let parsed = JSON.parse(String(ev.newValue));
             ac = (parsed && parsed.additional_config) ? parsed.additional_config : parsed;
@@ -1599,12 +1599,14 @@ class XChainHub {
             // loadGovernanceHistory: this is the LIVE path and that is the RESTART replay,
             // and a floor seen by only one would diverge restarted hubs from long-running ones.
             ms = (parsed && parsed.min_stake_xchain !== undefined) ? parsed.min_stake_xchain : undefined;
+            // The PBFT consensus_strategy rides it too, on the same both-paths rule.
+            cs = (parsed && parsed.consensus_strategy !== undefined) ? parsed.consensus_strategy : undefined;
         } catch (e) {
             console.warn('Governance ATTESTATION_PROVIDER change for ' + providerId +
                 ' has unparseable proposed_value; not applying:', e && e.message ? e.message : e);
             return;
         }
-        this.providerRegistry.applyProviderConfigActivation(providerId, Number(ev.activationBlock), ac, ms);
+        this.providerRegistry.applyProviderConfigActivation(providerId, Number(ev.activationBlock), ac, ms, cs);
     }
 
     // Parse CAPABILITY_<CAP>_MIN_STAKE into { capability, parameterKey }, where <CAP> is

@@ -465,6 +465,24 @@ class AttestationRound {
         // not the mapping and cannot resolve a vendor at all.
         let pinnedVendors = (pinnedAc.model_vendors && typeof pinnedAc.model_vendors === 'object')
             ? pinnedAc.model_vendors : null;
+        // The PBFT strategy is anchored for a stronger reason than the model identity is:
+        // it selects which state machine AttestationConsensus runs for this round, not
+        // merely which model answers it. Read live off the hot-reloadable registry at each
+        // decision site, one hub could adopt a leader's PREPARE while another ran its own
+        // agree() over the same round, because hotReload() re-parses every provider def on
+        // EVERY proposal:finalized event regardless of subject. Resolved ONCE here at the
+        // request's own block and carried on roundState, so a reload landing mid-round
+        // cannot move it and two hubs whose reloads raced still run the same machine.
+        // Fail closed on an unresolvable strategy, exactly as the provider floor does
+        // below: guessing a default here would silently run byte_equality against a
+        // judge_model federation.
+        let pinnedConsensusStrategy = (this.providerRegistry && typeof this.providerRegistry.getConsensusStrategy === 'function')
+            ? this.providerRegistry.getConsensusStrategy(providerId, snapshotBlk) : null;
+        if(!pinnedConsensusStrategy){
+            console.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... provider "' + providerId +
+                         '" has no block-anchored consensus_strategy at block ' + snapshotBlk + ' (failing closed)');
+            return;
+        }
         if(!pinnedFetchModel){
             console.warn('AttestationRound: provider "' + providerId + '" has no approved_models at block ' +
                          snapshotBlk + '; fetch falls back to the provider module default (un-pinned)');
@@ -556,6 +574,9 @@ class AttestationRound {
                 : { body: Buffer.alloc(0), meta: '', status: myStatus },
             pinnedJudgeModel: pinnedJudgeModel,
             pinnedVendors:    pinnedVendors,
+            // Block-anchored PBFT strategy for this round (see the resolution above).
+            // AttestationConsensus reads ONLY this, never the live registry.
+            pinnedConsensusStrategy: pinnedConsensusStrategy,
             // The allowlist that judges the winning proposal's meta has
             // to be the SAME block-anchored list this round pinned the fetch model
             // from. Judged against the live hotReloadable set instead, a governance

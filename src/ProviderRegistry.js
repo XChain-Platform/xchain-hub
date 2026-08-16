@@ -109,6 +109,18 @@ function normalizeMinStakeXchain(value) {
     return s;
 }
 
+// Canonicalise a provider consensus_strategy to a plain string, or null when it is
+// absent/blank. Deliberately NOT an allowlist of the strategies this build knows:
+// an unrecognised name must travel into the history verbatim so a hub running older
+// code resolves the same UNKNOWN value every peer does and declines the round,
+// rather than silently walking back to an older strategy and running a different
+// PBFT state machine from the rest of the federation for the same block.
+function normalizeConsensusStrategy(value) {
+    if (value === null || value === undefined) return null;
+    let s = String(value).trim();
+    return s === '' ? null : s;
+}
+
 class ProviderRegistry {
 
     constructor(hub){
@@ -142,6 +154,18 @@ class ProviderRegistry {
         // who may serve it. A given entry carries min_stake_xchain: null when its
         // governance change did not touch the floor, so resolution walks back to the
         // last entry that did (see getMinStake).
+        //
+        // consensus_strategy rides the same entry, for a stronger version of the same
+        // reason. It is not a parameter of the outcome, it SELECTS the PBFT state
+        // machine: judge_model runs leader-only agree() with follower PREPARE-adoption,
+        // byte_equality runs every-hub-agrees with first-verified-PREPARE-wins. Read
+        // live off `this.providers` it was the one round-shaping field that could differ
+        // between two hubs mid-round, because load() re-parses every provider def out of
+        // the local configs table and hotReload() re-runs load() on EVERY
+        // proposal:finalized event whatever that proposal was about, so no
+        // governance-side validation could reach it. Anchored here, two hubs resolve the
+        // same strategy for the same request block however their local reloads raced.
+        // Same null-is-transparent walk-back as min_stake_xchain (getConsensusStrategy).
         this.providerConfigHistory = new Map();
 
         // Pre-seed with defaults so even a fresh deploy is operational
@@ -221,10 +245,14 @@ class ProviderRegistry {
         for (let [providerId, def] of Object.entries(DEFAULTS)){
             let ac = (def && def.additional_config) || {};
             let ms = normalizeMinStakeXchain(def && def.min_stake_xchain);
+            // From DEFAULTS, never this.providers, for the reason stated above: the
+            // block-0 strategy has to be the same on a hub restarted after an operator
+            // edited the configs table as on one that was never restarted.
+            let cs = normalizeConsensusStrategy(def && def.consensus_strategy);
             let hist = this.providerConfigHistory.get(providerId) || [];
             let g = hist.find(e => e.activation_block === 0);
-            if (g) { g.additional_config = ac; g.min_stake_xchain = ms; }
-            else { hist.push({ activation_block: 0, additional_config: ac, min_stake_xchain: ms }); hist.sort((a, b) => a.activation_block - b.activation_block); }
+            if (g) { g.additional_config = ac; g.min_stake_xchain = ms; g.consensus_strategy = cs; }
+            else { hist.push({ activation_block: 0, additional_config: ac, min_stake_xchain: ms, consensus_strategy: cs }); hist.sort((a, b) => a.activation_block - b.activation_block); }
             this.providerConfigHistory.set(providerId, hist);
         }
     }
@@ -284,24 +312,64 @@ class ProviderRegistry {
         return normalizeMinStakeXchain(def && def.min_stake_xchain);
     }
 
+    // Resolve a provider's consensus_strategy effective AT blockIndex: the greatest
+    // activation_block <= blockIndex whose entry actually SET a strategy. Entries left
+    // null (a governance change that only moved additional_config or the floor) are
+    // transparent, exactly as in getMinStake.
+    //
+    // This is a CONSENSUS read. AttestationConsensus branches its whole PBFT phase
+    // transition on the answer, so the value a round runs on is resolved ONCE at
+    // _startRound against the request's own block and pinned into roundState; the six
+    // decision sites read the pinned value and never the registry. Resolving per
+    // message instead let a hotReload land mid-round and flip a hub's state machine
+    // between two messages of the same round.
+    //
+    // The fallback to the LIVE definition when history has nothing to say mirrors
+    // getMinStake and keeps a fresh hub (or one whose loadGovernanceHistory could not
+    // read governance_proposals) serving instead of stalling. It is strictly no worse
+    // than the pre-anchoring behaviour, which read live unconditionally, and it is
+    // unreachable for any provider in DEFAULTS because _seedProviderConfigGenesis
+    // always gives those a block-0 entry. A consensus caller still treats a null
+    // result as fail-closed: a provider whose strategy no hub can anchor cannot be
+    // served deterministically.
+    getConsensusStrategy(providerId, blockIndex){
+        let hist = this.providerConfigHistory.get(providerId);
+        let resolved = null;
+        if (hist && hist.length > 0){
+            if (blockIndex === undefined || blockIndex === null){
+                for (let e of hist) if (e.consensus_strategy !== null && e.consensus_strategy !== undefined) resolved = e.consensus_strategy;
+            } else {
+                for (let e of hist){
+                    if (e.activation_block > blockIndex) break; // ascending: nothing later is in effect yet
+                    if (e.consensus_strategy !== null && e.consensus_strategy !== undefined) resolved = e.consensus_strategy;
+                }
+            }
+        }
+        if (resolved !== null) return resolved;
+        let def = this.getDef(providerId);
+        return normalizeConsensusStrategy(def && def.consensus_strategy);
+    }
+
     // Append a block-anchored governance provider-config change to the history (idempotent
     // by activation_block; kept sorted ascending). Mirror of
     // CapabilityRegistry.applyMinStakeActivation: the change does not take effect until the
     // chain reaches activation_block, so two hubs that append at different wall-clock moments
     // still agree on the config for every block.
     //
-    // `minStakeXchain` is optional: omit it (or pass an unparseable value) for a change that
-    // does not move the provider stake floor, and the entry stores null so getMinStake keeps
-    // resolving the previously-activated floor.
-    applyProviderConfigActivation(providerId, activationBlock, additionalConfig, minStakeXchain){
+    // `minStakeXchain` and `consensusStrategy` are optional: omit either (or pass an
+    // unparseable value) for a change that does not move that field, and the entry stores
+    // null so getMinStake / getConsensusStrategy keep resolving the previously-activated
+    // value.
+    applyProviderConfigActivation(providerId, activationBlock, additionalConfig, minStakeXchain, consensusStrategy){
         let ab = Number(activationBlock);
         if (!Number.isInteger(ab) || ab < 0)
             throw new Error('invalid activation_block: ' + activationBlock);
         let ms = normalizeMinStakeXchain(minStakeXchain);
+        let cs = normalizeConsensusStrategy(consensusStrategy);
         let hist = this.providerConfigHistory.get(providerId) || [];
         let existing = hist.find(e => e.activation_block === ab);
-        if (existing) { existing.additional_config = additionalConfig; existing.min_stake_xchain = ms; }
-        else { hist.push({ activation_block: ab, additional_config: additionalConfig, min_stake_xchain: ms }); hist.sort((a, b) => a.activation_block - b.activation_block); }
+        if (existing) { existing.additional_config = additionalConfig; existing.min_stake_xchain = ms; existing.consensus_strategy = cs; }
+        else { hist.push({ activation_block: ab, additional_config: additionalConfig, min_stake_xchain: ms, consensus_strategy: cs }); hist.sort((a, b) => a.activation_block - b.activation_block); }
         this.providerConfigHistory.set(providerId, hist);
         return hist;
     }
@@ -333,7 +401,7 @@ class ProviderRegistry {
         for (let r of rows){
             let providerId = parseAttestationProviderParam(r.parameter);
             if (!providerId) continue;
-            let ac, ms;
+            let ac, ms, cs;
             try {
                 let parsed = JSON.parse(r.proposed_value);
                 // Accept either a full provider def or a bare additional_config object.
@@ -342,8 +410,13 @@ class ProviderRegistry {
                 // additional_config payload leaves it undefined, so the entry stays
                 // transparent and the previously-activated floor keeps resolving.
                 ms = (parsed && parsed.min_stake_xchain !== undefined) ? parsed.min_stake_xchain : undefined;
+                // Same for the PBFT strategy. Must be read on BOTH write paths (this
+                // restart replay and XChainHub._applyProviderGovernanceChange, the live
+                // one) or a restarted hub and a long-running one resolve different state
+                // machines for the same block, which is the divergence anchoring removes.
+                cs = (parsed && parsed.consensus_strategy !== undefined) ? parsed.consensus_strategy : undefined;
             } catch (e) { continue; }
-            this.applyProviderConfigActivation(providerId, r.activation_block, ac, ms);
+            this.applyProviderConfigActivation(providerId, r.activation_block, ac, ms, cs);
         }
     }
 

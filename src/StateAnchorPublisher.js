@@ -81,6 +81,7 @@ const SpendGuard        = require('./lib/spend_guard.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { resolveQuorumNetwork } = require('./lib/quorum_network.js');
 const { isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
+const { sumUtxosCoins } = require('./lib/utxo_balance.js');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const StateCheckpointEngine = require('./StateCheckpointEngine.js');
 const swq                   = require('./stake_weighted_quorum.js');
@@ -119,6 +120,15 @@ const XANCARCHPUB_SIGN     = 'XANCARCHPUB_SIGN';
 // taken from the message except the tuple identity it independently re-derives the canonical
 // from, and the frozen reward amount is never read off the wire at all.
 const XANCREWARD = 'XANCREWARD';
+
+// Default retention window for anchor_published_checkpoints and
+// anchor_published_archives, mirroring OraclePublisher's ~90-day
+// oracle_published_rounds window.
+const DEFAULT_ANCHOR_MARKER_RETENTION_MS = 7776000000;   // 90 days
+// Multiple of anchorIntentTtlMs the effective window is FLOORED at. The TTL is the
+// exact horizon past which _anchorIntentHolds already answers false, so the multiple
+// is pure margin over a re-armed intent, not the safety property itself.
+const ANCHOR_MARKER_RETENTION_TTL_SAFETY = 8;
 
 // Fixed serialization order for an archived match row (the crc32 and the
 // follower byte-comparison depend on this exact order). Spec §Archive JSON.
@@ -395,6 +405,22 @@ class StateAnchorPublisher {
         // which a send that never relayed is not coming back and holding the row costs
         // more than re-broadcasting it.
         this.anchorIntentTtlMs    = parseInt(process.env.ANCHOR_INTENT_TTL_MS || cfg.ANCHOR_INTENT_TTL_MS || '21600000');   // 6 h
+        // Retention window for the two durable anchor marker tables. Both appended one
+        // row per DOGE-spending broadcast and never removed one, so they grew for the
+        // life of the deployment while their oracle_published_rounds sibling was swept.
+        // Only CONFIRMED rows are pruned, and only past a floor derived from
+        // anchorIntentTtlMs; see _pruneAnchorMarkers for both invariants. 0 disables
+        // pruning; garbage or a negative value falls back to the default.
+        this.anchorMarkerRetentionMs = parseInt(process.env.ANCHOR_MARKER_RETENTION_MS ||
+                                                cfg.ANCHOR_MARKER_RETENTION_MS, 10);
+        if(!Number.isFinite(this.anchorMarkerRetentionMs) || this.anchorMarkerRetentionMs < 0)
+            this.anchorMarkerRetentionMs = DEFAULT_ANCHOR_MARKER_RETENTION_MS;
+        // Lifetime count of confirmed anchor marker rows the retention sweep deleted,
+        // and the in-flight sweep handle. The sweep is fire-and-forget on the flush
+        // path (retention must never stall an anchor), so the handle is what makes it
+        // awaitable in tests.
+        this.anchorMarkersPruned = 0;
+        this._retentionSweep     = null;
     }
 
     setBroadcastHook(fn){ this.broadcastFn = fn; }
@@ -415,6 +441,8 @@ class StateAnchorPublisher {
             anchorsAsBackup:    this._anchorsAsBackup,
             lastAnchorRank:     this._lastAnchorRank,
             archiveChunkLosses: this._archiveChunkLosses,
+            anchorMarkerRetentionMs: this.anchorMarkerRetentionMs,
+            anchorMarkersPruned:     this.anchorMarkersPruned,
             // Publisher-wallet runway: last-observed DOGE balance, its age, and the
             // low-balance threshold the publisher already warns at. dogeBalance is
             // null until the first flush reads it (or when no DOGE pipeline is set).
@@ -598,6 +626,11 @@ class StateAnchorPublisher {
 
             let anchored = await this._publishPendingCheckpoints(signer, btcBlock, failoverOnly);
             let archive  = await this._startArchiveRound(signer, btcBlock, failoverOnly);
+            // Bound the durable marker tables. Runs at the end of a flush that actually
+            // reached the publishing stage, so it never fires on a hub that is paused,
+            // out of balance or without a pipeline, and never before the intents this
+            // flush armed are settled.
+            this._sweepAnchorMarkerRetention();
             return { anchored: anchored, archive: archive };
         } catch(e){
             console.error('StateAnchorPublisher: flush failed:', e && e.message);
@@ -4262,13 +4295,90 @@ class StateAnchorPublisher {
         }
     }
 
+    // ----- Retention for the two anchor marker tables -----
+    //
+    // Both tables appended one row per DOGE-spending broadcast and removed one only on
+    // a definitive pre-send failure (_withdrawAnchorIntent / _withdrawArchiveIntent,
+    // both `sent_at IS NULL`), so a confirmed marker persisted for the life of the
+    // deployment while the oracle_published_rounds sibling was swept.
+    //
+    // Two invariants dominate these DELETEs, both load-bearing on a money-bearing path:
+    //
+    //   1. `sent_at IS NOT NULL` is mandatory. A sent_at NULL row that survived is the
+    //      AMBIGUOUS-send record: _publishPendingCheckpoints deliberately keeps the
+    //      intent when the failure could have reached the DOGE node (the `if(!(e &&
+    //      e.anchorAmbiguousSend))` guard), and the empty-txid path keeps it too. That
+    //      row is the only durable trace that DOGE may already have paid, so it is
+    //      retained forever regardless of age, exactly as the oracle sibling retains
+    //      its quarantine rows.
+    //   2. The cutoff never rises above `now - anchorIntentTtlMs`. This is the
+    //      re-presentability floor and it is exact rather than estimated, because the
+    //      TTL is the SAME quantity the read paths already measure. Every read of
+    //      either table goes through _anchorIntentHolds, which is false for any marker
+    //      whose intent_at is older than the TTL, so a row this DELETE can reach is one
+    //      that already changes no decision. anchor_published_archives is stricter
+    //      still: _getLiveArchiveIntent only ever selects `settled_at IS NULL`, so a
+    //      settled row is not read at all.
+    //
+    // The cutoff is measured on intent_at, not sent_at, because intent_at is the column
+    // _anchorIntentHolds measures and the one the floor is expressed in.
+    //
+    // Returns the total number of rows deleted across both tables. Throws on a DB
+    // error; the caller treats a retention failure as non-fatal.
+    async _pruneAnchorMarkers(){
+        if(!this.db) return 0;
+        if(!this.anchorMarkerRetentionMs || this.anchorMarkerRetentionMs <= 0) return 0;
+
+        // Invariant 2, as a hard clamp rather than a warning: an anchor marker pruned
+        // inside the hold window lets the next flush rebuild a second PSBT for a
+        // checkpoint DOGE may already have paid for.
+        let ttlFloorMs = (Number.isFinite(this.anchorIntentTtlMs) && this.anchorIntentTtlMs > 0)
+            ? this.anchorIntentTtlMs * ANCHOR_MARKER_RETENTION_TTL_SAFETY
+            : 0;
+        let windowSec = Math.ceil(Math.max(this.anchorMarkerRetentionMs, ttlFloorMs) / 1000);
+
+        // DB-clock arithmetic on both sides: intent_at is written by CURRENT_TIMESTAMP,
+        // so a Node-side cutoff would fold host/DB clock skew into the window.
+        let deleted = 0;
+        for(let table of ['anchor_published_checkpoints', 'anchor_published_archives']){
+            let res = await this.db.doQuery(
+                'DELETE FROM ' + table + ' WHERE sent_at IS NOT NULL ' +
+                'AND intent_at < DATE_SUB(NOW(), INTERVAL ? SECOND)',
+                [windowSec]);
+            deleted += (res && res.affectedRows) ? Number(res.affectedRows) : 0;
+        }
+        if(deleted > 0){
+            this.anchorMarkersPruned += deleted;
+            console.log('StateAnchorPublisher: anchor-marker retention pruned ' + deleted +
+                        ' confirmed marker row(s) older than ' + windowSec + 's (intent-only rows, which are ' +
+                        'the ambiguous-send record, are never pruned)');
+        }
+        return deleted;
+    }
+
+    // Housekeeping hook for the retention sweep. Fire-and-forget with the rejection
+    // swallowed: bounding the marker tables must never stall, fail or retry a flush
+    // that has already spent DOGE.
+    _sweepAnchorMarkerRetention(){
+        if(!this.db || !this.anchorMarkerRetentionMs) return;
+        this._retentionSweep = this._pruneAnchorMarkers()
+            .catch(e => {
+                console.warn('StateAnchorPublisher: anchor-marker retention sweep failed ' +
+                             '(the marker tables keep growing until it succeeds): ' + (e && e.message));
+                return 0;
+            });
+    }
+
     async _checkBalance(signer){
         let balance = null;
         try {
             if(signer.getBalanceFn) balance = await signer.getBalanceFn();
             else if(signer.encoder && this.dogeAddress){
+                // get_utxos reports satoshis; lowBalanceThreshold, the fail-closed
+                // flush gate and spendGuard.minBalance are all whole DOGE, so the
+                // sum converts. Units and fallback order: lib/utxo_balance.js.
                 let utxos = await signer.encoder.getUtxos(this.dogeAddress);
-                if(Array.isArray(utxos)) balance = utxos.reduce((t, u) => t + (parseFloat(u.value || u.amount || 0) || 0), 0);
+                if(Array.isArray(utxos)) balance = sumUtxosCoins(utxos);
             }
         } catch(e){ return null; }
         if(balance !== null){

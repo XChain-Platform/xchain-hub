@@ -630,10 +630,22 @@ class FullNodeChallengeRound {
             // Mirror the reload rule in-process, so a spend is gated identically
             // whether the log was read at start() or written this run.
             this._committedEpochs.add(epoch);
-            this._recordSpend({ phase: 'sent', epoch, challengeId: state.challengeId, txid: state.txid });
+            // Name the rank this verdict was broadcast at, in the durable spend record
+            // and in the log line. A failover verdict (leadRank > 0, the ladder in
+            // _tick promoting the next rank after each closeDepth of height with no
+            // verdict) is otherwise byte-identical to a healthy rank-0 verdict in every
+            // observable signal, so a dead elected leader stays invisible while the
+            // ladder absorbs its rounds. Same marker StateAnchorPublisher carries at
+            // its own anchor publish.
+            let leadRank = Number(state.leadRank) || 0;
+            this._recordSpend({ phase: 'sent', epoch, challengeId: state.challengeId, txid: state.txid, leadRank });
             this.peerManager && this.peerManager.broadcast(XNODE_DONE, { epoch, challengeId: state.challengeId, txid: state.txid });
             console.log('FullNodeChallengeRound: verdict broadcast epoch=' + epoch + ' pass=' + state.passList.length +
-                        ' sigs=' + state.sigs.size + '/' + quorum + (state.txid ? ' txid=' + state.txid : ''));
+                        ' sigs=' + state.sigs.size + '/' + quorum + (state.txid ? ' txid=' + state.txid : '') +
+                        (leadRank > 0
+                            ? ' [FAILOVER: broadcast at backup rank ' + leadRank + ' of ' + state.eligible.size +
+                              '; the rank-0 leader did not land a verdict for this epoch]'
+                            : ''));
         } catch(e){
             // Never blind-retry an AMBIGUOUS send. A timeout / reset / 5xx
             // after the request left the wire may mean the BTC node accepted the
@@ -847,9 +859,34 @@ class FullNodeChallengeRound {
     async _broadcastVerdict(wire){
         if(this.broadcastFn) return await this.broadcastFn(wire);
         if(this.encoder && this.walletSignFn && this.btcAddress){
-            let built = await this.encoder.createTx({ source: this.btcAddress, data: wire });
-            let psbt  = built && (built.psbt || built.psbtHex || built.hex);
-            let txHex = await this.walletSignFn(psbt);
+            // Same three-step encoder contract the sibling publishers use
+            // (AttestationPublisher / OraclePublisher / AttestationRelay /
+            // StateAnchorPublisher _defaultBroadcast): fetch UTXOs, then create_tx with
+            // {utxos, pubkey, data, change, encoding}. This path used to send
+            // {source, data}: `source` is not an encoder param at all (validateAll
+            // ignores it) and an absent pubkey is rejected up front with
+            // RangeError('pubkey is required') -> -32602, so the fallback threw before a
+            // PSBT was ever built and no NODEPROOF verdict could land on it.
+            let utxos = await this.encoder.getUtxos(this.btcAddress);
+            if(!utxos || (Array.isArray(utxos) && utxos.length === 0))
+                throw new Error('no UTXOs available for ' + this.btcAddress);
+            let built = await this.encoder.createTx({
+                utxos:    utxos,
+                // The encoder's P2SH path runs bitcoin.address.fromBase58Check() on this
+                // field, so it must be the base58check address, not the raw hex pubkey.
+                pubkey:   this.btcAddress,
+                data:     wire,
+                change:   this.btcAddress,
+                // A NODEPROOF verdict carries the pass list plus a pubkey+sig pair per
+                // co-signer, far past the 80-byte OP_RETURN limit.
+                encoding: 'P2SH'
+            });
+            // create_tx answers with `psbt` (plus `revealPsbt` for TAPROOT) and never
+            // psbtHex/hex, so the old alternates could only ever mask a missing PSBT by
+            // handing undefined to the wallet signer.
+            if(!built || !built.psbt) throw new Error('encoder returned no PSBT');
+            let txHex = await this.walletSignFn(built.psbt);
+            if(!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
             return await this.encoder.broadcastTx(txHex);
         }
         throw new Error('no broadcast pipeline (set broadcast hook, or encoder + wallet-sign + BTC_ADDRESS)');

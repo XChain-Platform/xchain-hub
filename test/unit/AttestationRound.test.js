@@ -60,6 +60,11 @@ function makeProviderRegistry(overrides) {
         // fixtures (whose snapshots carry no weight) selecting exactly as before on the
         // unweighted path, which is the only path they exercise.
         getMinStake: sinon.stub().returns('0'),
+        // Block-anchored PBFT strategy, resolved once at the request's block and pinned
+        // onto roundState. byte_equality keeps the existing fixtures on the path they
+        // already exercised; the anchoring itself is covered in ProviderRegistry.test.js
+        // and the fail-closed branch below.
+        getConsensusStrategy: sinon.stub().returns('byte_equality'),
         ...(overrides || {})
     };
 }
@@ -485,6 +490,56 @@ describe('AttestationRound', function () {
             let ar  = new AttestationRound(hub, reg);
             await ar._startRound(makeRequest({ redundancy: 2 }), 100);
             expect(ar.rounds.size).to.equal(1);
+        });
+    });
+
+    // The PBFT strategy selects which state machine AttestationConsensus runs for the
+    // round, so it is anchored at the request's block and pinned onto roundState rather
+    // than read live at each of the six decision sites: hotReload() re-parses every
+    // provider def from the local configs table on EVERY proposal:finalized event, so a
+    // live read could flip a hub's machine between two messages of one round.
+    describe('block-anchored consensus_strategy pin', function () {
+
+        const MY_PUBKEY = 'aa'.repeat(32);
+
+        function makeRequest(overrides) {
+            return {
+                request_id: 'rid-strategy', provider_id: 'http_get', redundancy: 1,
+                block_index: 4242, action_index: 1, payload: 'https://example.com/',
+                ...overrides
+            };
+        }
+        function makeStrategyHub() {
+            let capSS = { getSnapshot: sinon.stub().resolves({ validators: [{ pubkey: MY_PUBKEY }] }) };
+            let hub   = makeHub({ capabilitySnapshot: capSS });
+            hub.getIdentity = () => makeIdentity(MY_PUBKEY);
+            return hub;
+        }
+
+        it('_startRound resolves the strategy at the REQUEST block and pins it on roundState', async function () {
+            let reg = makeProviderRegistry({
+                getConsensusStrategy: sinon.stub().returns('judge_model'),
+                getModule: sinon.stub().returns({ fetch: sinon.stub().resolves({ body: Buffer.from('ok'), meta: '200' }) })
+            });
+            let ar = new AttestationRound(makeStrategyHub(), reg);
+            sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: MY_PUBKEY, hash: '00' }]);
+            await ar._startRound(makeRequest(), 4242);
+            expect(reg.getConsensusStrategy.calledWith('http_get', 4242)).to.be.true;
+            let rs = [...ar.rounds.values()][0];
+            expect(rs.pinnedConsensusStrategy).to.equal('judge_model');
+        });
+
+        it('_startRound skips the round, and the paid fetch, when the strategy is unanchorable', async function () {
+            let fetchStub = sinon.stub().resolves({ body: Buffer.from('ok'), meta: '200' });
+            let reg = makeProviderRegistry({
+                getConsensusStrategy: sinon.stub().returns(null),
+                getModule:            sinon.stub().returns({ fetch: fetchStub })
+            });
+            let ar = new AttestationRound(makeStrategyHub(), reg);
+            sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: MY_PUBKEY, hash: '00' }]);
+            await ar._startRound(makeRequest(), 4242);
+            expect(ar.rounds.size).to.equal(0);
+            expect(fetchStub.called, 'an unanchorable strategy must not trigger a paid fetch').to.be.false;
         });
     });
 

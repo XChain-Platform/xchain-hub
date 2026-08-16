@@ -58,6 +58,17 @@ class EncoderClient {
         //     re-broadcast. A 5xx may already have reached the coin node, so prefixing one
         //     would turn an ambiguous send into a retry and risk a double spend. 5xx
         //     messages therefore pass through untouched.
+        //
+        // Both branches also mirror the encoder's STRUCTURED error onto the thrown
+        // error as `rpcCode` and `rpcData`. create_tx and create_envelope_cancel_tx
+        // answer their operational failures (no UTXOs, insufficient funds, missing
+        // change address, tracker unavailable) with code -32010 and a stable
+        // machine-readable `data.reason`, and that field exists precisely so a caller
+        // can branch on the condition instead of matching substrings of a message that
+        // is free to be reworded. Attached ADDITIVELY (own properties on the same
+        // object, message and `response` untouched) so the classifier rules above are
+        // unaffected, and named `rpcData` rather than `data` so it can never be
+        // confused with an axios response body.
         let response;
         try {
             response = await axios.post(this.encoderUrl, body, { headers: headers, timeout: this.timeout });
@@ -66,10 +77,18 @@ class EncoderClient {
             if (rpcErr && Number(err.response.status) < 500) {
                 err.message = 'Encoder RPC error: ' + (rpcErr.message || JSON.stringify(rpcErr));
             }
+            if (rpcErr) {
+                err.rpcCode = rpcErr.code;
+                err.rpcData = rpcErr.data;
+            }
             throw err;
         }
         if (response.data && response.data.error) {
-            throw new Error('Encoder RPC error: ' + (response.data.error.message || JSON.stringify(response.data.error)));
+            let rpcErr = response.data.error;
+            let e = new Error('Encoder RPC error: ' + (rpcErr.message || JSON.stringify(rpcErr)));
+            e.rpcCode = rpcErr.code;
+            e.rpcData = rpcErr.data;
+            throw e;
         }
         return response.data ? response.data.result : null;
     }

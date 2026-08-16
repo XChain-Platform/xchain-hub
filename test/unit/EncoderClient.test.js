@@ -206,6 +206,52 @@ describe('EncoderClient', function () {
             try { await c._call('create_tx', {}); } catch (e) { caught = e; }
             expect(caught.message).to.equal('Request failed with status code 404');
         });
+
+        // create_tx reports its operational failures with code -32010 and a stable
+        // data.reason so a caller can branch on the condition rather than parse a
+        // message. Both failure branches must surface it, or which one the encoder
+        // happens to use decides whether the code exists.
+        it('mirrors the encoder code and data.reason on the 200-with-error-body branch', async function () {
+            axiosStub.post.resolves({ data: { error: {
+                code: -32010, message: 'insufficient funds',
+                data: { reason: 'INSUFFICIENT_FUNDS', required: 12345 }
+            } } });
+            let c = new EncoderClient('http://enc/rpc', '');
+            let caught = null;
+            try { await c._call('create_tx', {}); } catch (e) { caught = e; }
+            expect(caught.message).to.include('Encoder RPC error');
+            expect(caught.rpcCode).to.equal(-32010);
+            expect(caught.rpcData.reason).to.equal('INSUFFICIENT_FUNDS');
+            expect(caught.rpcData.required).to.equal(12345);
+        });
+
+        it('mirrors the encoder code and data.reason on the non-2xx branch, status intact', async function () {
+            axiosStub.post.rejects(httpError(400, { jsonrpc: '2.0', id: null, error: {
+                code: -32010, message: 'no change address', data: { reason: 'MISSING_CHANGE_ADDRESS' }
+            } }));
+            let c = new EncoderClient('http://enc/rpc', '');
+            let caught = null;
+            try { await c._call('create_tx', {}); } catch (e) { caught = e; }
+            expect(caught.rpcCode).to.equal(-32010);
+            expect(caught.rpcData.reason).to.equal('MISSING_CHANGE_ADDRESS');
+            // Same object still, so the retry classifier and the dead-letter record
+            // keep reading the HTTP status.
+            expect(caught.response.status).to.equal(400);
+        });
+
+        // The 5xx rule is what keeps an ambiguous send from being re-labelled
+        // retry-safe; attaching the structured fields must not disturb it.
+        it('a 5xx keeps its untouched message and its ambiguous classification', async function () {
+            axiosStub.post.rejects(httpError(503, { jsonrpc: '2.0', id: null, error: {
+                code: -32000, message: 'Server busy, retry shortly', data: { reason: 'TRACKER_UNAVAILABLE' }
+            } }));
+            let c = new EncoderClient('http://enc/rpc', '');
+            let caught = null;
+            try { await c._call('broadcast_tx', { tx_hex: 'ab' }); } catch (e) { caught = e; }
+            expect(caught.message).to.equal('Request failed with status code 503');
+            expect(caught.rpcData.reason).to.equal('TRACKER_UNAVAILABLE');
+            expect(isAmbiguousSendError(caught)).to.equal(true);
+        });
     });
 
     // ── getUtxos ─────────────────────────────────────────────────────────────

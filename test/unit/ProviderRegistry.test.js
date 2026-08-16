@@ -486,6 +486,104 @@ describe('ProviderRegistry', function () {
         });
     });
 
+    // consensus_strategy selects which PBFT state machine AttestationConsensus runs
+    // for a round (judge_model: leader-only agree() + follower PREPARE-adoption;
+    // byte_equality: every hub agrees + first-verified-PREPARE-wins). Read live off
+    // the hot-reloaded registry it was the one round-shaping field two hubs could
+    // disagree on mid-round, because hotReload() re-parses every provider def out of
+    // the local configs table on EVERY proposal:finalized event whatever the proposal
+    // was about. These pin the anchoring that closes that.
+    describe('getConsensusStrategy (block-anchored PBFT strategy)', function () {
+        it('resolves the DEFAULTS strategies from the genesis seed', function () {
+            let reg = new ProviderRegistry(makeHub());
+            reg._seedProviderConfigGenesis();
+            expect(reg.getConsensusStrategy('http_get', 500)).to.equal('byte_equality');
+            expect(reg.getConsensusStrategy('llm', 500)).to.equal('judge_model');
+        });
+
+        it('resolves the activation strategy at its block and later, genesis before', function () {
+            let reg = new ProviderRegistry(makeHub());
+            reg._seedProviderConfigGenesis();
+            reg.applyProviderConfigActivation('llm', 1000, { approved_models: ['x'] }, null, 'byte_equality');
+            expect(reg.getConsensusStrategy('llm', 999)).to.equal('judge_model');
+            expect(reg.getConsensusStrategy('llm', 1000)).to.equal('byte_equality');
+            expect(reg.getConsensusStrategy('llm', 999999)).to.equal('byte_equality');
+        });
+
+        it('keeps the previous strategy across an activation that only moves additional_config', function () {
+            let reg = new ProviderRegistry(makeHub());
+            reg._seedProviderConfigGenesis();
+            reg.applyProviderConfigActivation('llm', 1000, { approved_models: ['x'] }, null, 'byte_equality');
+            reg.applyProviderConfigActivation('llm', 2000, { approved_models: ['y'] });   // no strategy change
+            expect(reg.getConsensusStrategy('llm', 2000)).to.equal('byte_equality');
+        });
+
+        it('carries an unrecognised strategy verbatim rather than walking back to an older one', function () {
+            // A hub on older code must resolve the same UNKNOWN value every peer does and
+            // decline the round, not silently run the previous state machine while the
+            // rest of the federation runs the new one.
+            let reg = new ProviderRegistry(makeHub());
+            reg._seedProviderConfigGenesis();
+            reg.applyProviderConfigActivation('llm', 1000, {}, null, 'threshold_vote');
+            expect(reg.getConsensusStrategy('llm', 1000)).to.equal('threshold_vote');
+        });
+
+        it('genesis stays pinned to DEFAULTS even when the configs table flipped the live strategy', async function () {
+            // This is the exact divergence the anchoring exists for: an operator (or a
+            // governance hotReload of an unrelated proposal) re-parses the configs table
+            // into the live def, and a restarted hub would otherwise disagree with a
+            // long-running one about which state machine a historical block runs.
+            let db = {
+                getConfig: sinon.stub().resolves({
+                    llm: JSON.stringify({ provider_id: 'llm', consensus_strategy: 'byte_equality' })
+                }),
+                doQuery: sinon.stub().resolves([])
+            };
+            let reg = new ProviderRegistry(makeHub({ db }));
+            await reg.load();
+            await reg.loadGovernanceHistory();
+            expect(reg.getDef('llm').consensus_strategy).to.equal('byte_equality');
+            expect(reg.getConsensusStrategy('llm', 500)).to.equal('judge_model');
+        });
+
+        it('anchors a full-def governance strategy change at its activation block', async function () {
+            let db = {
+                getConfig: sinon.stub().resolves({}),
+                doQuery:   sinon.stub().resolves([
+                    { parameter: 'ATTESTATION_PROVIDER:llm', activation_block: 7000,
+                      proposed_value: JSON.stringify({ provider_id: 'llm', consensus_strategy: 'byte_equality' }) }
+                ])
+            };
+            let reg = new ProviderRegistry(makeHub({ db }));
+            await reg.loadGovernanceHistory();
+            expect(reg.getConsensusStrategy('llm', 6999)).to.equal('judge_model');
+            expect(reg.getConsensusStrategy('llm', 7000)).to.equal('byte_equality');
+        });
+
+        it('falls back to the live definition when no history exists', function () {
+            let reg = new ProviderRegistry(makeHub());
+            // No _seedProviderConfigGenesis call: history is empty. No worse than the
+            // pre-anchoring behaviour, which read live unconditionally.
+            expect(reg.getConsensusStrategy('llm', 100)).to.equal('judge_model');
+        });
+
+        it('returns null for a provider with no strategy anywhere, so a caller can fail closed', function () {
+            let reg = new ProviderRegistry(makeHub());
+            reg.providers.set('strategyless', { provider_id: 'strategyless' });
+            expect(reg.getConsensusStrategy('strategyless', 100)).to.equal(null);
+            expect(reg.getConsensusStrategy('nonexistent', 100)).to.equal(null);
+        });
+
+        it('re-seeding genesis does not wipe a later activation strategy', function () {
+            let reg = new ProviderRegistry(makeHub());
+            reg._seedProviderConfigGenesis();
+            reg.applyProviderConfigActivation('llm', 1000, {}, null, 'byte_equality');
+            reg._seedProviderConfigGenesis();
+            expect(reg.getConsensusStrategy('llm', 999)).to.equal('judge_model');
+            expect(reg.getConsensusStrategy('llm', 1000)).to.equal('byte_equality');
+        });
+    });
+
     describe('loadGovernanceHistory', function () {
         it('anchors a full-def proposal floor at its activation block', async function () {
             let db = {

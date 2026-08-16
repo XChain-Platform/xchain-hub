@@ -2631,6 +2631,25 @@ describe('StateAnchorPublisher getAnchorStats balance', function () {
         await pub._checkBalance({ getBalanceFn: async () => { throw new Error('node down'); } });
         expect(pub.getAnchorStats().dogeBalance).to.equal(5);   // not clobbered to null
     });
+    // The encoder branch reports get_utxos `value` in satoshis, while
+    // lowBalanceThreshold, spendGuard.minBalance and the monitor's dogeBalance
+    // alert are all whole DOGE, so the sum has to convert.
+    it('sums encoder UTXOs into DOGE, not satoshis', async function () {
+        let pub = newPub({ DOGE_LOW_BALANCE_THRESHOLD: '10' });
+        let signer = { encoder: { getUtxos: async () => [
+            { value: '500000000', amount: '5.00000000' },
+            { value: '350000000', amount: '3.50000000' }
+        ] } };
+        let bal = await pub._checkBalance(signer);
+        expect(bal).to.equal(8.5);
+        expect(bal).to.be.below(pub.lowBalanceThreshold);   // 8.5 DOGE is low; 8.5e8 never was
+        expect(pub.getAnchorStats().dogeBalance).to.equal(8.5);
+    });
+    it('converts an encoder UTXO carrying only the satoshi value field', async function () {
+        let pub = newPub();
+        let signer = { encoder: { getUtxos: async () => [{ value: '1500000000' }] } };
+        expect(await pub._checkBalance(signer)).to.equal(15);
+    });
 });
 
 describe('StateAnchorPublisher: capability-snapshot archive sort is a spec-stable total order', function () {

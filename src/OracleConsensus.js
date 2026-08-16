@@ -1083,8 +1083,15 @@ class OracleConsensus extends EventEmitter {
                     // publishes a 2-source pair the follower then withholds the whole round
                     // over, with no durable record. CONSENSUS-CRITICAL: deploy fleet-wide
                     // atomically.
-                    let deviation = devband.deviationFrom(local, p.price, 18);
-                    if (bcmath.bcgt(deviation, String(devThreshold))) {
+                    // Branch on the shared exceedsBand() comparator, not a locally
+                    // written bcgt: the band boundary (strict >, and the threshold's
+                    // string coercion) is then one definition shared with the slash
+                    // gate, so it cannot be edited on one side of the accept/slash pair
+                    // and not the other. deviation is recomputed inside the branch for
+                    // the pct/metadata only, which keeps the co-sign path at exactly one
+                    // computation and costs a second bcdiv solely on a reject.
+                    if (devband.exceedsBand(local, p.price, devThreshold, 18)) {
+                        let deviation = devband.deviationFrom(local, p.price, 18);
                         let pct = bcmath.bcformat(bcmath.bcmul(deviation, '100', 4), 4);
                         reject(p.coinPair, 'proposed ' + p.price + ' deviates ' + pct +
                             '% from local ' + local + ' (> ' + (devThreshold * 100) + '%)',

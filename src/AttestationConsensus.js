@@ -526,6 +526,14 @@ class AttestationConsensus extends EventEmitter {
             // governance delisting of the pinned model froze the round at
             // no_quorum forever, since every retry re-pinned the same model.
             pinnedApprovedModels: roundState.pinnedApprovedModels || null,
+            // Block-anchored PBFT strategy for this round. Every consensus_strategy
+            // decision below reads THIS and never providerRegistry.getDef(): the registry
+            // is re-parsed from the local configs table on every proposal:finalized
+            // hotReload, so a live read could flip this hub's state machine between two
+            // messages of one round, and two hubs whose reloads raced could run different
+            // machines against the same request. AttestationRound resolves it once at the
+            // request's own block and fails the round closed when it cannot.
+            pinnedConsensusStrategy: roundState.pinnedConsensusStrategy || null,
             finalized:    false,
             timer:        null
         };
@@ -715,8 +723,7 @@ class AttestationConsensus extends EventEmitter {
         // expiry rather than finalizing divergent bodies. byte_equality stays
         // deterministic (the agreed body is the common one) so every hub resolves
         // locally as before.
-        let agreeDef = this.providerRegistry.getDef(pending.providerId);
-        if(agreeDef && agreeDef.consensus_strategy === 'judge_model'
+        if(pending.pinnedConsensusStrategy === 'judge_model'
            && pending.leaderPubkey && pending.myPubkey
            && String(pending.leaderPubkey).toLowerCase() !== String(pending.myPubkey).toLowerCase()){
             return;
@@ -769,8 +776,7 @@ class AttestationConsensus extends EventEmitter {
         // non-match doesn't imply wrong.
         let winnerHash = crypto.createHash('sha256').update(winner.body).digest();
         let winnerHashHex = winnerHash.toString('hex');
-        let providerDef = this.providerRegistry.getDef(pending.providerId);
-        let strategy = providerDef && providerDef.consensus_strategy;
+        let strategy = pending.pinnedConsensusStrategy;
         // The canonical the on-chain verifier reconstructs binds `status` (hardcoded
         // 'ok' for a winner), but a proposal stores only {body, meta, sig} and its sig
         // was verified in _handlePropose over the sender's own wire status. A proposer
@@ -1019,8 +1025,7 @@ class AttestationConsensus extends EventEmitter {
             // is deliberately exempt: only the leader runs the judge, so a follower
             // genuinely cannot re-derive the verdict (the seam note below), and its
             // adoption stays participation-gated by the co-sign policy.
-            let nonOkDef = this.providerRegistry.getDef(pending.providerId);
-            if(status === 'no_quorum' && nonOkDef && nonOkDef.consensus_strategy === 'byte_equality'){
+            if(status === 'no_quorum' && pending.pinnedConsensusStrategy === 'byte_equality'){
                 let needNq = Math.min(pending.redundancy, pending.responsible.length);
                 if(pending.proposals.size < needNq){
                     this._bufferEarlyMessage(rid, envelope);
@@ -1097,8 +1102,7 @@ class AttestationConsensus extends EventEmitter {
             // established" path below and verifies over the canonical winner) or the
             // round expires. byte_equality is deterministic (independently-fetched
             // identical bodies) and stays first-verified-PREPARE-wins.
-            let providerDef = this.providerRegistry.getDef(pending.providerId);
-            if(providerDef && providerDef.consensus_strategy === 'judge_model' && pending.leaderPubkey &&
+            if(pending.pinnedConsensusStrategy === 'judge_model' && pending.leaderPubkey &&
                senderPubkey !== String(pending.leaderPubkey).toLowerCase()){
                 this._bufferEarlyMessage(rid, envelope);
                 return;
@@ -1119,7 +1123,7 @@ class AttestationConsensus extends EventEmitter {
                 return;
             }
             let prepBodyHash = crypto.createHash('sha256').update(body).digest('hex');
-            if(providerDef && providerDef.consensus_strategy === 'judge_model'){
+            if(pending.pinnedConsensusStrategy === 'judge_model'){
                 // A-F1: the leader's signature proves authorship, not honesty. agree()
                 // only ever SELECTS one of the collected proposals, so an honest
                 // leader's winner must hash-match a proposal this follower collected
@@ -1198,8 +1202,7 @@ class AttestationConsensus extends EventEmitter {
             // Sign our own copy if we agreed (we might have proposed the same body)
             let myProposal = pending.proposals.get(pending.myPubkey);
             if(myProposal){
-                let providerDef = this.providerRegistry.getDef(pending.providerId);
-                let strategy    = providerDef && providerDef.consensus_strategy;
+                let strategy    = pending.pinnedConsensusStrategy;
                 if(strategy === 'judge_model'){
                     // Liveness guard (item 5314): a follower re-signs the leader's
                     // chosen body only after verifying the leader's Ed25519 sig, so it

@@ -88,7 +88,7 @@ export TEST_DB_USER="${TEST_DB_USER:-${CI_DB_USER:-root}}"
 export TEST_DB_PASS="${TEST_DB_PASS:-${CI_DB_PASS:-}}"
 export TEST_DB_NAME="${TEST_DB_NAME:-${CI_DB_NAME:-xchain_hub_test}}"
 
-need_sib xchain-documentation xchain-explorer xchain-indexer xchain-sdk xchain-wallet xchain-vm
+need_sib xchain-documentation xchain-explorer xchain-indexer xchain-sdk xchain-wallet xchain-vm xchain-decoder
 
 # --- job: ci (XChain-Platform/.github ci-reusable.yml -> npm run ci) -------
 run_tier "ci" npm run ci

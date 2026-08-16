@@ -181,4 +181,160 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
             expect(sqlHits(db, 'DELETE FROM anchor_published_checkpoints')).to.have.length(0);
         });
     });
+
+    // ── marker-table retention (#4869) ────────────────────────────────────────
+    // Both marker tables appended one row per DOGE-spending broadcast and removed
+    // one only on a definitive pre-send failure, so a confirmed marker persisted for
+    // the life of the deployment while the oracle_published_rounds sibling was swept.
+    // Two invariants: only CONFIRMED rows are ever deleted (a surviving sent_at NULL
+    // row is the AMBIGUOUS-send record, the only durable trace that DOGE may already
+    // have paid), and the cutoff can never reach inside the anchorIntentTtlMs hold
+    // window, which is the exact quantity every read path already measures.
+    describe('marker-table retention (#4869)', function () {
+
+        // A db double that records statements and reports a fixed delete count. The
+        // assertions are about the STATEMENT the sweep issues, since the invariants
+        // are its predicates, not about a re-implementation of MariaDB.
+        function mkRetentionDb(affected, failOnDelete){
+            const seen = [];
+            return {
+                seen: seen,
+                async doQuery(sql, params){
+                    seen.push({ sql: sql, params: params });
+                    if(/^\s*DELETE/i.test(sql)){
+                        if(failOnDelete) throw new Error('ER_LOCK_WAIT_TIMEOUT');
+                        return { affectedRows: affected === undefined ? 0 : affected };
+                    }
+                    return [];
+                }
+            };
+        }
+
+        const dels = (db) => db.seen.filter(q => /^\s*DELETE/i.test(q.sql));
+
+        afterEach(function(){ delete process.env.ANCHOR_MARKER_RETENTION_MS; });
+
+        it('defaults to a ~90-day window and honours p2pConfig, the env var, and 0 as "off"', function () {
+            expect(mkPub(mkDb()).anchorMarkerRetentionMs).to.equal(7776000000);
+
+            const cfg = new StateAnchorPublisher({ db: mkDb(), p2pConfig: { ANCHOR_MARKER_RETENTION_MS: '900000' } });
+            expect(cfg.anchorMarkerRetentionMs).to.equal(900000);
+
+            process.env.ANCHOR_MARKER_RETENTION_MS = '111000';
+            const env = new StateAnchorPublisher({ db: mkDb(), p2pConfig: { ANCHOR_MARKER_RETENTION_MS: '900000' } });
+            expect(env.anchorMarkerRetentionMs, 'the env var wins over p2pConfig').to.equal(111000);
+            delete process.env.ANCHOR_MARKER_RETENTION_MS;
+
+            const off = new StateAnchorPublisher({ db: mkDb(), p2pConfig: { ANCHOR_MARKER_RETENTION_MS: '0' } });
+            expect(off.anchorMarkerRetentionMs).to.equal(0);
+
+            for(const bad of ['abc', '-5', '']){
+                const p = new StateAnchorPublisher({ db: mkDb(), p2pConfig: { ANCHOR_MARKER_RETENTION_MS: bad } });
+                expect(p.anchorMarkerRetentionMs, 'input ' + JSON.stringify(bad)).to.equal(7776000000);
+            }
+        });
+
+        it('sweeps BOTH tables with the sent_at IS NOT NULL filter on the intent_at column', async function () {
+            const db  = mkRetentionDb(3);
+            const pub = mkPub(db);
+            pub.anchorMarkerRetentionMs = 7776000000;
+            pub.anchorIntentTtlMs       = 21600000;
+
+            expect(await pub._pruneAnchorMarkers()).to.equal(6);
+
+            const d = dels(db);
+            expect(d.length, 'both marker tables must be swept').to.equal(2);
+            expect(d[0].sql).to.match(/FROM anchor_published_checkpoints/);
+            expect(d[1].sql).to.match(/FROM anchor_published_archives/);
+            for(const q of d){
+                expect(q.sql, 'the ambiguous-send record must never be deleted')
+                    .to.match(/sent_at IS NOT NULL/);
+                expect(q.sql, 'intent_at is the column _anchorIntentHolds measures')
+                    .to.match(/intent_at < DATE_SUB\(NOW\(\), INTERVAL \? SECOND\)/);
+                expect(q.params[0]).to.equal(7776000);
+            }
+            expect(pub.anchorMarkersPruned).to.equal(6);
+        });
+
+        it('clamps the cutoff below the anchorIntentTtlMs hold window, which is the re-presentability floor', async function () {
+            // A one-minute window would delete a marker that _anchorIntentHolds still
+            // answers true for, and the next flush would rebuild a second PSBT for a
+            // checkpoint DOGE may already have paid for. The TTL floors it instead.
+            const db  = mkRetentionDb(0);
+            const pub = mkPub(db);
+            pub.anchorMarkerRetentionMs = 60000;
+            pub.anchorIntentTtlMs       = 21600000;   // 6 h
+
+            await pub._pruneAnchorMarkers();
+
+            const floorSec = (21600000 * 8) / 1000;
+            expect(dels(db)[0].params[0]).to.equal(floorSec);
+            expect(floorSec * 1000, 'the cutoff sits strictly outside the hold window')
+                .to.be.greaterThan(pub.anchorIntentTtlMs);
+
+            // Widening the TTL widens the floor with it.
+            const db2  = mkRetentionDb(0);
+            const pub2 = mkPub(db2);
+            pub2.anchorMarkerRetentionMs = 60000;
+            pub2.anchorIntentTtlMs       = 43200000;   // 12 h
+            await pub2._pruneAnchorMarkers();
+            expect(dels(db2)[0].params[0]).to.equal((43200000 * 8) / 1000);
+        });
+
+        it('issues no DELETE when retention is off or no DB is wired', async function () {
+            const dbOff = mkRetentionDb(1);
+            const off   = mkPub(dbOff);
+            off.anchorMarkerRetentionMs = 0;
+            expect(await off._pruneAnchorMarkers()).to.equal(0);
+            expect(dels(dbOff).length).to.equal(0);
+
+            const noDb = mkPub(mkRetentionDb(1));
+            noDb.db = null;
+            expect(await noDb._pruneAnchorMarkers()).to.equal(0);
+        });
+
+        it('runs the sweep at the end of a flush that reached the publishing stage', async function () {
+            const db  = mkRetentionDb(1);
+            const pub = mkPub(db);
+            pub._drainDeferredV0Done       = async () => {};
+            pub._drainDeferredFinalized    = async () => {};
+            pub._drainDeferredRewardAttest = async () => {};
+            pub._publishPendingCheckpoints = async () => [];
+            pub._startArchiveRound         = async () => 'none';
+            pub.broadcastFn                = async () => ({ txid: 'x' });
+
+            await pub.flush();
+            await pub._retentionSweep;
+
+            expect(dels(db).length).to.equal(2);
+            expect(pub.anchorMarkersPruned).to.equal(2);
+        });
+
+        it('never lets a retention failure fail a flush that already spent DOGE', async function () {
+            const db  = mkRetentionDb(0, true);   // every DELETE throws
+            const pub = mkPub(db);
+            pub._drainDeferredV0Done       = async () => {};
+            pub._drainDeferredFinalized    = async () => {};
+            pub._drainDeferredRewardAttest = async () => {};
+            pub._publishPendingCheckpoints = async () => [{ chain: 'BTC', txid: 'paid' }];
+            pub._startArchiveRound         = async () => 'none';
+            pub.broadcastFn                = async () => ({ txid: 'x' });
+
+            const res = await pub.flush();
+            await pub._retentionSweep;            // the rejection is swallowed inside
+
+            expect(res.error, 'a housekeeping failure must never be reported as a flush error').to.equal(undefined);
+            expect(res.anchored).to.have.length(1);
+            expect(pub.anchorMarkersPruned).to.equal(0);
+        });
+
+        it('surfaces the window and the lifetime prune count through getAnchorStats()', function () {
+            const pub = mkPub(mkDb());
+            pub.anchorMarkerRetentionMs = 250000;
+            pub.anchorMarkersPruned     = 9;
+            const stats = pub.getAnchorStats();
+            expect(stats.anchorMarkerRetentionMs).to.equal(250000);
+            expect(stats.anchorMarkersPruned).to.equal(9);
+        });
+    });
 });
