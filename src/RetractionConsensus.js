@@ -362,25 +362,73 @@ class RetractionConsensus {
         await this._finalize(evt, canonical, id, sigs, false);
     }
 
+    // Mirrors verify against the capability_snapshots rows at snapshot_block,
+    // streamed on the SAME ordered socket BEFORE the deletion event, so a
+    // live subscriber always holds the set it needs (same contract as the
+    // engines' _persistCapabilitySnapshot before a signed row insert).
+    //
+    // FAIL CLOSED, in lockstep with CrossChainCallEngine._writeFinalizedRow and
+    // CrossChainDexEngine._writeFinalizedMatch: that persist is a PRECONDITION of the
+    // signed deletion, not a best-effort side-write. A swallowed DB throw, or a silent
+    // ZERO-row persist (the validator set degrades to [] on an indexer RPC error /
+    // 401-403, so the INSERT loop never runs, never throws, never warns, and the
+    // truncated guard returns without writing), streams a co-signed deletion that no
+    // mirror can verify: past the retraction gate the mirror refuses it, so the retracted
+    // rows stay live in every indexer while this hub logs a finalized retraction and
+    // retires the round id forever. Deferring is strictly better - the round id is
+    // released, so the next delivery of the same retraction (a peer's XRETRACT_FINALIZED,
+    // or our own indexer re-pushing the reorg through submitLocal) re-runs it cleanly.
+    //
+    // _rememberFinalized still runs FIRST: it is the reentrancy guard that keeps a
+    // duplicate FINALIZED arriving mid-await from streaming the same deletion twice.
+    // forgetFinalized on the error paths is what makes that ordering safe.
+    // Returns true when the signed deletion was actually streamed.
     async _finalize(evt, canonical, id, sigs, isInitiator){
         this._rememberFinalized(id);
-        // Mirrors verify against the capability_snapshots rows at snapshot_block,
-        // streamed on the SAME ordered socket BEFORE the deletion event, so a
-        // live subscriber always holds the set it needs (same contract as the
-        // engines' _persistCapabilitySnapshot before a signed row insert).
-        try { await this._persistCapabilitySnapshot('cross_chain', evt.snapshot_block); }
-        catch(e){ console.error('RetractionConsensus: snapshot persist error: ' + (e && e.message)); }
+        let label = evt.table + ' ' + evt.source_chain + '>=' + evt.from_action_index +
+                    ' (snapshot ' + evt.snapshot_block + ')';
+        let persistedRows = 0;
+        try {
+            persistedRows = await this._persistCapabilitySnapshot('cross_chain', evt.snapshot_block);
+        } catch(e){
+            console.error('RetractionConsensus: snapshot persist on finalize FAILED (fail-closed; deferring ' +
+                          'signed retraction ' + label + ', nothing streamed): ' + (e && e.message));
+            this.forgetFinalized(id);
+            return false;
+        }
+        if(!persistedRows){
+            console.error('RetractionConsensus: snapshot persist wrote ZERO capability rows for snapshot_block ' +
+                          evt.snapshot_block + ' (degraded/empty/truncated validator set; fail-closed, deferring ' +
+                          'signed retraction ' + label + ', nothing streamed)');
+            this.forgetFinalized(id);
+            return false;
+        }
         if(this.broadcaster)
             this.broadcaster.broadcastDeletion(Object.assign({}, evt, { retraction_signatures: sigs }));
         console.log('RetractionConsensus: ' + (isInitiator ? 'finalized' : 'adopted') + ' signed retraction ' +
                     evt.table + ' ' + evt.source_chain + '>=' + evt.from_action_index +
                     ' (' + sigs.length + ' sigs, snapshot ' + evt.snapshot_block + ')');
+        return true;
+    }
+
+    // Release a round whose fail-closed precondition refused the stream, so a later
+    // delivery of the same retraction can re-run it instead of being deduped away by
+    // the finalized ring. Symmetric with Consensus.forgetFinalized, which the engines
+    // already call from their reorg-retract paths.
+    forgetFinalized(id){
+        this.finalized.delete(id);
     }
 
     // Persist + mirror the qualifying validator set (same contract as
     // CrossChainCallEngine._persistCapabilitySnapshot).
+    // Returns the number of capability rows resolved (and persisted) for this
+    // (capability, block). A return of 0 means there was no DB mirror to write to,
+    // the set degraded to empty (an indexer RPC error / auth mismatch surfaces as a
+    // null snapshot, which _resolveCapabilityValidators normalizes to []), or the set
+    // was refused as truncated - so _finalize can fail closed rather than streaming a
+    // signed deletion whose signatures no mirror can verify.
     async _persistCapabilitySnapshot(capability, block){
-        if(!this.db) return;
+        if(!this.db) return 0;
         let validators = await this._resolveCapabilityValidators(capability, block, this.network);
         // SWQ-TRUNC-MIRROR: a TRUNCATED set is never mirrored, for the reason
         // spelled out in CrossChainDexEngine._persistCapabilitySnapshot. The retraction
@@ -394,7 +442,7 @@ class RetractionConsensus {
             console.warn('RetractionConsensus: refusing to persist a TRUNCATED ' + capability +
                          ' capability snapshot at block ' + block +
                          ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
-            return;
+            return 0;
         }
         for(let v of validators){
             let pubkey = String(v.pubkey).toLowerCase();
@@ -410,6 +458,7 @@ class RetractionConsensus {
                 if(r.length) this.broadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
             }
         }
+        return validators.length;
     }
 
     // Source-keyed at/above STAKE_WEIGHTED_QUORUM activation, legacy count set
