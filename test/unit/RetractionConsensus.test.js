@@ -273,9 +273,9 @@ describe('RetractionConsensus (signed retractions) @regression @tier1', function
         rc.stop();
     });
 
-    // Fail-closed finalize (XC-1544). The capability-snapshot persist is a PRECONDITION
+    // Fail-closed finalize. The capability-snapshot persist is a PRECONDITION
     // of the signed deletion: mirrors verify the co-signatures against those rows, so a
-    // swallowed DB throw or a silent zero-row persist used to stream a deletion no mirror
+    // swallowed DB throw or a silent zero-row persist would stream a deletion no mirror
     // can verify AND retire the round id forever, stranding the retracted rows live in
     // every indexer. Every failure path must stream nothing and RELEASE the round id.
     it('fail-closed: a THROWING capability persist defers the signed retraction and releases the round', async function () {

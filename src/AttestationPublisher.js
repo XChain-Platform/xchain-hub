@@ -346,7 +346,7 @@ class AttestationPublisher {
         // but wrong timing means multiple followers can step in early or the true
         // rank-1 late.
         let redundancy   = Math.max(1, Number(event.request && event.request.redundancy) || 1);
-        // Provider id for the block-anchored stake floor (XC-083). The event carries it
+        // Provider id for the block-anchored stake floor. The event carries it
         // directly; the request row is the fallback for an event shaped by an older
         // publisher. Absent on both, _computeResponsible fails closed on the weighted
         // path rather than rank against a set the other two copies do not agree with.
@@ -892,7 +892,7 @@ class AttestationPublisher {
     // including the caller's Math.max(1, Number(redundancy) || 1) normalization.
     // A silent change to any one copy is a fork surface; update all three together.
     //
-    // PROVIDER STAKE FLOOR (XC-083, weighted only): sources below the request
+    // PROVIDER STAKE FLOOR (weighted only): sources below the request
     // provider's block-anchored min_stake_xchain are dropped before the ranking, the
     // same filter AttestationRound._computeResponsibleSet applies. This ordering only
     // drives failover step-in timing, but ranking against a set the other copies do

@@ -1158,14 +1158,14 @@ describe('OraclePublisher', function () {
         });
     });
 
-    // ── oracle_published_rounds retention (XC-1364) ────────────────────────────
+    // ── oracle_published_rounds retention ────────────────────────────
     // The durable marker table gained one row per published round and never lost
     // one, so a money-bearing broadcast path grew a table without bound. Retention
     // may only ever touch CONFIRMED rows: a sent_at NULL row is the quarantine
     // marker for a round whose on-chain state is unknown and which an operator
     // reconciles by hand, and no round still on the publish queue may be pruned
     // (the marker is what stops a restart re-broadcasting it).
-    describe('oracle_published_rounds retention (XC-1364)', function () {
+    describe('oracle_published_rounds retention', function () {
 
         const ENV_KEY = 'ORACLE_PUBLISHED_ROUNDS_RETENTION_ROUNDS';
 

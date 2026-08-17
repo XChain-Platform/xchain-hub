@@ -376,7 +376,7 @@ class AttestationRound {
             return;
         }
 
-        // PROVIDER STAKE FLOOR (XC-083). A HIGHER, per-provider bar on top of the
+        // PROVIDER STAKE FLOOR. A HIGHER, per-provider bar on top of the
         // capability MIN_STAKE the snapshot was already built at: serving an `llm`
         // attestation costs more stake than serving an `http_get` one. Resolved from
         // the BLOCK-ANCHORED provider history at the request's own block, for the same
@@ -629,7 +629,7 @@ class AttestationRound {
     // test/unit/actions/attest-responsible-set-vectors.test.js. Add a vector there when
     // you change the rule, or the copies can drift in a direction every suite calls green.
     //
-    // PROVIDER STAKE FLOOR (XC-083, weighted only): `minStake` is the request
+    // PROVIDER STAKE FLOOR (weighted only): `minStake` is the request
     // provider's block-anchored min_stake_xchain. Sources whose aggregate weight is
     // below it are dropped BEFORE the ranking, so the freed slot goes to the next
     // qualifying validator rather than shrinking the set. Only the weighted snapshot

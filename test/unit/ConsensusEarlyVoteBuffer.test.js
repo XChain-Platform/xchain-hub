@@ -23,12 +23,6 @@
 // to back, and a follower that loses that race never applies the config the
 // federation just finalized. Nothing retries: the leader has already resolved,
 // and the remaining small COMMITs cannot carry the threshold between them.
-//
-// Measured 2026-08-14 (XC-1471) on a loaded venue against a live 4-hub weighted
-// federation: the round applied on the leader and on none of the three
-// followers, each of which logged the leader's COMMIT arriving before its own
-// proposal existed. Reproduced 2 runs in 3 under CPU load; unreproducible on an
-// idle host, which is what made it read as gate flakiness for a fortnight.
 
 const sinon      = require('sinon');
 const { expect } = require('chai');
@@ -171,7 +165,7 @@ describe('Consensus: early-arrival vote buffer (config-change PBFT)', function (
     describe('replay once the round opens', function () {
 
         it('applies the config from a whale COMMIT that beat the PRE_PREPARE', async function () {
-            // The XC-1471 race, in order: the leader's COMMIT lands while this
+            // The whale-COMMIT race, in order: the leader's COMMIT lands while this
             // hub is still locking its snapshot.
             consensus._handleCommit(voteEnvelope('PBFT_COMMIT', WHALE, digest));
             expect(consensus.earlyVotes.get(SEQ)).to.have.length(1);

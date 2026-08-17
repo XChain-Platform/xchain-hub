@@ -56,7 +56,7 @@ function makeProviderRegistry(overrides) {
         getModule: sinon.stub().returns({ fetch: sinon.stub().resolves({ body: 'data', meta: '200' }) }),
         getDef:    sinon.stub().returns({ max_response_bytes: 32768 }),
         getAdditionalConfig: sinon.stub().returns({ approved_models: ['claude-sonnet-4-6'], judge_model: 'claude-haiku-4-5' }),
-        // Block-anchored provider stake floor (XC-083). '0' keeps the pre-existing
+        // Block-anchored provider stake floor. '0' keeps the pre-existing
         // fixtures (whose snapshots carry no weight) selecting exactly as before on the
         // unweighted path, which is the only path they exercise.
         getMinStake: sinon.stub().returns('0'),
@@ -378,14 +378,14 @@ describe('AttestationRound', function () {
         });
     });
 
-    // ── provider stake floor (XC-083) ───────────────────────────────────────
+    // ── provider stake floor ───────────────────────────────────────
     // The canonical vectors above cover the SELECTION rule, but they skip wholesale
     // when the sibling xchain-documentation checkout is absent. These pin the same
     // behaviour locally, plus the two things the vectors cannot express: that
     // _startRound resolves the floor from the BLOCK-ANCHORED registry at the request's
     // own block, and that it refuses the round (before the paid provider fetch) when
     // the floor cannot be resolved.
-    describe('provider stake floor on the weighted path (XC-083)', function () {
+    describe('provider stake floor on the weighted path', function () {
 
         function weightedValidators() {
             return [

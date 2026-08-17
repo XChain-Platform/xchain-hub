@@ -677,7 +677,7 @@ describe('ProviderRegistry', function () {
         });
     });
 
-    // ── cross-repo genesis-floor parity (XC-083) ─────────────────────────────
+    // ── cross-repo genesis-floor parity ─────────────────────────────
     // min_stake_xchain became consensus input when the responsible-set derivation
     // started dropping below-floor sources at/above STAKE_WEIGHTED_QUORUM. The
     // indexer resolves the same value from its OWN shipped copy
@@ -690,7 +690,7 @@ describe('ProviderRegistry', function () {
     // registry) and the indexer mirrors it; same direction as the oracle-band and
     // xcall-constant cross-repo gates. Sibling policy matches them too: a missing
     // checkout skips, and XCHAIN_REQUIRE_SIBLINGS=1 forbids the green-by-skip.
-    describe('provider stake floors agree with the indexer mirror (XC-083)', function () {
+    describe('provider stake floors agree with the indexer mirror', function () {
         const fs   = require('fs');
         const path = require('path');
 

@@ -759,7 +759,7 @@ describe('AttestationPublisher: _computeResponsible', function () {
         expect(result.length).to.equal(1);
     });
 
-    // ---- provider stake floor (XC-083) --------------------------------------
+    // ---- provider stake floor --------------------------------------
     // This ordering only drives failover step-in timing, but ranking against a set
     // AttestationRound and the indexer do not agree with means followers step in
     // early or the true rank-1 steps in late. So the third copy applies the floor too.
