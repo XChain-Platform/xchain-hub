@@ -436,6 +436,18 @@ class ProviderRegistry {
                 try { mod._setConfig(this.providers.get(providerId)); }
                 catch (e) { console.warn('ProviderRegistry: _setConfig failed for ' + providerId, e); }
             }
+            // Sibling hook for a provider that spends real money OFF-chain (llm bills the
+            // operator's own vendor account rather than broadcasting a fee). Hands it this
+            // hub's config, and persists its rolling budget across restarts only for a
+            // real validator hub - a peerManager is the same "this hub actually serves
+            // rounds" test startAttestation() gates on, and it keeps a registry built by a
+            // unit test from leaving a spend window in the checkout for the next run.
+            if (typeof mod.armSpendGuard === 'function'){
+                try { mod.armSpendGuard((this.hub && this.hub.p2pConfig) || {},
+                                        !!(this.hub && this.hub.peerManager)); }
+                catch (e) { console.warn('ProviderRegistry: armSpendGuard failed for ' + providerId +
+                                         '; its budget still binds this process but resets on restart', e); }
+            }
             this.modules.set(providerId, mod);
             return mod;
         } catch (e) {

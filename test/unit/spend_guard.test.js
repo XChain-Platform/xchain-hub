@@ -193,6 +193,45 @@ describe('SpendGuard', function () {
             expect(g.stats().blocked.spend).to.be.greaterThan(0);
         });
 
+        // A caller that only learns the real cost after the send (the llm
+        // provider's CLI transport reports total_cost_usd on return) settles the
+        // reservation at the invoice instead of leaving the estimate in the window.
+        it('commit(token, actualCost) re-prices the reservation to the real cost', function () {
+            const g = new SpendGuard(PFX, {
+                [PFX + '_MAX_SPEND_USD_CENTS_PER_WINDOW']: '1000',
+                [PFX + '_EST_SPEND_USD_CENTS']: '100'
+            });
+            const t = g.reserve();
+            expect(g.spentInWindow()).to.equal(100);      // the estimate, pre-send
+            g.commit(t, 7);
+            expect(g.spentInWindow()).to.equal(7);        // the invoice, post-send
+        });
+
+        it('commit() without a cost keeps the reserved estimate, as every on-chain effector wants', function () {
+            const g = new SpendGuard(PFX, { [PFX + '_EST_SPEND_USD_CENTS']: '100' });
+            const t = g.reserve();
+            g.commit(t);
+            expect(g.spentInWindow()).to.equal(100);
+        });
+
+        it('ignores an unusable actual cost rather than zeroing the spend', function () {
+            const g = new SpendGuard(PFX, { [PFX + '_EST_SPEND_USD_CENTS']: '100' });
+            for (const bad of [0, -5, NaN, null, undefined, 'free']){
+                const t = g.reserve();
+                g.commit(t, bad);
+            }
+            // Six reservations, none re-priced to nothing by a junk invoice.
+            expect(g.spentInWindow()).to.equal(600);
+        });
+
+        it('a re-priced spend still cannot be handed back by a late release()', function () {
+            const g = new SpendGuard(PFX, { [PFX + '_EST_SPEND_USD_CENTS']: '100' });
+            const t = g.reserve();
+            g.commit(t, 42);
+            g.release(t);
+            expect(g.spentInWindow()).to.equal(42);
+        });
+
         it('refuses to reserve while the capability is paused', function () {
             const g = new SpendGuard(PFX, {});
             g.pause('incident');

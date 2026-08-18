@@ -707,6 +707,127 @@ describe('llm provider, fetch via claude_spawn', function () {
 
             expect(out.body.toString('utf8')).to.equal('still served');
         });
+
+        // ---- the aggregate budget the per-call caps never bounded ----
+        //
+        // The per-call ceilings bound ONE call each, so N cheap calls cost N times a
+        // cheap call. On testnet a request costs its author nothing, so this window is
+        // the only thing standing between a spam loop and the operator's vendor bill.
+        describe('rolling spend budget', function () {
+
+            const BUDGET_KEYS = ['LLM_MAX_SPEND_USD_CENTS_PER_WINDOW',
+                                 'LLM_EST_SPEND_USD_CENTS',
+                                 'LLM_SPEND_WINDOW_MS'];
+            let savedBudget;
+
+            beforeEach(function () {
+                savedBudget = {};
+                for (const k of BUDGET_KEYS){ savedBudget[k] = process.env[k]; delete process.env[k]; }
+            });
+
+            afterEach(function () {
+                for (const k of BUDGET_KEYS){
+                    if (savedBudget[k] === undefined) delete process.env[k];
+                    else                              process.env[k] = savedBudget[k];
+                }
+            });
+
+            it('charges a billed call against the window at the built-in estimate', async function () {
+                const { llm } = reloadWithSpawnStub({ result: 'ok' });
+
+                await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {}));
+
+                const stats = llm.spendStats();
+                expect(stats.spentInWindowUsdCents).to.equal(5);
+                expect(stats.maxSpendUsdCents).to.equal(1000);   // $10 default, not the $2000 clamp
+            });
+
+            it('re-prices the reservation to the CLI invoice when one is reported', async function () {
+                const { llm } = reloadWithSpawnStub({
+                    result: 'ok', json: { total_cost_usd: 0.0123 }
+                });
+
+                await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {}));
+
+                // ceil(1.23) - a partial cent was spent, not free - replacing the estimate.
+                expect(llm.spendStats().spentInWindowUsdCents).to.equal(2);
+            });
+
+            it('refuses the call WITHOUT dialing the vendor once the window is spent', async function () {
+                process.env.LLM_MAX_SPEND_USD_CENTS_PER_WINDOW = '1';   // under one estimated call
+                const { llm, stub } = reloadWithSpawnStub({ result: 'ok' });
+
+                let err;
+                try {
+                    await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {}));
+                } catch (e) { err = e; }
+
+                expect(err, 'the call must be refused').to.be.an('error');
+                expect(err.budgetExhausted).to.equal(true);
+                expect(err.paused, 'a budget stop is not the operator kill switch').to.equal(undefined);
+                expect(stub.called, 'no paid vendor call may be issued').to.equal(false);
+            });
+
+            it('closes the audit intent out as blocked rather than leaving it open', async function () {
+                process.env.LLM_MAX_SPEND_USD_CENTS_PER_WINDOW = '1';
+                const { llm } = reloadWithSpawnStub({ result: 'ok' });
+
+                try {
+                    await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {}));
+                } catch { /* expected */ }
+
+                // An intent with no settle is the operator's post-crash reconciliation
+                // list; a refusal is not a call in flight and must not land on it.
+                const lines = readSink();
+                expect(lines.map(l => l.phase)).to.deep.equal(['intent', 'settle']);
+                expect(lines[1].status).to.equal('blocked');
+            });
+
+            it('lets an operator raise the ceiling by env', async function () {
+                process.env.LLM_MAX_SPEND_USD_CENTS_PER_WINDOW = '4200';   // $42
+                const { llm } = reloadWithSpawnStub({ result: 'ok' });
+
+                await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {}));
+
+                const stats = llm.spendStats();
+                expect(stats.maxSpendUsdCents).to.equal(4200);
+                expect(stats.spentInWindowUsdCents).to.equal(5);
+            });
+
+            it('never lets config exceed the platform $2000 window clamp', async function () {
+                process.env.LLM_MAX_SPEND_USD_CENTS_PER_WINDOW = '999999';
+                const { llm } = reloadWithSpawnStub({ result: 'ok' });
+
+                await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {}));
+
+                expect(llm.spendStats().maxSpendUsdCents).to.equal(200000);
+            });
+
+            it('charges a call that reached the vendor and then threw', async function () {
+                const { llm, stub } = reloadWithSpawnStub({ result: 'ok' });
+                stub.rejects(new Error('cli exploded'));
+
+                try {
+                    await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {}));
+                } catch { /* expected */ }
+
+                // A refusal or a truncation still bills. Over-counting fails closed and
+                // ages out within the window; handing budget back to a call that may
+                // have billed does not.
+                expect(llm.spendStats().spentInWindowUsdCents).to.equal(5);
+            });
+
+            it('charges nothing when no credential resolves, since nothing can bill', async function () {
+                const { llm } = reloadWithSpawnStub({ result: 'ok' });
+
+                try {
+                    await _withEnv({ HUB_CLAUDE_DEFAULT_CONFIG_DIR: HERMETIC_DEFAULT_DIR },
+                        () => llm.fetch(JSON.stringify({ prompt: 'hi' }), {}));
+                } catch { /* no credentials */ }
+
+                expect(llm.spendStats().spentInWindowUsdCents).to.equal(0);
+            });
+        });
     });
 });
 

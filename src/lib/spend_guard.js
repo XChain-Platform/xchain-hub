@@ -266,8 +266,22 @@ class SpendGuard {
 
     // The send went out: keep the reserved budget as the recorded spend and make the
     // token inert, so a later stray release() cannot hand back a real spend.
-    commit(token){
-        if (token) token.settled = true;
+    //
+    // `actualCost` (USD cents) re-prices the reservation for a caller that only learns
+    // the REAL cost after the send: the llm provider reserves at an estimate and its
+    // claude_spawn transport reports total_cost_usd on return, so settling at the
+    // invoice keeps the window tracking money actually spent instead of a guess.
+    // Omitted or unusable keeps the reserved estimate, which is what every on-chain
+    // effector wants - a broadcast fee is known before it is sent.
+    commit(token, actualCost){
+        if (!token) return;
+        token.settled = true;
+        let c = Number(actualCost);
+        if (!Number.isFinite(c) || c <= 0) return;
+        let i = this._spends.findIndex(e => e.reservation === token.id);
+        if (i < 0) return;
+        this._spends[i].cost = c;
+        this._persist();
     }
 
     // The send never went out (blocked, threw, or was abandoned): give the budget
