@@ -174,10 +174,23 @@ function validateLimit(limit) {
     return null;
 }
 
+// Same digit-only shape validateLimit enforces, for the other external integer
+// fields. Returns the exact integer, or null when the value is not a bare integer:
+// callers still own the sign/range check, since the legal band differs per field.
+function strictInt(value) {
+    let n;
+    if (typeof value === 'number')                                 n = value;
+    else if (typeof value === 'string' && /^[0-9]+$/.test(value))  n = Number(value);
+    else                                                           return null;
+    return Number.isInteger(n) ? n : null;
+}
+
 function validateSince(since) {
     if (since !== undefined && since !== null && since !== '') {
-        let n = parseInt(since);
-        if (!Number.isFinite(n) || n < 0)
+        // Empty string stays "unset" here (unlike limit), so the guard sits inside
+        // the presence check rather than replacing it.
+        let n = strictInt(since);
+        if (n === null || n < 0)
             return { error: 'since_id must be a non-negative integer' };
     }
     return null;
@@ -662,11 +675,13 @@ async function startApi(){
                 return {error: "block_height is required"};
             if(block_time === undefined || block_time === null)
                 return {error: "block_time is required"};
-            let height = parseInt(block_height, 10);
-            if (!Number.isFinite(height) || height < 0)
+            // strictInt, not parseInt: '850000junk' and '850000.9' truncated to a
+            // plausible 850000 and were written as the tip the staleness gates read.
+            let height = strictInt(block_height);
+            if (height === null || height < 0)
                 return {error: "invalid block_height"};
-            let time = parseInt(block_time, 10);
-            if (!Number.isFinite(time) || time < 0)
+            let time = strictInt(block_time);
+            if (time === null || time < 0)
                 return {error: "invalid block_time"};
             try {
                 await hub.db.setChainTip(coin, network, height, time);
@@ -1164,8 +1179,20 @@ async function startApi(){
             if (scErr) return scErr;
             let dcErr = validateChain(dest_chain);
             if (dcErr) return dcErr;
+            // The index reaches an INSERT into swap_records unvalidated, so a parseInt
+            // prefix ('7junk', '1e3') recorded the swap against a different action than
+            // the caller named. Same positive-integer band requestAttestation enforces.
+            let srcIdx = strictInt(source_action_index);
+            if (srcIdx === null || srcIdx <= 0)
+                return {error: "source_action_index must be a positive integer"};
+            let destIdx = null;
+            if (dest_action_index) {
+                destIdx = strictInt(dest_action_index);
+                if (destIdx === null || destIdx <= 0)
+                    return {error: "dest_action_index must be a positive integer"};
+            }
             try {
-                await hub.initiateSwap(source_chain, parseInt(source_action_index), dest_chain, dest_action_index ? parseInt(dest_action_index) : null);
+                await hub.initiateSwap(source_chain, srcIdx, dest_chain, destIdx);
                 return {status: "success"};
             } catch (err) {
                 return {error: err.message || "error initiating swap"};
@@ -1175,8 +1202,11 @@ async function startApi(){
         async getswap({source_chain, source_action_index}){
             if(!source_chain || !source_action_index)
                 return {error: "source_chain and source_action_index are required"};
+            let srcIdx = strictInt(source_action_index);
+            if (srcIdx === null || srcIdx <= 0)
+                return {error: "source_action_index must be a positive integer"};
             try {
-                let swap = await hub.getSwap(source_chain, parseInt(source_action_index));
+                let swap = await hub.getSwap(source_chain, srcIdx);
                 return swap || {error: "swap not found"};
             } catch (err) {
                 return {error: "error fetching swap"};

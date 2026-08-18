@@ -35,6 +35,9 @@ const axios  = require('axios');
 const bc     = require('./bcmath.js');
 const swq    = require('./stake_weighted_quorum.js');
 const esc    = require('./attestation_escalation.js');
+// The consensus round-timeout default the seen-window floor below is keyed to.
+// Required, never re-spelled: see the constant's own note in constants.js.
+const { DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS } = require('./constants.js');
 
 const ATTEST_PROPOSE = 'ATTEST_PROPOSE';
 
@@ -99,10 +102,14 @@ class AttestationRound {
         // on its `pending.has(rid)` guard. At stock defaults 5*15s=75s is already
         // shorter than the 120s round timeout, and lowering ATTESTATION_POLL_MS
         // widens the gap silently. Sourcing the round timeout from the same config
-        // key AttestationConsensus reads keeps the two windows coupled. The paid
+        // key AND the same shared default AttestationConsensus reads keeps the two
+        // windows coupled on both paths; a re-spelled literal here coupled them only
+        // while the two copies happened to be equal, so raising the consensus default
+        // one-sidedly re-nested the window on any hub with no explicit key. The paid
         // fetch is also short-circuited directly in _startRound via
         // consensus.isRoundActive(), but flooring closes the nesting at its root.
-        let roundTimeoutMs  = parseInt(this.config.ATTESTATION_ROUND_TIMEOUT_MS) || 120000;
+        let roundTimeoutMs  = parseInt(this.config.ATTESTATION_ROUND_TIMEOUT_MS)
+                            || DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS;
         this.retryAfterMs   = Math.max(
             parseInt(this.config.ATTESTATION_RETRY_AFTER_MS) || (5 * this.pollMs),
             roundTimeoutMs + this.pollMs
@@ -369,7 +376,7 @@ class AttestationRound {
             return;
         }
 
-        // PROVIDER STAKE FLOOR (XC-083). A HIGHER, per-provider bar on top of the
+        // PROVIDER STAKE FLOOR. A HIGHER, per-provider bar on top of the
         // capability MIN_STAKE the snapshot was already built at: serving an `llm`
         // attestation costs more stake than serving an `http_get` one. Resolved from
         // the BLOCK-ANCHORED provider history at the request's own block, for the same
@@ -458,6 +465,24 @@ class AttestationRound {
         // not the mapping and cannot resolve a vendor at all.
         let pinnedVendors = (pinnedAc.model_vendors && typeof pinnedAc.model_vendors === 'object')
             ? pinnedAc.model_vendors : null;
+        // The PBFT strategy is anchored for a stronger reason than the model identity is:
+        // it selects which state machine AttestationConsensus runs for this round, not
+        // merely which model answers it. Read live off the hot-reloadable registry at each
+        // decision site, one hub could adopt a leader's PREPARE while another ran its own
+        // agree() over the same round, because hotReload() re-parses every provider def on
+        // EVERY proposal:finalized event regardless of subject. Resolved ONCE here at the
+        // request's own block and carried on roundState, so a reload landing mid-round
+        // cannot move it and two hubs whose reloads raced still run the same machine.
+        // Fail closed on an unresolvable strategy, exactly as the provider floor does
+        // below: guessing a default here would silently run byte_equality against a
+        // judge_model federation.
+        let pinnedConsensusStrategy = (this.providerRegistry && typeof this.providerRegistry.getConsensusStrategy === 'function')
+            ? this.providerRegistry.getConsensusStrategy(providerId, snapshotBlk) : null;
+        if(!pinnedConsensusStrategy){
+            console.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... provider "' + providerId +
+                         '" has no block-anchored consensus_strategy at block ' + snapshotBlk + ' (failing closed)');
+            return;
+        }
         if(!pinnedFetchModel){
             console.warn('AttestationRound: provider "' + providerId + '" has no approved_models at block ' +
                          snapshotBlk + '; fetch falls back to the provider module default (un-pinned)');
@@ -549,6 +574,9 @@ class AttestationRound {
                 : { body: Buffer.alloc(0), meta: '', status: myStatus },
             pinnedJudgeModel: pinnedJudgeModel,
             pinnedVendors:    pinnedVendors,
+            // Block-anchored PBFT strategy for this round (see the resolution above).
+            // AttestationConsensus reads ONLY this, never the live registry.
+            pinnedConsensusStrategy: pinnedConsensusStrategy,
             // The allowlist that judges the winning proposal's meta has
             // to be the SAME block-anchored list this round pinned the fetch model
             // from. Judged against the live hotReloadable set instead, a governance
@@ -601,7 +629,7 @@ class AttestationRound {
     // test/unit/actions/attest-responsible-set-vectors.test.js. Add a vector there when
     // you change the rule, or the copies can drift in a direction every suite calls green.
     //
-    // PROVIDER STAKE FLOOR (XC-083, weighted only): `minStake` is the request
+    // PROVIDER STAKE FLOOR (weighted only): `minStake` is the request
     // provider's block-anchored min_stake_xchain. Sources whose aggregate weight is
     // below it are dropped BEFORE the ranking, so the freed slot goes to the next
     // qualifying validator rather than shrinking the set. Only the weighted snapshot
@@ -691,6 +719,14 @@ class AttestationRound {
             stats.nonok_published_count               = this.consensus.nonOkPublished.size;
             stats.nonok_published_max                 = this.consensus.nonOkPublishedMax;
             stats.nonok_evicted_while_pending_count   = this.consensus.nonOkEvictedWhilePendingCount;
+            // Same three for the ok/`finalized` suppression ring, which had no
+            // stats at all: an undersized ATTESTATION_FINALIZED_MAX surfaced only
+            // as unexplained duplicate rounds and re-burned BTC fees. Occupancy
+            // against the cap says how close the ring is to evicting; the count is
+            // monotonic for the process life, so consumers alert on a rise.
+            stats.finalized_count                    = this.consensus.finalized.size;
+            stats.finalized_max                      = this.consensus.finalizedMax;
+            stats.finalized_evicted_while_pending_count = this.consensus.finalizedEvictedWhilePendingCount;
             // Consensus round timeouts (item 8c1148c0). failed_count above
             // counts only THIS hub's local provider-fetch failures (entry.error)
             // over the TTL-evicting `rounds` map; a round torn down by the PBFT

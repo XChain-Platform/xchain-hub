@@ -939,12 +939,32 @@ describe('PriceAggregator.receiveValidatedRound() signature-tally ordering flag-
         hub = createMockHub();
         hub.network = 'mainnet';    // the only network where the gate has two sides
         agg = new PriceAggregator(hub);
-        hub.capabilitySnapshot = { getSnapshot: sinon.stub().resolves({
-            capability: 'price',
-            blockIndex: 800000,
-            count:      V.length,
-            validators: V.map(v => ({ pubkey: v.pubkey, amount: '100000.00000000' }))
-        }) };
+        // Every height this block exercises (962999+) is at/above STAKE_WEIGHTED_QUORUM
+        // on mainnet (961000), so the round finalizes on summed signer STAKE, exactly as
+        // the indexer twin does at those heights. The weights are 50/50/1 over three
+        // distinct sources so that the accept/reject verdict of each case below still
+        // turns on WHICH signers the tally counted, which is this block's subject:
+        // V[0]+V[1] clears the strict 2/3 bar (3*100 > 2*101) and any single signer
+        // misses it. getSnapshot stays stubbed for the below-SWQ / unknown-network case.
+        hub.capabilitySnapshot = {
+            getSnapshot: sinon.stub().resolves({
+                capability: 'price',
+                blockIndex: 800000,
+                count:      V.length,
+                validators: V.map(v => ({ pubkey: v.pubkey, amount: '100000.00000000' }))
+            }),
+            getWeightSnapshot: sinon.stub().resolves({
+                capability:  'price',
+                blockIndex:  800000,
+                count:       V.length,
+                sourceCount: V.length,
+                validators: [
+                    { pubkey: V[0].pubkey, source: 'src-0', weight: '50' },
+                    { pubkey: V[1].pubkey, source: 'src-1', weight: '50' },
+                    { pubkey: V[2].pubkey, source: 'src-2', weight: '1'  }
+                ]
+            })
+        };
         hub.db.doQuery.callsFake(async (sql) => {
             if (/^SELECT id FROM price_snapshots/.test(sql)) return [];
             return [];
@@ -989,7 +1009,7 @@ describe('PriceAggregator.receiveValidatedRound() signature-tally ordering flag-
             { pubkey: V[1].pubkey, sig: V[1].sign(payload) },
         ]));
         expect(result.accepted).to.equal(false);
-        expect(result.reason).to.contain('insufficient quorum (1/2)');
+        expect(result.reason).to.contain('insufficient signer stake (1 verified signers)');
     });
 
     it('at/above the gate: a repeated VALID member still counts exactly once', async function () {
@@ -998,7 +1018,7 @@ describe('PriceAggregator.receiveValidatedRound() signature-tally ordering flag-
             { pubkey: V[0].pubkey, sig: V[0].sign(payload) },
         ]));
         expect(result.accepted).to.equal(false);
-        expect(result.reason).to.contain('insufficient quorum (1/2)');
+        expect(result.reason).to.contain('insufficient signer stake (1 verified signers)');
     });
 
     it('below the gate: the legacy mark-then-verify verdict is preserved verbatim', async function () {
@@ -1008,7 +1028,7 @@ describe('PriceAggregator.receiveValidatedRound() signature-tally ordering flag-
             { pubkey: V[1].pubkey, sig: V[1].sign(payload) },
         ]));
         expect(result.accepted).to.equal(false);
-        expect(result.reason).to.contain('insufficient quorum (1/2)',
+        expect(result.reason).to.contain('insufficient signer stake (1 verified signers)',
             'below the flag-day the garbage entry must still consume V[0]\'s dedupe slot');
     });
 
@@ -1023,6 +1043,128 @@ describe('PriceAggregator.receiveValidatedRound() signature-tally ordering flag-
         ]));
         expect(result.accepted).to.equal(false);
         expect(result.reason).to.contain('insufficient quorum (1/2)');
+    });
+});
+
+// receiveValidatedRound is the hub's MIRROR of the chain's PRICE v0 verification, so
+// its finalization threshold has to flip with the chain's. Above STAKE_WEIGHTED_QUORUM
+// the indexer twin (actions/price.js) finalizes on summed source-deduped signer STAKE;
+// while the hub still counted signatures, a round the chain finalized on 2 high-stake
+// signers was rejected here as sub-quorum (price_snapshots silently falling behind the
+// chain, the native-fee / XCHAIN-USD rail withholding), and a many-small-signer round
+// the chain refused was stored here as finalized.
+describe('PriceAggregator.receiveValidatedRound() stake-weighted quorum flag-day', function () {
+
+    let hub, agg;
+
+    // Five price-qualified validators -> count quorum max(2*floor(4/3)+1, ceil(6/2)) = 3.
+    // Stake is deliberately lopsided: the first two sources hold 45 each of S=100, so
+    // TWO signers clear the strict 2/3 stake bar (3*90 > 2*100) while missing the
+    // 3-signature count bar, and the three small sources together (30) clear the count
+    // bar while missing the stake bar (3*30 < 2*100). The two rules genuinely disagree.
+    const V = [makeValidator(), makeValidator(), makeValidator(), makeValidator(), makeValidator()];
+    const WEIGHTS = ['45', '45', '4', '3', '3'];
+    const PAIRS = [{ pair: 'BTC/USD', price: '50000' }];
+
+    const ABOVE = 962000;   // >= STAKE_WEIGHTED_QUORUM mainnet (961000)
+    const BELOW = 960999;   // <  STAKE_WEIGHTED_QUORUM mainnet
+
+    function roundAt(btcHeight, signers) {
+        let payload = agg._buildPriceV0Payload(5, 1700000000, PAIRS, btcHeight);
+        return {
+            round: 5,
+            timestamp: 1700000000,
+            btc_block_height: btcHeight,
+            block_index: 800000,
+            action_index: 42,
+            pairs: PAIRS,
+            sigs: signers.map(v => ({ pubkey: v.pubkey, sig: v.sign(payload) }))
+        };
+    }
+
+    function countSnapshot() {
+        return {
+            capability: 'price', blockIndex: 800000, count: V.length,
+            validators: V.map(v => ({ pubkey: v.pubkey, amount: '100.00000000' }))
+        };
+    }
+
+    function weightSnapshot(extra) {
+        return Object.assign({
+            capability: 'price', blockIndex: 800000, count: V.length, sourceCount: V.length,
+            validators: V.map((v, i) => ({ pubkey: v.pubkey, source: 'src-' + i, weight: WEIGHTS[i] }))
+        }, extra || {});
+    }
+
+    beforeEach(function () {
+        hub = createMockHub();
+        hub.network = 'mainnet';    // the only network where the gate has two sides
+        agg = new PriceAggregator(hub);
+        hub.capabilitySnapshot = {
+            getSnapshot:       sinon.stub().resolves(countSnapshot()),
+            getWeightSnapshot: sinon.stub().resolves(weightSnapshot())
+        };
+        hub.db.doQuery.callsFake(async (sql) => {
+            if (/^SELECT id FROM price_snapshots/.test(sql)) return [];
+            return [];
+        });
+    });
+
+    afterEach(function () {
+        sinon.restore();
+    });
+
+    it('at/above the gate: accepts two high-stake signers that the COUNT quorum would reject', async function () {
+        let result = await agg.receiveValidatedRound('BTC', roundAt(ABOVE, [V[0], V[1]]));
+        expect(result).to.deep.equal({ accepted: true });
+        // The weight snapshot is the one resolved, keyed on the round's block_index
+        // (the block the PRICE landed in), exactly as the indexer twin keys its weights.
+        expect(hub.capabilitySnapshot.getWeightSnapshot.calledOnceWith('price', 800000)).to.equal(true);
+        expect(hub.capabilitySnapshot.getSnapshot.called).to.equal(false);
+    });
+
+    it('at/above the gate: rejects a count-quorate round that misses the stake bar', async function () {
+        let result = await agg.receiveValidatedRound('BTC', roundAt(ABOVE, [V[2], V[3], V[4]]));
+        expect(result.accepted).to.equal(false);
+        expect(result.reason).to.contain('insufficient signer stake');
+        expect(hub.db.doQuery.getCalls().some(c => /^INSERT/.test(c.args[0]))).to.equal(false);
+    });
+
+    it('at/above the gate: fails closed when the weight snapshot is unresolvable (never falls back to count)', async function () {
+        hub.capabilitySnapshot.getWeightSnapshot.resolves(null);
+        // These same three signers clear the count quorum, so a fallback would accept.
+        let result = await agg.receiveValidatedRound('BTC', roundAt(ABOVE, [V[0], V[1], V[2]]));
+        expect(result).to.deep.equal({ accepted: false, reason: 'validator snapshot unavailable' });
+        expect(hub.capabilitySnapshot.getSnapshot.called).to.equal(false);
+    });
+
+    it('at/above the gate: fails closed on a TRUNCATED weight snapshot (dropped sources under-count S)', async function () {
+        hub.capabilitySnapshot.getWeightSnapshot.resolves(weightSnapshot({ truncated: true }));
+        let result = await agg.receiveValidatedRound('BTC', roundAt(ABOVE, [V[0], V[1]]));
+        expect(result).to.deep.equal({ accepted: false, reason: 'validator snapshot truncated' });
+    });
+
+    it('at/above the gate: fails closed when the hub cannot resolve a weight snapshot at all', async function () {
+        hub.capabilitySnapshot = { getSnapshot: sinon.stub().resolves(countSnapshot()) };
+        let result = await agg.receiveValidatedRound('BTC', roundAt(ABOVE, [V[0], V[1], V[2]]));
+        expect(result).to.deep.equal({ accepted: false, reason: 'validator snapshot unavailable' });
+    });
+
+    it('below the gate: the legacy count quorum is preserved byte-for-byte', async function () {
+        let two = await agg.receiveValidatedRound('BTC', roundAt(BELOW, [V[0], V[1]]));
+        expect(two).to.deep.equal({ accepted: false, reason: 'insufficient quorum (2/3)' });
+
+        let three = await agg.receiveValidatedRound('BTC', roundAt(BELOW, [V[2], V[3], V[4]]));
+        expect(three).to.deep.equal({ accepted: true });
+        expect(hub.capabilitySnapshot.getWeightSnapshot.called).to.equal(false);
+        expect(hub.capabilitySnapshot.getSnapshot.calledWith('price', 800000)).to.equal(true);
+    });
+
+    it('a hub that cannot resolve its own network stays on the legacy count rule', async function () {
+        hub.network = undefined;
+        let result = await agg.receiveValidatedRound('BTC', roundAt(999999999, [V[0], V[1]]));
+        expect(result).to.deep.equal({ accepted: false, reason: 'insufficient quorum (2/3)' });
+        expect(hub.capabilitySnapshot.getWeightSnapshot.called).to.equal(false);
     });
 });
 

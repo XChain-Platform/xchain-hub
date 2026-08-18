@@ -106,6 +106,7 @@ class XChainHub {
         this._capabilityCheckRunning  = false;
         this._stakePollRunning        = false;
         this._transportSetTimer       = null;
+        this._transportSetRefreshRunning = false;
         this._transportSignerSet      = new Set();  // last-known-good effective set, lowercased pubkey hex
         this._transportSignerSetAt    = 0;       // ms epoch of the last successful refresh (0 = never)
         this._latestBlockIndex        = null;
@@ -175,16 +176,29 @@ class XChainHub {
     // Refresh the chain-effective signer set from the on-chain validator snapshot. The
     // set is ADDITIVE to the registry, so transport auth follows key rotation; it is
     // NEVER cleared on an upstream failure, since the registry stays the auth floor.
+    // In-flight guard, the same one _pollOwnStake and _runOwnCapabilityCheck carry: the
+    // two awaits below are unbounded round trips, so a slow indexer lets the bare
+    // setInterval stack passes. Each pass resolves the BTC tip at its own START, so an
+    // older slow pass finishing last would write the OLDER block's validator snapshot
+    // over a newer one and drop a just-rotated key from transport auth. Serializing the
+    // passes orders the writes; a skipped tick costs at most one refresh interval of
+    // staleness, which the registry auth floor already covers.
     async _refreshTransportSignerSet(){
         if(!this.peerManager) return;
-        let block = await this._resolveBtcLatestBlock();
-        if(block == null){ this._warnTransportStale('BTC tip unresolved'); return; }
-        let snap = await this.capabilitySnapshot.getActiveValidatorSnapshot(block);
-        if(!snap || !Array.isArray(snap.validators)){ this._warnTransportStale('validator snapshot unavailable'); return; }
-        let set = new Set(snap.validators.map(v => String(v.pubkey).toLowerCase()));
-        this._transportSignerSet   = set;
-        this._transportSignerSetAt = Date.now();
-        this.peerManager.setEffectiveSignerSet(set);
+        if(this._transportSetRefreshRunning) return;
+        this._transportSetRefreshRunning = true;
+        try {
+            let block = await this._resolveBtcLatestBlock();
+            if(block == null){ this._warnTransportStale('BTC tip unresolved'); return; }
+            let snap = await this.capabilitySnapshot.getActiveValidatorSnapshot(block);
+            if(!snap || !Array.isArray(snap.validators)){ this._warnTransportStale('validator snapshot unavailable'); return; }
+            let set = new Set(snap.validators.map(v => String(v.pubkey).toLowerCase()));
+            this._transportSignerSet   = set;
+            this._transportSignerSetAt = Date.now();
+            this.peerManager.setEffectiveSignerSet(set);
+        } finally {
+            this._transportSetRefreshRunning = false;
+        }
     }
 
     // Warn once the last good refresh ages past a threshold. Never clears the set (the
@@ -1577,7 +1591,7 @@ class XChainHub {
                 ' has no activation_block; not applying (would be unanchored, risking cross-hub divergence)');
             return;
         }
-        let ac, ms;
+        let ac, ms, cs;
         try {
             let parsed = JSON.parse(String(ev.newValue));
             ac = (parsed && parsed.additional_config) ? parsed.additional_config : parsed;
@@ -1585,12 +1599,14 @@ class XChainHub {
             // loadGovernanceHistory: this is the LIVE path and that is the RESTART replay,
             // and a floor seen by only one would diverge restarted hubs from long-running ones.
             ms = (parsed && parsed.min_stake_xchain !== undefined) ? parsed.min_stake_xchain : undefined;
+            // The PBFT consensus_strategy rides it too, on the same both-paths rule.
+            cs = (parsed && parsed.consensus_strategy !== undefined) ? parsed.consensus_strategy : undefined;
         } catch (e) {
             console.warn('Governance ATTESTATION_PROVIDER change for ' + providerId +
                 ' has unparseable proposed_value; not applying:', e && e.message ? e.message : e);
             return;
         }
-        this.providerRegistry.applyProviderConfigActivation(providerId, Number(ev.activationBlock), ac, ms);
+        this.providerRegistry.applyProviderConfigActivation(providerId, Number(ev.activationBlock), ac, ms, cs);
     }
 
     // Parse CAPABILITY_<CAP>_MIN_STAKE into { capability, parameterKey }, where <CAP> is

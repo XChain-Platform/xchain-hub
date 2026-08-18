@@ -21,7 +21,11 @@
  *
  *   claude --print --output-format json --model <m> \
  *          --tools "" --no-session-persistence \
- *          --setting-sources "" [--append-system-prompt <s>]
+ *          --setting-sources "" [--append-system-prompt <s> | --system-prompt <s>]
+ *
+ * The two system-prompt flags are not interchangeable: the appending one leaves the
+ * CLI's own baked-in prompt in front of the caller's text, and only --system-prompt
+ * replaces it. See opts.systemPromptOverride below.
  *
  * Prompt streams via stdin. The CLI emits a single JSON object on stdout
  * carrying { result: "<text>", ... }; the function returns that JSON
@@ -46,6 +50,17 @@ const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 //   opts.prompt        (string, required)  user prompt body.
 //   opts.model         (string, required)  model identifier (e.g. claude-sonnet-4-6).
 //   opts.systemPrompt  (string, optional)  appended to the default system prompt.
+//   opts.systemPromptOverride
+//                      (string, optional)  REPLACES the default system prompt
+//                                          (--system-prompt) instead of appending, so the
+//                                          caller's text is the model's sole system
+//                                          content. Only for a caller whose system block
+//                                          is TRUSTED and whose contract depends on being
+//                                          alone in that role (the judge's
+//                                          data-vs-instruction framing); requester-supplied
+//                                          system text must keep the appending form, which
+//                                          leaves the CLI baseline in place. Mutually
+//                                          exclusive with systemPrompt.
 //   opts.timeoutMs     (number, optional)  kill after N ms. Default 60_000.
 //   opts.maxBudgetUsd  (number, optional)  pass --max-budget-usd. Default unset.
 //   opts.cwd           (string, optional)  working dir. Default os.tmpdir().
@@ -57,6 +72,7 @@ async function runClaudePrint(opts) {
     const prompt       = opts && opts.prompt;
     const model        = opts && opts.model;
     const systemPrompt = opts && opts.systemPrompt;
+    const systemPromptOverride = opts && opts.systemPromptOverride;
     const timeoutMs    = (opts && opts.timeoutMs) || 60000;
     const maxBudgetUsd = opts && opts.maxBudgetUsd;
     const cwd          = (opts && opts.cwd) || os.tmpdir();
@@ -64,6 +80,10 @@ async function runClaudePrint(opts) {
 
     if (!prompt || typeof prompt !== 'string') throw new Error('claude-spawn: prompt (string) required');
     if (!model  || typeof model  !== 'string') throw new Error('claude-spawn: model (string) required');
+    // Refuse rather than silently pick one. The two flags mean opposite things about
+    // whether the CLI baseline survives, and a caller that set both has not decided.
+    if (systemPrompt && systemPromptOverride)
+        throw new Error('claude-spawn: systemPrompt and systemPromptOverride are mutually exclusive');
 
     const auth = resolveHubLlmAuth(authCtx);
     if (!auth.ok) throw new Error('claude-spawn: ' + (auth.detail || auth.reason || 'no credentials'));
@@ -83,7 +103,12 @@ async function runClaudePrint(opts) {
         // independent of the operator's Claude Code configuration.
         '--setting-sources', ''
     ];
-    if (systemPrompt) args.push('--append-system-prompt', systemPrompt);
+    // --append-system-prompt ADDS to the CLI's own baked-in system prompt; only
+    // --system-prompt replaces it. A caller whose system block claims to be the model's
+    // sole instruction (the judge framing) is therefore wrong on this transport unless
+    // it takes the override, which is why the two are separate options rather than one.
+    if (systemPromptOverride) args.push('--system-prompt', systemPromptOverride);
+    else if (systemPrompt)    args.push('--append-system-prompt', systemPrompt);
     if (typeof maxBudgetUsd === 'number' && maxBudgetUsd > 0) {
         args.push('--max-budget-usd', String(maxBudgetUsd));
     }

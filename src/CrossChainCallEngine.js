@@ -704,8 +704,33 @@ class CrossChainCallEngine extends EventEmitter {
         // against capability_snapshots in whichever hub DB they mirror, and a
         // follower's DB may be the only one they read. Deterministic from BTC
         // stakes + idempotent (INSERT IGNORE), so all hubs write identical rows.
-        try { await this._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network); }
-        catch(e){ console.warn('CrossChainCall: snapshot persist on finalize failed: ' + (e && e.message)); }
+        //
+        // FAIL CLOSED, on the rationale CrossChainDexEngine._writeFinalizedMatch spells
+        // out in full (item 2385): the persist is a PRECONDITION of the row below, not a
+        // best-effort side-write. A swallowed DB throw, or a silent zero-row persist (the
+        // sentinel snapshot degrades to [] on an indexer RPC error / 401-403, so the
+        // INSERT loop never runs, never throws, never warns), would commit and broadcast
+        // a finalized XCALL/XEXEC row whose validator_signatures no capability_snapshot
+        // in this hub's DB can verify. On either failure skip the insert/broadcast, drop
+        // the in-flight reservation, and forget the finalized round so a later poll
+        // re-proposes cleanly, exactly as retractCallsForReorg does. The two engines are
+        // kept in lockstep by design; this is the error path that had drifted.
+        let persistedRows = 0;
+        try {
+            persistedRows = await this._persistCapabilitySnapshot('cross_chain', Number(row.snapshot_block), row.network);
+        } catch(e){
+            console.error('CrossChainCall: snapshot persist on finalize FAILED (fail-closed; deferring ' +
+                          row.phase + ' ' + String(row.call_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
+            this._deferFinalize(row);
+            return;
+        }
+        if(!persistedRows){
+            console.error('CrossChainCall: snapshot persist wrote ZERO capability rows for snapshot_block ' +
+                          row.snapshot_block + ' (degraded/empty validator set; fail-closed, deferring ' +
+                          row.phase + ' ' + String(row.call_id).substring(0, 16) + '... to a later round)');
+            this._deferFinalize(row);
+            return;
+        }
         let cols = ['call_id','phase','snapshot_block','network',
                     'source_chain','source_action_index','source_contract_index',
                     'target_chain','target_contract_index','method','params_json',
@@ -737,8 +762,25 @@ class CrossChainCallEngine extends EventEmitter {
         this.emit('call:' + row.phase, { callId: row.call_id });
     }
 
+    // Release a round that finalized in PBFT but whose fail-closed precondition refused
+    // the write, so the next poll can re-propose it. Both releases are needed: _inflight
+    // gates the poll (`if(this._inflight.has(roundId)) return;`) and the consensus
+    // finalized-ring refuses to re-run a round id it has already retired. No 'call:'
+    // event is emitted, because nothing was finalized in this hub's DB.
+    _deferFinalize(row){
+        this._inflight.delete(row.round_id);
+        if(this.consensus && typeof this.consensus.forgetFinalized === 'function')
+            this.consensus.forgetFinalized(row.round_id);
+    }
+
     // Persist + mirror the qualifying validator set (consensus leader path,
     // same contract as CrossChainDexEngine._persistCapabilitySnapshot).
+    // Returns the number of capability rows resolved (and persisted) for this
+    // (capability, block). A return of 0 means the set degraded to empty (an
+    // indexer RPC error / auth mismatch surfaces as a null snapshot, which
+    // _resolveCapabilityValidators normalizes to []) or was refused as truncated,
+    // so money-path callers can fail closed rather than committing a row whose
+    // signatures no mirror can verify against capability_snapshots.
     async _persistCapabilitySnapshot(capability, block, network){
         let validators = await this._resolveCapabilityValidators(capability, block, network);
         // SWQ-TRUNC-MIRROR: a TRUNCATED set is never mirrored, for the reason
@@ -750,7 +792,7 @@ class CrossChainCallEngine extends EventEmitter {
             console.warn('CrossChainCall: refusing to persist a TRUNCATED ' + capability +
                          ' capability snapshot at block ' + block +
                          ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
-            return;
+            return 0;
         }
         for(let v of validators){
             let pubkey = String(v.pubkey).toLowerCase();
@@ -766,6 +808,7 @@ class CrossChainCallEngine extends EventEmitter {
                 if(r.length) this.broadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
             }
         }
+        return validators.length;
     }
 
     // Source-keyed at/above STAKE_WEIGHTED_QUORUM activation, legacy count set below

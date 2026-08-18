@@ -95,6 +95,27 @@ describe('StateAnchorPublisher publisher-attestation abstains on an unresolved s
         expect(r.met).to.equal(true);
         expect(r.sigs.length).to.equal(1);
     });
+
+    // _resolveCapabilitySet fails CLOSED off regtest (it THROWS when the deterministic
+    // snapshot is unavailable). Inside these two rounds that throw would abort the whole
+    // anchor / discard an already-collected archive quorum, which is exactly what the
+    // publish path's own liveness note forbids: "a failed reward attestation must NEVER
+    // block the anchor". A snapshot outage must degrade to the legacy payload instead.
+    it('v4/v5 round: a THROWING resolver degrades to the legacy anchor instead of propagating', async () => {
+        let { pub } = buildPub({ network: 'mainnet' });
+        pub._resolveCapabilitySet = async () => { throw new Error('deterministic snapshot unavailable'); };
+        let r = await pub._runPublisherAttestationRound(CP, 'D'.repeat(34));
+        expect(r.met, 'no attestation, but the caller still publishes').to.equal(false);
+        expect(r.sigs).to.deep.equal([]);
+    });
+
+    it('v6 archive round: a THROWING resolver degrades to the legacy v1 instead of discarding the round', async () => {
+        let { pub } = buildPub({ network: 'mainnet' });
+        pub._resolveCapabilitySet = async () => { throw new Error('deterministic snapshot unavailable'); };
+        let r = await pub._runArchiveAttestationRound(CP, 7, 'D'.repeat(34));
+        expect(r.met).to.equal(false);
+        expect(r.sigs).to.deep.equal([]);
+    });
 });
 
 describe('StateAnchorPublisher archive wrapper is picked on the consensus key', () => {

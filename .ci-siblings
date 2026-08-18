@@ -26,3 +26,5 @@ xchain-sdk
 xchain-wallet
 # The oracle band constant mirror: PRICE_MAX, ORACLE_DEVIATION_THRESHOLD.
 xchain-vm
+# The sixth oracle band constant mirror: PRICE_MAX, ORACLE_DEVIATION_THRESHOLD.
+xchain-decoder

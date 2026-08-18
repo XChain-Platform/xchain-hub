@@ -621,6 +621,135 @@ describe('CrossChainEngine', function () {
         });
     });
 
+    // The quorum N is sized from the stake-qualified block-locked cross_chain snapshot,
+    // so the votes measured against it have to come from that same population. Gating on
+    // _isKnownSender alone let a merely-REGISTERED validator (no qualifying stake at the
+    // round's block) supply a vote toward a snapshot-sized bar, and the addr-keyed tally
+    // let one signing key registered under two addrs be counted twice - either way a
+    // finalized 'attested' row SwapTracker settles from escrow could rest on votes the
+    // qualified members never cast. Same invariant Consensus (leader election) and
+    // OracleConsensus (Oracle M1) already enforce.
+    describe('snapshot-gated PBFT tally', function () {
+
+        const MEMBERS = VALIDATORS_4;                      // snapshot population, quorum 3
+        const OUTSIDER = makeValidator(9);                 // registered, NOT in the snapshot
+        const attestationId = 'BTC:1:LTC';
+
+        // Snapshot = MEMBERS; registry additionally carries the outsider and a SECOND addr
+        // bound to MEMBERS[1]'s key (the multi-addr shape the registry genuinely allows).
+        const ALT_ADDR = 'ws://validator-2-alt:10001';
+
+        function wire() {
+            engine.setValidatorSet(MEMBERS);
+            pm.validatorAddr = MEMBERS[0].addr;
+            pm.validatorPubkeys = new Map([
+                ...MEMBERS.map(v => [v.addr, v.pubkey]),
+                [OUTSIDER.addr, OUTSIDER.pubkey],
+                [ALT_ADDR, MEMBERS[1].pubkey]
+            ]);
+            hub._resolveBtcLatestBlock = async () => 900000;
+            hub.capabilitySnapshot = {
+                getSnapshot: sinon.stub().resolves({ validators: MEMBERS.slice(), count: MEMBERS.length }),
+                getQuorum:   sinon.stub().returns(3)
+            };
+            hub.getIdentity = sinon.stub().returns({ getPubkeyHex: () => MEMBERS[0].pubkey });
+        }
+
+        async function openRound() {
+            let digest = engine._digest(attestationId, 3);
+            await engine._handlePropose({
+                sender: MEMBERS[1].addr,
+                data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
+                        destChain: 'LTC', confirmations: 3, digest, btcBlockHeight: 900000 }
+            });
+            return digest;
+        }
+
+        beforeEach(function () { wire(); });
+
+        it('locks the snapshot member set onto the pending round', async function () {
+            await openRound();
+            let pending = engine.pendingAttestations.get(attestationId);
+            expect(pending.memberPubkeys).to.be.instanceOf(Set);
+            expect([...pending.memberPubkeys].sort()).to.deep.equal(MEMBERS.map(v => v.pubkey).sort());
+        });
+
+        it('does not count a registered NON-MEMBER toward the snapshot-sized quorum', async function () {
+            let digest = await openRound();     // prepares = {self, MEMBERS[1]} = 2 members
+            pm.broadcast.resetHistory();
+
+            engine._handlePrepare({ sender: OUTSIDER.addr, data: { attestationId, digest } });
+
+            // The outsider is a known sender, so it lands in the raw set, but it is not in
+            // the snapshot the quorum of 3 was sized from, so it must not tip the round.
+            let pending = engine.pendingAttestations.get(attestationId);
+            expect(pending.prepares.has(OUTSIDER.addr)).to.be.true;
+            expect(pm.broadcast.called).to.be.false;
+        });
+
+        it('counts one signing key exactly once even when it votes under two addrs', async function () {
+            let digest = await openRound();
+            pm.broadcast.resetHistory();
+
+            // MEMBERS[1] (already counted from the PROPOSE) votes a second time under a
+            // second addr the registry binds to the SAME key. Addr-keyed that reads as a
+            // third vote and would tip the quorum of 3 on its own.
+            engine._handlePrepare({ sender: ALT_ADDR,          data: { attestationId, digest } });
+            let pending = engine.pendingAttestations.get(attestationId);
+            expect(pending.prepares.size).to.equal(3, 'both addrs are in the raw addr set');
+            expect(pm.broadcast.called).to.be.false;
+
+            // A genuinely distinct third member does tip it.
+            engine._handlePrepare({ sender: MEMBERS[3].addr,   data: { attestationId, digest } });
+            expect(pm.broadcast.called).to.be.true;
+            expect(pm.broadcast.getCall(0).args[0]).to.equal('XCHAIN_ATTEST_COMMIT');
+        });
+
+        it('finalizes on three distinct snapshot members', async function () {
+            let digest = await openRound();
+            pm.broadcast.resetHistory();
+            engine._handlePrepare({ sender: MEMBERS[2].addr, data: { attestationId, digest } });
+            expect(pm.broadcast.called).to.be.true;
+            expect(pm.broadcast.getCall(0).args[0]).to.equal('XCHAIN_ATTEST_COMMIT');
+        });
+
+        it('gates the COMMIT tally on membership too, not just PREPARE', async function () {
+            let digest = await openRound();
+            let pending = engine.pendingAttestations.get(attestationId);
+            let stored = sinon.stub(engine, '_storeWithRetry').resolves();
+
+            // Four COMMIT addrs, but one is the outsider and one is the alt addr of a key
+            // that already committed: two distinct members, below the quorum of 3.
+            pending.commits.add(MEMBERS[0].addr);
+            engine._handleCommit({ sender: MEMBERS[1].addr, data: { attestationId, digest } });
+            engine._handleCommit({ sender: ALT_ADDR,        data: { attestationId, digest } });
+            engine._handleCommit({ sender: OUTSIDER.addr,   data: { attestationId, digest } });
+            expect(pending.commits.size).to.equal(4, 'raw addr set holds all four');
+            expect(stored.called).to.be.false;
+
+            engine._handleCommit({ sender: MEMBERS[2].addr, data: { attestationId, digest } });
+            expect(stored.called).to.be.true;
+        });
+
+        it('degrades to the legacy raw tally when no snapshot population resolved', async function () {
+            // Single-node / bootstrap: _resolveQuorum falls back to the live set, so there
+            // is no snapshot population to gate against and the filter must stay off.
+            hub.capabilitySnapshot = null;
+            engine.setValidatorSet(MEMBERS);
+            let pending = { quorum: 2, memberPubkeys: null, prepares: new Set(['a', 'b']) };
+            expect(engine._countedVotes(pending, pending.prepares)).to.equal(2);
+        });
+
+        it('degrades to the legacy raw tally when the registry cannot attribute senders', async function () {
+            // The pre-bootstrap window _isKnownSender is deliberately lenient in (and
+            // already fences: a non-empty effective signer set makes an empty registry
+            // fail closed before a vote reaches this tally).
+            pm.validatorPubkeys = new Map();
+            let pending = { quorum: 2, memberPubkeys: new Set([MEMBERS[0].pubkey]), prepares: new Set(['a', 'b']) };
+            expect(engine._countedVotes(pending, pending.prepares)).to.equal(2);
+        });
+    });
+
     describe('quorum locking', function () {
 
         beforeEach(function () { wireLiveMirrorSnapshot(engine, hub); });

@@ -31,6 +31,12 @@ CREATE TABLE anchor_published_archives (
 -- bookkeeping finished (never blocks the next round) from one that vanished mid-flight
 -- (blocks until it ages past ANCHOR_INTENT_TTL_MS).
 --
+-- Retention: swept on the same window and the same two invariants as
+-- anchor_published_checkpoints (ANCHOR_MARKER_RETENTION_MS, floored at a multiple of
+-- ANCHOR_INTENT_TTL_MS, confirmed rows only). This table is the stricter of the pair:
+-- _getLiveArchiveIntent reads `settled_at IS NULL` rows only, so a settled row is never
+-- read by any live path at all. See _pruneAnchorMarkers.
+--
 -- Hub-local audit, deliberately NOT mirrored: hub_db_sync's HUB_STATE_TABLES carries
 -- state_checkpoints and anchor_reward_attestations only, and every sibling marker table
 -- (oracle_published_rounds, attest_published_requests, anchor_published_checkpoints) is

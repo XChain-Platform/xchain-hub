@@ -39,6 +39,35 @@ describe('idempotent-broadcast helper', function () {
         it('handles a null error', function () {
             expect(isAmbiguousSendError(null)).to.equal(false);
         });
+
+        // The 'Encoder RPC error' prefix does NOT prove a definitive rejection for
+        // broadcast_tx. When the encoder's own call to the coin node fails at the
+        // transport layer (ECONNRESET / ETIMEDOUT / a 5xx from the node), errorSanitize
+        // replaces the reason with the generic 'Transaction broadcast failed' - stripping
+        // err.code and err.response so the internal host:port cannot leak - and the
+        // encoder returns it in a normal JSON-RPC error body over HTTP 200. That is
+        // exactly the case where the tx MAY ALREADY have reached the node, and it used to
+        // be classified retry-safe alongside 'bad-txns-inputs-missingorspent'.
+        it('treats the encoder transport-failure fallback as AMBIGUOUS despite the RPC-error envelope', function () {
+            expect(isAmbiguousSendError(new Error('Encoder RPC error: Transaction broadcast failed'))).to.equal(true);
+        });
+        it('still treats a named node rejection in the same envelope as DEFINITIVE', function () {
+            expect(isAmbiguousSendError(new Error('Encoder RPC error: bad-txns-inputs-missingorspent'))).to.equal(false);
+            expect(isAmbiguousSendError(new Error('Encoder RPC error: min relay fee not met'))).to.equal(false);
+            expect(isAmbiguousSendError(new Error('Encoder RPC error: Missing required parameter: tx_hex'))).to.equal(false);
+        });
+        it('keeps a sub-500 HTTP refusal DEFINITIVE even when it carries that message', function () {
+            // A 4xx body proves the encoder refused the call before the node ever saw it,
+            // so there is nothing ambiguous to defer for.
+            expect(isAmbiguousSendError(Object.assign(
+                new Error('Encoder RPC error: Transaction broadcast failed'),
+                { response: { status: 400 } }))).to.equal(false);
+        });
+        it('leaves the prefix-less classification untouched', function () {
+            expect(isAmbiguousSendError(new Error('Transaction broadcast failed'))).to.equal(true);
+            expect(isAmbiguousSendError(Object.assign(
+                new Error('Transaction broadcast failed'), { code: 'ECONNREFUSED' }))).to.equal(false);
+        });
     });
 
     describe('AtMostOnce', function () {
@@ -106,6 +135,37 @@ describe('idempotent-broadcast helper', function () {
             expect(err.anchorAmbiguousSend).to.equal(true);
             expect(tracker.has('r1')).to.equal(false);   // not marked => a later existence-checked replay may proceed
             expect(guard.spentInWindow()).to.equal(0);   // no budget consumed by a failed send
+        });
+
+        // The send is AWAITED, so a check()/record() composition lets every concurrent
+        // caller read the same pre-send budget and all of them spend past the ceiling -
+        // the window spend_guard's own contract forbids. The reservation consumes the
+        // budget in the same synchronous turn, so only the first caller can pass.
+        it('admits exactly ONE of N concurrent awaited sends against a one-send budget', async function () {
+            const guard = new SpendGuard('BO', { BO_MAX_SPEND_USD_CENTS_PER_WINDOW: 100 });
+            let sent = 0;
+            let open;
+            const gate = new Promise(resolve => { open = resolve; });
+            const calls = [0, 1, 2].map(i => broadcastOnce({
+                key: 'r' + i, guard, cost: 100,
+                send: async () => { sent++; await gate; return { txid: 'tx' + i }; }
+            }));
+            open();
+            let results = await Promise.all(calls);
+            expect(sent).to.equal(1);
+            expect(results.filter(r => r.skipped === true).length).to.equal(2);
+            expect(guard.spentInWindow()).to.equal(100);
+        });
+
+        it('hands the reserved budget back when the send throws', async function () {
+            const guard = new SpendGuard('BO', { BO_MAX_SPEND_USD_CENTS_PER_WINDOW: 100 });
+            try {
+                await broadcastOnce({ key: 'r1', guard, cost: 100, send: async () => { throw new Error('nope'); } });
+            } catch (e){ /* expected */ }
+            expect(guard.spentInWindow()).to.equal(0);
+            // The freed budget is usable again: a leaked reservation would block this.
+            let r = await broadcastOnce({ key: 'r2', guard, cost: 100, send: async () => ({ txid: 'ok' }) });
+            expect(r.txid).to.equal('ok');
         });
 
         it('does NOT tag a definitive send error', async function () {

@@ -56,10 +56,15 @@ function makeProviderRegistry(overrides) {
         getModule: sinon.stub().returns({ fetch: sinon.stub().resolves({ body: 'data', meta: '200' }) }),
         getDef:    sinon.stub().returns({ max_response_bytes: 32768 }),
         getAdditionalConfig: sinon.stub().returns({ approved_models: ['claude-sonnet-4-6'], judge_model: 'claude-haiku-4-5' }),
-        // Block-anchored provider stake floor (XC-083). '0' keeps the pre-existing
+        // Block-anchored provider stake floor. '0' keeps the pre-existing
         // fixtures (whose snapshots carry no weight) selecting exactly as before on the
         // unweighted path, which is the only path they exercise.
         getMinStake: sinon.stub().returns('0'),
+        // Block-anchored PBFT strategy, resolved once at the request's block and pinned
+        // onto roundState. byte_equality keeps the existing fixtures on the path they
+        // already exercised; the anchoring itself is covered in ProviderRegistry.test.js
+        // and the fail-closed branch below.
+        getConsensusStrategy: sinon.stub().returns('byte_equality'),
         ...(overrides || {})
     };
 }
@@ -373,14 +378,14 @@ describe('AttestationRound', function () {
         });
     });
 
-    // ── provider stake floor (XC-083) ───────────────────────────────────────
+    // ── provider stake floor ───────────────────────────────────────
     // The canonical vectors above cover the SELECTION rule, but they skip wholesale
     // when the sibling xchain-documentation checkout is absent. These pin the same
     // behaviour locally, plus the two things the vectors cannot express: that
     // _startRound resolves the floor from the BLOCK-ANCHORED registry at the request's
     // own block, and that it refuses the round (before the paid provider fetch) when
     // the floor cannot be resolved.
-    describe('provider stake floor on the weighted path (XC-083)', function () {
+    describe('provider stake floor on the weighted path', function () {
 
         function weightedValidators() {
             return [
@@ -488,6 +493,56 @@ describe('AttestationRound', function () {
         });
     });
 
+    // The PBFT strategy selects which state machine AttestationConsensus runs for the
+    // round, so it is anchored at the request's block and pinned onto roundState rather
+    // than read live at each of the six decision sites: hotReload() re-parses every
+    // provider def from the local configs table on EVERY proposal:finalized event, so a
+    // live read could flip a hub's machine between two messages of one round.
+    describe('block-anchored consensus_strategy pin', function () {
+
+        const MY_PUBKEY = 'aa'.repeat(32);
+
+        function makeRequest(overrides) {
+            return {
+                request_id: 'rid-strategy', provider_id: 'http_get', redundancy: 1,
+                block_index: 4242, action_index: 1, payload: 'https://example.com/',
+                ...overrides
+            };
+        }
+        function makeStrategyHub() {
+            let capSS = { getSnapshot: sinon.stub().resolves({ validators: [{ pubkey: MY_PUBKEY }] }) };
+            let hub   = makeHub({ capabilitySnapshot: capSS });
+            hub.getIdentity = () => makeIdentity(MY_PUBKEY);
+            return hub;
+        }
+
+        it('_startRound resolves the strategy at the REQUEST block and pins it on roundState', async function () {
+            let reg = makeProviderRegistry({
+                getConsensusStrategy: sinon.stub().returns('judge_model'),
+                getModule: sinon.stub().returns({ fetch: sinon.stub().resolves({ body: Buffer.from('ok'), meta: '200' }) })
+            });
+            let ar = new AttestationRound(makeStrategyHub(), reg);
+            sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: MY_PUBKEY, hash: '00' }]);
+            await ar._startRound(makeRequest(), 4242);
+            expect(reg.getConsensusStrategy.calledWith('http_get', 4242)).to.be.true;
+            let rs = [...ar.rounds.values()][0];
+            expect(rs.pinnedConsensusStrategy).to.equal('judge_model');
+        });
+
+        it('_startRound skips the round, and the paid fetch, when the strategy is unanchorable', async function () {
+            let fetchStub = sinon.stub().resolves({ body: Buffer.from('ok'), meta: '200' });
+            let reg = makeProviderRegistry({
+                getConsensusStrategy: sinon.stub().returns(null),
+                getModule:            sinon.stub().returns({ fetch: fetchStub })
+            });
+            let ar = new AttestationRound(makeStrategyHub(), reg);
+            sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: MY_PUBKEY, hash: '00' }]);
+            await ar._startRound(makeRequest(), 4242);
+            expect(ar.rounds.size).to.equal(0);
+            expect(fetchStub.called, 'an unanchorable strategy must not trigger a paid fetch').to.be.false;
+        });
+    });
+
     // ── getStats ────────────────────────────────────────────────────────────
 
     describe('getStats()', function () {
@@ -525,6 +580,11 @@ describe('AttestationRound', function () {
                 nonOkPublished:                 new Map(),
                 nonOkPublishedMax:              64,
                 nonOkEvictedWhilePendingCount:  0,
+                // The ok-ring counterparts getStats now reads alongside the nonOk
+                // three; a real AttestationConsensus always carries them.
+                finalized:                      new Set(),
+                finalizedMax:                   10000,
+                finalizedEvictedWhilePendingCount: 0,
                 roundTimeoutCount:              4
             });
             // Quorum loss must NOT be folded into failed_count: failed_count is a
@@ -533,6 +593,28 @@ describe('AttestationRound', function () {
             let stats = ar.getStats();
             expect(stats.consensus_timeout_count).to.equal(4);
             expect(stats.failed_count).to.equal(0);
+        });
+
+        it('surfaces ok-ring occupancy and premature evictions, not just the nonOk ring', function () {
+            let hub = makeHub();
+            let ar  = new AttestationRound(hub, makeProviderRegistry());
+            // Absent without a consensus, same as the nonOk and timeout fields.
+            expect(ar.getStats().finalized_count).to.equal(undefined);
+            ar.setConsensus({
+                nonOkPublished:                 new Map(),
+                nonOkPublishedMax:              64,
+                nonOkEvictedWhilePendingCount:  0,
+                finalized:                      new Set(['a', 'b']),
+                finalizedMax:                   7,
+                finalizedEvictedWhilePendingCount: 2,
+                roundTimeoutCount:              0
+            });
+            let stats = ar.getStats();
+            // Occupancy against the cap is how close the ring is to evicting; the
+            // count is why an undersized cap is no longer a silent fee burn.
+            expect(stats.finalized_count).to.equal(2);
+            expect(stats.finalized_max).to.equal(7);
+            expect(stats.finalized_evicted_while_pending_count).to.equal(2);
         });
     });
 

@@ -12,7 +12,7 @@
 //
 // scheduler self-overlap (TOCTOU) guards.
 //
-// Four hub loops poll on a bare setInterval while their pass awaits network I/O
+// Five hub loops poll on a bare setInterval while their pass awaits network I/O
 // whose duration nothing here bounds, so a slow dependency lets the next interval
 // fire on top of the previous pass. Each pass then re-reads shared state the
 // in-flight pass has not written yet, and both act on it. The reference fix is
@@ -446,5 +446,79 @@ describe('XChainHub._pollOwnStake overlap guard', function () {
         hub._resolveBtcIndexerUrl = async () => 'http://indexer.test';
         await hub._pollOwnStake('pk');
         expect(refreshOwnQualification.callCount, 'the next poll runs normally').to.equal(1);
+    });
+});
+
+// ── XChainHub._refreshTransportSignerSet ────────────────────────────────────
+
+// The sharper half of this one is not duplicated work but ORDER. Each pass resolves
+// the BTC tip at its own start, so two passes in flight can finish out of order and
+// the older one's validator snapshot lands last, dropping a just-rotated key from
+// transport auth until the next tick.
+
+describe('XChainHub._refreshTransportSignerSet overlap guard', function () {
+
+    const NEWER = 'ab'.repeat(32);
+    const OLDER = 'cd'.repeat(32);
+
+    let hub, setEffectiveSignerSet, snapshot;
+
+    beforeEach(function () {
+        const XChainHub = require('../../src/XChainHub');
+        hub = new XChainHub('h', 1, 'd', 'u', 'p', null);
+        setEffectiveSignerSet = sinon.stub();
+        hub.peerManager = { setEffectiveSignerSet };
+        // Older block, older validator set: the block a pass resolved decides the set it
+        // would write, which is what makes an out-of-order write visible here.
+        snapshot = sinon.stub().callsFake(async (block) => ({
+            validators: [{ pubkey: block >= 200 ? NEWER : OLDER }]
+        }));
+        hub.capabilitySnapshot = { getActiveValidatorSnapshot: snapshot };
+    });
+
+    afterEach(function () {
+        sinon.restore();
+    });
+
+    it('a refresh firing on top of an in-flight refresh is skipped', async function () {
+        const { gate, release } = makeGate();
+        let first = true;
+        hub._resolveBtcLatestBlock = async () => {
+            if (first) { first = false; await gate; return 100; }
+            return 200;
+        };
+
+        const a = hub._refreshTransportSignerSet();   // parks before the snapshot round-trip
+        await flush();
+        await hub._refreshTransportSignerSet();       // the interval fires on top
+
+        expect(snapshot.callCount, 'the second pass never asked for a snapshot').to.equal(0);
+
+        release();
+        await a;
+        expect(snapshot.callCount, 'exactly one snapshot round-trip').to.equal(1);
+        expect(setEffectiveSignerSet.callCount, 'the effective set is written once').to.equal(1);
+        expect(hub._transportSetRefreshRunning, 'flag released in finally').to.equal(false);
+
+        // And the loop still works on the next tick, with the newer block's set.
+        await hub._refreshTransportSignerSet();
+        expect(setEffectiveSignerSet.lastCall.args[0].has(NEWER), 'the later tick writes the newer set').to.equal(true);
+    });
+
+    it('a rejected refresh does not wedge the refresh loop', async function () {
+        hub._resolveBtcLatestBlock = async () => { throw new Error('BTC tip lookup failed'); };
+        await hub._refreshTransportSignerSet().catch(() => {});
+        expect(hub._transportSetRefreshRunning, 'a failed refresh must not wedge the timer').to.equal(false);
+
+        hub._resolveBtcLatestBlock = async () => 200;
+        await hub._refreshTransportSignerSet();
+        expect(setEffectiveSignerSet.callCount, 'the next refresh runs normally').to.equal(1);
+    });
+
+    it('an unresolved tip releases the flag without writing the set', async function () {
+        hub._resolveBtcLatestBlock = async () => null;
+        await hub._refreshTransportSignerSet();
+        expect(setEffectiveSignerSet.callCount, 'no set is written on an unresolved tip').to.equal(0);
+        expect(hub._transportSetRefreshRunning, 'the early return still clears the flag').to.equal(false);
     });
 });

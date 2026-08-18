@@ -46,12 +46,14 @@ const ValidatorIdentity = require('./ValidatorIdentity.js');
 const eq                = require('./equivocation_header.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { positiveIntConfig } = require('./lib/config_int.js');
+// 2 minutes per request lifecycle. Lives in constants.js because
+// AttestationRound floors its `seen` window on the same default; see there.
+const { DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS } = require('./constants.js');
 
 const ATTEST_PROPOSE = 'ATTEST_PROPOSE';
 const ATTEST_PREPARE = 'ATTEST_PREPARE';
 const ATTEST_COMMIT  = 'ATTEST_COMMIT';
 
-const DEFAULT_ROUND_TIMEOUT_MS = 120000;  // 2 minutes per request lifecycle
 // Default cap for the nonOkPublished throttle ring. Floor derives
 // from the LONGEST provider deadline window (deadline_window_blocks, currently
 // 100 BTC blocks for http_get), not the ok/BTC-confirmation horizon that sizes
@@ -110,6 +112,25 @@ class AttestationConsensus extends EventEmitter {
         this.finalized       = new Set();
         this._finalizedOrder = [];
         this.finalizedMax    = positiveIntConfig(this.config.ATTESTATION_FINALIZED_MAX, 10000, 'ATTESTATION_FINALIZED_MAX');
+
+        // Violation detector for the sizing invariant above, which was otherwise
+        // unobservable: eviction is by count, nothing asked whether the evicted
+        // rid still needed suppression, and the first symptom was a re-proposed
+        // round and a burned BTC fee with no counter to attribute it to the cap.
+        // The sibling nonOk ring classifies its evictions against `finalized`; the
+        // ok ring has no such in-hub oracle (the answer lives in the indexer's
+        // pending list) and no BTC-confirmation horizon it could age an entry
+        // against, so this detects by PROOF instead of by proxy: evicted rids are
+        // kept as tombstones, and a later propose() for one is the indexer itself
+        // demonstrating the request was still pending when the ring dropped it.
+        // Sized to `finalizedMax`, which doubles the reach in rids at the same
+        // order of memory. Deliberately no start-time sizing-floor check, unlike
+        // checkNonOkSizingFloor(): that floor derives from a real provider
+        // deadline_window_blocks, and inventing a static ok horizon here would
+        // assert a number nothing in the hub can source.
+        this._finalizedEvicted      = new Set();
+        this._finalizedEvictedOrder = [];
+        this.finalizedEvictedWhilePendingCount = 0;
 
         // Non-ok publication throttle (Phase 4). A non-ok finalization leaves
         // the request PENDING on the indexer (retryable), so without a throttle
@@ -214,7 +235,7 @@ class AttestationConsensus extends EventEmitter {
             'ATTESTATION_TORNDOWN_MAX');
 
         this._messageHandler = null;
-        this.roundTimeoutMs  = parseInt(this.config.ATTESTATION_ROUND_TIMEOUT_MS) || DEFAULT_ROUND_TIMEOUT_MS;
+        this.roundTimeoutMs  = parseInt(this.config.ATTESTATION_ROUND_TIMEOUT_MS) || DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS;
     }
 
     async start(){
@@ -396,6 +417,26 @@ class AttestationConsensus extends EventEmitter {
         if(this.finalized.has(rid)) return;
         if(this.pending.has(rid)) return;
 
+        // Premature-eviction proof. Reaching here for a rid this hub already
+        // ok-finalized and then evicted means the indexer still listed the request
+        // as pending after the ring dropped it, i.e. ATTESTATION_FINALIZED_MAX sits
+        // below the sizing invariant in the constructor. The round below will
+        // re-publish an already-fulfilled response and burn a BTC tx, so count and
+        // warn: the cap is the cause and nothing else names it. Observation only,
+        // never a gate - a reorg that rolled the fulfillment back also arrives here
+        // legitimately, and refusing the round would strand that request until its
+        // deadline. The tombstone is left in place: if this round finalizes ok the
+        // rid re-enters `finalized` and the guard above suppresses the next poll,
+        // and if it does not, the next poll's fee is real and worth warning about
+        // again.
+        if(this._finalizedEvicted.has(rid)){
+            this.finalizedEvictedWhilePendingCount++;
+            console.warn('AttestationConsensus: re-proposing request ' + rid.substring(0,16) +
+                '... whose finalized entry was already evicted (ring full at ' + this.finalizedMax +
+                '; raise ATTESTATION_FINALIZED_MAX; evictions_while_pending=' +
+                this.finalizedEvictedWhilePendingCount + ')');
+        }
+
         let snapshot = roundState.snapshot;
         // PBFT messages (PROPOSE/PREPARE/COMMIT) only flow within the
         // REDUNDANCY-sized responsible set, so prepares/commits are bounded by
@@ -485,6 +526,14 @@ class AttestationConsensus extends EventEmitter {
             // governance delisting of the pinned model froze the round at
             // no_quorum forever, since every retry re-pinned the same model.
             pinnedApprovedModels: roundState.pinnedApprovedModels || null,
+            // Block-anchored PBFT strategy for this round. Every consensus_strategy
+            // decision below reads THIS and never providerRegistry.getDef(): the registry
+            // is re-parsed from the local configs table on every proposal:finalized
+            // hotReload, so a live read could flip this hub's state machine between two
+            // messages of one round, and two hubs whose reloads raced could run different
+            // machines against the same request. AttestationRound resolves it once at the
+            // request's own block and fails the round closed when it cannot.
+            pinnedConsensusStrategy: roundState.pinnedConsensusStrategy || null,
             finalized:    false,
             timer:        null
         };
@@ -674,8 +723,7 @@ class AttestationConsensus extends EventEmitter {
         // expiry rather than finalizing divergent bodies. byte_equality stays
         // deterministic (the agreed body is the common one) so every hub resolves
         // locally as before.
-        let agreeDef = this.providerRegistry.getDef(pending.providerId);
-        if(agreeDef && agreeDef.consensus_strategy === 'judge_model'
+        if(pending.pinnedConsensusStrategy === 'judge_model'
            && pending.leaderPubkey && pending.myPubkey
            && String(pending.leaderPubkey).toLowerCase() !== String(pending.myPubkey).toLowerCase()){
             return;
@@ -728,8 +776,7 @@ class AttestationConsensus extends EventEmitter {
         // non-match doesn't imply wrong.
         let winnerHash = crypto.createHash('sha256').update(winner.body).digest();
         let winnerHashHex = winnerHash.toString('hex');
-        let providerDef = this.providerRegistry.getDef(pending.providerId);
-        let strategy = providerDef && providerDef.consensus_strategy;
+        let strategy = pending.pinnedConsensusStrategy;
         // The canonical the on-chain verifier reconstructs binds `status` (hardcoded
         // 'ok' for a winner), but a proposal stores only {body, meta, sig} and its sig
         // was verified in _handlePropose over the sender's own wire status. A proposer
@@ -978,8 +1025,7 @@ class AttestationConsensus extends EventEmitter {
             // is deliberately exempt: only the leader runs the judge, so a follower
             // genuinely cannot re-derive the verdict (the seam note below), and its
             // adoption stays participation-gated by the co-sign policy.
-            let nonOkDef = this.providerRegistry.getDef(pending.providerId);
-            if(status === 'no_quorum' && nonOkDef && nonOkDef.consensus_strategy === 'byte_equality'){
+            if(status === 'no_quorum' && pending.pinnedConsensusStrategy === 'byte_equality'){
                 let needNq = Math.min(pending.redundancy, pending.responsible.length);
                 if(pending.proposals.size < needNq){
                     this._bufferEarlyMessage(rid, envelope);
@@ -1056,8 +1102,7 @@ class AttestationConsensus extends EventEmitter {
             // established" path below and verifies over the canonical winner) or the
             // round expires. byte_equality is deterministic (independently-fetched
             // identical bodies) and stays first-verified-PREPARE-wins.
-            let providerDef = this.providerRegistry.getDef(pending.providerId);
-            if(providerDef && providerDef.consensus_strategy === 'judge_model' && pending.leaderPubkey &&
+            if(pending.pinnedConsensusStrategy === 'judge_model' && pending.leaderPubkey &&
                senderPubkey !== String(pending.leaderPubkey).toLowerCase()){
                 this._bufferEarlyMessage(rid, envelope);
                 return;
@@ -1078,7 +1123,7 @@ class AttestationConsensus extends EventEmitter {
                 return;
             }
             let prepBodyHash = crypto.createHash('sha256').update(body).digest('hex');
-            if(providerDef && providerDef.consensus_strategy === 'judge_model'){
+            if(pending.pinnedConsensusStrategy === 'judge_model'){
                 // A-F1: the leader's signature proves authorship, not honesty. agree()
                 // only ever SELECTS one of the collected proposals, so an honest
                 // leader's winner must hash-match a proposal this follower collected
@@ -1157,8 +1202,7 @@ class AttestationConsensus extends EventEmitter {
             // Sign our own copy if we agreed (we might have proposed the same body)
             let myProposal = pending.proposals.get(pending.myPubkey);
             if(myProposal){
-                let providerDef = this.providerRegistry.getDef(pending.providerId);
-                let strategy    = providerDef && providerDef.consensus_strategy;
+                let strategy    = pending.pinnedConsensusStrategy;
                 if(strategy === 'judge_model'){
                     // Liveness guard (item 5314): a follower re-signs the leader's
                     // chosen body only after verifying the leader's Ed25519 sig, so it
@@ -1433,7 +1477,19 @@ class AttestationConsensus extends EventEmitter {
         if(this._finalizedOrder.length > this.finalizedMax){
             let oldest = this._finalizedOrder.shift();
             this.finalized.delete(oldest);
+            this._rememberEvictedFinalized(oldest);
         }
+    }
+
+    // Tombstone an evicted ok rid so propose() can later prove the eviction was
+    // premature. Ring-bounded FIFO like every other set here, so the detector
+    // cannot itself become the unbounded growth `finalized` was capped to avoid.
+    _rememberEvictedFinalized(rid){
+        if(this._finalizedEvicted.has(rid)) return;
+        this._finalizedEvicted.add(rid);
+        this._finalizedEvictedOrder.push(rid);
+        if(this._finalizedEvictedOrder.length > this.finalizedMax)
+            this._finalizedEvicted.delete(this._finalizedEvictedOrder.shift());
     }
 
     // Build the indexer-canonical signing message (returned as UTF-8 Buffer):

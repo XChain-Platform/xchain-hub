@@ -18,7 +18,7 @@ const constants  = require('../../src/constants');
 // the hub-local conformance guard against the "re-introduced literal" drift vector:
 // a future consumer (or a refactor) that hardcodes 0.05 or 1e10 instead of importing
 // the constant would drift undetected. The cross-repo half is the second describe
-// below (#3886): both literals are hand-mirrored into five other repos, and this file
+// below (#3886): both literals are hand-mirrored into six other repos, and this file
 // owning the canonical value is what lets one guard diff all of them.
 describe('oracle band constants conformance (#1299)', () => {
 
@@ -51,14 +51,18 @@ describe('oracle band constants conformance (#1299)', () => {
     });
 });
 
-// #3886: PRICE_MAX and ORACLE_DEVIATION_THRESHOLD are hand-mirrored into five other
+// #3886: PRICE_MAX and ORACLE_DEVIATION_THRESHOLD are hand-mirrored into six other
 // repos, and unlike XCALL_MAX_HOPS they are NOT in the GOLDEN set of
 // xcall-constants-cross-repo.test.js (whose GUARD_PATHS name only vm/indexer/sdk), so
-// nothing tied the copies together. Anchored HERE rather than replicated as a sixth
+// nothing tied the copies together. Anchored HERE rather than replicated as a seventh
 // byte-identical guard: this repo declares the canonical value, so one file can diff
 // every mirror against it and name the stale one. No mirror repo's code reads either
 // constant - they are re-exports for downstream consumers - so a mirror-side edit has
 // no local motive and being caught on the next hub CI run is enough.
+//
+// xchain-decoder was missing from MIRRORS (and from .ci-siblings) while carrying a
+// byte-identical copy of both values, and its own suite pins neither, so that copy was
+// the one mirror nothing on either side tied to the canonical value.
 describe('oracle band constants agree across the mirror repos (#3886)', function () {
     const fs   = require('fs');
     const path = require('path');
@@ -71,6 +75,7 @@ describe('oracle band constants agree across the mirror repos (#3886)', function
         'xchain-indexer':       'src/protocol/constants.js',
         'xchain-sdk':           'src/protocol/constants.js',
         'xchain-explorer':      'src/protocol/constants.js',
+        'xchain-decoder':       'src/protocol/constants.js',
         'xchain-documentation': 'protocol/constants.js'
     };
 

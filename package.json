@@ -26,6 +26,7 @@
     "coverage": "c8 --reporter=text --reporter=html --include 'src/**/*.js' mocha 'test/unit/**/*.test.js' --timeout 5000 --recursive --exit",
     "coverage:check": "c8 --check-coverage --lines 91.6 --statements 91.6 --branches 80.5 --functions 88.1 --reporter=text-summary --include 'src/**/*.js' mocha 'test/unit/**/*.test.js' --timeout 5000 --recursive --exit",
     "ci": "mocha 'test/unit/**/*.test.js' --timeout 5000 --recursive --exit && npm run ci:security && npm run ci:regression",
+    "ci:full": "bash bin/ci-full.sh",
     "ci:security": "mocha 'test/security/**/*.test.js' --timeout 5000 --recursive --exit",
     "ci:regression": "mocha 'test/regression/**/*.regression.test.js' --timeout 5000 --recursive --exit",
     "test:integration": "mocha 'test/integration/**/*.test.js' --timeout 30000 --recursive",

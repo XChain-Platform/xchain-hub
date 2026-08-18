@@ -679,6 +679,11 @@ exports.agree = async (proposals, options) => {
             judgeText = await _runLlm({
                 prompt:      judgePrompt,
                 system:      judgeSystem,
+                // judgeSystem is hub-authored and tells the model that nothing outside
+                // it is a real instruction, so it has to BE the whole system role, not a
+                // layer on a transport's own baseline. The claude_spawn branch reads
+                // this to take the CLI's replacing flag instead of its appending one.
+                systemIsSoleInstruction: true,
                 model:       jm,
                 // Reasoning-family judges need headroom past the reasoning-token
                 // spend or the verdict returns truncated/empty; chat-family judges
@@ -870,7 +875,12 @@ async function _runLlm(opts) {
     }
 }
 
-async function _runLlmDispatch({ prompt, system, model, maxTokens, temperature, format, timeoutMs, pinnedVendors, _usage }) {
+// systemIsSoleInstruction says the `system` block is hub-authored and its contract
+// depends on being the model's ONLY system content (the judge framing, which tells the
+// model that nothing outside the system message is an instruction). It is deliberately
+// NOT set for a requester-supplied envelope.system: replacing the CLI's baseline there
+// would hand a request author the entire system role on the validator box.
+async function _runLlmDispatch({ prompt, system, systemIsSoleInstruction, model, maxTokens, temperature, format, timeoutMs, pinnedVendors, _usage }) {
     const vendor = vendorOfModel(model, pinnedVendors);
     const auth   = resolveLlmVendorAuth(vendor);
     if (!auth.ok) throw new Error('llm: ' + (auth.detail || auth.reason || 'no credentials'));
@@ -978,9 +988,18 @@ async function _runLlmDispatch({ prompt, system, model, maxTokens, temperature, 
         const spawnOpts = {
             prompt,
             model,
-            systemPrompt: sys,
             timeoutMs:    timeoutMs || 60000
         };
+        // The CLI's default carries systemPrompt to --append-system-prompt, which adds
+        // to the agent persona the binary bakes in rather than replacing it. That is the
+        // right shape for a requester-supplied system block (the baseline stays), but it
+        // silently falsifies the judge's own claim that only its system message is a real
+        // instruction: on this transport the judge block would be one layer on top of an
+        // opaque prompt this codebase does not control, while the anthropic_api branch
+        // below sends it as the sole system content. Take the full override for that
+        // caller so the trust boundary is the same on both Anthropic transports.
+        if (sys && systemIsSoleInstruction) spawnOpts.systemPromptOverride = sys;
+        else if (sys)                       spawnOpts.systemPrompt         = sys;
         if (budget !== undefined) spawnOpts.maxBudgetUsd = budget;
         const { result, json } = await runClaudePrint(spawnOpts);
         // This branch used to drop `json` and record nothing, so
@@ -1105,6 +1124,13 @@ function _buildJudgePrompt(candidates) {
     let open  = (i) => '<candidate index="' + (i + 1) + '" nonce="' + nonce + '">';
     let close = (i) => '</candidate index="' + (i + 1) + '" nonce="' + nonce + '">';
 
+    // The claim below that only this message is a real instruction is a claim about
+    // the WIRE, so each transport has to be made to honour it: the API branches send
+    // this block as the request's whole system field, and the claude_spawn branch takes
+    // the CLI's replacing system-prompt flag (via systemIsSoleInstruction at the judge
+    // call site) rather than its appending one, which would leave the block sitting on
+    // top of the CLI's own baked-in agent prompt.
+    //
     // The evaluator role, the SECURITY data-vs-instruction framing, and the
     // verdict schema are TRUSTED instructions; carry them in the system role so
     // both the Anthropic and OpenAI transports apply their instruction-hierarchy

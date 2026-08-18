@@ -81,6 +81,7 @@ const SpendGuard        = require('./lib/spend_guard.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { resolveQuorumNetwork } = require('./lib/quorum_network.js');
 const { isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
+const { sumUtxosCoins } = require('./lib/utxo_balance.js');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const StateCheckpointEngine = require('./StateCheckpointEngine.js');
 const swq                   = require('./stake_weighted_quorum.js');
@@ -120,13 +121,23 @@ const XANCARCHPUB_SIGN     = 'XANCARCHPUB_SIGN';
 // from, and the frozen reward amount is never read off the wire at all.
 const XANCREWARD = 'XANCREWARD';
 
+// Default retention window for anchor_published_checkpoints and
+// anchor_published_archives, mirroring OraclePublisher's ~90-day
+// oracle_published_rounds window.
+const DEFAULT_ANCHOR_MARKER_RETENTION_MS = 7776000000;   // 90 days
+// Multiple of anchorIntentTtlMs the effective window is FLOORED at. The TTL is the
+// exact horizon past which _anchorIntentHolds already answers false, so the multiple
+// is pure margin over a re-armed intent, not the safety property itself.
+const ANCHOR_MARKER_RETENTION_TTL_SAFETY = 8;
+
 // Fixed serialization order for an archived match row (the crc32 and the
 // follower byte-comparison depend on this exact order). Spec §Archive JSON.
-// `id` (the hub-assigned mirror cursor) is archived because it is the
-// indexers' settlement-order key (getEffectiveUnsettledMatches ORDER BY id):
-// recovery must rebuild rows under their original ids or a reindexing node
-// could settle two same-block matches in a different order than live history
-// (action_index divergence). Archives published before this field exist
+// `id` (the hub-assigned mirror cursor) is archived for per-hub provenance
+// only; settlement order is (snapshot_block, match_id), never `id`, because a
+// per-hub AUTO_INCREMENT must not order consensus state (xchain-indexer
+// db.js getEffectiveUnsettledMatches). Recovery rebuilds the row under its
+// original id to preserve archive byte-parity, not to fix a settlement order
+// (xchain-indexer recovery.js). Archives published before this field exist
 // without it; recovery tolerates both shapes.
 const MATCH_KEYS = ['id', 'match_id', 'snapshot_block', 'network',
     'a_chain', 'a_action_index', 'a_kind', 'a_tick', 'a_amount', 'a_filled_before', 'a_ownership', 'a_payout_addr', 'a_payout_legs',
@@ -292,6 +303,19 @@ class StateAnchorPublisher {
         this._archiveChunkLosses = 0;
         // Cumulative count of v0/v3 anchors successfully published on-chain.
         this._anchorsPublished = 0;
+        // Split of that count by the rank this hub held for the row it anchored.
+        // A backup-rank publish means the elected rank-0 publisher did NOT anchor
+        // within its ladder step, so the federation is running on failover with
+        // reduced anchor redundancy. Undifferentiated, that is invisible: the
+        // checkpoints still land on cadence and every staleness/balance term stays
+        // green until the backups fail too. Same idea as OraclePublisher's
+        // _leaderRounds/_followerRounds on the PRICE rail.
+        this._anchorsAsLeader  = 0;
+        this._anchorsAsBackup  = 0;
+        // Rank state of the most recent successful anchor, surfaced via
+        // getAnchorStats so an operator sees the CURRENT posture, not only a
+        // lifetime tally that a long healthy history would dilute.
+        this._lastAnchorRank   = null;   // { chain, network, blockIndex, myRank, publisherCount, isLeader, at }
         // Last DOGE balance observed by _checkBalance (refreshed each flush) and
         // when, surfaced via getAnchorStats so an operator/monitor can watch the
         // publisher wallet's runway (it spends real DOGE on every anchor cycle)
@@ -300,9 +324,11 @@ class StateAnchorPublisher {
         this._lastBalance   = null;
         this._lastBalanceAt = null;
         // Locally-observed archive-round leaders: batch_seq -> Set(elected leader
-        // pubkeys). Populated in _handleSignReq the moment this hub validates a
-        // SIGN_REQ sender as the (rank-unlocked) elected archive leader for that
-        // batch_seq, and consulted in _handleFinalized to authenticate the
+        // pubkeys). Populated in _handleSignReq once a SIGN_REQ sender has validated
+        // as the (rank-unlocked) elected archive leader for that batch_seq AND its
+        // signature over the archive canonical verifies (the rank ladder alone is
+        // wire-keyed, so the signature is what proves the sender holds the key it
+        // names), and consulted in _handleFinalized to authenticate the
         // FINALIZED sender. The archive election is keyed on election_block (the
         // BTC tip at archive time), which the FINALIZED canonical does NOT carry,
         // so it cannot be re-derived at finalize time; this binds it from the
@@ -379,6 +405,22 @@ class StateAnchorPublisher {
         // which a send that never relayed is not coming back and holding the row costs
         // more than re-broadcasting it.
         this.anchorIntentTtlMs    = parseInt(process.env.ANCHOR_INTENT_TTL_MS || cfg.ANCHOR_INTENT_TTL_MS || '21600000');   // 6 h
+        // Retention window for the two durable anchor marker tables. Both appended one
+        // row per DOGE-spending broadcast and never removed one, so they grew for the
+        // life of the deployment while their oracle_published_rounds sibling was swept.
+        // Only CONFIRMED rows are pruned, and only past a floor derived from
+        // anchorIntentTtlMs; see _pruneAnchorMarkers for both invariants. 0 disables
+        // pruning; garbage or a negative value falls back to the default.
+        this.anchorMarkerRetentionMs = parseInt(process.env.ANCHOR_MARKER_RETENTION_MS ||
+                                                cfg.ANCHOR_MARKER_RETENTION_MS, 10);
+        if(!Number.isFinite(this.anchorMarkerRetentionMs) || this.anchorMarkerRetentionMs < 0)
+            this.anchorMarkerRetentionMs = DEFAULT_ANCHOR_MARKER_RETENTION_MS;
+        // Lifetime count of confirmed anchor marker rows the retention sweep deleted,
+        // and the in-flight sweep handle. The sweep is fire-and-forget on the flush
+        // path (retention must never stall an anchor), so the handle is what makes it
+        // awaitable in tests.
+        this.anchorMarkersPruned = 0;
+        this._retentionSweep     = null;
     }
 
     setBroadcastHook(fn){ this.broadcastFn = fn; }
@@ -391,7 +433,16 @@ class StateAnchorPublisher {
         return {
             enabled:            this.enabled,
             anchorsPublished:   this._anchorsPublished,
+            // Leader-vs-failover split of anchorsPublished plus the last anchor's
+            // rank posture. anchorsAsBackup climbing (or lastAnchorRank.isLeader
+            // false) is the only signal that the elected rank-0 publisher is dead
+            // and the ladder is absorbing its work.
+            anchorsAsLeader:    this._anchorsAsLeader,
+            anchorsAsBackup:    this._anchorsAsBackup,
+            lastAnchorRank:     this._lastAnchorRank,
             archiveChunkLosses: this._archiveChunkLosses,
+            anchorMarkerRetentionMs: this.anchorMarkerRetentionMs,
+            anchorMarkersPruned:     this.anchorMarkersPruned,
             // Publisher-wallet runway: last-observed DOGE balance, its age, and the
             // low-balance threshold the publisher already warns at. dogeBalance is
             // null until the first flush reads it (or when no DOGE pipeline is set).
@@ -575,6 +626,11 @@ class StateAnchorPublisher {
 
             let anchored = await this._publishPendingCheckpoints(signer, btcBlock, failoverOnly);
             let archive  = await this._startArchiveRound(signer, btcBlock, failoverOnly);
+            // Bound the durable marker tables. Runs at the end of a flush that actually
+            // reached the publishing stage, so it never fires on a hub that is paused,
+            // out of balance or without a pipeline, and never before the intents this
+            // flush armed are settled.
+            this._sweepAnchorMarkerRetention();
             return { anchored: anchored, archive: archive };
         } catch(e){
             console.error('StateAnchorPublisher: flush failed:', e && e.message);
@@ -619,6 +675,14 @@ class StateAnchorPublisher {
     _isRankZero(order){
         if(!this.identity || !order || order.length === 0) return false;
         return order[0] === String(this.identity.getPubkeyHex()).toLowerCase();
+    }
+
+    // This hub's position in `order`, or -1 when it is absent (or has no identity).
+    // Read-only: telemetry only, never a gate. _mayPublish stays the single
+    // publish decision so a reporting bug can never authorize a spend.
+    _myRank(order){
+        if(!this.identity || !order || order.length === 0) return -1;
+        return order.indexOf(String(this.identity.getPubkeyHex()).toLowerCase());
     }
 
     // v0: one per chain/network (the LATEST checkpoint that has no anchor yet).
@@ -777,8 +841,23 @@ class StateAnchorPublisher {
                 await this.db.doQuery(
                     'UPDATE state_checkpoints SET anchor_txid = ? WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? AND anchor_txid IS NULL',
                     [txid, row.chain, row.network, row.block_index, row.checkpoint_seq]);
+                // Name the rank this anchor was published at. A backup-rank publish is
+                // otherwise byte-identical to a healthy leader publish in every observable
+                // signal, so a dead rank-0 stays invisible while the ladder absorbs its
+                // work. Computed from the SAME `order` _mayPublish decided on, so the
+                // label can never disagree with the decision that produced the spend.
+                let myRank = this._myRank(order);
+                this._lastAnchorRank = { chain: row.chain, network: row.network,
+                                         blockIndex: Number(row.block_index), myRank: myRank,
+                                         publisherCount: order.length, isLeader: myRank === 0,
+                                         at: Date.now() };
+                if(myRank > 0) this._anchorsAsBackup++; else this._anchorsAsLeader++;
                 console.log('StateAnchorPublisher: anchored checkpoint ' + row.chain + '/' + row.network +
-                            ' @ ' + row.block_index + ' (txid ' + txid + ')');
+                            ' @ ' + row.block_index + ' (txid ' + txid + ')' +
+                            (myRank > 0
+                                ? ' [FAILOVER: published at backup rank ' + myRank + ' of ' + order.length +
+                                  '; the rank-0 publisher did not anchor this checkpoint]'
+                                : ''));
                 anchored.push({ chain: row.chain, network: row.network, block_index: Number(row.block_index), txid: txid });
                 this._anchorsPublished++;
                 // At/above the anchor-reward flag-day the per-chain reward is DERIVED
@@ -1003,6 +1082,17 @@ class StateAnchorPublisher {
         if(!Number.isFinite(roundRef) || !Number.isFinite(blockIndex) || !Number.isFinite(cpSeq)) return;
         if(![4, 5, 6].includes(version)) return;                             // only the attestation-bearing ANCHOR versions carry a reward
         if(rewardType !== 'anchor_archive' && rewardType !== 'anchor_' + chain) return;
+        // BIND the two: v6 is the archive leg, v4/v5 the per-chain leg, which is the
+        // pairing the BTC derive path enforces (indexer anchor_proof_client._judge:
+        // "a v4 can never prove an archive reward and vice versa"). Checked
+        // independently, a mis-paired tuple still passes everything downstream: the
+        // XANCPUB canonical is rebuilt from the reward_type, so a publisher that really
+        // collected a per-chain quorum can federate it against the v6 archive head that
+        // wraps the same checkpoint, and the drain's byte-match (four core hashes,
+        // identical on both legs) confirms it. The row it writes is append-only and
+        // never retracted, and the derive path rejects it forever: consensus-table
+        // pollution and a permanently stranded credit. Reject at ingress instead.
+        if((rewardType === 'anchor_archive') !== (version === 6)) return;
         if(!Array.isArray(d.attest_sigs) || d.attest_sigs.length === 0) return;
         if(this.identity && sender === this.identity.getPubkeyHex().toLowerCase()) return;   // our own broadcast echoing back
 
@@ -1249,7 +1339,24 @@ class StateAnchorPublisher {
     async _runPublisherAttestationRound(cp, publisher){
         if(!this.identity) return { met: false, sigs: [] };
 
-        let signingSet     = await this._resolveCapabilitySet('oracle_publish', Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));
+        // _resolveCapabilitySet FAILS CLOSED off regtest (it throws when the
+        // deterministic snapshot is unavailable), which is right for the callers that
+        // must not build on a divergent set. Here it would abort the whole anchor: this
+        // round is awaited inside the per-row publish loop, whose catch only logs 'v0
+        // publish failed' and drops the row, so a transient snapshot outage would
+        // withhold the ANCHOR itself rather than just its reward. Degrade instead,
+        // byte-identically to the snapCount === 0 abstain below: no attestation, legacy
+        // v0/v3 lands, no reward is recorded. Scoped to the resolve call only, so an
+        // unrelated throw inside the round still surfaces.
+        let signingSet;
+        try {
+            signingSet = await this._resolveCapabilitySet('oracle_publish', Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));
+        } catch(e){
+            console.warn('StateAnchorPublisher: oracle_publish set unresolvable at snapshot_block ' +
+                         Number(cp.snapshot_block) + ' (' + (e && e.message) + '); abstaining from the ' +
+                         'publisher-attestation round (legacy anchor, no reward) rather than blocking the anchor');
+            return { met: false, sigs: [] };
+        }
         let signingPubkeys = signingSet.map(v => v.pubkey);
         let snapCount      = signingPubkeys.length;
         let weighted       = swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));   // gate on the RECORD network to match the indexer
@@ -1437,7 +1544,20 @@ class StateAnchorPublisher {
     async _runArchiveAttestationRound(cp, batchSeq, publisher){
         if(!this.identity) return { met: false, sigs: [] };
 
-        let signingSet     = await this._resolveCapabilitySet('oracle_publish', Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));
+        // Same fail-closed resolver, same reason to degrade rather than propagate (see
+        // _runPublisherAttestationRound): this round is awaited in _publishArchive AFTER
+        // the v1 co-sign quorum has already been collected, so a throw here discards a
+        // completed round instead of publishing the legacy v1 the archive's own liveness
+        // note promises. Abstaining matches the snapCount === 0 branch below exactly.
+        let signingSet;
+        try {
+            signingSet = await this._resolveCapabilitySet('oracle_publish', Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));
+        } catch(e){
+            console.warn('StateAnchorPublisher: oracle_publish set unresolvable at snapshot_block ' +
+                         Number(cp.snapshot_block) + ' (' + (e && e.message) + '); abstaining from the ' +
+                         'archive publisher-attestation round (legacy v1, no reward) rather than discarding the archive');
+            return { met: false, sigs: [] };
+        }
         let signingPubkeys = signingSet.map(v => v.pubkey);
         let snapCount      = signingPubkeys.length;
         let weighted       = swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));   // gate on the RECORD network to match the indexer
@@ -2455,11 +2575,30 @@ class StateAnchorPublisher {
             let since = electionBlock - Number(cp.snapshot_block);
             if(!this._rankUnlocked(order, sender, since)) return;            // not unlocked on the failover ladder
         }
+        // AUTHENTICATE THE PROPOSER BEFORE BINDING ANYTHING TO IT. Everything above
+        // this line is derived from the wire: `sender` is the application-level
+        // d.sig_pubkey, NOT the envelope key PeerManager authenticated (that one binds
+        // only the relayer), and the rank ladder is keyed on the wire checkpoint, so any
+        // federation member can put another member's pubkey here and unlock a rank by
+        // choosing cp/batch_seq. The proposer's signature over the archive canonical is
+        // the one thing only the real leader can produce, so it gates the record: without
+        // it, a member could poison _observedArchiveCheckpoints for a future batch_seq
+        // (first observation wins, so the genuine round then resolves no local row and
+        // never co-signs) or flood past _observedArchiveLeadersCap and evict the
+        // in-flight entries every legitimate XANC_FINALIZED is authenticated against.
+        // The canonical is built from wire fields already in hand, so verifying here
+        // costs no extra state and no liveness.
+        let canonical = this._archiveCanonical(cp, Number(d.batch_seq), Number(d.match_count),
+                                               String(d.batch_crc32), Number(d.total_chunks));
+        if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender)) return;
         // The sender has validated as the (rank-unlocked) elected archive leader
         // for this batch_seq at election_block. Bind it locally BEFORE the
         // snapshot-set co-sign check below, so an election-set member that will
         // NOT co-sign (present only at election_block, not at snapshot_block) can
         // still authenticate this leader's later XANC_FINALIZED and back-fill.
+        // Deliberately still ahead of the local state_checkpoints byte-match below: a
+        // hub lagging on the wrapper checkpoint must keep recording the leader, or it
+        // abstains from the back-fill and the rows re-archive under a fresh seq.
         if(electionPubkeys.includes(sender))
             this._recordObservedArchiveLeader(Number(d.batch_seq), sender, cp);
         // MY co-sign eligibility, by contrast, is gated on the snapshot_block
@@ -2469,10 +2608,6 @@ class StateAnchorPublisher {
         // on-chain and could drag an otherwise-valid archive below quorum.
         let signingPubkeys = await this._getActiveOraclePublishPubkeys(Number(cp.snapshot_block));
         if(!signingPubkeys.includes(myPubkey)) return;
-
-        let canonical = this._archiveCanonical(cp, Number(d.batch_seq), Number(d.match_count),
-                                               String(d.batch_crc32), Number(d.total_chunks));
-        if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender)) return;
 
         // 1. The checkpoint wrapper must equal OUR state_checkpoints row (latest
         // seq for the height; a reorg-superseded row never co-signs an archive).
@@ -3824,23 +3959,68 @@ class StateAnchorPublisher {
     // _broadcastWithRetry can distinguish "absent" from "can't tell". Any depth
     // counts: even a 1-conf anchor spent our DOGE, so re-broadcasting would
     // double-spend regardless of whether it is deep enough to 'verify' yet.
-    // (getanchoraction serves CHECKPOINT_VERSIONS only, so a v1/v2 archive
-    // anchor can never satisfy this check; the archive path has no such query
-    // surface, so it pairs the ambiguous-error defer with its own durable marker,
+    //
+    // getanchoraction does NOT serve checkpoint anchors only. Its
+    // CHECKPOINT_VERSIONS set (indexer anchor-action-query.js: [0,1,3,4,5,6])
+    // carries the v1/v6 ARCHIVE HEADS as well, and an archive head wraps a
+    // checkpoint under the SAME (chain, network, block_index, checkpoint_seq)
+    // identity it is keyed on, so an UNFILTERED lookup answers with whichever
+    // row landed at the higher action_index. Adopting an archive head as this
+    // checkpoint's anchor stamps the archive txid, skips the real v4/v5 publish
+    // and the reward derived from it, and satisfies the anchor cadence with the
+    // wrong artifact on every hub that flushes after the head lands.
+    //
+    // An archive-head answer is not "absent" either: a real checkpoint anchor
+    // can sit BENEATH it at a lower action_index, and calling that absent
+    // re-broadcasts and double-spends. So narrow with the RPC's exact-version
+    // filter (the same one _verifyAnchorOnChain binds) across the checkpoint
+    // versions and decide on that, rather than on the unfiltered top row.
+    // (The archive path has no such query surface, so it pairs the
+    // ambiguous-error defer with its own durable marker,
     // anchor_published_archives, instead of a mined lookup.)
     async _findExistingCheckpointAnchor(row){
         let ix = this.indexers && this.indexers.DOGE;
         if(!ix || !ix.url) throw new Error('no DOGE indexer wired');
-        let res = await this._indexerCall('DOGE', 'getanchoraction', {
-            chain: String(row.chain), network: String(row.network),
-            block_index: Number(row.block_index), checkpoint_seq: Number(row.checkpoint_seq)
-        });
-        if(!res || res.error) throw new Error('getanchoraction failed: ' + (res && res.error));
-        if(!res.exists) return null;
+        // ANCHOR versions carrying an archive batch (v1/v6 head, v2 continuation
+        // chunk) and the ones that really anchor a checkpoint. Mirrors the
+        // rejectVersions/{0,3,4,5} split the receiver paths already use.
+        const ARCHIVE_VERSIONS    = [1, 2, 6];
+        const CHECKPOINT_VERSIONS = [0, 3, 4, 5];
+        let ask = async (version) => {
+            let params = {
+                chain: String(row.chain), network: String(row.network),
+                block_index: Number(row.block_index), checkpoint_seq: Number(row.checkpoint_seq)
+            };
+            if(version != null) params.version = Number(version);
+            let r = await this._indexerCall('DOGE', 'getanchoraction', params);
+            if(!r || r.error) throw new Error('getanchoraction failed: ' + (r && r.error));
+            return r;
+        };
         // A decoded-invalid row never anchored the checkpoint; treat as absent
         // (our own payloads are built from the quorum row, so this is a peer's
         // malformed tx, not our lost ACK).
-        if(/^invalid/i.test(String(res.status || ''))) return null;
+        let usable = (r) => !!(r && r.exists && !/^invalid/i.test(String(r.status || '')));
+        let res = await ask(null);
+        if(!res.exists) return null;
+        // An indexer too old to report `version` answers NaN here, which is not an
+        // archive version, so it keeps the pre-filter behavior rather than
+        // fanning out four lookups it would answer identically.
+        if(ARCHIVE_VERSIONS.includes(Number(res.version))){
+            for(let v of CHECKPOINT_VERSIONS){
+                let r = await ask(v);          // throws (undetermined) exactly as the unfiltered call does
+                // FAIL CLOSED against an indexer that ignores the version param: it
+                // would answer every one of these with the same archive head, and
+                // accepting that is the adoption this whole branch exists to stop.
+                // Undetermined (throw), never "absent": a false absent re-broadcasts,
+                // and it would also drop _broadcastWithRetry's ambiguous-send defer.
+                if(r && r.exists && Number(r.version) !== Number(v))
+                    throw new Error('getanchoraction ignored the version filter (asked v' + v +
+                                    ', answered v' + r.version + '); cannot rule out an existing anchor');
+                if(usable(r)) return { exists: true, txid: r.txid || null };
+            }
+            return null;
+        }
+        if(!usable(res)) return null;
         return { exists: true, txid: res.txid || null };
     }
 
@@ -4115,13 +4295,90 @@ class StateAnchorPublisher {
         }
     }
 
+    // ----- Retention for the two anchor marker tables -----
+    //
+    // Both tables appended one row per DOGE-spending broadcast and removed one only on
+    // a definitive pre-send failure (_withdrawAnchorIntent / _withdrawArchiveIntent,
+    // both `sent_at IS NULL`), so a confirmed marker persisted for the life of the
+    // deployment while the oracle_published_rounds sibling was swept.
+    //
+    // Two invariants dominate these DELETEs, both load-bearing on a money-bearing path:
+    //
+    //   1. `sent_at IS NOT NULL` is mandatory. A sent_at NULL row that survived is the
+    //      AMBIGUOUS-send record: _publishPendingCheckpoints deliberately keeps the
+    //      intent when the failure could have reached the DOGE node (the `if(!(e &&
+    //      e.anchorAmbiguousSend))` guard), and the empty-txid path keeps it too. That
+    //      row is the only durable trace that DOGE may already have paid, so it is
+    //      retained forever regardless of age, exactly as the oracle sibling retains
+    //      its quarantine rows.
+    //   2. The cutoff never rises above `now - anchorIntentTtlMs`. This is the
+    //      re-presentability floor and it is exact rather than estimated, because the
+    //      TTL is the SAME quantity the read paths already measure. Every read of
+    //      either table goes through _anchorIntentHolds, which is false for any marker
+    //      whose intent_at is older than the TTL, so a row this DELETE can reach is one
+    //      that already changes no decision. anchor_published_archives is stricter
+    //      still: _getLiveArchiveIntent only ever selects `settled_at IS NULL`, so a
+    //      settled row is not read at all.
+    //
+    // The cutoff is measured on intent_at, not sent_at, because intent_at is the column
+    // _anchorIntentHolds measures and the one the floor is expressed in.
+    //
+    // Returns the total number of rows deleted across both tables. Throws on a DB
+    // error; the caller treats a retention failure as non-fatal.
+    async _pruneAnchorMarkers(){
+        if(!this.db) return 0;
+        if(!this.anchorMarkerRetentionMs || this.anchorMarkerRetentionMs <= 0) return 0;
+
+        // Invariant 2, as a hard clamp rather than a warning: an anchor marker pruned
+        // inside the hold window lets the next flush rebuild a second PSBT for a
+        // checkpoint DOGE may already have paid for.
+        let ttlFloorMs = (Number.isFinite(this.anchorIntentTtlMs) && this.anchorIntentTtlMs > 0)
+            ? this.anchorIntentTtlMs * ANCHOR_MARKER_RETENTION_TTL_SAFETY
+            : 0;
+        let windowSec = Math.ceil(Math.max(this.anchorMarkerRetentionMs, ttlFloorMs) / 1000);
+
+        // DB-clock arithmetic on both sides: intent_at is written by CURRENT_TIMESTAMP,
+        // so a Node-side cutoff would fold host/DB clock skew into the window.
+        let deleted = 0;
+        for(let table of ['anchor_published_checkpoints', 'anchor_published_archives']){
+            let res = await this.db.doQuery(
+                'DELETE FROM ' + table + ' WHERE sent_at IS NOT NULL ' +
+                'AND intent_at < DATE_SUB(NOW(), INTERVAL ? SECOND)',
+                [windowSec]);
+            deleted += (res && res.affectedRows) ? Number(res.affectedRows) : 0;
+        }
+        if(deleted > 0){
+            this.anchorMarkersPruned += deleted;
+            console.log('StateAnchorPublisher: anchor-marker retention pruned ' + deleted +
+                        ' confirmed marker row(s) older than ' + windowSec + 's (intent-only rows, which are ' +
+                        'the ambiguous-send record, are never pruned)');
+        }
+        return deleted;
+    }
+
+    // Housekeeping hook for the retention sweep. Fire-and-forget with the rejection
+    // swallowed: bounding the marker tables must never stall, fail or retry a flush
+    // that has already spent DOGE.
+    _sweepAnchorMarkerRetention(){
+        if(!this.db || !this.anchorMarkerRetentionMs) return;
+        this._retentionSweep = this._pruneAnchorMarkers()
+            .catch(e => {
+                console.warn('StateAnchorPublisher: anchor-marker retention sweep failed ' +
+                             '(the marker tables keep growing until it succeeds): ' + (e && e.message));
+                return 0;
+            });
+    }
+
     async _checkBalance(signer){
         let balance = null;
         try {
             if(signer.getBalanceFn) balance = await signer.getBalanceFn();
             else if(signer.encoder && this.dogeAddress){
+                // get_utxos reports satoshis; lowBalanceThreshold, the fail-closed
+                // flush gate and spendGuard.minBalance are all whole DOGE, so the
+                // sum converts. Units and fallback order: lib/utxo_balance.js.
                 let utxos = await signer.encoder.getUtxos(this.dogeAddress);
-                if(Array.isArray(utxos)) balance = utxos.reduce((t, u) => t + (parseFloat(u.value || u.amount || 0) || 0), 0);
+                if(Array.isArray(utxos)) balance = sumUtxosCoins(utxos);
             }
         } catch(e){ return null; }
         if(balance !== null){

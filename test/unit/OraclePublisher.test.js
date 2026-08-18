@@ -471,15 +471,40 @@ describe('OraclePublisher', function () {
             expect(bal).to.be.null;
         });
 
-        it('sums UTXOs from encoder when getBalanceFn is not set', async function () {
+        // get_utxos reports `value` in satoshis while lowBalanceThreshold is whole
+        // DOGE, so these fixtures carry the real tracker shape (value + the derived
+        // `amount` string). The earlier fixture put whole DOGE in `value`, which no
+        // tracker emits, and let a 1e8 mis-scale read as correct.
+        it('sums encoder UTXOs into a DOGE balance when getBalanceFn is not set', async function () {
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
             pub.dogeAddress = 'D123';
             pub.encoder = {
-                getUtxos: sinon.stub().resolves([{ value: 5.0 }, { value: 3.5 }])
+                getUtxos: sinon.stub().resolves([
+                    { value: '500000000', amount: '5.00000000' },
+                    { value: '350000000', amount: '3.50000000' }
+                ])
             };
             let bal = await pub._checkBalance();
             expect(bal).to.equal(8.5);
+        });
+
+        it('converts a UTXO carrying only the satoshi value field', async function () {
+            let hub = makeHub();
+            let pub = new OraclePublisher(hub);
+            pub.dogeAddress = 'D123';
+            pub.encoder = { getUtxos: sinon.stub().resolves([{ value: '850000000' }]) };
+            expect(await pub._checkBalance()).to.equal(8.5);
+        });
+
+        it('reads a genuinely low wallet as below the floor', async function () {
+            let hub = makeHub();
+            let pub = new OraclePublisher(hub);
+            pub.dogeAddress = 'D123';
+            pub.encoder = { getUtxos: sinon.stub().resolves([{ value: '400000000', amount: '4.00000000' }]) };
+            let bal = await pub._checkBalance();
+            expect(bal).to.equal(4);
+            expect(bal).to.be.below(pub.lowBalanceThreshold);
         });
 
         it('handles encoder getUtxos failure by returning null', async function () {
@@ -983,6 +1008,34 @@ describe('OraclePublisher', function () {
             expect(broadcastStub.called).to.be.false;
         });
 
+        // The encoder-summed branch is the production default whenever the signer
+        // module exports no getBalance, and it is the branch that summed satoshis
+        // into the whole-DOGE floor. Both directions are pinned so a re-scaled sum
+        // cannot pass by jamming the gate shut either.
+        it('skips the publish pass when the encoder-summed wallet is below the floor', async function () {
+            let entry = { round: 5, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
+            fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');
+            let pub = new OraclePublisher(makeHub());
+            let broadcastStub = sinon.stub().resolves({ txid: 'x' });
+            pub.broadcastFn = broadcastStub;
+            pub.dogeAddress = 'D123';
+            pub.encoder = { getUtxos: sinon.stub().resolves([{ value: '400000000', amount: '4.00000000' }]) };
+            await pub._processQueue();
+            expect(broadcastStub.called).to.be.false;   // 4 DOGE, floor 10
+        });
+
+        it('publishes when the encoder-summed wallet clears the floor', async function () {
+            let entry = { round: 5, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
+            fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');
+            let pub = new OraclePublisher(makeHub());
+            let broadcastStub = sinon.stub().resolves({ txid: 'x' });
+            pub.broadcastFn = broadcastStub;
+            pub.dogeAddress = 'D123';
+            pub.encoder = { getUtxos: sinon.stub().resolves([{ value: '1500000000', amount: '15.00000000' }]) };
+            await pub._processQueue();
+            expect(broadcastStub.called).to.be.true;    // 15 DOGE, floor 10
+        });
+
         it('stops broadcasting once the per-window ceiling is reached, keeping rounds queued', async function () {
             process.env.ORACLE_PUBLISH_MAX_PUBLISHES_PER_WINDOW = '1';
             let e1 = { round: 1, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
@@ -1105,14 +1158,14 @@ describe('OraclePublisher', function () {
         });
     });
 
-    // ── oracle_published_rounds retention (XC-1364) ────────────────────────────
+    // ── oracle_published_rounds retention ────────────────────────────
     // The durable marker table gained one row per published round and never lost
     // one, so a money-bearing broadcast path grew a table without bound. Retention
     // may only ever touch CONFIRMED rows: a sent_at NULL row is the quarantine
     // marker for a round whose on-chain state is unknown and which an operator
     // reconciles by hand, and no round still on the publish queue may be pruned
     // (the marker is what stops a restart re-broadcasting it).
-    describe('oracle_published_rounds retention (XC-1364)', function () {
+    describe('oracle_published_rounds retention', function () {
 
         const ENV_KEY = 'ORACLE_PUBLISHED_ROUNDS_RETENTION_ROUNDS';
 

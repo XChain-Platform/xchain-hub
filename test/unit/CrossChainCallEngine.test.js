@@ -673,7 +673,9 @@ describe('CrossChainCallEngine', function () {
                 params_json: '["x"]', gas_limit: 50000, cross_hops: 1, effective_time: 1700000000,
                 result_status: null, return_payload_b64: null
             };
-            const persist = sinon.stub(engine, '_persistCapabilitySnapshot').resolves();
+            // The persisted-row COUNT is the money-path precondition signal, so the
+            // stub has to answer with one; a bare resolve() now means "degraded set".
+            const persist = sinon.stub(engine, '_persistCapabilitySnapshot').resolves(3);
             await engine._writeFinalizedRow({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
             expect(db.rows.length).to.equal(1);
             // EVERY hub (followers included) must persist the snapshot the
@@ -684,6 +686,67 @@ describe('CrossChainCallEngine', function () {
             expect(db.rows[0].validator_signatures).to.contain('a'.repeat(64));
             expect(broadcaster.broadcastRow.calledOnce).to.equal(true);
             expect(broadcaster.broadcastRow.firstCall.args[0].table).to.equal('cross_chain_calls');
+        });
+
+        // The snapshot persist is a PRECONDITION of the finalized row, not a
+        // best-effort side-write: a committed + broadcast XCALL/XEXEC row whose
+        // validator_signatures no local capability_snapshot can verify is the exact
+        // state the persist-before-insert ordering exists to prevent. Mirrors the
+        // CrossChainDexEngine._writeFinalizedMatch guards (item 2385).
+        function finalizeRow() {
+            return {
+                round_id: sha256('XCALLROUND|dispatch|' + CALL_ID),
+                call_id: CALL_ID, phase: 'dispatch', snapshot_block: 150, network: 'regtest',
+                source_chain: 'BTC', source_action_index: 41, source_contract_index: 5,
+                target_chain: 'DOGE', target_contract_index: 99, method: 'onArrival',
+                params_json: '["x"]', gas_limit: 50000, cross_hops: 1, effective_time: 1700000000,
+                result_status: null, return_payload_b64: null
+            };
+        }
+
+        it('_writeFinalizedRow fails closed and defers when the snapshot persist THROWS', async function () {
+            const { engine, db, broadcaster } = makeEngine();
+            const row = finalizeRow();
+            const forget = engine.consensus.forgetFinalized;
+            engine._inflight.add(row.round_id);
+            sinon.stub(engine, '_persistCapabilitySnapshot').rejects(new Error('db down'));
+
+            await engine._writeFinalizedRow({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
+
+            expect(db.rows.length, 'no unverifiable row may be committed').to.equal(0);
+            expect(broadcaster.broadcastRow.called, 'nothing may be broadcast').to.equal(false);
+            expect(engine._inflight.has(row.round_id), 'the in-flight slot must be released').to.equal(false);
+            expect(forget.calledWith(row.round_id), 'the round must be re-proposable').to.equal(true);
+        });
+
+        it('_writeFinalizedRow fails closed and defers on a silent ZERO-row persist', async function () {
+            const { engine, db, broadcaster } = makeEngine();
+            const row = finalizeRow();
+            const forget = engine.consensus.forgetFinalized;
+            engine._inflight.add(row.round_id);
+            // A degraded validator set (indexer RPC error / 401-403) writes no rows,
+            // throws nothing, and warns nothing; only the count exposes it.
+            sinon.stub(engine, '_persistCapabilitySnapshot').resolves(0);
+
+            await engine._writeFinalizedRow({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
+
+            expect(db.rows.length).to.equal(0);
+            expect(broadcaster.broadcastRow.called).to.equal(false);
+            expect(engine._inflight.has(row.round_id)).to.equal(false);
+            expect(forget.calledWith(row.round_id)).to.equal(true);
+        });
+
+        it('_persistCapabilitySnapshot returns the persisted row count (0 when truncated)', async function () {
+            const { engine } = makeEngine();
+            engine._resolveCapabilityValidators = async () =>
+                [{ pubkey: 'a'.repeat(64), source: 's1', weight: '1', amount: '1' },
+                 { pubkey: 'b'.repeat(64), source: 's2', weight: '1', amount: '1' }];
+            expect(await engine._persistCapabilitySnapshot('cross_chain', 100, 'regtest')).to.equal(2);
+
+            const capped = [{ pubkey: 'c'.repeat(64), source: 's3', weight: '1', amount: '1' }];
+            capped.truncated = true;
+            engine._resolveCapabilityValidators = async () => capped;
+            expect(await engine._persistCapabilitySnapshot('cross_chain', 100, 'regtest')).to.equal(0);
         });
 
         it('re-discovers a dispatch whose only result row is retracted (#4478)', async function () {

@@ -55,12 +55,8 @@ const MAX_VIEW_SKEW = 100;
 // broadcasts PRE_PREPARE and COMMIT back to back, so on a busy host the COMMIT
 // routinely overtakes the follower's snapshot lock and is discarded with nothing
 // left to re-deliver it: the round finalizes on the leader and NO follower ever
-// applies it. Measured on 2026-08-14 (XC-1471) against a 1000/1000/1000/7000
-// weighted federation, where the 70% whale meets 3*7000 > 2*10000 alone: all
-// three followers logged the whale's COMMIT arriving before their own proposal
-// existed, then sat at three small COMMITs (9000, under the 20000 line) for as
-// long as the test waited. A stake-weighted round cannot self-heal from this the
-// way a count round usually does, because the vote it lost is the only one heavy
+// applies it. A stake-weighted round cannot self-heal from this loss the way a
+// count round usually does, because the lost vote can be the only one heavy
 // enough to carry the threshold.
 //
 // `seq` comes from attacker-controlled envelope data, so both dimensions are
@@ -637,7 +633,7 @@ class Consensus {
         // Now that the round is open locally, deliver anything that voted on it
         // while the snapshot lock was still in flight. Without this the leader's
         // own COMMIT can be lost for good and this hub never applies a config the
-        // federation finalized (XC-1471).
+        // federation finalized.
         this._replayEarlyVotes(seq);
     }
 

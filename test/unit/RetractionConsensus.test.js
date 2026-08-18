@@ -12,7 +12,9 @@
 // Covers the canonical byte-shape (pinned against the hub_db_sync consumer
 // rebuild), the single-node self-sign path, gate/identity fallthroughs to the
 // legacy unsigned broadcast, follower sign-only-with-local-intent, initiator
-// quorum collection, FINALIZED adoption + dedup, and the timeout downgrade.
+// quorum collection, FINALIZED adoption + dedup, the timeout downgrade, and the
+// fail-closed finalize (a throwing / zero-row / truncated capability-snapshot persist
+// defers the signed deletion and releases the round id instead of streaming it).
 
 const assert            = require('assert');
 const crypto            = require('crypto');
@@ -268,6 +270,96 @@ describe('RetractionConsensus (signed retractions) @regression @tier1', function
         assert.ok(!hub._queries.some(q => /INSERT IGNORE INTO capability_snapshots/.test(q.sql)),
             'no capability_snapshots row may be written from a truncated set');
         assert.strictEqual(hub.hubDbBroadcaster.rows.length, 0, 'nothing may be mirrored either');
+        rc.stop();
+    });
+
+    // Fail-closed finalize. The capability-snapshot persist is a PRECONDITION
+    // of the signed deletion: mirrors verify the co-signatures against those rows, so a
+    // swallowed DB throw or a silent zero-row persist would stream a deletion no mirror
+    // can verify AND retire the round id forever, stranding the retracted rows live in
+    // every indexer. Every failure path must stream nothing and RELEASE the round id.
+    it('fail-closed: a THROWING capability persist defers the signed retraction and releases the round', async function () {
+        let id  = makeIdentity();
+        let pk  = id.getPubkeyHex().toLowerCase();
+        let hub = makeHub({ identity: id, validators: [{ pubkey: pk, source: 'srcA', weight: '100' }] });
+        hub.db.doQuery = async (sql) => {
+            if(/INSERT IGNORE INTO capability_snapshots/.test(sql)) throw new Error('db down');
+            return /^SELECT/.test(sql) ? [{ id: 1 }] : [];
+        };
+        let rc = new RetractionConsensus(hub);
+        await rc.submitLocal({ table: 'cross_chain_calls', source_chain: 'DOGE', from_action_index: 42, to_action_index: 99, retraction_generation: 7 });
+        assert.strictEqual(hub.hubDbBroadcaster.deletions.length, 0, 'no deletion may be streamed when the persist failed');
+        assert.strictEqual(rc.finalized.size, 0, 'the round id must be released so a later delivery re-runs it');
+        rc.stop();
+    });
+
+    it('fail-closed: a ZERO-row capability persist (degraded validator set) defers the signed retraction', async function () {
+        let id  = makeIdentity();
+        let pk  = id.getPubkeyHex().toLowerCase();
+        let hub = makeHub({ identity: id, validators: [{ pubkey: pk, source: 'srcA', weight: '100' }] });
+        // The set resolves for the round, then degrades to [] (indexer RPC error / 401-403
+        // surfaces as an empty snapshot) by the time the persist re-resolves it: the INSERT
+        // loop never runs, never throws, never warns.
+        let calls = 0;
+        hub.capabilitySnapshot.getWeightSnapshot = async () => {
+            calls++;
+            return calls === 1 ? { validators: [{ pubkey: pk, source: 'srcA', weight: '100' }] } : { validators: [] };
+        };
+        let rc = new RetractionConsensus(hub);
+        await rc.submitLocal({ table: 'cross_chain_calls', source_chain: 'DOGE', from_action_index: 42, to_action_index: 99, retraction_generation: 7 });
+        assert.ok(!hub._queries.some(q => /INSERT IGNORE INTO capability_snapshots/.test(q.sql)), 'nothing was persisted');
+        assert.strictEqual(hub.hubDbBroadcaster.deletions.length, 0, 'an unverifiable deletion must not be streamed');
+        assert.strictEqual(rc.finalized.size, 0, 'the round id must be released');
+        rc.stop();
+    });
+
+    it('fail-closed: a set that turns TRUNCATED at persist time defers rather than streaming', async function () {
+        let id  = makeIdentity();
+        let pk  = id.getPubkeyHex().toLowerCase();
+        let hub = makeHub({ identity: id, validators: [{ pubkey: pk, source: 'srcA', weight: '100' }] });
+        let calls = 0;
+        hub.capabilitySnapshot.getWeightSnapshot = async () => {
+            calls++;
+            let snap = { validators: [{ pubkey: pk, source: 'srcA', weight: '100' }] };
+            if(calls > 1) snap.truncated = true;   // the truncated guard writes no rows
+            return snap;
+        };
+        let rc = new RetractionConsensus(hub);
+        await rc.submitLocal({ table: 'cross_chain_calls', source_chain: 'DOGE', from_action_index: 42, to_action_index: 99, retraction_generation: 7 });
+        assert.strictEqual(hub.hubDbBroadcaster.deletions.length, 0);
+        assert.strictEqual(hub.hubDbBroadcaster.rows.length, 0);
+        assert.strictEqual(rc.finalized.size, 0, 'a truncated persist is a deferral, not a finalization');
+        rc.stop();
+    });
+
+    it('a deferred FINALIZED re-runs on re-delivery once the persist recovers, then dedups', async function () {
+        let idA = makeIdentity(), idB = makeIdentity(), idC = makeIdentity(), me = makeIdentity();
+        let vset = [idA, idB, idC, me].map((i, n) => ({ pubkey: i.getPubkeyHex().toLowerCase(), source: 'src' + n, weight: '100' }));
+        let hub = makeHub({ identity: me, validators: vset });
+        let healthy = false;
+        hub.db.doQuery = async (sql, args) => {
+            if(/INSERT IGNORE INTO capability_snapshots/.test(sql) && !healthy) throw new Error('db down');
+            hub._queries.push({ sql, args });
+            return /^SELECT/.test(sql) ? [{ id: 1 }] : [];
+        };
+        let rc   = new RetractionConsensus(hub);
+        let sigs = [idA, idB, idC].map(i => ({ pubkey: i.getPubkeyHex().toLowerCase(), sig: i.sign(GOLDEN_CANONICAL) }));
+        let env  = { type: 'XRETRACT_FINALIZED', data: { retraction: GOLDEN_EVT, signatures: sigs } };
+
+        rc._handleMessage(env);
+        await waitUntil(() => rc.finalized.size === 0, { label: 'the failed round to be released' });
+        assert.strictEqual(hub.hubDbBroadcaster.deletions.length, 0, 'deferred, nothing streamed');
+
+        healthy = true;
+        rc._handleMessage(env);
+        await waitUntil(() => hub.hubDbBroadcaster.deletions.length === 1, { label: 're-delivery to finalize once the DB recovers' });
+        assert.strictEqual(hub.hubDbBroadcaster.deletions[0].retraction_signatures.length, 3);
+
+        // and the ring still dedups a third delivery of the same round
+        rc._handleMessage(env);
+        await new Promise(r => setImmediate(r));
+        await new Promise(r => setImmediate(r));
+        assert.strictEqual(hub.hubDbBroadcaster.deletions.length, 1);
         rc.stop();
     });
 

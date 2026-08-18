@@ -18,6 +18,14 @@ CREATE TABLE anchor_published_checkpoints (
 -- an accepted-but-unmined send and that stamp left nothing anywhere recording that DOGE
 -- had already paid. This table is that record.
 --
+-- Retention: StateAnchorPublisher prunes rows whose intent_at is older than
+-- ANCHOR_MARKER_RETENTION_MS (default 7776000000, ~90 days; 0 disables) at the end of
+-- each publishing flush, with the cutoff floored at a multiple of ANCHOR_INTENT_TTL_MS
+-- so it can never reach a marker still inside its hold window. ONLY confirmed rows
+-- (sent_at IS NOT NULL) are ever deleted: a surviving sent_at NULL row is the
+-- AMBIGUOUS-send record, the only durable trace that DOGE may already have paid, so it
+-- is retained forever regardless of age. See _pruneAnchorMarkers.
+--
 -- Hub-local audit, deliberately NOT mirrored: hub_db_sync's HUB_STATE_TABLES carries
 -- state_checkpoints and anchor_reward_attestations only, and the two sibling marker
 -- tables are likewise absent from every mirror list.

@@ -533,10 +533,43 @@ describe('RewardTracker', function () {
             expect(post.getCall(0).args[2].headers['x-api-key']).to.equal('test-fixture-key');
         });
 
-        it('swallows a POST failure without throwing', async function () {
+        it('swallows a POST failure without throwing, after exhausting the bounded retry', async function () {
             let post = sinon.stub(axios, 'post').rejects(new Error('econnrefused'));
             rt.btcIndexerApiUrl = 'http://btc-indexer/api';
+            rt.pushRetryDelayMs = 0;
             await rt._pushRewardsToBtcIndexer(1, [hexPk(1)], '1.00000000', 1);
+            // A transport failure is exactly the drop that loses the reward permanently,
+            // so it is retried rather than logged once and abandoned.
+            expect(post.callCount).to.equal(rt.pushMaxAttempts);
+        });
+
+        it('retries a transient error envelope and stops on the first acceptance', async function () {
+            let post = sinon.stub(axios, 'post');
+            post.onFirstCall().resolves({ data: { result: { error: 'indexer database not ready' } } });
+            post.onSecondCall().resolves({ data: { result: { status: 'success', written: 1, skipped: 0 } } });
+            rt.btcIndexerApiUrl = 'http://btc-indexer/api';
+            rt.pushRetryDelayMs = 0;
+            await rt._pushRewardsToBtcIndexer(9, [hexPk(1)], '10.00000000', 800000, 'anchor_archive');
+            expect(post.callCount).to.equal(2);
+        });
+
+        it('does NOT retry a terminal refusal (flag-day retirement / unpushable type)', async function () {
+            let post = sinon.stub(axios, 'post').resolves({
+                data: { result: { error: 'reward_type anchor_archive at block 963000 is derived on-chain from ANCHOR v6; push retired' } }
+            });
+            rt.btcIndexerApiUrl = 'http://btc-indexer/api';
+            rt.pushRetryDelayMs = 0;
+            await rt._pushRewardsToBtcIndexer(9, [hexPk(1)], '10.00000000', 963000, 'anchor_archive');
+            expect(post.calledOnce).to.be.true;
+        });
+
+        it('treats a written=0/skipped>0 acceptance as a non-retryable un-minted reward', async function () {
+            let post = sinon.stub(axios, 'post').resolves({
+                data: { result: { status: 'success', written: 0, skipped: 1 } }
+            });
+            rt.btcIndexerApiUrl = 'http://btc-indexer/api';
+            rt.pushRetryDelayMs = 0;
+            await rt._pushRewardsToBtcIndexer(9, [hexPk(1)], '10.00000000', 800000, 'anchor_archive');
             expect(post.calledOnce).to.be.true;
         });
     });

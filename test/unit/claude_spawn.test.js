@@ -133,6 +133,33 @@ describe('claude-spawn runClaudePrint()', function () {
         expect(args[idx + 1]).to.equal('Be concise.');
     });
 
+    // --append-system-prompt leaves the CLI's own baked-in prompt in place, so a caller
+    // whose block claims to be the model's only instruction (the judge framing) has to
+    // get the replacing flag instead. Assert both that --system-prompt is emitted and
+    // that the appending flag is absent: emitting both would put the block back on top
+    // of the baseline and quietly restore the gap.
+    it('emits systemPromptOverride as --system-prompt and never the appending flag', async function () {
+        let jsonOut = JSON.stringify({ result: 'ok' });
+        let { runClaudePrint, spawnStub } = loadClaudeSpawn({ exitCode: 0, stdout: jsonOut });
+        await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6', systemPromptOverride: 'You are an evaluator.' });
+        let args = spawnStub.firstCall.args[1];
+        let idx  = args.indexOf('--system-prompt');
+        expect(idx).to.not.equal(-1);
+        expect(args[idx + 1]).to.equal('You are an evaluator.');
+        expect(args).to.not.include('--append-system-prompt');
+    });
+
+    it('refuses systemPrompt and systemPromptOverride together', async function () {
+        let jsonOut = JSON.stringify({ result: 'ok' });
+        let { runClaudePrint } = loadClaudeSpawn({ exitCode: 0, stdout: jsonOut });
+        let threw = false;
+        try {
+            await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6',
+                                   systemPrompt: 'a', systemPromptOverride: 'b' });
+        } catch (e) { threw = true; expect(e.message).to.include('mutually exclusive'); }
+        expect(threw).to.be.true;
+    });
+
     it('includes --max-budget-usd when maxBudgetUsd is a positive number', async function () {
         let jsonOut = JSON.stringify({ result: 'ok' });
         let { runClaudePrint, spawnStub } = loadClaudeSpawn({ exitCode: 0, stdout: jsonOut });

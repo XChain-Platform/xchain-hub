@@ -290,7 +290,7 @@ describe('StateAnchorPublisher: durable at-most-once archive intent', function (
         });
     });
 
-    // The XC-1383 window end to end: an accepted-but-unacked v1 send, the process dies
+    // The accepted-but-unacked window end to end: the process dies
     // before _backfillBatch, and the next flush must NOT rebuild and re-pay.
     describe('crash after an accepted archive send', function () {
         it('does not rebuild and re-broadcast the batch on the next flush', async function () {

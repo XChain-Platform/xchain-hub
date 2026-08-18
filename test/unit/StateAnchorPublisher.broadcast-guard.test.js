@@ -286,4 +286,70 @@ describe('StateAnchorPublisher: _findExistingCheckpointAnchor', function () {
         catch (e) { err = e; }
         expect(err).to.be.an('error');
     });
+
+    // getanchoraction's CHECKPOINT_VERSIONS carries the v1/v6 ARCHIVE HEADS, which
+    // wrap a checkpoint under the SAME identity this lookup is keyed on, so an
+    // unfiltered answer can be an archive head. Adopting one skips the real
+    // checkpoint publish and the reward derived from it; calling it "absent" would
+    // re-broadcast over a checkpoint anchor sitting beneath it. Both directions are
+    // pinned here.
+    function mkPubWithVersionedIndexer(byVersion, unfiltered){
+        const pub = mkPub();
+        const asked = [];
+        pub.indexers = { DOGE: { url: 'http://doge-indexer' } };
+        pub._indexerCall = async (coin, method, params) => {
+            expect(method).to.equal('getanchoraction');
+            asked.push(params.version === undefined ? null : params.version);
+            return (params.version === undefined) ? unfiltered : (byVersion[params.version] || { exists: false });
+        };
+        pub._asked = asked;
+        return pub;
+    }
+
+    it('does NOT adopt a v6 archive head as this checkpoint\'s anchor', async function () {
+        const pub = mkPubWithVersionedIndexer({}, { exists: true, version: 6, status: 'valid', txid: 'ee'.repeat(32) });
+        expect(await pub._findExistingCheckpointAnchor(ROW)).to.equal(null);
+        expect(pub._asked, 'falls back to the checkpoint versions').to.deep.equal([null, 0, 3, 4, 5]);
+    });
+
+    it('finds a checkpoint anchor sitting BENEATH a newer archive head (no duplicate publish)', async function () {
+        const pub = mkPubWithVersionedIndexer(
+            { 4: { exists: true, version: 4, status: 'valid', txid: 'ab'.repeat(32) } },
+            { exists: true, version: 1, status: 'valid', txid: 'ee'.repeat(32) });
+        const res = await pub._findExistingCheckpointAnchor(ROW);
+        expect(res.exists).to.equal(true);
+        expect(res.txid, 'adopts the CHECKPOINT anchor, never the archive txid').to.equal('ab'.repeat(32));
+    });
+
+    it('keeps the single-call path when the top row is a checkpoint version', async function () {
+        const pub = mkPubWithVersionedIndexer({}, { exists: true, version: 3, status: 'valid', txid: 'cd'.repeat(32) });
+        const res = await pub._findExistingCheckpointAnchor(ROW);
+        expect(res.txid).to.equal('cd'.repeat(32));
+        expect(pub._asked).to.deep.equal([null]);
+    });
+
+    it('treats an indexer that IGNORES the version filter as undetermined, not absent', async function () {
+        // Such an indexer answers every narrowed lookup with the same archive head;
+        // accepting it is the adoption this branch exists to stop, and calling it
+        // absent would re-broadcast over an anchor that may already exist.
+        const head = { exists: true, version: 6, status: 'valid', txid: 'ee'.repeat(32) };
+        const pub = mkPub();
+        pub.indexers = { DOGE: { url: 'http://doge-indexer' } };
+        pub._indexerCall = async () => head;
+        let err = null;
+        try { await pub._findExistingCheckpointAnchor(ROW); } catch (e) { err = e; }
+        expect(err).to.be.an('error');
+    });
+
+    it('propagates an undetermined answer from the narrowed lookup (never a false absent)', async function () {
+        const pub = mkPub();
+        pub.indexers = { DOGE: { url: 'http://doge-indexer' } };
+        pub._indexerCall = async (coin, method, params) => {
+            if (params.version === undefined) return { exists: true, version: 6, status: 'valid', txid: 'ee'.repeat(32) };
+            throw new Error('ETIMEDOUT');
+        };
+        let err = null;
+        try { await pub._findExistingCheckpointAnchor(ROW); } catch (e) { err = e; }
+        expect(err).to.be.an('error');
+    });
 });

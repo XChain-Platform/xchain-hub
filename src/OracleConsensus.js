@@ -180,7 +180,23 @@ class OracleConsensus extends EventEmitter {
         // finalization requires at least one follower that priced the pair itself.
         // Escape hatch for deliberate single-host / bootstrap deployments where no
         // second fetcher exists (regtest, ORACLE_MIN_SUBMISSIONS=1 setups).
-        this.allowUnverifiedPairs = String(process.env.ORACLE_ALLOW_UNVERIFIED_PAIRS || '') === 'true';
+        //
+        // Network-gated, same rule as the other regtest-only seams (StateCheckpointEngine's
+        // XDEX_SNAPSHOT_BLOCK / XDEX_SEED_LOCAL_VALIDATOR, coins/index.js
+        // resolveFeeDestination): honored ONLY on regtest, set-but-IGNORED and warned
+        // everywhere else. A mainnet/testnet federation always has a second fetcher, so the
+        // hatch has no legitimate use there, and a stray env var must never disarm a
+        // Byzantine-leader defense in silence. hub.network is the api.js-validated
+        // HUB_NETWORK (mainnet|testnet|regtest, required in validator mode, and this engine
+        // only ever starts in validator mode); anything else, '' included, fails closed.
+        let allowUnverifiedEnv = String(process.env.ORACLE_ALLOW_UNVERIFIED_PAIRS || '') === 'true';
+        let isRegtest          = !!(this.hub && this.hub.network === 'regtest');
+        if (allowUnverifiedEnv && !isRegtest) {
+            console.log('WARNING: ORACLE_ALLOW_UNVERIFIED_PAIRS is set but IGNORED on ' +
+                (((this.hub && this.hub.network) || '<unset>')) + '; unverifiable-pair co-sign ' +
+                'stays fail-closed. This hatch is honored only on regtest single-host bring-up.');
+        }
+        this.allowUnverifiedPairs = allowUnverifiedEnv && isRegtest;
     }
 
     // Canonicalize the set's ORDER on the way in, so _getLeader's
@@ -337,6 +353,13 @@ class OracleConsensus extends EventEmitter {
             let oldest = this._locallySkippedOrder.shift();
             this.locallySkipped.delete(oldest);
         }
+        // Announce the durable skip, mirroring 'round:finalized'. This is the only
+        // place a round becomes a non-finalized row in price_snapshots, and the guard
+        // above makes it exactly-once per round, so it is the event that carries the
+        // same semantic _hydrateFreshnessCounters rebuilds from the durable record
+        // (item 4942). Emitted after the state change so a listener observing back
+        // through getSubmissionsInfo sees the round already marked.
+        this.emit('round:skipped', { round: round });
     }
 
     // Minimum per-pair provider count observed across all of a round's submissions
@@ -1060,8 +1083,15 @@ class OracleConsensus extends EventEmitter {
                     // publishes a 2-source pair the follower then withholds the whole round
                     // over, with no durable record. CONSENSUS-CRITICAL: deploy fleet-wide
                     // atomically.
-                    let deviation = devband.deviationFrom(local, p.price, 18);
-                    if (bcmath.bcgt(deviation, String(devThreshold))) {
+                    // Branch on the shared exceedsBand() comparator, not a locally
+                    // written bcgt: the band boundary (strict >, and the threshold's
+                    // string coercion) is then one definition shared with the slash
+                    // gate, so it cannot be edited on one side of the accept/slash pair
+                    // and not the other. deviation is recomputed inside the branch for
+                    // the pct/metadata only, which keeps the co-sign path at exactly one
+                    // computation and costs a second bcdiv solely on a reject.
+                    if (devband.exceedsBand(local, p.price, devThreshold, 18)) {
+                        let deviation = devband.deviationFrom(local, p.price, 18);
                         let pct = bcmath.bcformat(bcmath.bcmul(deviation, '100', 4), 4);
                         reject(p.coinPair, 'proposed ' + p.price + ' deviates ' + pct +
                             '% from local ' + local + ' (> ' + (devThreshold * 100) + '%)',
@@ -1086,19 +1116,29 @@ class OracleConsensus extends EventEmitter {
                         // tighter per-pair override (maxChangeForPair; XCHAIN/USD is at 10%).
                         //
                         // Deliberately NOT maxChangeForPair() here, and this asymmetry is
-                        // load-bearing. The gate must never be tighter than the clamp: the two
-                        // compute their bounds differently (this side takes an 18dp deviation
-                        // ratio, the clamp takes an 8dp delta off the last price), so at equal
-                        // thresholds a maximally-clamped aggregate can land a hair over the line
-                        // and be rejected by every honest follower - wedging the round the clamp
-                        // was protecting. Holding the gate at the global maximum keeps it a strict
-                        // superset of every per-pair clamp, so a clamped aggregate always passes.
-                        // For an overridden pair the gate is merely permissive, which costs
-                        // nothing: no honest leader can propose a move the clamp did not bound,
-                        // and a follower that DID submit locally is checked against its own value
-                        // by the much tighter ORACLE_DEVIATION_THRESHOLD above.
-                        let histThreshold = String(ORACLE_MAX_CHANGE_PER_ROUND);
-                        if (bcmath.bcgt(deviation, histThreshold)) {
+                        // load-bearing. The gate must never be tighter than the clamp, so it
+                        // holds at the GLOBAL maximum: that keeps it a superset of every
+                        // per-pair clamp, and for an overridden pair being merely permissive
+                        // costs nothing (no honest leader can propose a move the clamp did not
+                        // bound, and a follower that DID submit locally is checked against its
+                        // own value by the much tighter ORACLE_DEVIATION_THRESHOLD above).
+                        //
+                        // Bound with the CLAMP'S OWN arithmetic rather than the 18dp deviation
+                        // ratio. Holding the same threshold was not enough: the clamp takes an
+                        // 8dp ROUND_HALF_UP delta off the last price, so whenever last*pct
+                        // rounds up (last='0.11111111' -> maxDelta '0.02777778' -> hi
+                        // '0.13888889' -> ratio 0.2500000225) the maximally-clamped aggregate
+                        // landed a hair over the ratio line and every honest follower without a
+                        // local submission rejected it - wedging the round the clamp was
+                        // protecting, exactly on the fat-tail move it exists for (item 4940).
+                        // Recomputing hi/lo with the identical bcmul/bcadd/bcsub at scale 8
+                        // makes a clamped price pass by construction, at the same threshold, for
+                        // every pair. `deviation` above is kept for the reject message/metadata.
+                        // CONSENSUS-CRITICAL: deploy fleet-wide atomically.
+                        let histDelta = bcmath.bcmul(lastPrice, String(ORACLE_MAX_CHANGE_PER_ROUND), 8);
+                        let histHi    = bcmath.bcadd(lastPrice, histDelta, 8);
+                        let histLo    = bcmath.bcsub(lastPrice, histDelta, 8);
+                        if (bcmath.bcgt(p.price, histHi) || bcmath.bclt(p.price, histLo)) {
                             let pct = bcmath.bcformat(bcmath.bcmul(deviation, '100', 4), 4);
                             reject(p.coinPair, 'proposed ' + p.price + ' deviates ' + pct +
                                 '% from last finalized ' + lastPrice + ' (no local submission, threshold ' + (ORACLE_MAX_CHANGE_PER_ROUND * 100) + '%)',
@@ -1124,18 +1164,28 @@ class OracleConsensus extends EventEmitter {
 
             // Coverage check. The per-price loop above only bounds the pairs the
             // proposer chose to INCLUDE; it never checks for pairs the proposer
-            // dropped. An honest leader proposes every pair the round priced (it
-            // stores a skipped round rather than an empty/truncated set), so a
-            // Byzantine leader omitting a pair this hub priced locally is the only
-            // way to reach here with missing coverage. Withhold co-sign (same
-            // fail-safe path as a deviation disagreement) so a suppressed pair can't
-            // silently freeze consumers on the prior snapshot for the round window.
+            // dropped. Withhold co-sign (same fail-safe path as a deviation
+            // disagreement) so a pair a Byzantine leader SUPPRESSED can't silently
+            // freeze consumers on the prior snapshot for the round window.
             if (!Array.isArray(prices) || prices.length === 0) {
                 reject('(all)', 'empty or malformed price set', { reason: 'empty-proposal' });
                 return;
             }
             let proposedPairs = new Set(prices.map(p => p && p.coinPair));
+            // Reproduce the LEADER's aggregation before demanding coverage. An honest
+            // leader aggregates the full member submission set, so a pair its
+            // `_aggregate` legitimately returned null for (the exactly-2-source
+            // deviation gate, an emptied trim) is honestly absent from the proposal.
+            // `localByPair` is the proposer-EXCLUDED reference, correct for the value
+            // checks above and wrong here: a pair submitted by the leader plus exactly
+            // one other hub looks single-source in that view, never reaches the
+            // 2-source gate, and tripped this loop on every honest round the two feeds
+            // disagreed - withholding all 36+ pairs and leaving no snapshot at all
+            // (item 4939). Demand coverage only where BOTH views price the pair, which
+            // is the suppression case and a strict subset of the old condition.
+            let leaderByPair = new Set((this._aggregateAll(submissions) || []).map(a => a && a.coinPair));
             for (let coinPair of localByPair.keys()) {
+                if (!leaderByPair.has(coinPair)) continue;
                 if (!proposedPairs.has(coinPair)) {
                     reject(coinPair, 'priced locally but omitted from proposal', { reason: 'missing-pairs' });
                     return;
@@ -1290,15 +1340,24 @@ class OracleConsensus extends EventEmitter {
         // dropped (fail closed; they only exist in the empty-registry bootstrap
         // window, where no snapshot is available either). Null memberPubkeys keeps
         // the legacy raw count (graceful degradation, matching the quorum fallback).
-        if (pending.memberPubkeys) {
-            let counted = new Set();
-            for (let sender of voteSet) {
-                let pk = this._resolveSenderPubkey(sender);
-                if (pk && pending.memberPubkeys.has(pk)) counted.add(pk);
-            }
-            return counted.size >= quorum;
+        return this._countDistinctMembers(pending, voteSet) >= quorum;
+    }
+
+    // Distinct qualified MEMBER-PUBKEY tally for one of the round's addr-keyed vote
+    // sets. The prepare/commit sets hold raw sender addrs and the registry may bind
+    // one key to several addrs, so a raw `.size` over-reports the endorsers that
+    // actually count. Null memberPubkeys (empty-registry bootstrap) degrades to the
+    // raw count, matching the quorum fallback. Defined once so the finalization tally
+    // and the validator_count recorded beside it cannot drift (item 4941).
+    _countDistinctMembers(pending, voteSet) {
+        if (!voteSet) return 0;
+        if (!pending || !pending.memberPubkeys) return voteSet.size;
+        let counted = new Set();
+        for (let sender of voteSet) {
+            let pk = this._resolveSenderPubkey(sender);
+            if (pk && pending.memberPubkeys.has(pk)) counted.add(pk);
         }
-        return voteSet.size >= quorum;
+        return counted.size;
     }
 
     _checkPrepareQuorum(round) {
@@ -1357,7 +1416,13 @@ class OracleConsensus extends EventEmitter {
         let pending = this.pendingRounds.get(round);
         if (!pending) return;
 
-        let validatorCount = pending.prepares.size;
+        // Record the endorsement breadth the round actually finalized on: distinct
+        // qualified member pubkeys, the same tally _quorumMet counts, not the raw
+        // addr-keyed prepare set. A key registered under two addrs (or a registered
+        // non-member whose PREPARE joined the set but never the quorum) inflated the
+        // persisted, mirrored and API-served validator_count above the endorsers that
+        // cleared quorum (item 4941).
+        let validatorCount = this._countDistinctMembers(pending, pending.prepares);
         let proof = JSON.stringify([...pending.commits]);
 
         const maxAttempts = 3;

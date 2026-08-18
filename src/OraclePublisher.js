@@ -46,6 +46,7 @@ const path          = require('path');
 const EncoderClient = require('./EncoderClient.js');
 const SpendGuard    = require('./lib/spend_guard.js');
 const { AtMostOnce, isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
+const { sumUtxosCoins } = require('./lib/utxo_balance.js');
 
 // PRICE v0 wire ceiling. Must equal MAX_DATA_BYTES in xchain-encoder/src/validator.js
 // (mirrors ATTEST_WIRE_MAX_BYTES in AttestationPublisher.js): an oversized wire is
@@ -939,17 +940,15 @@ class OraclePublisher {
                 return null;
             }
         } else if (this.encoder && this.dogeAddress) {
-            // Default: sum UTXO values for the configured DOGE address
+            // Default: sum the configured address's UTXOs into a DOGE balance.
+            // get_utxos reports each output in satoshis (`value`), and every
+            // consumer of this figure is whole-DOGE (lowBalanceThreshold, the
+            // fail-closed gate in _processQueue, spendGuard.minBalance, the
+            // monitor's dogeBalance alert), so the conversion is not optional.
+            // Units and the fallback order: lib/utxo_balance.js.
             try {
                 let utxos = await this.encoder.getUtxos(this.dogeAddress);
-                if (Array.isArray(utxos)) {
-                    let total = 0;
-                    for (let u of utxos) {
-                        let val = parseFloat(u.value || u.amount || 0);
-                        if (Number.isFinite(val)) total += val;
-                    }
-                    balance = total;
-                }
+                if (Array.isArray(utxos)) balance = sumUtxosCoins(utxos);
             } catch (err) {
                 console.warn('OraclePublisher: encoder balance check failed:', err);
                 return null;

@@ -79,6 +79,18 @@ const DEFAULT_LEADER_RETRY_MS        = 60000;   // grace before the sweep retrie
 const PENDING_PAGE_LIMIT             = 100;     // matches AttestationRound poll page size
 const ATTEST_WIRE_MAX_BYTES          = 8189;    // must equal MAX_DATA_BYTES in xchain-encoder/src/validator.js
 
+// Default retention window for the durable attest_published_requests marker table,
+// mirroring OraclePublisher's ~90-day oracle_published_rounds window.
+const DEFAULT_PUBLISHED_RETENTION_MS = 7776000000;   // 90 days
+// Multiple of the re-presentability horizon the effective window is FLOORED at.
+// The horizon itself is governance-controlled (see _publishedRetentionFloorMs), so
+// the safety multiple is what absorbs a hub whose indexer view lags the chain.
+const PUBLISHED_RETENTION_DEADLINE_SAFETY = 4;
+// Cap on how many queued request ids the prune DELETE will carry as an exclusion
+// list. A queue this deep is a drain failure, not a retention problem; the sweep
+// skips rather than building a pathological statement.
+const PUBLISHED_RETENTION_QUEUE_MAX = 5000;
+
 class AttestationPublisher {
 
     constructor(hub){
@@ -168,6 +180,27 @@ class AttestationPublisher {
         // set is still the whole guard and a restart can replay.
         this._publishedRequests = new AtMostOnce();
 
+        // Retention window for the durable attest_published_requests marker table.
+        // One row lands per ATTEST v1 request forever, so the money-bearing broadcast
+        // path grew a table (and, through _hydratePublishedMarkers, a per-restart
+        // SELECT) without bound. Only CONFIRMED rows are ever pruned and only past the
+        // re-presentability floor; see _prunePublishedRequests for both invariants.
+        // 0 disables pruning; garbage or a negative value falls back to the default.
+        this.publishedRequestsRetentionMs = parseInt(
+            process.env.ATTEST_PUBLISHED_REQUESTS_RETENTION_MS ||
+            cfg.ATTEST_PUBLISHED_REQUESTS_RETENTION_MS, 10);
+        if (!Number.isFinite(this.publishedRequestsRetentionMs) || this.publishedRequestsRetentionMs < 0){
+            this.publishedRequestsRetentionMs = DEFAULT_PUBLISHED_RETENTION_MS;
+        }
+        // Lifetime count of confirmed marker rows the retention sweep deleted, the
+        // in-flight sweep handle (fire-and-forget on the sweep path, so this is what
+        // makes it awaitable in tests), and whether a marker has been written since the
+        // last sweep. The table only grows when this publisher spends, so a hub that
+        // has published nothing since the last sweep has nothing to age out.
+        this.publishedRequestsPruned = 0;
+        this._retentionSweep         = null;
+        this._markersAddedSinceSweep = false;
+
         this._sweeping = false;   // sweep self-overlap guard, see _processQueue()
     }
 
@@ -179,6 +212,8 @@ class AttestationPublisher {
             enqueueFailures:    this._enqueueFailures,
             enabled:            this.enabled,
             quarantined:        this._quarantinedRequests.size,   // needs operator replay
+            publishedRequestsRetentionMs: this.publishedRequestsRetentionMs,
+            publishedRequestsPruned:      this.publishedRequestsPruned,
             spendGuard:         this.spendGuard.stats()
         };
     }
@@ -311,7 +346,7 @@ class AttestationPublisher {
         // but wrong timing means multiple followers can step in early or the true
         // rank-1 late.
         let redundancy   = Math.max(1, Number(event.request && event.request.redundancy) || 1);
-        // Provider id for the block-anchored stake floor (XC-083). The event carries it
+        // Provider id for the block-anchored stake floor. The event carries it
         // directly; the request row is the fallback for an event shaped by an older
         // publisher. Absent on both, _computeResponsible fails closed on the weighted
         // path rather than rank against a set the other two copies do not agree with.
@@ -521,6 +556,9 @@ class AttestationPublisher {
                 'UPDATE attest_published_requests SET txid = ?, sent_at = NOW() WHERE request_id = ?',
                 [txid || null, rid]
             );
+            // The table just grew by one confirmed row, which is the only thing the
+            // retention sweep has to age out; arm it for the next sweep pass.
+            this._markersAddedSinceSweep = true;
         } catch (e) {
             console.error('AttestationPublisher: broadcast for %s... succeeded but its ' +
                 'durable sent marker could not be persisted; a restart will QUARANTINE (not re-broadcast) this request. ' +
@@ -574,6 +612,121 @@ class AttestationPublisher {
                 'after a definitive send failure; a restart will QUARANTINE it ' +
                 'and it will need an operator replay. Error:', String(rid).substring(0,16), e);
         }
+    }
+
+    // Longest wall-clock window in which a CONFIRMED marker can still change a
+    // decision, derived from live governance rather than from a baked constant.
+    //
+    // A confirmed marker is only ever read through _durableSendGate, and that gate is
+    // reachable from exactly two places: onRequestFinalized (an AttestationConsensus
+    // finalization, which only fires for a request the consensus polled out of the
+    // indexer's PENDING set) and the replay sweep (which reaches the gate only past
+    // `pendingIds.has(rid)`). So a request whose marker no longer matters is precisely
+    // one that can no longer be PENDING, and the indexer expires a request at its
+    // deadline_block, at most `deadline_window_blocks` BTC blocks after the request
+    // landed (xchain-indexer providerRegistry.isDeadlineAllowed).
+    //
+    // That window is governance-controlled JSON, so it is re-derived here through
+    // ProviderRegistry.maxDeadlineWindowBlocks() the way AttestationConsensus
+    // .checkNonOkSizingFloor does, never from the 100-block http_get figure in any
+    // comment. Unlike that check this one is a HARD CLAMP, not a warning: an
+    // undersized ring only wastes a fee, while a marker pruned too early lets the very
+    // next finalization spend a SECOND fee for a response already on-chain.
+    //
+    // Returns 0 when no registry or no usable window is available, in which case the
+    // caller falls back to the queue exclusion plus the configured window alone.
+    _publishedRetentionFloorMs(){
+        let registry = (this.hub && this.hub.providerRegistry) ? this.hub.providerRegistry : null;
+        if (!registry || typeof registry.maxDeadlineWindowBlocks !== 'function') return 0;
+        let max = registry.maxDeadlineWindowBlocks();
+        let blocks = Number(max && max.blocks);
+        if (!Number.isFinite(blocks) || blocks <= 0) return 0;
+        return blocks * this.approxBlockMs * PUBLISHED_RETENTION_DEADLINE_SAFETY;
+    }
+
+    // Bound the durable attest_published_requests marker table to the retention
+    // window. Without this the table appends one row per paid ATTEST request forever,
+    // and _hydratePublishedMarkers re-reads all of it into memory on every restart.
+    //
+    // Three invariants dominate this DELETE, all load-bearing on a path that spends
+    // real BTC:
+    //
+    //   1. `sent_at IS NOT NULL` is mandatory. A sent_at NULL row is an intent-only
+    //      QUARANTINE marker for a request whose on-chain state is unknown after a
+    //      crash; _hydratePublishedMarkers turns it into a permanent operator-only
+    //      hold. Pruning one would erase the sole record that the request needs
+    //      hand-verification, and the next finalization would broadcast it again.
+    //   2. No request still on the durable WAL may be pruned, the exact analogue of
+    //      OraclePublisher's queue-file clamp. The rid is a string rather than an
+    //      orderable round, so the queue is excluded by identity instead of by a
+    //      cutoff clamp, which is tighter than a clamp rather than looser.
+    //   3. The window is floored at the re-presentability horizon
+    //      (_publishedRetentionFloorMs), so a configured window shorter than the
+    //      longest provider deadline cannot delete a marker a live path can still
+    //      reach.
+    //
+    // Returns the number of rows deleted. Throws on a DB error; the caller decides
+    // (the sweep path treats a retention failure as non-fatal).
+    async _prunePublishedRequests(){
+        let db = this._db();
+        if (!db) return 0;
+        if (!this.publishedRequestsRetentionMs || this.publishedRequestsRetentionMs <= 0) return 0;
+
+        let windowMs = Math.max(this.publishedRequestsRetentionMs, this._publishedRetentionFloorMs());
+
+        // Invariant 2. Best-effort read; an unreadable queue returns [] and the window
+        // applies on its own (an unreadable queue file is already loud elsewhere).
+        let queued = [];
+        for (let entry of this._readQueue()){
+            let rid = String(entry && entry.requestId || '').toLowerCase();
+            if (rid) queued.push(rid);
+        }
+        if (queued.length > PUBLISHED_RETENTION_QUEUE_MAX){
+            console.warn('AttestationPublisher: skipping the published-requests retention sweep; ' +
+                queued.length + ' entries are still on the durable queue at ' + this.queuePath +
+                ' (over the ' + PUBLISHED_RETENTION_QUEUE_MAX + ' exclusion cap). The queue is not draining; ' +
+                'fix that first, retention is the lesser problem.');
+            return 0;
+        }
+
+        // Seconds, and DB-clock arithmetic on both sides: sent_at is written by NOW(),
+        // so comparing it against a Node-side timestamp would fold any host/DB clock
+        // skew straight into the cutoff.
+        let windowSec = Math.ceil(windowMs / 1000);
+        let sql = 'DELETE FROM attest_published_requests ' +
+                  'WHERE sent_at IS NOT NULL AND sent_at < DATE_SUB(NOW(), INTERVAL ? SECOND)';
+        let params = [windowSec];
+        if (queued.length > 0){
+            sql += ' AND request_id NOT IN (' + queued.map(() => '?').join(',') + ')';
+            params = params.concat(queued);
+        }
+
+        let result  = await db.doQuery(sql, params);
+        let deleted = (result && result.affectedRows) ? Number(result.affectedRows) : 0;
+        if (deleted > 0){
+            this.publishedRequestsPruned += deleted;
+            console.log('AttestationPublisher: published-requests retention pruned ' + deleted +
+                ' confirmed marker row(s) older than ' + windowSec + 's (quarantined intent-only rows and ' +
+                'anything still on the durable queue are never pruned)');
+        }
+        return deleted;
+    }
+
+    // Housekeeping hook for the retention sweep. Fire-and-forget with the rejection
+    // swallowed: bounding the marker table must never stall, fail or retry a broadcast
+    // pass that has already spent BTC. Skipped when the publisher is disabled (a paused
+    // publisher touches nothing) and when nothing has been published since the last
+    // sweep, since the table only grows when this hub spends.
+    _sweepPublishedRequestRetention(){
+        if (!this.enabled || !this._markersAddedSinceSweep) return;
+        if (!this._db() || !this.publishedRequestsRetentionMs) return;
+        this._markersAddedSinceSweep = false;
+        this._retentionSweep = this._prunePublishedRequests()
+            .catch((e) => {
+                console.warn('AttestationPublisher: published-requests retention sweep failed ' +
+                    '(the marker table keeps growing until it succeeds): ', e);
+                return 0;
+            });
     }
 
     // Consult the durable marker before spending a BTC fee. READ-ONLY: it writes no
@@ -739,7 +892,7 @@ class AttestationPublisher {
     // including the caller's Math.max(1, Number(redundancy) || 1) normalization.
     // A silent change to any one copy is a fork surface; update all three together.
     //
-    // PROVIDER STAKE FLOOR (XC-083, weighted only): sources below the request
+    // PROVIDER STAKE FLOOR (weighted only): sources below the request
     // provider's block-anchored min_stake_xchain are dropped before the ranking, the
     // same filter AttestationRound._computeResponsibleSet applies. This ordering only
     // drives failover step-in timing, but ranking against a set the other copies do
@@ -831,6 +984,12 @@ class AttestationPublisher {
             return await this._processQueueInner();
         } finally {
             this._sweeping = false;
+            // Marker-table retention, not part of the broadcast pass. It runs from the
+            // finally so every early return above it is covered (a live-path publish
+            // leaves an EMPTY queue, and the inner pass returns before its body on an
+            // empty queue), and after the overlap guard releases so a slow DELETE can
+            // never make the next tick think a sweep is still in flight.
+            this._sweepPublishedRequestRetention();
         }
     }
 

@@ -563,6 +563,48 @@ describe('FullNodeChallengeRound', function () {
             expect(st.finalized).to.equal(true);
         });
 
+        // A failover verdict (state.leadRank > 0, the _tick ladder promoting the next
+        // rank after the elected leader landed nothing) was otherwise byte-identical to a
+        // healthy rank-0 verdict in every observable signal, so a dead elected leader
+        // stayed invisible while the ladder quietly absorbed its rounds. Pin the rank on
+        // the durable record and the marker on the log line, both directions.
+        it('names the broadcast rank on the sent record and marks a failover verdict', async function () {
+            const hub = makeHub();
+            const eng = await startEpoch(hub);
+            const st  = eng.rounds.get(288);
+            let seen = [];
+            eng._recordSpend = (entry) => { seen.push(entry); return true; };
+            st.leadRank = 2;                   // _tick promoted rank 2: nothing landed at 0 or 1
+            const logged = sinon.stub(console, 'log');
+            try {
+                eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+                await eng._closeCollection(288);
+            } finally { logged.restore(); }
+            const sent = seen.find(e => e.phase === 'sent');
+            expect(sent, 'verdict sent').to.exist;
+            expect(sent.leadRank, 'the durable record names the rank that spent the fee').to.equal(2);
+            const line = logged.getCalls().map(c => String(c.args[0])).find(s => /verdict broadcast/.test(s));
+            expect(line, 'verdict log line').to.exist;
+            expect(line).to.include('[FAILOVER');
+        });
+
+        it('leaves a healthy rank-0 verdict unmarked', async function () {
+            const hub = makeHub();
+            const eng = await startEpoch(hub);
+            const st  = eng.rounds.get(288);
+            let seen = [];
+            eng._recordSpend = (entry) => { seen.push(entry); return true; };
+            const logged = sinon.stub(console, 'log');
+            try {
+                eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+                await eng._closeCollection(288);
+            } finally { logged.restore(); }
+            const sent = seen.find(e => e.phase === 'sent');
+            expect(sent.leadRank, 'the elected leader broadcasts at rank 0').to.equal(0);
+            const line = logged.getCalls().map(c => String(c.args[0])).find(s => /verdict broadcast/.test(s));
+            expect(line).to.not.include('FAILOVER');
+        });
+
         it('writes a real fsynced line to the configured spend log', async function () {
             const fs   = require('fs');
             const os   = require('os');
@@ -921,6 +963,91 @@ describe('FullNodeChallengeRound', function () {
             eng._indexerCall = async () => { throw new Error('indexer down'); };
             try { await eng._tick(); } catch (e) { /* start()'s wrapper swallows this */ }
             expect(eng._ticking, 'a rejected indexer call must not wedge the poll').to.equal(false);
+        });
+    });
+
+    // ── encoder fallback broadcast ────────────────────────────────────────────
+    // The no-hook branch (operator signer exports walletSign but not the optional
+    // broadcast) used to call createTx({ source, data }). The encoder has no `source`
+    // param and rejects a missing pubkey with RangeError('pubkey is required') before
+    // building anything, so that branch could never land a verdict. Pin the shape
+    // against the encoder's real contract, the same way PublisherDefaultBroadcast.test.js
+    // pins it for the four sibling publishers.
+    describe('_broadcastVerdict (encoder fallback)', function () {
+        function makeMockEncoder() {
+            return {
+                createTxArgs: null,
+                getUtxos:    sinon.stub().resolves([{ txid: 'a'.repeat(64), vout: 0, value: 1 }]),
+                createTx:    function (args) { this.createTxArgs = args; return Promise.resolve({ psbt: 'deadbeef' }); },
+                broadcastTx: sinon.stub().resolves({ txid: 'verdict-txid' })
+            };
+        }
+
+        function wireEncoder(eng, encoder) {
+            eng.broadcastFn  = null;
+            eng.encoder      = encoder;
+            eng.walletSignFn = sinon.stub().resolves('00'.repeat(32));
+            eng.btcAddress   = '1AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQq';
+        }
+
+        it('fetches UTXOs and calls createTx with the encoder contract, not { source }', async function () {
+            const eng = new FullNodeChallengeRound(makeHub());
+            const encoder = makeMockEncoder();
+            wireEncoder(eng, encoder);
+
+            const res = await eng._broadcastVerdict('NODEPROOF|0|cid|288|0|0');
+
+            expect(encoder.getUtxos.calledOnceWith(eng.btcAddress), 'UTXOs fetched first').to.equal(true);
+            expect(encoder.createTxArgs).to.be.an('object');
+            expect(encoder.createTxArgs.source, 'source is not an encoder param').to.equal(undefined);
+            // The encoder's P2SH path runs fromBase58Check on this field, so it carries
+            // the address, not a hex pubkey.
+            expect(encoder.createTxArgs.pubkey).to.equal(eng.btcAddress);
+            expect(encoder.createTxArgs.change).to.equal(eng.btcAddress);
+            expect(encoder.createTxArgs.encoding).to.equal('P2SH');
+            expect(encoder.createTxArgs.utxos).to.have.lengthOf(1);
+            expect(eng.walletSignFn.calledOnceWith('deadbeef'), 'signs the returned .psbt').to.equal(true);
+            expect(res.txid).to.equal('verdict-txid');
+        });
+
+        it('throws before signing when the encoder returns no psbt', async function () {
+            const eng = new FullNodeChallengeRound(makeHub());
+            const encoder = makeMockEncoder();
+            // create_tx only ever answers with `psbt`; psbtHex/hex were guesses that
+            // could only ever hand the signer undefined.
+            encoder.createTx = () => Promise.resolve({ psbtHex: 'deadbeef' });
+            wireEncoder(eng, encoder);
+
+            let threw = false;
+            try { await eng._broadcastVerdict('NODEPROOF|0|cid|288|0|0'); }
+            catch (e) { threw = true; expect(e.message).to.include('no PSBT'); }
+            expect(threw).to.equal(true);
+            expect(eng.walletSignFn.called, 'never signs an absent PSBT').to.equal(false);
+            expect(encoder.broadcastTx.called).to.equal(false);
+        });
+
+        it('throws before createTx when the address has no UTXOs', async function () {
+            const eng = new FullNodeChallengeRound(makeHub());
+            const encoder = makeMockEncoder();
+            encoder.getUtxos = sinon.stub().resolves([]);
+            wireEncoder(eng, encoder);
+
+            let threw = false;
+            try { await eng._broadcastVerdict('NODEPROOF|0|cid|288|0|0'); }
+            catch (e) { threw = true; expect(e.message).to.include('no UTXOs'); }
+            expect(threw).to.equal(true);
+            expect(encoder.createTxArgs, 'no build attempted').to.equal(null);
+        });
+
+        it('the operator broadcast hook still short-circuits the encoder path', async function () {
+            const eng = new FullNodeChallengeRound(makeHub());
+            const encoder = makeMockEncoder();
+            wireEncoder(eng, encoder);
+            eng.broadcastFn = sinon.stub().resolves({ txid: 'hook-txid' });
+
+            const res = await eng._broadcastVerdict('NODEPROOF|0|cid|288|0|0');
+            expect(res.txid).to.equal('hook-txid');
+            expect(encoder.getUtxos.called).to.equal(false);
         });
     });
 });

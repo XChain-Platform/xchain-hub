@@ -13,6 +13,9 @@
 const sinon          = require('sinon');
 const { expect }     = require('chai');
 const proxyquire     = require('proxyquire');
+// The real classifier, so the 5xx guard below is pinned against the code that
+// actually decides whether a failed send may be re-broadcast.
+const { isAmbiguousSendError } = require('../../src/lib/idempotent_broadcast.js');
 
 // ────────────────────────────────────────────────────────────────────────────
 // Load EncoderClient with axios stubbed
@@ -148,6 +151,106 @@ describe('EncoderClient', function () {
                 expect(e.message).to.include('network timeout');
             }
             expect(threw).to.be.true;
+        });
+
+        // The encoder answers auth, rate-limit and batch-guard failures with a non-2xx
+        // status AND a JSON-RPC error body. axios rejects before the 2xx error check
+        // below it runs, so the specific reason used to be replaced by the bare status
+        // message on every publisher surface and in every dead-letter record.
+        function httpError(status, encoderBody) {
+            let e = new Error('Request failed with status code ' + status);
+            e.isAxiosError = true;
+            e.response = { status: status, data: encoderBody };
+            return e;
+        }
+
+        it('surfaces the encoder reason for 401 / 429 / 400 bodies', async function () {
+            const cases = [
+                [401, { jsonrpc: '2.0', id: null, error: { code: -32001, message: 'Unauthorized' } }, 'Unauthorized'],
+                [429, { jsonrpc: '2.0', id: null, error: { code: -32029, message: 'Too many requests' } }, 'Too many requests'],
+                [400, { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Batch too large (max 20 requests per call)' } }, 'Batch too large']
+            ];
+            for (let [status, body, reason] of cases) {
+                axiosStub.post.rejects(httpError(status, body));
+                let c = new EncoderClient('http://enc/rpc', '');
+                let caught = null;
+                try { await c._call('create_tx', {}); } catch (e) { caught = e; }
+                expect(caught, 'status ' + status).to.exist;
+                expect(caught.message).to.include('Encoder RPC error');
+                expect(caught.message).to.include(reason);
+                // The SAME object is rethrown, so the retry classifier and the
+                // dead-letter record still see the HTTP status.
+                expect(caught.response.status).to.equal(status);
+            }
+        });
+
+        it('leaves a 5xx message untouched so an ambiguous send is never re-labelled retry-safe', async function () {
+            // isAmbiguousSendError reads an 'Encoder RPC error' message as a definitive
+            // rejection. A 5xx may already have reached the coin node, so prefixing it
+            // would turn a possible double-spend into an auto-retry.
+            axiosStub.post.rejects(httpError(503, {
+                jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Server busy, retry shortly' }
+            }));
+            let c = new EncoderClient('http://enc/rpc', '');
+            let caught = null;
+            try { await c._call('broadcast_tx', { tx_hex: 'ab' }); } catch (e) { caught = e; }
+            expect(caught.message).to.equal('Request failed with status code 503');
+            expect(caught.message).to.not.include('Encoder RPC error');
+            expect(isAmbiguousSendError(caught)).to.equal(true);
+        });
+
+        it('leaves a non-2xx carrying no JSON-RPC body alone', async function () {
+            axiosStub.post.rejects(httpError(404, '<html>not found</html>'));
+            let c = new EncoderClient('http://enc/rpc', '');
+            let caught = null;
+            try { await c._call('create_tx', {}); } catch (e) { caught = e; }
+            expect(caught.message).to.equal('Request failed with status code 404');
+        });
+
+        // create_tx reports its operational failures with code -32010 and a stable
+        // data.reason so a caller can branch on the condition rather than parse a
+        // message. Both failure branches must surface it, or which one the encoder
+        // happens to use decides whether the code exists.
+        it('mirrors the encoder code and data.reason on the 200-with-error-body branch', async function () {
+            axiosStub.post.resolves({ data: { error: {
+                code: -32010, message: 'insufficient funds',
+                data: { reason: 'INSUFFICIENT_FUNDS', required: 12345 }
+            } } });
+            let c = new EncoderClient('http://enc/rpc', '');
+            let caught = null;
+            try { await c._call('create_tx', {}); } catch (e) { caught = e; }
+            expect(caught.message).to.include('Encoder RPC error');
+            expect(caught.rpcCode).to.equal(-32010);
+            expect(caught.rpcData.reason).to.equal('INSUFFICIENT_FUNDS');
+            expect(caught.rpcData.required).to.equal(12345);
+        });
+
+        it('mirrors the encoder code and data.reason on the non-2xx branch, status intact', async function () {
+            axiosStub.post.rejects(httpError(400, { jsonrpc: '2.0', id: null, error: {
+                code: -32010, message: 'no change address', data: { reason: 'MISSING_CHANGE_ADDRESS' }
+            } }));
+            let c = new EncoderClient('http://enc/rpc', '');
+            let caught = null;
+            try { await c._call('create_tx', {}); } catch (e) { caught = e; }
+            expect(caught.rpcCode).to.equal(-32010);
+            expect(caught.rpcData.reason).to.equal('MISSING_CHANGE_ADDRESS');
+            // Same object still, so the retry classifier and the dead-letter record
+            // keep reading the HTTP status.
+            expect(caught.response.status).to.equal(400);
+        });
+
+        // The 5xx rule is what keeps an ambiguous send from being re-labelled
+        // retry-safe; attaching the structured fields must not disturb it.
+        it('a 5xx keeps its untouched message and its ambiguous classification', async function () {
+            axiosStub.post.rejects(httpError(503, { jsonrpc: '2.0', id: null, error: {
+                code: -32000, message: 'Server busy, retry shortly', data: { reason: 'TRACKER_UNAVAILABLE' }
+            } }));
+            let c = new EncoderClient('http://enc/rpc', '');
+            let caught = null;
+            try { await c._call('broadcast_tx', { tx_hex: 'ab' }); } catch (e) { caught = e; }
+            expect(caught.message).to.equal('Request failed with status code 503');
+            expect(caught.rpcData.reason).to.equal('TRACKER_UNAVAILABLE');
+            expect(isAmbiguousSendError(caught)).to.equal(true);
         });
     });
 

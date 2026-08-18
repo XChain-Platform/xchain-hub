@@ -483,27 +483,41 @@ class PeerManager extends EventEmitter {
     }
 
     _removeInboundPeer(ws) {
+        // Only the peers-map cleanup is gated on ws._peerAddr. That field is set in
+        // _registerInboundPeer, which runs only once an inbound frame has cleared the
+        // JSON/type/timestamp/rate/signature checks, whereas the per-IP count is
+        // incremented for EVERY accepted socket. Gating the decrement on it too leaked
+        // the increment on every pre-auth close (self-connection guard, rate-limited
+        // drop, malformed frame, bad signature, connect-then-idle, port scan), so
+        // ipConnectionCounts climbed monotonically until the IP reached
+        // maxConnectionsPerIp and was refused inbound peering for the rest of the
+        // process lifetime: a per-IP partition of the gossip mesh every consensus
+        // engine rides, and co-located validators behind one egress IP hit it first.
         let addr = ws._peerAddr;
-        if (!addr) return;
+        if (addr) {
+            let peer = this.peers.get(addr);
+            if (peer && peer.ws === ws) {
+                peer.state = 'closed';
+                peer.ws = null;
+                this.emit('peer:disconnect', addr);
+                console.log('Inbound peer disconnected: ' + addr);
 
-        let peer = this.peers.get(addr);
-        if (peer && peer.ws === ws) {
-            peer.state = 'closed';
-            peer.ws = null;
-            this.emit('peer:disconnect', addr);
-            console.log('Inbound peer disconnected: ' + addr);
-
-            // Clean up if it was inbound-only (no reconnect for inbound)
-            if (peer.inbound) {
-                this.peers.delete(addr);
+                // Clean up if it was inbound-only (no reconnect for inbound)
+                if (peer.inbound) {
+                    this.peers.delete(addr);
+                }
             }
         }
 
-        // Decrement per-IP connection count
+        // Decrement per-IP connection count. Clearing ws._remoteIp makes the release
+        // idempotent: a counter decremented twice under-counts just as permanently as
+        // one never decremented at all, and nothing reads the field after close (the
+        // rate-key read in _handleInbound is message-time only).
         if (ws._remoteIp) {
             let count = (this.ipConnectionCounts.get(ws._remoteIp) || 1) - 1;
             if (count <= 0) this.ipConnectionCounts.delete(ws._remoteIp);
             else this.ipConnectionCounts.set(ws._remoteIp, count);
+            ws._remoteIp = null;
         }
     }
 

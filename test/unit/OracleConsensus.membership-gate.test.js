@@ -125,6 +125,36 @@ describe('OracleConsensus: snapshot membership gate (Oracle M1)', function () {
         expect(oc._quorumMet(pending, votes)).to.be.true; // raw sender count, unchanged
     });
 
+    // item 4941: price_snapshots.validator_count is the endorsement breadth operators,
+    // the indexer mirror and getpricesnapshots read, so it must be the tally that
+    // finalized the round - distinct qualified member pubkeys - not the raw addr-keyed
+    // prepare set, which a twin addr or a registered non-member inflates.
+    it('records validator_count as the deduped member tally, not the raw prepare set', async function () {
+        let twinAddr = 'ws://validator-1-twin:10001';
+        pm.validatorPubkeys.set(twinAddr, VALIDATORS_3[0].pubkey); // same KEY, second addr
+        let store = sinon.stub(oc, '_storeSnapshot').resolves();
+        oc.pendingRounds.set(ROUND, {
+            round:          ROUND,
+            weighted:       false,
+            quorum:         2,
+            memberPubkeys:  new Set([VALIDATORS_3[0].pubkey, VALIDATORS_3[1].pubkey]),
+            // Four raw prepare addrs: two bound to one member key, one other member,
+            // and one registered non-member the quorum never counted.
+            prepares:       new Set([VALIDATORS_3[0].addr, twinAddr, VALIDATORS_3[1].addr, NONMEMBER.addr]),
+            commits:        new Set([VALIDATORS_3[0].addr, VALIDATORS_3[1].addr]),
+            signatures:     new Map(),
+            prices:         [{ coinPair: 'BTC/USD', price: '100000' }],
+            btcBlockHeight: 100,
+            btcBlockTime:   1700000000,
+            finalized:      true
+        });
+
+        await oc._finalizeCommittedRound(ROUND);
+
+        expect(store.calledOnce).to.be.true;
+        expect(store.firstCall.args[2]).to.equal(2);
+    });
+
     it('_handlePropose locks memberPubkeys on the pending round', async function () {
         // Follower view: validator-2 is this hub; leader (validator-1) proposes.
         pm.validatorAddr = VALIDATORS_3[1].addr;

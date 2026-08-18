@@ -118,4 +118,21 @@ describe('OracleConsensus: locally-skipped rounds stay reprocessable (#7)', func
         expect(oc.locallySkipped.has(ROUND)).to.be.false;
         expect(oc.finalized.has(ROUND)).to.be.true;
     });
+
+    // item 4942: OracleRound's consecutiveSkippedRounds gauge subscribes to this
+    // event, so it must fire exactly once per round that becomes a durable
+    // non-finalized record - the same round set _hydrateFreshnessCounters counts
+    // back from price_snapshots after a restart.
+    it('emits round:skipped exactly once per round, and never for a finalized one', function () {
+        let seen = [];
+        oc.on('round:skipped', e => seen.push(e && e.round));
+
+        oc._markLocallySkipped(ROUND);
+        oc._markLocallySkipped(ROUND);
+        expect(seen).to.deep.equal([ROUND]);
+
+        oc._markFinalized(ROUND + 1);
+        oc._markLocallySkipped(ROUND + 1);
+        expect(seen).to.deep.equal([ROUND]);
+    });
 });

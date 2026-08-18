@@ -1191,11 +1191,14 @@ describe('Security Hardening', function () {
     describe('API: Input validation helpers', function () {
         // We test the validation functions by capturing the controller via proxyquire
         let controller;
+        // The since_id guard lives on the REST snapshot routes, not on a JSON-RPC
+        // method, so the route handlers are captured the same way the methods are.
+        let routes = {};
 
         before(async function () {
             let mockApp = {
                 use: sinon.stub(),
-                get: sinon.stub(),
+                get: sinon.stub().callsFake((path, handler) => { routes[path] = handler; }),
                 post: sinon.stub(),
                 set: sinon.stub(),
                 listen: sinon.stub().callsFake((port, host, cb) => { if (cb) cb(); })
@@ -1229,7 +1232,10 @@ describe('Security Hardening', function () {
                 getValidators: sinon.stub().resolves([]),
                 getReorgHistory: sinon.stub().resolves([]),
                 getSwaps: sinon.stub().resolves([]),
-                reportReorg: sinon.stub().resolves()
+                initiateSwap: sinon.stub().resolves(),
+                getSwap: sinon.stub().resolves({ source_chain: 'BTC', source_action_index: 7 }),
+                reportReorg: sinon.stub().resolves(),
+                db: { setChainTip: sinon.stub().resolves(), doQuery: sinon.stub().resolves([]) }
             };
 
             let capturedMethods;
@@ -1384,6 +1390,94 @@ describe('Security Hardening', function () {
         it('initiateswap rejects invalid dest_chain', async function () {
             let result = await controller.initiateswap({ source_chain: 'BTC', source_action_index: 1, dest_chain: 'ETH' });
             expect(result.error).to.include('BTC');
+        });
+
+        // The same integer-PREFIX hole validateLimit was hardened against, on the
+        // three other fields that reach a write: the swap action indices (INSERTed
+        // into swap_records), the chain tip (read by the staleness gates) and
+        // since_id (paged from the truncated id). '7junk' recorded a swap against
+        // action 7, '1e3' against action 1.
+        ['7junk', '1e3', '7.5', '-7', ' 7', '0x7', '0'].forEach((bad) => {
+            it(`initiateswap rejects a partial-integer source_action_index ${JSON.stringify(bad)}`, async function () {
+                let result = await controller.initiateswap({ source_chain: 'BTC', source_action_index: bad, dest_chain: 'LTC' });
+                expect(result.error).to.include('source_action_index');
+            });
+
+            it(`getswap rejects a partial-integer source_action_index ${JSON.stringify(bad)}`, async function () {
+                let result = await controller.getswap({ source_chain: 'BTC', source_action_index: bad });
+                expect(result.error).to.include('source_action_index');
+            });
+        });
+
+        it('initiateswap rejects a partial-integer dest_action_index', async function () {
+            let result = await controller.initiateswap({
+                source_chain: 'BTC', source_action_index: 7, dest_chain: 'LTC', dest_action_index: '9junk'
+            });
+            expect(result.error).to.include('dest_action_index');
+        });
+
+        it('initiateswap forwards the exact integer, string or number', async function () {
+            expect(await controller.initiateswap({ source_chain: 'BTC', source_action_index: '7', dest_chain: 'LTC' }))
+                .to.deep.equal({ status: 'success' });
+            expect(await controller.initiateswap({ source_chain: 'BTC', source_action_index: 7, dest_chain: 'LTC', dest_action_index: 9 }))
+                .to.deep.equal({ status: 'success' });
+        });
+
+        it('getswap accepts a well-formed index', async function () {
+            let result = await controller.getswap({ source_chain: 'BTC', source_action_index: '7' });
+            expect(result.error).to.be.undefined;
+        });
+
+        ['850000junk', '1e3', '850000.9', ' 850000', '0x32'].forEach((bad) => {
+            it(`pushchaintip rejects a partial-integer block_height ${JSON.stringify(bad)}`, async function () {
+                let result = await controller.pushchaintip({ coin: 'BTC', network: 'mainnet', block_height: bad, block_time: 1700000000 });
+                expect(result.error).to.include('invalid block_height');
+            });
+
+            it(`pushchaintip rejects a partial-integer block_time ${JSON.stringify(bad)}`, async function () {
+                let result = await controller.pushchaintip({ coin: 'BTC', network: 'mainnet', block_height: 850000, block_time: bad });
+                expect(result.error).to.include('invalid block_time');
+            });
+        });
+
+        it('pushchaintip still accepts the shapes the indexer sends', async function () {
+            expect(await controller.pushchaintip({ coin: 'BTC', network: 'mainnet', block_height: 850000, block_time: 1700000000 }))
+                .to.deep.equal({ status: 'success' });
+            expect(await controller.pushchaintip({ coin: 'BTC', network: 'mainnet', block_height: '850000', block_time: '1700000000' }))
+                .to.deep.equal({ status: 'success' });
+        });
+
+        describe('since_id on the snapshot routes', function () {
+            let route;
+            let fakeRes = () => {
+                let out = { code: null, body: null };
+                out.status = (c) => { out.code = c; return out; };
+                out.json = (b) => { out.body = b; return out; };
+                return out;
+            };
+
+            before(function () {
+                route = routes['/hub-db/snapshot/price_snapshots'];
+                expect(route, 'price_snapshots snapshot route registered').to.be.a('function');
+            });
+
+            ['5junk', '1e3', '5.5', '-5', ' 5', '0x32'].forEach((bad) => {
+                it(`rejects a partial-integer since_id ${JSON.stringify(bad)}`, async function () {
+                    let res = fakeRes();
+                    await route({ query: { since_id: bad } }, res);
+                    expect(res.code).to.equal(400);
+                    expect(res.body.error).to.include('since_id');
+                });
+            });
+
+            it('accepts a digit-only since_id and an omitted one', async function () {
+                let res = fakeRes();
+                await route({ query: { since_id: '1000' } }, res);
+                expect(res.code).to.equal(null);
+                let res2 = fakeRes();
+                await route({ query: {} }, res2);
+                expect(res2.code).to.equal(null);
+            });
         });
     });
 });
