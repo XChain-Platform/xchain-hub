@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-08-18
+
+### Fixed
+- Retraction consensus fails closed when the capability-snapshot persist fails, instead of proceeding on a snapshot that was never durably recorded.
+- Code-review round fixes across consensus, federation, and API code (two rounds, 68 files).
+
+### Security
+- Raised the brace-expansion and js-yaml dependency floors and the advisory guards that pin them.
+
 ## [0.9.0] - 2026-08-14
 
 First release of the XChain Platform release train. Every component in the train
