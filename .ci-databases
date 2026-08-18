@@ -4,7 +4,7 @@
 # It is NOT the .env-rendered ci_* schema the gate makes from .env.example:
 # testDb.js creates its own xchain_hub_test and then builds tables in it, and
 # the venue ci user holds ALL only on ci_% (plus a host-local xchain_hub_test%
-# grant that exists on dankserver and on no other venue), so the tier passed or
+# grant that exists on one venue and on no other), so the tier passed or
 # failed depending on which venue the dispatcher picked.
 #
 # The `name=ENV_VAR` form is the isolated one: the gate creates
