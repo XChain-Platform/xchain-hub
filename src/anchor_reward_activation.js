@@ -28,7 +28,7 @@
  * BTC/LTC/DOGE indexers all flip on the same anchor.
  *
  * A byte-identical twin of the map and amount lives in
- * xchain-hub/src/anchor_reward_activation.js and in
+ * xchain-indexer/src/anchor_reward_activation.js and in
  * xchain-documentation/protocol/constants.js; a cross-service regression suite
  * keeps all copies byte-equal, since a divergence forks the derived reward row
  * and breaks federation/ledger parity.
