@@ -251,16 +251,21 @@ describe('Regression: ReorgHandler', function () {
 
     // Query methods
     describe('getReorgHistory()', function () {
+        // The limit is clamped to a validated integer and interpolated, rather than
+        // bound, so that the read carries its own server-side page cap like the other
+        // HubOperationalCache-backed reads. These still assert the same contract the
+        // bound-parameter versions did (the caller's limit is honoured, and an absent
+        // one defaults to 50); only where the value lands in the statement moved.
         it('queries with limit @regression-p2', async function () {
             hub.db.doQuery.resolves([]);
             await rh.getReorgHistory(10);
-            expect(hub.db.doQuery.getCall(0).args[1]).to.deep.equal([10]);
+            expect(hub.db.doQuery.getCall(0).args[0]).to.include('LIMIT 10');
         });
 
         it('defaults to 50 @regression-p2', async function () {
             hub.db.doQuery.resolves([]);
             await rh.getReorgHistory();
-            expect(hub.db.doQuery.getCall(0).args[1]).to.deep.equal([50]);
+            expect(hub.db.doQuery.getCall(0).args[0]).to.include('LIMIT 50');
         });
     });
 });
