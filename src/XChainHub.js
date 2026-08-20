@@ -57,7 +57,13 @@ const { bcmul, bcdiv }   = require('./bcmath.js');
 const mathjs             = require('mathjs');
 const fs                 = require('fs');
 const axios              = require('axios');
-const PARAMETER_LIST     = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass"];
+// self_sync rides the same string-parameter path as the rest of this list: it
+// marks a checkpoint-schema descriptor (coin/network module "checkpoint",
+// row 39 / #4138 decoupling) as one the explorer's own HubMirrorSyncManager
+// self-provisions and populates, rather than an externally-maintained hub
+// schema. Coerced to the string "true"/"false" like every other value here;
+// xchain-explorer's db.js reads it back with `=== true || === 'true'`.
+const PARAMETER_LIST     = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass", "self_sync"];
 const OPERATIONAL_PARAMS = new Set(["GAS_PRICE", "ACTIVATION_DELAY_BLOCKS", "EXPIRATION_FEE_PER_DAY"]);
 const JSON_BLOB_PARAMS   = new Set(["GAS_SCHEDULE", "STAKING"]);
 
