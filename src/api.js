@@ -1057,6 +1057,38 @@ async function startApi(){
             }
         },
 
+        // List recorded slash proposals (all statuses), optionally filtered by
+        // status and/or validator pubkey. Read-only companion to
+        // proposeslashpenalty above: that method acts on the evidence, this one
+        // publishes that it exists.
+        //
+        // PUBLIC READ TIER on purpose (not in WRITE_METHODS, not in
+        // SENSITIVE_READ_METHODS): the rows carry no credential and no
+        // mesh-internal connection state, only who was accused of what and
+        // whether governance has ruled. Rows with status 'pending' are
+        // UNADJUDICATED accusations, never findings; the status field is on
+        // every row so a consumer can say so.
+        //
+        // The `evidence` blob is NOT served. SlashDetector.getSlashProposals
+        // replaces it with evidence_hash before returning, because this POST
+        // surface answers any caller: redacting downstream in one consumer
+        // would leave the verbatim text readable straight off the hub.
+        async getslashproposals({status, validator_pubkey, limit}){
+            let limErr = validateLimit(limit);
+            if (limErr) return limErr;
+            if(!hub.slashDetector) return {error: "slash detector not active"};
+            try {
+                return await hub.slashDetector.getSlashProposals({
+                    status, validatorPubkey: validator_pubkey, limit
+                });
+            } catch (err) {
+                // Surface the argument-validation messages (bad status, malformed
+                // pubkey) the way proposeslashpenalty does, so a caller can fix its
+                // request; the generic fallback covers DB failures.
+                return {error: err.message || "error fetching slash proposals"};
+            }
+        },
+
         async vote({proposal_id, vote}){
             if(!proposal_id || !vote)
                 return {error: "proposal_id and vote (approve/reject) are required"};

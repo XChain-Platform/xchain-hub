@@ -119,6 +119,7 @@ const METHODS = [
     ['resumeeffectorspend', 'Resume a paused effector\'s on-chain spend by capability label.', ['label'], { auth: true }],
     ['propose', 'Submit a governance proposal over one parameter.', ['parameter', 'current_value', 'proposed_value', 'rationale'], { auth: true }],
     ['proposeslashpenalty', 'Create a SLASH_PENALTY governance proposal over a validator\'s pending slash_proposals evidence; a passed vote executes the penalty (suspend or dismiss).', ['validator_pubkey', 'penalty', 'rationale'], { auth: true }],
+    ['getslashproposals', 'List recorded slash proposals (all statuses), optionally filtered by status and/or validator pubkey. Rows with status "pending" are UNADJUDICATED accusations recorded as evidence, not findings of guilt; enforcement happens only through a passed SLASH_PENALTY governance vote. The verbatim evidence blob is never served: each row carries evidence_hash, the SHA-256 of the stored evidence text, which is the same digest the SLASH_PENALTY evidence hash is built from.', ['status', 'validator_pubkey', 'limit']],
     ['vote', 'Vote on a governance proposal.', ['proposal_id', 'vote'], { auth: true }],
     ['getproposals', 'List governance proposals, optionally filtered by status and/or parameter name.', ['status', 'parameter', 'limit']],
     ['getproposal', 'One governance proposal with votes.', ['proposal_id']],

@@ -26,11 +26,47 @@
  *
  ********************************************************************/
 
+const crypto = require('crypto');
 const { ORACLE_DEVIATION_THRESHOLD } = require('./constants');
 const bcmath = require('./bcmath.js');
 const devband = require('./lib/deviation_band.js');
 
 const MAX_DEVIATIONS_PER_VALIDATOR = 1000;
+
+// Page bound for the public read surface, matching Governance.getProposals /
+// Governance.getVotes exactly (default 50, hard cap 500). The API layer's
+// validateLimit only rejects a limit above 10000, so without this the RPC would
+// hand out 10000 rows per call; every other list RPC the explorer reads caps
+// itself server-side and this one must too.
+const DEFAULT_PAGE = 50;
+const MAX_PAGE     = 500;
+
+const PROPOSAL_STATUSES = ['pending', 'approved', 'rejected', 'expired'];
+
+// Digest published in place of the verbatim `evidence` blob. SHA-256 over the
+// evidence TEXT exactly as stored, so it is
+// BYTE-IDENTICAL to the per-row leg of SlashGovernance.computeEvidenceHash: the
+// value an outside party sees on a row is the same value that feeds the
+// content-hash the electorate votes on, so anyone holding an evidence blob can
+// recompute sha256(blob) and prove it is the row named here, and re-derive the
+// SLASH_PENALTY parameter's aggregate hash from a published set. Canonicalizing
+// (re-parse + re-serialize the JSON) would break that correspondence and depend
+// on a JSON round-trip that silently rewrites number formatting, so the raw
+// stored bytes are hashed. A null evidence hashes as the empty string, same as
+// SlashGovernance. Cross-file drift is pinned by a parity test
+// (test/unit/slashProposalsRpc.test.js).
+//
+// This is a REPUBLICATION control, not confidentiality: the evidence space is
+// low-entropy (a fixed template with a few numeric fields), so a party who knows
+// the template can brute-force it back. That is accepted, because the property
+// actually needed here is independent verifiability, which a keyed/salted digest
+// would destroy. What the digest does buy is that the hub's own POST surface
+// cannot bulk-dump the verbatim text of accusations that nobody has adjudicated.
+function hashEvidence(evidence) {
+    return crypto.createHash('sha256')
+        .update(String(evidence == null ? '' : evidence))
+        .digest('hex');
+}
 
 class SlashDetector {
 
@@ -350,6 +386,63 @@ class SlashDetector {
         return await this.db.doQuery(query, [validatorPubkey]);
     }
 
+    // Public read surface behind the unauthenticated `getslashproposals` RPC
+    // (explorer M3.6). Three things separate it from getPendingProposals above,
+    // which is an internal, all-pending, unbounded read:
+    //
+    //  1. ALL statuses are published, not only 'pending' (operator ruling
+    //     2026-08-20, option (b)), optionally narrowed by status and/or pubkey.
+    //  2. It is BOUNDED server-side (MAX_PAGE), like Governance.getProposals.
+    //     The API layer's validateLimit alone would admit 10000.
+    //  3. The verbatim `evidence` blob NEVER leaves this method. Rows carry
+    //     evidence_hash instead (see hashEvidence). Redacting explorer-side
+    //     would not be enough: the hub's own POST surface serves this same RPC
+    //     to any caller, so the redaction has to happen here, before the row is
+    //     returned. The output object is built field-by-field from an allowlist
+    //     rather than by deleting `evidence` from the row, so a column added to
+    //     slash_proposals later cannot silently start publishing itself.
+    //
+    // Rows are unadjudicated ACCUSATIONS until governance rules on them (see the
+    // 2026-07-16 ruling recorded in SlashGovernance: these are evidence, not
+    // enforcement). status is the only thing that says which, so it is always
+    // present on every row and callers must render it.
+    //
+    // ORDER BY id DESC (not created_at) so the page order matches the
+    // AUTO_INCREMENT cursor the explorer pages on; created_at is a
+    // second-granularity TIMESTAMP and ties within a burst of detections.
+    async getSlashProposals({ status, validatorPubkey, limit } = {}) {
+        let where = [];
+        let args  = [];
+        if (status) {
+            if (!PROPOSAL_STATUSES.includes(String(status)))
+                throw new Error('status must be one of: ' + PROPOSAL_STATUSES.join(', '));
+            where.push('status = ?');
+            args.push(String(status));
+        }
+        if (validatorPubkey) {
+            let pk = String(validatorPubkey).toLowerCase();
+            if (!/^[0-9a-f]{64}$/.test(pk))
+                throw new Error('validator_pubkey must be 64 hex characters');
+            where.push('validator_pubkey = ?');
+            args.push(pk);
+        }
+        let lim = Math.min(Math.max(parseInt(limit, 10) || DEFAULT_PAGE, 1), MAX_PAGE);
+        let query = 'SELECT id, validator_pubkey, offense_type, round_number, evidence, status, created_at ' +
+                    'FROM slash_proposals';
+        if (where.length) query += ' WHERE ' + where.join(' AND ');
+        query += ' ORDER BY id DESC LIMIT ' + lim;
+        let rows = await this.db.doQuery(query, args);
+        return (rows || []).map(r => ({
+            id:               r.id,
+            validator_pubkey: r.validator_pubkey,
+            offense_type:     r.offense_type,
+            round_number:     r.round_number,
+            evidence_hash:    hashEvidence(r.evidence),
+            status:           r.status,
+            created_at:       r.created_at
+        }));
+    }
+
     // Record an attestation-divergence offense: a validator's PROPOSE body
     // didn't match the quorum-agreed winner. Only meaningful for providers
     // using byte_equality consensus. For judge_model providers, the winner
@@ -381,3 +474,9 @@ class SlashDetector {
 }
 
 module.exports = SlashDetector;
+// Exported so the published digest can be pinned against SlashGovernance's
+// per-row leg by test, and recomputed by any other hub-side consumer without a
+// second copy of the construction.
+module.exports.hashEvidence      = hashEvidence;
+module.exports.PROPOSAL_STATUSES = PROPOSAL_STATUSES;
+module.exports.MAX_PAGE          = MAX_PAGE;
