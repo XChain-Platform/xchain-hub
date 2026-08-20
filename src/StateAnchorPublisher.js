@@ -82,6 +82,7 @@ const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { resolveQuorumNetwork } = require('./lib/quorum_network.js');
 const { isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
 const { sumUtxosCoins } = require('./lib/utxo_balance.js');
+const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const StateCheckpointEngine = require('./StateCheckpointEngine.js');
 const swq                   = require('./stake_weighted_quorum.js');
@@ -3934,8 +3935,11 @@ class StateAnchorPublisher {
         if(!this.dogeAddress)    throw new Error('no DOGE_ADDRESS configured');
         let utxos = await signer.encoder.getUtxos(this.dogeAddress);
         if(!utxos || (Array.isArray(utxos) && utxos.length === 0)) throw new Error('no UTXOs available for ' + this.dogeAddress);
+        // utxos forwarded only while inside the encoder's caller-facing
+        // MAX_UTXO_COUNT; past it the param is omitted so the encoder selects from
+        // its own uncapped fetch of this same address (lib/encoder_utxo_forward.js).
         let psbtResult = await signer.encoder.createTx({
-            utxos: utxos, pubkey: this.dogeAddress, data: payload, change: this.dogeAddress, encoding: 'P2SH'
+            utxos: forwardableUtxos(utxos, 'StateAnchorPublisher'), pubkey: this.dogeAddress, data: payload, change: this.dogeAddress, encoding: 'P2SH'
         });
         if(!psbtResult || !psbtResult.psbt) throw new Error('encoder returned no PSBT');
         let txHex = await signer.walletSignFn(psbtResult.psbt);

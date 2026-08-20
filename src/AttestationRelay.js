@@ -106,6 +106,7 @@ const SpendGuard             = require('./lib/spend_guard.js');
 const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
 const { AtMostOnce, isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
 const { allCanonicalInts } = require('./lib/canonical_int.js');
+const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
 
 // The integer fields each relay leg signs VERBATIM and the indexer re-derives with
 // parseInt() off the v3/v4 wire. request_id / response_hash are hex, and
@@ -1309,7 +1310,11 @@ class AttestationRelay {
             if(!utxos || (Array.isArray(utxos) && utxos.length === 0))
                 throw new Error('no UTXOs available for ' + address);
             let psbtResult = await encoder.createTx({
-                utxos:    utxos,
+                // Forwarded only while inside the encoder's caller-facing
+                // MAX_UTXO_COUNT; past it the param is omitted so the encoder selects
+                // from its own uncapped fetch of this same address
+                // (lib/encoder_utxo_forward.js).
+                utxos:    forwardableUtxos(utxos, 'AttestationRelay'),
                 pubkey:   address,
                 data:     payload,
                 change:   address,

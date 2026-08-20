@@ -54,6 +54,7 @@ const ValidatorIdentity = require('./ValidatorIdentity.js');
 const EncoderClient      = require('./EncoderClient.js');
 const SpendGuard         = require('./lib/spend_guard.js');
 const { isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
+const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
 const eq                = require('./equivocation_header.js');
 const activation        = require('./lib/fullnode_activation.js');
 // Pinned coin registry: the single source for the consensus-relevant FULLNODE
@@ -871,7 +872,11 @@ class FullNodeChallengeRound {
             if(!utxos || (Array.isArray(utxos) && utxos.length === 0))
                 throw new Error('no UTXOs available for ' + this.btcAddress);
             let built = await this.encoder.createTx({
-                utxos:    utxos,
+                // Forwarded only while inside the encoder's caller-facing
+                // MAX_UTXO_COUNT; past it the param is omitted so the encoder selects
+                // from its own uncapped fetch of this same address
+                // (lib/encoder_utxo_forward.js).
+                utxos:    forwardableUtxos(utxos, 'FullNodeChallengeRound'),
                 // The encoder's P2SH path runs bitcoin.address.fromBase58Check() on this
                 // field, so it must be the base58check address, not the raw hex pubkey.
                 pubkey:   this.btcAddress,

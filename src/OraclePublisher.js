@@ -47,6 +47,7 @@ const EncoderClient = require('./EncoderClient.js');
 const SpendGuard    = require('./lib/spend_guard.js');
 const { AtMostOnce, isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
 const { sumUtxosCoins } = require('./lib/utxo_balance.js');
+const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
 
 // PRICE v0 wire ceiling. Must equal MAX_DATA_BYTES in xchain-encoder/src/validator.js
 // (mirrors ATTEST_WIRE_MAX_BYTES in AttestationPublisher.js): an oversized wire is
@@ -212,7 +213,11 @@ class OraclePublisher {
         // PRICE v0 payloads are typically ~900-1100 bytes (well above the 80-byte OP_RETURN limit),
         // so we use P2SH encoding which is what xchain-encoder supports for large payloads.
         let psbtResult = await this.encoder.createTx({
-            utxos:    utxos,
+            // Forwarded only while the set is inside the encoder's caller-facing
+            // MAX_UTXO_COUNT; past it the param is omitted so the encoder selects
+            // from its own uncapped fetch of this same address. See
+            // lib/encoder_utxo_forward.js.
+            utxos:    forwardableUtxos(utxos, 'OraclePublisher'),
             // The encoder's P2SH path runs bitcoin.address.fromBase58Check() on this
             // field, so it must be the base58check address (not the raw hex pubkey).
             pubkey:   this.dogeAddress,
