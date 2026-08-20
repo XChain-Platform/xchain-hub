@@ -284,14 +284,31 @@ class Consensus {
         // snapshot, i.e. the single-node / graceful-degradation path) keeps the
         // legacy live-set rotation.
         let memberPubkeys = this._memberPubkeySet(snapshot);
-        let nextSeq = this.seq + 1;
+        // The proposal slot. Two rules keep the rotation live:
+        //  1. Start past lastAppliedSeq, not just this.seq. Rounds applied as
+        //     a follower advance lastAppliedSeq only, so a hub that has mostly
+        //     followed would otherwise propose a seq every peer rejects as
+        //     stale, with a leader resolved from that dead slot.
+        //  2. Consume the slot even when the leader check refuses (the
+        //     `this.seq = nextSeq` in BOTH branches below). If a refusal left
+        //     this.seq untouched, every retry would resolve the SAME
+        //     (seq, view) and elect the SAME leader: a hub that is not the
+        //     rotation leader for that one slot could never propose again, no
+        //     matter how often it tried (a permanent livelock, armed the moment
+        //     the federation set becomes non-trivial). Consuming the slot moves
+        //     each attempt one rotation step forward, so within |members|
+        //     attempts the rotation reaches this hub. Skipped seqs are safe:
+        //     followers accept any seq above lastAppliedSeq, and the follower
+        //     identity guard evaluates the rotation at the CLAIMED seq.
+        let nextSeq = Math.max(this.seq, this.lastAppliedSeq) + 1;
         let leader = this._getLeader(nextSeq, memberPubkeys);
         if (leader && !this._isLeaderIdentity(leader, this.peerManager.validatorAddr, this._selfPubkey())) {
+            this.seq = nextSeq;
             throw new Error('Not the leader for seq ' + nextSeq + ' (leader: ' +
                 (leader.addr || leader.pubkey) + ')');
         }
 
-        this.seq++;
+        this.seq = nextSeq;
         let seq = this.seq;
         this.view = 0; // Reset view on new proposal
         let digest = this._digest(config);
