@@ -3781,6 +3781,7 @@ class StateAnchorPublisher {
             // Weighted snapshots carry one row per (source, pubkey), so dedupe before
             // returning: this set is used for membership and hash-order election, both of
             // which must see each key exactly once.
+            let snapErr = null;
             if(this.hub.capabilitySnapshot){
                 try {
                     let weighted = swq.isStakeWeightedQuorumActive(Number(blockIndex), this.network);
@@ -3789,8 +3790,38 @@ class StateAnchorPublisher {
                         : await this.hub.capabilitySnapshot.getSnapshot('oracle_publish', blockIndex);
                     if(snap && Array.isArray(snap.validators))
                         return [...new Set(snap.validators.map(v => String(v.pubkey).toLowerCase()))].sort();
-                } catch(e){ /* fail closed: fall through to [] */ }
+                } catch(e){ snapErr = e; }
             }
+            // Local-table fallback, the twin of the one in _resolveCapabilitySet
+            // and gated the same way: the per-hub capability_snapshots table is a
+            // valid source only on seeded/regtest stacks, where the deterministic
+            // snapshot path may simply not be wired. Off regtest a miss means THIS
+            // hub's indexer is down, and electing over local rows while healthy
+            // peers elect over the on-chain snapshot forks the election set, so
+            // the abstain below stands. Without this fallback a regtest hub with
+            // no live snapshot resolution abstained from every pinned election
+            // and anchored nothing, silently.
+            if(this.network === 'regtest' && this.db){
+                try {
+                    let rows = await this.db.doQuery(
+                        "SELECT signing_pubkey FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? ORDER BY signing_pubkey ASC",
+                        [Number(blockIndex), 'oracle_publish']);
+                    // Weighted snapshots persist one row per (source, pubkey);
+                    // membership and hash-order election need each key once.
+                    if(rows && rows.length > 0)
+                        return [...new Set(rows.map(r => String(r.signing_pubkey).toLowerCase()))].sort();
+                } catch(e){ if(!snapErr) snapErr = e; }
+            }
+            // Abstaining is still the correct fail-closed outcome (the pinned
+            // election gates treat an empty set as "do not act"), but it must be
+            // loud: an unresolved membership here surfaces as zero broadcasts with
+            // no error anywhere, which reads as a healthy idle publisher.
+            console.warn('StateAnchorPublisher: oracle_publish membership unresolved at block ' +
+                Number(blockIndex) + ' (capability snapshot unavailable' +
+                (this.network === 'regtest' ? ' and the local capability_snapshots table has no rows'
+                                            : '; the local-table fallback is regtest-only') +
+                (snapErr ? '; last error: ' + snapErr.message : '') +
+                '); abstaining from this pinned election');
             return [];
         }
         // Unpinned CURRENT-membership query (blockIndex null): the coarse V0_DONE /
