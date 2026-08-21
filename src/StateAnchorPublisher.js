@@ -1699,6 +1699,25 @@ class StateAnchorPublisher {
     async _startArchiveRound(signer, electionBlock, failoverOnly){
         if(this._archiveRound) return 'round_pending';                       // one at a time
 
+        // Fail closed on an unresolved BTC tip. flush() passes whatever
+        // hub._resolveBtcLatestBlock() returned, and that is null whenever the pushed tip
+        // is stale, the indexer lags past MAX_INDEXER_LAG_BLOCKS, or the RPC fails. A null
+        // block makes _getActiveOraclePublishPubkeys take its block-UNPINNED branch, whose
+        // own contract scopes it to the coarse V0_DONE / FINALIZED sender pre-filter: it
+        // answers from the per-hub, gossip-driven capabilityRegistry, so two hubs would
+        // elect over different member lists on a path that spends real DOGE. The follower
+        // side already refuses this round (_handleSignReq bounds election_block to its own
+        // tip), so the leader-side defer costs a stalled multi-hub round it was never going
+        // to complete, and closes the single-member case that self-quorums today. Same
+        // fail-closed idiom as the empty-set defer below; rows stay pending for the next
+        // flush, exactly like the balance and spend-guard gates in flush().
+        if(!Number.isFinite(electionBlock)){
+            console.warn('StateAnchorPublisher: BTC tip unresolved (' + electionBlock +
+                         '); deferring archive round rather than electing over the ' +
+                         'block-unpinned live registry (fail closed)');
+            return 'none';
+        }
+
         // Leader ELECTION runs over the set at the current BTC block (liveness: a
         // freshly-joined validator can take over a stalled publish even when the
         // wrapper checkpoint's snapshot_block is hours old). This set decides only
@@ -1792,10 +1811,13 @@ class StateAnchorPublisher {
         // Durable at-most-once for the ARCHIVE spend, the twin of the
         // anchor_published_checkpoints gate in _publishPendingCheckpoints. A crash
         // between an accepted v1/v2 send and _backfillBatch leaves every source row
-        // pending, and the archive path has NO mined-state query surface to notice the
-        // earlier send (getanchoraction serves CHECKPOINT_VERSIONS only), so without
-        // this the next flush rebuilds the whole batch under a fresh seq and re-pays for
-        // the head plus every chunk. Checked here, before the batch seq is drawn and
+        // pending. The archive path does read mined state, through getarchiveanchor
+        // rather than getanchoraction, but only at the send: _publishArchive passes
+        // _findExistingArchiveAnchor to _broadcastWithRetry, and that lookup answers from
+        // parsed on-chain actions, so a send still sitting in the DOGE mempool reads as
+        // absent. Without this marker the next flush therefore rebuilds the whole batch
+        // under a fresh seq and re-pays for the head plus every chunk. Checked here,
+        // which is BEFORE any such lookup, before the batch seq is drawn and
         // before the co-signing round burns a quorum, so a held round costs nothing.
         // Bounded by anchorIntentTtlMs: an unbounded marker for a send that never
         // relayed would stall archiving forever.
@@ -2439,7 +2461,9 @@ class StateAnchorPublisher {
     //                    checkpoint anchor and the v1 archive anchor.
     //   expect.rejectVersions - a set of ANCHOR versions to REJECT when no single
     //                    exact version is expected (the V0_DONE checkpoint path passes
-    //                    {1,2} so an archive anchor cannot pose as a checkpoint anchor).
+    //                    {1,2,6}, the archive-carrying set ARCHIVE_VERSIONS names in
+    //                    _findExistingCheckpointAnchor, so an archive anchor cannot pose
+    //                    as a checkpoint anchor).
     // Without `expect` this only proves "this checkpoint is anchored at depth".
     //
     // FAIL CLOSED against an un-upgraded indexer: one that predates the txid filter
@@ -2486,10 +2510,10 @@ class StateAnchorPublisher {
         if(want.version != null && Number(res.version) !== Number(want.version)) return 'rejected:version';
         // Reject a disallowed version even when no single exact version is
         // expected. The V0_DONE path accepts any CHECKPOINT-anchor version
-        // ({0,3,4,5}) but must not accept an ARCHIVE anchor ({1,2}): one
+        // ({0,3,4,5}) but must not accept an ARCHIVE anchor ({1,2,6}): one
         // checkpoint_seq carries both, and the 4-core-hash byte-match below
-        // passes for a v1 archive whose wrapper is this same checkpoint, so
-        // without this a Byzantine v0 publisher could name a confirmed v1
+        // passes for a v1/v6 archive whose wrapper is this same checkpoint, so
+        // without this a Byzantine v0 publisher could name a confirmed v1/v6
         // archive txid as proof of a v0 anchor (stamping the row fleet-wide and
         // mirroring a reward it never earned).
         if(Array.isArray(want.rejectVersions) &&
@@ -4254,11 +4278,17 @@ class StateAnchorPublisher {
     // stop. The hold is therefore per-NETWORK over any UNSETTLED intent, and settled_at
     // is what keeps a finished round from blocking the next one.
     //
-    // The archive path also has no mined-state fallback: getanchoraction serves
-    // CHECKPOINT_VERSIONS only, so there is no existsCheck to pass _broadcastWithRetry
-    // and no "has it mined yet?" question to fall through on. This marker plus the
-    // ambiguous-send defer are the whole guard, which is why the hold is unconditional
-    // within the TTL rather than conditional on a mined lookup.
+    // The archive path DOES have a mined-state fallback, just not through
+    // getanchoraction, which serves CHECKPOINT_VERSIONS only. getarchiveanchor answers
+    // "did we already publish THIS batch" from the batch's own content (checkpoint
+    // identity + crc + count + author), and _publishArchive passes it to
+    // _broadcastWithRetry as the head's existsCheck via _findExistingArchiveAnchor, plus
+    // _findExistingArchiveChunk per continuation chunk. What that lookup cannot see is a
+    // send that has not mined yet: it answers from parsed on-chain actions, so an archive
+    // still in the DOGE mempool reads as definitively absent. This marker covers exactly
+    // that window, together with the ambiguous-send defer, and it is read before the
+    // batch seq is even drawn, which is why the hold is unconditional within the TTL
+    // rather than conditional on a mined lookup.
 
     // Read the newest unsettled marker for a network, or null when none exists. Throws on
     // a DB error so the caller FAILS CLOSED (rows stay pending) rather than spending on a

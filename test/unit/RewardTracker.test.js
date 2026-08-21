@@ -80,6 +80,18 @@ describe('RewardTracker', function () {
             expect(args[1][2]).to.equal('3.33333333');
         });
 
+        // The discriminating case: 10 / 3 truncates and rounds alike, so only a
+        // split whose 9th decimal is >= 5 separates floor from half-up. Floor is
+        // what the indexer's bcmulfloor derivation credits, and it is the only
+        // one whose rows sum at or below the budget (6 x 1.66666667 = 10.00000002).
+        it('inexact split floors like the indexer: 10 / 6 = 1.66666666 each', async function () {
+            let six = [1, 2, 3, 4, 5, 6].map(hexPk);
+            await rt.distributeRewards(1, six);
+            expect(hub.db.doQuery.callCount).to.equal(6);
+            for (let i = 0; i < 6; i++)
+                expect(hub.db.doQuery.getCall(i).args[1][2]).to.equal('1.66666666');
+        });
+
         it('zero participants: no DB calls', async function () {
             await rt.distributeRewards(1, []);
             expect(hub.db.doQuery.called).to.be.false;

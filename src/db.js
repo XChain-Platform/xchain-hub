@@ -20,6 +20,20 @@
  *
  ********************************************************************/
 
+// Runtime floor, asserted above the require it protects. The pinned mariadb 3.5.x
+// line is ESM-only ("type": "module"), and require() loads ESM without a flag only
+// from Node 22.12.0; below that the next line throws a bare ERR_REQUIRE_ESM that
+// names neither the Node version nor the reason. engines.node cannot enforce this
+// (npm only warns, and nothing in the tree sets engine-strict), so the check lives
+// here, where the failure actually happens.
+const [NODE_MAJOR, NODE_MINOR] = String(process.versions.node).split('.').map(Number);
+if (NODE_MAJOR < 22 || (NODE_MAJOR === 22 && NODE_MINOR < 12)) {
+    throw new Error('xchain-hub requires Node >= 22.12.0 (running ' + process.versions.node +
+        '): the pinned mariadb 3.5.x driver is ESM-only and require() can load ESM without ' +
+        'a flag only from Node 22.12. Upgrade the runtime (see .nvmrc), or start Node with ' +
+        '--experimental-require-module.');
+}
+
 const mariadb = require('mariadb');
 const fs      = require('fs');
 const path    = require('path');

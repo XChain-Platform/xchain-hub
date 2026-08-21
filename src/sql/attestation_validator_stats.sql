@@ -4,7 +4,11 @@
 -- passed=0 when it diverged. block_index is the request's creation block, so a
 -- chain reorg that orphans that block deletes the row (AttestationSpotChecker
 -- .rollback), keeping the failure-window slash trigger reorg-safe. The rolling
--- window and threshold decision read live counts from these durable rows.
+-- 24h window and threshold decision run off the checker's IN-MEMORY failure
+-- history, not off these rows: the table is the durable audit trail behind that
+-- decision plus the lifetime aggregate statsFor() reads. Bounded by an age-based
+-- retention sweep on checked_at (SPOT_CHECK_STATS_RETENTION_MS, 90 days by
+-- default, 0 disables), floored at the rolling failure window.
 CREATE TABLE attestation_validator_stats (
     id               BIGINT AUTO_INCREMENT PRIMARY KEY,
     validator_pubkey CHAR(64) NOT NULL,

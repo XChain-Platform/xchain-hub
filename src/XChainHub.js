@@ -839,14 +839,35 @@ class XChainHub {
 
     // Oracle price staleness bound in seconds, mirroring the indexer's
     // ORACLE_MAX_PRICE_AGE_SECONDS so advisory quotes reject the rounds the fee gate does.
-    // 0 disables it. Precedence: p2pConfig/env override, else the pinned registry value.
+    // Precedence: a regtest-only p2pConfig/env override (where 0 disables the bound),
+    // else the pinned registry value.
+    //
+    // Regtest-gated because the key is consensus-pinned: consensusSubset() (coins/index.js)
+    // content-hashes it into CONSENSUS_CONFIG_PIN, and the indexer reads only the pinned
+    // bundle with no override path of its own. An override honored on mainnet or testnet
+    // therefore detaches this hub's fee quotes and its getoraclesubmissions
+    // oracleMaxPriceAgeSeconds field from the bound they claim to mirror, quoting rounds the
+    // fleet's fee gate rejects (or refusing rounds it accepts). Same rule and warning shape
+    // as the platform's other consensus-adjacent seams (coins/index.js resolveFeeDestination,
+    // OracleConsensus ORACLE_ALLOW_UNVERIFIED_PAIRS); standalone mode, where network is '',
+    // fails closed to the pinned value for the same reason those do.
     _oracleMaxAgeSeconds(coinPair) {
         let raw = (this.p2pConfig && this.p2pConfig.ORACLE_MAX_PRICE_AGE_SECONDS != null)
             ? this.p2pConfig.ORACLE_MAX_PRICE_AGE_SECONDS
             : process.env.ORACLE_MAX_PRICE_AGE_SECONDS;
         let v = parseInt(raw, 10);
-        if (Number.isFinite(v)) return v;
-        return this._registryOracleMaxAge(coinPair);
+        if (!Number.isFinite(v)) return this._registryOracleMaxAge(coinPair);
+        if (this.network === 'regtest') return v;
+        let pinned = this._registryOracleMaxAge(coinPair);
+        // Warned once per hub, not per call: this resolves on every getprice, every fee
+        // quote and every health poll, so a per-call line would bury the log.
+        if (v !== pinned && !this._warnedOracleMaxAgeOverride) {
+            this._warnedOracleMaxAgeOverride = true;
+            console.log('WARNING: ORACLE_MAX_PRICE_AGE_SECONDS=' + v + ' is set but IGNORED on ' +
+                (this.network || '<unset>') + '; using the consensus-pinned bound (' + pinned + '). ' +
+                'To change the staleness gate, change the pinned coin bundle.');
+        }
+        return pinned;
     }
 
     // The consensus-pinned ORACLE_MAX_PRICE_AGE_SECONDS for the pair, from the canonical

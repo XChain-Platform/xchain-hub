@@ -18,10 +18,14 @@ CREATE TABLE anchor_published_archives (
 -- that DOGE had already paid for that batch. The next flush then rebuilt the whole
 -- archive under a fresh batch seq and re-paid for every chunk.
 --
--- The checkpoint marker cannot serve this path. getanchoraction serves
--- CHECKPOINT_VERSIONS only, so an archive round has NO mined-state query surface at
--- all: the ambiguous-error defer is in-memory and dies with the process, which makes
--- this table the only durable record of an archive send.
+-- The checkpoint marker cannot serve this path: getanchoraction serves
+-- CHECKPOINT_VERSIONS only. An archive round reads its own mined state through a
+-- different RPC, getarchiveanchor, which StateAnchorPublisher passes to
+-- _broadcastWithRetry as the head and per-chunk existsCheck. That lookup answers from
+-- parsed on-chain actions, so a send still in the DOGE mempool reads as absent, and
+-- the ambiguous-error defer that would otherwise cover that window is in-memory and
+-- dies with the process. This table is what makes the record of an archive send
+-- DURABLE across a restart.
 --
 -- Why the hold is per-NETWORK and not per-batch_seq: a rebuild after a crash always
 -- draws a FRESH seq (_getNextBatchSeq is MAX(batch_seq)+1, and two v1 anchors sharing

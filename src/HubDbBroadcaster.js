@@ -27,6 +27,7 @@
 
 const WebSocket = require('ws');
 const { HUB_SCHEMA_VERSION } = require('./hub-schema-version');
+const { positiveIntConfig } = require('./lib/config_int.js');
 
 // JSON replacer that converts BigInt to string (mariadb returns BigInt for BIGINT columns)
 const bigIntReplacer = (k, v) => typeof v === 'bigint' ? v.toString() : v;
@@ -47,9 +48,17 @@ class HubDbBroadcaster {
         // standalone hub receives {}, so without the process.env arm these caps were
         // permanently pinned to their defaults and the CHANGELOG's WS_BACKPRESSURE_LIMIT
         // operator knob could never take effect.
-        this.maxPerIp = parseInt(process.env.WS_MAX_PER_IP || this.config.WS_MAX_PER_IP || 100);
-        this.maxSubscribers = parseInt(process.env.WS_MAX_SUBSCRIBERS || this.config.WS_MAX_SUBSCRIBERS || 1000);
-        this.maxBufferedMessages = parseInt(process.env.WS_BACKPRESSURE_LIMIT || this.config.WS_BACKPRESSURE_LIMIT || 50);
+        // Resolve through positiveIntConfig so a malformed or non-positive knob falls
+        // back to the default instead of becoming NaN: `size >= NaN` is always false,
+        // which would silently unarm the very caps this block exists to enforce.
+        // Zero carries no "disabled" meaning at any of these three sites (it would
+        // reject every connection, or close on the first buffered message).
+        this.maxPerIp = positiveIntConfig(
+            process.env.WS_MAX_PER_IP || this.config.WS_MAX_PER_IP, 100, 'WS_MAX_PER_IP');
+        this.maxSubscribers = positiveIntConfig(
+            process.env.WS_MAX_SUBSCRIBERS || this.config.WS_MAX_SUBSCRIBERS, 1000, 'WS_MAX_SUBSCRIBERS');
+        this.maxBufferedMessages = positiveIntConfig(
+            process.env.WS_BACKPRESSURE_LIMIT || this.config.WS_BACKPRESSURE_LIMIT, 50, 'WS_BACKPRESSURE_LIMIT');
 
         // Stream-position watermark heartbeat. Every interval, tell subscribers
         // "you have received every row event produced up to ts". Row events are
@@ -57,7 +66,11 @@ class HubDbBroadcaster {
         // stream genuinely means no new rows exist, and the indexer's sync
         // barriers can distinguish "mirror is behind" from "the world is quiet"
         // (the row-content watermark deadlock).
-        this.watermarkIntervalMs = parseInt(process.env.WS_WATERMARK_INTERVAL_MS || this.config.WS_WATERMARK_INTERVAL_MS || 10000);
+        // Guarded like the caps above: a NaN interval makes setInterval clamp to ~1ms,
+        // storming every subscriber, and serializes as null in the 'ready' frame so
+        // consumers cannot size their watchdog from it.
+        this.watermarkIntervalMs = positiveIntConfig(
+            process.env.WS_WATERMARK_INTERVAL_MS || this.config.WS_WATERMARK_INTERVAL_MS, 10000, 'WS_WATERMARK_INTERVAL_MS');
 
         // Heartbeat-cadence instrumentation. Whether a consumer's price
         // stream watermark sits within one heartbeat of wall clock used to be
@@ -213,6 +226,18 @@ class HubDbBroadcaster {
             try {
                 let sc = await this.db.doQuery('SELECT MAX(id) AS max_id FROM state_checkpoints');
                 maxIds.state_checkpoints = (sc.length > 0 && sc[0].max_id != null) ? Number(sc[0].max_id) : 0;
+            } catch (e) { /* table may not exist yet */ }
+            try {
+                // Second member of the indexer's hub-state mirror set (HubDbSync's
+                // HUB_STATE_TABLES pairs it with state_checkpoints above; this list must move
+                // in lockstep with that one). It is NOT in the consumer's FULL_REPAGE_TABLES,
+                // so the since_id cursor plus this advertised ceiling is the only thing that
+                // repairs the subscribe-to-bootstrap window for it; with no entry the
+                // consumer's catch-up branch is gated off entirely. No status filter: the
+                // table is append-only, never retracted, and the snapshot endpoint serves it
+                // unfiltered, so an unfiltered MAX(id) is exactly the ceiling that feed reaches.
+                let ra = await this.db.doQuery('SELECT MAX(id) AS max_id FROM anchor_reward_attestations');
+                maxIds.anchor_reward_attestations = (ra.length > 0 && ra[0].max_id != null) ? Number(ra[0].max_id) : 0;
             } catch (e) { /* table may not exist yet */ }
             try {
                 let cc = await this.db.doQuery("SELECT MAX(id) AS max_id FROM cross_chain_calls WHERE status <> 'retracted'");

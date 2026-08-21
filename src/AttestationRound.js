@@ -574,6 +574,13 @@ class AttestationRound {
                 : { body: Buffer.alloc(0), meta: '', status: myStatus },
             pinnedJudgeModel: pinnedJudgeModel,
             pinnedVendors:    pinnedVendors,
+            // The response cap this round's own fetch was bounded by, carried so
+            // AttestationConsensus can size its inbound PROPOSE/PREPARE body gate
+            // from the same number instead of re-reading the hot-reloadable
+            // registry per message. A governance change landing mid-round would
+            // otherwise leave this hub gating its peers' bodies at a cap its own
+            // proposal never had to meet.
+            pinnedMaxResponseBytes: (providerDef && Number(providerDef.max_response_bytes)) || null,
             // Block-anchored PBFT strategy for this round (see the resolution above).
             // AttestationConsensus reads ONLY this, never the live registry.
             pinnedConsensusStrategy: pinnedConsensusStrategy,

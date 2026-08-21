@@ -862,6 +862,25 @@ describe('Governance', function () {
             expect(pm.listenerCount('message')).to.equal(0);
             clock.restore();
         });
+
+        it('the tally timer catches a rejecting tick instead of dropping the promise', async function () {
+            // The tick guards its two awaits but not the leader check between them, and
+            // the hub registers no process.on('unhandledRejection'), so an uncaught tick
+            // rejection would kill the process rather than log and re-arm.
+            let clock = sinon.useFakeTimers();
+            gov.tallyInterval = 1000;
+            sinon.stub(gov, '_checkExpiredProposals').rejects(new Error('tally tick blew up'));
+            let logged = sinon.stub(console, 'error');
+            await gov.start();
+
+            clock.tick(1001);
+            // The .catch runs on the microtask queue, which fake timers do not drive.
+            await Promise.resolve();
+            await Promise.resolve();
+
+            clock.restore();
+            expect(logged.calledWithMatch('Governance tally tick error:')).to.equal(true);
+        });
     });
 
     // -----------------------------------------------------------------

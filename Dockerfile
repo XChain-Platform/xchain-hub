@@ -14,4 +14,10 @@ COPY ./src /XChainHub/src
 COPY ./docs /XChainHub/docs
 COPY ./.en[v] /XChainHub/.env
 
-CMD ["npm", "run", "api"]
+# Exec-form node, not `npm run api` (which is this exact command). npm builds an
+# npm -> sh -c -> node tree and no wrapper forwards signals, so `docker stop`
+# kills npm while node is never told anything (measured on the regtest encoder,
+# xchain-encoder/Dockerfile). The hub registers a real graceful shutdown on
+# SIGTERM/SIGINT (src/api.js: WebSocket drain, server.close, hub.close pool
+# drain, observability flush), which only runs when node is PID 1.
+CMD ["node", "./src/api.js"]

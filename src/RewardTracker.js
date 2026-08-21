@@ -20,8 +20,9 @@
  *
  ********************************************************************/
 
-const axios = require('axios');
-const ar    = require('./anchor_reward_activation.js');
+const axios  = require('axios');
+const ar     = require('./anchor_reward_activation.js');
+const bcmath = require('./bcmath.js');
 
 class RewardTracker {
 
@@ -59,6 +60,8 @@ class RewardTracker {
     async distributeRewards(round, participants, btcBlockHeight) {
         if (!participants || participants.length === 0) return;
 
+        // Sanity-gate the configured budget only; the split below never touches
+        // this float.
         let totalReward = parseFloat(this.rewardPerRound);
         if (!Number.isFinite(totalReward) || totalReward <= 0)
             throw new Error('Invalid reward amount: ' + this.rewardPerRound);
@@ -68,7 +71,15 @@ class RewardTracker {
         );
         if (validParticipants.length === 0) return;
 
-        let perValidator = (totalReward / validParticipants.length).toFixed(8);
+        // Split the budget the way the indexer derives the consensus rows
+        // (actions/price.js: bcdiv at 18, then bcmulfloor to the 8-decimal GAS
+        // grid). Floor, never toFixed: half-up made 10 across 6 record 1.66666667
+        // each, 10.00000002 in total, above the very budget it split and one
+        // satoshi off the 1.66666666 the chain credits.
+        let perValidator = bcmath.bcformat(
+            bcmath.bcmulfloor(
+                bcmath.bcdiv(this.rewardPerRound, String(validParticipants.length), 18), '1', 8
+            ), 8);
 
         for (let pubkey of validParticipants) {
             // INSERT IGNORE relies on the UNIQUE KEY (validator_pubkey, round_number, reward_type)

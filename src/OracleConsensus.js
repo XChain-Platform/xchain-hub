@@ -170,7 +170,24 @@ class OracleConsensus extends EventEmitter {
         // Default to a 2-hub diversity floor: a single hub's single external source must never
         // become a federation-signed price. A real federation always clears 2; single-host / regtest
         // deployments set ORACLE_MIN_SUBMISSIONS=1 explicitly.
-        this.minSubmissions      = parseInt(process.env.ORACLE_MIN_SUBMISSIONS) || 2;
+        //
+        // positiveIntConfig, not `parseInt(env) || 2`: a NEGATIVE value is truthy, so it would
+        // pass straight through and make the `submissions.size < this.minSubmissions` floor checks
+        // permanently false, removing the floor rather than lowering it. Non-positive and
+        // unparseable values now fall back to 2.
+        this.minSubmissions      = positiveIntConfig(process.env.ORACLE_MIN_SUBMISSIONS, 2, 'ORACLE_MIN_SUBMISSIONS');
+        // Unlike ORACLE_ALLOW_UNVERIFIED_PAIRS below, this knob is NOT regtest-gated: single-host
+        // PROD is a supported deployment (xchain-node ConfigService passes the key through, and
+        // HubConsensusEnvGuard refuses a container regenerate that drops it) and ignoring the
+        // override there would skip every round and stall every indexer's price-sync barrier.
+        // What the hatch must not be is SILENT, so a sub-floor setting announces itself on any
+        // network that is not regtest, naming the defense it stands down.
+        if (this.minSubmissions < 2 && !(this.hub && this.hub.network === 'regtest')) {
+            console.log('WARNING: ORACLE_MIN_SUBMISSIONS=' + this.minSubmissions + ' on ' +
+                (((this.hub && this.hub.network) || '<unset>')) + '; the 2-hub price diversity floor ' +
+                'is STOOD DOWN on this hub, so one submitter can carry a federation-signed round. ' +
+                'Intended only for a deliberate single-host deployment.');
+        }
         this.leaderTimeout       = parseInt(process.env.ORACLE_LEADER_TIMEOUT_MS) || DEFAULT_LEADER_TIMEOUT_MS;
         // A proposed pair this follower can verify against NOTHING (no live
         // local aggregate AND no finalized history) used to fall through with only
@@ -1587,34 +1604,6 @@ class OracleConsensus extends EventEmitter {
         // Sort ascending (ordering only; float compare is fine here)
         values.sort((a, b) => a.f - b.f);
 
-        // Exactly-2-source deviation gate (item 4496). With only two submissions the trim
-        // below is a no-op, so the even-length median is a plain mean: one divergent source
-        // drags the federation-signed price ~halfway toward it, with no outlier protection.
-        // Refuse to publish this pair when the two disagree enough that the mean would put
-        // BOTH submitters outside the deviation threshold, i.e. each is more than
-        // ORACLE_DEVIATION_THRESHOLD from the mean, which for sorted values reduces to
-        // (hi - lo) / (hi + lo) > threshold. That matches SlashDetector's default band
-        // (it defaults to this same ORACLE_DEVIATION_THRESHOLD and fail-fasts on a tighter
-        // override), so we never federation-sign a price we would then slash; the pair is
-        // simply omitted this round and consumers hold the last snapshot.
-        // Uses the hardcoded constant (not an env value) and bignumber math so every hub
-        // gates identically. CONSENSUS-CRITICAL: deploy fleet-wide atomically.
-        if (values.length === 2) {
-            let lo = values[0].s, hi = values[1].s; // sorted ascending, both > 0
-            // Shared deviation_band helper: (hi-lo)/(hi+lo), no rounded
-            // intermediate mean. Scale 18, NOT the original inline scale 8: the
-            // co-sign gate (_handlePropose) and SlashDetector both round at 18, so
-            // a scale-8 publish gate truncates a boundary spread back inside the
-            // band and federation-signs a price the other two gates then withhold
-            // or slash.
-            if (devband.twoSourceSpreadExceeds(lo, hi, ORACLE_DEVIATION_THRESHOLD, 18)) {
-                console.warn('Oracle: dropping ' + coinPair + ' this round: only 2 sources and they '
-                    + 'disagree beyond the ' + (ORACLE_DEVIATION_THRESHOLD * 100) + '% mean-deviation gate ('
-                    + lo + ' vs ' + hi + ')');
-                return null;
-            }
-        }
-
         // Trim top and bottom 15%. Use Math.ceil so at least one value is trimmed
         // once N >= 4 (Math.floor yields 0 for all N <= 6, making the trim a no-op
         // in small federations and leaving a single in-bounds outlier able to shift
@@ -1632,8 +1621,46 @@ class OracleConsensus extends EventEmitter {
             return null;
         }
 
-        // Compute median in bignumber (no float midpoint average / .toFixed artifact)
         let mid = Math.floor(values.length / 2);
+
+        // Even-split deviation gate (items 4496, 5333). An even-length set has no real
+        // median: the aggregate below is the MEAN of the two middle values, so a two-camp
+        // feed disagreement publishes a price NO submitter stands behind. The sort leaves
+        // nothing between values[mid-1] and values[mid], so every value sits at or beyond
+        // one of them and the CLOSEST submitter's deviation from that mean is exactly
+        // (hi - lo) / (hi + lo). Refuse to publish the pair once that exceeds
+        // ORACLE_DEVIATION_THRESHOLD, i.e. once the mean would put every submitter outside
+        // the band. That matches SlashDetector's default band (it defaults to this same
+        // ORACLE_DEVIATION_THRESHOLD and fail-fasts on a tighter override), so we never
+        // federation-sign a price we would then slash; the pair is simply omitted this
+        // round and consumers hold the last snapshot.
+        // The gate runs AFTER the trim, not before it (item 5333). A raw-count-only N==2
+        // check missed every set the ceil-trim REDUCES to an even split - N=4 leaves 2
+        // values, N=6 and N=8 leave 4 - and there the leader published the unbackable mean
+        // while every honest follower, re-deriving over the proposer-excluded (odd) set,
+        // landed on a single camp value, tripped the co-sign band in _handlePropose and
+        // rejected the WHOLE proposal, so one pair's disagreement wedged the entire round
+        // in the finalization timeout with no skipped-round row. A 2-value set is never
+        // trimmed (values.length > 2 * trimCount is false at N=2), so this placement
+        // strictly subsumes the old raw N==2 check rather than adding a second gate.
+        // Shared deviation_band helper: (hi-lo)/(hi+lo), no rounded intermediate mean.
+        // Scale 18, NOT the original inline scale 8: the co-sign gate (_handlePropose) and
+        // SlashDetector both round at 18, so a scale-8 publish gate truncates a boundary
+        // spread back inside the band and federation-signs a price the other two gates then
+        // withhold or slash. Uses the hardcoded constant (not an env value) and bignumber
+        // math so every hub gates identically.
+        // CONSENSUS-CRITICAL: deploy fleet-wide atomically.
+        if (values.length % 2 === 0) {
+            let lo = values[mid - 1].s, hi = values[mid].s; // sorted ascending, both > 0
+            if (devband.twoSourceSpreadExceeds(lo, hi, ORACLE_DEVIATION_THRESHOLD, 18)) {
+                console.warn('Oracle: dropping ' + coinPair + ' this round: the two middle values '
+                    + 'disagree beyond the ' + (ORACLE_DEVIATION_THRESHOLD * 100) + '% mean-deviation gate ('
+                    + lo + ' vs ' + hi + '), so the published mean would put every submitter outside the band');
+                return null;
+            }
+        }
+
+        // Compute median in bignumber (no float midpoint average / .toFixed artifact)
         let median;
         if (values.length % 2 === 0) {
             median = bcmath.bcformat(bcmath.bcdiv(bcmath.bcadd(values[mid - 1].s, values[mid].s, 8), '2', 8), 8);
@@ -1874,6 +1901,17 @@ class OracleConsensus extends EventEmitter {
     // The pending object must have a `round` field set when it's created.
     _verifyAndStoreSig(pending, pubkeyHex, sigHex) {
         if (!pending || !pubkeyHex || !sigHex) return false;
+        // Key the signatures map on LOWERCASE pubkey hex (item 5334). This was the one
+        // wire-pubkey keying site in the engine that stored the value verbatim, while every
+        // structure the map is read beside is normalized: pending.validators (:697/:1235),
+        // _memberPubkeySet, _resolveSenderPubkey, and PriceAggregator's verifier of the same
+        // PRICE v0 proof. Hex decoding is case-insensitive, so a peer sending 'AB..' hex
+        // verified and then took a SECOND map slot beside its own 'ab..' entry, duplicating
+        // that validator in the sigsArray this hub publishes on the wire. (The weighted
+        // tally itself is unaffected: swq.meetsStakeThreshold lowercases both sides and
+        // dedupes by source, so no stake was ever mis-counted.) Normalizing in the helper,
+        // not at the three callers, keeps the invariant for any future caller.
+        pubkeyHex = String(pubkeyHex).toLowerCase();
         if (pending.signatures.has(pubkeyHex)) return false; // already collected
         if (pending.round === undefined || pending.round === null) {
             console.warn('Oracle: cannot verify sig: pending round has no round number');

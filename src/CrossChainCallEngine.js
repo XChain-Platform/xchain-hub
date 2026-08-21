@@ -802,9 +802,15 @@ class CrossChainCallEngine extends EventEmitter {
                 'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?)',
                 [block, capability, pubkey, amount, source]);
             if(this.broadcaster){
+                // Select back on the full widened uq_cap_snap
+                // (snapshot_block, capability, signing_pubkey, source). A pubkey-only
+                // select-back re-read the SAME row for every source of a delegated key
+                // (LIMIT 1), so the mirror stream carried one source and the downstream
+                // verifier tallied an under-counted denominator. Inert below SWQ, where
+                // source='' and there is one row per key. Parity with StateCheckpointEngine.
                 let r = await this.db.doQuery(
-                    'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? LIMIT 1',
-                    [block, capability, pubkey]);
+                    'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
+                    [block, capability, pubkey, source]);
                 if(r.length) this.broadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
             }
         }

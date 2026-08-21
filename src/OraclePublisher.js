@@ -20,9 +20,22 @@
  *   leader_index = round % active_oracle_publish_count
  *
  * Active validators are sorted by signing_pubkey for stable ordering
- * across all nodes. If the leader misses their window (1 BTC block),
- * the next validator in rotation becomes eligible. First valid PRICE tx
- * on-chain for a given round wins (and earns the reward).
+ * across all nodes. First valid PRICE tx on-chain for a given round wins
+ * (and earns the reward).
+ *
+ * NOT IMPLEMENTED HERE: leader failover. This class publishes only for the
+ * rounds it is itself elected to lead; a non-leader records the round in
+ * _followerRounds and stops, and the retry sweep only replays rounds THIS hub
+ * enqueued as leader. There is no cross-validator takeover and no batch
+ * catch-up of another validator's missed rounds, so a dark leader is not
+ * self-healing hub-side and nothing in getoraclepublisherstatus fires when one
+ * misses its turn. The compensating control is off-hub: the dashboard's
+ * publish-coverage rail detects the gap from the chain side, backed by the
+ * _lastRankState / _leaderRounds / _followerRounds counters below. Rank-staggered
+ * takeover exists only in AttestationPublisher (ATTEST), which is a separate
+ * mechanism on a separate rail. The protocol spec's PRICE failover section
+ * describes behavior this reference implementation does not have; do not read
+ * this file as evidence either way about what the protocol intends.
  *
  * A round that exhausts its broadcast attempts is written to an append-only
  * dead-letter file (never silently dropped) so the finalized round can be
@@ -52,7 +65,8 @@ const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
 // PRICE v0 wire ceiling. Must equal MAX_DATA_BYTES in xchain-encoder/src/validator.js
 // (mirrors ATTEST_WIRE_MAX_BYTES in AttestationPublisher.js): an oversized wire is
 // rejected by createTx with a RangeError, so we drop it before it lands on the durable
-// queue rather than letting the failover sweep retry it forever.
+// queue rather than letting the queue retry sweep replay it forever. (Named for
+// what _processQueue does: this class has no failover sweep, see the header.)
 const PRICE_WIRE_MAX_BYTES = 8189;
 
 class OraclePublisher {
@@ -151,7 +165,9 @@ class OraclePublisher {
         this.spendGuard.minBalance = this.lowBalanceThreshold;
 
         // Per-round state
-        this.failoverWindowBlocks = 1; // 1 BTC block before failover triggers
+        // (No failoverWindowBlocks here: a knob by that name drives real rank-staggered
+        // takeover in AttestationPublisher, and carrying a dead copy on this class read
+        // as evidence that PRICE had the same behavior. It never did, see the header.)
         // Leader-rotation observability (item 3218). A dark peer publisher is
         // otherwise invisible: this hub's own status stays perfect while 1/N of
         // rounds never land on-chain. Track the rank state of the most recent
@@ -174,6 +190,11 @@ class OraclePublisher {
         this.broadcastFn  = null;
         this.walletSignFn = null;
         this.getBalanceFn = null;
+
+        // Publish-pass self-overlap guard, see _processQueue(). Named for the sibling
+        // publishers' house convention (AttestationPublisher._sweeping,
+        // AttestationSpotChecker._schedulerTick).
+        this._sweeping = false;
     }
 
     // Set a custom broadcast hook (overrides the default encoder-based pipeline)
@@ -326,7 +347,9 @@ class OraclePublisher {
             publisherCount: publisherCount
         };
         if (leaderRank !== myRank) {
-            // Not our turn yet, but we may need to take over later if leader fails
+            // Not our turn. This hub does nothing further for this round: there is no
+            // hub-side takeover if the leader stays dark, so the count is an observability
+            // record of the follower window, not a pending obligation.
             this._followerRounds++;
             return;
         }
@@ -691,8 +714,36 @@ class OraclePublisher {
         return deleted;
     }
 
-    // Process pending rounds in the queue: build payload, check balance, broadcast
+    // Self-overlap guard for the publish pass, the same house convention the sibling
+    // publishers carry (AttestationPublisher._sweeping, AttestationSpotChecker
+    // ._schedulerTick). onRoundFinalized awaits a pass per PBFT event and nothing
+    // serializes those events, so two rounds finalizing inside one pass duration would
+    // otherwise run two passes over the same durable queue. That is a DOUBLE DOGE
+    // SPEND, not a duplicate log line: every at-most-once check in the body closes only
+    // AFTER the multi-second encoder+sign+broadcast round trip (_publishedRounds.mark
+    // and _markPublished are post-send), and the pre-send intent write is deliberately
+    // idempotent (ON DUPLICATE KEY UPDATE), so a second pass clears every guard while
+    // the first pass's broadcast is still in flight and re-broadcasts the same round.
+    // A wrapper rather than an inline flag, so none of the body's early returns can
+    // skip the release. Skipping is safe: the skipped round stays on the durable queue
+    // (the rewrite below preserves mid-pass arrivals) and publishes on the next round
+    // this hub leads.
     async _processQueue() {
+        if (this._sweeping) {
+            console.warn('OraclePublisher: publish pass still in flight; skipping this pass ' +
+                '(entries stay on the durable queue and publish on the next pass)');
+            return;
+        }
+        this._sweeping = true;
+        try {
+            return await this._processQueueInner();
+        } finally {
+            this._sweeping = false;
+        }
+    }
+
+    // Process pending rounds in the queue: build payload, check balance, broadcast
+    async _processQueueInner() {
         // item 2677 kill switch: suppress the replay/sweep too, not just the live
         // path, so a disabled publisher spends nothing. Entries stay on the durable
         // queue untouched and resume only when re-enabled and re-swept.
@@ -860,14 +911,38 @@ class OraclePublisher {
             }
         }
 
+        // Rebuild the durable queue from a FRESH read rather than truncating it to the
+        // snapshot this pass began with. _enqueue APPENDS to the same file, and
+        // onRoundFinalized enqueues before it calls the pass, so a round finalized while
+        // this pass was awaiting a broadcast is on disk but absent from `entries`; a
+        // blind rewrite to `remaining` erases it, and the overlap guard above makes that
+        // arrival MORE likely rather than less (the skipped pass leaves the round on the
+        // queue and nothing else drains it). Keep this pass's copy of an unresolved
+        // entry, since its attempts counter is the current one, drop only the rounds this
+        // pass actually resolved (published, dead-lettered, or dropped as already-sent),
+        // and carry everything else through untouched.
+        // Built as `remaining` PLUS the mid-pass arrivals, never as a filter over the
+        // fresh read alone: _readQueue swallows a read failure as an empty list, and a
+        // rebuild derived only from it would then truncate the queue and lose every
+        // round this pass meant to retry. This shape is never worse than the old blind
+        // rewrite, only strictly more inclusive.
+        let seen     = new Set(remaining.map(e => e.round));
+        let resolved = new Set(entries.map(e => e.round).filter(r => !seen.has(r)));
+        let rebuilt  = remaining.slice();
+        for (let e of this._readQueue()) {
+            if (resolved.has(e.round) || seen.has(e.round)) continue;
+            seen.add(e.round);
+            rebuilt.push(e);
+        }
+
         // Dequeue-side rewrite must fail loud, mirroring the enqueue path's "refuse
-        // to ack if queue is unwritable" stance. On success the durable queue now
-        // equals `remaining` (which never holds a published round), so no published
-        // round can still be on disk and the dedup guard can be reset to bound its
-        // growth. On failure the published rounds remain on the queue file: keep the
-        // guard armed (it prevents the re-broadcast) and surface the failure so an
-        // operator repairs the queue before a restart drops the in-memory guard.
-        let rewritten = this._rewriteQueue(remaining);
+        // to ack if queue is unwritable" stance. On success the durable queue holds only
+        // unresolved rounds (never a published one), so no published round can still be
+        // on disk and the dedup guard can be reset to bound its growth. On failure the
+        // published rounds remain on the queue file: keep the guard armed (it prevents
+        // the re-broadcast) and surface the failure so an operator repairs the queue
+        // before a restart drops the in-memory guard.
+        let rewritten = this._rewriteQueue(rebuilt);
         if (rewritten) {
             this._publishedRounds.clear();
         } else {

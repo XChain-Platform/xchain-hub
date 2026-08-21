@@ -38,20 +38,28 @@ describe('Regression: validator setup/run fixes', function () {
     // -----------------------------------------------------------------
     // REG-VAL-001 (F1): require('mariadb') must load. The 3.5.x line is
     // ESM-only, and the platform now pins it deliberately: the invariant
-    // moved from "stay below 3.5" to "run on Node >= 22, where require()
-    // can load ESM". On Node 18 this require throws ERR_REQUIRE_ESM, which
-    // is exactly the F1 crash on a fresh build under the wrong runtime.
+    // moved from "stay below 3.5" to "run on a Node that can require() ESM".
+    // That is Node 22.12.0, not Node 22: unflagged require(esm) landed in
+    // 22.12, so 22.0-22.11 still throw ERR_REQUIRE_ESM, which is exactly the
+    // F1 crash on a fresh build under the wrong runtime. Assert the MINOR,
+    // or the gate stays green on a floor that admits a dozen failing minors.
     // -----------------------------------------------------------------
     describe('REG-VAL-001: mariadb is require()-loadable on the supported runtime', function () {
         it('require("mariadb") loads without ERR_REQUIRE_ESM @regression-p0', function () {
             expect(() => require('mariadb')).to.not.throw();
         });
 
-        it('engines pins Node >= 22 (require(esm) support for the ESM-only mariadb) @regression-p0', function () {
+        it('engines pins Node >= 22.12 (unflagged require(esm) for the ESM-only mariadb) @regression-p0', function () {
             const engines = require('../../package.json').engines;
             expect(engines && engines.node, 'package.json engines.node missing').to.be.a('string');
-            const min = parseInt((String(engines.node).match(/\d+/) || ['0'])[0], 10);
-            expect(min, `engines.node "${engines.node}" must require Node >= 22`).to.be.at.least(22);
+            const floor = String(engines.node).match(/(\d+)\.(\d+)(?:\.(\d+))?/);
+            expect(floor, `engines.node "${engines.node}" must declare a full major.minor floor`).to.not.equal(null);
+            const major = parseInt(floor[1], 10);
+            const minor = parseInt(floor[2], 10);
+            expect(
+                major > 22 || (major === 22 && minor >= 12),
+                `engines.node "${engines.node}" must require Node >= 22.12.0 (require(esm) is flagged below it)`
+            ).to.equal(true);
         });
 
         it('src/db.js (which require()s mariadb) loads under CommonJS @regression-p0', function () {
