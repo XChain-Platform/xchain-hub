@@ -127,4 +127,25 @@ function bcround(num, decimals){
     return bcnum(mathjs.format(rounded, {notation: 'fixed', precision: d}));
 }
 
-module.exports = { isNull, isNumeric, bcnum, bcsub, bcadd, bcmul, bcdiv, getPrice, bcgt, bclt, bcgte, bclte, bcstr, bcformat, bcround };
+// Multiply and FLOOR to d decimal places, entirely in decimal.js space. Faithful
+// port of xchain-indexer/src/utility.js bcmulfloor: the floor goes through
+// decimal.js's native .floor(), never mathjs.format()'s precision rounding, which
+// is half-up (away from zero) and would credit a share holder more than the strict
+// proportional entitlement at every midpoint fractional value.
+//
+// Splitting a fixed budget is the whole reason the helper exists: floor keeps
+// sum(shares) <= budget, while a half-up split of an inexact division sums ABOVE
+// the budget it came from (10 across 6 gives 1.66666667 each, 10.00000002 total).
+// The indexer derives the consensus oracle-round rows this way, so the hub must
+// too or the two ledgers disagree on every inexact split.
+function bcmulfloor(numA, numB, decimals){
+    let a = (!isNull(numA)) ? numA : 0;
+    let b = (!isNull(numB)) ? numB : 0;
+    let d = (!isNull(decimals)) ? parseInt(decimals) : 0;
+    let product = mathjs.multiply(mathjs.bignumber(a), mathjs.bignumber(b));
+    let scale   = mathjs.bignumber(10).pow(d);
+    let floored = bcnum(product).times(scale).floor().div(scale);
+    return bcnum(mathjs.format(floored, {notation: 'fixed', precision: d}));
+}
+
+module.exports = { isNull, isNumeric, bcnum, bcsub, bcadd, bcmul, bcdiv, getPrice, bcgt, bclt, bcgte, bclte, bcstr, bcformat, bcround, bcmulfloor };

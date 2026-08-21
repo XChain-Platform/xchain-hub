@@ -34,7 +34,7 @@ xchain-hub/
 
 ### Prerequisites
 
-- **Node.js 22** exactly. The platform pins Node 22 fleet-wide: the `mariadb` driver is ESM-only (Node 18 fails with `ERR_REQUIRE_ESM`), and newer majors are not validated against the stack. `engines.node` declares `>=22.0.0`; use 22.
+- **Node.js 22.12 or newer** (22.x only). The platform pins Node 22 fleet-wide: the `mariadb` driver is ESM-only, and `require()` loads ESM without a flag only from **22.12.0**, so 22.0-22.11 fail at hub boot with `ERR_REQUIRE_ESM` even though `npm install` succeeded. Newer majors are not validated against the stack. `engines.node` declares `>=22.12.0`; `.nvmrc` says `22`, which resolves to the newest installed 22.x, so `nvm install 22` is the safe path.
 - **MariaDB** reachable from the hub host for anything beyond unit tests.
 - For integration and e2e runs, a running XChain stack (indexer, at least one coin node). The `xchain-regtest-miner` plus a regtest stack is the easiest local path.
 

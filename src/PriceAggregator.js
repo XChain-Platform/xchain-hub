@@ -47,6 +47,11 @@ const { normalizeRetractionBounds } = require('./lib/retraction_bounds.js');
 // replaying pusher cannot drown the log; the suppressed count rides on the next line.
 const FENCE_WARN_INTERVAL_MS = 60_000;
 
+// Minimum gap between missing-pair coverage warnings for the SAME source chain.
+// Same sizing rationale as FENCE_WARN_INTERVAL_MS: a pair that stays gone keeps
+// re-announcing itself in any log tail, without one stalled feed flooding the log.
+const MISSING_PAIR_WARN_INTERVAL_MS = 60_000;
+
 class PriceAggregator extends EventEmitter {
 
     constructor(hub) {
@@ -56,6 +61,70 @@ class PriceAggregator extends EventEmitter {
         // Per-source-chain throttle state for the ingest-fence rejection
         // warning ({ last: ms, suppressed: n }). See _warnIngestFenceRejection.
         this._fenceWarnState = new Map();
+        // Per-source-chain state for the ingest pair-coverage check
+        // ({ seen: Set, last: ms, suppressed: n, rounds: n }). See _checkIngestPairCoverage.
+        this._missingPairWarnState = new Map();
+    }
+
+    // Name a pair that STOPPED arriving from a source chain. The PRODUCER path records a
+    // durable 'skipped' row for every configured pair a finalized round omitted
+    // (OracleConsensus._storeSnapshot, item #180) and getSubmissionsInfo surfaces those as
+    // droppedPairs; this path had no equivalent, so on a mirror hub a pair that quietly
+    // stopped appearing in pushed rounds left no row, no counter and no line naming it,
+    // while consumers kept serving its previous round and the drop diagnostics read
+    // healthy (item 5335).
+    //
+    // The reference set is the pairs THIS source chain has actually been sending, not this
+    // hub's local pair config. Local config is the wrong basis on an ingest path: the round
+    // is another federation's consensus output, so any pair it legitimately does not publish
+    // (a gate not yet open there, a feed it cannot source, a version skew in its pair list)
+    // would warn on every single round, and a detector that fires constantly names nothing.
+    // A high-water set per chain self-calibrates instead: the first accepted round from a
+    // chain only records what it carries, and only a pair that was arriving and then stops
+    // is reported. The cost is that the set is in-memory, so a pair already gone before a
+    // restart is not re-reported; that is the honest limit of a non-durable detector, and
+    // the alternative (writing marker rows from local config) would put rows the source
+    // chain never finalized into a consensus-MIRRORED table, its id-ordered bootstrap read
+    // and its row:inserted stream, letting two hubs mirror one round differently.
+    //
+    // Warnings are throttled per source chain on the _warnIngestFenceRejection pattern: the
+    // first short round prints immediately, then at most one line per window, carrying both
+    // the count it stands for and the running total of short rounds so nothing is lost.
+    _checkIngestPairCoverage(sourceChain, round, pairs) {
+        let chain   = sourceChain || 'unknown';
+        let present = new Set(pairs.map(p => p.pair));
+        let state   = this._missingPairWarnState.get(chain);
+        if (!state) {
+            // First round from this chain: adopt its pair set as the baseline, report nothing.
+            this._missingPairWarnState.set(chain, { seen: present, last: 0, suppressed: 0, rounds: 0 });
+            return;
+        }
+        let missing = [...state.seen].filter(pair => !present.has(pair));
+        // Grow the high-water set with anything new, so a pair that starts arriving is
+        // covered from then on; a missing pair stays in `seen` so it keeps being reported
+        // until it comes back.
+        for (let pair of present) state.seen.add(pair);
+        if (!missing.length) return;
+        this._warnMissingIngestPairs(chain, round, missing, state);
+    }
+
+    _warnMissingIngestPairs(chain, round, missingPairs, state) {
+        let now = Date.now();
+        state.rounds++;
+        if (state.last && (now - state.last) < MISSING_PAIR_WARN_INTERVAL_MS) {
+            state.suppressed++;
+            return;
+        }
+        let suppressed = state.suppressed;
+        state.last = now;
+        state.suppressed = 0;
+        console.warn('PriceAggregator: round ' + round + ' from ' + chain + ' arrived without '
+            + missingPairs.length + ' pair(s) this chain had been sending: ' + missingPairs.join(', ')
+            + '. Consumers keep serving the previous round for each one until it returns.'
+            + ' ' + state.rounds + ' round(s) from this chain have been short a pair so far'
+            + (suppressed > 0 ? '; ' + suppressed + ' warning(s) suppressed since the last line' : '')
+            + '. If a pair is gone for good, the source federation stopped publishing it;'
+            + ' if it flaps, that federation is dropping it at its own aggregation gate.');
     }
 
     // An ingest-fence rejection USED TO BE silent (a bare
@@ -420,6 +489,17 @@ class PriceAggregator extends EventEmitter {
         }
 
         console.log('PriceAggregator: accepted round ' + round + ' from ' + (sourceChain || 'unknown') + ' (' + roundData.pairs.length + ' pairs, ' + validatorCount + ' sigs)');
+
+        // Per-pair coverage check (item 5335): name any pair this chain had been sending and
+        // this round did not carry, so an ingest hub's silent pair drop is as visible as the
+        // producer path's droppedPairs. Diagnostics only, and guarded: the round is already
+        // stored and must never be flipped to rejected by a coverage warning.
+        try {
+            this._checkIngestPairCoverage(sourceChain, round, roundData.pairs);
+        } catch (e) {
+            console.warn('PriceAggregator: pair-coverage check failed for round ' + round + ':', e.message);
+        }
+
         return { accepted: true };
     }
 

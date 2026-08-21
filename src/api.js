@@ -643,7 +643,17 @@ async function startApi(){
                 // submissions rail already carries via lastSuccessAgeMs, and the
                 // REST /hub-db/snapshot sibling via its `watermark`). Omitted =
                 // historical bare-array contract, so existing callers are untouched.
-                if (with_watermark) return { watermark: Math.floor(Date.now() / 1000), snapshots };
+                // oracleMaxPriceAgeSeconds rides this rail too (item 5551): the
+                // bound the consumer clamps freshness to travelled only on
+                // getoraclesubmissions, so it was lost exactly when that rail was
+                // down; same _oracleMaxAgeSeconds source as there, never a literal.
+                if (with_watermark) {
+                    return {
+                        watermark: Math.floor(Date.now() / 1000),
+                        oracleMaxPriceAgeSeconds: hub._oracleMaxAgeSeconds(),
+                        snapshots,
+                    };
+                }
                 return snapshots;
             } catch (err) {
                 return {error: "error fetching price snapshots"};
@@ -966,9 +976,11 @@ async function startApi(){
         },
 
         // ORACLE (PRICE v0) publisher status (read, no auth): publish-rail health for
-        // the oracle-publish leader rotation/failover path - queue depth, lifetime
-        // published/abandoned (dead-letter) counts, last-published round + txid, and
-        // the last-observed DOGE publisher-wallet balance for runway monitoring.
+        // the oracle-publish leader rotation - queue depth, lifetime published/abandoned
+        // (dead-letter) counts, last-published round + txid, and the last-observed DOGE
+        // publisher-wallet balance for runway monitoring. Reports only THIS hub's rail:
+        // OraclePublisher implements no takeover, so a peer leader that goes dark moves
+        // nothing here and is detected off-hub by the dashboard's publish-coverage rail.
         // Mirrors getanchorstatus: always 200 so a poller can read it independent of
         // overall hub health, {active:false} when no oracle publisher is running.
         async getoraclepublisherstatus(){
@@ -1054,6 +1066,38 @@ async function startApi(){
                 return await hub.proposeSlashPenalty(validator_pubkey, penalty, rationale);
             } catch (err) {
                 return {error: err.message || "error creating slash penalty proposal"};
+            }
+        },
+
+        // List recorded slash proposals (all statuses), optionally filtered by
+        // status and/or validator pubkey. Read-only companion to
+        // proposeslashpenalty above: that method acts on the evidence, this one
+        // publishes that it exists.
+        //
+        // PUBLIC READ TIER on purpose (not in WRITE_METHODS, not in
+        // SENSITIVE_READ_METHODS): the rows carry no credential and no
+        // mesh-internal connection state, only who was accused of what and
+        // whether governance has ruled. Rows with status 'pending' are
+        // UNADJUDICATED accusations, never findings; the status field is on
+        // every row so a consumer can say so.
+        //
+        // The `evidence` blob is NOT served. SlashDetector.getSlashProposals
+        // replaces it with evidence_hash before returning, because this POST
+        // surface answers any caller: redacting downstream in one consumer
+        // would leave the verbatim text readable straight off the hub.
+        async getslashproposals({status, validator_pubkey, limit}){
+            let limErr = validateLimit(limit);
+            if (limErr) return limErr;
+            if(!hub.slashDetector) return {error: "slash detector not active"};
+            try {
+                return await hub.slashDetector.getSlashProposals({
+                    status, validatorPubkey: validator_pubkey, limit
+                });
+            } catch (err) {
+                // Surface the argument-validation messages (bad status, malformed
+                // pubkey) the way proposeslashpenalty does, so a caller can fix its
+                // request; the generic fallback covers DB failures.
+                return {error: err.message || "error fetching slash proposals"};
             }
         },
 

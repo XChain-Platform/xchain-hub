@@ -66,10 +66,11 @@ const DEFAULT_NONOK_PUBLISHED_MAX = 40000;
 // re-derived against a CHANGED deadline_window_blocks instead of against the 100-block
 // figure the comments were written around (item 3421).
 const NONOK_THROUGHPUT_PER_BLOCK = DEFAULT_NONOK_PUBLISHED_MAX / 100;
-// Cap for the inbound `meta` field on PROPOSE/PREPARE envelopes, mirroring the
-// body_b64 cap: meta is a short provider tag (HTTP status code, LLM model id),
-// so anything longer is adversarial padding that would otherwise be stored,
-// hashed into the canonical, and re-broadcast unbounded.
+// Cap for the inbound `meta` and `status` fields on PROPOSE/PREPARE envelopes,
+// mirroring the body_b64 cap: both are short tags (meta a provider tag, HTTP
+// status code or LLM model id; status one of 'ok', 'provider_error',
+// 'no_quorum'), so anything longer is adversarial padding that would otherwise
+// be stored, hashed into the canonical, and re-broadcast unbounded.
 const ATTEST_META_MAX_LENGTH   = 256;
 const PENDING_EVICT_MS         = 10000;   // hold finalized state ~10s for late-arriving duplicates, then evict
 
@@ -534,6 +535,15 @@ class AttestationConsensus extends EventEmitter {
             // machines against the same request. AttestationRound resolves it once at the
             // request's own block and fails the round closed when it cannot.
             pinnedConsensusStrategy: roundState.pinnedConsensusStrategy || null,
+            // Inbound body-size gate for this round's lifetime, derived from the
+            // max_response_bytes AttestationRound already read to bound its own
+            // fetch. Pinning it here is what keeps the gate consistent with the
+            // bytes this hub itself proposed; see _bodyB64Limit. Null when the
+            // round state carries no cap (legacy/synthetic round states), which
+            // leaves the live per-message read in place.
+            maxBodyB64Length: Number(roundState.pinnedMaxResponseBytes) > 0
+                ? Math.ceil(Number(roundState.pinnedMaxResponseBytes) * 1.4)
+                : null,
             finalized:    false,
             timer:        null
         };
@@ -608,6 +618,19 @@ class AttestationConsensus extends EventEmitter {
         return Math.ceil(maxBytes * 1.4);
     }
 
+    // Body cap for THIS round, pinned once at propose() from the same provider
+    // def the round fetched under, so the acceptance predicate cannot move
+    // between two messages of one round. Reading max_response_bytes live per
+    // message let a governance hotReload (which re-parses every def on every
+    // proposal:finalized event, whatever the proposal was about) lower the cap
+    // mid-round: this hub's own proposal is inserted directly and bypasses the
+    // gate, so it would then reject the byte-identical bodies its honest peers
+    // sent and stall the round to timeout. Falls back to the live read when the
+    // round state carried no cap, which keeps the gate exactly as it was.
+    _bodyB64Limit(pending){
+        return pending.maxBodyB64Length || this._maxBodyB64Length(pending.providerId);
+    }
+
     _handlePropose(envelope){
         let d = envelope.data;
         if(!d || !d.requestId) return;
@@ -633,12 +656,21 @@ class AttestationConsensus extends EventEmitter {
         // Reject oversized payloads before allocating a Buffer. A responsible
         // peer could otherwise craft a body_b64 up to the WebSocket frame limit,
         // far larger than the provider's configured response cap.
-        if(String(d.body_b64 || '').length > this._maxBodyB64Length(pending.providerId)){
+        if(String(d.body_b64 || '').length > this._bodyB64Limit(pending)){
             console.warn('AttestationConsensus: oversized PROPOSE body from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected pre-decode)');
             return;
         }
         if(String(d.meta || '').length > ATTEST_META_MAX_LENGTH){
             console.warn('AttestationConsensus: oversized PROPOSE meta from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
+            return;
+        }
+        // Same cap for `status`, and for the same reason: it is a short outcome
+        // tag ('ok', 'provider_error', 'no_quorum'), it is hashed into the
+        // canonical below, stored verbatim for the round's lifetime, and
+        // concatenated into the A-F4 candidate key, so an uncapped one is
+        // adversarial padding on every surface `meta` is capped against.
+        if(String(d.status || '').length > ATTEST_META_MAX_LENGTH){
+            console.warn('AttestationConsensus: oversized PROPOSE status from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
             return;
         }
 
@@ -731,6 +763,11 @@ class AttestationConsensus extends EventEmitter {
 
         pending._agreeing = true;
         let winner;
+        // Log-only could-not-judge channel (providers/llm.js _markInconclusive):
+        // agree() fills it before every inconclusive null so the warn line below
+        // can tell a judge outage / pause / spent budget from a genuine
+        // not-equivalent verdict. Never reaches the canonical, PREPARE or status.
+        let judgeOutcome = {};
         try {
             // Bound the judge call to the same fetch-timeout budget as a
             // provider fetch, so a slow-drip judge vendor call cannot overrun
@@ -747,7 +784,7 @@ class AttestationConsensus extends EventEmitter {
             winner = await Promise.resolve(providerModule.agree(proposalsArr,
                 { pinnedJudgeModel: pending.pinnedJudgeModel || null, pinnedVendors: pending.pinnedVendors || null,
                   pinnedApprovedModels: pending.pinnedApprovedModels || null,
-                  timeoutMs: judgeTimeoutMs, expectedN: need }));
+                  timeoutMs: judgeTimeoutMs, expectedN: need, outcome: judgeOutcome }));
         } catch (e) {
             console.warn('AttestationConsensus: agree() threw for %s...:', rid.substring(0,16), e);
             winner = null;
@@ -758,7 +795,11 @@ class AttestationConsensus extends EventEmitter {
         if(!this.pending.has(rid) || pending.finalized) return;
 
         if(!winner){
-            console.warn('AttestationConsensus: no consensus on ' + rid.substring(0,16) + '... (' + proposalsArr.length + ' proposals diverged)');
+            if(judgeOutcome.inconclusive)
+                console.warn('AttestationConsensus: no consensus on ' + rid.substring(0,16) + '... (could not judge: reason=' +
+                             judgeOutcome.reason + '; ' + proposalsArr.length + ' proposals)');
+            else
+                console.warn('AttestationConsensus: no consensus on ' + rid.substring(0,16) + '... (' + proposalsArr.length + ' proposals diverged)');
             // Phase 4: publish an explicit STATUS=no_quorum ATTEST v1 (audit
             // row; the request stays pending on the indexer so later retry
             // rounds can still fulfill it before the deadline).
@@ -863,7 +904,11 @@ class AttestationConsensus extends EventEmitter {
     // that reaches the same conclusion signs byte-identical canonicals and the
     // round converges without a judge call. Statuses:
     //   provider_error - every responsible fetch failed (upstream outage)
-    //   no_quorum      - fetches succeeded but agree() found no equivalence
+    //   no_quorum      - fetches succeeded but agree() returned no winner: either
+    //                    a genuine not-equivalent verdict or a could-not-judge
+    //                    (judge outage, paused provider, spent budget,
+    //                    unparseable verdict); the distinction is log-only
+    //                    (judgeOutcome above) since the reason is leader-local
     // The indexer treats both as RETRYABLE: the request stays pending, so a
     // later round (e.g. after the model-fallback ladder advances) can still
     // fulfill it. Throttled to one publication per (request_id, status).
@@ -960,12 +1005,17 @@ class AttestationConsensus extends EventEmitter {
         if(!pending.responsible.some(v => v.pubkey === senderPubkey)) return;
 
         // Reject oversized payloads before allocating a Buffer (see _handlePropose).
-        if(String(d.body_b64 || '').length > this._maxBodyB64Length(pending.providerId)){
+        if(String(d.body_b64 || '').length > this._bodyB64Limit(pending)){
             console.warn('AttestationConsensus: oversized PREPARE body from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected pre-decode)');
             return;
         }
         if(String(d.meta || '').length > ATTEST_META_MAX_LENGTH){
             console.warn('AttestationConsensus: oversized PREPARE meta from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
+            return;
+        }
+        // Status cap, mirroring the PROPOSE guard above.
+        if(String(d.status || '').length > ATTEST_META_MAX_LENGTH){
+            console.warn('AttestationConsensus: oversized PREPARE status from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
             return;
         }
 
@@ -1038,6 +1088,26 @@ class AttestationConsensus extends EventEmitter {
                     if(nonOkModule && typeof nonOkModule.agree === 'function')
                         derivedWinner = nonOkModule.agree(okForVerdict, { expectedN: needNq });
                 } catch (_) { derivedWinner = null; }
+                // agree() is dual-shape by contract (see _maybeAdvanceFromProposals):
+                // the ok-winner path awaits it, but this is the SYNCHRONOUS PBFT
+                // PREPARE handler and cannot. A thenable return is therefore not a
+                // derived winner, and reading it as one (every Promise is truthy)
+                // would refuse EVERY no_quorum PREPARE for this provider and expire
+                // the round at its deadline instead of publishing the audit row. The
+                // gate keys on the pinned STRATEGY while the shape rides the MODULE,
+                // so governance pointing byte_equality at an async module reaches
+                // here. Settle the orphaned promise before dropping it: an unhandled
+                // rejection from a provider call nobody awaits takes the hub process
+                // down. Fail closed either way - a verdict this hub cannot itself
+                // derive is one it must not co-sign (items 2641, 2579).
+                if(derivedWinner && typeof derivedWinner.then === 'function'){
+                    derivedWinner.then(() => {}, () => {});
+                    console.error('AttestationConsensus: byte_equality provider "' + pending.providerId +
+                        '" exports an async agree(); no_quorum self-derivation is unavailable on the ' +
+                        'synchronous PREPARE path, so ' + rid.substring(0,16) + '... is not co-signed ' +
+                        '(config error: strategy/module shape mismatch)');
+                    return;
+                }
                 if(derivedWinner){
                     console.warn('AttestationConsensus: refusing no_quorum PREPARE from ' + senderPubkey.substring(0,16) +
                         '... for ' + rid.substring(0,16) + '... (own agree() derives an ok winner; not co-signing)');

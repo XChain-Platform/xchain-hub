@@ -54,6 +54,8 @@ const ValidatorIdentity = require('./ValidatorIdentity.js');
 const EncoderClient      = require('./EncoderClient.js');
 const SpendGuard         = require('./lib/spend_guard.js');
 const { isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
+const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
+const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
 const eq                = require('./equivocation_header.js');
 const activation        = require('./lib/fullnode_activation.js');
 // Pinned coin registry: the single source for the consensus-relevant FULLNODE
@@ -73,6 +75,12 @@ const XNODE_DONE     = 'XNODE_DONE';
 // alone would make the pinned verifier diverge from a still-bare producer.
 const PASS_CMP = (a, b) => Buffer.compare(Buffer.from(String(a), 'utf8'),
                                           Buffer.from(String(b), 'utf8'));
+
+// Throttle for the truncated-verifier-set alarm. _eligibleVerifiers runs once per
+// poll tick (30s by default), so an unthrottled warning would emit thousands of
+// times a day for one standing condition; an hour is loud enough to be seen and
+// quiet enough to stay readable. Same idiom as CapabilitySnapshot.getQuorum.
+const TRUNC_WARN_THROTTLE_MS = 3600000;
 
 class FullNodeChallengeRound {
 
@@ -211,6 +219,7 @@ class FullNodeChallengeRound {
         this._committedEpochs = new Set();
         this._timer   = null;
         this._ticking = false;      // in-flight guard, see _tick()
+        this._truncWarnAt = 0;      // throttle for the truncated-set alarm, see _eligibleVerifiers()
         this._handler = (env) => this._handleMessage(env);
     }
 
@@ -801,6 +810,28 @@ class FullNodeChallengeRound {
         let set = new Set(this.genesis);
         try {
             let verified = await this._indexerCall('getfullnodeverifiers', { block_index: epoch });
+            // Alarm-and-proceed on a TRUNCATED verifier set. getfullnodeverifiers carries
+            // `truncated` precisely so a hub can say so (it is set when the indexer's read
+            // hit VALIDATOR_QUERY_LIMIT), and this set is the 2/3+1 quorum denominator and
+            // the leader-election domain: consumed silently, a cap lowers the quorum bar
+            // with no operator signal at all. We still proceed rather than abstain, because
+            // every indexer truncates identically at the same block, so the capped set
+            // stays cross-hub deterministic; refusing would halt the round the moment the
+            // verifier set outgrows the cap, which is the worse failure. Throttled, since
+            // this runs once per poll tick. Same shape as CapabilitySnapshot.getQuorum.
+            if (verified && verified.truncated === true){
+                let now = Date.now();
+                if (now - this._truncWarnAt > TRUNC_WARN_THROTTLE_MS){
+                    this._truncWarnAt = now;
+                    console.error('FullNodeChallengeRound: _eligibleVerifiers: the indexer returned a TRUNCATED ' +
+                        'verified-full-node set at epoch ' + epoch + ' (' +
+                        ((verified.validators && verified.validators.length) || 0) + ' verifier(s) returned): it hit ' +
+                        'VALIDATOR_QUERY_LIMIT, so the eligible set is CAPPED below the true verifier universe and the ' +
+                        '2/3+1 quorum denominator is a floor, not the real N. The round still runs (every indexer ' +
+                        'truncates identically, so the capped set is cross-hub deterministic); raise the frozen ' +
+                        'VALIDATOR_QUERY_LIMIT consensus constant on the indexers (coordinated fleet upgrade).');
+                }
+            }
             let list = (verified && verified.validators) || [];
             for(let v of list){
                 let pk = String(v.pubkey || v).toLowerCase();
@@ -871,7 +902,11 @@ class FullNodeChallengeRound {
             if(!utxos || (Array.isArray(utxos) && utxos.length === 0))
                 throw new Error('no UTXOs available for ' + this.btcAddress);
             let built = await this.encoder.createTx({
-                utxos:    utxos,
+                // Forwarded only while inside the encoder's caller-facing
+                // MAX_UTXO_COUNT; past it the param is omitted so the encoder selects
+                // from its own uncapped fetch of this same address
+                // (lib/encoder_utxo_forward.js).
+                utxos:    forwardableUtxos(utxos, 'FullNodeChallengeRound'),
                 // The encoder's P2SH path runs bitcoin.address.fromBase58Check() on this
                 // field, so it must be the base58check address, not the raw hex pubkey.
                 pubkey:   this.btcAddress,
@@ -885,6 +920,11 @@ class FullNodeChallengeRound {
             // psbtHex/hex, so the old alternates could only ever mask a missing PSBT by
             // handing undefined to the wallet signer.
             if(!built || !built.psbt) throw new Error('encoder returned no PSBT');
+            // Refuse phase 1 of a two-transaction encoding before anything is signed: this
+            // pipeline has no reveal, so broadcasting the P2SH funding tx would publish a
+            // NODEPROOF verdict no indexer can decode and strand the carrier value
+            // (lib/two_phase_guard.js).
+            assertSingleTxEncoding(built, 'FullNodeChallengeRound');
             let txHex = await this.walletSignFn(built.psbt);
             if(!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
             return await this.encoder.broadcastTx(txHex);

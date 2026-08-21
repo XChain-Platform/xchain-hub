@@ -522,3 +522,126 @@ describe('XChainHub._refreshTransportSignerSet overlap guard', function () {
         expect(hub._transportSetRefreshRunning, 'the early return still clears the flag').to.equal(false);
     });
 });
+
+// ── OraclePublisher._processQueue ───────────────────────────────────────────
+//
+// Not a timer: this pass is driven per PBFT event (onRoundFinalized awaits it), so
+// the overlap arrives when two rounds finalize inside one pass duration, which is
+// what a consensus backlog draining after a partition looks like. Every at-most-once
+// check in the pass closes only AFTER the awaited broadcast, and the pre-send intent
+// write is deliberately idempotent, so an unguarded second pass re-broadcasts the
+// round the first is still sending: a duplicate DOGE spend, not a duplicate log line.
+
+describe('OraclePublisher._processQueue overlap guard', function () {
+
+    const OraclePublisher = require('../../src/OraclePublisher');
+    const MY_PUB = 'aa'.repeat(32);
+
+    let queueFile;
+
+    function makePublisher() {
+        const hub = {
+            db:                 null,
+            getIdentity:        () => ({ getPubkeyHex: () => MY_PUB, sign: () => 'bb'.repeat(64) }),
+            p2pConfig:          {},
+            oracleConsensus:    null,
+            capabilitySnapshot: null
+        };
+        const pub = new OraclePublisher(hub);
+        pub.queuePath      = queueFile;
+        pub.deadLetterPath = queueFile.replace(/\.jsonl$/, '') + '.deadletter.jsonl';
+        pub.encoder        = null;      // no balance source, so the floor gate is inert
+        return pub;
+    }
+
+    function entry(round) {
+        return {
+            round:          round,
+            btcBlockHeight: 900000 + round,
+            btcBlockTime:   1750000000,
+            prices:         [{ pair: 'BTC/USD', price: '100000' }],
+            sigs:           [{ pubkey: MY_PUB, sig: 'ee'.repeat(64) }],
+            attempts:       0,
+            enqueuedAt:     Date.now()
+        };
+    }
+
+    function writeQueue(entries) {
+        fs.writeFileSync(queueFile, entries.map(e => JSON.stringify(e)).join('\n') + (entries.length ? '\n' : ''));
+    }
+
+    function readQueue() {
+        return fs.readFileSync(queueFile, 'utf8').split('\n').filter(l => l.trim().length > 0).map(l => JSON.parse(l));
+    }
+
+    beforeEach(function () {
+        queueFile = path.join(os.tmpdir(), 'oracleq-' + process.pid + '-' + Math.floor(Math.random() * 1e9) + '.jsonl');
+    });
+
+    afterEach(function () {
+        sinon.restore();
+        try { fs.unlinkSync(queueFile); } catch (_) {}
+        try { fs.unlinkSync(queueFile.replace(/\.jsonl$/, '') + '.deadletter.jsonl'); } catch (_) {}
+    });
+
+    it('a second finalized round arriving mid-broadcast does not re-broadcast the round in flight', async function () {
+        const pub = makePublisher();
+        writeQueue([entry(7)]);
+
+        const { gate, release } = makeGate();
+        let first = true;
+        const bcast = sinon.stub().callsFake(async () => {
+            if (first) { first = false; await gate; }
+            return { txid: 'tx-7' };
+        });
+        pub.setBroadcastHook(bcast);
+
+        const a = pub._processQueue();
+        await flush();
+        await pub._processQueue();      // the next round:finalized pass, while a is parked
+        expect(bcast.callCount, 'the guarded pass spent no DOGE').to.equal(1);
+
+        release();
+        await a;
+        expect(bcast.callCount, 'round 7 is broadcast exactly once').to.equal(1);
+        expect(pub._sweeping, 'flag released in finally').to.equal(false);
+    });
+
+    it('a round enqueued while a pass is in flight survives the queue rewrite', async function () {
+        // onRoundFinalized APPENDS before it calls the pass, so the new round is on
+        // disk but not in the in-flight pass's snapshot. A rewrite that truncates to
+        // that snapshot erases it, and the overlap guard makes the case reachable
+        // rather than rarer (the skipped pass leaves the round for the next one).
+        const pub = makePublisher();
+        writeQueue([entry(7)]);
+
+        const { gate, release } = makeGate();
+        const bcast = sinon.stub().callsFake(async () => { await gate; return { txid: 'tx-7' }; });
+        pub.setBroadcastHook(bcast);
+
+        const a = pub._processQueue();
+        await flush();
+        await pub._enqueue(entry(8));
+        await pub._processQueue();      // skipped by the guard
+        release();
+        await a;
+
+        expect(readQueue().map(e => e.round), 'the mid-pass round is still queued').to.deep.equal([8]);
+        expect(bcast.callCount, 'only the snapshot round was broadcast').to.equal(1);
+    });
+
+    it('a rejected pass releases the guard instead of wedging the publisher', async function () {
+        const pub = makePublisher();
+        writeQueue([entry(7)]);
+        const balance = sinon.stub(pub, '_checkBalance').rejects(new Error('balance source exploded'));
+
+        await pub._processQueue().catch(() => {});
+        expect(pub._sweeping, 'a rejected pass must not wedge the publish path').to.equal(false);
+
+        balance.resolves(null);
+        const bcast = sinon.stub().resolves({ txid: 'tx-7' });
+        pub.setBroadcastHook(bcast);
+        await pub._processQueue();
+        expect(bcast.callCount, 'the next pass publishes normally').to.equal(1);
+    });
+});

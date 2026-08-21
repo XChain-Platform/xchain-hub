@@ -71,11 +71,14 @@ describe('Boundary: Trimmed Median Aggregation', function () {
             expect(oc._aggregate(subs, 'BTC/USD')).to.equal('20.00000000');
         });
 
-        it('N=6: trimCount=0, no trim (last N before trim kicks in)', function () {
-            // floor(6 * 0.15) = 0
-            let subs = submissionsForPair([1, 2, 3, 4, 5, 6]);
-            // Even count: median = (3+4)/2 = 3.5
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('3.50000000');
+        it('N=6: trimCount=1, even post-trim count medians the middle pair', function () {
+            // ceil(6 * 0.15) = 1 → after trim: [1002, 1004, 1006, 1008]
+            // Clustered prices so the even-split deviation gate passes (middle-pair spread
+            // (1006-1004)/2010 ≈ 0.1% << 5%); the gate itself is covered in
+            // OracleConsensus.test.js.
+            let subs = submissionsForPair([1000, 1002, 1004, 1006, 1008, 1010]);
+            // Even count: median = (1004+1006)/2 = 1005
+            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('1005.00000000');
         });
 
         it('N=7: trimCount=1, trims 1 from each end (first trim transition)', function () {
@@ -93,12 +96,14 @@ describe('Boundary: Trimmed Median Aggregation', function () {
             expect(oc._aggregate(subs, 'BTC/USD')).to.equal('7.00000000');
         });
 
-        it('N=14: trimCount=2, trims 2 from each end (second trim transition)', function () {
-            // floor(14 * 0.15) = 2
-            let prices = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+        it('N=14: trimCount=3, trims 3 from each end (second trim transition)', function () {
+            // ceil(14 * 0.15) = 3
+            // Clustered prices so the even-split deviation gate passes (middle-pair spread
+            // (1014-1012)/2026 ≈ 0.1% << 5%).
+            let prices = Array.from({ length: 14 }, (_, i) => 1000 + i * 2);
             let subs = submissionsForPair(prices);
-            // After trim: [3..12] (10 values) → median = (7+8)/2 = 7.5
-            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('7.50000000');
+            // After trim: [1006..1020] (8 values) → median = (1012+1014)/2 = 1013
+            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('1013.00000000');
         });
 
         it('N=20: trimCount=3, trims 3 from each end', function () {

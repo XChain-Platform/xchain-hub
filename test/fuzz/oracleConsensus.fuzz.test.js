@@ -167,7 +167,13 @@ describe('Fuzz: OracleConsensus', function () {
                         prices: [{ coinPair: 'BTC/USD', price: String(p) }]
                     }));
                     let subs = buildSubmissions(entries);
-                    let result = parseFloat(oc._aggregate(subs, 'BTC/USD'));
+                    let raw = oc._aggregate(subs, 'BTC/USD');
+                    // A null is a deliberate DROP, not a price: the even-split deviation
+                    // gate omits a pair whose published mean would put every submitter
+                    // outside the band, and this generator produces such splits freely.
+                    // Without this guard the property asserts against parseFloat(null).
+                    if (raw === null) return;
+                    let result = parseFloat(raw);
                     let min = Math.min(...prices);
                     let max = Math.max(...prices);
                     expect(result).to.be.at.least(min - 1e-6);

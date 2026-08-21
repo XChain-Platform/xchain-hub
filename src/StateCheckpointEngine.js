@@ -478,6 +478,18 @@ class StateCheckpointEngine extends EventEmitter {
         let sender   = String(d.sig_pubkey || '').toLowerCase();
         if(sender === myPubkey) return;                            // our own broadcast
 
+        // Third of the guard's three call sites (propose, co-sign, persist). The
+        // indexer byte-match further down rebuilds `mine` with the network OUR OWN
+        // indexer reports, so it catches record-vs-indexer drift and is blind to the
+        // record-vs-DEPLOYMENT drift this predicate exists for: _resolveCapabilityValidators
+        // resolves the stake-weighted-quorum gate on `this.network`, so a hub whose
+        // HUB_NETWORK disagrees with the record would co-sign under one quorum plane and
+        // then refuse the finalized checkpoint under the other. Placed before the tip
+        // resolve and the validator resolve, like the persist path, so a cross-network
+        // record costs no lookups. A throw is caught by the XCHK_SIGN_REQ .catch in
+        // _handleMessage; an unscoped hub (this.network === '') is warned, not refused.
+        this._assertCheckpointNetwork(cp, 'co-sign');
+
         // Freshness guard (fail-closed): the leader-supplied snapshot_block selects
         // the validator set AND every flag-day gate below, but is a wire field the
         // proposer chose. Bound it against our OWN resolved BTC tip before it can

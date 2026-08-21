@@ -381,13 +381,49 @@ describe('XChainHub', function () {
             expect(threw, 'stale oracle must fail the quote closed').to.equal(true);
         });
 
-        it('honours ORACLE_MAX_PRICE_AGE_SECONDS from p2pConfig (0 disables the bound)', async function () {
-            let h = new XChainHub('host', 3306, 'db', 'user', 'pass', { ORACLE_MAX_PRICE_AGE_SECONDS: 0 });
+        // ORACLE_MAX_PRICE_AGE_SECONDS is consensus-pinned (coins/index.js consensusSubset)
+        // and the indexer reads only the pinned bundle, so the hub's override is a regtest
+        // bring-up seam: honored there, set-but-IGNORED and warned on every other network
+        // (standalone's empty network included, which fails closed like the sibling seams).
+        it('honours ORACLE_MAX_PRICE_AGE_SECONDS from p2pConfig on regtest (0 disables the bound)', async function () {
+            let h = new XChainHub('host', 3306, 'db', 'user', 'pass',
+                { HUB_NETWORK: 'regtest', ORACLE_MAX_PRICE_AGE_SECONDS: 0 });
             h.db = mockDb;
             mockDb.doQuery.resolves([{ price: '100000', coin_pair: 'BTC/USD', block_timestamp: nowS() - 999999 }]);
             let s = await h.getPriceStatus('BTC/USD');
             expect(s.stale).to.equal(false);
             expect(s.maxAgeSeconds).to.equal(0);
+        });
+
+        ['mainnet', 'testnet'].forEach(function (network) {
+            it('ignores the p2pConfig override on ' + network + ' and warns once', async function () {
+                const coins  = require('../../src/coins');
+                const pinned = Number(coins.getCoinConfig('BTC', network).ORACLE_MAX_PRICE_AGE_SECONDS);
+                let h = new XChainHub('host', 3306, 'db', 'user', 'pass',
+                    { HUB_NETWORK: network, ORACLE_MAX_PRICE_AGE_SECONDS: 0 });
+                h.db = mockDb;
+                mockDb.doQuery.resolves([{ price: '100000', coin_pair: 'BTC/USD', block_timestamp: nowS() - 999999 }]);
+                let logs = [];
+                let stub = sinon.stub(console, 'log').callsFake(m => logs.push(String(m)));
+                let s;
+                try {
+                    s = await h.getPriceStatus('BTC/USD');
+                    await h.getPriceStatus('BTC/USD');
+                } finally { stub.restore(); }
+                expect(s.maxAgeSeconds).to.equal(pinned);
+                expect(s.stale).to.equal(true);
+                let warned = logs.filter(l => l.indexOf('ORACLE_MAX_PRICE_AGE_SECONDS') !== -1);
+                expect(warned.length).to.equal(1);
+                expect(warned[0]).to.contain('IGNORED on ' + network);
+            });
+        });
+
+        it('ignores the override in standalone mode, where the network is unset', function () {
+            const coins  = require('../../src/coins');
+            const pinned = Number(coins.getCoinConfig('BTC', 'mainnet').ORACLE_MAX_PRICE_AGE_SECONDS);
+            let h = new XChainHub('host', 3306, 'db', 'user', 'pass', { ORACLE_MAX_PRICE_AGE_SECONDS: 0 });
+            let stub = sinon.stub(console, 'log');
+            try { expect(h._oracleMaxAgeSeconds('BTC/USD')).to.equal(pinned); } finally { stub.restore(); }
         });
 
         it('sources the default bound from the consensus-pinned coin registry (no literal 1800)', function () {

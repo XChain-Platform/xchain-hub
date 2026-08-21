@@ -59,6 +59,7 @@ const fs = require('fs');
 const path = require('path');
 const { resolveLlmVendorAuth } = require('../lib/hub-credentials');
 const { runClaudePrint } = require('../lib/claude-spawn');
+const SpendGuard = require('../lib/spend_guard.js');
 
 // Upper bound on candidate text fed to the judge. Candidate bodies are
 // arbitrary attacker-chosen bytes (only the sender's signature over them is
@@ -141,6 +142,84 @@ function _recordSpendSettle(intent, status, usage, err) {
         usage:     (usage && Object.keys(usage).length) ? usage : null,
         error:     err ? String(err.message || err).substring(0, 200) : undefined
     });
+}
+
+// Aggregate spend budget (the enforcement half of the audit above)
+//
+// The audit above records what was spent; nothing bounded it. The ceilings that do
+// exist each bound ONE call - --max-budget-usd on the CLI transport, max_tokens on
+// the two HTTP ones - so N cheap calls still cost N times a cheap call. Every other
+// hub money path (ANCHOR, ATTEST, ATTEST_RELAY, ORACLE_PUBLISH, FULLNODE) already
+// sits behind a rolling per-window SpendGuard; the one path billed to the operator's
+// own vendor account did not.
+//
+// On mainnet that gap is bounded by economics: a request costs its author real BTC
+// and real XCHAIN. On testnet both are free, so the attacker's cost to make a
+// validator buy vendor tokens is zero and the bound has to live here instead.
+//
+// Same guard class, same `<PREFIX>_*` env/cfg idiom and the same $2000 hard clamp as
+// the on-chain effectors, with two LLM-specific defaults: a conservative per-window
+// budget rather than the class default of the clamp itself, and a per-call estimate
+// sized for one attestation turn rather than one on-chain broadcast.
+const LLM_DEFAULT_WINDOW_USD_CENTS = 1000;  // $10 per rolling window (class default 1h)
+const LLM_DEFAULT_EST_USD_CENTS    = 5;     // $0.05: one bounded max_tokens turn, estimated high
+
+let _guardCfg = {};
+let _guard    = null;
+function _spendGuard(){
+    if (_guard) return _guard;
+    // These are DEFAULTS, not overrides. SpendGuard reads env first, then cfg, so an
+    // operator's LLM_MAX_SPEND_USD_CENTS_PER_WINDOW still wins, and a hub that sets
+    // the same keys in p2pConfig (armSpendGuard) wins over the built-ins here.
+    _guard = new SpendGuard('LLM', {
+        LLM_MAX_SPEND_USD_CENTS_PER_WINDOW: LLM_DEFAULT_WINDOW_USD_CENTS,
+        LLM_EST_SPEND_USD_CENTS:            LLM_DEFAULT_EST_USD_CENTS,
+        ...(_guardCfg || {})
+    }, 'llm');
+    return _guard;
+}
+
+// Install the hub's config, and on a real validator hub also turn on restart
+// persistence - the module-level equivalent of the start()/persistTo() call every
+// on-chain effector makes. Called from ProviderRegistry.getModule().
+//
+// The two halves are separate on purpose. The config half is always safe and always
+// wanted: it makes the in-process budget bind with the operator's real numbers. The
+// persistence half writes a durable window to disk, so it is gated on the caller
+// vouching that this is a live validator (`persist`), because a registry built by a
+// unit test would otherwise leave a spend window in the checkout and the NEXT run
+// would inherit a consumed budget. That is precisely why SpendGuard makes persistence
+// opt-in by CALL rather than by config.
+exports.armSpendGuard = (cfg, persist) => {
+    _guardCfg = cfg || {};
+    _guard    = null;                       // rebuild against the hub's config
+    let g = _spendGuard();
+    return persist ? g.persistTo() : g;
+};
+// Operator/health surface: the live window without reaching into the registry.
+exports.spendStats = (now) => _spendGuard().stats(now);
+exports._resetSpendGuardForTest = () => { _guard = null; _guardCfg = {}; SpendGuard.unregister('llm'); };
+
+// A refusal to spend, not a vendor failure. Marked distinctly (and NOT as `paused`,
+// which means the operator/governance kill switch) so health and callers can tell a
+// budget stop from an outage: the fix for this one is time or a raised ceiling.
+function _budgetExhaustedError(reason){
+    let err = new Error('llm: ' + (reason || 'per-window spend budget reached') + '; no paid API call issued');
+    err.budgetExhausted = true;
+    // Typed like the other non-transport outcomes (kind) but deliberately NOT
+    // transient:false: the stop heals when the rolling window rolls, so agree()
+    // records it as a transient could-not-judge, not a hard error.
+    err.kind = 'budget_exhausted';
+    return err;
+}
+
+// The CLI transport reports real money (total_cost_usd); the HTTP transports report
+// tokens, which would need a per-model price table to become money, so those keep the
+// reserved estimate. Round UP: a partial cent was spent, not free.
+function _actualCostUsdCents(usage){
+    let c = Number(usage && usage.costUsd);
+    if (!Number.isFinite(c) || c <= 0) return null;
+    return Math.ceil(c * 100);
 }
 
 // Provider-def-injected configuration. ProviderRegistry calls _setConfig
@@ -360,7 +439,20 @@ exports._setConfig = (def) => {
             console.warn('llm: ignoring additional_config.default_temperature ' + ac.default_temperature +
                 ' (must be a number in [0, 1]); keeping ' + DEFAULT_TEMPERATURE);
     }
-    if (Number(ac.prompt_envelope_version)) PROMPT_ENVELOPE_VERSION = Number(ac.prompt_envelope_version);
+    // Positive-integer rule for the envelope-version ceiling, same warn-and-keep as the
+    // two siblings above: this value is the ONLY check at the fetch() boundary
+    // (`Number(envelope.envelope_version) > PROMPT_ENVELOPE_VERSION`), so a negative
+    // ceiling rejects every well-formed envelope_version:1 request on every hub and
+    // Infinity disables the ceiling entirely, both from one governance key with no
+    // code deploy behind it.
+    if (ac.prompt_envelope_version !== undefined) {
+        let ev = Number(ac.prompt_envelope_version);
+        if (Number.isInteger(ev) && ev > 0)
+            PROMPT_ENVELOPE_VERSION = ev;
+        else
+            console.warn('llm: ignoring additional_config.prompt_envelope_version ' + ac.prompt_envelope_version +
+                ' (must be a positive integer); keeping ' + PROMPT_ENVELOPE_VERSION);
+    }
     // Governance kill switch and per-call spend cap.
     if (typeof ac.enabled === 'boolean') LLM_ENABLED_CONFIG = ac.enabled;
     if (ac.max_budget_usd !== undefined) {
@@ -403,6 +495,11 @@ exports.fetch = async (payload, options) => {
             envelope.temperature < 0 || envelope.temperature > 2)
             throw new Error('llm: envelope.temperature must be a number in [0, 2]');
     }
+    // Same boundary rule for the optional system prompt: a non-string would otherwise
+    // string-coerce into '[object Object]' on the json_object path and fail per
+    // transport (spawn argv vs vendor 400) on the text path. Omission stays legal.
+    if (envelope.system !== undefined && typeof envelope.system !== 'string')
+        throw new Error('llm: envelope.system must be a string');
 
     // Requester-controlled fallback policy. 'any' (default): serve from any
     // approved model on the chain. 'strict': the requesting contract only
@@ -625,6 +722,17 @@ exports.agree = async (proposals, options) => {
         _markInconclusive(options, 'provider_paused');
         return null;
     }
+    // Same shape for a spent budget. The guard is hub-global (one SpendGuard for
+    // every model and vendor), so once the window is exhausted every fallback in
+    // the chain below is refused at _runLlm's reserve gate too; walking it would
+    // only write a futile intent+blocked settle pair per model and then record the
+    // round as 'unreachable', the vendor-outage shape. allow() is a pure predicate
+    // (no budget consumed); the in-loop budgetExhausted check below covers the
+    // concurrent-round race between this allow() and the chain's reserve().
+    if (!_spendGuard().allow(null)) {
+        _markInconclusive(options, 'budget_exhausted');
+        return null;
+    }
 
     // The judge model is supplied by the leader as options.pinnedJudgeModel,
     // resolved from the block-anchored provider config at the request's block, so
@@ -710,6 +818,13 @@ exports.agree = async (proposals, options) => {
             // judgment outcome, not a transport failure, and must NOT be re-asked
             // of a different fallback model. Only transport failures (transient
             // errors, credential/endpoint resolution) may advance the chain.
+            // A spent budget is neither: the guard is hub-global, so every later
+            // model in the chain is refused too. Stop here (see the pre-loop gate).
+            if (e && e.budgetExhausted) {
+                console.warn('llm: judge ' + jm + ' refused by the spend budget; stopping fallback chain');
+                _markInconclusive(options, 'budget_exhausted');
+                return null;
+            }
             if (e && (e.kind === 'refusal' || e.transient === false)) {
                 console.warn('llm: judge ' + jm + ' returned a non-transport outcome (' +
                     (e.kind || 'hard_error') + '); deferring to no_quorum without advancing chain');
@@ -865,11 +980,34 @@ async function _runLlm(opts) {
     // Per-call collector; a module-level one would cross-talk between the
     // concurrent rounds AttestationRound can have in flight at once.
     const usage  = {};
+
+    // Reserve the budget BEFORE dispatch, and only when a vendor actually resolved: a
+    // null intent means no credential could be reached, so the call cannot bill and
+    // must not consume budget. reserve() consumes in the same synchronous turn, which
+    // is what stops concurrent rounds from all clearing one pre-send check and all
+    // spending past the ceiling.
+    const token = intent ? _spendGuard().reserve(null) : null;
+    if (intent && !token) {
+        const err = _budgetExhaustedError(_spendGuard().noteBlocked());
+        // Close the intent out. An intent with no settle is the operator's post-crash
+        // reconciliation list, and a refusal is not a call in flight.
+        _recordSpendSettle(intent, 'blocked', usage, err);
+        throw err;
+    }
+
     try {
         const text = await _runLlmDispatch({ ...opts, _usage: usage });
+        // Re-price the reservation at the invoice when the transport reports one.
+        _spendGuard().commit(token, _actualCostUsdCents(usage));
         _recordSpendSettle(intent, 'ok', usage, null);
         return text;
     } catch (e) {
+        // Everything that throws from here reached a vendor - resolution and
+        // credentials already succeeded above - and a refusal or a truncation still
+        // bills, so the reservation STAYS spent. Over-counting fails closed and ages
+        // out within one window; handing budget back to a call that may have billed
+        // does not.
+        _spendGuard().commit(token, _actualCostUsdCents(usage));
         _recordSpendSettle(intent, 'error', usage, e);
         throw e;
     }

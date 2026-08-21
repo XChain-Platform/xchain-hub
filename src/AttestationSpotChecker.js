@@ -65,6 +65,17 @@ const DEFAULT_SCHEDULER_INTERVAL_MS = 60 * 60 * 1000;    // 1h between injection
 const DEFAULT_MAX_INJECTIONS_PER_TICK = 1;
 const STATS_TABLE                = 'attestation_validator_stats';
 
+// Retention window for the durable spot-check outcome table. One row lands per
+// judged (validator, request) and nothing but the reorg rollback ever deleted one,
+// so the table grew for the life of the deployment while every sibling hub audit
+// table carries an explicit window (telemetry_pings, oracle_submissions,
+// oracle_published_rounds, attest_published_requests). 90 days matches
+// attest_published_requests, the closest sibling. 0 disables the sweep.
+const DEFAULT_STATS_RETENTION_MS  = 90 * 24 * 60 * 60 * 1000;
+// The prune has nothing new to do for hours after it runs, and the DELETE scans on
+// checked_at, so throttle it rather than running it on every judged outcome.
+const STATS_SWEEP_MIN_INTERVAL_MS = 60 * 60 * 1000;
+
 // Re-judge queue. An ok finalization is TERMINAL: onRequestFinalized
 // deletes the queue entry before judging, so a judge that could not answer used
 // to drop the spot-check permanently and no later event re-triggered it. These
@@ -76,11 +87,12 @@ const DEFAULT_REJUDGE_SWEEP_MS   = 5 * 60 * 1000;        // 5m between re-judge 
 
 // Which inconclusive reasons can change on a later attempt. Only a reason whose
 // cause is the JUDGE being unavailable is retried: the provider is paused
-// (llm.js _markInconclusive 'provider_paused') or its endpoint is unreachable.
+// (llm.js _markInconclusive 'provider_paused'), its endpoint is unreachable, or
+// its rolling spend window is spent ('budget_exhausted', heals when the window rolls).
 // Every other reason is a property of the round's own bytes (meta_unrecognized,
 // meta_uncorroborated, no_proposals, unparseable, empty_verdict, truncated_pick)
 // so re-asking returns the same neutral verdict; those keep today's drop.
-const TRANSIENT_INCONCLUSIVE = ['provider_paused', 'unreachable'];
+const TRANSIENT_INCONCLUSIVE = ['provider_paused', 'unreachable', 'budget_exhausted'];
 
 class AttestationSpotChecker {
 
@@ -125,6 +137,18 @@ class AttestationSpotChecker {
         this._sweeper        = null;
         this._tickInFlight   = false;   // scheduler self-overlap guard, see _schedulerTick()
         this._sweepInFlight  = false;   // same guard for the re-judge sweep
+
+        // Durable-outcome retention, see _pruneStats(). 0 (explicitly configured)
+        // disables the sweep; anything unparseable or negative falls back to the
+        // default rather than silently disabling it.
+        this.statsRetentionMs = parseInt(cfg.SPOT_CHECK_STATS_RETENTION_MS);
+        if (!Number.isFinite(this.statsRetentionMs) || this.statsRetentionMs < 0) {
+            this.statsRetentionMs = DEFAULT_STATS_RETENTION_MS;
+        }
+        this.statsPruned   = 0;      // lifetime outcome rows deleted by the sweep
+        this._statsSweptAt = 0;      // throttle stamp; 0 means the first write sweeps
+        this._statsSweep   = null;   // in-flight handle: fire-and-forget, so this is
+                                     // what makes it awaitable in tests
     }
 
     _isTruthy(v){
@@ -544,10 +568,57 @@ class AttestationSpotChecker {
                 [String(pubkey).toLowerCase(), String(providerId), String(requestId),
                  Number(blockIndex) || 0, passed ? 1 : 0]
             );
+            // A row just landed, which is the only way this table ever grows, so this
+            // is where the retention sweep belongs (same reasoning as the sibling
+            // publishers' post-write sweeps). Throttled and fire-and-forget inside.
+            this._sweepStatsRetention();
         } catch (e) {
             console.warn('AttestationSpotChecker: stats persist failed for ' +
                          String(pubkey).substring(0, 16) + '...: ' + (e && e.message ? e.message : e));
         }
+    }
+
+    // Bound the durable outcome table. Age-based, and computed in DB-clock arithmetic
+    // on BOTH sides: checked_at is written by CURRENT_TIMESTAMP, so comparing it
+    // against a Node-side timestamp would fold host/DB clock skew straight into the
+    // cutoff. The window is floored at the rolling failure window, so a misconfigured
+    // short retention can never delete a row inside the span the slash trigger reasons
+    // over; at the 90-day default nothing reorg-reachable is anywhere near the cutoff,
+    // which is why no block-height clamp is needed on top. Returns rows deleted.
+    // Throws on a DB error, and the caller decides what that costs.
+    async _pruneStats(){
+        let db = this.hub && this.hub.db;
+        if (!db || typeof db.doQuery !== 'function') return 0;
+        if (!this.statsRetentionMs || this.statsRetentionMs <= 0) return 0;
+
+        let windowSec = Math.ceil(Math.max(this.statsRetentionMs, this.failureWindowMs) / 1000);
+        let res = await db.doQuery(
+            'DELETE FROM ' + STATS_TABLE + ' WHERE checked_at < DATE_SUB(NOW(), INTERVAL ? SECOND)',
+            [windowSec]);
+        let deleted = (res && res.affectedRows) ? Number(res.affectedRows) : 0;
+        if (deleted > 0) {
+            this.statsPruned += deleted;
+            console.log('AttestationSpotChecker: spot-check stats retention pruned ' + deleted +
+                        ' outcome row(s) older than ' + windowSec + 's');
+        }
+        return deleted;
+    }
+
+    // Housekeeping hook for the retention sweep. Throttled, because the prune has
+    // nothing new to delete for hours after it runs and the judge path calls it on
+    // every persisted outcome. Fire-and-forget with the rejection swallowed:
+    // retention is housekeeping and must never fail or stall a judging pass.
+    _sweepStatsRetention(){
+        if (!this.statsRetentionMs) return;
+        let now = Date.now();
+        if (now - this._statsSweptAt < STATS_SWEEP_MIN_INTERVAL_MS) return;
+        this._statsSweptAt = now;
+        this._statsSweep = this._pruneStats().catch((e) => {
+            console.warn('AttestationSpotChecker: spot-check stats retention sweep failed ' +
+                         '(the outcome table keeps growing until it succeeds): ' +
+                         (e && e.message ? e.message : e));
+            return 0;
+        });
     }
 
     // Reorg rollback: a confirmed reorg to `height` orphans every block above

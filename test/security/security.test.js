@@ -1224,6 +1224,9 @@ describe('Security Hardening', function () {
                 startAttestation: sinon.stub().resolves(),
                 startCapabilities: sinon.stub().resolves(),
                 getPriceSnapshots: sinon.stub().resolves([]),
+                // The with_watermark envelope carries the price-age bound the hub
+                // resolves for getprice; a fixed stand-in here, asserted below.
+                _oracleMaxAgeSeconds: sinon.stub().returns(900),
                 getPrice: sinon.stub().resolves(null),
                 getFeeQuote: sinon.stub().resolves({}),
                 getOracle: sinon.stub().returns(null),
@@ -1360,6 +1363,9 @@ describe('Security Hardening', function () {
             expect(result.snapshots).to.be.an('array');
             expect(result.watermark).to.be.at.least(before);
             expect(result.watermark).to.be.at.most(after);
+            // The price-age bound rides the same envelope, sourced from the hub
+            // rather than a literal (the stub above returns 900).
+            expect(result.oracleMaxPriceAgeSeconds).to.equal(900);
         });
 
         it('getpricesnapshots without with_watermark keeps the bare-array contract', async function () {

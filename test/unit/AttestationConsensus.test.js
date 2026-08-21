@@ -882,8 +882,10 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         // block-anchored model_vendors map, null when the round carried none.
         // pinnedApprovedModels rides the same way: the block-anchored
         // allowlist the meta gate judges against, null when the round carried none.
+        // outcome is the log-only could-not-judge channel agree() fills before an
+        // inconclusive null; empty on the way in.
         expect(agreeSpy.firstCall.args[1]).to.deep.equal({ pinnedJudgeModel: 'claude-opus-4-7',
-            pinnedVendors: null, pinnedApprovedModels: null, timeoutMs: 10000, expectedN: 2 });
+            pinnedVendors: null, pinnedApprovedModels: null, timeoutMs: 10000, expectedN: 2, outcome: {} });
     });
 
     // fetch() honours the block-anchored pinned model, so the allowlist
@@ -1193,6 +1195,38 @@ describe('AttestationConsensus: _maybeAdvanceFromProposals consensus outcomes', 
         expect(pending.winner.body.length).to.equal(0);
         expect(pending.winner.meta).to.equal('');
         expect(pending.status).to.equal('no_quorum');
+    });
+
+    // The provider's could-not-judge channel (options.outcome) is wired through so the
+    // log can tell a judge outage from a genuine not-equivalent verdict; the on-chain
+    // status stays no_quorum either way (the reason is leader-local, never canonical).
+    it('passes options.outcome to agree() and logs the inconclusive reason, still publishing no_quorum', async function () {
+        let seenOpts;
+        let reg = makeRealProviderRegistry((proposals, options) => {
+            seenOpts = options;
+            options.outcome.inconclusive = true;
+            options.outcome.reason = 'unreachable';
+            return null;
+        });
+        let warn = sinon.stub(console, 'warn');
+        let pending = await seedThreeProposals(reg);
+        warn.restore();
+        expect(seenOpts.outcome).to.be.an('object');
+        expect(pending.status).to.equal('no_quorum');
+        expect(pending.winner.body.length).to.equal(0);
+        let lines = warn.getCalls().map(c => String(c.args[0]));
+        expect(lines.some(l => /could not judge: reason=unreachable/.test(l))).to.equal(true);
+        expect(lines.some(l => /proposals diverged/.test(l))).to.equal(false);
+    });
+
+    it('keeps the diverged wording when agree() returns null without marking the outcome', async function () {
+        let reg = makeRealProviderRegistry(() => null);
+        let warn = sinon.stub(console, 'warn');
+        let pending = await seedThreeProposals(reg);
+        warn.restore();
+        expect(pending.status).to.equal('no_quorum');
+        let lines = warn.getCalls().map(c => String(c.args[0]));
+        expect(lines.some(l => /proposals diverged/.test(l))).to.equal(true);
     });
 
     it('supports an async agree() (judge_model style)', async function () {
@@ -2086,6 +2120,71 @@ describe('AttestationConsensus: byte_equality no_quorum + replay hardening', fun
         c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p2, Buffer.from('body-c')));
         await flush();
         expect(c.pending.get(RID).status).to.equal('no_quorum');
+    });
+
+    // item 5305: the self-derivation gate keys on the pinned STRATEGY while the
+    // sync/async shape of agree() rides the MODULE, so a byte_equality provider
+    // exporting an async agree() reaches this synchronous handler. Its pending
+    // Promise is truthy, and reading it as a derived ok winner would refuse every
+    // no_quorum PREPARE for that provider until the round hit its deadline. The
+    // gate must read a thenable as "cannot derive", say so, and consume the
+    // orphaned settlement so a rejecting agree() cannot fell the process.
+    it('reads an async agree() as underivable, not as a derived winner (5305)', function () {
+        let thenSpy = sinon.spy();
+        let cc = new AttestationConsensus(hub, {
+            getDef:    sinon.stub().returns({ max_response_bytes: 65536, consensus_strategy: 'byte_equality' }),
+            getModule: sinon.stub().returns({ agree: () => ({ then: thenSpy }) })
+        });
+        cc.pending.set(RID, {
+            requestId:   RID,
+            request:     { request_id: 'req' },
+            providerId:  'http_get',
+            redundancy:  1,
+            responsible: [{ pubkey: pub(p1) }],
+            myPubkey:    pub(me),
+            proposals:   new Map([[pub(me), { body: BODY, meta: '', sig: 'aa', status: 'ok' }]]),
+            prepares:    new Set(),
+            commits:     new Set(),
+            signatures:  new Map(),
+            winner:      null,
+            status:      'ok',
+            pinnedConsensusStrategy: 'byte_equality',
+            finalized:   false,
+            timer:       null
+        });
+        let errs = [];
+        sinon.stub(console, 'error').callsFake((m) => errs.push(String(m)));
+
+        cc._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, EMPTY, '', 'no_quorum'));
+
+        let pending = cc.pending.get(RID);
+        expect(pending.winner).to.equal(null);                    // not adopted on a truthy Promise
+        expect(pending.signatures.has(pub(p1))).to.equal(false);  // and not co-signed
+        expect(thenSpy.calledOnce).to.equal(true);                // settlement consumed, not orphaned
+        expect(errs.some(m => m.indexOf('async agree()') !== -1)).to.equal(true);
+    });
+
+    // item 5306: the inbound body gate is pinned for the round's lifetime from the
+    // cap the round fetched under, so a hotReload that lowers max_response_bytes
+    // mid-round cannot make this hub reject peer bodies the size of its own.
+    it('gates inbound bodies on the round-pinned cap, not the live registry (5306)', async function () {
+        let reg = makeRealProviderRegistry(require('../../src/providers/http_get').agree, 'byte_equality', 65536);
+        c = new AttestationConsensus(hub, reg);
+        let rs = roundState(me, [me, p1, p2], BODY, 'http_get', 3);
+        rs.pinnedMaxResponseBytes = 65536;
+        await c.propose(RID, rs);
+        await flush();
+        let pending = c.pending.get(RID);
+        expect(pending.maxBodyB64Length).to.equal(Math.ceil(65536 * 1.4));
+        // Governance lowers the cap mid-round; the registry now reports 4 bytes.
+        reg.getDef.returns({ max_response_bytes: 4, consensus_strategy: 'byte_equality' });
+        // Control: a live read would now reject this body outright.
+        expect(c._maxBodyB64Length('http_get')).to.be.below(BODY.toString('base64').length);
+        c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, BODY));
+        await flush();
+        // Accepted under the pinned cap: the live read would have rejected a body
+        // byte-identical to the one this hub proposed itself.
+        expect(pending.proposals.has(pub(p1))).to.equal(true);
     });
 
     // item 2640: a torn-down rid drops (not parks) late envelopes, and a fresh

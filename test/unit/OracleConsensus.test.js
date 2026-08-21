@@ -89,11 +89,34 @@ describe('OracleConsensus', function () {
             expect(oc._aggregate(subs, 'BTC/USD')).to.be.null;
         });
 
-        it('deviation gate is 2-source only: three divergent submissions still finalize', function () {
-            // The gate never applies for N >= 3 (the trim provides outlier protection); a
-            // 3-source round with a wide spread still returns the trimmed median.
+        it('deviation gate does not apply to an odd count: three divergent submissions still finalize', function () {
+            // An odd post-trim count medians to a REAL submitted value, so at least one
+            // source stands behind the published price and the gate has nothing to refuse.
             let subs = submissionsForPair([100, 200, 300]);
             expect(oc._aggregate(subs, 'BTC/USD')).to.equal('200.00000000');
+        });
+
+        it('4 submissions in a 2-2 split: the post-trim pair trips the gate and drops (item 5333)', function () {
+            // ceil(4 * 0.15) = 1 → after trim: [100, 111], whose mean 105.5 puts EVERY
+            // submitter 5.21% out, past the 5% band. Gating only the RAW count missed this:
+            // the leader published 105.5, every follower re-derived a single camp value over
+            // the proposer-excluded set, tripped the co-sign band and rejected the whole
+            // proposal, wedging the round for every pair.
+            let subs = submissionsForPair([100, 100, 111, 111]);
+            expect(oc._aggregate(subs, 'BTC/USD')).to.be.null;
+        });
+
+        it('6 submissions in a 3-3 split: the gate still fires after the trim (item 5333)', function () {
+            // ceil(6 * 0.15) = 1 → after trim: [100, 100, 111, 111] → middle pair 100/111.
+            // A post-trim length of exactly 2 is not the only wedge shape.
+            let subs = submissionsForPair([100, 100, 100, 111, 111, 111]);
+            expect(oc._aggregate(subs, 'BTC/USD')).to.be.null;
+        });
+
+        it('4 submissions split inside the band: still publishes the even-split mean', function () {
+            // After trim: [100, 103] → spread 3/203 = 1.48% < 5%, so the pair publishes.
+            let subs = submissionsForPair([100, 100, 103, 103]);
+            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('101.50000000');
         });
 
         it('three submissions: returns middle value', function () {
@@ -1564,6 +1587,22 @@ describe('OracleConsensus', function () {
 
             let pending2 = { round: 5, btcBlockTime: 1700000000, btcBlockHeight: 799000, prices, signatures: new Map() };
             expect(oc._verifyAndStoreSig(pending2, id.getPubkeyHex(), 'ff'.repeat(64))).to.be.false;
+        });
+
+        it('_verifyAndStoreSig keys the map on lowercase hex, so a mixed-case repeat dedupes (item 5334)', function () {
+            let id = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
+            let prices = [{ coinPair: 'BTC/USD', price: '100000' }];
+            let payload = oc._buildPriceV0Payload(5, 1700000000, prices, 799000);
+            let sig = id.sign(payload);
+            let pending = { round: 5, btcBlockTime: 1700000000, btcBlockHeight: 799000, prices, signatures: new Map() };
+
+            // Uppercase hex verifies (hex decode is case-insensitive) and lands lowercase.
+            expect(oc._verifyAndStoreSig(pending, id.getPubkeyHex().toUpperCase(), sig)).to.be.true;
+            expect([...pending.signatures.keys()]).to.deep.equal([id.getPubkeyHex()]);
+
+            // The same key in the other casing is a duplicate, not a second sigsArray entry.
+            expect(oc._verifyAndStoreSig(pending, id.getPubkeyHex(), sig)).to.be.false;
+            expect(pending.signatures.size).to.equal(1);
         });
     });
 

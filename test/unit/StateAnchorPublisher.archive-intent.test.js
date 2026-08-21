@@ -196,6 +196,45 @@ describe('StateAnchorPublisher: durable at-most-once archive intent', function (
     });
 
     describe('_startArchiveRound', function () {
+        // flush() hands over whatever hub._resolveBtcLatestBlock() returned, and that is
+        // null on a stale pushed tip, an over-lag indexer, or a failed RPC. A non-finite
+        // block makes _getActiveOraclePublishPubkeys take its block-UNPINNED branch (the
+        // per-hub gossip registry, scoped by its own contract to the coarse sender
+        // pre-filter), so the round would elect over a set that differs hub to hub on a
+        // path that spends real DOGE. Defer instead, and do it before the resolver is
+        // consulted at all.
+        for (const bad of [null, undefined, NaN]) {
+            it('defers the round on an unresolved BTC tip (' + String(bad) + ') without electing', async function () {
+                const db = mkDb({ rows: ARCHIVE_ROWS });
+                const { pub, identity } = mkPub(db);
+                let elections = 0;
+                pub._getActiveOraclePublishPubkeys = async () => {
+                    elections++;
+                    return [identity.getPubkeyHex().toLowerCase()];
+                };
+                let broadcasts = 0;
+                const out = await pub._startArchiveRound(
+                    { broadcastFn: async () => { broadcasts++; return { txid: 'fresh' }; } }, bad);
+                expect(out, 'an unresolved tip must defer, like the empty-set case').to.equal('none');
+                expect(elections, 'the unpinned election set was never resolved').to.equal(0);
+                expect(broadcasts, 'no DOGE spent on an unpinned election').to.equal(0);
+                expect(sqlHits(db, 'COALESCE(GREATEST(')).to.have.length(0);   // no seq drawn
+            });
+        }
+
+        it('still elects and draws a seq on a finite tip (the guard is not a blanket stop)', async function () {
+            const db = mkDb({ rows: ARCHIVE_ROWS });
+            const { pub, identity } = mkPub(db);
+            let elections = 0;
+            pub._getActiveOraclePublishPubkeys = async () => {
+                elections++;
+                return [identity.getPubkeyHex().toLowerCase()];
+            };
+            await pub._startArchiveRound({ broadcastFn: async () => ({ txid: 'fresh' }) }, BLOCK);
+            expect(elections, 'a finite tip still resolves the election set').to.be.greaterThan(0);
+            expect(sqlHits(db, 'COALESCE(GREATEST(')).to.have.length(1);
+        });
+
         it('holds the round while an unsettled intent survives, before a batch seq is even drawn', async function () {
             const db = mkDb({ rows: ARCHIVE_ROWS, archives: [live({ txid: 'earlier-v1' })] });
             const { pub } = mkPub(db);

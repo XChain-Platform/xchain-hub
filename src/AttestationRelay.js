@@ -106,6 +106,8 @@ const SpendGuard             = require('./lib/spend_guard.js');
 const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
 const { AtMostOnce, isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
 const { allCanonicalInts } = require('./lib/canonical_int.js');
+const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
+const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
 
 // The integer fields each relay leg signs VERBATIM and the indexer re-derives with
 // parseInt() off the v3/v4 wire. request_id / response_hash are hex, and
@@ -1029,9 +1031,15 @@ class AttestationRelay {
                 'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?)',
                 [block, capability, pubkey, amount, source]);
             if(this.broadcaster){
+                // Select back on the full widened uq_cap_snap
+                // (snapshot_block, capability, signing_pubkey, source). A pubkey-only
+                // select-back re-read the SAME row for every source of a delegated key
+                // (LIMIT 1), so the mirror stream carried one source. This writer has no
+                // caller today; the widening goes in now so the next one does not inherit
+                // the drift. Inert below SWQ, where source='' and there is one row per key.
                 let r = await this.db.doQuery(
-                    'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? LIMIT 1',
-                    [block, capability, pubkey]);
+                    'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
+                    [block, capability, pubkey, source]);
                 if(r.length) this.broadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
             }
         }
@@ -1183,7 +1191,17 @@ class AttestationRelay {
                          ' leg of ' + rid.substring(0, 16) + '...; retained for a later sweep');
             return;
         }
-        if(!this.spendGuard.allow()){
+        // RESERVE rather than allow(): the send below is AWAITED and this method has
+        // two concurrent drivers, the rank-0 broadcast inside the unawaited
+        // 'match:finalized' handler and the _poll sweep, with nothing serializing them.
+        // src/lib/spend_guard.js forbids the pure allow()/record() pair around an
+        // awaited send precisely for that shape: every in-flight caller reads the same
+        // pre-send budget and they all spend past the ATTEST_RELAY count and USD
+        // ceilings by the concurrency width. reserve() consumes the budget in this
+        // synchronous turn, so the ceiling holds by construction; the reservation IS
+        // the recorded spend, so record() must never be called on this path.
+        let spendToken = this.spendGuard.reserve();
+        if(!spendToken){
             console.warn(this.spendGuard.noteBlocked() + ' (' + rid.substring(0, 16) + '...); retained for a later window');
             return;
         }
@@ -1191,6 +1209,9 @@ class AttestationRelay {
         // The intent record goes down BEFORE the send so a crash mid-flight is
         // recoverable as ambiguous rather than invisible. See _loadWal.
         if(!this._appendWal({ ts: Date.now(), rid: rid, leg: phase, phase: 'intent' })){
+            // Nothing goes on the wire without a durable record, so the leg stays
+            // retryable and the reserved budget goes back.
+            this.spendGuard.release(spendToken);
             console.error('AttestationRelay: durable WAL write FAILED for ' + rid.substring(0, 16) +
                           '...; skipping broadcast (no on-chain spend without a durable record)');
             return;
@@ -1200,7 +1221,7 @@ class AttestationRelay {
         try {
             let result = await broadcaster(entry.wire);
             this._broadcastSucceeded++;
-            this.spendGuard.record();
+            this.spendGuard.commit(spendToken);   // the reservation IS the fee charged to the window
             state.published.mark(rid);
             state.wire.delete(rid);
             this._appendWal({ ts: Date.now(), rid: rid, leg: phase, phase: 'sent', txid: (result && result.txid) || null });
@@ -1219,11 +1240,20 @@ class AttestationRelay {
             // knows ran before the send. Without this a transient "no UTXOs available"
             // would suppress the request permanently.
             if(!e._relayPreSend && isAmbiguousSendError(e)){
+                // COMMIT, not release: this branch already treats the tx as possibly on
+                // the wire, marks the leg published and never retries it, so the fee may
+                // have been paid. Keeping the reservation charges the window for it,
+                // which fails closed; releasing would hand budget back for a spend
+                // nothing will re-attempt.
+                this.spendGuard.commit(spendToken);
                 state.published.mark(rid);
                 this._appendWal({ ts: Date.now(), rid: rid, leg: phase, phase: 'sent', txid: null, ambiguous: true });
                 console.error('AttestationRelay: AMBIGUOUS ' + version + ' broadcast failure for ' + rid.substring(0, 16) +
                               '... (the tx may have reached the ' + entry.coin + ' node); not retrying: ', e);
             } else {
+                // A pre-send or clean failure left nothing on the wire and the leg stays
+                // retryable, so the reserved budget goes back.
+                this.spendGuard.release(spendToken);
                 this._appendWal({ ts: Date.now(), rid: rid, leg: phase, phase: 'failed' });
                 console.error('AttestationRelay: ' + version + ' broadcast failed for ' + rid.substring(0, 16) + '...: ', e);
             }
@@ -1309,13 +1339,22 @@ class AttestationRelay {
             if(!utxos || (Array.isArray(utxos) && utxos.length === 0))
                 throw new Error('no UTXOs available for ' + address);
             let psbtResult = await encoder.createTx({
-                utxos:    utxos,
+                // Forwarded only while inside the encoder's caller-facing
+                // MAX_UTXO_COUNT; past it the param is omitted so the encoder selects
+                // from its own uncapped fetch of this same address
+                // (lib/encoder_utxo_forward.js).
+                utxos:    forwardableUtxos(utxos, 'AttestationRelay'),
                 pubkey:   address,
                 data:     payload,
                 change:   address,
                 encoding: 'P2SH'
             });
             if(!psbtResult || !psbtResult.psbt) throw new Error('encoder returned no PSBT');
+            // Refuse phase 1 of a two-transaction encoding before anything is signed: this
+            // pipeline has no reveal, so broadcasting the P2SH funding tx would publish a
+            // relay leg no indexer can decode and strand the carrier value
+            // (lib/two_phase_guard.js).
+            assertSingleTxEncoding(psbtResult, 'AttestationRelay');
             // The coin argument is what lets one operator module hold a key per chain;
             // a single-key module ignores it, exactly as it does today.
             txHex = await walletSignFn(psbtResult.psbt, coin || HOME_CHAIN);

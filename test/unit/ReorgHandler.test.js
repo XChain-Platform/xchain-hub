@@ -971,13 +971,24 @@ describe('ReorgHandler', function () {
         it('queries with limit', async function () {
             hub.db.doQuery.resolves([]);
             await rh.getReorgHistory(10);
-            expect(hub.db.doQuery.getCall(0).args[1]).to.deep.equal([10]);
+            expect(hub.db.doQuery.getCall(0).args[0]).to.include('LIMIT 10');
         });
 
         it('defaults to 50', async function () {
             hub.db.doQuery.resolves([]);
             await rh.getReorgHistory();
-            expect(hub.db.doQuery.getCall(0).args[1]).to.deep.equal([50]);
+            expect(hub.db.doQuery.getCall(0).args[0]).to.include('LIMIT 50');
+        });
+
+        // Server-side page cap: this RPC must not depend on callers behaving
+        // (e.g. the explorer passing {limit:500}) or on the API layer's generic
+        // validateLimit 10000 ceiling. Matches CapabilityRegistry#listState and
+        // Governance#getProposals/#getVotes, which each cap at 500 in their own SQL.
+        it('caps at 500 even when a larger limit is requested', async function () {
+            hub.db.doQuery.resolves([]);
+            await rh.getReorgHistory(99999);
+            expect(hub.db.doQuery.getCall(0).args[0]).to.include('LIMIT 500');
+            expect(hub.db.doQuery.getCall(0).args[0]).to.not.include('LIMIT 99999');
         });
     });
 

@@ -257,7 +257,16 @@ class Governance extends EventEmitter {
         this._messageHandler = (envelope) => this._handleMessage(envelope);
         this.peerManager.on('message', this._messageHandler);
 
-        this._tallyTimer = setInterval(() => this._checkExpiredProposals(), this.tallyInterval);
+        // Catch the tick's rejection, the same idiom every other periodic loop in the
+        // hub uses. _checkExpiredProposals guards its two awaits but not the leader
+        // check between them, so a data fault there (an unorderable proposal_id, a
+        // non-iterable result row set) rejects the tick's promise. The hub registers no
+        // process.on('unhandledRejection'), and Node's default turns an unhandled
+        // rejection into process death, so without this a per-tick fault kills the hub
+        // instead of logging and re-arming, which is what the tally path intends.
+        this._tallyTimer = setInterval(() => {
+            this._checkExpiredProposals().catch(e => console.error('Governance tally tick error:', e));
+        }, this.tallyInterval);
 
         console.log('Governance engine started (voting period: ' + (this.votingPeriod / 86400000).toFixed(1) + ' days)');
     }

@@ -66,14 +66,23 @@ describe('Boundary: RewardTracker', function () {
             expect(total).to.be.closeTo(9.99999999, 1e-9);
         });
 
-        it('10 / 7 → toFixed(8) output equals (10/7).toFixed(8)', async function () {
+        // The 9th decimal of 10/7 is 8, so this is the case where the old float
+        // + toFixed(8) split rounded UP to 1.42857143 and minted a satoshi: 7 x
+        // that is 10.00000001, above the budget it split and one satoshi off
+        // what the indexer's bcmulfloor derivation credits. The expectation is
+        // written out rather than recomputed with the construct under test, so
+        // it pins the value and not the code.
+        it('10 / 7 = 1.42857142 (floored; half-up would mint a satoshi)', async function () {
             let participants = Array.from({ length: 7 }, (_, i) => hexPubkey(i + 1));
             await rt.distributeRewards(1, participants);
 
-            let expected = (10 / 7).toFixed(8);
-            let amounts  = insertAmounts();
+            let amounts = insertAmounts();
             expect(amounts).to.have.length(7);
-            amounts.forEach(a => expect(a).to.equal(expected));
+            amounts.forEach(a => expect(a).to.equal('1.42857142'));
+
+            // Conservation: the recorded rows never sum above the round budget.
+            let total = amounts.reduce((sum, a) => sum + parseFloat(a), 0);
+            expect(total).to.be.at.most(10);
         });
 
         it('10 / 100 = 0.10000000 (exact)', async function () {

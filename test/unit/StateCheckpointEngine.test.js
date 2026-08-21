@@ -671,6 +671,35 @@ describe('StateCheckpointEngine', function () {
             expect(nd.db.checkpoints.length, 'nothing persisted').to.equal(0);
         });
 
+        // Third call site of the same predicate. The indexer byte-match further down
+        // _handleSignReq rebuilds the canonical with the network OUR OWN indexer reports,
+        // so it sees record-vs-indexer drift and is blind to record-vs-DEPLOYMENT drift:
+        // co-sign membership resolves the SWQ gate on this.network, so without this the
+        // follower contributes a signature under one plane and then refuses the finalized
+        // checkpoint under the other.
+        it('co-sign REFUSES a checkpoint whose network disagrees with the deployment network', async function () {
+            let bus   = buildMesh(2, { btcBlock: 200 });
+            let nd    = bus.nodes[0];
+            let other = bus.nodes[1];
+            nd.engine.network = 'mainnet';                 // deployment plane
+            let types = [];
+            let pm    = nd.engine.peerManager;
+            let orig  = pm.broadcast.bind(pm);
+            pm.broadcast = (type, data) => { types.push(type); return orig(type, data); };
+            let threw = null;
+            try {
+                await nd.engine._handleSignReq({
+                    type: 'XCHK_SIGN_REQ', sender: other.pubkey,
+                    data: { checkpoint: cp(Object.assign({}, ROOTED, { network: 'regtest' })),
+                            sig_pubkey: other.pubkey, sig: 'a' }
+                });
+            } catch(e){ threw = e; }
+            expect(threw, 'a cross-network SIGN_REQ must be refused, not silently co-signed').to.not.equal(null);
+            expect(String(threw.message)).to.match(/network mismatch in co-sign/);
+            expect(String(threw.message), 'names BOTH values so it is diagnosable').to.match(/regtest[\s\S]*mainnet/);
+            expect(types.includes('XCHK_SIGN'), 'no co-signature left the hub').to.equal(false);
+        });
+
         it('accepts when the two agree', async function () {
             let bus = buildMesh(1, { btcBlock: 200 });
             let nd  = bus.nodes[0];

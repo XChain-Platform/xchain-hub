@@ -126,7 +126,7 @@
     },
     {
       "name": "getpricesnapshots",
-      "summary": "PBFT-finalized price snapshots (trimmed-median rounds). status='all' also returns skipped/disputed rows; with_watermark wraps the rows as {watermark, snapshots} with a hub-clock epoch-seconds watermark.",
+      "summary": "PBFT-finalized price snapshots (trimmed-median rounds). status='all' also returns skipped/disputed rows; with_watermark wraps the rows as {watermark, oracleMaxPriceAgeSeconds, snapshots} with a hub-clock epoch-seconds watermark and the price-age bound getprice enforces.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -215,10 +215,16 @@
             },
             {
               "type": "object",
-              "description": "Returned when with_watermark is truthy: hub-clock epoch seconds plus the rows.",
+              "description": "Returned when with_watermark is truthy: hub-clock epoch seconds, the price-age bound getprice enforces (oracleMaxPriceAgeSeconds, null when the registry read fails), plus the rows.",
               "properties": {
                 "watermark": {
                   "type": "number"
+                },
+                "oracleMaxPriceAgeSeconds": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
                 },
                 "snapshots": {
                   "type": "array",
@@ -849,6 +855,50 @@
         "schema": {}
       },
       "x-auth": "x-api-key header, when HUB_API_KEY is configured"
+    },
+    {
+      "name": "getslashproposals",
+      "summary": "List recorded slash proposals (all statuses), optionally filtered by status and/or validator pubkey. Rows with status \"pending\" are UNADJUDICATED accusations recorded as evidence, not findings of guilt; enforcement happens only through a passed SLASH_PENALTY governance vote. The verbatim evidence blob is never served: each row carries evidence_hash, the SHA-256 of the stored evidence text, which is the same digest the SLASH_PENALTY evidence hash is built from.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "status",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "validator_pubkey",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      }
     },
     {
       "name": "vote",

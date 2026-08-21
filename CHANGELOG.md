@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-08-18
+
+### Added
+- A read RPC for slash proposals that lists every status, so a pending accusation is visible as unadjudicated rather than hidden, and returns each accusation's evidence as a digest instead of verbatim text.
+- Service database descriptors accept `self_sync`, so a consumer that maintains its own checkpoint mirror can declare that mode.
+
+### Changed
+- Refreshed the bundled chain-registry snapshot, which carries the per-coin donation defaults.
+
+### Fixed
+- Retraction consensus fails closed when the capability-snapshot persist fails, instead of proceeding on a snapshot that was never durably recorded.
+- Oracle publishing and attestation relay reserve their spend budget before an awaited broadcast, so concurrent sends can no longer spend past the per-window ceiling.
+- A round the spend ceiling declined no longer leaves an intent-only record for startup to quarantine.
+- Every publisher refuses phase one of a two-transaction encoding before anything is signed, because those pipelines have no reveal and would otherwise broadcast an undecodable payload.
+- A spent spend budget is reported as a transient could-not-judge that is re-judged when the window rolls, rather than reading as a vendor outage.
+- Oracle diagnostics carry per-read error flags, so a failed read no longer renders like a clean round.
+- The price-snapshot read carries the price-age bound alongside its watermark.
+- The LLM envelope rejects a non-string system prompt and a non-positive-integer version ceiling.
+- The block-pinned election query falls back to the local capability snapshot and warns when membership stays unresolved, instead of electing an empty set and anchoring nothing in silence.
+- A refused proposal consumes its rotation slot, so a hub that was not the leader for one slot can propose again instead of retrying the same slot forever.
+- Publishers forward the whole UTXO set to the encoder rather than a truncated fetch.
+- The reorg history read is capped server-side at 500 rows instead of trusting its callers.
+- The full-node verifier set resolves at the raw epoch height again; the earlier buried-height change misattributed epoch participation and is withdrawn in lockstep with the indexer.
+- Corrected an anchor-reward header that pointed maintainers at the hub's own copy instead of the indexer twin.
+- Review-round fixes across the reward split, the round gates and the capability select-back.
+- Code-review round fixes across consensus, federation, and API code (two rounds, 68 files).
+
+### Security
+- Raised the brace-expansion and js-yaml dependency floors and the advisory guards that pin them.
+
 ## [0.9.0] - 2026-08-14
 
 First release of the XChain Platform release train. Every component in the train

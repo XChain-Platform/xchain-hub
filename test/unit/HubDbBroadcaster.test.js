@@ -86,6 +86,52 @@ describe('HubDbBroadcaster', function () {
             let b = new HubDbBroadcaster({});
             expect(b.maxBufferedMessages).to.equal(50);
         });
+
+        // A NaN cap makes every `size >= cap` comparison false, so an unparseable
+        // knob would unarm the caps entirely rather than degrade to the default.
+        it('falls back to the defaults on unparseable knobs', function () {
+            sinon.stub(console, 'warn');
+            let b = new HubDbBroadcaster({
+                WS_MAX_PER_IP:            'many',
+                WS_MAX_SUBSCRIBERS:       'lots',
+                WS_BACKPRESSURE_LIMIT:    'some',
+                WS_WATERMARK_INTERVAL_MS: 'soon'
+            });
+            expect(b.maxPerIp).to.equal(100);
+            expect(b.maxSubscribers).to.equal(1000);
+            expect(b.maxBufferedMessages).to.equal(50);
+            expect(b.watermarkIntervalMs).to.equal(10000);
+            b.stop();
+        });
+
+        it('falls back to the defaults on negative and zero knobs', function () {
+            sinon.stub(console, 'warn');
+            let b = new HubDbBroadcaster({
+                WS_MAX_PER_IP:            '-1',
+                WS_MAX_SUBSCRIBERS:       '-100',
+                WS_BACKPRESSURE_LIMIT:    '0',
+                WS_WATERMARK_INTERVAL_MS: '-5000'
+            });
+            expect(b.maxPerIp).to.equal(100);
+            expect(b.maxSubscribers).to.equal(1000);
+            expect(b.maxBufferedMessages).to.equal(50);
+            expect(b.watermarkIntervalMs).to.equal(10000);
+            b.stop();
+        });
+
+        it('still honours well-formed positive knobs', function () {
+            let b = new HubDbBroadcaster({
+                WS_MAX_PER_IP:            '7',
+                WS_MAX_SUBSCRIBERS:       '9',
+                WS_BACKPRESSURE_LIMIT:    '11',
+                WS_WATERMARK_INTERVAL_MS: '2500'
+            });
+            expect(b.maxPerIp).to.equal(7);
+            expect(b.maxSubscribers).to.equal(9);
+            expect(b.maxBufferedMessages).to.equal(11);
+            expect(b.watermarkIntervalMs).to.equal(2500);
+            b.stop();
+        });
     });
 
     // ── addSubscriber ────────────────────────────────────────────────────────
@@ -121,6 +167,38 @@ describe('HubDbBroadcaster', function () {
             let msg = JSON.parse(ws.send.firstCall.args[0]);
             expect(msg.max_ids).to.have.property('price_snapshots', 10);
             expect(msg.max_ids).to.have.property('oracle_prices', 20);
+        });
+
+        // The consumer's window-repair catch-up (xchain-indexer HubDbSync) is gated on
+        // this frame carrying an entry for the table, and skips any table it does not
+        // find here. Both members of the indexer's HUB_STATE_TABLES mirror set are
+        // outside its FULL_REPAGE_TABLES, so the advertised ceiling is the only repair
+        // they get; anchor_reward_attestations was omitted when it joined the set, which
+        // silently disabled the repair for the table the BTC indexer derives
+        // COLLECT-spendable validator_rewards from. Asserted by table name so the next
+        // mirror-set addition has to be advertised too.
+        it('advertises a max_id for every hub-state mirror table (state_checkpoints + anchor_reward_attestations)', async function () {
+            let asked = [];
+            let db = makeDb({
+                doQuery: sinon.stub().callsFake(async (sql) => {
+                    asked.push(String(sql));
+                    return [{ max_id: 7 }];
+                })
+            });
+            let b  = new HubDbBroadcaster({}, db);
+            let ws = makeMockWs();
+            await b.addSubscriber(ws);
+            let msg = JSON.parse(ws.send.firstCall.args[0]);
+            for (const table of ['state_checkpoints', 'anchor_reward_attestations']) {
+                expect(msg.max_ids, 'ready frame omits ' + table + ', so the consumer never runs its gap catch-up for it')
+                    .to.have.property(table, 7);
+                expect(asked.some(sql => sql.includes('FROM ' + table)),
+                    'no MAX(id) query was issued for ' + table).to.equal(true);
+            }
+            // Append-only table: an unfiltered ceiling is what the snapshot feed serves,
+            // so a status filter here would strand the consumer's catch-up.
+            expect(asked.some(sql => sql.includes('FROM anchor_reward_attestations') && sql.includes('status')))
+                .to.equal(false);
         });
 
         it('handles DB error in max_id queries gracefully', async function () {

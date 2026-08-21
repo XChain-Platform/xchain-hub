@@ -68,6 +68,8 @@ const axios         = require('axios');
 const EncoderClient = require('./EncoderClient.js');
 const SpendGuard    = require('./lib/spend_guard.js');
 const { AtMostOnce, isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
+const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
+const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
 
 const APPROX_BTC_BLOCK_MS  = 600000;  // ~10 min; used to translate the failover
                                       // window from blocks to a wall-clock silence
@@ -1240,7 +1242,10 @@ class AttestationPublisher {
             throw new Error('no UTXOs available for ' + this.btcAddress);
         }
         let psbtResult = await this.encoder.createTx({
-            utxos:    utxos,
+            // Forwarded only while inside the encoder's caller-facing MAX_UTXO_COUNT;
+            // past it the param is omitted so the encoder selects from its own
+            // uncapped fetch of this same address (lib/encoder_utxo_forward.js).
+            utxos:    forwardableUtxos(utxos, 'AttestationPublisher'),
             // The encoder's P2SH path runs bitcoin.address.fromBase58Check() on this
             // field, so it must be the base58check address, not the raw hex pubkey.
             pubkey:   this.btcAddress,
@@ -1249,6 +1254,10 @@ class AttestationPublisher {
             encoding: 'P2SH'  // response payloads can exceed 80-byte OP_RETURN
         });
         if (!psbtResult || !psbtResult.psbt) throw new Error('encoder returned no PSBT');
+        // Refuse phase 1 of a two-transaction encoding before anything is signed: this
+        // pipeline has no reveal, so broadcasting the P2SH funding tx would publish an
+        // ATTEST no indexer can decode and strand the carrier value (lib/two_phase_guard.js).
+        assertSingleTxEncoding(psbtResult, 'AttestationPublisher');
         let txHex = await this.walletSignFn(psbtResult.psbt);
         if (!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
         // Everything above is pre-send (build/sign; no money moved). Only broadcast_tx

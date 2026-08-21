@@ -407,8 +407,14 @@ class OracleRound {
         // per-pair skip markers _storeSnapshot writes for partially-dropped rounds
         // (item #180) must not inflate the feed-outage count. Those partial drops
         // surface separately as droppedPairs.
+        // Each diagnostic read carries its own *ReadError marker (item 5548):
+        // without one a failed read serves the same empty array as a clean
+        // round, and a consumer keying warn on droppedPairCount > 0 reads the
+        // failure as healthy. Additive booleans, always emitted, false on success.
         let skippedRounds = [];
         let droppedPairs = [];
+        let skippedRoundsReadError = false;
+        let droppedPairsReadError = false;
         try {
             let rows = await this.db.doQuery(
                 `SELECT DISTINCT s.round_number FROM price_snapshots s
@@ -419,6 +425,7 @@ class OracleRound {
             skippedRounds = rows.map(r => Number(r.round_number));
         } catch (err) {
             // Non-fatal: diagnostics still return the in-memory state if the read fails
+            skippedRoundsReadError = true;
             console.warn('Oracle: failed to read skipped rounds for diagnostics:', err);
         }
         try {
@@ -434,6 +441,7 @@ class OracleRound {
                  ORDER BY s.round_number DESC, s.coin_pair ASC LIMIT 50`);
             droppedPairs = rows.map(r => ({ round: Number(r.round_number), coinPair: r.coin_pair }));
         } catch (err) {
+            droppedPairsReadError = true;
             console.warn('Oracle: failed to read per-pair drops for diagnostics:', err);
         }
 
@@ -445,8 +453,10 @@ class OracleRound {
             submissions:              info,
             skippedRounds:            skippedRounds,
             skippedCount:             skippedRounds.length,
+            skippedRoundsReadError:   skippedRoundsReadError,
             droppedPairs:             droppedPairs,
             droppedPairCount:         droppedPairs.length,
+            droppedPairsReadError:    droppedPairsReadError,
             failedSubmissionPersists:      this.failedSubmissionPersists,
             lastSubmissionPersistFailureRound: this.lastSubmissionPersistFailureRound,
             lastSubmissionPersistFailureCount: this.lastSubmissionPersistFailureCount,

@@ -626,6 +626,17 @@ describe('OracleRound (extra coverage)', function () {
             expect(info).to.have.property('currentRound');
             expect(info.skippedRounds).to.deep.equal([]);
             expect(info.droppedPairs).to.deep.equal([]);
+            // Item 5548: the failure is marked, so the empty arrays cannot be
+            // mistaken for a clean round downstream.
+            expect(info.skippedRoundsReadError).to.equal(true);
+            expect(info.droppedPairsReadError).to.equal(true);
+        });
+
+        it('marks both read flags false when the diagnostic reads succeed', async function () {
+            hub.db.doQuery = sinon.stub().resolves([]);
+            let info = await or.getSubmissionsInfo();
+            expect(info.skippedRoundsReadError).to.equal(false);
+            expect(info.droppedPairsReadError).to.equal(false);
         });
     });
 

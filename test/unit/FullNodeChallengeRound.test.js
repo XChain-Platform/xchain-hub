@@ -366,6 +366,32 @@ describe('FullNodeChallengeRound', function () {
             const set = await eng._eligibleVerifiers(288);
             expect([...set]).to.deep.equal([V1]);
         });
+        it('ALARMS (and still proceeds) when the indexer marks the verifier set truncated', async function () {
+            // getfullnodeverifiers carries `truncated` so a hub can say the set hit
+            // VALIDATOR_QUERY_LIMIT. This set is the 2/3+1 divisor, so consuming a cap
+            // silently lowers the quorum bar with no operator signal. Alarm-and-proceed
+            // (not abstain): every indexer truncates identically, so the capped set is
+            // still cross-hub deterministic, and refusing would halt the round the
+            // moment the verifier set outgrows the cap.
+            axiosStub.post.callsFake(async (url, body) => {
+                const m = body.method;
+                if (m === 'getfullnodeverifiers')
+                    return { data: { result: { validators: [{ pubkey: V2 }], truncated: true } } };
+                return { data: { result: null } };
+            });
+            const logged = sinon.stub(console, 'error');
+            const eng = new FullNodeChallengeRound(makeHub());
+            const set = await eng._eligibleVerifiers(288);
+            expect([...set].sort(), 'the capped set is still consumed').to.deep.equal([V1, V2].sort());
+            expect(logged.calledWithMatch('TRUNCATED'), 'no truncation alarm was raised').to.equal(true);
+        });
+        it('does not alarm when the indexer does not mark the set truncated', async function () {
+            wireRpc({ verifiers: [{ pubkey: V2 }] });
+            const logged = sinon.stub(console, 'error');
+            const eng = new FullNodeChallengeRound(makeHub());
+            await eng._eligibleVerifiers(288);
+            expect(logged.calledWithMatch('TRUNCATED')).to.equal(false);
+        });
         it('_runEpoch abstains (creates no round, emits no verdict) when the verifier set is unresolved', async function () {
             // RPC-failure abstain regression: getblockhashes succeeds (so _runEpoch is
             // reached) but getfullnodeverifiers fails. The hub must skip the epoch:

@@ -1239,3 +1239,88 @@ describe('PriceAggregator ingest-fence rejection warning', function () {
         expect(warn.called).to.equal(false);
     });
 });
+
+describe('PriceAggregator ingest pair coverage (item 5335)', function () {
+
+    let hub, agg, warn, clock;
+
+    beforeEach(function () {
+        hub  = createMockHub();
+        agg  = new PriceAggregator(hub);
+        warn = sinon.stub(console, 'warn');
+        clock = sinon.useFakeTimers({ now: 1_700_000_000_000, toFake: ['Date'] });
+    });
+
+    afterEach(function () {
+        clock.restore();
+        sinon.restore();
+    });
+
+    let pairs = (...names) => names.map(n => ({ pair: n, price: '1' }));
+
+    it('says nothing on the first round from a chain: it is the baseline, not a drop', function () {
+        agg._checkIngestPairCoverage('BTC', 1, pairs('BTC/USD', 'LTC/USD'));
+        expect(warn.called).to.equal(false);
+    });
+
+    it('never warns about a pair this chain has simply never sent (local config is not the basis)', function () {
+        // The hub is configured for 36 pairs; a source federation publishing two of them is
+        // not a drop, and a detector that says so every round names nothing.
+        agg._checkIngestPairCoverage('BTC', 1, pairs('BTC/USD', 'LTC/USD'));
+        agg._checkIngestPairCoverage('BTC', 2, pairs('BTC/USD', 'LTC/USD'));
+        agg._checkIngestPairCoverage('BTC', 3, pairs('BTC/USD', 'LTC/USD'));
+        expect(warn.called).to.equal(false);
+    });
+
+    it('names a pair that was arriving and stops, with the short-round count', function () {
+        agg._checkIngestPairCoverage('BTC', 1, pairs('BTC/USD', 'LTC/USD'));
+        agg._checkIngestPairCoverage('BTC', 2, pairs('BTC/USD'));
+        expect(warn.callCount).to.equal(1);
+        expect(warn.firstCall.args[0]).to.contain('LTC/USD');
+        expect(warn.firstCall.args[0]).to.contain('round 2 from BTC');
+        expect(warn.firstCall.args[0]).to.contain('1 round(s) from this chain have been short');
+    });
+
+    it('keeps reporting while the pair stays gone, throttled, and carries the suppressed count', function () {
+        agg._checkIngestPairCoverage('BTC', 1, pairs('BTC/USD', 'LTC/USD'));
+        agg._checkIngestPairCoverage('BTC', 2, pairs('BTC/USD'));
+        agg._checkIngestPairCoverage('BTC', 3, pairs('BTC/USD'));
+        agg._checkIngestPairCoverage('BTC', 4, pairs('BTC/USD'));
+        expect(warn.callCount).to.equal(1);   // 2 suppressed inside the window
+
+        clock.tick(60_000);
+        agg._checkIngestPairCoverage('BTC', 5, pairs('BTC/USD'));
+        expect(warn.callCount).to.equal(2);
+        expect(warn.secondCall.args[0]).to.contain('2 warning(s) suppressed');
+        expect(warn.secondCall.args[0]).to.contain('4 round(s) from this chain have been short');
+    });
+
+    it('goes quiet once the pair comes back', function () {
+        agg._checkIngestPairCoverage('BTC', 1, pairs('BTC/USD', 'LTC/USD'));
+        agg._checkIngestPairCoverage('BTC', 2, pairs('BTC/USD'));
+        expect(warn.callCount).to.equal(1);
+
+        clock.tick(60_000);
+        agg._checkIngestPairCoverage('BTC', 3, pairs('BTC/USD', 'LTC/USD'));
+        expect(warn.callCount).to.equal(1);
+    });
+
+    it('tracks each source chain separately, so one chain cannot mask another', function () {
+        agg._checkIngestPairCoverage('BTC',  1, pairs('BTC/USD', 'LTC/USD'));
+        agg._checkIngestPairCoverage('DOGE', 1, pairs('DOGE/USD'));
+        agg._checkIngestPairCoverage('BTC',  2, pairs('BTC/USD'));
+        agg._checkIngestPairCoverage('DOGE', 2, pairs('DOGE/USD'));
+        expect(warn.callCount).to.equal(1);
+        expect(warn.firstCall.args[0]).to.contain('from BTC');
+    });
+
+    it('adopts a pair that starts arriving, so its later loss is reported too', function () {
+        agg._checkIngestPairCoverage('BTC', 1, pairs('BTC/USD'));
+        agg._checkIngestPairCoverage('BTC', 2, pairs('BTC/USD', 'XCHAIN/USD'));
+        expect(warn.called).to.equal(false);
+
+        agg._checkIngestPairCoverage('BTC', 3, pairs('BTC/USD'));
+        expect(warn.callCount).to.equal(1);
+        expect(warn.firstCall.args[0]).to.contain('XCHAIN/USD');
+    });
+});
