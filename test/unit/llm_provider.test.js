@@ -310,6 +310,50 @@ describe('llm provider, _setConfig', function () {
     });
 });
 
+// The envelope-version ceiling is read at exactly one place, the fetch() boundary, so
+// a bare-truthiness install let a negative governance value reject every valid
+// envelope_version:1 request and Infinity disable the ceiling. Same positive-integer
+// warn-and-keep rule as max_completion_tokens / default_temperature.
+describe('llm provider, governance prompt_envelope_version bounds', function () {
+
+    afterEach(function () { sinon.restore(); });
+
+    // No getter: probe the installed ceiling through fetch()'s envelope_version gate.
+    // Hermetic env: no credential resolves, so an accepted version fails later at the
+    // transport rather than dialing anything.
+    function ceilingAccepts(additionalConfig, version) {
+        return _withEnv({}, async () => {
+            const llm = _reloadProvider();
+            const warn = sinon.stub(console, 'warn');
+            llm._setConfig({ additional_config: additionalConfig });
+            warn.restore();
+            try { await llm.fetch(JSON.stringify({ prompt: 'q', envelope_version: version }), {}); }
+            catch (e) { return !/unsupported envelope_version/.test(e.message); }
+            return true;
+        });
+    }
+
+    it('installs a valid positive-integer ceiling', async function () {
+        expect(await ceilingAccepts({ prompt_envelope_version: 2 }, 2)).to.equal(true);
+        expect(await ceilingAccepts({ prompt_envelope_version: 2 }, 3)).to.equal(false);
+    });
+
+    for (const bad of [-3, 1.5, Number.POSITIVE_INFINITY, 0, 'abc']) {
+        it('ignores ' + String(bad) + ' and keeps the prior ceiling (envelope_version 1 still accepted)', async function () {
+            expect(await ceilingAccepts({ prompt_envelope_version: bad }, 1)).to.equal(true);
+            expect(await ceilingAccepts({ prompt_envelope_version: bad }, 2)).to.equal(false);
+        });
+    }
+
+    it('warns once per rejected value', async function () {
+        const llm = _reloadProvider();
+        const warn = sinon.stub(console, 'warn');
+        llm._setConfig({ additional_config: { prompt_envelope_version: -3 } });
+        expect(warn.calledOnce).to.equal(true);
+        expect(warn.firstCall.args[0]).to.match(/ignoring additional_config\.prompt_envelope_version -3/);
+    });
+});
+
 describe('llm provider, fetch input validation', function () {
 
     it('rejects non-JSON payloads with a JSON-envelope message', async function () {
@@ -370,6 +414,14 @@ describe('llm provider, envelope numeric bounds', function () {
 
     it('rejects a fractional max_tokens', async function () {
         expect((await rejects({ max_tokens: 1.5 })).message).to.match(/max_tokens must be a positive integer/);
+    });
+
+    // envelope.system was the one requester field forwarded untyped: an object became
+    // '[object Object]' in json_object mode and failed per transport in text mode.
+    it('rejects a non-string envelope.system at the boundary (object, number, null)', async function () {
+        expect((await rejects({ system: { role: 'x' } })).message).to.match(/envelope\.system must be a string/);
+        expect((await rejects({ system: 42 })).message).to.match(/envelope\.system must be a string/);
+        expect((await rejects({ system: null })).message).to.match(/envelope\.system must be a string/);
     });
 
     // The headroom add is what made this case silent: -1 + 2048 = 2047, a valid-looking
@@ -2113,6 +2165,50 @@ describe('llm provider, judge fallback chain', function () {
             expect(winner).to.equal(null);
             expect(outcome.inconclusive).to.equal(true);
             expect(outcome.reason).to.equal('unreachable');
+        });
+    });
+
+    // A spent per-window budget is hub-global (one SpendGuard for every model and
+    // vendor), so the fallback chain must stop before dialing anything and record a
+    // budget reason rather than walking every model and stamping 'unreachable'.
+    describe('spent spend budget', function () {
+        let savedWindow;
+        beforeEach(function () { savedWindow = process.env.LLM_MAX_SPEND_USD_CENTS_PER_WINDOW; });
+        afterEach(function () {
+            if (savedWindow === undefined) delete process.env.LLM_MAX_SPEND_USD_CENTS_PER_WINDOW;
+            else process.env.LLM_MAX_SPEND_USD_CENTS_PER_WINDOW = savedWindow;
+        });
+
+        it('stops the judge chain before any vendor call and records budget_exhausted', async function () {
+            process.env.LLM_MAX_SPEND_USD_CENTS_PER_WINDOW = '1';   // under one estimated call
+            await _withEnv({ ANTHROPIC_API_KEY: 'sk-test', OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+                const llm = _reloadProvider();
+                llm._setConfig({ additional_config: { judge_fallback_models: ['gpt-5-mini'] } });
+                // No nock interceptors: any dial would throw a nock error and advance the chain.
+                const outcome = {};
+                const winner = await llm.agree(PROPOSALS, { pinnedJudgeModel: 'claude-haiku-4-5', outcome });
+                expect(winner).to.equal(null);
+                expect(outcome.inconclusive).to.equal(true);
+                expect(outcome.reason).to.equal('budget_exhausted');
+                // The pre-loop gate is a pure predicate: nothing was reserved or blocked.
+                expect(llm.spendStats().spentInWindowUsdCents).to.equal(0);
+                llm._resetSpendGuardForTest();
+            });
+        });
+
+        it('types the budget error at its source for every _runLlm caller', async function () {
+            process.env.LLM_MAX_SPEND_USD_CENTS_PER_WINDOW = '1';
+            await _withEnv({ ANTHROPIC_API_KEY: 'sk-test' }, async () => {
+                const llm = _reloadProvider();
+                let err;
+                try { await llm.fetch(JSON.stringify({ prompt: 'hi' }), {}); }
+                catch (e) { err = e; }
+                expect(err).to.exist;
+                expect(err.budgetExhausted).to.equal(true);
+                expect(err.kind).to.equal('budget_exhausted');
+                expect(err.transient, 'a spend stop heals when the window rolls').to.equal(undefined);
+                llm._resetSpendGuardForTest();
+            });
         });
     });
 

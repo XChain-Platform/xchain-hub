@@ -87,11 +87,12 @@ const DEFAULT_REJUDGE_SWEEP_MS   = 5 * 60 * 1000;        // 5m between re-judge 
 
 // Which inconclusive reasons can change on a later attempt. Only a reason whose
 // cause is the JUDGE being unavailable is retried: the provider is paused
-// (llm.js _markInconclusive 'provider_paused') or its endpoint is unreachable.
+// (llm.js _markInconclusive 'provider_paused'), its endpoint is unreachable, or
+// its rolling spend window is spent ('budget_exhausted', heals when the window rolls).
 // Every other reason is a property of the round's own bytes (meta_unrecognized,
 // meta_uncorroborated, no_proposals, unparseable, empty_verdict, truncated_pick)
 // so re-asking returns the same neutral verdict; those keep today's drop.
-const TRANSIENT_INCONCLUSIVE = ['provider_paused', 'unreachable'];
+const TRANSIENT_INCONCLUSIVE = ['provider_paused', 'unreachable', 'budget_exhausted'];
 
 class AttestationSpotChecker {
 

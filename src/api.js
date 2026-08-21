@@ -643,7 +643,17 @@ async function startApi(){
                 // submissions rail already carries via lastSuccessAgeMs, and the
                 // REST /hub-db/snapshot sibling via its `watermark`). Omitted =
                 // historical bare-array contract, so existing callers are untouched.
-                if (with_watermark) return { watermark: Math.floor(Date.now() / 1000), snapshots };
+                // oracleMaxPriceAgeSeconds rides this rail too (item 5551): the
+                // bound the consumer clamps freshness to travelled only on
+                // getoraclesubmissions, so it was lost exactly when that rail was
+                // down; same _oracleMaxAgeSeconds source as there, never a literal.
+                if (with_watermark) {
+                    return {
+                        watermark: Math.floor(Date.now() / 1000),
+                        oracleMaxPriceAgeSeconds: hub._oracleMaxAgeSeconds(),
+                        snapshots,
+                    };
+                }
                 return snapshots;
             } catch (err) {
                 return {error: "error fetching price snapshots"};

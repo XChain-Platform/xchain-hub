@@ -61,6 +61,7 @@ const SpendGuard    = require('./lib/spend_guard.js');
 const { AtMostOnce, isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
 const { sumUtxosCoins } = require('./lib/utxo_balance.js');
 const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
+const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
 
 // PRICE v0 wire ceiling. Must equal MAX_DATA_BYTES in xchain-encoder/src/validator.js
 // (mirrors ATTEST_WIRE_MAX_BYTES in AttestationPublisher.js): an oversized wire is
@@ -249,6 +250,12 @@ class OraclePublisher {
         if (!psbtResult || !psbtResult.psbt) {
             throw new Error('encoder returned no PSBT');
         }
+        // 2b. Refuse phase 1 of a two-transaction encoding. P2SH answers a FUNDING tx
+        // whose payload only becomes readable when a reveal spends it, and this pipeline
+        // has no reveal: broadcasting it publishes an undecodable PRICE and strands the
+        // carrier value. Thrown BEFORE the wallet hook, so nothing is signed and no fee
+        // is spent. See lib/two_phase_guard.js.
+        assertSingleTxEncoding(psbtResult, 'OraclePublisher');
 
         // 3. Sign the PSBT via the operator-provided wallet hook
         let txHex = await this.walletSignFn(psbtResult.psbt);
@@ -834,17 +841,6 @@ class OraclePublisher {
                     this._publishedRounds.mark(entry.round);
                     continue;
                 }
-                // Record broadcast intent BEFORE the send. A crash between here and the
-                // sent marker leaves an intent-only row that startup quarantines (never
-                // auto-rebroadcast). Fail closed if the intent cannot be durably recorded.
-                try {
-                    await this._recordPublishIntent(entry.round);
-                } catch (e) {
-                    console.error('OraclePublisher: cannot record durable publish intent for round ' + entry.round +
-                        '; deferring broadcast (fail closed): ', e);
-                    remaining.push(entry);
-                    continue;
-                }
             }
 
             let payload = this.buildPriceV0Wire(entry.round, entry.btcBlockTime, entry.prices, entry.sigs, entry.btcBlockHeight);
@@ -853,29 +849,61 @@ class OraclePublisher {
             let broadcaster = this.broadcastFn || ((p) => this._defaultBroadcast(p));
             let canBroadcast = this.broadcastFn || (this.encoder && this.walletSignFn);
 
+            // Decline an unwired pipeline BEFORE any budget is claimed and before any
+            // intent is recorded: nothing can leave the process on this branch, so it
+            // must consume no reservation and leave no crash marker behind.
+            if (!canBroadcast) {
+                console.warn('OraclePublisher: no broadcast pipeline configured (set DOGE_ENCODER_URL + setWalletSignHook, or setBroadcastHook), round ' + entry.round + ' will remain queued');
+                entry.attempts++;
+                remaining.push(entry);
+                continue;
+            }
+
             // item 2676 - per-window spend ceiling. A tripped ceiling is not a
             // failure: keep the round queued (no attempts++) and skip the broadcast
-            // so it publishes in a later window. Checked before the send so no fee
-            // is spent once the budget is exhausted.
-            if (!this.spendGuard.allow()) {
+            // so it publishes in a later window.
+            //
+            // RESERVE rather than allow(): the broadcast below is AWAITED, and
+            // src/lib/spend_guard.js forbids the pure allow()/record() pair around an
+            // awaited send, because concurrent callers all read the same pre-send budget
+            // and every one of them spends past the cap. The _sweeping guard above makes
+            // two passes rare rather than impossible (a future second call site, or a
+            // sweep timer, reopens it), so the gate is closed by construction here
+            // instead of by the caller's discipline. reserve() consumes the budget in
+            // this synchronous turn and is handed back by release() only when the send
+            // never went out; the reservation IS the recorded spend, so record() must
+            // never be called on this path.
+            let spendToken = this.spendGuard.reserve();
+            if (!spendToken) {
                 console.warn(this.spendGuard.noteBlocked() + ' (round ' + entry.round + ')');
                 remaining.push(entry);
                 continue;
             }
 
-            try {
-                if (!canBroadcast) {
-                    console.warn('OraclePublisher: no broadcast pipeline configured (set DOGE_ENCODER_URL + setWalletSignHook, or setBroadcastHook), round ' + entry.round + ' will remain queued');
-                    entry.attempts++;
+            // Record broadcast intent BEFORE the send and AFTER the reservation. A crash
+            // between here and the sent marker leaves an intent-only row that startup
+            // quarantines (never auto-rebroadcast), so a round the ceiling DECLINED must
+            // never leave one behind: that stranded a round nothing had broadcast.
+            // Fail closed if the intent cannot be durably recorded.
+            if (this.db) {
+                try {
+                    await this._recordPublishIntent(entry.round);
+                } catch (e) {
+                    console.error('OraclePublisher: cannot record durable publish intent for round ' + entry.round +
+                        '; deferring broadcast (fail closed): ', e);
+                    this.spendGuard.release(spendToken);
                     remaining.push(entry);
                     continue;
                 }
+            }
+
+            try {
                 let result = await broadcaster(payload);
                 // Record the round as published BEFORE the queue rewrite. This is the
                 // at-most-once anchor: even if the rewrite below fails and leaves this
                 // round on the durable queue, the next tick's guard will skip it.
                 this._publishedRounds.mark(entry.round);
-                this.spendGuard.record();   // count the fee against the window budget
+                this.spendGuard.commit(spendToken);   // the reservation IS the fee charged to the window
                 // Persist the durable sent marker so the guard survives a restart (the
                 // in-process tracker above does not). Best-effort: on failure the intent
                 // row remains and a restart quarantines the round rather than re-broadcasting.
@@ -896,12 +924,22 @@ class OraclePublisher {
                 // never silently dropped) for manual inspection/replay. Only definitive
                 // pre-send errors keep the existing attempts-and-requeue retry.
                 if (this._isAmbiguousSendError(err) || (err && err.oracleAmbiguousSend)) {
+                    // COMMIT, not release: this branch has already decided the tx may be
+                    // on-chain and dead-letters the round rather than retrying, so the fee
+                    // may well have been paid. Keeping the reservation charges the window
+                    // for it, which fails closed; releasing would hand back budget for a
+                    // spend nothing will ever re-attempt.
+                    this.spendGuard.commit(spendToken);
                     console.error('OraclePublisher: AMBIGUOUS send failure for round ' + entry.round +
                         ' (tx may have reached the DOGE node); NOT re-broadcasting to avoid a double spend. ' +
                         'Moving to dead-letter file ' + this.deadLetterPath + ' for manual verify/replay: ', err);
                     this._deadLetter(entry, 'ambiguous send failure (possible double-spend risk); verify on-chain before replay');
                     continue;   // do not push to remaining; no auto re-broadcast
                 }
+                // Definitive pre-send failure: nothing left the process and the round is
+                // requeued for a later attempt, so the budget goes back (the invariant
+                // the old post-send record() gave for free).
+                this.spendGuard.release(spendToken);
                 entry.attempts++;
                 console.error('OraclePublisher: publish failed for round ' + entry.round + ' (attempt ' + entry.attempts + '/' + this.maxAttempts + '): ', err);
                 if (balance !== null && balance < 0.01) {

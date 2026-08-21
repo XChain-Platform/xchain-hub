@@ -206,6 +206,10 @@ exports._resetSpendGuardForTest = () => { _guard = null; _guardCfg = {}; SpendGu
 function _budgetExhaustedError(reason){
     let err = new Error('llm: ' + (reason || 'per-window spend budget reached') + '; no paid API call issued');
     err.budgetExhausted = true;
+    // Typed like the other non-transport outcomes (kind) but deliberately NOT
+    // transient:false: the stop heals when the rolling window rolls, so agree()
+    // records it as a transient could-not-judge, not a hard error.
+    err.kind = 'budget_exhausted';
     return err;
 }
 
@@ -435,7 +439,20 @@ exports._setConfig = (def) => {
             console.warn('llm: ignoring additional_config.default_temperature ' + ac.default_temperature +
                 ' (must be a number in [0, 1]); keeping ' + DEFAULT_TEMPERATURE);
     }
-    if (Number(ac.prompt_envelope_version)) PROMPT_ENVELOPE_VERSION = Number(ac.prompt_envelope_version);
+    // Positive-integer rule for the envelope-version ceiling, same warn-and-keep as the
+    // two siblings above: this value is the ONLY check at the fetch() boundary
+    // (`Number(envelope.envelope_version) > PROMPT_ENVELOPE_VERSION`), so a negative
+    // ceiling rejects every well-formed envelope_version:1 request on every hub and
+    // Infinity disables the ceiling entirely, both from one governance key with no
+    // code deploy behind it.
+    if (ac.prompt_envelope_version !== undefined) {
+        let ev = Number(ac.prompt_envelope_version);
+        if (Number.isInteger(ev) && ev > 0)
+            PROMPT_ENVELOPE_VERSION = ev;
+        else
+            console.warn('llm: ignoring additional_config.prompt_envelope_version ' + ac.prompt_envelope_version +
+                ' (must be a positive integer); keeping ' + PROMPT_ENVELOPE_VERSION);
+    }
     // Governance kill switch and per-call spend cap.
     if (typeof ac.enabled === 'boolean') LLM_ENABLED_CONFIG = ac.enabled;
     if (ac.max_budget_usd !== undefined) {
@@ -478,6 +495,11 @@ exports.fetch = async (payload, options) => {
             envelope.temperature < 0 || envelope.temperature > 2)
             throw new Error('llm: envelope.temperature must be a number in [0, 2]');
     }
+    // Same boundary rule for the optional system prompt: a non-string would otherwise
+    // string-coerce into '[object Object]' on the json_object path and fail per
+    // transport (spawn argv vs vendor 400) on the text path. Omission stays legal.
+    if (envelope.system !== undefined && typeof envelope.system !== 'string')
+        throw new Error('llm: envelope.system must be a string');
 
     // Requester-controlled fallback policy. 'any' (default): serve from any
     // approved model on the chain. 'strict': the requesting contract only
@@ -700,6 +722,17 @@ exports.agree = async (proposals, options) => {
         _markInconclusive(options, 'provider_paused');
         return null;
     }
+    // Same shape for a spent budget. The guard is hub-global (one SpendGuard for
+    // every model and vendor), so once the window is exhausted every fallback in
+    // the chain below is refused at _runLlm's reserve gate too; walking it would
+    // only write a futile intent+blocked settle pair per model and then record the
+    // round as 'unreachable', the vendor-outage shape. allow() is a pure predicate
+    // (no budget consumed); the in-loop budgetExhausted check below covers the
+    // concurrent-round race between this allow() and the chain's reserve().
+    if (!_spendGuard().allow(null)) {
+        _markInconclusive(options, 'budget_exhausted');
+        return null;
+    }
 
     // The judge model is supplied by the leader as options.pinnedJudgeModel,
     // resolved from the block-anchored provider config at the request's block, so
@@ -785,6 +818,13 @@ exports.agree = async (proposals, options) => {
             // judgment outcome, not a transport failure, and must NOT be re-asked
             // of a different fallback model. Only transport failures (transient
             // errors, credential/endpoint resolution) may advance the chain.
+            // A spent budget is neither: the guard is hub-global, so every later
+            // model in the chain is refused too. Stop here (see the pre-loop gate).
+            if (e && e.budgetExhausted) {
+                console.warn('llm: judge ' + jm + ' refused by the spend budget; stopping fallback chain');
+                _markInconclusive(options, 'budget_exhausted');
+                return null;
+            }
             if (e && (e.kind === 'refusal' || e.transient === false)) {
                 console.warn('llm: judge ' + jm + ' returned a non-transport outcome (' +
                     (e.kind || 'hard_error') + '); deferring to no_quorum without advancing chain');

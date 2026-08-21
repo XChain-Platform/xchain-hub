@@ -55,6 +55,7 @@ const EncoderClient      = require('./EncoderClient.js');
 const SpendGuard         = require('./lib/spend_guard.js');
 const { isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
 const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
+const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
 const eq                = require('./equivocation_header.js');
 const activation        = require('./lib/fullnode_activation.js');
 // Pinned coin registry: the single source for the consensus-relevant FULLNODE
@@ -919,6 +920,11 @@ class FullNodeChallengeRound {
             // psbtHex/hex, so the old alternates could only ever mask a missing PSBT by
             // handing undefined to the wallet signer.
             if(!built || !built.psbt) throw new Error('encoder returned no PSBT');
+            // Refuse phase 1 of a two-transaction encoding before anything is signed: this
+            // pipeline has no reveal, so broadcasting the P2SH funding tx would publish a
+            // NODEPROOF verdict no indexer can decode and strand the carrier value
+            // (lib/two_phase_guard.js).
+            assertSingleTxEncoding(built, 'FullNodeChallengeRound');
             let txHex = await this.walletSignFn(built.psbt);
             if(!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
             return await this.encoder.broadcastTx(txHex);

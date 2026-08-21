@@ -882,8 +882,10 @@ describe('AttestationConsensus: judge_model winner-selection is leader-gated (#3
         // block-anchored model_vendors map, null when the round carried none.
         // pinnedApprovedModels rides the same way: the block-anchored
         // allowlist the meta gate judges against, null when the round carried none.
+        // outcome is the log-only could-not-judge channel agree() fills before an
+        // inconclusive null; empty on the way in.
         expect(agreeSpy.firstCall.args[1]).to.deep.equal({ pinnedJudgeModel: 'claude-opus-4-7',
-            pinnedVendors: null, pinnedApprovedModels: null, timeoutMs: 10000, expectedN: 2 });
+            pinnedVendors: null, pinnedApprovedModels: null, timeoutMs: 10000, expectedN: 2, outcome: {} });
     });
 
     // fetch() honours the block-anchored pinned model, so the allowlist
@@ -1193,6 +1195,38 @@ describe('AttestationConsensus: _maybeAdvanceFromProposals consensus outcomes', 
         expect(pending.winner.body.length).to.equal(0);
         expect(pending.winner.meta).to.equal('');
         expect(pending.status).to.equal('no_quorum');
+    });
+
+    // The provider's could-not-judge channel (options.outcome) is wired through so the
+    // log can tell a judge outage from a genuine not-equivalent verdict; the on-chain
+    // status stays no_quorum either way (the reason is leader-local, never canonical).
+    it('passes options.outcome to agree() and logs the inconclusive reason, still publishing no_quorum', async function () {
+        let seenOpts;
+        let reg = makeRealProviderRegistry((proposals, options) => {
+            seenOpts = options;
+            options.outcome.inconclusive = true;
+            options.outcome.reason = 'unreachable';
+            return null;
+        });
+        let warn = sinon.stub(console, 'warn');
+        let pending = await seedThreeProposals(reg);
+        warn.restore();
+        expect(seenOpts.outcome).to.be.an('object');
+        expect(pending.status).to.equal('no_quorum');
+        expect(pending.winner.body.length).to.equal(0);
+        let lines = warn.getCalls().map(c => String(c.args[0]));
+        expect(lines.some(l => /could not judge: reason=unreachable/.test(l))).to.equal(true);
+        expect(lines.some(l => /proposals diverged/.test(l))).to.equal(false);
+    });
+
+    it('keeps the diverged wording when agree() returns null without marking the outcome', async function () {
+        let reg = makeRealProviderRegistry(() => null);
+        let warn = sinon.stub(console, 'warn');
+        let pending = await seedThreeProposals(reg);
+        warn.restore();
+        expect(pending.status).to.equal('no_quorum');
+        let lines = warn.getCalls().map(c => String(c.args[0]));
+        expect(lines.some(l => /proposals diverged/.test(l))).to.equal(true);
     });
 
     it('supports an async agree() (judge_model style)', async function () {

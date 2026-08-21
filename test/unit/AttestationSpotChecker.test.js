@@ -890,6 +890,19 @@ describe('AttestationSpotChecker: re-judge queue', function () {
         expect(sc._failuresFor('aa'.repeat(32))).to.have.length(0);
     });
 
+    // A spent per-window spend budget heals when the window rolls, so it is held for
+    // re-judge exactly like a paused provider rather than dropped.
+    it('holds a budget_exhausted spot-check for re-judge instead of dropping it', async function () {
+        const db  = makeFakeDb();
+        const hub = makeHub({ db });
+        const sc  = new AttestationSpotChecker(hub, makeFlakyRegistry('budget_exhausted', 1, false));
+        sc.register('rb1', 'http_get', 'expected');
+        await sc.onRequestFinalized(okEvent('rb1', 700, ['aa'.repeat(32)]));
+        expect(sc._pendingReJudgeSize()).to.equal(1);
+        expect(db.rows).to.have.length(0);
+        expect(sc._failuresFor('aa'.repeat(32))).to.have.length(0);
+    });
+
     it('scores the held spot-check once the provider resumes (the coverage that used to be lost)', async function () {
         const db  = makeFakeDb();
         const hub = makeHub({ db });

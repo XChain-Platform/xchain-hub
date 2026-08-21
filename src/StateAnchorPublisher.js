@@ -83,6 +83,7 @@ const { resolveQuorumNetwork } = require('./lib/quorum_network.js');
 const { isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
 const { sumUtxosCoins } = require('./lib/utxo_balance.js');
 const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
+const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const StateCheckpointEngine = require('./StateCheckpointEngine.js');
 const swq                   = require('./stake_weighted_quorum.js');
@@ -3997,6 +3998,10 @@ class StateAnchorPublisher {
             utxos: forwardableUtxos(utxos, 'StateAnchorPublisher'), pubkey: this.dogeAddress, data: payload, change: this.dogeAddress, encoding: 'P2SH'
         });
         if(!psbtResult || !psbtResult.psbt) throw new Error('encoder returned no PSBT');
+        // Refuse phase 1 of a two-transaction encoding before anything is signed: this
+        // pipeline has no reveal, so broadcasting the P2SH funding tx would publish an
+        // ANCHOR no indexer can decode and strand the carrier value (lib/two_phase_guard.js).
+        assertSingleTxEncoding(psbtResult, 'StateAnchorPublisher');
         let txHex = await signer.walletSignFn(psbtResult.psbt);
         if(!txHex || typeof txHex !== 'string') throw new Error('wallet sign hook returned invalid tx hex');
         // Everything above is pre-send (building/signing; no money has moved).

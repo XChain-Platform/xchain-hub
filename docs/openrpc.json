@@ -126,7 +126,7 @@
     },
     {
       "name": "getpricesnapshots",
-      "summary": "PBFT-finalized price snapshots (trimmed-median rounds). status='all' also returns skipped/disputed rows; with_watermark wraps the rows as {watermark, snapshots} with a hub-clock epoch-seconds watermark.",
+      "summary": "PBFT-finalized price snapshots (trimmed-median rounds). status='all' also returns skipped/disputed rows; with_watermark wraps the rows as {watermark, oracleMaxPriceAgeSeconds, snapshots} with a hub-clock epoch-seconds watermark and the price-age bound getprice enforces.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -215,10 +215,16 @@
             },
             {
               "type": "object",
-              "description": "Returned when with_watermark is truthy: hub-clock epoch seconds plus the rows.",
+              "description": "Returned when with_watermark is truthy: hub-clock epoch seconds, the price-age bound getprice enforces (oracleMaxPriceAgeSeconds, null when the registry read fails), plus the rows.",
               "properties": {
                 "watermark": {
                   "type": "number"
+                },
+                "oracleMaxPriceAgeSeconds": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
                 },
                 "snapshots": {
                   "type": "array",
