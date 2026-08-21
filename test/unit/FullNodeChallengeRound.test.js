@@ -15,7 +15,6 @@ const crypto       = require('crypto');
 const { expect }   = require('chai');
 const proxyquire   = require('proxyquire');
 const EventEmitter = require('events');
-const srb          = require('../../src/snapshot_reorg_buffer.js');
 
 const V1 = 'a'.repeat(64);   // genesis verifier / full node
 const V2 = 'b'.repeat(64);   // second verifier
@@ -340,23 +339,6 @@ describe('FullNodeChallengeRound', function () {
             const eng = new FullNodeChallengeRound(makeHub());      // genesis = [V1]
             const set = await eng._eligibleVerifiers(288);
             expect([...set].sort()).to.deep.equal([V1, V2].sort());
-        });
-        it('resolves the verifier set at the BURIED height, not the tip-adjacent epoch', async function () {
-            // The eligible set is the leader-election domain and the 2/3+1 quorum
-            // divisor, and a round runs while tip - epoch <= acceptWindow, so the epoch
-            // is tip-adjacent and its stake state is not reorg-safe: two hubs whose
-            // reads straddled a shallow BTC reorg resolved different member lists for
-            // the same epoch. Every other validator-set lock the hub performs already
-            // buries, _claimantSet in this same engine included. Gated by the shared
-            // snapshot_reorg_buffer flag day so the hub moves in lockstep with the
-            // indexer that grades the verdict (nodeproof.js buries through the same
-            // gate); regtest is armed from genesis, so the buffer is live here.
-            wireRpc({ verifiers: [{ pubkey: V2 }] });
-            const eng = new FullNodeChallengeRound(makeHub());
-            await eng._eligibleVerifiers(288);
-            const call = axiosStub.post.getCalls().find(c => c.args[1] && c.args[1].method === 'getfullnodeverifiers');
-            expect(call, 'getfullnodeverifiers was never called').to.not.equal(undefined);
-            expect(call.args[1].params.block_index).to.equal(288 - srb.CANONICAL_REORG_BUFFER);
         });
         it('ABSTAINS (returns null) rather than degrading to genesis-only when the verifiers RPC is unavailable', async function () {
             // Consensus-critical: a per-hub, reachability-dependent fallback to the

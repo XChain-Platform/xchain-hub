@@ -56,7 +56,6 @@ const SpendGuard         = require('./lib/spend_guard.js');
 const { isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
 const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
 const eq                = require('./equivocation_header.js');
-const srb               = require('./snapshot_reorg_buffer.js');
 const activation        = require('./lib/fullnode_activation.js');
 // Pinned coin registry: the single source for the consensus-relevant FULLNODE
 // parameters. See the constructor.
@@ -806,23 +805,10 @@ class FullNodeChallengeRound {
     // The legitimate genesis-only path (a genuinely genesis-only federation) is on the
     // SUCCESS branch, where the indexer returns an empty validators list; only the
     // error-degradation path changes.
-    //
-    // The set RESOLVES at the buried height, not at the raw epoch. A round runs while
-    // tipBlock - epoch <= acceptWindow (_tick), so the epoch is tip-adjacent and its
-    // stake state is not reorg-safe: two hubs whose reads straddle a shallow BTC reorg
-    // resolved different member lists for the same epoch, which is a divergent leader
-    // (duplicate fee-bearing verdict broadcasts) or a divergent 2/3+1 divisor. Every
-    // other validator-set lock the hub performs already buries, including _claimantSet
-    // in this file (CapabilitySnapshot._buriedBlockIndex); this was the last one that
-    // did not. Gated by the shared snapshot_reorg_buffer flag day so the hub moves in
-    // lockstep with the verifier that grades the result (nodeproof.js resolves its own
-    // eligible set through the same gate): below the flag day both stay raw, at/above
-    // it both bury, and neither state is asymmetric.
     async _eligibleVerifiers(epoch){
         let set = new Set(this.genesis);
-        let setBlock = srb.buriedSnapshotBlock(epoch, this.network);
         try {
-            let verified = await this._indexerCall('getfullnodeverifiers', { block_index: setBlock });
+            let verified = await this._indexerCall('getfullnodeverifiers', { block_index: epoch });
             // Alarm-and-proceed on a TRUNCATED verifier set. getfullnodeverifiers carries
             // `truncated` precisely so a hub can say so (it is set when the indexer's read
             // hit VALIDATOR_QUERY_LIMIT), and this set is the 2/3+1 quorum denominator and
@@ -837,7 +823,7 @@ class FullNodeChallengeRound {
                 if (now - this._truncWarnAt > TRUNC_WARN_THROTTLE_MS){
                     this._truncWarnAt = now;
                     console.error('FullNodeChallengeRound: _eligibleVerifiers: the indexer returned a TRUNCATED ' +
-                        'verified-full-node set at block ' + setBlock + ' (epoch ' + epoch + ', ' +
+                        'verified-full-node set at epoch ' + epoch + ' (' +
                         ((verified.validators && verified.validators.length) || 0) + ' verifier(s) returned): it hit ' +
                         'VALIDATOR_QUERY_LIMIT, so the eligible set is CAPPED below the true verifier universe and the ' +
                         '2/3+1 quorum denominator is a floor, not the real N. The round still runs (every indexer ' +
