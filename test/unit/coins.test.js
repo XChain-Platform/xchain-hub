@@ -37,15 +37,20 @@ const coins      = require('../../src/coins');
 // -> 4855000, DOGE 64800000 -> 67815000), so only the three TESTNET goldens move.
 // Mainnet and regtest are deliberately untouched, and their unchanged goldens are
 // the check that nothing else drifted in with the genesis edit.
+// REGENERATED 2026-08-24 (fresh testnet genesis): the three testnet `firstBlock`
+// heights moved to just under their live tips again (BTC 147500 -> 149700,
+// LTC 4855000 -> 4862500, DOGE 67815000 -> 67847500) so the public testnet
+// announces with zero pre-announcement test actions. Only the three TESTNET
+// goldens move; unchanged mainnet/regtest goldens are the no-drift check.
 const GOLDEN_HASH = {
     BTC:  { mainnet: '8f2a60c4a06d819d909cefa5d463a2f810d014fc66cdfa0ef51ffa19cbb5f66b',
-            testnet: '1e45a958ff9eb6a88be8684e3801b57e7afcfc9031f7761e4f4b1dcf1c8d42a9',
+            testnet: 'f6589c6b88dc930db05998070ef0b73743f58623a0d23fbc30fdb158c49d1427',
             regtest: '24e6a363e5a36285574dea357328a997fdee5762ef812d8947eacf69c51afc24' },
     LTC:  { mainnet: 'f5c81b02f2c8bdd4a828f25495cc5c63fa18e6040c80569c2aaeb8d6860ce577',
-            testnet: '888818a874d6d8acb3363355089f0de601c355b63fc8431a44ef666f91615202',
+            testnet: '9faf066a1470be2486d8a2cd121548ca02de1397d0678a2ab8dc0e712ebfa8fd',
             regtest: '5ad03b383d873d309640e75dfefa2787a5806cb8a84ee46f4cc7fb25ca7f808b' },
     DOGE: { mainnet: '8073fa2632b84c691ad625ee107f8a03ca90483f1b726700e46db833b86399b4',
-            testnet: 'ea3ee0d1407959f3cb59e4baf66b50dfc2ada9962351e578d7c6d8586e6ff905',
+            testnet: '2991d7e7caf2b212de959dd5831ac1477e0b13da95ac1ed8c2b43e2704732439',
             regtest: '019220a461e34c99fcf5cbf107673f13d3f2a57d2a20e16a0323ed44c81edd11' },
 };
 
