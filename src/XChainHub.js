@@ -137,11 +137,29 @@ class XChainHub {
         this.hubDbBroadcaster = new HubDbBroadcaster(this.p2pConfig || {}, this.db);
         this.priceAggregator.on('row:inserted', (event) => {
             this.hubDbBroadcaster.broadcastRow(event);
+            this._noteAggregatorRow(event);
         });
         this.priceAggregator.on('row:deleted', (event) => {
             this.hubDbBroadcaster.broadcastDeletion(event);
         });
         console.log('XChain Hub started (MariaDB: ' + this.dbName + ')');
+    }
+
+    // Advance the oracle clamp reference on finalized rounds that arrive by PUSH.
+    // PriceAggregator.receiveValidatedRound writes 'finalized' price_snapshots rows for
+    // rounds pushed from a source chain and touches no consensus state, so a hub that
+    // INGESTED round N went on clamping against N-1 for the process lifetime (item
+    // 5834). Guarded and never fatal: this feeds a local accept-gate input, and a throw
+    // must not escape into the mirror broadcast that shares the listener.
+    _noteAggregatorRow(event){
+        try {
+            if(event && event.table === 'price_snapshots' && this.oracleConsensus){
+                this.oracleConsensus.noteIngestedPriceRow(event.row);
+            }
+        } catch (e){
+            console.warn('Oracle: could not fold an ingested price row into the clamp reference:',
+                e && e.message ? e.message : e);
+        }
     }
 
     async startP2P(){

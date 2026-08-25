@@ -30,6 +30,10 @@ const crypto = require('crypto');
 const { ORACLE_DEVIATION_THRESHOLD } = require('./constants');
 const bcmath = require('./bcmath.js');
 const devband = require('./lib/deviation_band.js');
+// The per-round move bound the aggregation clamp applies, read from its one definition
+// in OracleConsensus (item 5833). Requiring the module for a helper only; OracleConsensus
+// does not require this file, so there is no cycle.
+const { maxChangeForPair } = require('./OracleConsensus.js');
 
 const MAX_DEVIATIONS_PER_VALIDATOR = 1000;
 
@@ -78,8 +82,13 @@ class SlashDetector {
         // ORACLE_DEVIATION_THRESHOLD (constants.js), the same band the oracle
         // co-sign gate (OracleConsensus._handlePropose) and the exactly-2-source
         // publish gate (_aggregate) enforce, so by default we never slash a
-        // submission the federation just co-signed. A SLASH_DEVIATION_THRESHOLD
-        // override (env / governance) is still honored, but guarded:
+        // submission the federation just co-signed. This is the band's FLOOR, not
+        // the band in force every round: in a round where the aggregation clamp
+        // moved a pair's published price, _checkDeviations widens that pair by
+        // maxChangeForPair, because the clamp is licensed to publish that far from
+        // the median every submitter stood behind (item 5833).
+        // A SLASH_DEVIATION_THRESHOLD override (env / governance) is still
+        // honored, but guarded:
         //  - TIGHTER than the co-sign band would slash submitters INSIDE the
         //    co-signed band (the exact inversion of the "never sign a price we
         //    would slash" invariant), so it fails fast at construction;
@@ -154,6 +163,9 @@ class SlashDetector {
             finalizedMap[fp.coinPair] = fp.price;
         }
 
+        // Pairs whose published price was CLAMPED this round get a wider band (item 5833).
+        let clampedPairs = this._clampLimitedPairs(round, finalizedMap);
+
         // Check each validator's submission against the finalized prices.
         // The unique offense signal is (validator, round): one proposal per
         // deviating validator per round, with the deviating pairs aggregated
@@ -187,7 +199,19 @@ class SlashDetector {
                 // admission gate both call, not two copies that agree today. deviation
                 // is recomputed inside the branch for the pct only, which costs a second
                 // bcdiv solely on the rare slash path.
-                if (devband.exceedsBand(String(p.price), String(finalPriceStr), this.deviationThreshold, 18)) {
+                //
+                // Widen the band by the pair's clamp allowance in a round where the clamp
+                // actually bound (item 5833). The band is measured against the CLAMPED
+                // published price while submissions are raw, and the clamp is licensed to
+                // move the published price up to maxChangeForPair away from the median every
+                // submitter stood behind, so a genuine fat-tail move put every honest
+                // submitter outside a 5% band and recorded price_deviation against the whole
+                // federation. Widening only in clamped rounds keeps the band exactly as tight
+                // as the co-sign gate in every normal round; the reference stays the uniform
+                // published price, so evidence bodies and their hashes are unchanged.
+                let band = this.deviationThreshold;
+                if (clampedPairs.has(p.coinPair)) band += maxChangeForPair(p.coinPair);
+                if (devband.exceedsBand(String(p.price), String(finalPriceStr), band, 18)) {
                     let deviation = devband.deviationFrom(String(p.price), String(finalPriceStr), 18);
                     let pct = bcmath.bcformat(bcmath.bcmul(deviation, '100', 4), 4);
                     console.warn('Slash: Validator ' + pubkey.substring(0, 16) + '... deviated ' +
@@ -214,6 +238,46 @@ class SlashDetector {
                 await this._trackDeviation(pubkey, round);
             }
         }
+    }
+
+    // The pairs whose published price for `round` sits ON a clamp bound, i.e. the pairs
+    // OracleConsensus._clampToLastFinalized actually moved. Derived, not carried: no
+    // field is added to round:finalized, no wire format changes and no query is issued,
+    // so accusation sets and SlashGovernance evidence hashes stay byte-identical.
+    //
+    // The reference comes from the consensus engine's own retained clamp basis for this
+    // exact round (getClampReference), which is the value the aggregate was clamped
+    // against, not a re-read that could have moved since. Bounds are recomputed with the
+    // clamp's own scale-8 bcmath and compared NUMERICALLY rather than by string equality,
+    // so a re-formatted trailing digit cannot silently un-detect a clamp.
+    //
+    // Fail-soft to TODAY's behaviour: no engine, or no reference for this round, yields
+    // an empty set and the band stays at this.deviationThreshold. That never slashes
+    // anyone the tight band would have spared, it only fails to widen.
+    _clampLimitedPairs(round, finalizedMap) {
+        let clamped = new Set();
+        let engine  = this.hub && this.hub.oracleConsensus;
+        let basis   = (engine && typeof engine.getClampReference === 'function')
+            ? engine.getClampReference(round) : null;
+        if (!basis) return clamped;
+
+        for (let coinPair of Object.keys(finalizedMap || {})) {
+            let published = finalizedMap[coinPair];
+            if (published === null || published === undefined) continue;
+            let last = basis.get(coinPair);
+            if (last === null || last === undefined || !bcmath.bcgt(String(last), '0')) continue;
+            let maxDelta = bcmath.bcmul(String(last), String(maxChangeForPair(coinPair)), 8);
+            let hi = bcmath.bcadd(String(last), maxDelta, 8);
+            let lo = bcmath.bcsub(String(last), maxDelta, 8);
+            // The clamp never publishes outside [lo, hi], so "at or past a bound" is
+            // "on the bound". A median landing exactly on a bound counts as clamped too:
+            // that widens the band on a round the clamp would have published the same
+            // price for, which is leniency, never a wrongful slash.
+            if (!bcmath.bclt(String(published), hi) || !bcmath.bcgt(String(published), lo)) {
+                clamped.add(coinPair);
+            }
+        }
+        return clamped;
     }
 
     async _checkParticipation(round, participants, allValidators) {
