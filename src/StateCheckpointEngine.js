@@ -696,12 +696,11 @@ class StateCheckpointEngine extends EventEmitter {
              cp.block_merkle_root || null, cp.block_merkle_version != null ? cp.block_merkle_version : null,
              JSON.stringify(sigs)]);
 
-        if(this.broadcaster){
-            let r = await this.db.doQuery(
-                'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? LIMIT 1',
-                [cp.chain, cp.network, cp.block_index, cp.checkpoint_seq]);
-            if(r.length) this.broadcaster.broadcastRow({ table: 'state_checkpoints', row: r[0] });
-        }
+        await this._broadcastRowOrResync(
+            'state_checkpoints',
+            'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? LIMIT 1',
+            [cp.chain, cp.network, cp.block_index, cp.checkpoint_seq],
+            'state-checkpoint broadcast gap');
 
         // Advance the cadence latch for PEER-led rounds too, symmetric with the
         // startup seed (_loadLastCheckpointLatch reads MAX(snapshot_block) over rows
@@ -941,18 +940,55 @@ class StateCheckpointEngine extends EventEmitter {
             await this.db.doQuery(
                 'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?)',
                 [block, capability, pubkey, amount, source]);
-            if(this.broadcaster){
-                // Select the row back by (block, capability, pubkey, SOURCE),
-                // matching the widened uq_cap_snap. A pubkey-only select-back returned
-                // just ONE of a multi-source key's rows (LIMIT 1), so the mirror stream
-                // carried a single source and the downstream indexer never saw the
-                // second. Inert below SWQ, where source='' and there is one row per key.
-                let r = await this.db.doQuery(
-                    'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
-                    [block, capability, pubkey, source]);
-                if(r.length) this.broadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
-            }
+            // Select the row back by (block, capability, pubkey, SOURCE),
+            // matching the widened uq_cap_snap. A pubkey-only select-back returned
+            // just ONE of a multi-source key's rows (LIMIT 1), so the mirror stream
+            // carried a single source and the downstream indexer never saw the
+            // second. Inert below SWQ, where source='' and there is one row per key.
+            await this._broadcastRowOrResync(
+                'capability_snapshots',
+                'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
+                [block, capability, pubkey, source],
+                'capability-snapshot broadcast gap');
         }
+    }
+
+    // Stream a row this hub has ALREADY committed to hub-DB mirror subscribers, and
+    // repair the stream when it cannot be delivered.
+    //
+    // HubDbBroadcaster.broadcastWatermark advances on its own wall clock and tells every
+    // subscriber "you have every row produced through ts"; a consumer's only gap repair is
+    // the max_ids catch-up in its bootstrap, which runs at connect time. state_checkpoints
+    // is a HUB_STATE_TABLES member with no FULL_REPAGE re-page, so a dropped row leaves the
+    // mirror certifying completeness past a committed, quorum-signed checkpoint until the
+    // socket happens to reconnect. A throw from the re-read and a zero-row result are the
+    // same undeliverable row event, and dropAllForResync is the sanctioned repair (the
+    // OracleConsensus._finalize price-round path is the in-repo precedent).
+    //
+    // Never throws to the caller: the row is committed, so the cadence-latch advance, the
+    // log line and the checkpoint:finalized emit must still run. Only DELIVERY becomes
+    // non-fatal here; the INSERTs above and the rootless-checkpoint refusal stay fail-closed.
+    // The empty-subscriber short-circuit also keeps the per-validator loop in
+    // _persistCapabilitySnapshot from re-firing the repair once the first drop emptied the set.
+    async _broadcastRowOrResync(table, sql, params, reason){
+        let b = this.broadcaster;
+        if(!b) return;
+        if(b.subscribers && b.subscribers.size === 0) return;   // nothing to gap
+        let failure = null;
+        try {
+            let rows = await this.db.doQuery(sql, params);
+            if(rows && rows.length){
+                for(let row of rows) b.broadcastRow({ table: table, row: row });
+                return;
+            }
+            failure = 'the committed row read back empty';
+        } catch(e){
+            failure = (e && e.message) ? e.message : String(e);
+        }
+        console.error('StateCheckpointEngine: could not stream a committed ' + table +
+                      ' row to mirror subscribers (' + failure + '); forcing subscriber resync');
+        try { if(typeof b.dropAllForResync === 'function') b.dropAllForResync(reason); }
+        catch(_e){ /* the repair itself must never fail a committed checkpoint */ }
     }
 
     async _resolveSnapshotBlock(){

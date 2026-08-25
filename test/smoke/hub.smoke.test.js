@@ -226,8 +226,9 @@ describe('Smoke: xchain-hub', function () {
 
                 async getoraclesubmissions() {
                     let oracle = hub.getOracle();
-                    if (!oracle) return { error: 'oracle not active' };
-                    return await oracle.getSubmissionsInfo();
+                    // Mirrors src/api.js: an absent oracle ROLE is {active:false}, never an error.
+                    if (!oracle) return { active: false };
+                    return { active: true, ...(await oracle.getSubmissionsInfo()) };
                 },
 
                 async getattestations({ status, limit }) {
@@ -304,9 +305,14 @@ describe('Smoke: xchain-hub', function () {
         // ── SMOKE-HUB-010: Optional subsystems ──
 
         describe('SMOKE-HUB-010: Graceful handling of disabled subsystems', function () {
-            it('getoraclesubmissions returns structured error when oracle inactive', async function () {
+            // An absent oracle ROLE (standalone config-oracle hub) is a neutral
+            // {active:false}, NOT an {error} envelope a health consumer would have to
+            // read as a transport failure. The absent-error assertion is the load-
+            // bearing half: it is what fails if the old error shape comes back.
+            it('getoraclesubmissions reports active:false, not an error, when oracle inactive', async function () {
                 let res = await callRpc('getoraclesubmissions');
-                expect(res.result.error).to.include('oracle not active');
+                expect(res.result.active).to.equal(false);
+                expect(res.result.error).to.equal(undefined);
             });
 
             it('getattestations returns structured error when cross-chain inactive', async function () {

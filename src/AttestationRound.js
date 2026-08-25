@@ -37,7 +37,9 @@ const swq    = require('./stake_weighted_quorum.js');
 const esc    = require('./attestation_escalation.js');
 // The consensus round-timeout default the seen-window floor below is keyed to.
 // Required, never re-spelled: see the constant's own note in constants.js.
-const { DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS } = require('./constants.js');
+// SUPPORTED_CONSENSUS_STRATEGIES is the admission allowlist _startRound declines an
+// unrecognised block-anchored strategy against; shared with the dispatch sites it names.
+const { DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS, SUPPORTED_CONSENSUS_STRATEGIES } = require('./constants.js');
 
 const ATTEST_PROPOSE = 'ATTEST_PROPOSE';
 
@@ -476,11 +478,27 @@ class AttestationRound {
         // Fail closed on an unresolvable strategy, exactly as the provider floor does
         // below: guessing a default here would silently run byte_equality against a
         // judge_model federation.
+        //
+        // Fail closed on an UNSUPPORTED one for the same reason. The registry carries an
+        // unrecognised name verbatim (ProviderRegistry.normalizeConsensusStrategy) so every
+        // hub resolves the same value rather than walking back to an older strategy; this
+        // gate is the half that then declines. Without it a non-empty unknown name is
+        // truthy, pins, and reaches AttestationConsensus, whose dispatch is positive
+        // equality against SUPPORTED_CONSENSUS_STRATEGIES only: the round would run the
+        // byte_equality branches with the no_quorum self-derivation gate (items 2641/2579)
+        // switched off, which is not a machine any peer runs. Checked HERE, before the
+        // provider fetch, so a round this build cannot serve costs no vendor call.
         let pinnedConsensusStrategy = (this.providerRegistry && typeof this.providerRegistry.getConsensusStrategy === 'function')
             ? this.providerRegistry.getConsensusStrategy(providerId, snapshotBlk) : null;
         if(!pinnedConsensusStrategy){
             console.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... provider "' + providerId +
                          '" has no block-anchored consensus_strategy at block ' + snapshotBlk + ' (failing closed)');
+            return;
+        }
+        if(SUPPORTED_CONSENSUS_STRATEGIES.indexOf(pinnedConsensusStrategy) === -1){
+            console.warn('AttestationRound: skipping ' + rid.substring(0,16) + '... provider "' + providerId +
+                         '" has unsupported consensus_strategy "' + pinnedConsensusStrategy + '" at block ' + snapshotBlk +
+                         ' (failing closed; this build implements ' + SUPPORTED_CONSENSUS_STRATEGIES.join(', ') + ')');
             return;
         }
         if(!pinnedFetchModel){
@@ -545,7 +563,12 @@ class AttestationRound {
                     pinnedVendors:    pinnedVendors,
                     // Rank of the pinned model on the fallback ladder; providers
                     // enforce request-level fallback policy on it (llm 'strict').
-                    modelRank:        modelIdx
+                    modelRank:        modelIdx,
+                    // This hub's api.js-validated HUB_NETWORK. http_get gates its
+                    // private-address escape hatch on it, and the e2e harness runs
+                    // several hubs in one process, where process.env cannot tell
+                    // them apart.
+                    network:          this.hub.network
                 });
             } catch (e) {
                 console.warn('AttestationRound: fetch failed for ' + rid.substring(0,16) + '...: ', e);

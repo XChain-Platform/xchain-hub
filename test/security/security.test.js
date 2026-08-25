@@ -1194,6 +1194,8 @@ describe('Security Hardening', function () {
         // The since_id guard lives on the REST snapshot routes, not on a JSON-RPC
         // method, so the route handlers are captured the same way the methods are.
         let routes = {};
+        // The hub stub itself, so a test can assert what the controller forwarded.
+        let hubStub;
 
         before(async function () {
             let mockApp = {
@@ -1237,6 +1239,9 @@ describe('Security Hardening', function () {
                 getSwaps: sinon.stub().resolves([]),
                 initiateSwap: sinon.stub().resolves(),
                 getSwap: sinon.stub().resolves({ source_chain: 'BTC', source_action_index: 7 }),
+                // Records the index the controller forwarded, so the well-formed case can
+                // assert the exact integer reaches the engine rather than a coerced one.
+                requestAttestation: sinon.stub().resolves({ status: 'attested' }),
                 reportReorg: sinon.stub().resolves(),
                 db: { setChainTip: sinon.stub().resolves(), doQuery: sinon.stub().resolves([]) }
             };
@@ -1287,6 +1292,7 @@ describe('Security Hardening', function () {
             await waitUntil(() => capturedMethods, { label: 'api.js boot to register its JSON-RPC methods' });
 
             controller = capturedMethods;
+            hubStub    = mockHub;
         });
 
         it('getfeequote rejects invalid chain', async function () {
@@ -1413,6 +1419,14 @@ describe('Security Hardening', function () {
                 let result = await controller.getswap({ source_chain: 'BTC', source_action_index: bad });
                 expect(result.error).to.include('source_action_index');
             });
+
+            // Same field, same band, on the entrypoint that opens a quorum round. The
+            // engine's parseInt guard accepts a prefix, so without this gate '1e3' attests as
+            // action 1 under the id BTC:1:LTC instead of erroring.
+            it(`requestattestation rejects a partial-integer source_action_index ${JSON.stringify(bad)}`, async function () {
+                let result = await controller.requestattestation({ source_chain: 'BTC', source_action_index: bad, dest_chain: 'LTC' });
+                expect(result.error).to.include('source_action_index');
+            });
         });
 
         it('initiateswap rejects a partial-integer dest_action_index', async function () {
@@ -1432,6 +1446,16 @@ describe('Security Hardening', function () {
         it('getswap accepts a well-formed index', async function () {
             let result = await controller.getswap({ source_chain: 'BTC', source_action_index: '7' });
             expect(result.error).to.be.undefined;
+        });
+
+        it('requestattestation forwards the exact integer, string or number', async function () {
+            hubStub.requestAttestation.resetHistory();
+            expect(await controller.requestattestation({ source_chain: 'BTC', source_action_index: '1000', dest_chain: 'LTC' }))
+                .to.deep.equal({ status: 'attested' });
+            expect(hubStub.requestAttestation.lastCall.args).to.deep.equal(['BTC', 1000, 'LTC']);
+            expect(await controller.requestattestation({ source_chain: 'BTC', source_action_index: 42, dest_chain: 'LTC' }))
+                .to.deep.equal({ status: 'attested' });
+            expect(hubStub.requestAttestation.lastCall.args).to.deep.equal(['BTC', 42, 'LTC']);
         });
 
         ['850000junk', '1e3', '850000.9', ' 850000', '0x32'].forEach((bad) => {

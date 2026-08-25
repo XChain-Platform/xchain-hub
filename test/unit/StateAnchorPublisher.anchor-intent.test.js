@@ -180,6 +180,57 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
             } }, 1000);
             expect(sqlHits(db, 'DELETE FROM anchor_published_checkpoints')).to.have.length(0);
         });
+
+        // ORDERING: the marker is read before the publisher-attestation round, not after.
+        //
+        // Every case above runs with pub.identity = null, which is exactly the leg where
+        // the round is skipped, so none of them can see where the marker read sits
+        // relative to it. With an identity set and no gate, a held row solicits a full 2f+1
+        // XANCPUB quorum from the federation, occupy the single _attestRound slot for up
+        // to roundTimeoutMs, and make every peer re-derive the election, for a publish
+        // this loop then declines. The archive twin (_publishArchive) already checks its
+        // intent first and documents that ordering as deliberate.
+        function mkAttestingPub(db){
+            const pub = mkPub(db);
+            pub.identity = { getPubkeyHex: () => 'AA' };   // arms the isAnchorRewardActive branch
+            pub.rounds   = 0;
+            pub._runPublisherAttestationRound = async () => { pub.rounds++; return null; };
+            return pub;
+        }
+
+        it('does not open a publisher-attestation round for a held, unmined checkpoint', async function () {
+            const db  = mkDb({ pending: [mkRow()], marker: { intent_at: new Date(), txid: 'earlier-tx', sent_at: null } });
+            const pub = mkAttestingPub(db);
+            pub._findExistingCheckpointAnchor = async () => null;
+            let broadcasts = 0;
+            const out = await pub._publishPendingCheckpoints({ broadcastFn: async () => { broadcasts++; return { txid: 'fresh' }; } }, 1000);
+            expect(pub.rounds, 'a held row must cost one DB read, not a federation quorum').to.equal(0);
+            expect(broadcasts).to.equal(0);
+            expect(out).to.deep.equal([]);
+        });
+
+        it('still runs the attestation round when the held anchor has mined (no over-skip)', async function () {
+            // The mined fall-through is the half a careless reorder breaks: the row is
+            // held AND mined, so the loop must continue into the normal publish/adopt path
+            // rather than `continue`-ing past it.
+            const db  = mkDb({ pending: [mkRow()], marker: { intent_at: new Date(), txid: null, sent_at: null } });
+            const pub = mkAttestingPub(db);
+            pub._findExistingCheckpointAnchor = async () => ({ exists: true, txid: 'mined-tx' });
+            const out = await pub._publishPendingCheckpoints({ broadcastFn: async () => ({ txid: 'fresh' }) }, 1000);
+            expect(pub.rounds, 'a held-but-mined row still takes the normal publish path').to.equal(1);
+            expect(out).to.have.length(1);
+            expect(out[0].txid).to.equal('mined-tx');
+        });
+
+        it('runs the attestation round for an unheld checkpoint', async function () {
+            // The negative control for the two cases above: with no marker the round must
+            // still open, or "rounds === 0" would prove nothing about the ordering.
+            const db  = mkDb({ pending: [mkRow()] });
+            const pub = mkAttestingPub(db);
+            pub._findExistingCheckpointAnchor = async () => null;
+            await pub._publishPendingCheckpoints({ broadcastFn: async () => ({ txid: 'fresh' }) }, 1000);
+            expect(pub.rounds).to.equal(1);
+        });
     });
 
     // ── marker-table retention (#4869) ────────────────────────────────────────

@@ -70,6 +70,11 @@ const coins = require('./coins');
 const COINS = [...coins.ALLOWED_COINS];
 const FIATS = ['USD', 'CAD', 'AUD', 'MXN', 'GBP', 'JPY', 'CNY', 'CHF', 'BRL', 'INR', 'EUR', 'KRW'];
 
+// How many offending pairs the aggregated bound-rejection warn names before it
+// elides the rest. Enough to identify whether one pair or a whole coin regressed,
+// short enough to stay one readable log line.
+const BOUND_REJECT_SAMPLE = 5;
+
 // Build all 36 coin pairs (BTC/USD, BTC/CAD, ..., DOGE/KRW)
 const COIN_PAIRS = [];
 for (let coin of COINS) {
@@ -98,6 +103,45 @@ class PriceFetcher {
         // not two, and can upgrade their plan or remove the key.
         this._cmc400Count          = 0;
         this._cmc400AlertThreshold = parseInt(config.CMC_400_ALERT_THRESHOLD) || 5;
+
+        // Cumulative count, per source, of upstream values the (0, PRICE_MAX)
+        // ingest bound rejected. Without a signal here a source that starts
+        // returning zero or mis-scaled values for SOME pairs stops contributing
+        // to those pairs' medians in silence: the pair still publishes at a
+        // reduced `sources` count, the liveSources<2 warn in fetchPrices stays
+        // quiet (that source is still contributing other pairs), and the
+        // total-loss warn fires only when EVERY source dropped the pair and
+        // blames the absence rather than the bound. Every sibling rejection site
+        // in this pipeline already says it out loud (OracleRound._handleMessage,
+        // OracleConsensus._aggregate, XchainPriceSource._entry); this was the
+        // last silent one.
+        this._boundRejects = { coingecko: 0, kraken: 0, coinmarketcap: 0 };
+    }
+
+    // Emit ONE aggregated warn per source per fetch for the values that source's
+    // parse loop dropped on the (0, PRICE_MAX) bound, and carry the cumulative
+    // per-source counter (same shape as _cmc400Count above). Aggregated rather
+    // than per-pair on purpose: the fetch is scheduled and there are 36 pairs, so
+    // a genuinely mis-scaled upstream would emit 36 lines per round and bury the
+    // signal this exists to give. Absences (a pair the source simply did not
+    // return) are NOT counted; only values that were present and failed the bound.
+    _reportBoundRejects(sourceKey, label, rejected) {
+        if (!rejected || rejected.length === 0) return;
+        this._boundRejects[sourceKey] += rejected.length;
+        let sample = rejected.slice(0, BOUND_REJECT_SAMPLE);
+        console.warn('PriceFetcher: ' + label + ' returned ' + rejected.length +
+            ' value(s) outside the ingestion bound (0 < value < ' + PRICE_MAX + ') this fetch; ' +
+            'dropped from those pairs\' medians: ' + sample.join(', ') +
+            (rejected.length > sample.length ? ', ...' : '') +
+            '. Cumulative for this source: ' + this._boundRejects[sourceKey] + '.');
+    }
+
+    // Render one rejected value for the aggregated warn, truncated so a garbage
+    // upstream payload cannot turn a diagnostic line into a multi-kilobyte log entry.
+    static _rejectSample(coinPair, raw) {
+        let shown = String(raw);
+        if (shown.length > 32) shown = shown.slice(0, 32) + '...';
+        return coinPair + '=' + shown;
     }
 
     // The coin pairs at least two configured providers can supply this round. Used by
@@ -249,6 +293,7 @@ class PriceFetcher {
 
         let data = response.data;
         let prices = {};
+        let rejected = [];
         for (let coin of COINS) {
             let cgId   = COINGECKO_IDS[coin];
             let cgData = data && data[cgId];
@@ -259,9 +304,12 @@ class PriceFetcher {
                 let val = parseFloat(raw);
                 if (Number.isFinite(val) && val > 0 && val < PRICE_MAX) {
                     prices[coin + '/' + fiat] = val;
+                } else {
+                    rejected.push(PriceFetcher._rejectSample(coin + '/' + fiat, raw));
                 }
             }
         }
+        this._reportBoundRejects('coingecko', 'CoinGecko', rejected);
         return prices;
     }
 
@@ -302,6 +350,7 @@ class PriceFetcher {
         if (!result) return null;
 
         let prices = {};
+        let rejected = [];
         for (let pair of Object.keys(KRAKEN_PAIRS)) {
             let altname = KRAKEN_PAIRS[pair];
             // Kraken's result key may be the request altname or a canonical X/Z form;
@@ -311,12 +360,18 @@ class PriceFetcher {
                 if (result[key]) { entry = result[key]; break; }
             }
             // 'c' is last-trade-closed [price, lotVolume]; index 0 is the price.
-            if (!entry || !Array.isArray(entry.c) || entry.c[0] === undefined) continue;
+            // A null last-trade price is an absence, not a bound rejection (same
+            // reading as the CoinGecko and CoinMarketCap loops); it was already
+            // dropped by the bound, so no price behavior changes.
+            if (!entry || !Array.isArray(entry.c) || entry.c[0] === undefined || entry.c[0] === null) continue;
             let val = parseFloat(entry.c[0]);
             if (Number.isFinite(val) && val > 0 && val < PRICE_MAX) {
                 prices[pair] = val;
+            } else {
+                rejected.push(PriceFetcher._rejectSample(pair, entry.c[0]));
             }
         }
+        this._reportBoundRejects('kraken', 'Kraken', rejected);
         return prices;
     }
 
@@ -361,19 +416,29 @@ class PriceFetcher {
         if (!data) return null;
 
         let prices = {};
+        let rejected = [];
         for (let coin of COINS) {
             let symbol  = CMC_SYMBOLS[coin];
             let cmcData = data[symbol];
             if (!cmcData || !cmcData.quote) continue;
             for (let fiat of FIATS) {
                 let cmcQuote = cmcData.quote[fiat];
-                if (!cmcQuote || cmcQuote.price === undefined) continue;
+                // An explicit null price is an ABSENCE, not a bound rejection: CMC
+                // returns null for conversions the configured plan does not cover, so
+                // counting it would fire the warn on every fetch of a healthy free-plan
+                // hub and train the operator to ignore the real signal. Skipped here for
+                // the same reason CoinGecko's loop skips null above; it was already
+                // dropped by the bound, so no price behavior changes.
+                if (!cmcQuote || cmcQuote.price === undefined || cmcQuote.price === null) continue;
                 let val = parseFloat(cmcQuote.price);
                 if (Number.isFinite(val) && val > 0 && val < PRICE_MAX) {
                     prices[coin + '/' + fiat] = val;
+                } else {
+                    rejected.push(PriceFetcher._rejectSample(coin + '/' + fiat, cmcQuote.price));
                 }
             }
         }
+        this._reportBoundRejects('coinmarketcap', 'CoinMarketCap', rejected);
         return prices;
     }
 

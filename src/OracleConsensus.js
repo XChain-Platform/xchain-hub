@@ -160,7 +160,13 @@ class OracleConsensus extends EventEmitter {
         // _pruneEarlyMessages an O(rounds) scan (O(n^2) CPU). Map preserves insertion
         // order, so eviction is FIFO on the oldest round key. 256 >> any legitimate
         // in-flight round concurrency (rounds are ~10 min apart).
-        this.earlyMessageMaxRounds = parseInt(process.env.ORACLE_EARLY_MSG_MAX_ROUNDS) || 256;
+        // positiveIntConfig, not `parseInt(env) || 256`, and here it is a HANG, not a
+        // loosened cap: the eviction below is a `while (size >= max)` loop, so a negative
+        // value keeps the condition true at size 0, where `keys().next().value` is
+        // undefined and `delete(undefined)` changes nothing. The loop never terminates and
+        // wedges the event loop for the whole hub process on the first buffered message.
+        this.earlyMessageMaxRounds = positiveIntConfig(process.env.ORACLE_EARLY_MSG_MAX_ROUNDS, 256,
+            'ORACLE_EARLY_MSG_MAX_ROUNDS');
 
         this.validatorSet = [];
 

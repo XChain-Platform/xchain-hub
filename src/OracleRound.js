@@ -210,6 +210,16 @@ class OracleRound {
         this.lastSubmissionPersistFailureRound = null;
         this.lastSubmissionPersistFailureCount = 0;
 
+        // Same shape for the durable retention sweep, which is fired and not awaited
+        // (see _executeRoundInner) so its rejection has nowhere else to land: without
+        // these the oracle_submissions audit table grows for the process lifetime and
+        // the first operator signal is DB pressure. _submissionsPruneDark is an edge
+        // latch, not a counter: the sweep runs every round, so an unlatched warn would
+        // reprint the same fault forever (same posture as OraclePublisher._logSnapshotDark).
+        this.submissionsPruneFailures = 0;
+        this.lastSubmissionsPruneFailureRound = null;
+        this._submissionsPruneDark = false;
+
         // Wall-clock anchor for round numbering. All hubs must agree on this
         // timestamp so they compute the same round number from the same time.
         this.epochStart = parseInt(this.config.ORACLE_EPOCH_START);
@@ -460,6 +470,12 @@ class OracleRound {
             failedSubmissionPersists:      this.failedSubmissionPersists,
             lastSubmissionPersistFailureRound: this.lastSubmissionPersistFailureRound,
             lastSubmissionPersistFailureCount: this.lastSubmissionPersistFailureCount,
+            // Retention-sweep failures. Additive and count-only: the log carries the
+            // driver message, this payload is the public read tier (see
+            // _onSubmissionsPruneFailure). Without these a stalled sweep is visible
+            // only to whoever is tailing the hub log.
+            submissionsPruneFailures:          this.submissionsPruneFailures,
+            lastSubmissionsPruneFailureRound:  this.lastSubmissionsPruneFailureRound,
             consecutiveSkippedRounds: this.consecutiveSkippedRounds,
             // PBFT finalization-timeout evictions (leader and follower seats),
             // mirroring StateCheckpointEngine getStats().round_timeouts so the
@@ -662,7 +678,11 @@ class OracleRound {
         // Best-effort DB retention for the oracle_submissions audit table. Fire-and-
         // forget: a retention failure must never stall or crash a money-bearing
         // consensus round (same posture as the tolerated audit-row insert failures).
-        this._pruneSubmissionsDb().catch(() => {});
+        // Not awaiting is the requirement; DISCARDING the rejection was not, and it
+        // made this the only error path in the round loop with no log and no counter.
+        // The round number is captured HERE rather than read inside the handler: the
+        // sweep settles asynchronously and this.currentRound may already have advanced.
+        this._pruneSubmissionsDb().catch(err => this._onSubmissionsPruneFailure(err, this.currentRound));
 
         // Initialize submission map for this round
         if (!this.submissions.has(this.currentRound)) {
@@ -1004,6 +1024,35 @@ class OracleRound {
                 ' rows older than round ' + cutoff + ' (keep ' +
                 this.submissionsRetentionRounds + ' rounds)');
         }
+        // Latch clears only after a DELETE actually completed, never on the two
+        // early returns above: those mean the sweep did not run, which is not
+        // evidence that a dark DB is reachable again.
+        if (this._submissionsPruneDark) {
+            this._submissionsPruneDark = false;
+            console.warn('Oracle submissions retention: prune recovered at round ' +
+                this.currentRound + ' (' + this.submissionsPruneFailures +
+                ' failure(s) since start)');
+        }
+    }
+
+    // The only trace a failed retention sweep leaves. Counters are monotonic (like
+    // failedSubmissionPersists) so a fault that has since recovered is still visible
+    // to getSubmissionsInfo; the warn fires once per dark spell, on the transition in.
+    //
+    // The error MESSAGE is logged and deliberately not put on the counters:
+    // getoraclesubmissions is in the hub's public read tier (only getallconfigs is a
+    // gated read), and a raw driver error can carry a DB user, host or schema detail.
+    // getSubmissionsInfo already draws this line for droppedPairsReadError, which
+    // exposes a boolean and logs the exception.
+    _onSubmissionsPruneFailure(err, round) {
+        this.submissionsPruneFailures++;
+        this.lastSubmissionsPruneFailureRound = round != null ? round : this.currentRound;
+        if (this._submissionsPruneDark) return;
+        this._submissionsPruneDark = true;
+        console.warn('Oracle submissions retention: prune FAILED at round ' +
+            this.lastSubmissionsPruneFailureRound +
+            '; the oracle_submissions audit table will grow until it recovers: ' +
+            ((err && err.message) ? err.message : err));
     }
 }
 

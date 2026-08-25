@@ -464,6 +464,78 @@ describe('OracleRound (extra coverage)', function () {
         });
     });
 
+    // ── retention-sweep failure is observable (review #5799) ─────────────────
+    //
+    // The sweep is fired and not awaited, so its rejection has nowhere to land but
+    // this handler. A bare `.catch(() => {})` here leaves the one error path in the
+    // round loop with neither a log line nor a counter - so a dead pool or a lock
+    // timeout let oracle_submissions grow for the process lifetime and the first
+    // signal an operator got was DB pressure with nothing pointing at retention.
+
+    describe('_onSubmissionsPruneFailure()', function () {
+        let warn;
+
+        beforeEach(function () { warn = sinon.stub(console, 'warn'); });
+
+        it('counts a rejected sweep and records the round it failed in', async function () {
+            or.submissionsRetentionRounds = 100;
+            or.currentRound = 1000;
+            hub.db.doQuery = sinon.stub().rejects(new Error('pool is closed'));
+            await or._pruneSubmissionsDb().catch(e => or._onSubmissionsPruneFailure(e, or.currentRound));
+            expect(or.submissionsPruneFailures).to.equal(1);
+            expect(or.lastSubmissionsPruneFailureRound).to.equal(1000);
+            expect(warn.calledOnce).to.be.true;
+            expect(warn.firstCall.args[0]).to.match(/prune FAILED at round 1000/);
+        });
+
+        it('warns once per dark spell, and again after an intervening recovery', function () {
+            or.currentRound = 500;
+            or._onSubmissionsPruneFailure(new Error('a'), 500);
+            or._onSubmissionsPruneFailure(new Error('a'), 501);
+            or._onSubmissionsPruneFailure(new Error('a'), 502);
+            expect(or.submissionsPruneFailures).to.equal(3);
+            expect(warn.callCount).to.equal(1);          // latched: no per-round log storm
+
+            or._submissionsPruneDark = false;            // what a successful sweep does
+            or._onSubmissionsPruneFailure(new Error('a'), 503);
+            expect(warn.callCount).to.equal(2);
+            expect(or.submissionsPruneFailures).to.equal(4);   // monotonic, never reset
+        });
+
+        it('clears the latch and says so after a sweep that actually ran', async function () {
+            or.submissionsRetentionRounds = 100;
+            or.currentRound = 1000;
+            or._submissionsPruneDark = true;
+            or.submissionsPruneFailures = 2;
+            hub.db.doQuery = sinon.stub().resolves({ affectedRows: 3 });
+            await or._pruneSubmissionsDb();
+            expect(or._submissionsPruneDark).to.be.false;
+            expect(warn.calledOnce).to.be.true;
+            expect(warn.firstCall.args[0]).to.match(/prune recovered at round 1000/);
+        });
+
+        it('leaves the latch set when the sweep short-circuits without running a DELETE', async function () {
+            or.submissionsRetentionRounds = 0;           // retention disabled
+            or.currentRound = 1000;
+            or._submissionsPruneDark = true;
+            hub.db.doQuery = sinon.stub().resolves({});
+            await or._pruneSubmissionsDb();
+            expect(hub.db.doQuery.called).to.be.false;
+            expect(or._submissionsPruneDark).to.be.true;  // a skipped sweep is not a recovery
+            expect(warn.called).to.be.false;
+        });
+
+        it('reports the counters on getSubmissionsInfo without leaking the driver message', async function () {
+            or.currentRound = 700;
+            or._onSubmissionsPruneFailure(new Error("Access denied for user 'hub'@'10.0.0.5'"), 700);
+            hub.db.doQuery = sinon.stub().resolves([]);
+            let info = await or.getSubmissionsInfo();
+            expect(info.submissionsPruneFailures).to.equal(1);
+            expect(info.lastSubmissionsPruneFailureRound).to.equal(700);
+            expect(JSON.stringify(info)).to.not.match(/Access denied/);
+        });
+    });
+
     // ── ORACLE_SUBMISSIONS_RETENTION_ROUNDS is actually reachable (item 2664) ─
     //
     // OracleRound reads this knob off hub.p2pConfig, which is a fixed object literal

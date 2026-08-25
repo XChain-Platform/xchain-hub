@@ -40,7 +40,12 @@ const BOOTSTRAP_AT_100K = '1.00000000';
 const { COIN_ID_SQL, XCHAIN_TICK_SQL, DISPENSE_FILLS_SQL, DEX_FILLS_SQL } =
     require('../../src/xchainPriceQuery.js');
 
+// HUB_NETWORK belongs in the shared fixture because the four consensus-uniform
+// derivation overrides are honored only on regtest. A fixture that omitted it would
+// silently take the set-but-IGNORED path and assert the pinned constants instead of
+// the override each case means to exercise.
 const CONFIG = {
+    HUB_NETWORK: 'regtest',
     XCHAIN_PRICE_INDEXER_DB_HOST: '127.0.0.1',
     XCHAIN_PRICE_INDEXER_DB_NAME: 'XChain_BTC_Regtest_Indexer',
     XCHAIN_PRICE_INDEXER_DB_USER: 'reader',
@@ -371,6 +376,100 @@ describe('XchainPriceSource: validator-side XCHAIN/USD @regression', function ()
             expect(out).to.equal(null);
             expect(warned.some(w => /abstaining from XCHAIN\/USD.*ingestion bound/.test(w)),
                 'the ingestion bound logged its abstention').to.be.true;
+        });
+    });
+
+    describe('consensus-uniform overrides are regtest-only', function () {
+        // constants.js declares W/K/bootstrap/threshold CONSENSUS-UNIFORM: a hub running
+        // different values computes a different XCHAIN/BTC leg and lands outside the
+        // co-sign deviation band. The overrides exist for regtest and e2e drills, and
+        // that restriction is code rather than an api.js comment, because a stray env var on
+        // a validator was a slashing lottery. Same enforced shape as the platform's other
+        // consensus-adjacent seams (OracleConsensus ORACLE_ALLOW_UNVERIFIED_PAIRS,
+        // XChainHub._oracleMaxAgeSeconds).
+        const OVERRIDES = {
+            XCHAIN_PRICE_WINDOW_BLOCKS:       '10',
+            XCHAIN_PRICE_CONFIRMATION_BUFFER: '0',
+            XCHAIN_PRICE_BOOTSTRAP_SATS:      '5000',
+            XCHAIN_PRICE_MIN_BTC_VOLUME:      '0',
+        };
+
+        function build(network) {
+            const cfg = { ...CONFIG, ...OVERRIDES };
+            if (network === undefined) delete cfg.HUB_NETWORK;
+            else cfg.HUB_NETWORK = network;
+            let logged = [];
+            let orig = console.log;
+            console.log = (...a) => logged.push(a.join(' '));
+            let src;
+            try { src = makeSource({}, FINALIZED_BTC, cfg).src; } finally { console.log = orig; }
+            return { src, logged };
+        }
+
+        function expectPinned(src) {
+            expect(src.windowBlocks, 'windowBlocks').to.equal(1000);
+            expect(src.confirmationBuffer, 'confirmationBuffer').to.equal(6);
+            expect(src.bootstrapXchainBtc, 'bootstrapXchainBtc').to.equal('0.00001000');
+            expect(src.minBtcVolume, 'minBtcVolume').to.equal(null);
+        }
+
+        it('honors all four on regtest', function () {
+            const { src, logged } = build('regtest');
+            expect(src.windowBlocks).to.equal(10);
+            expect(src.confirmationBuffer).to.equal(0);
+            // The honored path runs the sats through bcdiv, which hands back a mathjs
+            // BigNumber; only the pinned fallback is the literal 8dp string.
+            expect(String(src.bootstrapXchainBtc)).to.equal('0.00005');
+            expect(src.minBtcVolume).to.equal('0');
+            expect(logged.some(l => /IGNORED/.test(l)),
+                'regtest must not warn about a hatch it honored').to.be.false;
+        });
+
+        it('ignores all four on mainnet and names each one it dropped', function () {
+            const { src, logged } = build('mainnet');
+            expectPinned(src);
+            for (const key of Object.keys(OVERRIDES)) {
+                expect(logged.some(l => l.includes(key) && /is set but IGNORED on mainnet/.test(l)),
+                    key + ' must log a set-but-IGNORED line').to.be.true;
+            }
+        });
+
+        it('ignores all four on testnet', function () {
+            expectPinned(build('testnet').src);
+        });
+
+        it('fails closed when the network is unset (standalone is not a bypass)', function () {
+            const { src, logged } = build(undefined);
+            expectPinned(src);
+            expect(logged.some(l => /IGNORED on <unset>/.test(l)),
+                'an unset network names itself in the warning').to.be.true;
+        });
+
+        it('stays silent off regtest when an override merely restates the pinned value', function () {
+            // ConfigService bakes the host shell's XCHAIN_PRICE_* into the hub container on
+            // every regenerate, so a validator carrying the pinned value would otherwise
+            // warn at every boot about a divergence that does not exist.
+            const cfg = { ...CONFIG, HUB_NETWORK: 'mainnet',
+                          XCHAIN_PRICE_WINDOW_BLOCKS: '1000',
+                          XCHAIN_PRICE_BOOTSTRAP_SATS: String(XCHAIN_PRICE_BOOTSTRAP_SATS) };
+            let logged = [];
+            let orig = console.log;
+            console.log = (...a) => logged.push(a.join(' '));
+            let src;
+            try { src = makeSource({}, FINALIZED_BTC, cfg).src; } finally { console.log = orig; }
+            expect(src.windowBlocks).to.equal(1000);
+            expect(src.bootstrapXchainBtc).to.equal('0.00001000');
+            expect(logged.some(l => /IGNORED/.test(l)),
+                'a matching override is not a divergence').to.be.false;
+        });
+
+        it('leaves the per-operator indexer credentials ungated', function () {
+            // The INDEXER_DB_* keys are per-validator by design; gating them would take
+            // every non-regtest hub off the pair entirely.
+            const cfg = { ...CONFIG, HUB_NETWORK: 'mainnet' };
+            const { src } = makeSource({}, FINALIZED_BTC, cfg);
+            expect(src.isConfigured()).to.equal(true);
+            expect(src.host).to.equal('127.0.0.1');
         });
     });
 });

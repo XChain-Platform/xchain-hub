@@ -541,6 +541,41 @@ describe('AttestationRound', function () {
             expect(ar.rounds.size).to.equal(0);
             expect(fetchStub.called, 'an unanchorable strategy must not trigger a paid fetch').to.be.false;
         });
+
+        // The registry carries an unrecognised strategy VERBATIM on purpose, so every hub
+        // resolves the same value instead of walking back to an older machine. Declining is
+        // the other half of that contract: admitted, a non-empty unknown name reaches
+        // AttestationConsensus, whose dispatch is positive equality against the two
+        // implemented names, so the round runs the byte_equality branches with the
+        // no_quorum self-derivation gate (items 2641/2579) inactive.
+        it('_startRound skips the round, and the paid fetch, on a strategy this build does not implement', async function () {
+            let fetchStub = sinon.stub().resolves({ body: Buffer.from('ok'), meta: '200' });
+            let reg = makeProviderRegistry({
+                getConsensusStrategy: sinon.stub().returns('threshold_vote'),
+                getModule:            sinon.stub().returns({ fetch: fetchStub })
+            });
+            let ar = new AttestationRound(makeStrategyHub(), reg);
+            sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: MY_PUBKEY, hash: '00' }]);
+            await ar._startRound(makeRequest(), 4242);
+            expect(ar.rounds.size, 'an unsupported strategy must not pin a round').to.equal(0);
+            expect(fetchStub.called, 'an unsupported strategy must not trigger a paid fetch').to.be.false;
+        });
+
+        // Guards the allowlist against over-tightening: both implemented names must still
+        // admit, or the gate above turns every live round into an expiry + refund.
+        it('_startRound still admits both strategies this build implements', async function () {
+            for (let strategy of ['byte_equality', 'judge_model']) {
+                let reg = makeProviderRegistry({
+                    getConsensusStrategy: sinon.stub().returns(strategy),
+                    getModule: sinon.stub().returns({ fetch: sinon.stub().resolves({ body: Buffer.from('ok'), meta: '200' }) })
+                });
+                let ar = new AttestationRound(makeStrategyHub(), reg);
+                sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: MY_PUBKEY, hash: '00' }]);
+                await ar._startRound(makeRequest(), 4242);
+                expect(ar.rounds.size, strategy + ' must still start a round').to.equal(1);
+                expect([...ar.rounds.values()][0].pinnedConsensusStrategy).to.equal(strategy);
+            }
+        });
     });
 
     // ── getStats ────────────────────────────────────────────────────────────
@@ -896,6 +931,29 @@ describe('AttestationRound', function () {
             expect(state.pinnedJudgeModel).to.equal('claude-haiku-4-6');
             // getAdditionalConfig was resolved at the request's block_index.
             expect(reg.getAdditionalConfig.calledWith('http_get', sinon.match.any)).to.be.true;
+        });
+
+        it('hands the provider this hub validated network, for the http_get SSRF hatch gate', async function () {
+            // http_get honors ATTESTATION_HTTP_GET_ALLOW_PRIVATE only on regtest. A
+            // container reads HUB_NETWORK from its own env, but the e2e harness runs
+            // several hubs in ONE process off in-memory p2pConfig, where process.env
+            // cannot tell them apart - so the network has to travel with the call.
+            let myPubkey = 'aa'.repeat(32);
+            // regtest has STAKE_WEIGHTED_QUORUM active from genesis, so the round takes
+            // the weight-snapshot leg; both legs reach the same fetch.
+            let capSS = { getSnapshot:       sinon.stub().resolves({ validators: [{ pubkey: myPubkey }] }),
+                          getWeightSnapshot: sinon.stub().resolves({ validators: [{ pubkey: myPubkey }] }) };
+            let hub   = makeHub({ capabilitySnapshot: capSS });
+            hub.network     = 'regtest';
+            hub.getIdentity = () => makeIdentity(myPubkey);
+            let fetchStub = sinon.stub().resolves({ body: Buffer.from('ok'), meta: '200' });
+            let reg = makeProviderRegistry({ getModule: sinon.stub().returns({ fetch: fetchStub }) });
+            let ar  = new AttestationRound(hub, reg);
+            sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: myPubkey, hash: '00' }]);
+            ar.setConsensus({ propose: sinon.stub().resolves() });
+            await ar._startRound(makeRequest());
+            expect(fetchStub.calledOnce, 'the round reached the provider fetch').to.be.true;
+            expect(fetchStub.firstCall.args[1].network).to.equal('regtest');
         });
     });
 

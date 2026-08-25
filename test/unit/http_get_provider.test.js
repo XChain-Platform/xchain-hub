@@ -283,6 +283,7 @@ describe('http_get.fetch: SSRF guard', function () {
         nock.cleanAll();
         sinon.restore();
         delete process.env.ATTESTATION_HTTP_GET_ALLOW_PRIVATE;
+        delete process.env.HUB_NETWORK;
     });
 
     async function expectGuardReject(payload) {
@@ -361,11 +362,52 @@ describe('http_get.fetch: SSRF guard', function () {
         expect(result.body.toString()).to.equal('public-ok');
     });
 
-    it('ATTESTATION_HTTP_GET_ALLOW_PRIVATE=1 disables the guard (regtest/e2e escape hatch)', async function () {
+    it('ATTESTATION_HTTP_GET_ALLOW_PRIVATE=1 disables the guard on regtest (e2e escape hatch)', async function () {
         process.env.ATTESTATION_HTTP_GET_ALLOW_PRIVATE = '1';
+        process.env.HUB_NETWORK = 'regtest';
         nock('https://127.0.0.1').get('/local').reply(200, 'local-ok');
         const result = await httpGet.fetch('https://127.0.0.1/local', {});
         expect(result.body.toString()).to.equal('local-ok');
+    });
+
+    it('honors the hatch on a regtest network passed through options', async function () {
+        // The e2e harness runs several hubs in ONE process off in-memory p2pConfig, so
+        // there is no per-hub process.env.HUB_NETWORK to read; AttestationRound passes
+        // the hub's validated network down instead.
+        process.env.ATTESTATION_HTTP_GET_ALLOW_PRIVATE = '1';
+        nock('https://127.0.0.1').get('/local').reply(200, 'local-ok');
+        const result = await httpGet.fetch('https://127.0.0.1/local', { network: 'regtest' });
+        expect(result.body.toString()).to.equal('local-ok');
+    });
+
+    it('IGNORES the hatch off regtest and says so once', async function () {
+        // The hatch's "never set it in production" rule is enforced, not prose, because a stray
+        // env var on a mainnet validator turned the attestation fleet into an internal
+        // port scanner and made that hub fetch a URL its peers structurally cannot reach.
+        process.env.ATTESTATION_HTTP_GET_ALLOW_PRIVATE = '1';
+        process.env.HUB_NETWORK = 'mainnet';
+        let logged = [];
+        let orig = console.log;
+        console.log = (...a) => logged.push(a.join(' '));
+        try { await expectGuardReject('https://127.0.0.1/local'); }
+        finally { console.log = orig; }
+        expect(logged.some(l => /ATTESTATION_HTTP_GET_ALLOW_PRIVATE.*IGNORED on mainnet/.test(l)),
+            'the ignored hatch names itself and the network').to.be.true;
+    });
+
+    it('IGNORES the hatch when the network is unset (standalone is not a bypass)', async function () {
+        process.env.ATTESTATION_HTTP_GET_ALLOW_PRIVATE = '1';
+        await expectGuardReject('https://169.254.169.254/latest/meta-data/');
+        await expectGuardReject('https://10.0.0.5/');
+    });
+
+    it('IGNORES the hatch off regtest even for a hostname that resolves private', async function () {
+        // The env-only form skipped resolvePinnedAddress entirely, so the DNS-rebind leg
+        // of the guard went with it; the gate has to restore both, not just the literal check.
+        process.env.ATTESTATION_HTTP_GET_ALLOW_PRIVATE = '1';
+        process.env.HUB_NETWORK = 'testnet';
+        sinon.stub(dns.promises, 'lookup').resolves([{ address: '192.168.1.10', family: 4 }]);
+        await expectGuardReject('https://internal.example.com/');
     });
 });
 
