@@ -103,6 +103,23 @@ class OracleConsensus extends EventEmitter {
         // the dashboard can alert on quorum-loss frequency (reviews 1468/1469).
         this._roundTimeouts = 0;
 
+        // Rounds where the last-finalized-price reference was still behind the round
+        // being aggregated AFTER a re-read of price_snapshots, i.e. this hub's own
+        // database never received the previous round. Mirrors the _roundTimeouts
+        // counter convention above (diagnostic only; nothing gates on it).
+        this._staleClampReference = 0;
+
+        // Round each _lastFinalizedPrices entry came from (Map<coin_pair, round>),
+        // kept alongside the price map rather than inside it so every existing
+        // reader of _lastFinalizedPrices keeps reading a plain price string.
+        // Used to detect that the cached clamp/co-sign reference is behind the
+        // round being processed; see _refreshLastFinalizedPrices.
+        this._lastFinalizedRounds = new Map();
+
+        // Round of the last refresh ATTEMPT, so a hub whose own database is behind
+        // re-reads at most once per round instead of once per aggregation.
+        this._lastFinalizedRefreshRound = null;
+
         // When each round became ready to finalize (Date.now() at finalizeRound's
         // follower path). The receiver-side leader-timeout grace in _handlePropose
         // is measured from here so every honest hub applies the same window before
@@ -245,32 +262,113 @@ class OracleConsensus extends EventEmitter {
     // _updateLastFinalizedPrices (key = coin_pair, value = price string) and the
     // "latest finalized = highest round_number" ordering used by hub.getPrice().
     // Fail-soft: an empty table or a query error leaves the cache empty (the prior
-    // cold-start behavior), so this can never block hub startup.
+    // cold-start behavior), so this can never block hub startup. The read itself is
+    // _loadLastFinalizedPrices, shared with the per-round refresh; this wrapper only
+    // adds the start-up log line.
     async _seedLastFinalizedPrices() {
+        let loaded = await this._loadLastFinalizedPrices();
+        if (loaded > 0)
+            console.log('Oracle: seeded last-finalized-price cache with ' + loaded + ' pair(s) from price_snapshots');
+    }
+
+    // Read the newest finalized price (and the round it came from) per coin_pair
+    // out of price_snapshots and merge it into the cache. Shared by the start-time
+    // seed and the per-round refresh so both use ONE definition of "latest
+    // finalized". Returns the number of pairs loaded.
+    // Fail-soft by contract: a query error leaves whatever was cached in place and
+    // never throws, because both callers sit on the consensus path.
+    // Rows are MERGED, never used to clear the map: an empty/partial result (a
+    // truncated table, a replica mid-restore) must not silently drop the clamp
+    // reference and turn every clamped pair into an unbounded aggregate.
+    async _loadLastFinalizedPrices() {
         if (!this._lastFinalizedPrices) this._lastFinalizedPrices = new Map();
+        if (!this._lastFinalizedRounds) this._lastFinalizedRounds = new Map();
         try {
             // One row per coin_pair: the price from that pair's highest finalized
             // round. The subquery picks the max finalized round per pair, then the
             // join reads that round's price for the pair.
             let rows = await this.db.doQuery(
-                "SELECT p.coin_pair AS coin_pair, p.price AS price " +
+                "SELECT p.coin_pair AS coin_pair, p.price AS price, p.round_number AS round_number " +
                 "FROM price_snapshots p " +
                 "JOIN (SELECT coin_pair, MAX(round_number) AS mx FROM price_snapshots " +
                 "      WHERE status = 'finalized' AND price IS NOT NULL GROUP BY coin_pair) m " +
                 "  ON p.coin_pair = m.coin_pair AND p.round_number = m.mx " +
                 "WHERE p.status = 'finalized' AND p.price IS NOT NULL", []);
-            let seeded = 0;
+            let loaded = 0;
             for (let r of (rows || [])) {
                 if (r.coin_pair && r.price !== null && r.price !== undefined) {
                     this._lastFinalizedPrices.set(r.coin_pair, String(r.price));
-                    seeded++;
+                    let rn = Number(r.round_number);
+                    if (Number.isInteger(rn)) this._lastFinalizedRounds.set(r.coin_pair, rn);
+                    loaded++;
                 }
             }
-            if (seeded > 0)
-                console.log('Oracle: seeded last-finalized-price cache with ' + seeded + ' pair(s) from price_snapshots');
+            return loaded;
         } catch (e) {
-            console.warn('Oracle: could not seed last-finalized-price cache (continuing with empty cache):',
-                e && e.message ? e.message : e);
+            console.warn('Oracle: could not read last-finalized prices from price_snapshots ' +
+                '(keeping the previous reference):', e && e.message ? e.message : e);
+            return 0;
+        }
+    }
+
+    // Highest round any cached entry reflects, or null when nothing is cached.
+    _maxCachedFinalizedRound() {
+        if (!this._lastFinalizedRounds || this._lastFinalizedRounds.size === 0) return null;
+        let mx = null;
+        for (let r of this._lastFinalizedRounds.values()) {
+            if (Number.isInteger(r) && (mx === null || r > mx)) mx = r;
+        }
+        return mx;
+    }
+
+    // Make the clamp / co-sign reference a function of what price_snapshots holds
+    // at THIS round, not of this process's own history.
+    //
+    // _lastFinalizedPrices used to have exactly two writers: the start-time seed and
+    // _storeSnapshot. Every path where this hub misses a round its peers finalize
+    // left the reference behind for the process lifetime - a PROPOSE-round timeout
+    // eviction, a withheld co-sign, _storeSkippedRound (which writes no cache entry),
+    // and PriceAggregator.receiveValidatedRound (which writes 'finalized' rows for
+    // rounds pushed from a source chain and never touched this cache). A hub one
+    // round behind clamps an identical median against last_{N-1} while its peers
+    // clamp against last_N, so during a sustained move the two aggregates differ by
+    // up to a full clamp step - far outside the co-sign deviation band - and the
+    // stale hub withholds the whole round, every round, until restart.
+    //
+    // Re-read when the cache is older than round-1 (round-1 is the newest round that
+    // CAN be finalized while round is being aggregated). One indexed query, only on
+    // rounds where this hub is actually behind; at most one attempt per round, so a
+    // hub whose own database is behind does not re-query per aggregation.
+    // CONSENSUS-CRITICAL: deploy fleet-wide atomically.
+    async _refreshLastFinalizedPrices(round) {
+        if (!Number.isInteger(round)) return;
+        let cached = this._maxCachedFinalizedRound();
+        if (cached !== null && cached >= round - 1) return;      // already current
+        if (this._lastFinalizedRefreshRound === round) return;   // already tried this round
+        this._lastFinalizedRefreshRound = round;
+
+        await this._loadLastFinalizedPrices();
+
+        // Still behind after the re-read means this hub's OWN database never
+        // received round-1 (gossip gap, ingest lag), which the re-read cannot fix.
+        // Report it and carry on with the stale reference: changing what a hub
+        // co-signs or publishes on this signal is a separate, fleet-wide-atomic
+        // decision, not something to slip in behind a diagnostic.
+        // Gated on the highest cached round, NOT per pair: a pair the federation
+        // legitimately dropped for a few rounds (2-source deviation gate, emptied
+        // trim) is behind on every honest hub and is not a divergence.
+        let after = this._maxCachedFinalizedRound();
+        if (after !== null && after < round - 1) {
+            this._staleClampReference++;
+            let behind = [];
+            for (let [pair, r] of this._lastFinalizedRounds) {
+                if (Number.isInteger(r) && r < round - 1) behind.push(pair + '@' + r);
+            }
+            console.warn('Oracle: last-finalized reference is behind for round ' + round +
+                ': newest finalized round in this hub\'s price_snapshots is ' + after +
+                ' (expected ' + (round - 1) + '). The aggregate clamp and the no-local-submission ' +
+                'co-sign band will use a stale reference for: ' + behind.slice(0, 8).join(', ') +
+                (behind.length > 8 ? ' (+' + (behind.length - 8) + ' more)' : ''));
         }
     }
 
@@ -544,6 +642,15 @@ class OracleConsensus extends EventEmitter {
                 'below minimum member submissions threshold');
             return;
         }
+
+        // Bring the clamp reference up to what price_snapshots holds at this round
+        // BEFORE anything aggregates. Placed once here rather than at each call site
+        // because every aggregating path below leaves through it: the standalone
+        // (quorum === 0) branch, the leader's _proposeRound, and the two
+        // fallback-proposer setTimeout callbacks, which are armed from inside this
+        // function and so inherit the refresh. That is what keeps _proposeRound
+        // synchronous - it never has to await a refresh of its own.
+        await this._refreshLastFinalizedPrices(round);
 
         let quorum = snapshot
             ? this.hub.capabilitySnapshot.getQuorum(snapshot)
@@ -1007,6 +1114,16 @@ class OracleConsensus extends EventEmitter {
             console.log('Oracle: Accepting [FALLBACK] PROPOSE from ' + envelope.sender +
                 ' for round ' + round + ' (leader ' + (leader ? leader.addr : 'unknown') + ' has no submission)');
         }
+
+        // Bring the clamp / co-sign reference up to what price_snapshots holds at this
+        // round before any of the three readers below run: the proposer-excluded local
+        // aggregate (_aggregateAll -> _clampToLastFinalized), the no-local-submission
+        // historical band (_getLastFinalizedPrice), and the coverage check's re-derived
+        // leader aggregate. A follower that sat out the previous round would otherwise
+        // measure the leader's correctly-clamped price against a reference one round old
+        // and withhold co-sign on the whole round. Placed after the leader/fallback
+        // validation so an unauthorized PROPOSE cannot make this hub query.
+        await this._refreshLastFinalizedPrices(round);
 
         // Content-validate the proposed prices before co-signing. Leadership rotates round-robin, so
         // a Byzantine or feed-broken validator gets a leader turn; without this check honest followers
@@ -1764,7 +1881,7 @@ class OracleConsensus extends EventEmitter {
         // Update the in-memory last-finalized-price cache so the co-sign gate in
         // _handlePropose can apply a historical-deviation check for pairs a hub
         // did not price locally in the current round (seq 4083).
-        this._updateLastFinalizedPrices(prices);
+        this._updateLastFinalizedPrices(prices, round);
 
         // Broadcast the finalized rows to hub-DB mirror subscribers (distributed indexers),
         // mirroring StateCheckpointEngine/CrossChainDexEngine. This must happen AFTER the
@@ -1943,12 +2060,27 @@ class OracleConsensus extends EventEmitter {
         return this._lastFinalizedPrices.get(coinPair) || null;
     }
 
+    // Round the cached last-finalized price for a pair came from, or null when the
+    // pair is uncached (or was cached before rounds were recorded). Separate from
+    // _getLastFinalizedPrice so its callers keep getting a plain price string.
+    _getLastFinalizedRound(coinPair) {
+        if (!this._lastFinalizedRounds) return null;
+        let r = this._lastFinalizedRounds.get(coinPair);
+        return Number.isInteger(r) ? r : null;
+    }
+
     // Update the in-memory last-finalized-price cache after a round is stored.
-    // Called at the end of _storeSnapshot.
-    _updateLastFinalizedPrices(prices) {
+    // Called at the end of _storeSnapshot. `round` stamps each entry with the round
+    // it reflects, which is what lets _refreshLastFinalizedPrices tell "current" from
+    // "this hub sat out a round the federation finalized".
+    _updateLastFinalizedPrices(prices, round) {
         if (!this._lastFinalizedPrices) this._lastFinalizedPrices = new Map();
+        if (!this._lastFinalizedRounds) this._lastFinalizedRounds = new Map();
         for (let p of prices) {
-            if (p.coinPair && p.price) this._lastFinalizedPrices.set(p.coinPair, String(p.price));
+            if (p.coinPair && p.price) {
+                this._lastFinalizedPrices.set(p.coinPair, String(p.price));
+                if (Number.isInteger(round)) this._lastFinalizedRounds.set(p.coinPair, round);
+            }
         }
     }
 
