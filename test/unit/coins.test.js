@@ -42,8 +42,12 @@ const coins      = require('../../src/coins');
 // LTC 4855000 -> 4862500, DOGE 67815000 -> 67847500) so the public testnet
 // announces with zero pre-announcement test actions. Only the three TESTNET
 // goldens move; unchanged mainnet/regtest goldens are the no-drift check.
+// BTC mainnet REGENERATED 2026-08-24: the mainnet validator reward pool
+// (REWARD) moved to its final vanity address. Addresses are in the consensus
+// subset, so only the BTC mainnet golden moves; every other golden is
+// deliberately untouched and is the no-drift check.
 const GOLDEN_HASH = {
-    BTC:  { mainnet: '8f2a60c4a06d819d909cefa5d463a2f810d014fc66cdfa0ef51ffa19cbb5f66b',
+    BTC:  { mainnet: '6f0722aed9d46d74612b630af6d7c0d4538208eec85da546d7ef4b1afb08908b',
             testnet: 'f6589c6b88dc930db05998070ef0b73743f58623a0d23fbc30fdb158c49d1427',
             regtest: '24e6a363e5a36285574dea357328a997fdee5762ef812d8947eacf69c51afc24' },
     LTC:  { mainnet: 'f5c81b02f2c8bdd4a828f25495cc5c63fa18e6040c80569c2aaeb8d6860ce577',
