@@ -116,7 +116,7 @@
     },
     {
       "name": "getoraclesubmissions",
-      "summary": "Raw per-validator oracle price submissions for recent rounds, plus round cadence, skipped/dropped-pair diagnostics and oracleMaxPriceAgeSeconds (the price-age bound getprice enforces).",
+      "summary": "Raw per-validator oracle price submissions for recent rounds, plus round cadence, skipped/dropped-pair diagnostics and oracleMaxPriceAgeSeconds (the price-age bound getprice enforces). Carries active:true; a hub that runs no oracle round (standalone config-oracle deployment, no P2P_VALIDATOR_ADDR) answers {active:false} rather than an error, so a health consumer can tell an absent role from a failure.",
       "paramStructure": "by-name",
       "params": [],
       "result": {

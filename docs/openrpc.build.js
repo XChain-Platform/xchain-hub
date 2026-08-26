@@ -94,7 +94,7 @@ const METHODS = [
     ['health', 'Detailed health: DB, oracle staleness, P2P state (503 when degraded).', []],
     ['getallconfigs', 'Service discovery: connection parameters for every platform service on this chain (mesh-internal: includes DB credentials, keyed like a write). since_updated_at returns only entries changed after that timestamp.', ['since_updated_at'], { auth: true }],
     ['updateconfig', 'Update a service config entry (PBFT-replicated in validator mode).', ['config'], { auth: true }],
-    ['getoraclesubmissions', 'Raw per-validator oracle price submissions for recent rounds, plus round cadence, skipped/dropped-pair diagnostics and oracleMaxPriceAgeSeconds (the price-age bound getprice enforces).', []],
+    ['getoraclesubmissions', 'Raw per-validator oracle price submissions for recent rounds, plus round cadence, skipped/dropped-pair diagnostics and oracleMaxPriceAgeSeconds (the price-age bound getprice enforces). Carries active:true; a hub that runs no oracle round (standalone config-oracle deployment, no P2P_VALIDATOR_ADDR) answers {active:false} rather than an error, so a health consumer can tell an absent role from a failure.', []],
     ['getpricesnapshots', 'PBFT-finalized price snapshots (trimmed-median rounds). status=\'all\' also returns skipped/disputed rows; with_watermark wraps the rows as {watermark, oracleMaxPriceAgeSeconds, snapshots} with a hub-clock epoch-seconds watermark and the price-age bound getprice enforces.', ['limit', 'status', 'with_watermark'], { result: SNAPSHOTS_RESULT }],
     ['getprice', 'Latest finalized price for a pair (e.g. BTC/USD).', ['coin_pair']],
     ['getfeequote', 'Protocol fee quote for an action (native-coin USD-pegged fees).', ['action', 'chain']],

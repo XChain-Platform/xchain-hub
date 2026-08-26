@@ -116,6 +116,89 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
         });
     });
 
+    // ── rooted (post-CHECKPOINT_COMMITMENT) canonical: the shape mainnet signs today ──
+    //
+    // Every fixture above is ROOTLESS, and only FORMAT 0/1/6 ever reach the indexer
+    // builder, so the SPV-root suffix branch is dead on BOTH sides of every assertion
+    // in this file: the three builders are compared only where all three provably emit
+    // the empty suffix, i.e. they agree for the wrong reason, and a one-sided edit to
+    // the suffix (field order, the .toLowerCase(), the pipe count, either gate) ships
+    // green. The two sides gate that suffix by DIFFERENT rules on purpose (the hub on
+    // the flag-day AND root presence, StateCheckpointEngine._checkpointRootSuffix; the
+    // indexer on the wire VERSION 3/5, anchor.js), which makes their equivalence on a
+    // REAL rooted checkpoint exactly the property that needs asserting.
+    // CHECKPOINT_COMMITMENT and the EQUIV header both arm mainnet at 961000, so a
+    // high-snapshot mainnet row is simultaneously rooted and header-wrapped; the hub is
+    // the producer of the bytes validators sign and the indexer is their on-chain
+    // verifier, and those were the two copies nothing pinned on this shape (the SDK,
+    // sync and explorer copies are each pinned elsewhere).
+    describe('rooted checkpoint canonical: hub == sdk == indexer', function () {
+        before(requireSiblings);
+
+        const SR = 'd4'.repeat(32), BMR = 'e5'.repeat(32);
+        const cpRootsOn   = Object.assign({}, cpOn, {
+            state_root: SR, state_root_version: 1,
+            block_merkle_root: BMR, block_merkle_version: 1 });
+        const cpRootsMain = Object.assign({}, cpRootsOn, { network:'mainnet', snapshot_block:961000 });
+
+        // ONE fixture, projected into the indexer's field naming, so a transcription
+        // slip cannot make the two sides agree for the wrong reason.
+        function indexerRooted(cp, format) {
+            return anchor._canonical({
+                FORMAT: format, CHAIN: cp.chain, NETWORK: cp.network,
+                BLOCK_INDEX_CHECKPOINTED: cp.block_index, BLOCK_HASH: cp.block_hash,
+                LEDGER_HASH: cp.ledger_hash, ACTIONS_HASH: cp.actions_hash,
+                CONTRACT_HASH: cp.contract_hash, CHECKPOINT_SEQ: cp.checkpoint_seq,
+                SNAPSHOT_BLOCK: cp.snapshot_block,
+                STATE_ROOT: cp.state_root, STATE_ROOT_VERSION: cp.state_root_version,
+                BLOCK_MERKLE_ROOT: cp.block_merkle_root, BLOCK_MERKLE_VERSION: cp.block_merkle_version
+            });
+        }
+
+        it('regtest, roots present: hub == sdk == indexer(v3)', function () {
+            const hub = SCE.canonicalCheckpoint(cpRootsOn);
+            expect(sdkCheckpoint.canonicalCheckpoint(cpRootsOn), 'SDK checkpoint.js drifted from the hub root suffix')
+                .to.equal(hub);
+            expect(indexerRooted(cpRootsOn, 3), 'indexer Anchor._canonical(FORMAT=3) drifted from the hub root suffix')
+                .to.equal(hub);
+            // Pinned literal reconstructed from the spec parts, not read off a builder, so
+            // a THREE-sided edit still fails (the same reason the v1/v6 block below gives).
+            // Same construction as xchain-sync/test/unit/checkpoint.twin.test.js.
+            expect(hub).to.equal('EQUIV|XCHECKPOINT|BTC|regtest|500|7|0||' + RAW_ON +
+                '|' + SR + '|1|' + BMR + '|1');
+        });
+
+        it('mainnet at/above 961000: rooted AND header-wrapped, all three agree', function () {
+            const hub = SCE.canonicalCheckpoint(cpRootsMain);
+            expect(sdkCheckpoint.canonicalCheckpoint(cpRootsMain)).to.equal(hub);
+            expect(indexerRooted(cpRootsMain, 3)).to.equal(hub);
+            expect(hub).to.equal('EQUIV|XCHECKPOINT|BTC|mainnet|500|7|0||' +
+                'XCHECKPOINT|BTC|mainnet|500|bh|lh|ah|ch|7|961000|' + SR + '|1|' + BMR + '|1');
+        });
+
+        it('v5 (publisher-bearing) canonical is byte-identical to v3', function () {
+            expect(indexerRooted(cpRootsOn, 5)).to.equal(indexerRooted(cpRootsOn, 3));
+        });
+
+        it('binds the root field ORDER identically in all three (a root swap diverges everywhere)', function () {
+            // Without this, swapping state_root and block_merkle_root on ONE side would
+            // still satisfy the equalities above for any fixture whose two roots matched.
+            const swapped = Object.assign({}, cpRootsOn, { state_root: BMR, block_merkle_root: SR });
+            const hub = SCE.canonicalCheckpoint(swapped);
+            expect(hub).to.not.equal(SCE.canonicalCheckpoint(cpRootsOn));
+            expect(sdkCheckpoint.canonicalCheckpoint(swapped)).to.equal(hub);
+            expect(indexerRooted(swapped, 3)).to.equal(hub);
+        });
+
+        it('a rootless post-flag-day row still emits NO suffix on both sides (legacy v0/v4)', function () {
+            // The complement, and the reason the two gates may legitimately differ: the
+            // hub withholds the suffix when a root is absent, and the indexer keeps a v0
+            // rootless whatever the flag-day says, so old signatures still verify.
+            expect(SCE.canonicalCheckpoint(cpOn)).to.equal('EQUIV|XCHECKPOINT|BTC|regtest|500|7|0||' + RAW_ON);
+            expect(indexerRooted(cpOn, 0)).to.equal(SCE.canonicalCheckpoint(cpOn));
+        });
+    });
+
     describe('v0/v1 collision fix (R-4)', function () {
         before(requireSiblings);
 

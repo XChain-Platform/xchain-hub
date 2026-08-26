@@ -121,8 +121,14 @@ class CrossChainDexConsensus extends EventEmitter {
         // carrying an unbounded `row` (this engine had no size gate at all). Cap
         // both: a distinct-id ceiling with FIFO eviction, and a serialized-size
         // gate on each buffered envelope.
-        this.earlyMessageMaxDistinctIds = parseInt(this.config.XDEX_EARLY_MSG_MAX_IDS) || 512;
-        this.earlyMessageMaxBytes       = parseInt(this.config.XDEX_EARLY_MSG_MAX_BYTES) || 131072;
+        // positiveIntConfig for the same reason the attestation half uses it: a negative
+        // is truthy, and a negative MAX_BYTES inverts the size gate so every pre-membership
+        // envelope is dropped rather than buffered, while a negative MAX_IDS evicts on
+        // every insert.
+        this.earlyMessageMaxDistinctIds = positiveIntConfig(this.config.XDEX_EARLY_MSG_MAX_IDS, 512,
+            'XDEX_EARLY_MSG_MAX_IDS');
+        this.earlyMessageMaxBytes       = positiveIntConfig(this.config.XDEX_EARLY_MSG_MAX_BYTES, 131072,
+            'XDEX_EARLY_MSG_MAX_BYTES');
 
         this._messageHandler = null;
         this.roundTimeoutMs  = parseInt(this.config.XDEX_ROUND_TIMEOUT_MS) || DEFAULT_ROUND_TIMEOUT_MS;

@@ -219,9 +219,23 @@ const MAX_SOURCE_ADDRESS_LENGTH = 100;
 // timeout, a different engine's lifecycle that must not be tied to this one.
 const DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS = 120000;
 
+// The ATTEST PBFT state machines this build actually implements, and therefore the
+// admission allowlist for a block-anchored provider consensus_strategy.
+// AttestationConsensus dispatches on the pinned strategy by POSITIVE equality against
+// these two names only (leader-only agree() and PREPARE buffering for judge_model;
+// the divergence slash-candidate sweep and the no_quorum self-derivation gate for
+// byte_equality), so an unrecognised name does not select a third machine: it falls
+// through to the byte_equality branches with the no_quorum gate switched off, which is
+// the one combination no peer runs. ProviderRegistry deliberately carries an unknown
+// name verbatim into the block-anchored history so every hub RESOLVES the same value;
+// this list is the other half of that contract, the part that then DECLINES the round.
+// Adding a strategy means adding its dispatch branches in AttestationConsensus and its
+// entry here together: an entry without branches re-opens exactly this hole.
+const SUPPORTED_CONSENSUS_STRATEGIES = Object.freeze(['byte_equality', 'judge_model']);
+
 module.exports = { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD, ORACLE_MAX_CHANGE_PER_ROUND, XCALL_MAX_HOPS,
                    DEFAULT_ORACLE_ROUND_INTERVAL_MS, DEFAULT_ORACLE_SUBMISSION_WINDOW_MS,
-                   DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS,
+                   DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS, SUPPORTED_CONSENSUS_STRATEGIES,
                    PRICE_V1_COINS, PRICE_V1_FIATS, MAX_TICK_LENGTH, MAX_MEMO_LENGTH,
                    MAX_SOURCE_ADDRESS_LENGTH, DERIVED_PAIRS,
                    XCHAIN_PRICE_WINDOW_BLOCKS, XCHAIN_PRICE_CONFIRMATION_BUFFER,

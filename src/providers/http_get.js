@@ -48,8 +48,24 @@ const USER_AGENT = 'XChain-Attestation/1.0';
 // custom `lookup`, so a rebinding DNS answer cannot swap in a private target
 // between check and connect. IP-literal hosts are checked directly.
 //
-// ATTESTATION_HTTP_GET_ALLOW_PRIVATE=1 disables the guard (for regtest /
-// e2e environments that attest local endpoints). Never set it in production.
+// ATTESTATION_HTTP_GET_ALLOW_PRIVATE=1 disables the guard for environments
+// that attest local endpoints, and is NETWORK-GATED: honored only when the
+// hub's network is regtest, set-but-IGNORED and warned anywhere else, with an
+// unset network failing closed. The gate is code rather than prose because one
+// stray env var on a mainnet or testnet validator would otherwise turn the
+// attestation fleet into an internal port scanner and make that hub fetch a
+// URL its peers structurally cannot reach, diverging the round. Same shape as
+// the platform's other regtest-only seams (OracleConsensus
+// ORACLE_ALLOW_UNVERIFIED_PAIRS, XChainHub._oracleMaxAgeSeconds).
+//
+// The network comes from `options.network` first (AttestationRound passes the
+// hub's api.js-validated HUB_NETWORK; the e2e harness runs several hubs in one
+// process off in-memory p2pConfig, where no per-hub env var exists), falling
+// back to process.env.HUB_NETWORK for a single-hub container.
+
+// Latched so the ignored-hatch warning prints once per process: fetch runs per
+// attestation request, and a per-request line would bury the log.
+let warnedHatchIgnored = false;
 
 // True when `addr` (an IPv4/IPv6 string) is loopback, private, link-local,
 // CGNAT, multicast or otherwise non-public.
@@ -150,7 +166,18 @@ exports.fetch = async (payload, options) => {
 
     // WHATWG URL keeps brackets on IPv6 literals; strip for net/dns use.
     const bareHost = url.hostname.replace(/^\[|\]$/g, '');
-    const pinned = process.env.ATTESTATION_HTTP_GET_ALLOW_PRIVATE === '1'
+    // Escape hatch, network-gated (see the header). Off regtest the hatch is
+    // dropped and the full guard runs: the literal check, the resolve-once
+    // rejection of any non-public answer, and the pinned `lookup` below.
+    const hatchSet = process.env.ATTESTATION_HTTP_GET_ALLOW_PRIVATE === '1';
+    const network  = String(options.network || process.env.HUB_NETWORK || '').toLowerCase();
+    if (hatchSet && network !== 'regtest' && !warnedHatchIgnored) {
+        warnedHatchIgnored = true;
+        console.log('WARNING: ATTESTATION_HTTP_GET_ALLOW_PRIVATE=1 is set but IGNORED on ' +
+            (network || '<unset>') + '; the http_get SSRF guard stays active. This hatch is ' +
+            'honored only on regtest, where attesting a local endpoint is the point.');
+    }
+    const pinned = (hatchSet && network === 'regtest')
         ? null
         : await resolvePinnedAddress(bareHost);
 
@@ -167,8 +194,8 @@ exports.fetch = async (payload, options) => {
             headers:  { 'User-Agent': USER_AGENT, 'Accept': '*/*' },
             timeout:  timeoutMs,
             // Pin the socket to the address validated above (TLS SNI and the
-            // Host header still use the hostname). Undefined when the guard
-            // is disabled via ATTESTATION_HTTP_GET_ALLOW_PRIVATE.
+            // Host header still use the hostname). Undefined only when the
+            // regtest-gated ATTESTATION_HTTP_GET_ALLOW_PRIVATE hatch applied.
             lookup:   pinned ? pinnedLookup(pinned) : undefined
         }, (res) => {
             // No automatic redirects: a 3xx terminates with the body as-is so callers

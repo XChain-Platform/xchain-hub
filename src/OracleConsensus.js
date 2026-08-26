@@ -160,7 +160,13 @@ class OracleConsensus extends EventEmitter {
         // _pruneEarlyMessages an O(rounds) scan (O(n^2) CPU). Map preserves insertion
         // order, so eviction is FIFO on the oldest round key. 256 >> any legitimate
         // in-flight round concurrency (rounds are ~10 min apart).
-        this.earlyMessageMaxRounds = parseInt(process.env.ORACLE_EARLY_MSG_MAX_ROUNDS) || 256;
+        // positiveIntConfig, not `parseInt(env) || 256`, and here it is a HANG, not a
+        // loosened cap: the eviction below is a `while (size >= max)` loop, so a negative
+        // value keeps the condition true at size 0, where `keys().next().value` is
+        // undefined and `delete(undefined)` changes nothing. The loop never terminates and
+        // wedges the event loop for the whole hub process on the first buffered message.
+        this.earlyMessageMaxRounds = positiveIntConfig(process.env.ORACLE_EARLY_MSG_MAX_ROUNDS, 256,
+            'ORACLE_EARLY_MSG_MAX_ROUNDS');
 
         this.validatorSet = [];
 
@@ -235,6 +241,33 @@ class OracleConsensus extends EventEmitter {
         // locally submit that a long-running hub would withhold on. Local accept-
         // gate only: no signed bytes change, no reindex.
         await this._seedLastFinalizedPrices();
+
+        // Re-run the seed on a timer so the clamp reference tracks the DATABASE, not
+        // this process's own finalize history (item 5834). The cache had exactly two
+        // writers, the start-time seed and _storeSnapshot, so every round this hub sat
+        // out (co-sign reject before pendingRounds.set, commit-quorum timeout eviction,
+        // a below-minSubmissions skip) left it clamping against an ever-older reference
+        // while its peers moved on. The seed is idempotent, fail-soft and monotonic, so
+        // re-running it can only carry the reference FORWARD to rows this hub already
+        // holds. It bounds the staleness window rather than closing it: a round-aligned
+        // re-read on the consensus path is a separate, deliberate change.
+        // Cadence only, NOT a federation-uniform value: it decides how promptly a hub
+        // catches up to rows it already holds, never what any hub clamps to. A longer
+        // interval degrades toward the pre-fix staleness, a shorter one costs one
+        // indexed query. So it needs no flag day and no regtest-only gate.
+        this._reseedIntervalMs = positiveIntConfig(process.env.ORACLE_CLAMP_RESEED_MS, 60000,
+            'ORACLE_CLAMP_RESEED_MS');
+        this._reseedTimer = setInterval(() => {
+            // In-flight guard, the convention XChainHub._refreshTransportSignerSet uses:
+            // the query is an unbounded round trip and a bare setInterval stacks passes.
+            if (this._reseedRunning) return;
+            this._reseedRunning = true;
+            this._seedLastFinalizedPrices({ quiet: true })
+                .catch(() => { /* _seedLastFinalizedPrices never rejects; belt and braces */ })
+                .then(() => { this._reseedRunning = false; });
+        }, this._reseedIntervalMs);
+        if (this._reseedTimer.unref) this._reseedTimer.unref();
+
         this._messageHandler = (envelope) => this._handleMessage(envelope);
         this.peerManager.on('message', this._messageHandler);
         console.log('Oracle consensus engine started');
@@ -246,14 +279,15 @@ class OracleConsensus extends EventEmitter {
     // "latest finalized = highest round_number" ordering used by hub.getPrice().
     // Fail-soft: an empty table or a query error leaves the cache empty (the prior
     // cold-start behavior), so this can never block hub startup.
-    async _seedLastFinalizedPrices() {
+    async _seedLastFinalizedPrices(opts) {
         if (!this._lastFinalizedPrices) this._lastFinalizedPrices = new Map();
         try {
             // One row per coin_pair: the price from that pair's highest finalized
             // round. The subquery picks the max finalized round per pair, then the
-            // join reads that round's price for the pair.
+            // join reads that round's price for the pair. round_number rides along so
+            // the entry can be stamped and the merge below can stay monotonic.
             let rows = await this.db.doQuery(
-                "SELECT p.coin_pair AS coin_pair, p.price AS price " +
+                "SELECT p.coin_pair AS coin_pair, p.price AS price, p.round_number AS round_number " +
                 "FROM price_snapshots p " +
                 "JOIN (SELECT coin_pair, MAX(round_number) AS mx FROM price_snapshots " +
                 "      WHERE status = 'finalized' AND price IS NOT NULL GROUP BY coin_pair) m " +
@@ -262,11 +296,13 @@ class OracleConsensus extends EventEmitter {
             let seeded = 0;
             for (let r of (rows || [])) {
                 if (r.coin_pair && r.price !== null && r.price !== undefined) {
-                    this._lastFinalizedPrices.set(r.coin_pair, String(r.price));
-                    seeded++;
+                    // Merge, never replace the map: a truncated or partial read must not
+                    // drop a pair's reference, since an absent reference means NO clamp
+                    // at all and an unbounded aggregate is worse than a stale bound.
+                    if (this._noteFinalizedPrice(r.coin_pair, r.price, r.round_number)) seeded++;
                 }
             }
-            if (seeded > 0)
+            if (seeded > 0 && !(opts && opts.quiet))
                 console.log('Oracle: seeded last-finalized-price cache with ' + seeded + ' pair(s) from price_snapshots');
         } catch (e) {
             console.warn('Oracle: could not seed last-finalized-price cache (continuing with empty cache):',
@@ -275,6 +311,10 @@ class OracleConsensus extends EventEmitter {
     }
 
     async stop() {
+        if (this._reseedTimer) {
+            clearInterval(this._reseedTimer);
+            this._reseedTimer = null;
+        }
         if (this._messageHandler) {
             this.peerManager.removeListener('message', this._messageHandler);
             this._messageHandler = null;
@@ -1677,9 +1717,15 @@ class OracleConsensus extends EventEmitter {
     // per-round movement to ORACLE_MAX_CHANGE_PER_ROUND relative to the pair's last
     // FINALIZED snapshot: a genuine sustained move walks to the new level over a few
     // rounds (cache updates each finalized round), a one-round spike is absorbed.
-    // Deterministic federation-wide: every hub's _lastFinalizedPrices holds the same
-    // finalized history (DB-seeded on start), so followers re-deriving the aggregate
-    // clamp identically. No history (brand-new pair, cold standalone cache) means no
+    // Federation-uniform ARITHMETIC, converging reference: the bound and the formula are
+    // identical on every hub, and _lastFinalizedPrices is derived from price_snapshots,
+    // not from this process's finalize history (seeded at start, advanced by every
+    // finalized round this hub stores, folded from the push-ingest stream, and re-seeded
+    // on a timer). It is NOT identical by construction: a hub that missed the round its
+    // peers just finalized clamps against an older reference until one of those writers
+    // catches it up, so two hubs can straddle a finalization for up to one re-seed
+    // interval (item 5834; closing the window entirely is a separate, deliberate
+    // round-aligned change). No history (brand-new pair, cold standalone cache) means no
     // clamp; the unverifiable-pair gate covers that case on the co-sign side.
     // CONSENSUS-CRITICAL: deploy fleet-wide atomically.
     _clampToLastFinalized(coinPair, price) {
@@ -1764,7 +1810,13 @@ class OracleConsensus extends EventEmitter {
         // Update the in-memory last-finalized-price cache so the co-sign gate in
         // _handlePropose can apply a historical-deviation check for pairs a hub
         // did not price locally in the current round (seq 4083).
-        this._updateLastFinalizedPrices(prices);
+        // Retain the reference THIS round's aggregate clamped against, before the round
+        // being stored overwrites it. SlashDetector needs it to tell a pair the clamp
+        // actually moved from one it did not (item 5833); nothing is added to
+        // round:finalized and no wire format changes, so evidence bodies and their
+        // hashes are byte-identical. One round is kept, replaced on the next store.
+        this._clampReference = { round: round, prices: new Map(this._lastFinalizedPrices || []) };
+        this._updateLastFinalizedPrices(prices, round);
 
         // Broadcast the finalized rows to hub-DB mirror subscribers (distributed indexers),
         // mirroring StateCheckpointEngine/CrossChainDexEngine. This must happen AFTER the
@@ -1943,13 +1995,64 @@ class OracleConsensus extends EventEmitter {
         return this._lastFinalizedPrices.get(coinPair) || null;
     }
 
+    // The round each cached reference came from, parallel to _lastFinalizedPrices
+    // (Map<coin_pair, round>). Kept as a second map rather than boxing the value so
+    // every existing reader of _lastFinalizedPrices still sees a plain price string.
+    // Absent for an entry written without a round (see _noteFinalizedPrice).
+    _lastFinalizedRoundFor(coinPair) {
+        if (!this._lastFinalizedRounds) return null;
+        let r = this._lastFinalizedRounds.get(coinPair);
+        return Number.isFinite(r) ? r : null;
+    }
+
+    // Record one pair's finalized price, newest round wins. Returns true when the
+    // entry moved. The cache means "the price from this pair's HIGHEST finalized
+    // round", which is what _seedLastFinalizedPrices computes; before the stamp the
+    // runtime writer disagreed with the seed, so a late _storeSnapshot for an older
+    // round (a locally-skipped round stored by a late PROPOSE, a replayed COMMIT)
+    // walked the reference BACKWARDS. An unstamped write is trusted as current, so
+    // callers that have no round keep the prior set-always behaviour.
+    _noteFinalizedPrice(coinPair, price, round) {
+        if (!coinPair || price === null || price === undefined || price === '') return false;
+        if (!this._lastFinalizedPrices) this._lastFinalizedPrices = new Map();
+        if (!this._lastFinalizedRounds) this._lastFinalizedRounds = new Map();
+        let r = Number(round);
+        let stamped = Number.isFinite(r);
+        let known = this._lastFinalizedRoundFor(coinPair);
+        if (stamped && known !== null && r < known) return false;
+        this._lastFinalizedPrices.set(coinPair, String(price));
+        if (stamped) this._lastFinalizedRounds.set(coinPair, r);
+        return true;
+    }
+
     // Update the in-memory last-finalized-price cache after a round is stored.
-    // Called at the end of _storeSnapshot.
-    _updateLastFinalizedPrices(prices) {
+    // Called at the end of _storeSnapshot. `round` is optional: the unit tests that
+    // drive this directly, and any future caller without one, keep the unstamped
+    // set-always behaviour. Rounds arriving by push come in through
+    // noteIngestedPriceRow instead.
+    _updateLastFinalizedPrices(prices, round) {
         if (!this._lastFinalizedPrices) this._lastFinalizedPrices = new Map();
         for (let p of prices) {
-            if (p.coinPair && p.price) this._lastFinalizedPrices.set(p.coinPair, String(p.price));
+            if (p.coinPair && p.price) this._noteFinalizedPrice(p.coinPair, p.price, round);
         }
+    }
+
+    // The last-finalized reference `round`'s aggregate was clamped against, or null when
+    // this hub did not store that round (so it holds no reference for it). Read by
+    // SlashDetector to widen the deviation band on pairs the clamp actually moved.
+    getClampReference(round) {
+        if (!this._clampReference || this._clampReference.round !== round) return null;
+        return this._clampReference.prices;
+    }
+
+    // Fold a finalized price_snapshots row from the hub's DB-mirror ingest stream into
+    // the clamp reference. PriceAggregator.receiveValidatedRound writes finalized rows
+    // for rounds pushed from a source chain and touched nothing else, so a hub that
+    // ingests rather than finalizes never advanced its reference at all. Non-finalized,
+    // priceless and older-round rows are ignored by the monotonic guard above.
+    noteIngestedPriceRow(row) {
+        if (!row || row.status !== 'finalized') return false;
+        return this._noteFinalizedPrice(row.coin_pair, row.price, row.round_number);
     }
 
     // Record the first time we saw this round as ready to finalize. The
@@ -2126,3 +2229,9 @@ class OracleConsensus extends EventEmitter {
 }
 
 module.exports = OracleConsensus;
+
+// Named export so SlashDetector measures the clamp allowance from the SAME table this
+// module clamps with (item 5833). A second copy of MAX_CHANGE_PER_ROUND_BY_PAIR would
+// let a per-pair retune move the clamp and leave the slash gate on the old allowance,
+// which is the mismatch that finding is about. Default export shape is unchanged.
+module.exports.maxChangeForPair = maxChangeForPair;

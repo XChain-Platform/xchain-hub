@@ -315,4 +315,148 @@ describe('PriceFetcher', function () {
             expect(capable.size).to.equal(36);
         });
     });
+
+    // -----------------------------------------------------------------
+    // (0, PRICE_MAX) bound rejections: drop signal + per-source counter
+    // -----------------------------------------------------------------
+
+    describe('bound-rejection signal', function () {
+
+        let warnStub;
+
+        beforeEach(function () {
+            warnStub = sinon.stub(console, 'warn');
+        });
+
+        // Other warn lines these fetchers emit (fetch-failed, total-loss) must not
+        // satisfy these assertions, so match on the bound line's own phrase.
+        function boundWarns() {
+            return warnStub.getCalls()
+                .map(c => String(c.args[0]))
+                .filter(m => m.includes('outside the ingestion bound'));
+        }
+
+        it('CoinGecko: a zero price is dropped, warned once, and counted', async function () {
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0 });
+            axiosStub.get.resolves({
+                data: {
+                    bitcoin:  { usd: 0 },        // rejected by the bound
+                    litecoin: { usd: 85.25 },
+                    dogecoin: { usd: 0.15 }
+                }
+            });
+
+            let result = await pf.fetchFromCoinGecko();
+            expect(result['BTC/USD']).to.be.undefined;   // still excluded from the median
+            expect(result['LTC/USD']).to.equal(85.25);   // healthy pairs unaffected
+
+            let warns = boundWarns();
+            expect(warns).to.have.lengthOf(1);
+            expect(warns[0]).to.include('CoinGecko');
+            expect(warns[0]).to.include('BTC/USD=0');
+            expect(pf._boundRejects.coingecko).to.equal(1);
+        });
+
+        it('CoinGecko: several rejected pairs in one fetch emit exactly ONE warn line', async function () {
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0 });
+            axiosStub.get.resolves({
+                data: {
+                    bitcoin:  { usd: 0, cad: -1, gbp: 'not-a-number' },
+                    litecoin: { usd: 1e20 },   // at/above PRICE_MAX
+                    dogecoin: { usd: 0.15 }
+                }
+            });
+
+            let result = await pf.fetchFromCoinGecko();
+            expect(result['DOGE/USD']).to.equal(0.15);
+
+            let warns = boundWarns();
+            expect(warns).to.have.lengthOf(1);           // one line per source per fetch
+            expect(warns[0]).to.include('4 value(s)');
+            expect(pf._boundRejects.coingecko).to.equal(4);
+        });
+
+        it('CoinGecko: the counter accumulates across fetches', async function () {
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0 });
+            axiosStub.get.resolves({ data: { bitcoin: { usd: 0 }, litecoin: { usd: 85 }, dogecoin: { usd: 0.15 } } });
+
+            await pf.fetchFromCoinGecko();
+            await pf.fetchFromCoinGecko();
+            expect(pf._boundRejects.coingecko).to.equal(2);
+            expect(boundWarns()).to.have.lengthOf(2);    // one per fetch, not one per pair
+        });
+
+        it('CoinGecko: a clean fetch emits no bound warn and leaves the counter at zero', async function () {
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0 });
+            axiosStub.get.resolves({ data: { bitcoin: { usd: 100000 }, litecoin: { usd: 85 }, dogecoin: { usd: 0.15 } } });
+
+            await pf.fetchFromCoinGecko();
+            expect(boundWarns()).to.have.lengthOf(0);
+            expect(pf._boundRejects.coingecko).to.equal(0);
+        });
+
+        it('CoinGecko: an absent pair is not counted as a bound rejection', async function () {
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0 });
+            // Only BTC/USD is present; every other pair is simply missing.
+            axiosStub.get.resolves({ data: { bitcoin: { usd: 100000 } } });
+
+            await pf.fetchFromCoinGecko();
+            expect(boundWarns()).to.have.lengthOf(0);
+            expect(pf._boundRejects.coingecko).to.equal(0);
+        });
+
+        it('Kraken: a zero last-trade price is dropped, warned and counted under its own source', async function () {
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0 });
+            axiosStub.get.resolves({
+                data: { error: [], result: { XXBTZUSD: { c: ['0', '1'] }, XXBTZEUR: { c: ['90000', '1'] } } }
+            });
+
+            let result = await pf.fetchFromKraken();
+            expect(result['BTC/USD']).to.be.undefined;
+            expect(result['BTC/EUR']).to.equal(90000);
+
+            let warns = boundWarns();
+            expect(warns).to.have.lengthOf(1);
+            expect(warns[0]).to.include('Kraken');
+            expect(pf._boundRejects.kraken).to.equal(1);
+            expect(pf._boundRejects.coingecko).to.equal(0);   // counters are per source
+        });
+
+        it('CoinMarketCap: an out-of-bound price is warned and counted; a null price is not', async function () {
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0, COINMARKETCAP_API_KEY: 'k' });
+            axiosStub.get.resolves({
+                data: {
+                    data: {
+                        BTC:  { quote: { USD: { price: -5 }, CAD: { price: null } } },
+                        LTC:  { quote: { USD: { price: 85 } } },
+                        DOGE: { quote: { USD: { price: 0.15 } } }
+                    }
+                }
+            });
+
+            let result = await pf.fetchFromCoinMarketCap();
+            expect(result['BTC/USD']).to.be.undefined;
+            expect(result['LTC/USD']).to.equal(85);
+
+            let warns = boundWarns();
+            expect(warns).to.have.lengthOf(1);
+            expect(warns[0]).to.include('CoinMarketCap');
+            expect(warns[0]).to.include('BTC/USD=-5');
+            expect(pf._boundRejects.coinmarketcap).to.equal(1);   // the null CAD quote is an absence
+        });
+
+        it('a garbage upstream value is truncated in the warn line', async function () {
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0 });
+            let garbage = 'x'.repeat(500);
+            axiosStub.get.resolves({
+                data: { bitcoin: { usd: garbage }, litecoin: { usd: 85 }, dogecoin: { usd: 0.15 } }
+            });
+
+            await pf.fetchFromCoinGecko();
+            let warns = boundWarns();
+            expect(warns).to.have.lengthOf(1);
+            expect(warns[0].length).to.be.below(300);
+            expect(warns[0]).to.include('...');
+        });
+    });
 });

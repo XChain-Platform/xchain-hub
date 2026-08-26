@@ -741,6 +741,35 @@ class StateAnchorPublisher {
                 let useV3 = ckpt.isCheckpointCommitmentActive(Number(row.snapshot_block), row.network) &&
                             row.state_root != null && row.block_merkle_root != null &&
                             row.state_root_version != null && row.block_merkle_version != null;
+                // Consult the durable at-most-once marker BEFORE building a
+                // fresh PSBT, and before the publisher-attestation round below solicits a
+                // peer quorum. The existence check reads mined state only, so it cannot see
+                // a send this hub made and then crashed on; the marker can. A surviving
+                // intent means DOGE may already have paid for this exact checkpoint, so hold
+                // the row (bounded by anchorIntentTtlMs) unless the anchor has since mined,
+                // in which case fall through and let the retry loop adopt it on attempt 0
+                // exactly as it does for a peer's anchor.
+                //
+                // Ordered ahead of the attestation block for the reason _publishArchive
+                // states for its own twin ("Checked ahead of the publisher-attestation round
+                // so a held publish does not burn a peer quorum either"): the round takes the
+                // single _attestRound slot for up to roundTimeoutMs and makes every peer
+                // re-derive the election and byte-match its state_checkpoints row, all for a
+                // publish this branch then declines. A held row must cost one DB read.
+                let intent = await this._getAnchorIntent(row);
+                if(this._anchorIntentHolds(intent)){
+                    let mined = null;
+                    try { mined = await this._findExistingCheckpointAnchor(row); }
+                    catch(_e){ mined = null; }        // undetermined indexer: hold, never spend
+                    if(!(mined && mined.exists)){
+                        console.warn('StateAnchorPublisher: v0 anchor for ' + row.chain + '/' + row.network +
+                                     ' @ ' + row.block_index + ' held: a broadcast intent recorded at ' +
+                                     String(intent.intent_at) + (intent.txid ? ' (txid ' + intent.txid + ')' : '') +
+                                     ' has no mined anchor yet; not rebuilding a second transaction until it ' +
+                                     'mines or the intent ages past ' + this.anchorIntentTtlMs + 'ms');
+                        continue;
+                    }
+                }
                 // Anchor-reward re-derivation flag-day: at/above it, run the publisher-
                 // attestation round (2f+1 oracle_publish quorum over XANCPUB binding THIS
                 // hub as the earner) and emit ANCHOR v4 (rootless) / v5 (root-bearing),
@@ -770,27 +799,6 @@ class StateAnchorPublisher {
                     payload = useV3 ? this._buildV3Payload(row) : this._buildV0Payload(row);
                 }
                 let broadcaster = signer.broadcastFn || ((p) => this._defaultBroadcast(p, signer));
-                // Consult the durable at-most-once marker BEFORE building a
-                // fresh PSBT. The existence check below reads mined state only, so
-                // it cannot see a send this hub made and then crashed on; the marker can.
-                // A surviving intent means DOGE may already have paid for this exact
-                // checkpoint, so hold the row (bounded by anchorIntentTtlMs) unless the
-                // anchor has since mined, in which case fall through and let the retry
-                // loop adopt it on attempt 0 exactly as it does for a peer's anchor.
-                let intent = await this._getAnchorIntent(row);
-                if(this._anchorIntentHolds(intent)){
-                    let mined = null;
-                    try { mined = await this._findExistingCheckpointAnchor(row); }
-                    catch(_e){ mined = null; }        // undetermined indexer: hold, never spend
-                    if(!(mined && mined.exists)){
-                        console.warn('StateAnchorPublisher: v0 anchor for ' + row.chain + '/' + row.network +
-                                     ' @ ' + row.block_index + ' held: a broadcast intent recorded at ' +
-                                     String(intent.intent_at) + (intent.txid ? ' (txid ' + intent.txid + ')' : '') +
-                                     ' has no mined anchor yet; not rebuilding a second transaction until it ' +
-                                     'mines or the intent ages past ' + this.anchorIntentTtlMs + 'ms');
-                        continue;
-                    }
-                }
                 await this._recordAnchorIntent(row);
                 // Multiple chains' v0 anchors go out back-to-back from the same
                 // wallet; without the retry, every cycle lands only the first

@@ -51,8 +51,9 @@ function buildController(hub) {
 
         async getoraclesubmissions() {
             let oracle = hub.getOracle();
-            if (!oracle) return { error: 'oracle not active' };
-            return await oracle.getSubmissionsInfo();
+            // Mirrors src/api.js: an absent oracle ROLE is {active:false}, never an error.
+            if (!oracle) return { active: false };
+            return { active: true, ...(await oracle.getSubmissionsInfo()) };
         },
 
         async getpricesnapshots({ limit }) {

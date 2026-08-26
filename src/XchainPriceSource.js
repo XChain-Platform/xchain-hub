@@ -98,6 +98,11 @@ class XchainPriceSource {
      *     access; a validator without it simply does not submit this pair).
      *   INDEXER_COIN - reference chain, 'BTC'. XCHAIN is BTC-only as a
      *     balance-bearing token, so this is not expected to vary.
+     *   HUB_NETWORK - the api.js-validated deployment network. It gates the four
+     *     CONSENSUS-UNIFORM derivation overrides below: they are honored only on
+     *     regtest, and set-but-IGNORED (with a warning) anywhere else.
+     *   XCHAIN_PRICE_WINDOW_BLOCKS / _CONFIRMATION_BUFFER / _BOOTSTRAP_SATS /
+     *     _MIN_BTC_VOLUME - regtest and e2e-drill overrides of the constants.js pins.
      * @param {object} hubDb  the hub's own Database, for the finalized-price reads
      */
     constructor(config = {}, hubDb = null) {
@@ -109,14 +114,65 @@ class XchainPriceSource {
         this.user   = config.XCHAIN_PRICE_INDEXER_DB_USER || '';
         this.pass   = config.XCHAIN_PRICE_INDEXER_DB_PASS || '';
 
-        this.windowBlocks       = parseInt(config.XCHAIN_PRICE_WINDOW_BLOCKS) || XCHAIN_PRICE_WINDOW_BLOCKS;
-        this.confirmationBuffer = Number.isFinite(parseInt(config.XCHAIN_PRICE_CONFIRMATION_BUFFER))
+        // Network gate for the four CONSENSUS-UNIFORM derivation parameters below.
+        //
+        // constants.js declares them fleet-uniform: every validator must compute the
+        // same window over the same fills, so a hub honoring a local override produces a
+        // different XCHAIN/BTC leg and lands outside the co-sign deviation band, which
+        // this file calls a slashing lottery. The overrides are for regtest and e2e
+        // drills only, and that restriction is enforced HERE rather than stated in a
+        // comment elsewhere, because a comment leaves one stray env var on a validator
+        // enough to diverge it. Retuning these for real is a coordinated flag-day
+        // change to constants.js, never an operator env var.
+        //
+        // Same rule and warning shape as the platform's other consensus-adjacent seams
+        // (OracleConsensus ORACLE_ALLOW_UNVERIFIED_PAIRS, XChainHub._oracleMaxAgeSeconds,
+        // coins/index.js resolveFeeDestination): honored on regtest, set-but-IGNORED and
+        // warned everywhere else, with standalone mode (network '') failing closed to the
+        // pin for the same reason those do. The per-operator INDEXER_DB_* keys above stay
+        // ungated: they are per-validator by design and gating them would take every
+        // non-regtest hub off the pair entirely.
+        let network = String(config.HUB_NETWORK || '').toLowerCase();
+        let regtest = network === 'regtest';
+        // Returns the override's value on regtest, the pin everywhere else; warns only on
+        // a real divergence, since ConfigService bakes the host shell's XCHAIN_PRICE_*
+        // into the container on every regenerate and a hub carrying the pinned value has
+        // drifted from nothing.
+        // `diverges` is decided per key by the caller rather than by a generic compare:
+        // the honored bootstrap is a bcmath BigNumber against a fixed-8dp string pin, and
+        // the honored threshold is a string against a null (DISABLED) pin, so one shared
+        // comparison would either warn on every equal value or swallow a real divergence.
+        let pinOffRegtest = (key, honored, pinned, diverges) => {
+            if (regtest) return honored;
+            let raw = config[key];
+            let isSet = raw !== undefined && raw !== null && String(raw) !== '';
+            if (isSet && diverges) {
+                console.log('WARNING: ' + key + '=' + raw + ' is set but IGNORED on ' +
+                    (network || '<unset>') + '; using the consensus-pinned value (' +
+                    (pinned === null ? 'DISABLED' : pinned) +
+                    '). The XCHAIN/USD derivation parameters are consensus-uniform and move ' +
+                    'only by a coordinated flag-day, never by a local override.');
+            }
+            return pinned;
+        };
+
+        let windowHonored = parseInt(config.XCHAIN_PRICE_WINDOW_BLOCKS) || XCHAIN_PRICE_WINDOW_BLOCKS;
+        this.windowBlocks = pinOffRegtest('XCHAIN_PRICE_WINDOW_BLOCKS', windowHonored,
+            XCHAIN_PRICE_WINDOW_BLOCKS, windowHonored !== XCHAIN_PRICE_WINDOW_BLOCKS);
+
+        let bufferHonored = Number.isFinite(parseInt(config.XCHAIN_PRICE_CONFIRMATION_BUFFER))
             ? parseInt(config.XCHAIN_PRICE_CONFIRMATION_BUFFER) : XCHAIN_PRICE_CONFIRMATION_BUFFER;
+        this.confirmationBuffer = pinOffRegtest('XCHAIN_PRICE_CONFIRMATION_BUFFER', bufferHonored,
+            XCHAIN_PRICE_CONFIRMATION_BUFFER, bufferHonored !== XCHAIN_PRICE_CONFIRMATION_BUFFER);
+
         // Satoshi-denominated (D2, 2026-08-03). Stored as the BTC-denominated rate
         // because that is the unit `toUsd` and the fill pipeline both expect.
-        this.bootstrapXchainBtc = config.XCHAIN_PRICE_BOOTSTRAP_SATS
+        let bootstrapHonored = config.XCHAIN_PRICE_BOOTSTRAP_SATS
             ? bcmath.bcdiv(String(config.XCHAIN_PRICE_BOOTSTRAP_SATS), '100000000', 8)
             : XCHAIN_PRICE_BOOTSTRAP_XCHAIN_BTC;
+        this.bootstrapXchainBtc = pinOffRegtest('XCHAIN_PRICE_BOOTSTRAP_SATS', bootstrapHonored,
+            XCHAIN_PRICE_BOOTSTRAP_XCHAIN_BTC,
+            Number(String(bootstrapHonored)) !== Number(XCHAIN_PRICE_BOOTSTRAP_XCHAIN_BTC));
 
         // D2 supersession threshold: the BTC-side notional a window must carry before
         // the derived VWAP replaces the carry-forward. null = DISABLED, which is how
@@ -129,12 +185,14 @@ class XchainPriceSource {
         // unparseable override reads as "not set" and leaves the constant in force;
         // an explicit '0' is a real value meaning "any volume supersedes", which is a
         // deliberate drill setting and NOT the same as disabled.
-        let volOverride = config.XCHAIN_PRICE_MIN_BTC_VOLUME;
-        this.minBtcVolume = XCHAIN_PRICE_MIN_BTC_VOLUME;
+        let volOverride  = config.XCHAIN_PRICE_MIN_BTC_VOLUME;
+        let volumeHonored = XCHAIN_PRICE_MIN_BTC_VOLUME;
         if (volOverride !== undefined && volOverride !== null && String(volOverride) !== '') {
             let parsed = Number(volOverride);
-            if (Number.isFinite(parsed) && parsed >= 0) this.minBtcVolume = String(volOverride);
+            if (Number.isFinite(parsed) && parsed >= 0) volumeHonored = String(volOverride);
         }
+        this.minBtcVolume = pinOffRegtest('XCHAIN_PRICE_MIN_BTC_VOLUME', volumeHonored,
+            XCHAIN_PRICE_MIN_BTC_VOLUME, volumeHonored !== XCHAIN_PRICE_MIN_BTC_VOLUME);
 
         // Lazily opened: constructing a pool for a hub that will never derive the
         // pair would hold idle connections against the indexer for nothing.

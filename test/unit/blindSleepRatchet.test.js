@@ -23,7 +23,11 @@ const { scan, blindSleepSites } = require('../../bin/check-blind-sleeps');
 
 describe('blind-sleep ratchet', function () {
 
+    // Hold a ceiling wide enough for a loaded venue: scan() walks and parses the
+    // whole test tree synchronously, so its cost tracks the box, not this diff,
+    // and mocha's 5s default made a ratchet against CI flake into one.
     it('the test tree contains no blind-sleep waits', function () {
+        this.timeout(60000);
         let findings = scan();
         let detail = findings.map(f =>
             f.file + ': ' + f.sites.map(s => 'line ' + s.line).join(', ')).join('\n');

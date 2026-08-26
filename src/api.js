@@ -261,10 +261,13 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     // state: holding the price capability implies this access, and a validator without
     // it simply does not submit the pair.
     //
-    // The window/buffer/bootstrap overrides exist for regtest and e2e only. They are
-    // CONSENSUS-UNIFORM values (constants.js): a hub running different ones computes a
-    // different XCHAIN/BTC leg and lands outside the co-sign deviation band, so on a
+    // The window/buffer/bootstrap/volume overrides exist for regtest and e2e only. They
+    // are CONSENSUS-UNIFORM values (constants.js): a hub running different ones computes
+    // a different XCHAIN/BTC leg and lands outside the co-sign deviation band, so on a
     // real network they must be left unset and moved only by a coordinated flag-day.
+    // That rule is now ENFORCED rather than merely stated: XchainPriceSource honors these
+    // four only when HUB_NETWORK is regtest and logs a set-but-IGNORED warning otherwise.
+    // They are still forwarded raw so the gate and its warning live at the single read.
     XCHAIN_PRICE_INDEXER_DB_HOST: process.env.XCHAIN_PRICE_INDEXER_DB_HOST || '',
     XCHAIN_PRICE_INDEXER_DB_PORT: process.env.XCHAIN_PRICE_INDEXER_DB_PORT || '',
     XCHAIN_PRICE_INDEXER_DB_NAME: process.env.XCHAIN_PRICE_INDEXER_DB_NAME || '',
@@ -608,9 +611,20 @@ async function startApi(){
             }
         },
 
+        // Always 200. {active:false} means this hub runs NO oracle round at all -
+        // the documented standalone config-oracle topology (CONFIGURATION.md:
+        // P2P_VALIDATOR_ADDR left empty), where startOracle() never mints an
+        // OracleRound because there is no peerManager. That is an absent ROLE, not a
+        // fault, so it is reported the same structured way getanchorstatus and
+        // getoraclepublisherstatus report theirs, and deliberately NOT as an {error}
+        // envelope: a health consumer cannot tell an error body apart from a
+        // transport failure, so the old shape pinned such a hub at 'degraded' on
+        // every poll for its whole life. startOracle() is awaited unguarded in
+        // startApi, so a broken oracle subsystem fails the boot rather than
+        // reaching here - {active:false} can only mean "no role".
         async getoraclesubmissions(){
             let oracle = hub.getOracle();
-            if(!oracle) return {error: "oracle not active"};
+            if(!oracle) return {active: false};
             let info = await oracle.getSubmissionsInfo();
             // Publish the authoritative price-age bound alongside the cadence
             // (item #4479). ORACLE_ROUND_INTERVAL is an unbounded deployment
@@ -622,7 +636,7 @@ async function startApi(){
             // the registry default, the correct representative scalar while all
             // registry coins share one bound. Additive: callers that ignore the
             // field are unaffected, and it is null when the registry read fails.
-            return {...info, oracleMaxPriceAgeSeconds: hub._oracleMaxAgeSeconds()};
+            return {active: true, ...info, oracleMaxPriceAgeSeconds: hub._oracleMaxAgeSeconds()};
         },
 
         // status is optional and additive: omitted/'finalized' preserves the
@@ -1165,8 +1179,17 @@ async function startApi(){
             if (scErr) return scErr;
             let dcErr = validateChain(dest_chain);
             if (dcErr) return dcErr;
+            // strictInt, not the engine's parseInt: parseInt takes an integer PREFIX, so
+            // '1e3' became 1 and '1000.9' became 1000, and the coerced value is what the
+            // attestation id, the stored row and the PROPOSE payload are built from. A
+            // caller that named action 1000 got a quorum round opened over action 1
+            // instead of an error. Same band initiateswap/getswap enforce for this field;
+            // the CrossChainEngine guard stays as the defence-in-depth backstop.
+            let srcIdx = strictInt(source_action_index);
+            if (srcIdx === null || srcIdx <= 0)
+                return {error: "source_action_index must be a positive integer"};
             try {
-                let attestation = await hub.requestAttestation(source_chain, source_action_index, dest_chain);
+                let attestation = await hub.requestAttestation(source_chain, srcIdx, dest_chain);
                 return attestation;
             } catch (err) {
                 return {error: err.message || "error requesting attestation"};

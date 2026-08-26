@@ -733,6 +733,30 @@ describe('AttestationConsensus: PREPARE signatures verified against the winner (
         expect(ValidatorIdentity.verify(canon.toString('utf8'), pending.signatures.get(pub(p2)), pub(p2))).to.equal(true);
     });
 
+    // Makes the cross-handler dependency above executable rather than prose.
+    // _maybeAdvanceFromProposals returns at once when a winner exists, and the
+    // winner-canonical sweep runs only at winner establishment, so a late PROPOSE is
+    // recorded but contributes NO signature; only that peer's own PREPARE (or COMMIT)
+    // does. A change that moves where signatures are counted must trip this test.
+    it('a post-winner PROPOSE contributes no signature; the same peer\'s PREPARE does', async function () {
+        let WINNER  = Buffer.from('winner-body');
+        let pending = seedWithWinner([p1, p2], WINNER);
+
+        // p1 proposes the WINNER bytes themselves, correctly signed, AFTER the winner
+        // is locked: the most favourable case for the "sigs collected" reading.
+        c._handlePropose(signEnv('ATTEST_PROPOSE', RID, 'http_get', p1, WINNER));
+        await flush();
+        expect(pending.proposals.has(pub(p1)), 'the late proposal is still recorded').to.equal(true);
+        expect(pending.signatures.has(pub(p1)), 'but its signature is NOT swept in').to.equal(false);
+        expect(pending.signatures.size).to.equal(0);
+
+        // The same peer's PREPARE over the winner is what actually counts it.
+        c._handlePrepare(signEnv('ATTEST_PREPARE', RID, 'http_get', p1, WINNER));
+        expect(pending.signatures.has(pub(p1))).to.equal(true);
+        let canon = buildCanonical(RID, 'http_get', WINNER, 'ok', '');
+        expect(ValidatorIdentity.verify(canon.toString('utf8'), pending.signatures.get(pub(p1)), pub(p1))).to.equal(true);
+    });
+
     it('finalizes a round carrying ONLY winner-body signatures when a peer PREPAREs a divergent body', async function () {
         // redundancy 2 over [me,p1,p2]: winner sets after me+p1 propose the same
         // BODY; p2 then PREPAREs a divergent body whose sig must be excluded.

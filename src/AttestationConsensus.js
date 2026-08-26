@@ -199,8 +199,17 @@ class AttestationConsensus extends EventEmitter {
         // once `pending` exists). Cap both: a distinct-rid ceiling with FIFO eviction,
         // and a serialized-size gate on each buffered envelope. Mirrors the DEX half
         // (CrossChainDexConsensus, A-F5).
-        this.earlyMessageMaxDistinctIds = parseInt(this.config.ATTESTATION_EARLY_MSG_MAX_IDS) || 512;
-        this.earlyMessageMaxBytes       = parseInt(this.config.ATTESTATION_EARLY_MSG_MAX_BYTES) || 131072;
+        // positiveIntConfig, not `parseInt(cfg) || DEFAULT`: a negative is truthy, and a
+        // non-positive value here does not merely loosen a cap, it inverts the gate. A
+        // negative MAX_BYTES makes `sz > max` true for EVERY envelope, so early buffering
+        // is off entirely: the first proposer's PROPOSE is dropped on any peer whose round
+        // has not started yet (the case the buffer exists for) and the round stalls to the
+        // PBFT timeout. A negative MAX_IDS fires the distinct-rid eviction on every insert,
+        // holding one rid at a time.
+        this.earlyMessageMaxDistinctIds = positiveIntConfig(this.config.ATTESTATION_EARLY_MSG_MAX_IDS, 512,
+            'ATTESTATION_EARLY_MSG_MAX_IDS');
+        this.earlyMessageMaxBytes       = positiveIntConfig(this.config.ATTESTATION_EARLY_MSG_MAX_BYTES, 131072,
+            'ATTESTATION_EARLY_MSG_MAX_BYTES');
 
         // Early-COMMIT buffer. A COMMIT can arrive after `pending` exists but
         // before a winner is established: the PROPOSE->agree() transition is
@@ -705,8 +714,20 @@ class AttestationConsensus extends EventEmitter {
     }
 
     // Once enough proposals are in, run provider.agree() to pick a winner and
-    // transition to PREPARE phase. Idempotent: extra proposals after a winner
-    // is picked are validated against the winner and their sigs collected.
+    // transition to PREPARE phase. Idempotent by early return, NOT by re-sweeping:
+    // once a winner exists this returns at the first statement below, so a PROPOSE
+    // arriving afterwards is stored by _handlePropose but never re-verified against
+    // the winner canonical and never counted into pending.signatures. The
+    // winner-canonical sweep further down runs exactly once, at the moment the winner
+    // is established, and _establishNonOkWinner's sweep is guarded the same way.
+    //
+    // So a late proposer's signature reaches the set ONLY through its own PREPARE or
+    // COMMIT, each verified over the winner canonical at its own handler. That is a
+    // cross-handler dependency, not an incidental one: it is why liveness holds today
+    // (a validator that PROPOSEs also PREPAREs) and why moving where signatures are
+    // counted must account for this path. Pinned by
+    // "a post-winner PROPOSE contributes no signature; the same peer's PREPARE does"
+    // in test/unit/AttestationConsensus.test.js.
     //
     // provider.agree() may be sync (http_get returns the winner immediately)
     // or async (llm runs judge_model via an API call). We always await it via

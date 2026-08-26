@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-08-25
+
+### Fixed
+- Closed a gap in oracle price consensus where a hub that missed or sat out a round clamped against a stale price reference instead of the shared last-finalized value.
+- The oracle slash-detection band now widens only in rounds where the price clamp actually bound, so a genuine market move no longer flags every honest submitter.
+- Attestation rounds now fail closed on an unsupported consensus strategy instead of running it with safety checks disabled.
+- Updated the BTC mainnet reward pool address.
+- Re-pinned the testnet genesis for BTC, LTC, and DOGE at the current chain tips ahead of the public testnet announcement.
+- Code-review round fixes across oracle consensus, attestation, and observability code.
+
+### Security
+- Closed a gap where the attestation fetch provider's private-address allow list and the price source's consensus-uniform overrides were honored on every network instead of being restricted to regtest.
+
 ## [0.10.0] - 2026-08-18
 
 ### Added
