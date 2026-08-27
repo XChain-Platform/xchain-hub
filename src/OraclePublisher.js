@@ -49,12 +49,11 @@
  *   - DOGE balance monitoring with WARN/ERROR log thresholds
  *
  * PRICE v2 BATCH RAIL (spec section 7).
- * At/above PRICE_BATCH_ACTIVATION a finalized round is no longer broadcast on
- * its own. It is appended to a SEPARATE durable buffer file and leaves this hub
- * only as part of an hourly batch that a quorum of the price-capable set has
- * co-signed. The two files are deliberately distinct: the publish queue
- * broadcasts every entry it reads, so a "buffered" round parked there would go
- * out as the very v0 the batch replaces.
+ * A finalized round is never broadcast on its own. It is appended to a SEPARATE
+ * durable buffer file and leaves this hub only as part of an hourly batch that a
+ * quorum of the price-capable set has co-signed. The two files are deliberately
+ * distinct: the publish queue broadcasts every entry it reads, so a "buffered"
+ * round parked there would go out as the very v0 the batch replaces.
  *
  * Every hub buffers every round it finalizes, leader or not, because window
  * leadership is resolved at the window's anchor and that anchor is unknown when
@@ -82,7 +81,6 @@ const { sumUtxosCoins } = require('./lib/utxo_balance.js');
 const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
 const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
 const { positiveIntConfig } = require('./lib/config_int.js');
-const { isPriceBatchActive } = require('./price_batch_activation.js');
 const { compressPriceV2Body, PRICE_V2_COMPRESSION_MARKER,
         PRICE_V2_MAX_ROUND_COUNT } = require('./price_v2_compression.js');
 
@@ -237,10 +235,8 @@ class OraclePublisher {
 
         // ---------------- PRICE v2 batch rail (spec section 7) ----------------
 
-        // The activation gate is TIME-keyed per network, so the publisher needs the
-        // hub's network name to evaluate it. An unset HUB_NETWORK makes
-        // isPriceBatchActive fail closed, which keeps this hub on the v0 rail rather
-        // than emitting batches nobody else will index.
+        // The network name still keys the remaining per-network rules the batch rail
+        // reads (pair widening, sig tally, stake-weighted quorum).
         this.network = (hub && hub.network) ? String(hub.network) : '';
 
         this.batchWindowRounds    = positiveIntConfig(
@@ -449,85 +445,17 @@ class OraclePublisher {
             console.log('OraclePublisher: disabled (ORACLE_PUBLISH_ENABLED=false); skipping round ' + event.round);
             return;
         }
-        // PRICE v2 flag day. At/above the stamp a finalized round never rides its own
-        // transaction: it goes into the buffer and leaves as part of a signed batch.
-        // The gate is evaluated on the ROUND's own block time (the key the chain-side
-        // gate uses) and fails closed, so a hub with no HUB_NETWORK stays on v0.
-        // No leader check here, deliberately: EVERY hub buffers EVERY round it
-        // finalizes, because window leadership is decided at the window's anchor and
-        // that anchor is not known when the window's first round finalizes.
-        if (isPriceBatchActive(event.btcBlockTime, this.network)) {
-            await this._bufferFinalizedRound(event);
-            this._noteWindowRound(event.round);
-            return;
-        }
-
-        let round = event.round;
-        let myRank = await this._getMyRank(event.btcBlockHeight);
-        if (myRank === null) return; // not an active oracle_publish validator (capability not active)
-
-        let publisherCount = await this._getActiveOraclePublishCount(event.btcBlockHeight);
-        if (publisherCount === 0) return;
-
-        let leaderRank = round % publisherCount;
-        this._lastRankState = {
-            round:          round,
-            myRank:         myRank,
-            leaderRank:     leaderRank,
-            isLeader:       leaderRank === myRank,
-            publisherCount: publisherCount
-        };
-        if (leaderRank !== myRank) {
-            // Not our turn. This hub does nothing further for this round: there is no
-            // hub-side takeover if the leader stays dark, so the count is an observability
-            // record of the follower window, not a pending obligation.
-            this._followerRounds++;
-            return;
-        }
-        this._leaderRounds++;
-
-        // We are the leader for this round. Enqueue and try to publish.
-        // Signatures are collected by OracleConsensus during PBFT prepare/commit and passed in event.signatures
-        let sigs = (event.signatures && Array.isArray(event.signatures) && event.signatures.length > 0)
-            ? event.signatures
-            : this._buildLocalSigOnly(event);
-
-        // Guard: the assembled PRICE v0 wire must fit the encoder's data-payload
-        // ceiling, or createTx rejects it with a RangeError downstream. Catching that
-        // after enqueue is too late, the entry would already be on the durable queue
-        // and the failover sweep would retry the same oversized payload forever. Drop
-        // it loudly here (symmetric to AttestationPublisher's pre-WAL guard).
-        let wire      = this.buildPriceV0Wire(round, event.btcBlockTime, event.prices, sigs, event.btcBlockHeight);
-        let wireBytes = Buffer.byteLength(wire, 'utf8');
-        if (wireBytes > PRICE_WIRE_MAX_BYTES) {
-            console.error('OraclePublisher: PRICE v0 wire for round ' + round +
-                ' is ' + wireBytes + ' bytes, exceeds encoder limit of ' + PRICE_WIRE_MAX_BYTES +
-                '; dropping broadcast. Too many pairs or signatures for a single round.');
-            this.oversizedDrops++;
-            // Route the dropped round through the append-only dead-letter sink so it
-            // stays countable (getStats) and replayable like every other abandoned
-            // round, instead of vanishing with only a console.error. NOT enqueued: the
-            // drop must stay pre-enqueue so the failover sweep never retries an
-            // unencodable payload forever.
-            this._deadLetter({
-                round:          round,
-                btcBlockHeight: event.btcBlockHeight,
-                btcBlockTime:   event.btcBlockTime,
-                prices:         event.prices,
-                sigs:           sigs
-            }, 'PRICE v0 wire ' + wireBytes + ' bytes exceeds encoder limit of ' + PRICE_WIRE_MAX_BYTES);
-            return;
-        }
-
-        await this._enqueue({
-            round:          round,
-            btcBlockHeight: event.btcBlockHeight,
-            btcBlockTime:   event.btcBlockTime,
-            prices:         event.prices,
-            sigs:           sigs
-        });
-
-        await this._processQueue();
+        // PRICE v2 BATCH RAIL, unconditional. A finalized round never rides its own
+        // transaction: it goes into the buffer and leaves as part of a signed batch. There
+        // is no activation gate and no v0 fallback rail here, so this hub cannot be one
+        // stamp away from emitting a wire its peers index differently.
+        //
+        // No leader check here, deliberately: EVERY hub buffers EVERY round it finalizes,
+        // because window leadership is decided at the window's anchor and that anchor is
+        // not known when the window's first round finalizes. Leader election, the durable
+        // queue and the broadcast happen at window assembly (_assembleWindow).
+        await this._bufferFinalizedRound(event);
+        this._noteWindowRound(event.round);
     }
 
     // Determine this node's rank in the sorted oracle_publish validator list, or null if not active
@@ -1062,8 +990,8 @@ class OraclePublisher {
     // 'disputed' marks a reorg-retracted row, and the signing round refuses to sign
     // disputed content, so treating a disputed round as "present but unbuffered" would
     // stall the window forever waiting for something no peer will ever co-sign.
-    // Rounds below the activation stamp are exempt: they went out as v0 and were never
-    // buffered, which is the transition instant (D27).
+    // No exemption for early rounds: batching is unconditional, so every round that
+    // finalized locally was buffered and an unbuffered one is a real coverage hole.
     async _windowCoverageComplete(first, last, rounds) {
         if (!this.db) return true;
         let rows;
@@ -1082,7 +1010,6 @@ class OraclePublisher {
         for (let row of (rows || [])) {
             let r = parseInt(row.round_number);
             if (!Number.isFinite(r) || have.has(r)) continue;
-            if (!isPriceBatchActive(row.block_timestamp, this.network)) continue;
             missing.push(r);
         }
         if (missing.length > 0) {

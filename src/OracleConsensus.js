@@ -1755,6 +1755,39 @@ class OracleConsensus extends EventEmitter {
         let blockTimestamp = btcBlockTime   || Math.floor(Date.now() / 1000);
         if (!prices || prices.length === 0) return;
 
+        // Mirror the round's `price` validator set into capability_snapshots at the
+        // round's BTC anchor, BEFORE the round's own rows land.
+        //
+        // Capability staking is BTC-only at the protocol level (coins/DOGE.js and
+        // coins/LTC.js declare CAPABILITIES: {}), so a non-BTC indexer resolves the
+        // price-capable set from the hub-mirrored capability_snapshots or not at all.
+        // Nothing on the oracle path ever wrote a `price` row: finalizeRound and
+        // _handlePropose resolve the set through CapabilitySnapshot, which is a cached
+        // RPC read against the BTC indexer and persists nothing. The mirror therefore
+        // carried only cross_chain and oracle_publish rows, and every PRICE action
+        // published off BTC resolved an EMPTY set, summed to zero stake and recorded
+        // 'invalid: insufficient signer stake' with signatures that all verify.
+        //
+        // EVERY hub persists, not just the leader: an indexer verifies a PRICE action
+        // against capability_snapshots in whichever hub DB it mirrors, and a follower's
+        // DB may be the only one it reads. Deterministic from the BTC stakes at the
+        // anchor plus INSERT IGNORE, so every hub writes identical rows and a re-finalize
+        // of the same round is a no-op (same idempotency contract as the cross_chain and
+        // oracle_publish writers).
+        //
+        // Ordered first, and fail-closed by throwing, for the reason StateCheckpointEngine
+        // states for its oracle_publish persist: a mirror subscriber must never receive a
+        // quorum-signed row it cannot verify. A throw here skips the price_snapshots
+        // INSERT and its broadcast entirely; _finalizeCommittedRound's retry loop then
+        // retains the round and re-drives it, and OracleRound's finalizeRound .catch logs
+        // the single-node path.
+        //
+        // referenceBlock is the same value the round resolved its snapshot at
+        // (finalizeRound's btcBlockHeight, threaded through pending.btcBlockHeight), so
+        // every chain's indexer reads the SAME snapshot block for the same round. Never
+        // the local processing height.
+        await this._persistCapabilitySnapshot('price', referenceBlock);
+
         // Write the whole round in ONE multi-row INSERT (mirrors db.setParams) so the
         // round lands atomically. The per-pair loop this replaced let a getfeequote /
         // getpricesnapshots reader observe a torn round (some pairs from round N, others
@@ -1841,6 +1874,89 @@ class OracleConsensus extends EventEmitter {
                 catch (err) { /* the repair itself must not fail finalize */ }
             }
         }
+    }
+
+    // Resolve the qualifying validator set for `capability` at a BTC block, normalized to
+    // { pubkey, source, weight, amount }. Same shape and same activation gate as
+    // StateCheckpointEngine/CrossChainDexEngine._resolveCapabilityValidators: at/above
+    // STAKE_WEIGHTED_QUORUM activation (keyed on the BTC block + this hub's network) the
+    // SOURCE-KEYED weights, below it the legacy count set (source='', weight=amount), so
+    // the rows this hub mirrors match the rows those engines mirror for the same block.
+    // A degraded snapshot (indexer RPC error / auth mismatch surfaces as null) normalizes
+    // to [], which persists nothing rather than inventing membership.
+    async _resolveCapabilityValidators(capability, block) {
+        let validators = [];
+        let capSnapshot = this.hub ? this.hub.capabilitySnapshot : null;
+        if (!capSnapshot) return validators;
+        let weighted = swq.isStakeWeightedQuorumActive(block, this.hub.network);
+        if (weighted) {
+            let snap = await capSnapshot.getWeightSnapshot(capability, block);
+            if (snap && Array.isArray(snap.validators)) {
+                validators = snap.validators.map(v => ({
+                    pubkey: v.pubkey,
+                    source: String(v.source != null ? v.source : ''),
+                    weight: String(v.weight != null ? v.weight : '0'),
+                    amount: String(v.weight != null ? v.weight : '0')
+                }));
+                // Carry the truncation marker through the .map so the persist below can
+                // refuse an over-cap set (SWQ-TRUNC parity with the other writers).
+                if (snap.truncated === true) validators.truncated = true;
+            }
+        } else {
+            let snap = await capSnapshot.getSnapshot(capability, block);
+            if (snap && Array.isArray(snap.validators))
+                validators = snap.validators.map(v => ({
+                    pubkey: v.pubkey,
+                    source: '',
+                    weight: String(v.amount != null ? v.amount : '0'),
+                    amount: String(v.amount != null ? v.amount : '0')
+                }));
+        }
+        return validators;
+    }
+
+    // Persist the qualifying validator set for `capability` at `block` to
+    // capability_snapshots (idempotent) and mirror each row to hub-DB subscribers.
+    // Returns the number of rows resolved (and persisted) for this (capability, block);
+    // 0 means the set degraded to empty or was refused as truncated.
+    //
+    // Byte-for-byte the same write and select-back as
+    // StateCheckpointEngine/CrossChainCallEngine._persistCapabilitySnapshot: INSERT IGNORE
+    // on the natural key is the idempotency primitive (all hubs write identical rows for a
+    // block, and a replayed round re-writes nothing), and the select-back keys on the full
+    // widened uq_cap_snap (block, capability, pubkey, SOURCE) because a pubkey delegated by
+    // two sources has two rows and a pubkey-only LIMIT 1 re-read would stream only one.
+    async _persistCapabilitySnapshot(capability, block) {
+        let validators = await this._resolveCapabilityValidators(capability, block);
+        // SWQ-TRUNC-MIRROR: never mirror a TRUNCATED set. The `.truncated` marker is what
+        // fails this hub's own meetsStakeThreshold closed, but it is a JS array property
+        // with no capability_snapshots column behind it, so persisting the capped rows
+        // would hand an off-BTC verifier a partial set it reads back as COMPLETE and let it
+        // clear a 2/3 bar over an under-counted stake denominator this hub itself rejects.
+        // Writing nothing leaves the mirror empty, so that read yields S=0 and fails closed
+        // through the same predicate as everything else. Keep this in lockstep with the
+        // other capability_snapshots writers.
+        if (validators && validators.truncated === true) {
+            console.warn('Oracle: refusing to persist a TRUNCATED ' + capability +
+                ' capability snapshot at block ' + block +
+                ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
+            return 0;
+        }
+        for (let v of validators) {
+            let pubkey = String(v.pubkey).toLowerCase();
+            let amount = String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0'));
+            let source = String(v.source != null ? v.source : '');
+            await this.db.doQuery(
+                'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?)',
+                [block, capability, pubkey, amount, source]);
+            if (this.hub && this.hub.hubDbBroadcaster) {
+                let r = await this.db.doQuery(
+                    'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
+                    [block, capability, pubkey, source]);
+                if (r.length) this.hub.hubDbBroadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
+            }
+        }
+        return validators.length;
     }
 
     // item 3521 - the pair set the per-pair drop markers are written over. It must
@@ -1946,8 +2062,8 @@ class OracleConsensus extends EventEmitter {
     //
     // The EQUIV header is UNCONDITIONAL here, unlike _buildPriceV0Payload's height gate.
     // v0 gates because it has pre-flag-day history whose bytes may not move; v2 has none
-    // (it is invalid below its own PRICE_BATCH_ACTIVATION, and every network where it can
-    // be active already has EQUIV active). The unwrapped bare-JSON form is also the exact
+    // (it is ungated and every network it runs on already has EQUIV active). The
+    // unwrapped bare-JSON form is also the exact
     // shape that breaks SLASH's "an ORACLE-tagged canonical always carries `round`"
     // invariant, which is why v2 carries its own engine tag. Do NOT "fix" this into a
     // v0-style gate.

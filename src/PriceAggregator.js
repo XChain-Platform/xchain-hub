@@ -205,8 +205,8 @@ class PriceAggregator extends EventEmitter {
     //
     // The EQUIV header is UNCONDITIONAL here, unlike _buildPriceV0Payload's height gate.
     // v0 gates because it has pre-flag-day history whose bytes may not move; v2 has none
-    // (it is invalid below its own PRICE_BATCH_ACTIVATION, and every network where it can
-    // be active already has EQUIV active). The unwrapped bare-JSON form is also the exact
+    // (it is ungated and every network it runs on already has EQUIV active). The
+    // unwrapped bare-JSON form is also the exact
     // shape that breaks SLASH's "an ORACLE-tagged canonical always carries `round`"
     // invariant, which is why v2 carries its own engine tag. Do NOT "fix" this into a
     // v0-style gate.
@@ -624,9 +624,9 @@ class PriceAggregator extends EventEmitter {
         // payload and accepts the resulting skew because it is one-sided and small: a
         // round is stamped, then mined, so block_time >= timestamp and the hub can only
         // activate LATER than the chain (one round of carry-forward, self-healing). A
-        // batch widens that skew from ~10 minutes to ~70, so arming this gate and
-        // PRICE_BATCH_ACTIVATION in one pass would have the hub refuse a whole HOUR the
-        // chain accepted. Carrying block_time and keying on it is the clean fix the
+        // batch widens that skew from ~10 minutes to ~70, so keying this gate on a
+        // round timestamp would have the hub refuse a whole HOUR the chain accepted.
+        // Carrying block_time and keying on it is the clean fix the
         // comment in receiveValidatedRound already names. One pattern for the whole
         // batch, because every round in it landed in the same block.
         let pairPattern = pricePair.pricePairPattern(blockTime, this.hub && this.hub.network);

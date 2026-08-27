@@ -288,23 +288,30 @@ describe('OraclePublisher PRICE v2 batch rail', function () {
             expect(h.broadcasts).to.have.length(0);
         });
 
-        it('keeps the v0 rail byte-for-byte below the stamp', async function () {
-            // mainnet ships the UNARMED 9999999999 sentinel, so v2 is inactive there.
-            let h = makePublisher({ network: 'mainnet' });
-            await h.p.start();
-            await h.p.onRoundFinalized(roundFixture(0));
+        it('buffers on EVERY network, because batching is not gated', async function () {
+            // There is no activation stamp: the platform is not live, so there is no
+            // replay history for a gate to protect, and a gate nobody remembers to arm
+            // is worse than no gate. A round buffers wherever it finalizes.
+            for (const network of ['mainnet', 'testnet', 'regtest']) {
+                let h = makePublisher({ network });
+                await h.p.start();
+                await h.p.onRoundFinalized(roundFixture(0));
 
-            expect(readJsonl(h.bufferPath)).to.have.length(0);
-            expect(h.broadcasts).to.have.length(1);
-            expect(h.broadcasts[0].split('|').slice(0, 2)).to.deep.equal(['PRICE', '0']);
+                expect(readJsonl(h.bufferPath), network).to.have.length(1);
+                expect(h.broadcasts, network).to.have.length(0);
+            }
         });
 
-        it('fails closed to the v0 rail when the hub has no network configured', async function () {
+        it('buffers even with no network configured, so a hub cannot fall back to the v0 rail', async function () {
+            // A standalone hub reads network as '' (it is derived from the p2p config),
+            // and while a GATE would have failed closed on that and quietly emitted v0,
+            // an ungated rail cannot: one hub emitting a wire its peers no longer expect
+            // is the split this removal exists to make unreachable.
             let h = makePublisher({ network: '' });
             await h.p.start();
             await h.p.onRoundFinalized(roundFixture(0));
-            expect(readJsonl(h.bufferPath)).to.have.length(0);
-            expect(h.broadcasts).to.have.length(1);
+            expect(readJsonl(h.bufferPath)).to.have.length(1);
+            expect(h.broadcasts).to.have.length(0);
         });
 
         it('buffers on a hub that is NOT the window leader, because leadership is unknown at buffer time', async function () {
@@ -434,8 +441,11 @@ describe('OraclePublisher PRICE v2 batch rail', function () {
             expect(logs.warn.join('\n')).to.match(/finalized round\(s\) 3 with no buffered copy/);
         });
 
-        it('exempts rounds below the activation stamp, so the first straddling window can publish (D27)', async function () {
-            // The pre-stamp round went out as PRICE v0 and was never buffered.
+        it('has NO stamp exemption: a finalized round with no buffered copy withholds the batch', async function () {
+            // The old rail exempted rounds below the activation stamp, because those went
+            // out as v0 and were never buffered, so without the exemption the first
+            // straddling window would have seen permanent gaps. No stamp, no straddle, no
+            // exemption: every finalized round must be accounted for, whatever its time.
             let h = makePublisher({
                 network: 'testnet',
                 db: makeDb({ snapshots: [
@@ -443,13 +453,12 @@ describe('OraclePublisher PRICE v2 batch rail', function () {
                     { round_number: 1, block_timestamp: 1800000600, status: 'finalized' }
                 ] })
             });
-            // testnet's stamp is 0, so a negative block time reads as below it.
             await h.p.start();
             h.p._buffer.set(1, bufferedFixture(1));
 
             await h.p._assembleWindow(0);
-            expect(h.signer.calls).to.have.length(1);
-            expect(h.signer.calls[0]).to.include({ first: 1, last: 1 });
+            expect(h.signer.calls).to.have.length(0);
+            expect(logs.warn.join('\n')).to.match(/finalized round\(s\) 0 with no buffered copy/);
         });
 
         it('keys on status = finalized ONLY, so a reorg-disputed round cannot stall the window forever', async function () {
