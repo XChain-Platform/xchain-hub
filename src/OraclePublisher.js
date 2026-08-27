@@ -45,7 +45,22 @@
  *   - Leader rotation calculation
  *   - Persistent queue (JSONL with fsync)
  *   - PRICE v0 payload construction (matches indexer parser format)
+ *   - PRICE v2 batch assembly (buffer, window scheduler, splitting, signing round)
  *   - DOGE balance monitoring with WARN/ERROR log thresholds
+ *
+ * PRICE v2 BATCH RAIL (spec section 7).
+ * At/above PRICE_BATCH_ACTIVATION a finalized round is no longer broadcast on
+ * its own. It is appended to a SEPARATE durable buffer file and leaves this hub
+ * only as part of an hourly batch that a quorum of the price-capable set has
+ * co-signed. The two files are deliberately distinct: the publish queue
+ * broadcasts every entry it reads, so a "buffered" round parked there would go
+ * out as the very v0 the batch replaces.
+ *
+ * Every hub buffers every round it finalizes, leader or not, because window
+ * leadership is resolved at the window's anchor and that anchor is unknown when
+ * the window's first round finalizes. Non-leaders shed their copies once an
+ * on-chain batch covering the window shows up in their own price_snapshots, and
+ * unconditionally at ORACLE_BATCH_BUFFER_MAX_ROUNDS.
  *
  * The actual DOGE broadcast is delegated to a `broadcastFn` hook that
  * the operator wires up to their preferred signer (xchain-sdk, xchain-encoder
@@ -56,12 +71,20 @@
 
 const fs            = require('fs');
 const path          = require('path');
+const crypto        = require('crypto');
 const EncoderClient = require('./EncoderClient.js');
 const SpendGuard    = require('./lib/spend_guard.js');
+const OracleBatchSigner = require('./OracleBatchSigner.js');
+const swq           = require('./stake_weighted_quorum.js');
+const pst           = require('./price_sig_tally_activation.js');
 const { AtMostOnce, isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
 const { sumUtxosCoins } = require('./lib/utxo_balance.js');
 const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
 const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
+const { positiveIntConfig } = require('./lib/config_int.js');
+const { isPriceBatchActive } = require('./price_batch_activation.js');
+const { compressPriceV2Body, PRICE_V2_COMPRESSION_MARKER,
+        PRICE_V2_MAX_ROUND_COUNT } = require('./price_v2_compression.js');
 
 // PRICE v0 wire ceiling. Must equal MAX_DATA_BYTES in xchain-encoder/src/validator.js
 // (mirrors ATTEST_WIRE_MAX_BYTES in AttestationPublisher.js): an oversized wire is
@@ -69,6 +92,12 @@ const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
 // queue rather than letting the queue retry sweep replay it forever. (Named for
 // what _processQueue does: this class has no failover sweep, see the header.)
 const PRICE_WIRE_MAX_BYTES = 8189;
+
+// Bound on the assembled-window memo below. It only exists to stop one process
+// re-assembling a window it already handled, so it needs to cover the buffer's
+// own horizon and nothing more; the durable per-round markers are the real
+// at-most-once guard.
+const ASSEMBLED_WINDOW_MEMO_MAX = 4096;
 
 class OraclePublisher {
 
@@ -83,6 +112,10 @@ class OraclePublisher {
         // Append-only sink for rounds that exhaust maxAttempts. Kept next to the
         // queue so operators find both together; never truncated (open 'a').
         this.deadLetterPath     = this.queuePath.replace(/\.jsonl$/, '') + '.deadletter.jsonl';
+        // PRICE v2 round buffer, a third sibling file. Rounds wait here between
+        // finalization and the window close that turns them into one signed batch.
+        // Deliberately NOT the publish queue: see the header.
+        this.bufferPath         = this.queuePath.replace(/\.jsonl$/, '') + '.buffer.jsonl';
         // Lifetime counter of rounds moved to the dead-letter file. Makes a
         // give-up event countable instead of only a console.error.
         this.abandonedCount     = 0;
@@ -129,12 +162,17 @@ class OraclePublisher {
         // Retention window (in rounds) for the durable oracle_published_rounds marker
         // table. One row lands per published round forever, so on a money-bearing
         // broadcast path the table grows without bound for the life of the deployment.
+        // PRICE v2 batching does NOT change that rate: a batch writes one marker row
+        // per CONTAINED round, not one per wire, so the rows-per-day figure the window
+        // below is sized against is identical either side of the flag day (D26).
         // Only CONFIRMED rows (sent_at IS NOT NULL) are ever pruned: a sent_at NULL row
         // is the quarantine marker for a round whose on-chain state is unknown, which an
         // operator reconciles by hand, so those must survive forever (see
         // _hydratePublishedMarkers). Keep the most recent N rounds; 0 disables pruning.
         // Default ~90 days at the 10-minute round default, mirroring the
         // ORACLE_SUBMISSIONS_RETENTION_ROUNDS window on the sibling audit table.
+        // The window counts ROUNDS, never wires, so it means the same 90 days under
+        // v2 batching even though the wire count per day falls by ORACLE_BATCH_WINDOW_ROUNDS.
         this.publishedRoundsRetentionRounds = parseInt(
             process.env.ORACLE_PUBLISHED_ROUNDS_RETENTION_ROUNDS ||
             cfg.ORACLE_PUBLISHED_ROUNDS_RETENTION_ROUNDS);
@@ -196,6 +234,53 @@ class OraclePublisher {
         // publishers' house convention (AttestationPublisher._sweeping,
         // AttestationSpotChecker._schedulerTick).
         this._sweeping = false;
+
+        // ---------------- PRICE v2 batch rail (spec section 7) ----------------
+
+        // The activation gate is TIME-keyed per network, so the publisher needs the
+        // hub's network name to evaluate it. An unset HUB_NETWORK makes
+        // isPriceBatchActive fail closed, which keeps this hub on the v0 rail rather
+        // than emitting batches nobody else will index.
+        this.network = (hub && hub.network) ? String(hub.network) : '';
+
+        this.batchWindowRounds    = positiveIntConfig(
+            process.env.ORACLE_BATCH_WINDOW_ROUNDS || cfg.ORACLE_BATCH_WINDOW_ROUNDS,
+            6, 'ORACLE_BATCH_WINDOW_ROUNDS');
+        this.batchGraceMs         = positiveIntConfig(
+            process.env.ORACLE_BATCH_GRACE_MS || cfg.ORACLE_BATCH_GRACE_MS,
+            300000, 'ORACLE_BATCH_GRACE_MS');
+        this.batchBufferMaxRounds = positiveIntConfig(
+            process.env.ORACLE_BATCH_BUFFER_MAX_ROUNDS || cfg.ORACLE_BATCH_BUFFER_MAX_ROUNDS,
+            4032, 'ORACLE_BATCH_BUFFER_MAX_ROUNDS');
+
+        // In-memory mirror of bufferPath, round -> the canonical builder's input shape
+        // { round, timestamp, btcBlockHeight, pairs }. The file is the durable copy;
+        // this Map is what the window scheduler and the self-check read.
+        this._buffer = new Map();
+        // windowIndex -> { timer }. One grace timer per window, armed once and never
+        // extended: a late round arriving inside the grace still lands in the buffer
+        // and is picked up by the assembly that timer fires.
+        this._windows = new Map();
+        // Windows this process has already assembled, insertion-ordered and bounded.
+        // Prevents the catch-up sweep and a late round from re-running a window the
+        // durable markers would then have to refuse.
+        this._assembledWindows = new Map();
+        // Window assemblies run strictly one at a time. Two overlapping assemblies
+        // would run two signing rounds against one OracleBatchSigner, whose single
+        // _signRound slot supports exactly one.
+        this._windowChain  = Promise.resolve();
+        this._catchupTimer = null;
+        // A signer this instance created because the hub wired none. Owned means
+        // started and stopped here; a hub-wired signer is neither.
+        this._ownedBatchSigner = null;
+
+        // Batch stats (spec section 7). batchWindowsPublished and lastPublishedWindow
+        // move when a wire actually lands, batchSplitCount when assembly decides to
+        // split, batchUnpublishableCount when even one round cannot fit a wire.
+        this.batchWindowsPublished   = 0;
+        this.lastPublishedWindow     = null;
+        this.batchSplitCount         = 0;
+        this.batchUnpublishableCount = 0;
     }
 
     // Set a custom broadcast hook (overrides the default encoder-based pipeline)
@@ -304,6 +389,11 @@ class OraclePublisher {
             console.warn('OraclePublisher: queue file unwritable at ' + this.queuePath + ':', e);
         }
 
+        // Reload the v2 round buffer. A restart between a round finalizing and its
+        // window closing must not lose the round: it is the sole hub-side copy of an
+        // hour of price data that has not reached a chain yet.
+        this._hydrateBuffer();
+
         // Hydrate the durable at-most-once guard before subscribing to new rounds:
         // load confirmed rounds into the in-process guard and quarantine any
         // intent-only rounds so a restart can never re-broadcast an already-published
@@ -326,7 +416,28 @@ class OraclePublisher {
             });
         }
 
+        // Catch-up for windows that closed while this hub was down. Every buffered
+        // window except the newest is closed by definition (a higher round exists), so
+        // one delayed sweep re-arms exactly what the restart dropped. Delayed by the
+        // grace so a hub restarting mid-window still gives its peers time to come up
+        // before it proposes a batch they cannot yet co-sign.
+        this._scheduleBufferCatchup();
+
         console.log('OraclePublisher started (queue: ' + this.queuePath + ', address: ' + (this.dogeAddress || '<unset>') + ')');
+    }
+
+    // Release every timer this class owns, plus a batch signer it created itself.
+    // The class had no stop() before the batch rail, because it had no timers.
+    stop() {
+        for (let state of this._windows.values()) {
+            if (state.timer) clearTimeout(state.timer);
+        }
+        this._windows.clear();
+        if (this._catchupTimer) { clearTimeout(this._catchupTimer); this._catchupTimer = null; }
+        if (this._ownedBatchSigner) {
+            try { this._ownedBatchSigner.stop(); } catch (e) { /* stopping is best-effort */ }
+            this._ownedBatchSigner = null;
+        }
     }
 
     // Called when a round is finalized. Enqueue if this node is the leader.
@@ -338,6 +449,19 @@ class OraclePublisher {
             console.log('OraclePublisher: disabled (ORACLE_PUBLISH_ENABLED=false); skipping round ' + event.round);
             return;
         }
+        // PRICE v2 flag day. At/above the stamp a finalized round never rides its own
+        // transaction: it goes into the buffer and leaves as part of a signed batch.
+        // The gate is evaluated on the ROUND's own block time (the key the chain-side
+        // gate uses) and fails closed, so a hub with no HUB_NETWORK stays on v0.
+        // No leader check here, deliberately: EVERY hub buffers EVERY round it
+        // finalizes, because window leadership is decided at the window's anchor and
+        // that anchor is not known when the window's first round finalizes.
+        if (isPriceBatchActive(event.btcBlockTime, this.network)) {
+            await this._bufferFinalizedRound(event);
+            this._noteWindowRound(event.round);
+            return;
+        }
+
         let round = event.round;
         let myRank = await this._getMyRank(event.btcBlockHeight);
         if (myRank === null) return; // not an active oracle_publish validator (capability not active)
@@ -563,6 +687,17 @@ class OraclePublisher {
         }
     }
 
+    // Every round a queue entry carries. A v0 entry carries exactly one, so the v0
+    // paths keep their previous behavior byte for byte; a v2 batch entry carries all
+    // the rounds on its wire, which is the granularity every at-most-once guard and
+    // every durable marker row is keyed at.
+    _entryRounds(entry) {
+        if (entry && entry.batch && Array.isArray(entry.batch.rounds) && entry.batch.rounds.length > 0) {
+            return entry.batch.rounds.map(r => parseInt(r)).filter(r => Number.isFinite(r));
+        }
+        return [entry.round];
+    }
+
     // Read all queue entries (used by _processQueue and on restart)
     _readQueue() {
         try {
@@ -592,6 +727,630 @@ class OraclePublisher {
             console.error('OraclePublisher: failed to rewrite queue:', e);
             return false;
         }
+    }
+
+    // ================= PRICE v2 batch rail (spec section 7) =================
+    //
+    // Ordering of the parts below: the buffer file, the window scheduler, window
+    // assembly (leader election, self-check, splitting), wire construction, and the
+    // marker-clearing seam the ingest side calls on a retraction.
+
+    // ----- The durable round buffer -----
+
+    // Normalize a round:finalized event into the ONE shape the canonical builder and
+    // the signing round both take, so nothing downstream has to re-map it. Pair names
+    // are read `coinPair || pair` and prices stringified exactly as the v0 producer
+    // does, which is what keeps a v2 round object byte-identical to v0's own.
+    _bufferEntryFromEvent(event) {
+        return {
+            round:          parseInt(event.round),
+            timestamp:      parseInt(event.btcBlockTime),
+            btcBlockHeight: parseInt(event.btcBlockHeight),
+            pairs:          (event.prices || []).map(p => ({
+                pair:  p.coinPair || p.pair,
+                price: String(p.price)
+            }))
+        };
+    }
+
+    // Append one finalized round to the durable buffer, same open('a') + fsync
+    // discipline the publish queue and the dead-letter file use. A write failure is
+    // FATAL to the caller for the same reason _enqueue's is: an unwritable buffer
+    // means this hub silently loses an hour of price data it is the only holder of.
+    async _bufferFinalizedRound(event) {
+        let entry = this._bufferEntryFromEvent(event);
+        if (!Number.isFinite(entry.round)) return;
+        if (this._buffer.has(entry.round)) return;   // re-finalization of a buffered round
+        entry.bufferedAt = Date.now();
+        let line = JSON.stringify(entry) + '\n';
+        try {
+            let fd = fs.openSync(this.bufferPath, 'a');
+            fs.writeSync(fd, line);
+            fs.fsyncSync(fd);
+            fs.closeSync(fd);
+        } catch (e) {
+            console.error('OraclePublisher: failed to buffer round %s for batching:', entry.round, e);
+            throw e;
+        }
+        this._buffer.set(entry.round, entry);
+        this._enforceBufferBound();
+    }
+
+    _readBufferFile() {
+        try {
+            let raw = fs.readFileSync(this.bufferPath, 'utf8');
+            return raw.split('\n').filter(l => l.trim().length > 0).map(l => {
+                try { return JSON.parse(l); } catch (e) { return null; }
+            }).filter(e => e !== null && Number.isFinite(Number(e.round)));
+        } catch (e) {
+            return [];
+        }
+    }
+
+    // Truncating rewrite, used only by the two pruning paths. Returns false on a write
+    // failure; the in-memory Map is the authority for this process either way, so a
+    // failed prune costs disk, never correctness.
+    _rewriteBufferFile(entries) {
+        let lines = entries.map(e => JSON.stringify(e)).join('\n') + (entries.length > 0 ? '\n' : '');
+        try {
+            let fd = fs.openSync(this.bufferPath, 'w');
+            fs.writeSync(fd, lines);
+            fs.fsyncSync(fd);
+            fs.closeSync(fd);
+            return true;
+        } catch (e) {
+            console.error('OraclePublisher: failed to rewrite the v2 round buffer at ' +
+                this.bufferPath + ':', e);
+            return false;
+        }
+    }
+
+    _hydrateBuffer() {
+        this._buffer = new Map();
+        for (let e of this._readBufferFile()) {
+            let r = parseInt(e.round);
+            if (!Number.isFinite(r)) continue;
+            this._buffer.set(r, e);
+        }
+        if (this._buffer.size > 0) {
+            console.log('OraclePublisher: reloaded ' + this._buffer.size +
+                ' buffered oracle round(s) from ' + this.bufferPath);
+        }
+        this._enforceBufferBound();
+    }
+
+    // The unconditional bound (D29's second half). Non-leaders normally shed a window
+    // when they see its batch land, but a hub that never sees one (dark leader, chain
+    // behind, a window nobody led) must still not accumulate forever. Oldest rounds go
+    // first: a round old enough to fall off this end is far past any window a later
+    // leader would still re-propose.
+    _enforceBufferBound() {
+        if (this._buffer.size <= this.batchBufferMaxRounds) return;
+        let ordered = Array.from(this._buffer.keys()).sort((a, b) => a - b);
+        let drop    = ordered.slice(0, this._buffer.size - this.batchBufferMaxRounds);
+        for (let r of drop) this._buffer.delete(r);
+        console.warn('OraclePublisher: v2 round buffer hit ORACLE_BATCH_BUFFER_MAX_ROUNDS (' +
+            this.batchBufferMaxRounds + '); dropped ' + drop.length + ' round(s) up to ' +
+            drop[drop.length - 1] + ' without publishing them');
+        this._rewriteBufferFile(this._bufferedRange(-Infinity, Infinity));
+    }
+
+    // Buffered rounds inside a closed round range, ascending.
+    _bufferedRange(first, last) {
+        let out = [];
+        for (let [r, e] of this._buffer) {
+            if (r >= first && r <= last) out.push(e);
+        }
+        return out.sort((a, b) => parseInt(a.round) - parseInt(b.round));
+    }
+
+    // D29's first half: shed the rounds of a window whose batch this hub can already
+    // see in its OWN price_snapshots. Batch-sourced rows are the ones whose
+    // consensus_proof is the {"batch":...} object of D23; a v0-sourced row's proof is
+    // a bare signature array, so the prefix discriminates exactly (the same test
+    // PriceAggregator's retraction path uses). Best-effort: a DB error just leaves the
+    // rounds buffered until the bound above collects them.
+    async _pruneObservedWindow(first, last) {
+        if (!this.db) return 0;
+        let rows;
+        try {
+            rows = await this.db.doQuery(
+                'SELECT DISTINCT round_number FROM price_snapshots WHERE round_number >= ? ' +
+                'AND round_number <= ? AND consensus_proof LIKE \'{"batch":%\'',
+                [first, last]);
+        } catch (e) {
+            console.warn('OraclePublisher: cannot check for an on-chain batch covering rounds ' +
+                first + '..' + last + '; leaving them buffered: ', e && e.message);
+            return 0;
+        }
+        let pruned = 0;
+        for (let row of (rows || [])) {
+            let r = parseInt(row.round_number);
+            if (Number.isFinite(r) && this._buffer.delete(r)) pruned++;
+        }
+        if (pruned > 0) {
+            this._rewriteBufferFile(this._bufferedRange(-Infinity, Infinity));
+            console.log('OraclePublisher: pruned ' + pruned + ' buffered round(s) in ' + first +
+                '..' + last + ' after observing their batch on-chain');
+        }
+        return pruned;
+    }
+
+    // ----- The window scheduler -----
+
+    _windowIndexOf(round) {
+        return Math.floor(parseInt(round) / this.batchWindowRounds);
+    }
+
+    // Called for every round this hub buffers. Two things close a window: its LAST
+    // slot finalizing, or a round of a HIGHER window arriving (which proves the lower
+    // one can receive nothing more). Skipped rounds make the second case the normal
+    // one at the end of an hour, so both are needed.
+    _noteWindowRound(round) {
+        let w = this._windowIndexOf(round);
+        if (!Number.isFinite(w)) return;
+        for (let lower of Array.from(this._windows.keys())) {
+            if (lower < w) this._armWindowTimer(lower);
+        }
+        if (!this._windows.has(w)) this._windows.set(w, { timer: null });
+        if (parseInt(round) % this.batchWindowRounds === this.batchWindowRounds - 1) {
+            this._armWindowTimer(w);
+        }
+    }
+
+    // Arm the grace timer for a window, once. Never re-armed: extending it on every
+    // late arrival would let a steady trickle of stragglers postpone an hour of price
+    // data indefinitely.
+    _armWindowTimer(windowIndex) {
+        let state = this._windows.get(windowIndex);
+        if (!state) { state = { timer: null }; this._windows.set(windowIndex, state); }
+        if (state.timer) return;
+        // Already handled. Drop the tracking entry too, or a window that assembled
+        // early keeps a row in _windows that every later round re-walks.
+        if (this._assembledWindows.has(windowIndex)) { this._windows.delete(windowIndex); return; }
+        state.timer = setTimeout(() => {
+            state.timer = null;
+            this._windows.delete(windowIndex);
+            this._queueWindowAssembly(windowIndex);
+        }, this.batchGraceMs);
+        if (state.timer.unref) state.timer.unref();
+    }
+
+    // Serialize assemblies onto one chain. The signing round holds a single in-flight
+    // slot, so two windows assembling at once would have the second one silently
+    // clobber the first's round.
+    _queueWindowAssembly(windowIndex) {
+        this._windowChain = this._windowChain.then(() =>
+            this._assembleWindow(windowIndex).catch(e =>
+                console.error('OraclePublisher: window ' + windowIndex + ' assembly failed:', e)));
+        return this._windowChain;
+    }
+
+    _scheduleBufferCatchup() {
+        if (this._buffer.size === 0) return;
+        this._catchupTimer = setTimeout(() => {
+            this._catchupTimer = null;
+            // The highest buffered window may still be open, so leave it to the normal
+            // scheduler; every window below it is closed by construction.
+            let windows = Array.from(new Set(
+                Array.from(this._buffer.keys()).map(r => this._windowIndexOf(r)))).sort((a, b) => a - b);
+            for (let w of windows.slice(0, Math.max(0, windows.length - 1))) {
+                this._queueWindowAssembly(w);
+            }
+        }, this.batchGraceMs);
+        if (this._catchupTimer.unref) this._catchupTimer.unref();
+    }
+
+    _noteAssembled(windowIndex) {
+        this._assembledWindows.set(windowIndex, true);
+        while (this._assembledWindows.size > ASSEMBLED_WINDOW_MEMO_MAX) {
+            this._assembledWindows.delete(this._assembledWindows.keys().next().value);
+        }
+    }
+
+    // ----- Window assembly -----
+
+    // Turn one closed window into zero or more signed, enqueued PRICE v2 wires.
+    async _assembleWindow(windowIndex) {
+        if (!this.enabled) return;
+        if (this._assembledWindows.has(windowIndex)) return;
+
+        let first  = windowIndex * this.batchWindowRounds;
+        let last   = first + this.batchWindowRounds - 1;
+        let rounds = this._bufferedRange(first, last);
+        if (rounds.length === 0) { this._noteAssembled(windowIndex); return; }
+
+        // The window's anchor is the LAST included round's own BTC anchor, matching the
+        // batch anchor the wire header carries and the anchor every verifier resolves
+        // the signature set against.
+        let anchor = parseInt(rounds[rounds.length - 1].btcBlockHeight);
+
+        // Leader election over the SAME sorted oracle_publish snapshot the v0 rail
+        // rotates on, keyed on the window rather than the round.
+        let pubkeys = await this._getActiveOraclePublishPubkeys(anchor);
+        if (pubkeys.length === 0) return;   // fail closed, already logged by the resolver
+        let me     = this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
+        let myRank = me ? pubkeys.indexOf(me) : -1;
+        if (myRank < 0) return;             // not an oracle_publish validator at this anchor
+
+        let leaderRank = windowIndex % pubkeys.length;
+        this._lastRankState = {
+            round:          last,
+            myRank:         myRank,
+            leaderRank:     leaderRank,
+            isLeader:       leaderRank === myRank,
+            publisherCount: pubkeys.length
+        };
+        if (leaderRank !== myRank) {
+            // Not our window. The buffered rounds are NOT dropped here: they are this
+            // hub's evidence for the on-chain observation prune, and its material if a
+            // later window has to re-propose this one.
+            this._followerRounds++;
+            this._noteAssembled(windowIndex);
+            await this._pruneObservedWindow(first, last);
+            return;
+        }
+        this._leaderRounds++;
+
+        // The self-check. A window published with a hole in it puts a signed, permanent
+        // claim on chain that the missing round did not finalize.
+        if (!(await this._windowCoverageComplete(first, last, rounds))) return;
+
+        let signer = this._getBatchSigner();
+        if (!signer) {
+            console.warn('OraclePublisher: no OracleBatchSigner available; window [' + first + ',' +
+                last + '] stays unpublished');
+            return;
+        }
+
+        let sigCountHint = await this._priceSetSizeHint(anchor, pubkeys.length);
+        let wires = [];
+        for (let segment of this._splitByFlagDay(rounds)) {
+            let idx = 0;
+            while (idx < segment.length) {
+                let take  = Math.max(1, this._packSegment(segment.slice(idx), sigCountHint));
+                let range = segment.slice(idx, idx + take);
+                let wire  = await this._signAndSizeRange(signer, range);
+                if (wire === null) {
+                    // Quorum was not reached. Nothing publishes for this window and it is
+                    // deliberately NOT memoized, so a later leader (or a later catch-up on
+                    // this hub) can re-propose the identical canonical content.
+                    return;
+                }
+                idx += wire.rounds.length;
+                if (wire.unpublishable) continue;   // the ceiling case, already dead-lettered
+                wires.push(wire);
+            }
+        }
+
+        this._noteAssembled(windowIndex);
+        if (wires.length === 0) return;
+        if (wires.length > 1) {
+            // Counted at assembly, not at broadcast: splitting is a decision this code
+            // makes, and it stays worth seeing even if the wires then fail to send.
+            this.batchSplitCount += wires.length - 1;
+            console.log('OraclePublisher: window [' + first + ',' + last + '] split into ' +
+                wires.length + ' PRICE v2 wires to fit ' + PRICE_WIRE_MAX_BYTES + ' bytes');
+        }
+
+        for (let i = 0; i < wires.length; i++) {
+            await this._enqueue({
+                // Identity field stays the FIRST round, so _processQueue's Sets and the
+                // retention sweep's queue-floor clamp keep working on a scalar (D10).
+                round: wires[i].firstRound,
+                batch: {
+                    windowIndex: windowIndex,
+                    firstRound:  wires[i].firstRound,
+                    lastRound:   wires[i].lastRound,
+                    anchor:      wires[i].anchor,
+                    rounds:      wires[i].rounds.map(r => parseInt(r.round)),
+                    sigCount:    wires[i].sigCount,
+                    compressed:  wires[i].compressed,
+                    wireIndex:   i,
+                    wireCount:   wires.length
+                },
+                wire: wires[i].wire
+            });
+        }
+
+        await this._processQueue();
+        await this._pruneObservedWindow(first, last);
+    }
+
+    // Refuse the window if any round it should carry finalized locally but is not in
+    // the buffer. Deliberately keyed on status = 'finalized' ONLY: the third enum value
+    // 'disputed' marks a reorg-retracted row, and the signing round refuses to sign
+    // disputed content, so treating a disputed round as "present but unbuffered" would
+    // stall the window forever waiting for something no peer will ever co-sign.
+    // Rounds below the activation stamp are exempt: they went out as v0 and were never
+    // buffered, which is the transition instant (D27).
+    async _windowCoverageComplete(first, last, rounds) {
+        if (!this.db) return true;
+        let rows;
+        try {
+            rows = await this.db.doQuery(
+                'SELECT DISTINCT round_number, block_timestamp FROM price_snapshots ' +
+                'WHERE round_number >= ? AND round_number <= ? AND status = ?',
+                [first, last, 'finalized']);
+        } catch (e) {
+            console.warn('OraclePublisher: cannot self-check window [' + first + ',' + last +
+                '] against price_snapshots; withholding the batch (fail closed): ', e && e.message);
+            return false;
+        }
+        let have    = new Set(rounds.map(r => parseInt(r.round)));
+        let missing = [];
+        for (let row of (rows || [])) {
+            let r = parseInt(row.round_number);
+            if (!Number.isFinite(r) || have.has(r)) continue;
+            if (!isPriceBatchActive(row.block_timestamp, this.network)) continue;
+            missing.push(r);
+        }
+        if (missing.length > 0) {
+            console.warn('OraclePublisher: window [' + first + ',' + last + '] has finalized round(s) ' +
+                missing.join(', ') + ' with no buffered copy; withholding the batch rather than ' +
+                'publishing a signed claim that they did not finalize');
+            return false;
+        }
+        return true;
+    }
+
+    // A composite verdict of every armed oracle flag day at one BTC anchor. Rounds
+    // whose keys differ cannot share a wire: a batch resolves those gates ONCE on the
+    // batch anchor, so a straddling range would judge its earlier rounds under a rule
+    // set they never finalized under. OracleBatchSigner._straddlesArmedOracleFlagDay is
+    // the receiving-side twin of this, and it refuses SILENTLY, so a leader that skips
+    // this split simply never reaches quorum and the window never publishes.
+    _flagDayKey(btcBlockHeight) {
+        let h = Number(btcBlockHeight);
+        return (swq.isStakeWeightedQuorumActive(h, this.network) ? '1' : '0') +
+               (pst.isPriceSigTallyVerifyFirstActive(h, this.network) ? '1' : '0');
+    }
+
+    _splitByFlagDay(rounds) {
+        let segments = [];
+        let current  = [];
+        let key      = null;
+        for (let r of rounds) {
+            let k = this._flagDayKey(r.btcBlockHeight);
+            if (key === null || k === key) {
+                current.push(r);
+            } else {
+                segments.push(current);
+                current = [r];
+            }
+            key = k;
+        }
+        if (current.length > 0) segments.push(current);
+        return segments;
+    }
+
+    // How many signatures to SIZE against before the signing round has produced any.
+    // The price-capable set at the anchor is the upper bound on what can come back, so
+    // packing against it never under-splits; the post-signing measurement in
+    // _signAndSizeRange is the authority either way.
+    async _priceSetSizeHint(anchor, fallback) {
+        try {
+            if (this.hub && this.hub.capabilitySnapshot) {
+                let snap = await this.hub.capabilitySnapshot.getSnapshot('price', anchor);
+                if (snap && Array.isArray(snap.validators) && snap.validators.length > 0) {
+                    return snap.validators.length;
+                }
+            }
+        } catch (e) { /* the hint is advisory; fall through to the publisher set size */ }
+        return Math.max(1, fallback || 1);
+    }
+
+    // Signature-shaped filler for pre-signing size estimates. Byte-exact in length for
+    // the uncompressed form (64-hex pubkey, 128-hex signature), and high-entropy so the
+    // COMPRESSED estimate is not flattered: repeating one placeholder would deflate to
+    // almost nothing and the packer would then over-fill every wire.
+    _placeholderSigs(count) {
+        let out = [];
+        for (let i = 0; i < count; i++) {
+            let a = crypto.createHash('sha256').update('xpriceb-size-pubkey-' + i).digest('hex');
+            let b = crypto.createHash('sha256').update('xpriceb-size-sig-a-' + i).digest('hex') +
+                    crypto.createHash('sha256').update('xpriceb-size-sig-b-' + i).digest('hex');
+            out.push({ pubkey: a, sig: b });
+        }
+        return out;
+    }
+
+    // Largest leading run of `rounds` whose estimated wire fits the ceiling. Returns 0
+    // when even the first round overflows; the caller still proposes that single round,
+    // so the loud-ceiling path measures a REAL wire rather than an estimate.
+    _packSegment(rounds, sigCount) {
+        let sigs = this._placeholderSigs(sigCount);
+        let n    = Math.min(rounds.length, PRICE_V2_MAX_ROUND_COUNT);
+        while (n >= 1) {
+            let sub = rounds.slice(0, n);
+            let emitted = this._emitWire(sub[0].round, sub[n - 1].round,
+                sub[n - 1].btcBlockHeight, sub, sigs);
+            if (emitted.bytes <= PRICE_WIRE_MAX_BYTES) return n;
+            n--;
+        }
+        return 0;
+    }
+
+    // Run the signing round for a range, then measure the wire the signatures actually
+    // produced. Shrinks and re-signs while the real wire overflows, because the sig set
+    // is only known after quorum and a bigger-than-estimated set can push a range over.
+    //
+    // Returns { wire, bytes, rounds, ... } on success, a { unpublishable: true } record
+    // when a single round cannot fit at all, or null when quorum was not reached.
+    async _signAndSizeRange(signer, range) {
+        let candidate = range;
+        while (candidate.length >= 1) {
+            let first  = parseInt(candidate[0].round);
+            let last   = parseInt(candidate[candidate.length - 1].round);
+            let anchor = parseInt(candidate[candidate.length - 1].btcBlockHeight);
+
+            let result;
+            try {
+                result = await signer.collectBatchSignatures(first, last, anchor, candidate);
+            } catch (e) {
+                console.error('OraclePublisher: batch-signing round for [' + first + ',' + last +
+                    '] threw; window stays unpublished: ', e);
+                return null;
+            }
+            // met:false means quorum was not reached. Those signatures are observability
+            // only; publishing them would put a wire on chain that no indexer accepts and
+            // spend a DOGE fee for it.
+            if (!result || result.met !== true || !Array.isArray(result.sigs) || result.sigs.length === 0) {
+                console.warn('OraclePublisher: no signing quorum for batch [' + first + ',' + last +
+                    ']; window stays unpublished (a later leader re-proposes it)');
+                return null;
+            }
+
+            let emitted = this._emitWire(first, last, anchor, candidate, result.sigs);
+            if (emitted.bytes <= PRICE_WIRE_MAX_BYTES) {
+                return {
+                    wire:       emitted.wire,
+                    bytes:      emitted.bytes,
+                    compressed: emitted.compressed,
+                    firstRound: first,
+                    lastRound:  last,
+                    anchor:     anchor,
+                    sigCount:   result.sigs.length,
+                    rounds:     candidate
+                };
+            }
+
+            if (candidate.length === 1) {
+                // THE CEILING. One round plus its signature set does not fit either wire
+                // form, so no split can rescue it and the federation has outgrown the
+                // 8,189-byte payload limit. v0 already counts oversized drops and
+                // dead-letters them; what is new here is the CRITICAL-level line and a
+                // batch-specific counter an operator can alert on.
+                this.batchUnpublishableCount++;
+                console.error('OraclePublisher: CRITICAL - PRICE v2 round ' + first +
+                    ' alone needs ' + emitted.bytes + ' bytes with ' + result.sigs.length +
+                    ' signature(s), over the ' + PRICE_WIRE_MAX_BYTES + '-byte encoder limit in ' +
+                    (emitted.compressed ? 'compressed' : 'uncompressed') + ' form. No split can fit ' +
+                    'it: this federation has outgrown the PRICE wire. The round is dead-lettered to ' +
+                    this.deadLetterPath + ' and NOTHING publishes for it.');
+                this._deadLetter({
+                    round:          first,
+                    batchFirstRound: first,
+                    batchLastRound:  last,
+                    btcBlockHeight: anchor,
+                    rounds:         candidate,
+                    sigs:           result.sigs
+                }, 'PRICE v2 single-round wire ' + emitted.bytes + ' bytes exceeds encoder limit of ' +
+                   PRICE_WIRE_MAX_BYTES);
+                return { unpublishable: true, rounds: candidate };
+            }
+            candidate = candidate.slice(0, candidate.length - 1);
+        }
+        return null;
+    }
+
+    // ----- The v2 wire -----
+
+    // Everything after `PRICE|2|` in the uncompressed form. Rounds are re-sorted and
+    // pairs re-normalized here exactly as the canonical builder does, so the wire and
+    // the signed canonical describe the same content in the same order.
+    buildPriceV2Body(firstRound, lastRound, btcBlockHeight, rounds, sigs) {
+        let ordered = [...rounds].sort((a, b) => parseInt(a.round) - parseInt(b.round));
+        // The batch header's BTC_BLOCK_HEIGHT must EQUAL the LAST included round's own
+        // anchor: both verifiers now reject a mismatch, so a wire built from a freely
+        // chosen anchor is a DOGE fee spent on an action the chain refuses. Derived
+        // here rather than taken on trust, which is what makes a mismatched header
+        // unrepresentable, and the caller's value is cross-checked so a split that
+        // forgot to re-derive for its sub-range is LOUD instead of merely wrong.
+        let derivedAnchor = parseInt(ordered[ordered.length - 1].btcBlockHeight);
+        if (parseInt(btcBlockHeight) !== derivedAnchor) {
+            throw new Error('OraclePublisher: PRICE v2 batch anchor ' + parseInt(btcBlockHeight) +
+                ' does not equal the last included round\'s anchor ' + derivedAnchor +
+                '; both verifiers reject this wire. The anchor must be re-derived for every split.');
+        }
+        let parts = [String(parseInt(firstRound)), String(parseInt(lastRound)),
+                     String(derivedAnchor), String(ordered.length)];
+        for (let r of ordered) {
+            let pairs = r.pairs.map(p => ({ pair: p.coinPair || p.pair, price: String(p.price) }))
+                .sort((a, b) => {
+                    if (a.pair < b.pair) return -1;
+                    if (a.pair > b.pair) return 1;
+                    return 0;
+                });
+            parts.push(String(parseInt(r.round)));
+            parts.push(String(parseInt(r.timestamp)));
+            parts.push(String(parseInt(r.btcBlockHeight)));
+            parts.push(String(pairs.length));
+            for (let p of pairs) { parts.push(p.pair); parts.push(p.price); }
+        }
+        parts.push(String(sigs.length));
+        for (let s of sigs) { parts.push(s.pubkey); parts.push(s.sig); }
+        return parts.join('|');
+    }
+
+    // Emit whichever form is smaller. A batch that deflates larger (short bodies, or
+    // content deflate cannot exploit) simply rides uncompressed; both forms are equally
+    // valid and the reader distinguishes them on the `Z` in the FIRST_ROUND slot.
+    _emitWire(firstRound, lastRound, btcBlockHeight, rounds, sigs) {
+        let body  = this.buildPriceV2Body(firstRound, lastRound, btcBlockHeight, rounds, sigs);
+        let plain = 'PRICE|2|' + body;
+        let plainBytes = Buffer.byteLength(plain, 'utf8');
+        try {
+            let packed      = 'PRICE|2|' + PRICE_V2_COMPRESSION_MARKER + '|' + compressPriceV2Body(body);
+            let packedBytes = Buffer.byteLength(packed, 'utf8');
+            if (packedBytes < plainBytes) {
+                return { wire: packed, bytes: packedBytes, compressed: true };
+            }
+        } catch (e) {
+            console.warn('OraclePublisher: deflate of the PRICE v2 body failed; ' +
+                'emitting the uncompressed form: ', e && e.message);
+        }
+        return { wire: plain, bytes: plainBytes, compressed: false };
+    }
+
+    // The signing round. Preferred from the hub so one instance owns the P2P handler;
+    // when the hub wires none this class creates and owns one, which is what keeps the
+    // batch rail functional on a hub whose wiring has not caught up.
+    _getBatchSigner() {
+        if (this.hub && this.hub.oracleBatchSigner) return this.hub.oracleBatchSigner;
+        if (this._ownedBatchSigner) return this._ownedBatchSigner;
+        if (!this.hub) return null;
+        try {
+            this._ownedBatchSigner = new OracleBatchSigner(this.hub);
+            this._ownedBatchSigner.start();
+            return this._ownedBatchSigner;
+        } catch (e) {
+            console.error('OraclePublisher: cannot construct an OracleBatchSigner:', e);
+            return null;
+        }
+    }
+
+    // ----- The retraction seam (D28), called by PriceAggregator -----
+
+    // Forget that a set of rounds was ever published, in BOTH halves of the
+    // at-most-once guard. Clearing only the durable rows leaves the in-process set
+    // still suppressing the re-publish, and a reorg then costs an hour of price
+    // history rather than a round.
+    //
+    // The quarantine set is deliberately untouched: a quarantined round's on-chain
+    // state is unknown, which a retraction does not resolve, and only an operator may
+    // release one.
+    async clearPublishedMarkers(rounds) {
+        let list = (Array.isArray(rounds) ? rounds : [rounds])
+            .map(r => parseInt(r)).filter(r => Number.isFinite(r));
+        if (list.length === 0) return 0;
+
+        for (let r of list) {
+            this._publishedRounds.delete(r);
+            // The window memo is the third suppressor: an assembled window is never
+            // re-assembled, so a retracted window would never be rebuilt without this.
+            this._assembledWindows.delete(this._windowIndexOf(r));
+        }
+
+        if (!this.db) return list.length;
+        let placeholders = list.map(() => '?').join(',');
+        let result = await this.db.doQuery(
+            'DELETE FROM oracle_published_rounds WHERE round IN (' + placeholders + ')', list);
+        let deleted = result && result.affectedRows ? Number(result.affectedRows) : 0;
+        console.log('OraclePublisher: cleared publish markers for ' + list.length +
+            ' retracted batch round(s) (' + deleted + ' durable row(s) removed); the recovery ' +
+            're-publish is no longer suppressed');
+        return deleted;
     }
 
     // ----- Durable at-most-once marker (oracle_published_rounds) -----
@@ -701,6 +1460,9 @@ class OraclePublisher {
         // Invariant 2: never prune a marker whose round can still be read off the
         // durable queue file. Best-effort read; an unreadable queue returns [] and the
         // window applies unchanged (the file being unreadable is already loud elsewhere).
+        // A v2 batch entry's `round` is its FIRST round, which is also the LOWEST round
+        // it carries, so the clamp below still lands under every round the entry
+        // protects and needs no batch-specific arm.
         for (let entry of this._readQueue()) {
             let r = Number(entry && entry.round);
             if (Number.isFinite(r) && r < cutoff) cutoff = r;
@@ -800,11 +1562,18 @@ class OraclePublisher {
                 continue;
             }
 
+            // Every at-most-once check below runs over the entry's CONTAINED rounds, not
+            // its identity field. For a v0 entry that list is [entry.round] and nothing
+            // changes; for a v2 batch it is every round on the wire, which is what stops
+            // a re-publish under a DIFFERENT split from finding no marker and paying DOGE
+            // a second time for rounds already on chain (D10).
+            let entryRounds = this._entryRounds(entry);
+
             // At-most-once guard. If this round was already broadcast this process
             // lifetime, it is only still on the queue because a prior tick's rewrite
             // failed to truncate it. Re-broadcasting would spend DOGE twice, so drop
             // the stale entry (do not push to remaining) instead of sending again.
-            if (this._publishedRounds.has(entry.round)) {
+            if (entryRounds.some(r => this._publishedRounds.has(r))) {
                 console.warn('OraclePublisher: round ' + entry.round + ' already broadcast this process lifetime; dropping stale queue entry without re-broadcast (a prior queue rewrite must have failed)');
                 continue;
             }
@@ -812,7 +1581,7 @@ class OraclePublisher {
             // Quarantined round (an intent-only durable marker from a pre-crash broadcast
             // whose on-chain state is unknown). NEVER re-broadcast: drop the stale queue
             // entry and leave it for operator replay. Surfaced at startup in _hydratePublishedMarkers.
-            if (this._quarantinedRounds.has(entry.round)) {
+            if (entryRounds.some(r => this._quarantinedRounds.has(r))) {
                 console.warn('OraclePublisher: round ' + entry.round + ' is quarantined (publish intent recorded before a crash, on-chain state unknown); dropping queue entry without re-broadcast, awaiting operator replay');
                 continue;
             }
@@ -824,26 +1593,38 @@ class OraclePublisher {
             // spend (kept on the queue, retried next tick; attempts NOT incremented, this
             // is not a broadcast failure).
             if (this.db) {
-                let marker;
-                try {
-                    marker = await this._getPublishedMarker(entry.round);
-                } catch (e) {
-                    console.error('OraclePublisher: cannot read durable publish marker for round ' + entry.round +
-                        '; deferring broadcast (fail closed to avoid a duplicate DOGE spend): ', e);
-                    remaining.push(entry);
-                    continue;
+                let sent = null;
+                let failed = false;
+                for (let r of entryRounds) {
+                    let marker;
+                    try {
+                        marker = await this._getPublishedMarker(r);
+                    } catch (e) {
+                        console.error('OraclePublisher: cannot read durable publish marker for round ' + r +
+                            '; deferring broadcast (fail closed to avoid a duplicate DOGE spend): ', e);
+                        failed = true;
+                        break;
+                    }
+                    if (marker && marker.sent_at !== null && marker.sent_at !== undefined) { sent = marker; break; }
                 }
-                if (marker && marker.sent_at !== null && marker.sent_at !== undefined) {
+                if (failed) { remaining.push(entry); continue; }
+                if (sent) {
                     // Already broadcast in a prior process; only still on the queue because
-                    // a rewrite failed before restart. Drop without re-sending.
-                    console.warn('OraclePublisher: round ' + entry.round + ' has a durable sent marker (txid ' +
-                        (marker.txid || '<none>') + '); dropping stale queue entry without re-broadcast');
-                    this._publishedRounds.mark(entry.round);
+                    // a rewrite failed before restart. Drop without re-sending. ANY contained
+                    // round being marked condemns the whole wire: the rounds it carries are
+                    // already on chain, and a batch is atomic.
+                    console.warn('OraclePublisher: round ' + sent.round + ' has a durable sent marker (txid ' +
+                        (sent.txid || '<none>') + '); dropping stale queue entry without re-broadcast');
+                    for (let r of entryRounds) this._publishedRounds.mark(r);
                     continue;
                 }
             }
 
-            let payload = this.buildPriceV0Wire(entry.round, entry.btcBlockTime, entry.prices, entry.sigs, entry.btcBlockHeight);
+            // A batch entry carries its finished wire: the signature set it was built
+            // against is the one a quorum signed, so the bytes must not be rebuilt here.
+            let payload = entry.batch
+                ? entry.wire
+                : this.buildPriceV0Wire(entry.round, entry.btcBlockTime, entry.prices, entry.sigs, entry.btcBlockHeight);
 
             // Choose broadcast strategy: custom hook overrides, otherwise use the default encoder pipeline
             let broadcaster = this.broadcastFn || ((p) => this._defaultBroadcast(p));
@@ -886,11 +1667,18 @@ class OraclePublisher {
             // never leave one behind: that stranded a round nothing had broadcast.
             // Fail closed if the intent cannot be durably recorded.
             if (this.db) {
-                try {
-                    await this._recordPublishIntent(entry.round);
-                } catch (e) {
-                    console.error('OraclePublisher: cannot record durable publish intent for round ' + entry.round +
-                        '; deferring broadcast (fail closed): ', e);
+                let intentFailed = false;
+                for (let r of entryRounds) {
+                    try {
+                        await this._recordPublishIntent(r);
+                    } catch (e) {
+                        console.error('OraclePublisher: cannot record durable publish intent for round ' + r +
+                            '; deferring broadcast (fail closed): ', e);
+                        intentFailed = true;
+                        break;
+                    }
+                }
+                if (intentFailed) {
                     this.spendGuard.release(spendToken);
                     remaining.push(entry);
                     continue;
@@ -899,19 +1687,39 @@ class OraclePublisher {
 
             try {
                 let result = await broadcaster(payload);
-                // Record the round as published BEFORE the queue rewrite. This is the
+                // Record the rounds as published BEFORE the queue rewrite. This is the
                 // at-most-once anchor: even if the rewrite below fails and leaves this
                 // round on the durable queue, the next tick's guard will skip it.
-                this._publishedRounds.mark(entry.round);
+                for (let r of entryRounds) this._publishedRounds.mark(r);
                 this.spendGuard.commit(spendToken);   // the reservation IS the fee charged to the window
                 // Persist the durable sent marker so the guard survives a restart (the
                 // in-process tracker above does not). Best-effort: on failure the intent
                 // row remains and a restart quarantines the round rather than re-broadcasting.
-                await this._markPublished(entry.round, (result && result.txid) || null);
-                console.log('OraclePublisher: published round ' + entry.round + ' (txid: ' + (result && result.txid) + ')');
+                // ONE ROW PER CONTAINED ROUND: the table's semantics are one row per round
+                // and every guard reads it that way, so a batch that marked only its first
+                // round would leave the rest re-publishable under a different split (D10).
+                for (let r of entryRounds) {
+                    await this._markPublished(r, (result && result.txid) || null);
+                }
+                if (entry.batch) {
+                    console.log('OraclePublisher: published PRICE v2 batch [' + entry.batch.firstRound + ',' +
+                        entry.batch.lastRound + '] carrying ' + entryRounds.length + ' round(s)' +
+                        (entry.batch.compressed ? ' (compressed)' : '') + ' (txid: ' + (result && result.txid) + ')');
+                    // A window counts once no matter how many wires it split into, so the
+                    // counter reads as "windows on chain"; the split count is separate.
+                    if (entry.batch.wireIndex === 0 || entry.batch.wireIndex === undefined) {
+                        this.batchWindowsPublished++;
+                    }
+                    this.lastPublishedWindow = entry.batch.windowIndex;
+                } else {
+                    console.log('OraclePublisher: published round ' + entry.round + ' (txid: ' + (result && result.txid) + ')');
+                }
                 this.publishedCount++;
                 publishedThisPass       = true;
-                this.lastPublishedRound = entry.round;
+                // LAST_ROUND, not the entry's identity field: the dashboard's
+                // publisher-stall rule reads this as "the newest round on chain", and
+                // reporting FIRST_ROUND would make a healthy rail look an hour behind.
+                this.lastPublishedRound = entry.batch ? entry.batch.lastRound : entry.round;
                 this.lastPublishedTxid  = (result && result.txid) || null;
                 // Successfully published. Drop from queue (do not add to remaining).
             } catch (err) {
@@ -1041,8 +1849,35 @@ class OraclePublisher {
             lastRankRound:       this._lastRankState ? this._lastRankState.round : null,
             leaderRounds:        this._leaderRounds,
             followerRounds:      this._followerRounds,
+            // PRICE v2 batch rail (spec section 7). batchUnpublishableCount is the
+            // machine-checkable half of the loud ceiling: a non-zero value means a
+            // single round plus its signature set no longer fits any wire form, which
+            // no split can rescue.
+            batchWindowsPublished:   this.batchWindowsPublished,
+            lastPublishedWindow:     this.lastPublishedWindow,
+            batchSplitCount:         this.batchSplitCount,
+            batchUnpublishableCount: this.batchUnpublishableCount,
+            // Surfaced from the signing round, so one status call answers "is the rail
+            // stalled because nobody will co-sign?" without a second accessor.
+            batchSignTimeouts:       this._batchSignTimeouts(),
+            batchBufferDepth:        this._buffer.size,
+            batchBufferPath:         this.bufferPath,
+            batchWindowRounds:       this.batchWindowRounds,
             spendGuard:          this.spendGuard.stats()
         };
+    }
+
+    // The signer's own timeout counter, read without constructing a signer: getStats is
+    // a cheap diagnostic and must not start a P2P handler as a side effect.
+    _batchSignTimeouts() {
+        let signer = (this.hub && this.hub.oracleBatchSigner) || this._ownedBatchSigner;
+        if (!signer || typeof signer.getStats !== 'function') return 0;
+        try {
+            let s = signer.getStats();
+            return (s && Number.isFinite(Number(s.batchSignTimeouts))) ? Number(s.batchSignTimeouts) : 0;
+        } catch (e) {
+            return 0;
+        }
     }
 
     // Check DOGE balance and log warnings if below threshold
