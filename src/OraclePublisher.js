@@ -1165,7 +1165,7 @@ class OraclePublisher {
             let sub = rounds.slice(0, n);
             let emitted = this._emitWire(sub[0].round, sub[n - 1].round,
                 sub[n - 1].btcBlockHeight, sub, sigs);
-            if (emitted.bytes <= PRICE_WIRE_MAX_BYTES) return n;
+            if (this._wireFits(emitted)) return n;
             n--;
         }
         return 0;
@@ -1202,7 +1202,7 @@ class OraclePublisher {
             }
 
             let emitted = this._emitWire(first, last, anchor, candidate, result.sigs);
-            if (emitted.bytes <= PRICE_WIRE_MAX_BYTES) {
+            if (this._wireFits(emitted)) {
                 return {
                     wire:       emitted.wire,
                     bytes:      emitted.bytes,
@@ -1222,10 +1222,14 @@ class OraclePublisher {
                 // dead-letters them; what is new here is the CRITICAL-level line and a
                 // batch-specific counter an operator can alert on.
                 this.batchUnpublishableCount++;
+                let bound = emitted.bytes > PRICE_WIRE_MAX_BYTES
+                    ? 'the encoder payload limit (' + emitted.bytes + ' bytes on the wire, ' +
+                      (emitted.compressed ? 'compressed' : 'uncompressed') + ')'
+                    : 'the reader\'s inflated-body cap (' + emitted.bodyBytes + ' body bytes; ' +
+                      'the wire itself is only ' + emitted.bytes + ')';
                 console.error('OraclePublisher: CRITICAL - PRICE v2 round ' + first +
-                    ' alone needs ' + emitted.bytes + ' bytes with ' + result.sigs.length +
-                    ' signature(s), over the ' + PRICE_WIRE_MAX_BYTES + '-byte encoder limit in ' +
-                    (emitted.compressed ? 'compressed' : 'uncompressed') + ' form. No split can fit ' +
+                    ' alone does not fit with ' + result.sigs.length + ' signature(s): it breaches ' +
+                    bound + ', over the ' + PRICE_WIRE_MAX_BYTES + '-byte limit. No split can fit ' +
                     'it: this federation has outgrown the PRICE wire. The round is dead-lettered to ' +
                     this.deadLetterPath + ' and NOTHING publishes for it.');
                 this._deadLetter({
@@ -1235,8 +1239,8 @@ class OraclePublisher {
                     btcBlockHeight: anchor,
                     rounds:         candidate,
                     sigs:           result.sigs
-                }, 'PRICE v2 single-round wire ' + emitted.bytes + ' bytes exceeds encoder limit of ' +
-                   PRICE_WIRE_MAX_BYTES);
+                }, 'PRICE v2 single round exceeds encoder limit of ' + PRICE_WIRE_MAX_BYTES +
+                   ' (wire ' + emitted.bytes + ' bytes, body ' + emitted.bodyBytes + ' bytes)');
                 return { unpublishable: true, rounds: candidate };
             }
             candidate = candidate.slice(0, candidate.length - 1);
@@ -1290,17 +1294,29 @@ class OraclePublisher {
         let body  = this.buildPriceV2Body(firstRound, lastRound, btcBlockHeight, rounds, sigs);
         let plain = 'PRICE|2|' + body;
         let plainBytes = Buffer.byteLength(plain, 'utf8');
+        let bodyBytes  = Buffer.byteLength(body, 'utf8');
         try {
             let packed      = 'PRICE|2|' + PRICE_V2_COMPRESSION_MARKER + '|' + compressPriceV2Body(body);
             let packedBytes = Buffer.byteLength(packed, 'utf8');
             if (packedBytes < plainBytes) {
-                return { wire: packed, bytes: packedBytes, compressed: true };
+                return { wire: packed, bytes: packedBytes, compressed: true, bodyBytes: bodyBytes };
             }
         } catch (e) {
             console.warn('OraclePublisher: deflate of the PRICE v2 body failed; ' +
                 'emitting the uncompressed form: ', e && e.message);
         }
-        return { wire: plain, bytes: plainBytes, compressed: false };
+        return { wire: plain, bytes: plainBytes, compressed: false, bodyBytes: bodyBytes };
+    }
+
+    // TWO bounds, and missing the second one spends a DOGE fee on an action no reader
+    // will accept. The encoder's payload limit binds the bytes actually broadcast, and
+    // `price_v2_compression.js` binds the INFLATED body to the same number
+    // (`outputCap = Math.min(PRICE_WIRE_MAX_BYTES, ratioCap)`), so a compressed wire
+    // that comfortably fits the encoder can still carry a body every indexer refuses to
+    // finish inflating. Compression therefore buys FEE, not round capacity: it relaxes
+    // this predicate by the 8 bytes of the `PRICE|2|` prefix and nothing more.
+    _wireFits(emitted) {
+        return emitted.bytes <= PRICE_WIRE_MAX_BYTES && emitted.bodyBytes <= PRICE_WIRE_MAX_BYTES;
     }
 
     // The signing round. Preferred from the hub so one instance owns the P2P handler;

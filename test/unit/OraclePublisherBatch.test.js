@@ -231,6 +231,16 @@ function makePublisher(opts) {
              deadPath:   path.join(dir, 'publisher-queue.deadletter.jsonl') };
 }
 
+// The body a READER recovers from a wire, through the real reader path. Returns
+// null when the reader refuses it, which is the only honest way to assert that a
+// wire this publisher emitted is one the chain will actually accept.
+function bodyOf(wire) {
+    let f = wire.split('|');
+    if (f[2] !== PRICE_V2_COMPRESSION_MARKER) return wire.slice('PRICE|2|'.length);
+    let r = inflatePriceV2Body(f[3]);
+    return r.ok ? r.body : null;
+}
+
 function readJsonl(p) {
     if (!fs.existsSync(p)) return [];
     return fs.readFileSync(p, 'utf8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l));
@@ -546,14 +556,37 @@ describe('OraclePublisher PRICE v2 batch rail', function () {
                 expect(e.batch.anchor, 'wire [' + e.batch.firstRound + ',' + e.batch.lastRound + ']')
                     .to.equal(lastRoundAnchor);
                 // And it is the value actually on the wire, whichever form it rode in.
-                let f    = e.wire.split('|');
-                let body = f[2] === PRICE_V2_COMPRESSION_MARKER
-                    ? inflatePriceV2Body(f[3]).body
-                    : e.wire.slice('PRICE|2|'.length);
-                expect(body.split('|')[2]).to.equal(String(lastRoundAnchor));
+                expect(bodyOf(e.wire).split('|')[2]).to.equal(String(lastRoundAnchor));
             }
             // The signing round was asked for the same anchor it will be verified under.
             for (let c of h.signer.calls) expect(c.anchor).to.equal(800000 + c.last);
+        });
+
+        it('emits only wires the READER accepts: the inflated body is capped at the same 8189', async function () {
+            // price_v2_compression.js caps the INFLATED body at PRICE_WIRE_MAX_BYTES
+            // (outputCap = min(PRICE_WIRE_MAX_BYTES, ratioCap)), so a compressed wire can
+            // sail under the encoder limit and still carry a body every indexer refuses
+            // to finish inflating. Sizing on the emitted bytes alone spends a DOGE fee on
+            // an action nobody accepts, so every wire is round-tripped through the real
+            // reader here rather than merely measured.
+            let h = makePublisher({ signerOpts: { sigCount: 3 } });
+            await h.p.start();
+            for (let r = 0; r < 6; r++) {
+                h.p._buffer.set(r, bufferedFixture(r, { pairs: pairsOf(90, 'reader' + r) }));
+            }
+            sinon.stub(h.p, '_processQueue').resolves();
+            await h.p._assembleWindow(0);
+
+            let entries = readJsonl(h.queuePath);
+            expect(entries.length).to.be.greaterThan(1);
+            for (let e of entries) {
+                let body = bodyOf(e.wire);
+                expect(body, 'the reader must accept wire [' + e.batch.firstRound + ',' +
+                    e.batch.lastRound + ']').to.not.equal(null);
+                expect(Buffer.byteLength(body, 'utf8')).to.be.at.most(PRICE_WIRE_MAX_BYTES);
+                expect(body.split('|').slice(0, 2))
+                    .to.deep.equal([String(e.batch.firstRound), String(e.batch.lastRound)]);
+            }
         });
 
         it('refuses to build a body whose header anchor is not the last round\'s anchor', function () {
@@ -786,14 +819,15 @@ describe('OraclePublisher PRICE v2 batch rail', function () {
             let h = makePublisher({ signerOpts: { sigCount: 3 } });
             await h.p.start();
             h.p._buffer.set(0, bufferedFixture(0, { pairs: pairsOf(1200, 'huge') }));
-            // The premise, measured rather than assumed.
-            expect(h.p._emitWire(0, 0, 800000, h.p._bufferedRange(0, 0), sigsOf(3)).bytes)
-                .to.be.greaterThan(PRICE_WIRE_MAX_BYTES);
+            // The premise, measured rather than assumed: it fits neither bound.
+            expect(h.p._wireFits(h.p._emitWire(0, 0, 800000, h.p._bufferedRange(0, 0), sigsOf(3))))
+                .to.equal(false);
 
             await h.p._assembleWindow(0);
 
             expect(h.p.getStats().batchUnpublishableCount).to.equal(1);
-            expect(logs.error.join('\n')).to.match(/OraclePublisher: CRITICAL - PRICE v2 round 0 alone needs/);
+            expect(logs.error.join('\n')).to.match(/OraclePublisher: CRITICAL - PRICE v2 round 0 alone does not fit/);
+            expect(logs.error.join('\n')).to.match(/inflated-body cap|encoder payload limit/);
             let dead = readJsonl(h.deadPath);
             expect(dead).to.have.length(1);
             expect(dead[0].round).to.equal(0);
