@@ -67,7 +67,6 @@ function makeTracker() {
     };
     let hub = { db, network: '', p2pConfig: { ANCHOR_REWARD_PER_PUBLISH: '10.00000000' } };
     let rt  = new RewardTracker(hub);
-    rt._pushRewardsToBtcIndexer = async () => {};      // no network from a unit test
     return { rt, rows: () => rows };
 }
 

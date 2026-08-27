@@ -31,7 +31,7 @@ Decentralized config oracle, price oracle, and cross-chain coordinator for the X
 - **SWAP lifecycle tracking**: tracks cross-chain swaps through initiated -> attested -> executed -> settled -> failed
 - **Reorg propagation**: cross-chain reorg detection, hub rollback, and coordinated chain rollback via PBFT consensus
 - **Governance**: off-chain PBFT voting for parameter changes (7-day voting period, 2/3+ approval, 50% quorum)
-- **Reward tracking**: per-round XCHAIN rewards for oracle participants; cross-hub `pushvalidatorrewards` to indexer for persistence
+- **Reward tracking**: per-round XCHAIN rewards for oracle participants, recorded hub-locally; the indexer derives its own consensus reward rows from on-chain bytes
 - **Slash detection**: price deviation (>5%), repeated deviation (3+ in 24h), non-participation (30+ missed rounds), and attestation divergence (byte_equality providers)
 - **Leader rotation**: deterministic per-sequence leader with view change on timeout
 - **Multi-instance**: multiple hub instances against shared MariaDB with consumer fallback
@@ -272,7 +272,7 @@ All methods are called via HTTP POST with JSON-RPC 2.0 format. See [API Referenc
 | Reorgs | `reportreorg`, `getreorghistory` |
 | Governance | `propose`, `vote`, `getproposals`, `getproposal`, `getvotes`, `getvalidatorcapabilities` |
 
-The hub also calls **indexer** RPCs (`getownstake`, `getactivevalidators`, `getcapabilityvalidators`, `getpendingattestation_requests`, `getlatestblock`) and posts back to it (`pushchaintip`, `pushvalidatorrewards`, `pushpriceround`, `pushoracleprice`).
+The hub also calls **indexer** RPCs (`getownstake`, `getactivevalidators`, `getcapabilityvalidators`, `getpendingattestation_requests`, `getlatestblock`) and posts back to it (`pushchaintip`, `pushpriceround`, `pushoracleprice`). The indexer's `pushvalidatorrewards` is retired and refuses every reward type; the hub no longer calls it.
 
 ## Database Schema
 

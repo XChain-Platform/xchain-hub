@@ -143,7 +143,6 @@ describe('Regression: slashing safety + reward split', function () {
             const writes = [];
             const hub = { p2pConfig: { ORACLE_REWARD_PER_ROUND: perRound }, db: { doQuery: async (q, p) => { writes.push(p); } } };
             const rt = new RewardTracker(hub);
-            rt._pushRewardsToBtcIndexer = async () => {};   // no network
             return { rt, writes };
         }
 
