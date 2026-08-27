@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// StateAnchorPublisher: ANCHOR v0/v1/v2 payload construction, the archive
+// StateAnchorPublisher: ANCHOR v0/v1/batch payload construction, the archive
 // signing round (followers co-sign only archives matching their own DB),
 // chunking round-trips, re-archival of retracted matches, and back-fill via
 // XANC_FINALIZED. Mesh harness mirrors StateCheckpointEngine.test.js.

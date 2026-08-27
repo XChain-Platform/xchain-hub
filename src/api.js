@@ -137,7 +137,7 @@ const WRITE_METHODS  = new Set([
 // (bulk-key gated), rolling-deploy safe. Full fix (2f+1 co-signed retractions)
 // rides the shared flag-day set.
 //
-// pushpricebatch (PRICE v2, spec section 5.7 / decision D22) is deliberately
+// pushpricebatch (PRICE v0, spec section 5.7 / decision D22) is deliberately
 // NOT in this set: it is a FORWARD write that delivers new signed rounds, the
 // same role pushpriceround already plays outside the retraction tier. Its own
 // retraction path is pushpricereorg below; a batch push carries no
@@ -748,7 +748,7 @@ async function startApi(){
             }
         },
 
-        // PRICE v2 batch counterpart to pushpriceround (spec section 5.7): one signed
+        // PRICE batch counterpart to pushpriceround (spec section 5.7): one signed
         // action carries every finalized round in an hourly window as rounds[], keyed
         // by the batch's own first_round/last_round/btc_block_height rather than a
         // single round. block_time is new (not on pushpriceround): the hub's

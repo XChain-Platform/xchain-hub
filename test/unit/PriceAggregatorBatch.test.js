@@ -10,11 +10,11 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// PRICE v2 (batch) ingest: PriceAggregator.receiveValidatedBatch, spec
+// PRICE v0 (batch) ingest: PriceAggregator.receiveValidatedBatch, spec
 // spec section 5.7, decisions D8, D13, D14, D23, D28.
 //
 // The canonical payload itself is pinned elsewhere (priceV2PayloadTwinParity.test.js
-// asserts _buildPriceV2Payload is byte-identical to the indexer and OracleConsensus
+// asserts _buildPriceBatchPayload is byte-identical to the indexer and OracleConsensus
 // twins), so these tests sign whatever that builder emits and pin what INGEST does
 // with a batch: per-round dedupe, column semantics, the block_time-keyed pair flag
 // day, the WS mirror re-emit, the reorg fence and the publisher marker clear.
@@ -72,7 +72,7 @@ describe('PriceAggregator.receiveValidatedBatch()', function () {
 
     // The canonical the validators sign: exactly the bytes the aggregator rebuilds.
     function signBatch(rounds, signers = V.slice(0, 3), overrides = {}) {
-        let payload = agg._buildPriceV2Payload(
+        let payload = agg._buildPriceBatchPayload(
             overrides.first_round      !== undefined ? overrides.first_round      : FIRST_ROUND,
             overrides.last_round       !== undefined ? overrides.last_round       : LAST_ROUND,
             overrides.btc_block_height !== undefined ? overrides.btc_block_height : BATCH_ANCHOR,
@@ -492,7 +492,7 @@ describe('PriceAggregator.receiveValidatedBatch()', function () {
         expect(inserts.length).to.equal(0);
         // Never silent: a rebuilt indexer trips this fence on every push.
         expect(console.warn.calledOnce).to.equal(true);
-        expect(console.warn.firstCall.args[0]).to.match(/PRICE v2 batch/);
+        expect(console.warn.firstCall.args[0]).to.match(/PRICE batch/);
     });
 
     it('accepts the re-published batch at a higher generation and stamps it on every row', async function () {

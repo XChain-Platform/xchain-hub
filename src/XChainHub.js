@@ -302,7 +302,7 @@ class XChainHub {
         await this.oracleConsensus.start();
         await this.oracle.start();
 
-        // Produces the ONE quorum signature set a PRICE v2 batch's wire carries
+        // Produces the ONE quorum signature set a PRICE batch's wire carries
         // (spec section 6). Modeled on StateAnchorPublisher: peer-message wiring is
         // a no-op with no peerManager, so construction never throws or blocks a
         // standalone hub, and it must exist before oraclePublisher below, whose

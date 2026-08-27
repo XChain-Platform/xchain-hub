@@ -45,10 +45,10 @@
  *   - Leader rotation calculation
  *   - Persistent queue (JSONL with fsync)
  *   - PRICE v0 payload construction (matches indexer parser format)
- *   - PRICE v2 batch assembly (buffer, window scheduler, splitting, signing round)
+ *   - PRICE batch assembly (buffer, window scheduler, splitting, signing round)
  *   - DOGE balance monitoring with WARN/ERROR log thresholds
  *
- * PRICE v2 BATCH RAIL (spec section 7).
+ * PRICE v0 BATCH RAIL (spec section 7).
  * A finalized round is never broadcast on its own. It is appended to a SEPARATE
  * durable buffer file and leaves this hub only as part of an hourly batch that a
  * quorum of the price-capable set has co-signed. The two files are deliberately
@@ -81,8 +81,8 @@ const { sumUtxosCoins } = require('./lib/utxo_balance.js');
 const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
 const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
 const { positiveIntConfig } = require('./lib/config_int.js');
-const { compressPriceV2Body, PRICE_V2_COMPRESSION_MARKER,
-        PRICE_V2_MAX_ROUND_COUNT } = require('./price_v2_compression.js');
+const { compressPriceBatchBody, PRICE_BATCH_COMPRESSION_MARKER,
+        PRICE_BATCH_MAX_ROUND_COUNT } = require('./price_batch_compression.js');
 
 // PRICE v0 wire ceiling. Must equal MAX_DATA_BYTES in xchain-encoder/src/validator.js
 // (mirrors ATTEST_WIRE_MAX_BYTES in AttestationPublisher.js): an oversized wire is
@@ -110,7 +110,7 @@ class OraclePublisher {
         // Append-only sink for rounds that exhaust maxAttempts. Kept next to the
         // queue so operators find both together; never truncated (open 'a').
         this.deadLetterPath     = this.queuePath.replace(/\.jsonl$/, '') + '.deadletter.jsonl';
-        // PRICE v2 round buffer, a third sibling file. Rounds wait here between
+        // PRICE v0 round buffer, a third sibling file. Rounds wait here between
         // finalization and the window close that turns them into one signed batch.
         // Deliberately NOT the publish queue: see the header.
         this.bufferPath         = this.queuePath.replace(/\.jsonl$/, '') + '.buffer.jsonl';
@@ -160,7 +160,7 @@ class OraclePublisher {
         // Retention window (in rounds) for the durable oracle_published_rounds marker
         // table. One row lands per published round forever, so on a money-bearing
         // broadcast path the table grows without bound for the life of the deployment.
-        // PRICE v2 batching does NOT change that rate: a batch writes one marker row
+        // PRICE batching does NOT change that rate: a batch writes one marker row
         // per CONTAINED round, not one per wire, so the rows-per-day figure the window
         // below is sized against is identical either side of the flag day (D26).
         // Only CONFIRMED rows (sent_at IS NOT NULL) are ever pruned: a sent_at NULL row
@@ -233,7 +233,7 @@ class OraclePublisher {
         // AttestationSpotChecker._schedulerTick).
         this._sweeping = false;
 
-        // ---------------- PRICE v2 batch rail (spec section 7) ----------------
+        // ---------------- PRICE batch rail (spec section 7) ----------------
 
         // The network name still keys the remaining per-network rules the batch rail
         // reads (pair widening, sig tally, stake-weighted quorum).
@@ -445,7 +445,7 @@ class OraclePublisher {
             console.log('OraclePublisher: disabled (ORACLE_PUBLISH_ENABLED=false); skipping round ' + event.round);
             return;
         }
-        // PRICE v2 BATCH RAIL, unconditional. A finalized round never rides its own
+        // PRICE v0 BATCH RAIL, unconditional. A finalized round never rides its own
         // transaction: it goes into the buffer and leaves as part of a signed batch. There
         // is no activation gate and no v0 fallback rail here, so this hub cannot be one
         // stamp away from emitting a wire its peers index differently.
@@ -616,7 +616,7 @@ class OraclePublisher {
     }
 
     // Every round a queue entry carries. A v0 entry carries exactly one, so the v0
-    // paths keep their previous behavior byte for byte; a v2 batch entry carries all
+    // paths keep their previous behavior byte for byte; a batch entry carries all
     // the rounds on its wire, which is the granularity every at-most-once guard and
     // every durable marker row is keyed at.
     _entryRounds(entry) {
@@ -657,7 +657,7 @@ class OraclePublisher {
         }
     }
 
-    // ================= PRICE v2 batch rail (spec section 7) =================
+    // ================= PRICE batch rail (spec section 7) =================
     //
     // Ordering of the parts below: the buffer file, the window scheduler, window
     // assembly (leader election, self-check, splitting), wire construction, and the
@@ -878,7 +878,7 @@ class OraclePublisher {
 
     // ----- Window assembly -----
 
-    // Turn one closed window into zero or more signed, enqueued PRICE v2 wires.
+    // Turn one closed window into zero or more signed, enqueued PRICE v0 wires.
     async _assembleWindow(windowIndex) {
         if (!this.enabled) return;
         if (this._assembledWindows.has(windowIndex)) return;
@@ -958,7 +958,7 @@ class OraclePublisher {
             // makes, and it stays worth seeing even if the wires then fail to send.
             this.batchSplitCount += wires.length - 1;
             console.log('OraclePublisher: window [' + first + ',' + last + '] split into ' +
-                wires.length + ' PRICE v2 wires to fit ' + PRICE_WIRE_MAX_BYTES + ' bytes');
+                wires.length + ' PRICE v0 wires to fit ' + PRICE_WIRE_MAX_BYTES + ' bytes');
         }
 
         for (let i = 0; i < wires.length; i++) {
@@ -1087,7 +1087,7 @@ class OraclePublisher {
     // so the loud-ceiling path measures a REAL wire rather than an estimate.
     _packSegment(rounds, sigCount) {
         let sigs = this._placeholderSigs(sigCount);
-        let n    = Math.min(rounds.length, PRICE_V2_MAX_ROUND_COUNT);
+        let n    = Math.min(rounds.length, PRICE_BATCH_MAX_ROUND_COUNT);
         while (n >= 1) {
             let sub = rounds.slice(0, n);
             let emitted = this._emitWire(sub[0].round, sub[n - 1].round,
@@ -1154,7 +1154,7 @@ class OraclePublisher {
                       (emitted.compressed ? 'compressed' : 'uncompressed') + ')'
                     : 'the reader\'s inflated-body cap (' + emitted.bodyBytes + ' body bytes; ' +
                       'the wire itself is only ' + emitted.bytes + ')';
-                console.error('OraclePublisher: CRITICAL - PRICE v2 round ' + first +
+                console.error('OraclePublisher: CRITICAL - PRICE v0 round ' + first +
                     ' alone does not fit with ' + result.sigs.length + ' signature(s): it breaches ' +
                     bound + ', over the ' + PRICE_WIRE_MAX_BYTES + '-byte limit. No split can fit ' +
                     'it: this federation has outgrown the PRICE wire. The round is dead-lettered to ' +
@@ -1166,7 +1166,7 @@ class OraclePublisher {
                     btcBlockHeight: anchor,
                     rounds:         candidate,
                     sigs:           result.sigs
-                }, 'PRICE v2 single round exceeds encoder limit of ' + PRICE_WIRE_MAX_BYTES +
+                }, 'PRICE v0 single round exceeds encoder limit of ' + PRICE_WIRE_MAX_BYTES +
                    ' (wire ' + emitted.bytes + ' bytes, body ' + emitted.bodyBytes + ' bytes)');
                 return { unpublishable: true, rounds: candidate };
             }
@@ -1175,12 +1175,12 @@ class OraclePublisher {
         return null;
     }
 
-    // ----- The v2 wire -----
+    // ----- The batch wire -----
 
-    // Everything after `PRICE|2|` in the uncompressed form. Rounds are re-sorted and
+    // Everything after `PRICE|0|` in the uncompressed form. Rounds are re-sorted and
     // pairs re-normalized here exactly as the canonical builder does, so the wire and
     // the signed canonical describe the same content in the same order.
-    buildPriceV2Body(firstRound, lastRound, btcBlockHeight, rounds, sigs) {
+    buildPriceBatchBody(firstRound, lastRound, btcBlockHeight, rounds, sigs) {
         let ordered = [...rounds].sort((a, b) => parseInt(a.round) - parseInt(b.round));
         // The batch header's BTC_BLOCK_HEIGHT must EQUAL the LAST included round's own
         // anchor: both verifiers now reject a mismatch, so a wire built from a freely
@@ -1190,7 +1190,7 @@ class OraclePublisher {
         // forgot to re-derive for its sub-range is LOUD instead of merely wrong.
         let derivedAnchor = parseInt(ordered[ordered.length - 1].btcBlockHeight);
         if (parseInt(btcBlockHeight) !== derivedAnchor) {
-            throw new Error('OraclePublisher: PRICE v2 batch anchor ' + parseInt(btcBlockHeight) +
+            throw new Error('OraclePublisher: PRICE batch anchor ' + parseInt(btcBlockHeight) +
                 ' does not equal the last included round\'s anchor ' + derivedAnchor +
                 '; both verifiers reject this wire. The anchor must be re-derived for every split.');
         }
@@ -1218,18 +1218,18 @@ class OraclePublisher {
     // content deflate cannot exploit) simply rides uncompressed; both forms are equally
     // valid and the reader distinguishes them on the `Z` in the FIRST_ROUND slot.
     _emitWire(firstRound, lastRound, btcBlockHeight, rounds, sigs) {
-        let body  = this.buildPriceV2Body(firstRound, lastRound, btcBlockHeight, rounds, sigs);
-        let plain = 'PRICE|2|' + body;
+        let body  = this.buildPriceBatchBody(firstRound, lastRound, btcBlockHeight, rounds, sigs);
+        let plain = 'PRICE|0|' + body;
         let plainBytes = Buffer.byteLength(plain, 'utf8');
         let bodyBytes  = Buffer.byteLength(body, 'utf8');
         try {
-            let packed      = 'PRICE|2|' + PRICE_V2_COMPRESSION_MARKER + '|' + compressPriceV2Body(body);
+            let packed      = 'PRICE|0|' + PRICE_BATCH_COMPRESSION_MARKER + '|' + compressPriceBatchBody(body);
             let packedBytes = Buffer.byteLength(packed, 'utf8');
             if (packedBytes < plainBytes) {
                 return { wire: packed, bytes: packedBytes, compressed: true, bodyBytes: bodyBytes };
             }
         } catch (e) {
-            console.warn('OraclePublisher: deflate of the PRICE v2 body failed; ' +
+            console.warn('OraclePublisher: deflate of the PRICE v0 body failed; ' +
                 'emitting the uncompressed form: ', e && e.message);
         }
         return { wire: plain, bytes: plainBytes, compressed: false, bodyBytes: bodyBytes };
@@ -1237,11 +1237,11 @@ class OraclePublisher {
 
     // TWO bounds, and missing the second one spends a DOGE fee on an action no reader
     // will accept. The encoder's payload limit binds the bytes actually broadcast, and
-    // `price_v2_compression.js` binds the INFLATED body to the same number
+    // `price_batch_compression.js` binds the INFLATED body to the same number
     // (`outputCap = Math.min(PRICE_WIRE_MAX_BYTES, ratioCap)`), so a compressed wire
     // that comfortably fits the encoder can still carry a body every indexer refuses to
     // finish inflating. Compression therefore buys FEE, not round capacity: it relaxes
-    // this predicate by the 8 bytes of the `PRICE|2|` prefix and nothing more.
+    // this predicate by the 8 bytes of the `PRICE|0|` prefix and nothing more.
     _wireFits(emitted) {
         return emitted.bytes <= PRICE_WIRE_MAX_BYTES && emitted.bodyBytes <= PRICE_WIRE_MAX_BYTES;
     }
@@ -1403,7 +1403,7 @@ class OraclePublisher {
         // Invariant 2: never prune a marker whose round can still be read off the
         // durable queue file. Best-effort read; an unreadable queue returns [] and the
         // window applies unchanged (the file being unreadable is already loud elsewhere).
-        // A v2 batch entry's `round` is its FIRST round, which is also the LOWEST round
+        // A batch entry's `round` is its FIRST round, which is also the LOWEST round
         // it carries, so the clamp below still lands under every round the entry
         // protects and needs no batch-specific arm.
         for (let entry of this._readQueue()) {
@@ -1507,7 +1507,7 @@ class OraclePublisher {
 
             // Every at-most-once check below runs over the entry's CONTAINED rounds, not
             // its identity field. For a v0 entry that list is [entry.round] and nothing
-            // changes; for a v2 batch it is every round on the wire, which is what stops
+            // changes; for a batch it is every round on the wire, which is what stops
             // a re-publish under a DIFFERENT split from finding no marker and paying DOGE
             // a second time for rounds already on chain (D10).
             let entryRounds = this._entryRounds(entry);
@@ -1645,7 +1645,7 @@ class OraclePublisher {
                     await this._markPublished(r, (result && result.txid) || null);
                 }
                 if (entry.batch) {
-                    console.log('OraclePublisher: published PRICE v2 batch [' + entry.batch.firstRound + ',' +
+                    console.log('OraclePublisher: published PRICE batch [' + entry.batch.firstRound + ',' +
                         entry.batch.lastRound + '] carrying ' + entryRounds.length + ' round(s)' +
                         (entry.batch.compressed ? ' (compressed)' : '') + ' (txid: ' + (result && result.txid) + ')');
                     // A window counts once no matter how many wires it split into, so the
@@ -1792,7 +1792,7 @@ class OraclePublisher {
             lastRankRound:       this._lastRankState ? this._lastRankState.round : null,
             leaderRounds:        this._leaderRounds,
             followerRounds:      this._followerRounds,
-            // PRICE v2 batch rail (spec section 7). batchUnpublishableCount is the
+            // PRICE batch rail (spec section 7). batchUnpublishableCount is the
             // machine-checkable half of the loud ceiling: a non-zero value means a
             // single round plus its signature set no longer fits any wire form, which
             // no split can rescue.

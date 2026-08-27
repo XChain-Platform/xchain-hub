@@ -38,7 +38,7 @@ const priceSigTally     = require('./price_sig_tally_activation.js');
 const swq               = require('./stake_weighted_quorum.js');
 const { PRICE_MAX, PRICE_V1_COINS, PRICE_V1_FIATS,
         MAX_TICK_LENGTH, MAX_MEMO_LENGTH, MAX_SOURCE_ADDRESS_LENGTH } = require('./constants.js');
-const { PRICE_V2_MAX_ROUND_COUNT } = require('./price_v2_compression.js');
+const { PRICE_BATCH_MAX_ROUND_COUNT } = require('./price_batch_compression.js');
 const { bcgt }          = require('./bcmath.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { normalizeRetractionBounds } = require('./lib/retraction_bounds.js');
@@ -193,9 +193,9 @@ class PriceAggregator extends EventEmitter {
         return raw;
     }
 
-    // Build the canonical signable payload for a PRICE v2 batch: ONE signature set over
-    // several rounds. MUST match xchain-indexer/src/ed25519.js buildPriceV2Payload and
-    // OracleConsensus._buildPriceV2Payload byte for byte; validators signed these bytes,
+    // Build the canonical signable payload for a PRICE batch: ONE signature set over
+    // several rounds. MUST match xchain-indexer/src/ed25519.js buildPriceBatchPayload and
+    // OracleConsensus._buildPriceBatchPayload byte for byte; validators signed these bytes,
     // so any divergence here rejects every legitimate batch.
     //
     // `rounds` is [{ round, timestamp, btcBlockHeight, pairs }] and each `pairs` entry is
@@ -210,7 +210,7 @@ class PriceAggregator extends EventEmitter {
     // shape that breaks SLASH's "an ORACLE-tagged canonical always carries `round`"
     // invariant, which is why v2 carries its own engine tag. Do NOT "fix" this into a
     // v0-style gate.
-    _buildPriceV2Payload(firstRound, lastRound, btcBlockHeight, rounds) {
+    _buildPriceBatchPayload(firstRound, lastRound, btcBlockHeight, rounds) {
         let sortedRounds = [...rounds]
             .sort((a, b) => parseInt(a.round) - parseInt(b.round))
             .map(r => {
@@ -553,7 +553,7 @@ class PriceAggregator extends EventEmitter {
         return { accepted: true };
     }
 
-    // PRICE v2 (batch) ingest: ONE quorum signature set over a WINDOW of full-body
+    // PRICE v0 (batch) ingest: ONE quorum signature set over a WINDOW of full-body
     // rounds. Same posture as receiveValidatedRound (the pusher's local validation is
     // never trusted; every signature is re-verified here against the canonical bytes
     // the validators signed), with the two differences the batch shape forces:
@@ -580,7 +580,7 @@ class PriceAggregator extends EventEmitter {
         // DoS bound, mirroring the wire parser's own (D15): the round count rides in
         // from an external pusher and every round below costs a dedupe SELECT plus an
         // INSERT. The wire ceiling already makes a larger batch physically impossible.
-        if (batchData.rounds.length > PRICE_V2_MAX_ROUND_COUNT) {
+        if (batchData.rounds.length > PRICE_BATCH_MAX_ROUND_COUNT) {
             return refuse('too many rounds');
         }
 
@@ -716,7 +716,7 @@ class PriceAggregator extends EventEmitter {
             let wm = await this.db.getPriceIngestWatermark(sourceChain || '');
             if (wm && pushGeneration <= wm.retraction_generation && batchActionIndex >= wm.from_action_index) {
                 // Never silent: a rebuilt indexer trips this fence on every push.
-                this._warnIngestFenceRejection(sourceChain, 'PRICE v2 batch', pushGeneration, batchActionIndex, wm);
+                this._warnIngestFenceRejection(sourceChain, 'PRICE batch', pushGeneration, batchActionIndex, wm);
                 return refuse('stale (retracted generation)');
             }
         }
@@ -748,10 +748,10 @@ class PriceAggregator extends EventEmitter {
             return refuse('validator snapshot truncated');
         }
 
-        // ONE verification pass over the batch canonical. _buildPriceV2Payload is the
+        // ONE verification pass over the batch canonical. _buildPriceBatchPayload is the
         // byte-for-byte twin of the indexer's and OracleConsensus's builders; never
         // inline the JSON here, or the three copies drift and every honest batch fails.
-        let payload      = this._buildPriceV2Payload(firstRound, lastRound, btcBlockHeight, rounds);
+        let payload      = this._buildPriceBatchPayload(firstRound, lastRound, btcBlockHeight, rounds);
         let qualified    = new Set(snapshot.validators.map(v => String(v.pubkey).toLowerCase()));
         let seenPubkey   = new Set();
         let verifiedSigs = [];
@@ -1125,7 +1125,7 @@ class PriceAggregator extends EventEmitter {
         let canClearMarkers = !!(publisher && typeof publisher.clearPublishedMarkers === 'function');
         if (publisher && !canClearMarkers) {
             console.warn('PriceAggregator: OraclePublisher is wired but exposes no clearPublishedMarkers(rounds);'
-                + ' a retracted PRICE v2 batch will stay marked as published and the at-most-once guard will'
+                + ' a retracted PRICE batch will stay marked as published and the at-most-once guard will'
                 + ' suppress the recovery re-publish, costing an hour of price history rather than a round.');
         }
         let batchRounds = [];

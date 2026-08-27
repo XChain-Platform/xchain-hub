@@ -2049,9 +2049,9 @@ class OracleConsensus extends EventEmitter {
         return raw;
     }
 
-    // Build the canonical signable payload for a PRICE v2 batch: ONE signature set over
+    // Build the canonical signable payload for a PRICE batch: ONE signature set over
     // several rounds. THIS IS THE PRODUCER; xchain-indexer/src/ed25519.js
-    // buildPriceV2Payload and PriceAggregator._buildPriceV2Payload must match it byte for
+    // buildPriceBatchPayload and PriceAggregator._buildPriceBatchPayload must match it byte for
     // byte, or the bytes signed here are not the bytes any verifier checks.
     //
     // `rounds` is [{ round, timestamp, btcBlockHeight, pairs }] and each `pairs` entry is
@@ -2067,7 +2067,7 @@ class OracleConsensus extends EventEmitter {
     // shape that breaks SLASH's "an ORACLE-tagged canonical always carries `round`"
     // invariant, which is why v2 carries its own engine tag. Do NOT "fix" this into a
     // v0-style gate.
-    _buildPriceV2Payload(firstRound, lastRound, btcBlockHeight, rounds) {
+    _buildPriceBatchPayload(firstRound, lastRound, btcBlockHeight, rounds) {
         let sortedRounds = [...rounds]
             .sort((a, b) => parseInt(a.round) - parseInt(b.round))
             .map(r => {

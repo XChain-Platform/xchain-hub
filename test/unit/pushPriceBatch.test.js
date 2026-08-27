@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// PRICE v2 batch ingest: pushpricebatch JSON-RPC method (spec
+// PRICE batch ingest: pushpricebatch JSON-RPC method (spec
 // spec section 5.7, decision D22).
 //
 // Coverage:
@@ -139,7 +139,7 @@ async function bootApi(env, hubOverrides) {
     };
 }
 
-describe('hub pushpricebatch JSON-RPC (PRICE v2 batch ingest, spec section 5.7)', function () {
+describe('hub pushpricebatch JSON-RPC (PRICE batch ingest, spec section 5.7)', function () {
 
     afterEach(function () { sinon.restore(); });
 

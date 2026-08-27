@@ -12,9 +12,9 @@
  *
  **********************************************************************
  *
- * XChain Hub - PRICE v2 batch-signing round (XPRICEB)
+ * XChain Hub - PRICE batch-signing round (XPRICEB)
  *
- * The consensus round that produces the ONE quorum signature set a PRICE v2
+ * The consensus round that produces the ONE quorum signature set a PRICE v0
  * batch carries. Nothing else in the platform signs batch-shaped bytes: the
  * PBFT rail signs each round separately over _buildPriceV0Payload, and those
  * signatures verify only against that round's own canonical.
@@ -41,7 +41,7 @@ const swq               = require('./stake_weighted_quorum.js');
 const pst               = require('./price_sig_tally_activation.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { positiveIntConfig } = require('./lib/config_int.js');
-const { PRICE_V2_MAX_ROUND_COUNT } = require('./price_v2_compression.js');
+const { PRICE_BATCH_MAX_ROUND_COUNT } = require('./price_batch_compression.js');
 
 const XPRICEB_SIGN_REQ = 'XPRICEB_SIGN_REQ';
 const XPRICEB_SIGN     = 'XPRICEB_SIGN';
@@ -129,7 +129,7 @@ class OracleBatchSigner {
 
         if(!Number.isFinite(first) || !Number.isFinite(last) || !Number.isFinite(anchor) ||
            first < 0 || last < first) return empty;
-        if(!Array.isArray(rounds) || rounds.length === 0 || rounds.length > PRICE_V2_MAX_ROUND_COUNT) return empty;
+        if(!Array.isArray(rounds) || rounds.length === 0 || rounds.length > PRICE_BATCH_MAX_ROUND_COUNT) return empty;
         if(!this.identity) return empty;
 
         this.stats.batchSignRounds++;
@@ -138,13 +138,13 @@ class OracleBatchSigner {
         try {
             canonical = this._canonical(first, last, anchor, rounds);
         } catch(e){
-            console.warn('OracleBatchSigner: cannot build the v2 canonical for window [' + first + ',' + last +
+            console.warn('OracleBatchSigner: cannot build the batch canonical for window [' + first + ',' + last +
                          '] (' + (e && e.message) + '); no batch for this window');
             return empty;
         }
 
         // The SIGNING set is the price-capable set at the BATCH ANCHOR, which is the
-        // same set (and the same anchor) the indexer's _parseV2 resolves the wire's
+        // same set (and the same anchor) the indexer's _parseV0 resolves the wire's
         // quorum against. Resolving it anywhere else would let this hub collect a
         // quorum the chain then rejects, spending a DOGE fee for an invalid action.
         let signingSet;
@@ -283,8 +283,8 @@ class OracleBatchSigner {
         if(!Number.isFinite(first) || !Number.isFinite(last) || first < 0 || last < first) return;
         // Bound the proposed window BEFORE any DB work: first/last are attacker-chosen,
         // and an unbounded range is a query-cost amplifier on every price validator.
-        if((last - first + 1) > PRICE_V2_MAX_ROUND_COUNT) return;
-        if(!Array.isArray(d.rounds) || d.rounds.length === 0 || d.rounds.length > PRICE_V2_MAX_ROUND_COUNT) return;
+        if((last - first + 1) > PRICE_BATCH_MAX_ROUND_COUNT) return;
+        if(!Array.isArray(d.rounds) || d.rounds.length === 0 || d.rounds.length > PRICE_BATCH_MAX_ROUND_COUNT) return;
 
         let mine;
         try {
@@ -334,7 +334,7 @@ class OracleBatchSigner {
         // thing that unlocks a signature, so a fabricated price, a dropped round, an
         // injected round, a shifted timestamp or a re-pointed anchor all land here as
         // an ordinary string inequality. Both go through the ONE canonical builder
-        // (OracleConsensus._buildPriceV2Payload), so there is no second spelling of
+        // (OracleConsensus._buildPriceBatchPayload), so there is no second spelling of
         // the format for the two sides to disagree about.
         let ours, theirs;
         try {
@@ -384,9 +384,9 @@ class OracleBatchSigner {
     // treats that as a refusal.
     _canonical(firstRound, lastRound, btcBlockHeight, rounds){
         let oc = this.hub ? this.hub.oracleConsensus : null;
-        if(!oc || typeof oc._buildPriceV2Payload !== 'function')
-            throw new Error('OracleConsensus._buildPriceV2Payload is unavailable');
-        return oc._buildPriceV2Payload(firstRound, lastRound, btcBlockHeight, rounds);
+        if(!oc || typeof oc._buildPriceBatchPayload !== 'function')
+            throw new Error('OracleConsensus._buildPriceBatchPayload is unavailable');
+        return oc._buildPriceBatchPayload(firstRound, lastRound, btcBlockHeight, rounds);
     }
 
     // Rebuild the canonical builder's `rounds` input from THIS hub's own finalized

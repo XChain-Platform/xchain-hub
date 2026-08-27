@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// OraclePublisher PRICE v2 batch rail (spec
+// OraclePublisher PRICE batch rail (spec
 // section 7). Real fs against a temp directory rather than a stubbed one, because
 // the separation of the buffer file from the publish queue is the point of half
 // these tests and a stub would let both "files" be the same object.
@@ -24,7 +24,7 @@ const { expect } = require('chai');
 
 const OraclePublisher = require('../../src/OraclePublisher.js');
 const { waitUntil }   = require('../helpers/waitUntil');
-const { PRICE_V2_COMPRESSION_MARKER, inflatePriceV2Body } = require('../../src/price_v2_compression.js');
+const { PRICE_BATCH_COMPRESSION_MARKER, inflatePriceBatchBody } = require('../../src/price_batch_compression.js');
 
 const PRICE_WIRE_MAX_BYTES = 8189;
 
@@ -236,8 +236,8 @@ function makePublisher(opts) {
 // wire this publisher emitted is one the chain will actually accept.
 function bodyOf(wire) {
     let f = wire.split('|');
-    if (f[2] !== PRICE_V2_COMPRESSION_MARKER) return wire.slice('PRICE|2|'.length);
-    let r = inflatePriceV2Body(f[3]);
+    if (f[2] !== PRICE_BATCH_COMPRESSION_MARKER) return wire.slice('PRICE|0|'.length);
+    let r = inflatePriceBatchBody(f[3]);
     return r.ok ? r.body : null;
 }
 
@@ -248,7 +248,7 @@ function readJsonl(p) {
 
 // ────────────────────────────────────────────────────────────────────────────
 
-describe('OraclePublisher PRICE v2 batch rail', function () {
+describe('OraclePublisher PRICE batch rail', function () {
 
     let logs;
     beforeEach(function () {
@@ -375,7 +375,7 @@ describe('OraclePublisher PRICE v2 batch rail', function () {
             expect(h.signer.calls).to.have.length(1);
             expect(h.signer.calls[0]).to.include({ first: 0, last: 5, count: 6 });
             expect(h.broadcasts).to.have.length(1);
-            expect(h.broadcasts[0].split('|').slice(0, 2)).to.deep.equal(['PRICE', '2']);
+            expect(h.broadcasts[0].split('|').slice(0, 2)).to.deep.equal(['PRICE', '0']);
         });
 
         it('closes a window whose LAST slot was skipped, when a higher window\'s round arrives', async function () {
@@ -572,7 +572,7 @@ describe('OraclePublisher PRICE v2 batch rail', function () {
         });
 
         it('emits only wires the READER accepts: the inflated body is capped at the same 8189', async function () {
-            // price_v2_compression.js caps the INFLATED body at PRICE_WIRE_MAX_BYTES
+            // price_batch_compression.js caps the INFLATED body at PRICE_WIRE_MAX_BYTES
             // (outputCap = min(PRICE_WIRE_MAX_BYTES, ratioCap)), so a compressed wire can
             // sail under the encoder limit and still carry a body every indexer refuses
             // to finish inflating. Sizing on the emitted bytes alone spends a DOGE fee on
@@ -601,8 +601,8 @@ describe('OraclePublisher PRICE v2 batch rail', function () {
         it('refuses to build a body whose header anchor is not the last round\'s anchor', function () {
             let h = makePublisher();
             let rounds = [bufferedFixture(0), bufferedFixture(1)];   // anchors 800000, 800001
-            expect(() => h.p.buildPriceV2Body(0, 1, 800001, rounds, sigsOf(1))).to.not.throw();
-            expect(() => h.p.buildPriceV2Body(0, 1, 800000, rounds, sigsOf(1)))
+            expect(() => h.p.buildPriceBatchBody(0, 1, 800001, rounds, sigsOf(1))).to.not.throw();
+            expect(() => h.p.buildPriceBatchBody(0, 1, 800000, rounds, sigsOf(1)))
                 .to.throw(/does not equal the last included round's anchor 800001/);
         });
 
@@ -629,11 +629,11 @@ describe('OraclePublisher PRICE v2 batch rail', function () {
             let emitted = h.p._emitWire(0, 5, 800005, rounds, sigsOf(3));
             expect(emitted.compressed).to.equal(true);
             let fields = emitted.wire.split('|');
-            expect(fields.slice(0, 3)).to.deep.equal(['PRICE', '2', PRICE_V2_COMPRESSION_MARKER]);
+            expect(fields.slice(0, 3)).to.deep.equal(['PRICE', '0', PRICE_BATCH_COMPRESSION_MARKER]);
 
-            let inflated = inflatePriceV2Body(fields[3]);
+            let inflated = inflatePriceBatchBody(fields[3]);
             expect(inflated.ok).to.equal(true);
-            expect(inflated.body).to.equal(h.p.buildPriceV2Body(0, 5, 800005, rounds, sigsOf(3)));
+            expect(inflated.body).to.equal(h.p.buildPriceBatchBody(0, 5, 800005, rounds, sigsOf(3)));
         });
 
         it('rides UNCOMPRESSED when deflate makes the body larger', function () {
@@ -645,8 +645,8 @@ describe('OraclePublisher PRICE v2 batch rail', function () {
             let rounds = [bufferedFixture(0, { pairs: [{ coinPair: 'Q7fKp2ZmXn4Vb8Rt/Ld3Ws9Yj', price: '1' }] })];
             let emitted = h.p._emitWire(0, 0, 800000, rounds, []);
             expect(emitted.compressed).to.equal(false);
-            expect(emitted.wire.split('|')[2]).to.not.equal(PRICE_V2_COMPRESSION_MARKER);
-            expect(emitted.wire).to.equal('PRICE|2|' + h.p.buildPriceV2Body(0, 0, 800000, rounds, []));
+            expect(emitted.wire.split('|')[2]).to.not.equal(PRICE_BATCH_COMPRESSION_MARKER);
+            expect(emitted.wire).to.equal('PRICE|0|' + h.p.buildPriceBatchBody(0, 0, 800000, rounds, []));
         });
 
         it('never emits a wire larger than the uncompressed form, whatever the content', function () {
@@ -654,7 +654,7 @@ describe('OraclePublisher PRICE v2 batch rail', function () {
             for (let pairCount of [1, 2, 5, 37, 200]) {
                 for (let sigCount of [0, 1, 3, 9]) {
                     let rounds = [bufferedFixture(0, { pairs: pairsOf(pairCount, 'inv' + pairCount) })];
-                    let plain  = 'PRICE|2|' + h.p.buildPriceV2Body(0, 0, 800000, rounds, sigsOf(sigCount));
+                    let plain  = 'PRICE|0|' + h.p.buildPriceBatchBody(0, 0, 800000, rounds, sigsOf(sigCount));
                     let out    = h.p._emitWire(0, 0, 800000, rounds, sigsOf(sigCount));
                     expect(out.bytes, pairCount + ' pairs / ' + sigCount + ' sigs')
                         .to.be.at.most(Buffer.byteLength(plain, 'utf8'));
@@ -668,7 +668,7 @@ describe('OraclePublisher PRICE v2 batch rail', function () {
                 bufferedFixture(2, { pairs: [{ coinPair: 'ZZZ/USD', price: '3' }, { coinPair: 'AAA/USD', price: '1' }] }),
                 bufferedFixture(1, { pairs: [{ coinPair: 'AAA/USD', price: '2' }] })
             ];
-            let body = h.p.buildPriceV2Body(1, 2, 800002, rounds, sigsOf(1));
+            let body = h.p.buildPriceBatchBody(1, 2, 800002, rounds, sigsOf(1));
             let f = body.split('|');
             expect(f.slice(0, 4)).to.deep.equal(['1', '2', '800002', '2']);
             expect(f[4]).to.equal('1');                    // round 1 first
@@ -835,7 +835,7 @@ describe('OraclePublisher PRICE v2 batch rail', function () {
             await h.p._assembleWindow(0);
 
             expect(h.p.getStats().batchUnpublishableCount).to.equal(1);
-            expect(logs.error.join('\n')).to.match(/OraclePublisher: CRITICAL - PRICE v2 round 0 alone does not fit/);
+            expect(logs.error.join('\n')).to.match(/OraclePublisher: CRITICAL - PRICE v0 round 0 alone does not fit/);
             expect(logs.error.join('\n')).to.match(/inflated-body cap|encoder payload limit/);
             let dead = readJsonl(h.deadPath);
             expect(dead).to.have.length(1);
@@ -922,7 +922,7 @@ describe('OraclePublisher PRICE v2 batch rail', function () {
             };
 
             let threw = null;
-            try { await h.p._defaultBroadcast('PRICE|2|0|5|800005|1|...'); } catch (e) { threw = e; }
+            try { await h.p._defaultBroadcast('PRICE|0|0|5|800005|1|...'); } catch (e) { threw = e; }
 
             expect(threw, 'the guard must throw').to.not.equal(null);
             expect(threw.message).to.match(/phase 1 of a two-transaction/);

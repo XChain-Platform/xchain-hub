@@ -30,7 +30,7 @@ const OracleConsensus   = require('../../src/OracleConsensus');
 const ValidatorIdentity = require('../../src/ValidatorIdentity');
 const { waitUntil }     = require('../helpers/waitUntil');
 
-const canonicalBuilder = { _buildPriceV2Payload: OracleConsensus.prototype._buildPriceV2Payload };
+const canonicalBuilder = { _buildPriceBatchPayload: OracleConsensus.prototype._buildPriceBatchPayload };
 
 function baseRounds() {
     let out = [];
@@ -158,7 +158,7 @@ describe('OracleBatchSigner over real P2P transport', function () {
 
         expect(res.met).to.equal(true);
         expect(res.sigs.length).to.be.at.least(2);
-        let canonical = canonicalBuilder._buildPriceV2Payload(300, 305, 6005, rounds);
+        let canonical = canonicalBuilder._buildPriceBatchPayload(300, 305, 6005, rounds);
         expect(res.canonical).to.equal(canonical);
         for (let s of res.sigs) {
             expect(pubkeys).to.include(s.pubkey);
