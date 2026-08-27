@@ -16,6 +16,7 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const Consensus  = require('../../src/Consensus');
 const { createMockHub } = require('../helpers/mockHub');
+const { pubkeyForTestSender } = require('../helpers/fixtures');
 
 describe('Consensus view-change guard (stress-sweep 2026-07-08)', function () {
 
@@ -30,7 +31,7 @@ describe('Consensus view-change guard (stress-sweep 2026-07-08)', function () {
     afterEach(function () { sinon.restore(); });
 
     function vc(view, seq) {
-        consensus._handleViewChange({ sender: 'ws://peer:10001', data: { view, seq: seq || 1 } });
+        consensus._handleViewChange({ sender: 'ws://peer:10001', sig_pubkey: pubkeyForTestSender('ws://peer:10001'), data: { view, seq: seq || 1 } });
     }
 
     it('ignores a VIEW_CHANGE for a view <= the current view (no rewind, no bucket)', function () {

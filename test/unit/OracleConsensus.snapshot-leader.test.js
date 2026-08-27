@@ -149,7 +149,7 @@ describe('OracleConsensus: block-locked snapshot leader', function () {
         oracleRound.getSubmissions.returns(buildSubmissions([
             { sender: VALIDATORS_3[1].addr, prices: prices }
         ]));
-        await oc._handlePropose({ sender: VALIDATORS_3[0].addr, data: {
+        await oc._handlePropose({ sender: VALIDATORS_3[0].addr, sig_pubkey: VALIDATORS_3[0].pubkey, data: {
             round: ROUND, prices, digest: oc._digest(ROUND, prices),
             btcBlockHeight: 100, btcBlockTime: 1700000000
         } });
@@ -169,7 +169,7 @@ describe('OracleConsensus: block-locked snapshot leader', function () {
             { sender: VALIDATORS_3[0].addr, prices: prices },
             { sender: VALIDATORS_3[1].addr, prices: prices }
         ]));
-        await oc._handlePropose({ sender: VALIDATORS_3[1].addr, data: {
+        await oc._handlePropose({ sender: VALIDATORS_3[1].addr, sig_pubkey: VALIDATORS_3[1].pubkey, data: {
             round: ROUND, prices, digest: oc._digest(ROUND, prices),
             btcBlockHeight: 100, btcBlockTime: 1700000000
         } });
@@ -186,7 +186,7 @@ describe('OracleConsensus: block-locked snapshot leader', function () {
             { sender: VALIDATORS_3[1].addr, prices: prices },
             { sender: VALIDATORS_3[2].addr, prices: prices }
         ]));
-        await oc._handlePropose({ sender: VALIDATORS_3[1].addr, data: {
+        await oc._handlePropose({ sender: VALIDATORS_3[1].addr, sig_pubkey: VALIDATORS_3[1].pubkey, data: {
             round: ROUND, prices, digest: oc._digest(ROUND, prices),
             btcBlockHeight: 100, btcBlockTime: 1700000000
         } });

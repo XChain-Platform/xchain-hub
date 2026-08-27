@@ -20,7 +20,7 @@ const { expect }      = require('chai');
 const OracleConsensus = require('../../src/OracleConsensus');
 const OracleRound     = require('../../src/OracleRound');
 const { createMockHub } = require('../helpers/mockHub');
-const { VALIDATORS_3, makeValidator, buildSubmissions } = require('../helpers/fixtures');
+const { VALIDATORS_3, makeValidator, buildSubmissions, pubkeyForTestSender } = require('../helpers/fixtures');
 
 const NONMEMBER = makeValidator(9); // registered, but NOT in the price snapshot
 
@@ -101,14 +101,14 @@ describe('OracleConsensus: snapshot membership gate (Oracle M1)', function () {
             memberPubkeys: new Set([VALIDATORS_3[0].pubkey, VALIDATORS_3[1].pubkey])
         };
         // One member + two non-member votes: quorum NOT met.
-        let votes = new Set([VALIDATORS_3[0].addr, NONMEMBER.addr, makeValidator(8).addr]);
+        let votes = new Set([VALIDATORS_3[0].pubkey, NONMEMBER.pubkey, makeValidator(8).pubkey]);
         expect(oc._quorumMet(pending, votes)).to.be.false;
         // Second member joins: met.
-        votes.add(VALIDATORS_3[1].addr);
+        votes.add(VALIDATORS_3[1].pubkey);
         expect(oc._quorumMet(pending, votes)).to.be.true;
     });
 
-    it('count-mode quorum counts two addrs bound to the same pubkey once', function () {
+    it('count-mode quorum counts one key once however many addrs carried it', function () {
         let twinAddr = 'ws://validator-1-twin:10001';
         pm.validatorPubkeys.set(twinAddr, VALIDATORS_3[0].pubkey); // same KEY, second addr
         let pending = {
@@ -138,10 +138,11 @@ describe('OracleConsensus: snapshot membership gate (Oracle M1)', function () {
             weighted:       false,
             quorum:         2,
             memberPubkeys:  new Set([VALIDATORS_3[0].pubkey, VALIDATORS_3[1].pubkey]),
-            // Four raw prepare addrs: two bound to one member key, one other member,
-            // and one registered non-member the quorum never counted.
-            prepares:       new Set([VALIDATORS_3[0].addr, twinAddr, VALIDATORS_3[1].addr, NONMEMBER.addr]),
-            commits:        new Set([VALIDATORS_3[0].addr, VALIDATORS_3[1].addr]),
+            // Prepare KEYS: two members plus a registered non-member the quorum never
+            // counts. The twin addr contributed no extra entry, because it carried a key
+            // that had already voted.
+            prepares:       new Set([VALIDATORS_3[0].pubkey, VALIDATORS_3[1].pubkey, NONMEMBER.pubkey]),
+            commits:        new Set([VALIDATORS_3[0].pubkey, VALIDATORS_3[1].pubkey]),
             signatures:     new Map(),
             prices:         [{ coinPair: 'BTC/USD', price: '100000' }],
             btcBlockHeight: 100,
@@ -163,7 +164,7 @@ describe('OracleConsensus: snapshot membership gate (Oracle M1)', function () {
         oracleRound.getSubmissions.returns(buildSubmissions([
             { sender: VALIDATORS_3[1].addr, prices: prices }
         ]));
-        await oc._handlePropose({ sender: VALIDATORS_3[0].addr, data: {
+        await oc._handlePropose({ sender: VALIDATORS_3[0].addr, sig_pubkey: VALIDATORS_3[0].pubkey, data: {
             round: ROUND, prices, digest: oc._digest(ROUND, prices),
             btcBlockHeight: 100, btcBlockTime: 1700000000
         } });
@@ -173,7 +174,7 @@ describe('OracleConsensus: snapshot membership gate (Oracle M1)', function () {
         expect([...pending.memberPubkeys]).to.have.members(
             [VALIDATORS_3[0].pubkey, VALIDATORS_3[1].pubkey]);
         // A non-member PREPARE must not advance the round to COMMIT quorum.
-        oc._handlePrepare({ sender: NONMEMBER.addr, data: { round: ROUND, digest: pending.digest } });
+        oc._handlePrepare({ sender: NONMEMBER.addr, sig_pubkey: NONMEMBER.pubkey, data: { round: ROUND, digest: pending.digest } });
         expect(pending.finalized).to.be.false;
     });
 });
@@ -194,10 +195,13 @@ describe('OracleRound: submission ingest dedup by verified pubkey (Oracle M1)', 
 
     afterEach(function () { sinon.restore(); });
 
-    function submit(sender, price) {
+    // sigPubkey defaults to a key unique to this sender; a test that wants two
+    // senders to share ONE signing key passes it explicitly.
+    function submit(sender, price, sigPubkey) {
         round._handleMessage({
             type: 'ORACLE_PRICE_SUBMIT',
             sender: sender,
+            sig_pubkey: sigPubkey || pubkeyForTestSender(sender),
             timestamp: Date.now(),
             data: { round: 7, prices: [{ coinPair: 'BTC/USD', price: price }], sources: 2 }
         });
@@ -207,7 +211,7 @@ describe('OracleRound: submission ingest dedup by verified pubkey (Oracle M1)', 
         let twinAddr = 'ws://validator-2-twin:10001';
         pm.validatorPubkeys.set(twinAddr, VALIDATORS_3[1].pubkey);
         submit(VALIDATORS_3[1].addr, '100000');
-        submit(twinAddr, '999999');
+        submit(twinAddr, '999999', VALIDATORS_3[1].pubkey);   // second addr, SAME key
         let subs = round.getSubmissions(7);
         expect(subs.size).to.equal(1);
         expect(subs.has(VALIDATORS_3[1].addr)).to.be.true;

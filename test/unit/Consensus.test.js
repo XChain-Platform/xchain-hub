@@ -16,7 +16,7 @@ const Consensus      = require('../../src/Consensus');
 const { createMockHub }     = require('../helpers/mockHub');
 const { VALIDATORS_3, VALIDATORS_4, VALIDATORS_7, VALIDATORS_10, VALIDATORS_13,
         makeValidator, WEIGHTED_VALIDATORS_4, makeWeightSnapshot,
-        makeFederationSnapshot } = require('../helpers/fixtures');
+        makeFederationSnapshot, pubkeyForTestSender } = require('../helpers/fixtures');
 const { waitUntil }  = require('../helpers/waitUntil');
 
 describe('Consensus (PBFT)', function () {
@@ -353,6 +353,7 @@ describe('Consensus (PBFT)', function () {
             // seq 5, view 0: (5+0)%4 = 1, VALIDATORS_4[1] is the rotation leader.
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 800000 }
             });
 
@@ -377,6 +378,7 @@ describe('Consensus (PBFT)', function () {
             let digest = consensus._digest(config);
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[2].addr,                       // not the leader for (seq 5, view 0)
+                sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config }
             });
             expect(consensus.pendingProposals.has(5)).to.be.false;
@@ -390,6 +392,7 @@ describe('Consensus (PBFT)', function () {
             let digest = consensus._digest(config);
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, configDigest: digest, config }
             });
             expect(consensus.pendingProposals.has(5)).to.be.false;
@@ -399,6 +402,7 @@ describe('Consensus (PBFT)', function () {
         it('PRE_PREPARE with wrong digest is rejected', function () {
             consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: 'bad-digest', config: { x: 1 } }
             });
             expect(consensus.pendingProposals.has(5)).to.be.false;
@@ -407,6 +411,7 @@ describe('Consensus (PBFT)', function () {
         it('PRE_PREPARE with missing fields is ignored', function () {
             consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: null, configDigest: null, config: null }
             });
             expect(consensus.pendingProposals.size).to.equal(0);
@@ -422,6 +427,7 @@ describe('Consensus (PBFT)', function () {
             let digest = consensus._digest(config);
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config }  // no btcBlockHeight
             });
             expect(consensus.pendingProposals.has(5)).to.be.false;
@@ -443,6 +449,7 @@ describe('Consensus (PBFT)', function () {
             let digest = consensus._digest(config);
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 800000 }
             });
             expect(consensus.pendingProposals.has(5)).to.be.true;
@@ -459,6 +466,7 @@ describe('Consensus (PBFT)', function () {
             let digestA = consensus._digest(configA);
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: digestA, config: configA, btcBlockHeight: 800000 }
             });
 
@@ -477,6 +485,7 @@ describe('Consensus (PBFT)', function () {
             // is dropped only by the digest-conflict rule (two leaders, one seq).
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[2].addr,
+                sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { seq: 5, view: 1, configDigest: digestB, config: configB, btcBlockHeight: 800000 }
             });
 
@@ -507,6 +516,7 @@ describe('Consensus (PBFT)', function () {
             // Third prepare → quorum met
             consensus._handlePrepare({
                 sender: VALIDATORS_4[2].addr,
+                sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { seq: 5, configDigest: digest }
             });
 
@@ -532,6 +542,7 @@ describe('Consensus (PBFT)', function () {
             // Third commit → quorum met
             consensus._handleCommit({
                 sender: VALIDATORS_4[2].addr,
+                sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { seq: 5, configDigest: digest }
             });
 
@@ -603,14 +614,17 @@ describe('Consensus (PBFT)', function () {
             // N=4, quorum=3. Need 3 VIEW_CHANGE votes
             consensus._handleViewChange({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { view: 1, seq: 5 }
             });
             consensus._handleViewChange({
                 sender: VALIDATORS_4[2].addr,
+                sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { view: 1, seq: 5 }
             });
             consensus._handleViewChange({
                 sender: VALIDATORS_4[3].addr,
+                sig_pubkey: VALIDATORS_4[3].pubkey,
                 data: { view: 1, seq: 5 }
             });
             // quorum = 3, 3 votes → accepted
@@ -632,6 +646,7 @@ describe('Consensus (PBFT)', function () {
             // A NEW_VIEW from any other validator must be ignored.
             consensus._handleNewView({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { view: 1, seq: 5 }
             });
             expect(consensus.view).to.equal(0);
@@ -642,6 +657,7 @@ describe('Consensus (PBFT)', function () {
             // validators[(5+1) % 4] = validators[2], the leader for (5, 1).
             consensus._handleNewView({
                 sender: VALIDATORS_4[2].addr,
+                sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { view: 1, seq: 5 }
             });
             expect(consensus.view).to.equal(1);
@@ -654,6 +670,7 @@ describe('Consensus (PBFT)', function () {
             let idx = (5 + 2) % VALIDATORS_4.length;
             consensus._handleNewView({
                 sender: VALIDATORS_4[idx].addr,
+                sig_pubkey: VALIDATORS_4[idx].pubkey,
                 data: { view: 2, seq: 5 }
             });
             expect(consensus.view).to.equal(5);
@@ -688,10 +705,10 @@ describe('Consensus (PBFT)', function () {
 
             // Three distinct view-change votes, meets the locked quorum (3),
             // below the live one (5). Must accept on the locked value.
-            consensus._handleViewChange({ sender: VALIDATORS_7[1].addr, data: { view: 1, seq: 5 } });
-            consensus._handleViewChange({ sender: VALIDATORS_7[2].addr, data: { view: 1, seq: 5 } });
+            consensus._handleViewChange({ sender: VALIDATORS_7[1].addr, sig_pubkey: VALIDATORS_7[1].pubkey, data: { view: 1, seq: 5 } });
+            consensus._handleViewChange({ sender: VALIDATORS_7[2].addr, sig_pubkey: VALIDATORS_7[2].pubkey, data: { view: 1, seq: 5 } });
             expect(consensus.view).to.equal(0); // 2 votes < 3, not yet
-            consensus._handleViewChange({ sender: VALIDATORS_7[3].addr, data: { view: 1, seq: 5 } });
+            consensus._handleViewChange({ sender: VALIDATORS_7[3].addr, sig_pubkey: VALIDATORS_7[3].pubkey, data: { view: 1, seq: 5 } });
             expect(consensus.view).to.equal(1); // 3 votes == locked quorum → accepted
         });
 
@@ -715,8 +732,8 @@ describe('Consensus (PBFT)', function () {
 
             // Two distinct votes would clear the live quorum (2), but must
             // NOT clear the locked quorum (5).
-            consensus._handleViewChange({ sender: VALIDATORS_3[1].addr, data: { view: 1, seq: 5 } });
-            consensus._handleViewChange({ sender: VALIDATORS_3[2].addr, data: { view: 1, seq: 5 } });
+            consensus._handleViewChange({ sender: VALIDATORS_3[1].addr, sig_pubkey: VALIDATORS_3[1].pubkey, data: { view: 1, seq: 5 } });
+            consensus._handleViewChange({ sender: VALIDATORS_3[2].addr, sig_pubkey: VALIDATORS_3[2].pubkey, data: { view: 1, seq: 5 } });
             expect(consensus.view).to.equal(0);                 // not promoted
             expect(pm.broadcast.called).to.be.false;            // no NEW_VIEW broadcast
         });
@@ -743,7 +760,7 @@ describe('Consensus (PBFT)', function () {
             consensus.setValidatorSet(VALIDATORS_3);
 
             // Own vote was added by _initiateViewChange; add one more (size 2).
-            consensus._handleViewChange({ sender: VALIDATORS_3[1].addr, data: { view: 1, seq: 5 } });
+            consensus._handleViewChange({ sender: VALIDATORS_3[1].addr, sig_pubkey: VALIDATORS_3[1].pubkey, data: { view: 1, seq: 5 } });
             expect(consensus.pendingViewChanges.get(1).size).to.equal(2);
             expect(pm.broadcast.callCount).to.equal(1);         // still no NEW_VIEW: 2 < locked 5
         });
@@ -886,6 +903,7 @@ describe('Consensus (PBFT)', function () {
             consensus._handleMessage({
                 type: 'PBFT_PRE_PREPARE',
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 800000 }
             });
             await new Promise(r => setImmediate(r));
@@ -1017,6 +1035,7 @@ describe('Consensus (PBFT)', function () {
             let config = { x: 1 };
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,            // leader for (seq 5, view 0)
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: consensus._digest(config), config, btcBlockHeight: 800000 }
             });
             expect(consensus.pendingProposals.has(5)).to.be.false;
@@ -1061,6 +1080,7 @@ describe('Consensus (PBFT)', function () {
             let digest = consensus._digest(config);
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config }
             });
             expect(consensus.pendingProposals.has(5)).to.be.false;
@@ -1074,6 +1094,7 @@ describe('Consensus (PBFT)', function () {
             let digest = consensus._digest(config);
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 800000 }
             });
             expect(consensus.pendingProposals.has(5)).to.be.true;
@@ -1104,7 +1125,7 @@ describe('Consensus (PBFT)', function () {
                 resolve: () => {}, reject: (e) => { rejected = e; }, quorum: 3
             });
 
-            consensus._handleCommit({ sender: VALIDATORS_4[2].addr, data: { seq: 5, configDigest: digest } });
+            consensus._handleCommit({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { seq: 5, configDigest: digest } });
             await waitUntil(() => rejected, { label: 'the failed apply to reject the proposer promise' });
 
             expect(rejected).to.be.an('error');
@@ -1139,7 +1160,7 @@ describe('Consensus (PBFT)', function () {
                 resolve: () => {}, reject: (e) => { rejected = e; }, quorum: 3
             });
 
-            consensus._handleCommit({ sender: VALIDATORS_4[2].addr, data: { seq: 5, configDigest: digest } });
+            consensus._handleCommit({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { seq: 5, configDigest: digest } });
             await waitUntil(() => rejected, { label: 'the failed seq write to reject the proposer promise' });
 
             expect(rejected).to.be.an('error');
@@ -1160,14 +1181,14 @@ describe('Consensus (PBFT)', function () {
         });
 
         it('ignores VIEW_CHANGE with non-numeric fields', function () {
-            consensus._handleViewChange({ sender: 'a', data: { view: 'x', seq: 5 } });
+            consensus._handleViewChange({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { view: 'x', seq: 5 } });
             expect(consensus.pendingViewChanges.size).to.equal(0);
         });
 
         it('ignores VIEW_CHANGE when the computed quorum is 0', function () {
             consensus.setValidatorSet([]);
             pm.getPeerStatus.returns([]);
-            consensus._handleViewChange({ sender: 'a', data: { view: 1, seq: 5 } });
+            consensus._handleViewChange({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { view: 1, seq: 5 } });
             expect(consensus.view).to.equal(0);
         });
 
@@ -1176,9 +1197,9 @@ describe('Consensus (PBFT)', function () {
             consensus.view = 0;
             consensus.pendingViewChanges.set(0, new Set(['stale'])); // lower view to prune
 
-            consensus._handleViewChange({ sender: VALIDATORS_4[1].addr, data: { view: 1, seq: 5 } });
-            consensus._handleViewChange({ sender: VALIDATORS_4[3].addr, data: { view: 1, seq: 5 } });
-            consensus._handleViewChange({ sender: VALIDATORS_4[0].addr, data: { view: 1, seq: 5 } });
+            consensus._handleViewChange({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { view: 1, seq: 5 } });
+            consensus._handleViewChange({ sender: VALIDATORS_4[3].addr, sig_pubkey: VALIDATORS_4[3].pubkey, data: { view: 1, seq: 5 } });
+            consensus._handleViewChange({ sender: VALIDATORS_4[0].addr, sig_pubkey: VALIDATORS_4[0].pubkey, data: { view: 1, seq: 5 } });
 
             expect(consensus.view).to.equal(1);
             let nv = pm.broadcast.getCalls().find(c => c.args[0] === 'PBFT_NEW_VIEW');
@@ -1188,13 +1209,13 @@ describe('Consensus (PBFT)', function () {
         });
 
         it('ignores NEW_VIEW with non-numeric fields', function () {
-            consensus._handleNewView({ sender: 'a', data: { view: null, seq: 5 } });
+            consensus._handleNewView({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { view: null, seq: 5 } });
             expect(consensus.view).to.equal(0);
         });
 
         it('ignores NEW_VIEW when the validator set is empty', function () {
             consensus.setValidatorSet([]);
-            consensus._handleNewView({ sender: 'a', data: { view: 1, seq: 5 } });
+            consensus._handleNewView({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { view: 1, seq: 5 } });
             expect(consensus.view).to.equal(0);
         });
     });
@@ -1212,6 +1233,7 @@ describe('Consensus (PBFT)', function () {
         it('rejects a PRE_PREPARE with a non-positive seq', async function () {
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: -1, configDigest: 'd', config: { x: 1 } }
             });
             expect(consensus.pendingProposals.size).to.equal(0);
@@ -1227,6 +1249,7 @@ describe('Consensus (PBFT)', function () {
             let digest = consensus._digest(config);
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 900000 }
             });
             let p = consensus.pendingProposals.get(5);
@@ -1236,22 +1259,22 @@ describe('Consensus (PBFT)', function () {
         });
 
         it('ignores a PREPARE with no configDigest', function () {
-            expect(() => consensus._handlePrepare({ sender: 'a', data: { seq: 5 } })).to.not.throw();
+            expect(() => consensus._handlePrepare({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { seq: 5 } })).to.not.throw();
         });
 
         it('ignores a PREPARE whose digest does not match the proposal', function () {
             consensus.pendingProposals.set(5, { digest: 'right', prepares: new Set(), resolved: false, quorum: 3 });
-            consensus._handlePrepare({ sender: 'a', data: { seq: 5, configDigest: 'wrong' } });
+            consensus._handlePrepare({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { seq: 5, configDigest: 'wrong' } });
             expect(consensus.pendingProposals.get(5).prepares.size).to.equal(0);
         });
 
         it('ignores a COMMIT with no configDigest', function () {
-            expect(() => consensus._handleCommit({ sender: 'a', data: { seq: 5 } })).to.not.throw();
+            expect(() => consensus._handleCommit({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { seq: 5 } })).to.not.throw();
         });
 
         it('ignores a COMMIT whose digest does not match the proposal', function () {
             consensus.pendingProposals.set(5, { digest: 'right', commits: new Set(), applied: false, quorum: 3 });
-            consensus._handleCommit({ sender: 'a', data: { seq: 5, configDigest: 'wrong' } });
+            consensus._handleCommit({ sender: 'a', sig_pubkey: pubkeyForTestSender('a'), data: { seq: 5, configDigest: 'wrong' } });
             expect(consensus.pendingProposals.get(5).commits.size).to.equal(0);
         });
 
@@ -1273,7 +1296,7 @@ describe('Consensus (PBFT)', function () {
                 commits: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr]),
                 resolved: false, applied: false, timer: null, resolve: null, reject: null, quorum: 3
             });
-            consensus._handleCommit({ sender: VALIDATORS_4[2].addr, data: { seq: 5, configDigest: digest } });
+            consensus._handleCommit({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { seq: 5, configDigest: digest } });
             await waitUntil(() => !consensus.pendingProposals.has(5), { label: 'the follower apply to clear round 5' });
             expect(hub.applyConfig.calledOnce).to.be.true;
             expect(consensus.pendingProposals.has(5)).to.be.false; // applied and cleared
@@ -1293,7 +1316,7 @@ describe('Consensus (PBFT)', function () {
                 commits: new Set([VALIDATORS_4[0].addr, VALIDATORS_4[1].addr]),
                 resolved: false, applied: false, timer: null, resolve: null, reject: null, quorum: 3
             });
-            consensus._handleCommit({ sender: VALIDATORS_4[2].addr, data: { seq: 5, configDigest: digest } });
+            consensus._handleCommit({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { seq: 5, configDigest: digest } });
             // The catch handler clears the in-flight guard, so `_applying === false`
             // is the failed apply having actually been handled: poll that, then assert
             // the proposal survived it. (A poll on `applyConfig.called` would pass
@@ -1576,6 +1599,7 @@ describe('Consensus (PBFT)', function () {
             // seq 5, view 0: (5+0)%4 = 1 → VALIDATORS_4[1] is the legitimate leader.
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 800000 }
             });
 
@@ -1648,6 +1672,7 @@ describe('Consensus (PBFT)', function () {
             let digest = consensus._digest(config);
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 800000 }
             });
 
@@ -1688,6 +1713,7 @@ describe('Consensus (PBFT)', function () {
             let digest = consensus._digest(config);
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 800000 }
             });
 

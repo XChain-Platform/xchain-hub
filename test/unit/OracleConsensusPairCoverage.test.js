@@ -41,7 +41,7 @@ describe('OracleConsensus PROPOSE pair-coverage (stress-sweep 2026-07-08)', func
     afterEach(function () { sinon.restore(); });
 
     function envelope(prices) {
-        return { sender: leader.addr, data: {
+        return { sender: leader.addr, sig_pubkey: leader.pubkey, data: {
             round: ROUND, prices, digest: oc._digest(ROUND, prices),
             btcBlockHeight: 100, btcBlockTime: 1700000000
         } };

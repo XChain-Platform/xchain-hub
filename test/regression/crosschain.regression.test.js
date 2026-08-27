@@ -81,6 +81,7 @@ describe('Regression: CrossChain & SwapTracker', function () {
                 // it the follower resolves no snapshot and fails closed.
                 await engine._handlePropose({
                     sender: VALIDATORS_4[1].addr,
+                    sig_pubkey: VALIDATORS_4[1].pubkey,
                     data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
                             destChain: 'LTC', confirmations: 3, digest, btcBlockHeight: 900000 }
                 });
@@ -107,6 +108,7 @@ describe('Regression: CrossChain & SwapTracker', function () {
 
                 engine._handlePrepare({
                     sender: VALIDATORS_4[2].addr,
+                    sig_pubkey: VALIDATORS_4[2].pubkey,
                     data: { attestationId, digest }
                 });
 
@@ -134,6 +136,7 @@ describe('Regression: CrossChain & SwapTracker', function () {
 
                 engine._handleCommit({
                     sender: VALIDATORS_4[2].addr,
+                    sig_pubkey: VALIDATORS_4[2].pubkey,
                     data: { attestationId, digest }
                 });
 
@@ -149,6 +152,7 @@ describe('Regression: CrossChain & SwapTracker', function () {
             it('PROPOSE with wrong digest rejected @regression-p0', function () {
                 engine._handlePropose({
                     sender: VALIDATORS_4[1].addr,
+                    sig_pubkey: VALIDATORS_4[1].pubkey,
                     data: { attestationId: 'BTC:1:LTC', digest: 'wrong', confirmations: 3 }
                 });
                 expect(engine.pendingAttestations.size).to.equal(0);
@@ -158,6 +162,7 @@ describe('Regression: CrossChain & SwapTracker', function () {
                 engine.finalized.add('BTC:1:LTC');
                 engine._handlePropose({
                     sender: VALIDATORS_4[1].addr,
+                    sig_pubkey: VALIDATORS_4[1].pubkey,
                     data: { attestationId: 'BTC:1:LTC', digest: 'x', confirmations: 3 }
                 });
                 expect(engine.pendingAttestations.size).to.equal(0);
@@ -245,6 +250,7 @@ describe('Regression: CrossChain & SwapTracker', function () {
 
                 engine._handleCommit({
                     sender: VALIDATORS_4[2].addr,
+                    sig_pubkey: VALIDATORS_4[2].pubkey,
                     data: { attestationId, digest }
                 });
 

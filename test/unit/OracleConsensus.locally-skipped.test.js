@@ -20,6 +20,7 @@ const sinon           = require('sinon');
 const { expect }      = require('chai');
 const OracleConsensus = require('../../src/OracleConsensus');
 const { createMockHub } = require('../helpers/mockHub');
+const { pubkeyForTestSender } = require('../helpers/fixtures');
 
 describe('OracleConsensus: locally-skipped rounds stay reprocessable (#7)', function () {
     let hub, oc, oracleRound;
@@ -53,7 +54,7 @@ describe('OracleConsensus: locally-skipped rounds stay reprocessable (#7)', func
         let known  = sinon.stub(oc, '_isKnownSender').returns(false);
         let prices = [{ coinPair: 'BTC/USD', price: '100000' }];
         await oc._handlePropose({
-            sender: 'ws://validator-2:10001',
+            sender: 'ws://validator-2:10001', sig_pubkey: pubkeyForTestSender('ws://validator-2:10001'),
             data: { round: ROUND, prices, digest: oc._digest(ROUND, prices), btcBlockHeight: 100 }
         });
 
@@ -67,7 +68,7 @@ describe('OracleConsensus: locally-skipped rounds stay reprocessable (#7)', func
         let known  = sinon.stub(oc, '_isKnownSender').returns(false);
         let prices = [{ coinPair: 'BTC/USD', price: '100000' }];
         await oc._handlePropose({
-            sender: 'ws://validator-2:10001',
+            sender: 'ws://validator-2:10001', sig_pubkey: pubkeyForTestSender('ws://validator-2:10001'),
             data: { round: ROUND, prices, digest: oc._digest(ROUND, prices), btcBlockHeight: 100 }
         });
 

@@ -272,13 +272,14 @@ class XChainHub {
         this.oracleConsensus.on('round:finalized', async (event) => {
             // A rejection out of an EventEmitter listener is an unhandled rejection.
             try {
-                let participantPubkeys = [];
-                if(this.peerManager.validatorPubkeys){
-                    for(let addr of event.participants){
-                        let pk = this.peerManager.validatorPubkeys.get(addr);
-                        if(pk) participantPubkeys.push(pk);
-                    }
-                }
+                // event.participants are SIGNING KEYS (OracleConsensus tallies votes
+                // by proven key), so they need no registry translation. That is the
+                // point: the old addr->pubkey lookup silently paid nobody for a
+                // validator the chain attributes but the local registry has no row
+                // for, so a community validator could vote and never be rewarded.
+                let participantPubkeys = (event.participants || [])
+                    .filter(pk => pk)
+                    .map(pk => String(pk).toLowerCase());
 
                 await this.rewardTracker.distributeRewards(event.round, participantPubkeys, event.btcBlockHeight);
 

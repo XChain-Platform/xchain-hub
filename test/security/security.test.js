@@ -17,7 +17,7 @@ const { createMockHub }    = require('../helpers/mockHub');
 const { waitUntil }        = require('../helpers/waitUntil');
 const { PRICE_MAX }        = require('../../src/constants.js');
 const { VALIDATORS_3, VALIDATORS_4, makeValidator, SAMPLE_PRICES,
-        buildSubmissions, makeFederationSnapshot } = require('../helpers/fixtures');
+        buildSubmissions, makeFederationSnapshot, pubkeyForTestSender } = require('../helpers/fixtures');
 // A price strictly above the accepted (0, PRICE_MAX) band, used as the
 // out-of-bounds sentinel so these bound tests track PRICE_MAX (widened over time
 // from 10M) instead of a hardcoded literal that silently rots.
@@ -49,13 +49,13 @@ describe('Security Hardening', function () {
         it('rejects unsigned messages when requireSigs is true', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1', REQUIRE_SIGNATURES: true }, null);
             pm.validatorPubkeys = new Map();
-            let envelope = { type: 'TEST', id: 'x1', sender: 'ws://peer:1', timestamp: Date.now(), data: {} };
+            let envelope = { type: 'TEST', id: 'x1', sender: 'ws://peer:1', sig_pubkey: pubkeyForTestSender('ws://peer:1'), timestamp: Date.now(), data: {} };
             expect(pm._verifySignature(envelope)).to.be.false;
         });
 
         it('accepts unsigned messages when requireSigs is false', function () {
             let pm = new PeerManager({ P2P_VALIDATOR_ADDR: 'ws://a:1', REQUIRE_SIGNATURES: false }, null);
-            let envelope = { type: 'TEST', id: 'x1', sender: 'ws://peer:1', timestamp: Date.now(), data: {} };
+            let envelope = { type: 'TEST', id: 'x1', sender: 'ws://peer:1', sig_pubkey: pubkeyForTestSender('ws://peer:1'), timestamp: Date.now(), data: {} };
             expect(pm._verifySignature(envelope)).to.be.true;
         });
 
@@ -280,6 +280,7 @@ describe('Security Hardening', function () {
             let envelope = {
                 type: 'PBFT_PRE_PREPARE',
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 3, view 2): (3+2)%4 = 1
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 3, view: 2, configDigest: digest, config: config }
             };
             consensus._handlePrePrepare(envelope);
@@ -304,6 +305,7 @@ describe('Security Hardening', function () {
             let envelope = {
                 type: 'PBFT_PRE_PREPARE',
                 sender: VALIDATORS_4[0].addr,                       // leader for (seq 3, view 1): (3+1)%4 = 0
+                sig_pubkey: VALIDATORS_4[0].pubkey,
                 data: { seq: 3, view: 1, configDigest: digest, config: config, btcBlockHeight: 800000 }
             };
             await consensus._handlePrePrepare(envelope);
@@ -468,6 +470,7 @@ describe('Security Hardening', function () {
             let envelope = {
                 type: 'ORACLE_PRICE_SUBMIT',
                 sender: 'ws://peer-1:10001',
+                sig_pubkey: pubkeyForTestSender('ws://peer-1:10001'),
                 timestamp: Date.now(),
                 data: {
                     round: 5,
@@ -606,6 +609,7 @@ describe('Security Hardening', function () {
             let digest = engine._digest(attestationId, 3);
             let envelope = {
                 sender: 'ws://v:1',
+                sig_pubkey: pubkeyForTestSender('ws://v:1'),
                 data: { attestationId, digest, confirmations: 3, sourceChain: 'BTC', sourceActionIndex: 1, destChain: 'LTC' }
             };
             await engine._handlePropose(envelope);
@@ -689,7 +693,7 @@ describe('Security Hardening', function () {
                 config, digest, prepares: new Set(), commits: new Set(),
                 quorum: 3, resolved: false, applied: false, timer: null
             });
-            consensus._handlePrepare({ sender: VALIDATORS_4[1].addr, data: { seq: 1, configDigest: digest } });
+            consensus._handlePrepare({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { seq: 1, configDigest: digest } });
             expect(consensus.pendingProposals.get(1).prepares.has(VALIDATORS_4[1].addr)).to.be.true;
         });
     });

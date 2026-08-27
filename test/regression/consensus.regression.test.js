@@ -96,6 +96,7 @@ describe('Regression: Consensus (PBFT)', function () {
             // broadcasting PREPARE), so the flow must be awaited.
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 800000 }
             });
             expect(consensus.pendingProposals.has(5)).to.be.true;
@@ -103,6 +104,7 @@ describe('Regression: Consensus (PBFT)', function () {
             // Step 2: Third PREPARE reaches quorum → COMMIT broadcast
             consensus._handlePrepare({
                 sender: VALIDATORS_4[2].addr,
+                sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { seq: 5, configDigest: digest }
             });
             expect(pm.broadcast.calledWith('PBFT_COMMIT')).to.be.true;
@@ -120,12 +122,14 @@ describe('Regression: Consensus (PBFT)', function () {
             // Second commit
             consensus._handleCommit({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, configDigest: digest }
             });
 
             // Third commit → quorum met
             consensus._handleCommit({
                 sender: VALIDATORS_4[2].addr,
+                sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { seq: 5, configDigest: digest }
             });
 
@@ -162,6 +166,7 @@ describe('Regression: Consensus (PBFT)', function () {
             // Only 1 prepare (from PRE_PREPARE sender) + self = 2, need 3
             await consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: 800000 }
             });
 
@@ -197,6 +202,7 @@ describe('Regression: Consensus (PBFT)', function () {
             // Second commit → still only 2, need 3
             consensus._handleCommit({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, configDigest: digest }
             });
 
@@ -269,6 +275,7 @@ describe('Regression: Consensus (PBFT)', function () {
             // not the identity guard, is what rejects it)
             consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config }
             });
 
@@ -395,6 +402,7 @@ describe('Regression: Consensus (PBFT)', function () {
             // an authenticated non-leader from driving an uncontested seq to commit.
             consensus._handlePrePrepare({
                 sender: VALIDATORS_4[3].addr,
+                sig_pubkey: VALIDATORS_4[3].pubkey,
                 data: { seq: 5, view: 0, configDigest: digest, config }
             });
 
@@ -410,6 +418,7 @@ describe('Regression: Consensus (PBFT)', function () {
 
             consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,                       // leader for (seq 5, view 0)
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: 5, view: 0, configDigest: 'bad-digest', config }
             });
 
@@ -422,6 +431,7 @@ describe('Regression: Consensus (PBFT)', function () {
 
             consensus._handlePrePrepare({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { seq: null, configDigest: null, config: null }
             });
 

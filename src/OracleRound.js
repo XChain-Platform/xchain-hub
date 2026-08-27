@@ -28,6 +28,7 @@
 const PriceFetcher = require('./PriceFetcher.js');
 const XchainPriceSource = require('./XchainPriceSource.js');
 const { isXchainPriceActive, roundStartSeconds } = require('./xchain_price_activation.js');
+const { isAdmissibleSigner, provenPubkey } = require('./lib/chain_signer_admission.js');
 const { PRICE_MAX, DEFAULT_ORACLE_ROUND_INTERVAL_MS,
         DEFAULT_ORACLE_SUBMISSION_WINDOW_MS, DERIVED_PAIRS } = require('./constants.js');
 
@@ -821,23 +822,11 @@ class OracleRound {
     }
 
     // Handle incoming gossip messages
-    // A sender counts only if it maps to a registered validator pubkey. Mirrors
-    // OracleConsensus._isKnownSender: a null registry fails closed; an empty
-    // registry is the permissive bootstrap window (before syncvalidators has run)
-    // only until a chain-effective signer set exists; then it fails closed.
-    _isRegisteredSender(sender) {
-        let registry = this.peerManager && this.peerManager.validatorPubkeys;
-        if (!registry) return false;
-        if (registry.size === 0) {
-            // Empty-registry leniency is for the genuine pre-bootstrap window ONLY
-            // (G-1): once the on-chain snapshot has produced a non-empty
-            // effective signer set, an empty registry is a misconfiguration or
-            // wipe window, not bootstrap, and counting unattributable senders
-            // would reopen count-mode quorum forgery. Fail closed instead.
-            let signerSet = this.peerManager.effectiveSignerSet;
-            return !(signerSet && signerSet.size > 0);
-        }
-        return registry.has(sender);
+    // A submission counts only if the chain-effective signer set or the local
+    // registry attributes its PROVEN signing key. Shared definition (and the full
+    // security argument) in lib/chain_signer_admission.js.
+    _isRegisteredSender(envelope) {
+        return isAdmissibleSigner(this.peerManager, envelope);
     }
 
     _handleMessage(envelope) {
@@ -848,14 +837,13 @@ class OracleRound {
         // on integer/non-negative, not falsiness, or a genesis round-0 submission is dropped.
         if (!Number.isInteger(round) || round < 0 || !prices || !Array.isArray(prices)) return;
 
-        // Drop submissions from senders that are not registered validators. Without
-        // this gate a single authorized signing key can broadcast many submissions,
-        // each naming a distinct fake `sender` (PeerManager only binds sender<->key
-        // when the sender is already registered), Sybil-stuffing the trimmed-median
-        // aggregate and the ORACLE_MIN_SUBMISSIONS diversity floor with one node.
-        // Mirrors OracleConsensus._isKnownSender, including the empty-registry
-        // permissive bootstrap window.
-        if (!this._isRegisteredSender(envelope.sender)) return;
+        // Drop submissions whose signing key neither the chain nor the registry
+        // attributes. Without this gate a single authorized key can broadcast many
+        // submissions, each naming a distinct fake `sender`, Sybil-stuffing the
+        // trimmed-median aggregate and the ORACLE_MIN_SUBMISSIONS diversity floor
+        // from one node. The dedup below closes that off for good by keying on the
+        // proven key rather than on the self-asserted sender.
+        if (!this._isRegisteredSender(envelope)) return;
 
         // Only accept submissions for current or next round
         if (round < this.currentRound - 1 || round > this.currentRound + 1) return;
@@ -876,18 +864,15 @@ class OracleRound {
         let roundSubs = this.submissions.get(round);
         if (roundSubs.has(envelope.sender)) return; // Already have a submission from this sender
 
-        // Resolve the sender's registered pubkey up front. PeerManager enforces the
-        // addr<->pubkey binding on every verified envelope, so this is the VERIFIED
-        // signing identity, not a claim. Dedup on it (Oracle M1): the registry is
-        // Map<addr, pubkey> and one key may be registered under several addrs, so a
-        // sender-keyed first-wins alone lets a single signing key submit once per
-        // addr, multiplying its weight in the trimmed median and the
-        // ORACLE_MIN_SUBMISSIONS diversity floor.
-        let senderPubkey = null;
-        if (this.peerManager.validatorPubkeys) {
-            let pk = this.peerManager.validatorPubkeys.get(envelope.sender);
-            if (pk) senderPubkey = String(pk).toLowerCase();
-        }
+        // The PROVEN signing key of this envelope, which the gate above has already
+        // established the chain or the registry attributes. Taken from the envelope
+        // rather than looked up by addr in the registry: a chain-attributed
+        // validator has no registry row, so the old lookup returned null for it and
+        // its submission was dropped downstream as unresolvable. Dedup on this key:
+        // one key may present under several addrs, so a sender-keyed first-wins
+        // alone lets a single signing key submit once per addr, multiplying its
+        // weight in the trimmed median and the ORACLE_MIN_SUBMISSIONS floor.
+        let senderPubkey = provenPubkey(envelope);
         if (senderPubkey) {
             for (let sub of roundSubs.values()) {
                 if (sub && sub.pubkey === senderPubkey) {
@@ -929,8 +914,8 @@ class OracleRound {
             prices:    validPrices,
             sources:   sources || 0,
             timestamp: envelope.timestamp,
-            // Verified registered pubkey (lowercase hex) or null during the
-            // empty-registry bootstrap window. OracleConsensus keys its snapshot
+            // Proven signing key (lowercase hex), or null only on a pre-bootstrap
+            // envelope that carried none. OracleConsensus keys its snapshot
             // membership filter on this.
             pubkey:    senderPubkey
         });

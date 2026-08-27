@@ -28,7 +28,7 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const Consensus  = require('../../src/Consensus');
 const { createMockHub } = require('../helpers/mockHub');
-const { WEIGHTED_VALIDATORS_4, makeWeightSnapshot } = require('../helpers/fixtures');
+const { WEIGHTED_VALIDATORS_4, makeWeightSnapshot, pubkeyForTestSender } = require('../helpers/fixtures');
 
 // S = 1000 + 100 + 100 + 100 = 1300. The whale alone clears 3*1000 > 2*1300;
 // the three small sources together (300) never do. Sorted by pubkey, the whale
@@ -44,6 +44,7 @@ function prePrepareEnvelope(consensus, seq) {
     return {
         type:       'PBFT_PRE_PREPARE',
         sender:     WHALE.addr,
+        sig_pubkey:     WHALE.pubkey,
         sig_pubkey: WHALE.pubkey,
         data: {
             seq:            seq === undefined ? SEQ : seq,
@@ -59,6 +60,7 @@ function voteEnvelope(type, validator, digest, seq) {
     return {
         type:       type,
         sender:     validator.addr,
+        sig_pubkey:     validator.pubkey,
         sig_pubkey: validator.pubkey,
         data:       { seq: seq === undefined ? SEQ : seq, configDigest: digest }
     };
@@ -114,7 +116,7 @@ describe('Consensus: early-arrival vote buffer (config-change PBFT)', function (
             // The known-sender guard runs before the buffer, so the buffer can
             // never become a way in for a sender the tally would refuse.
             consensus._handleCommit({
-                type: 'PBFT_COMMIT', sender: 'ws://stranger:10009',
+                type: 'PBFT_COMMIT', sender: 'ws://stranger:10009', sig_pubkey: pubkeyForTestSender('ws://stranger:10009'),
                 data: { seq: SEQ, configDigest: digest }
             });
             expect(consensus.earlyVotes.has(SEQ)).to.be.false;

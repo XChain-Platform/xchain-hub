@@ -28,6 +28,7 @@ const EventEmitter = require('events');
 const coins        = require('./coins');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { positiveIntConfig } = require('./lib/config_int.js');
+const { isAdmissibleSigner, provenPubkey } = require('./lib/chain_signer_admission.js');
 
 const XCHAIN_ATTEST_PROPOSE = 'XCHAIN_ATTEST_PROPOSE';
 const XCHAIN_ATTEST_PREPARE = 'XCHAIN_ATTEST_PREPARE';
@@ -263,7 +264,9 @@ class CrossChainEngine extends EventEmitter {
             };
 
             // Add own PREPARE
-            pending.prepares.add(this.peerManager.validatorAddr);
+            // Vote sets hold PROVEN SIGNING KEYS, not sender addrs (see _addVote).
+            let selfPkOnPropose = this._selfPubkey();
+            if (selfPkOnPropose) pending.prepares.add(selfPkOnPropose);
             this.pendingAttestations.set(attestationId, pending);
 
             // Timeout
@@ -308,28 +311,13 @@ class CrossChainEngine extends EventEmitter {
 
     // --- Message handlers ---
 
-    // Defense-in-depth: only tally votes from senders that are registered
-    // validators. PeerManager already drops messages whose signature doesn't
-    // match a registered pubkey, but counting raw envelope.sender values means a
-    // forged sender that slipped past that layer (e.g. during a null-registry
-    // window) could otherwise inflate quorum from a single connection. The
-    // registry is keyed by addr (the same value used as the sender). A null
-    // registry fails closed (the vulnerability scenario); an empty registry stays
-    // lenient ONLY until a chain-effective signer set exists (genuine pre-bootstrap, where the sig layer already rejects
-    // unknown senders and no peer votes should be arriving).
-    _isKnownSender(sender) {
-        let registry = this.peerManager && this.peerManager.validatorPubkeys;
-        if (!registry) return false;
-        if (registry.size === 0) {
-            // Empty-registry leniency is for the genuine pre-bootstrap window ONLY
-            // (G-1): once the on-chain snapshot has produced a non-empty
-            // effective signer set, an empty registry is a misconfiguration or
-            // wipe window, not bootstrap, and counting unattributable senders
-            // would reopen count-mode quorum forgery. Fail closed instead.
-            let signerSet = this.peerManager.effectiveSignerSet;
-            return !(signerSet && signerSet.size > 0);
-        }
-        return registry.has(sender);
+    // Whether an authenticated envelope may be counted toward attestation quorum.
+    // Admits on the PROVEN signing key (chain-effective set OR registry), never on
+    // envelope.sender, so a validator that staked on chain is counted without any
+    // operator hand-registering it first. Shared definition and the full security
+    // argument in lib/chain_signer_admission.js.
+    _isKnownSender(envelope) {
+        return isAdmissibleSigner(this.peerManager, envelope);
     }
 
     // Verified signing pubkey (lowercase hex) for a sender addr, or null. PeerManager
@@ -345,6 +333,21 @@ class CrossChainEngine extends EventEmitter {
             if (identity) pk = identity.getPubkeyHex();
         }
         return pk ? String(pk).toLowerCase() : null;
+    }
+
+    // This hub's own signing key, for seeding its own vote into a key-keyed
+    // prepare/commit set. Null only on a hub that cannot sign a vote anyway.
+    _selfPubkey() {
+        return this._resolveSenderPubkey(this.peerManager && this.peerManager.validatorAddr);
+    }
+
+    // Record one peer's vote in a key-keyed set. The envelope has already cleared
+    // _isKnownSender, so it carries a proven key. N envelopes from ONE key collapse
+    // to a single entry however many distinct senders they name, which is what
+    // bounds count-mode forgery here.
+    _addVote(voteSet, envelope) {
+        let pk = provenPubkey(envelope);
+        if (pk) voteSet.add(pk);
     }
 
     // Pubkey set of the round's locked cross_chain snapshot, or null when no usable
@@ -393,23 +396,20 @@ class CrossChainEngine extends EventEmitter {
     // members, and count DISTINCT pubkeys. This is the invariant Consensus (leader
     // election) and OracleConsensus (Oracle M1 submissions) already enforce.
     //
-    // Two degradations keep the legacy raw count, and only two. A null memberPubkeys means
-    // no snapshot population resolved (single-node / bootstrap), which is the same state
-    // _resolveQuorum falls back to the live set in. An EMPTY validator registry means no
-    // sender can be resolved to a key at all, which is the same pre-bootstrap window
-    // _isKnownSender is deliberately lenient in; that leniency is already fenced there (a
-    // non-empty effective signer set makes an empty registry fail closed before a vote ever
-    // reaches this tally), so it is honoured here rather than second-guessed into a stall.
+    // The vote sets now hold proven signing keys directly, so this only intersects
+    // them with the round's snapshot membership. One degradation remains: a null
+    // memberPubkeys means no snapshot population resolved (single-node / bootstrap),
+    // the same state _resolveQuorum falls back to the live set in. The old
+    // empty-registry degradation is gone with the registry lookup it protected: a
+    // key that no longer needs resolving through the registry cannot be un-resolvable
+    // because the registry is empty.
     _countedVotes(pending, voteSet) {
         if (!pending || !pending.memberPubkeys) return voteSet ? voteSet.size : 0;
-        let registry = this.peerManager && this.peerManager.validatorPubkeys;
-        if (!registry || registry.size === 0) return voteSet ? voteSet.size : 0;
-        let counted = new Set();
-        for (let sender of voteSet) {
-            let pk = this._resolveSenderPubkey(sender);
-            if (pk && pending.memberPubkeys.has(pk)) counted.add(pk);
+        let counted = 0;
+        for (let pk of voteSet) {
+            if (pending.memberPubkeys.has(pk)) counted++;
         }
-        return counted.size;
+        return counted;
     }
 
     _handleMessage(envelope) {
@@ -437,7 +437,7 @@ class CrossChainEngine extends EventEmitter {
 
         // Discard proposals from senders that are not registered validators
         // before doing any snapshot/indexer work for them.
-        if (!this._isKnownSender(envelope.sender)) return;
+        if (!this._isKnownSender(envelope)) return;
 
         // Verify digest
         let computedDigest = this._digest(attestationId, confirmations);
@@ -511,8 +511,9 @@ class CrossChainEngine extends EventEmitter {
         }
 
         let pending = this.pendingAttestations.get(attestationId);
-        pending.prepares.add(envelope.sender);
-        pending.prepares.add(this.peerManager.validatorAddr);
+        this._addVote(pending.prepares, envelope);
+        let selfPkOnAccept = this._selfPubkey();
+        if (selfPkOnAccept) pending.prepares.add(selfPkOnAccept);
 
         // Send PREPARE
         this.peerManager.broadcast(XCHAIN_ATTEST_PREPARE, {
@@ -526,13 +527,13 @@ class CrossChainEngine extends EventEmitter {
         let { attestationId, digest } = envelope.data;
         if (!attestationId || !digest) return;
 
-        // Only count PREPARE votes from registered validators.
-        if (!this._isKnownSender(envelope.sender)) return;
+        // Only count PREPARE votes whose signing key the chain or the registry attributes.
+        if (!this._isKnownSender(envelope)) return;
 
         let pending = this.pendingAttestations.get(attestationId);
         if (!pending || pending.digest !== digest) return;
 
-        pending.prepares.add(envelope.sender);
+        this._addVote(pending.prepares, envelope);
         this._checkPrepareQuorum(attestationId);
     }
 
@@ -540,13 +541,13 @@ class CrossChainEngine extends EventEmitter {
         let { attestationId, digest } = envelope.data;
         if (!attestationId || !digest) return;
 
-        // Only count COMMIT votes from registered validators.
-        if (!this._isKnownSender(envelope.sender)) return;
+        // Only count COMMIT votes whose signing key the chain or the registry attributes.
+        if (!this._isKnownSender(envelope)) return;
 
         let pending = this.pendingAttestations.get(attestationId);
         if (!pending || pending.digest !== digest) return;
 
-        pending.commits.add(envelope.sender);
+        this._addVote(pending.commits, envelope);
         this._checkCommitQuorum(attestationId);
     }
 
@@ -609,7 +610,8 @@ class CrossChainEngine extends EventEmitter {
         let quorum = (typeof pending.quorum === 'number') ? pending.quorum : this._getQuorum();
         if (this._countedVotes(pending, pending.prepares) >= quorum && !pending._commitSent) {
             pending._commitSent = true;
-            pending.commits.add(this.peerManager.validatorAddr);
+            let selfPkOnCommit = this._selfPubkey();
+            if (selfPkOnCommit) pending.commits.add(selfPkOnCommit);
 
             this.peerManager.broadcast(XCHAIN_ATTEST_COMMIT, {
                 attestationId:  attestationId,
