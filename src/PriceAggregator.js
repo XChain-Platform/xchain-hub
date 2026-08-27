@@ -38,6 +38,7 @@ const priceSigTally     = require('./price_sig_tally_activation.js');
 const swq               = require('./stake_weighted_quorum.js');
 const { PRICE_MAX, PRICE_V1_COINS, PRICE_V1_FIATS,
         MAX_TICK_LENGTH, MAX_MEMO_LENGTH, MAX_SOURCE_ADDRESS_LENGTH } = require('./constants.js');
+const { PRICE_V2_MAX_ROUND_COUNT } = require('./price_v2_compression.js');
 const { bcgt }          = require('./bcmath.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { normalizeRetractionBounds } = require('./lib/retraction_bounds.js');
@@ -190,6 +191,55 @@ class PriceAggregator extends EventEmitter {
         if (eq.isEquivHeaderActive(btcBlockHeight, this.hub && this.hub.network))
             return eq.buildEquivCanonical(eq.ENGINE_TAGS.ORACLE, parseInt(btcBlockHeight), 0, raw);
         return raw;
+    }
+
+    // Build the canonical signable payload for a PRICE v2 batch: ONE signature set over
+    // several rounds. MUST match xchain-indexer/src/ed25519.js buildPriceV2Payload and
+    // OracleConsensus._buildPriceV2Payload byte for byte; validators signed these bytes,
+    // so any divergence here rejects every legitimate batch.
+    //
+    // `rounds` is [{ round, timestamp, btcBlockHeight, pairs }] and each `pairs` entry is
+    // { pair | coinPair, price }. The builder sorts the rounds ascending and normalizes
+    // each round's pairs itself rather than requiring sorted input, so no caller of the
+    // three twins can get the ordering contract subtly wrong.
+    //
+    // The EQUIV header is UNCONDITIONAL here, unlike _buildPriceV0Payload's height gate.
+    // v0 gates because it has pre-flag-day history whose bytes may not move; v2 has none
+    // (it is invalid below its own PRICE_BATCH_ACTIVATION, and every network where it can
+    // be active already has EQUIV active). The unwrapped bare-JSON form is also the exact
+    // shape that breaks SLASH's "an ORACLE-tagged canonical always carries `round`"
+    // invariant, which is why v2 carries its own engine tag. Do NOT "fix" this into a
+    // v0-style gate.
+    _buildPriceV2Payload(firstRound, lastRound, btcBlockHeight, rounds) {
+        let sortedRounds = [...rounds]
+            .sort((a, b) => parseInt(a.round) - parseInt(b.round))
+            .map(r => {
+                let pairs = r.pairs.map(p => ({ pair: p.coinPair || p.pair, price: String(p.price) }));
+                let sortedPairs = [...pairs].sort((a, b) => {
+                    if (a.pair < b.pair) return -1;
+                    if (a.pair > b.pair) return 1;
+                    return 0;
+                });
+                return {
+                    round:            parseInt(r.round),
+                    timestamp:        parseInt(r.timestamp),
+                    btc_block_height: parseInt(r.btcBlockHeight),
+                    pairs:            sortedPairs
+                };
+            });
+        let raw = JSON.stringify({
+            first_round:      parseInt(firstRound),
+            last_round:       parseInt(lastRound),
+            btc_block_height: parseInt(btcBlockHeight),
+            rounds:           sortedRounds
+        });
+        // ROUND_ID carries the batch anchor AND the round window: two honest batches that
+        // split one window differently at the same anchor must not land on one equiv key,
+        // which would read as equivocation. XORACLEB has no view change → VIEW=0.
+        let roundId = String(parseInt(btcBlockHeight)) + '|' +
+                      String(parseInt(firstRound))     + '|' +
+                      String(parseInt(lastRound));
+        return eq.buildEquivCanonical(eq.ENGINE_TAGS.ORACLE_BATCH, roundId, 0, raw);
     }
 
     // The pusher's local validation is NOT trusted: before any row is stored
@@ -503,6 +553,333 @@ class PriceAggregator extends EventEmitter {
         return { accepted: true };
     }
 
+    // PRICE v2 (batch) ingest: ONE quorum signature set over a WINDOW of full-body
+    // rounds. Same posture as receiveValidatedRound (the pusher's local validation is
+    // never trusted; every signature is re-verified here against the canonical bytes
+    // the validators signed), with the two differences the batch shape forces:
+    //
+    //   - the signature set is verified ONCE, because it covers every round in the
+    //     window. A signature or structural failure therefore rejects the WHOLE batch,
+    //     exactly as it rejects a whole round in v0: a signed batch is atomic.
+    //   - dedupe is PER ROUND, not the whole-call early return receiveValidatedRound
+    //     uses. Overlapping and re-published batches are expected (leaders may split a
+    //     window differently, D25), so a whole-call return over one already-finalized
+    //     round would silently drop the five good rounds sharing the batch, and under
+    //     batching the batch is the SOLE carrier of those rounds for a chain-only node.
+    //
+    // Returns { accepted, stored, duplicates, rejected } (D13). `accepted` is true iff
+    // every round either stored or deduped; `reason` names the cause when it is not.
+    async receiveValidatedBatch(sourceChain, batchData) {
+        let roundCount = (batchData && Array.isArray(batchData.rounds)) ? batchData.rounds.length : 0;
+        // Whole-batch rejection: nothing stored, nothing deduped, every round refused.
+        let refuse = (reason) => ({ accepted: false, stored: 0, duplicates: 0, rejected: roundCount, reason });
+
+        if (!batchData || !Array.isArray(batchData.rounds) || batchData.rounds.length < 1) {
+            return refuse('invalid batchData');
+        }
+        // DoS bound, mirroring the wire parser's own (D15): the round count rides in
+        // from an external pusher and every round below costs a dedupe SELECT plus an
+        // INSERT. The wire ceiling already makes a larger batch physically impossible.
+        if (batchData.rounds.length > PRICE_V2_MAX_ROUND_COUNT) {
+            return refuse('too many rounds');
+        }
+
+        let firstRound = parseInt(batchData.first_round);
+        let lastRound  = parseInt(batchData.last_round);
+        if (!Number.isFinite(firstRound) || firstRound < 0 ||
+            !Number.isFinite(lastRound)  || lastRound  < 0 || firstRound > lastRound) {
+            return refuse('invalid round window');
+        }
+
+        // The BATCH anchor: part of the signed canonical, and the height every oracle
+        // flag day below resolves on (§5.5). Distinct from each round's own anchor.
+        let btcBlockHeight = parseInt(batchData.btc_block_height);
+        if (!Number.isFinite(btcBlockHeight) || btcBlockHeight < 0) {
+            return refuse('invalid btc_block_height');
+        }
+
+        // block_index anchors both the validator snapshot the signatures are checked
+        // against and the stored reference_block (D8); verification is impossible
+        // without it.
+        let referenceBlock = parseInt(batchData.block_index);
+        if (!Number.isFinite(referenceBlock) || referenceBlock < 0) {
+            return refuse('invalid block_index');
+        }
+
+        // block_time is the landing block's own clock, and it is why the batch push
+        // carries a field the v0 push does not (D14). The pair-name flag day is keyed
+        // on it below; digits-only and inside the safe-integer range, on the same
+        // reasoning receiveOraclePrice records for its own block_time gate (parseInt
+        // rounds silently past 2^53, and a coerced 0 would read as "before every flag
+        // day" on a genesis-on network).
+        if (!/^[0-9]+$/.test(String(batchData.block_time)) ||
+            !Number.isSafeInteger(Number(batchData.block_time)) ||
+            Number(batchData.block_time) <= 0) {
+            return refuse('invalid block_time');
+        }
+        let blockTime = parseInt(batchData.block_time, 10);
+
+        // THE PAIR-NAME FLAG DAY IS KEYED ON THE BATCH'S block_time, NOT on each
+        // round's own timestamp as v0 keys it (D14). v0 has no block time in its push
+        // payload and accepts the resulting skew because it is one-sided and small: a
+        // round is stamped, then mined, so block_time >= timestamp and the hub can only
+        // activate LATER than the chain (one round of carry-forward, self-healing). A
+        // batch widens that skew from ~10 minutes to ~70, so arming this gate and
+        // PRICE_BATCH_ACTIVATION in one pass would have the hub refuse a whole HOUR the
+        // chain accepted. Carrying block_time and keying on it is the clean fix the
+        // comment in receiveValidatedRound already names. One pattern for the whole
+        // batch, because every round in it landed in the same block.
+        let pairPattern = pricePair.pricePairPattern(blockTime, this.hub && this.hub.network);
+
+        // Per-round structure. Rounds must be strictly ascending, unique and inside the
+        // declared window (D16); the window is validated for shape, deliberately NOT
+        // against the publisher's window-size knob, so validation stays range-agnostic.
+        let rounds  = [];
+        let prev    = null;
+        for (let r of batchData.rounds) {
+            if (!r || !Array.isArray(r.pairs) || r.pairs.length < 1) return refuse('invalid rounds');
+            let round = parseInt(r.round);
+            if (!Number.isFinite(round) || round < 0)               return refuse('invalid rounds');
+            if (round < firstRound || round > lastRound)            return refuse('round outside window');
+            if (prev !== null && round <= prev)                     return refuse('rounds not strictly ascending');
+            prev = round;
+
+            let timestamp = parseInt(r.timestamp);
+            if (!Number.isFinite(timestamp) || timestamp < 0)       return refuse('invalid round timestamp');
+            let roundAnchor = parseInt(r.btc_block_height);
+            if (!Number.isFinite(roundAnchor) || roundAnchor < 0)   return refuse('invalid round btc_block_height');
+
+            // Identical pair rules to v0 (wire-format parity, PRICE_MAX ceiling and the
+            // positive lower bound), so a batch cannot smuggle past ingest a pair a
+            // single-round push would be refused for.
+            for (let p of r.pairs) {
+                if (!p || typeof p.pair !== 'string' || !pairPattern.test(p.pair) ||
+                    p.price === undefined || p.price === null || !/^[0-9]+(\.[0-9]+)?$/.test(String(p.price)) ||
+                    !(parseFloat(String(p.price)) > 0) ||
+                    !(parseFloat(String(p.price)) < PRICE_MAX)) {
+                    return refuse('invalid pairs');
+                }
+            }
+            rounds.push({ round, timestamp, btcBlockHeight: roundAnchor, pairs: r.pairs });
+        }
+
+        let network = this.hub && this.hub.network;
+
+        // STRADDLE RULE (D7 / §5.4): a batch resolves the oracle flag days ONCE, on the
+        // batch anchor, so a window whose first and last rounds sit on opposite sides of
+        // an armed gate would judge its earlier rounds under the later rule. Such a batch
+        // is invalid on-chain and the publisher never assembles one; refusing it here
+        // keeps the hub from storing rounds the chain rejected.
+        let firstAnchor = rounds[0].btcBlockHeight;
+        let lastAnchor  = rounds[rounds.length - 1].btcBlockHeight;
+        if (priceSigTally.isPriceSigTallyVerifyFirstActive(firstAnchor, network) !==
+            priceSigTally.isPriceSigTallyVerifyFirstActive(lastAnchor, network) ||
+            swq.isStakeWeightedQuorumActive(firstAnchor, network) !==
+            swq.isStakeWeightedQuorumActive(lastAnchor, network)) {
+            return refuse('batch straddles an oracle flag day');
+        }
+
+        // Structural sig validation: [{ pubkey: 64-hex, sig: 128-hex }, ...]
+        if (!Array.isArray(batchData.sigs) || batchData.sigs.length < 1) {
+            return refuse('invalid sigs');
+        }
+        let sigs = [];
+        for (let s of batchData.sigs) {
+            if (!s || typeof s.pubkey !== 'string' || typeof s.sig !== 'string' ||
+                !/^[0-9a-fA-F]{64}$/.test(s.pubkey) || !/^[0-9a-fA-F]{128}$/.test(s.sig)) {
+                return refuse('invalid sigs');
+            }
+            sigs.push({ pubkey: s.pubkey.toLowerCase(), sig: s.sig.toLowerCase() });
+        }
+
+        // Source-chain reorg fence (item 5308 / HUB-RETRACT-4), same as the v0 path: a
+        // batch push that arrives after its source action was rolled back and retracted
+        // carries the pre-reorg generation and is dropped; the re-published canonical
+        // batch carries a higher one. Checked before any verification work.
+        let sourceActionIndex = batchData.action_index === undefined || batchData.action_index === null
+            ? null : batchData.action_index;
+        let pushGeneration = parseInt(batchData.push_generation);
+        if (!Number.isFinite(pushGeneration) || pushGeneration < 0) pushGeneration = 0;
+        let batchActionIndex = parseInt(sourceActionIndex);
+        if (Number.isFinite(batchActionIndex)) {
+            let wm = await this.db.getPriceIngestWatermark(sourceChain || '');
+            if (wm && pushGeneration <= wm.retraction_generation && batchActionIndex >= wm.from_action_index) {
+                // Never silent: a rebuilt indexer trips this fence on every push.
+                this._warnIngestFenceRejection(sourceChain, 'PRICE v2 batch', pushGeneration, batchActionIndex, wm);
+                return refuse('stale (retracted generation)');
+            }
+        }
+
+        // Both quorum gates resolve on the BATCH anchor, which is what the indexer twin
+        // keys on for a v2 action, and the straddle rule above is what makes one
+        // resolution sound for every round in the window. The validator snapshot itself
+        // (weights and count) still comes from referenceBlock, exactly as v0 resolves it.
+        let weighted = swq.isStakeWeightedQuorumActive(btcBlockHeight, network);
+
+        let capSnap  = this.hub.capabilitySnapshot;
+        let snapshot = null;
+        if (capSnap) {
+            snapshot = weighted
+                ? (typeof capSnap.getWeightSnapshot === 'function'
+                    ? await capSnap.getWeightSnapshot('price', referenceBlock)
+                    : null)
+                : await capSnap.getSnapshot('price', referenceBlock);
+        }
+        // Fail closed: without the snapshot the sigs cannot be checked against the
+        // qualified set, so the batch is refused rather than stored on trust.
+        if (!snapshot || !Array.isArray(snapshot.validators)) {
+            return refuse('validator snapshot unavailable');
+        }
+        // SWQ-TRUNC parity (see receiveValidatedRound): a truncated weight snapshot
+        // under-counts total stake, so the strict 2/3 bar could pass a batch the full
+        // set would refuse.
+        if (weighted && snapshot.truncated === true) {
+            return refuse('validator snapshot truncated');
+        }
+
+        // ONE verification pass over the batch canonical. _buildPriceV2Payload is the
+        // byte-for-byte twin of the indexer's and OracleConsensus's builders; never
+        // inline the JSON here, or the three copies drift and every honest batch fails.
+        let payload      = this._buildPriceV2Payload(firstRound, lastRound, btcBlockHeight, rounds);
+        let qualified    = new Set(snapshot.validators.map(v => String(v.pubkey).toLowerCase()));
+        let seenPubkey   = new Set();
+        let verifiedSigs = [];
+        let verifyFirst  = priceSigTally.isPriceSigTallyVerifyFirstActive(btcBlockHeight, network);
+
+        for (let s of sigs) {
+            if (seenPubkey.has(s.pubkey)) continue;        // duplicate pubkey counts once
+            if (!verifyFirst) seenPubkey.add(s.pubkey);
+            if (!qualified.has(s.pubkey)) continue;        // not price-qualified at this block
+            if (!ValidatorIdentity.verify(payload, s.sig, s.pubkey)) continue;
+            if (verifyFirst) seenPubkey.add(s.pubkey);
+            verifiedSigs.push(s);
+        }
+
+        if (weighted) {
+            if (!swq.meetsStakeThreshold(snapshot.validators, verifiedSigs.map(s => s.pubkey))) {
+                return refuse('insufficient signer stake (' + verifiedSigs.length + ' verified signers)');
+            }
+        } else {
+            let setSize = Number.isFinite(parseInt(snapshot.count)) ? parseInt(snapshot.count) : snapshot.validators.length;
+            let quorum  = bftQuorumOrSingle(setSize, 1);   // majority-floored BFT quorum
+            if (verifiedSigs.length < quorum) {
+                return refuse('insufficient quorum (' + verifiedSigs.length + '/' + quorum + ')');
+            }
+        }
+
+        // Batch consensus proof (D23). Key order is PINNED: the acceptance test compares
+        // this serialized value across a replaying node and a live one, so a reordering
+        // here would read as a mismatch even with identical content. The `batch` object
+        // is also what tells a batch-sourced row from a v0-sourced one, whose proof is a
+        // bare signature ARRAY; retractFromActionIndex relies on that.
+        let proofJson = JSON.stringify({
+            batch: {
+                first_round:      firstRound,
+                last_round:       lastRound,
+                btc_block_height: btcBlockHeight
+            },
+            sigs: verifiedSigs
+        });
+        let validatorCount = verifiedSigs.length;
+        let createdAt = new Date();
+
+        let stored = 0, duplicates = 0;
+        for (let r of rounds) {
+            // PER-ROUND dedupe (D13). A non-'skipped' row for this round_number means the
+            // round is already finalized, from a v0 push, an earlier overlapping batch or a
+            // failover double-publish; that round is a duplicate and the REST of the batch
+            // still lands. 'skipped' placeholder rows are not duplicates and are overwritten
+            // by the upsert below, exactly as on the v0 path.
+            let existing = await this.db.doQuery(
+                "SELECT id FROM price_snapshots WHERE round_number = ? AND status != 'skipped' LIMIT 1",
+                [r.round]
+            );
+            if (existing && existing.length > 0) {
+                duplicates++;
+                continue;
+            }
+
+            // Column semantics pinned so a v2-sourced row is indistinguishable from a
+            // v0-sourced one (§5.7): block_timestamp is the ROUND's own timestamp (the
+            // field the fee path reads), and reference_block is the PUSH's block_index,
+            // the landing block on the landing chain (D8), NOT the round's BTC anchor.
+            // Two consensus readers read reference_block, so a v2 row that differed here
+            // would fork them.
+            let insertedRows = [];
+            let placeholders = r.pairs.map(() => "(?, ?, ?, ?, ?, ?, ?, 1, ?, 'finalized', ?, ?, ?, ?)").join(', ');
+            let params = [];
+            for (let p of r.pairs) {
+                params.push(r.round, p.pair, p.price, referenceBlock, sourceChain || null, r.timestamp,
+                            validatorCount, proofJson, sourceChain || null, sourceActionIndex, pushGeneration, createdAt);
+                insertedRows.push({
+                    round_number:        r.round,
+                    coin_pair:           p.pair,
+                    price:               p.price,
+                    reference_block:     referenceBlock,
+                    reference_chain:     sourceChain || null,
+                    block_timestamp:     r.timestamp,
+                    validator_count:     validatorCount,
+                    consensus_round:     1,
+                    consensus_proof:     proofJson,
+                    status:              'finalized',
+                    source_chain:        sourceChain || null,
+                    source_action_index: sourceActionIndex,
+                    push_generation:     pushGeneration,
+                    created_at:          createdAt
+                });
+            }
+            // ONE multi-row INSERT PER ROUND, not one for the whole batch: the hub
+            // Database has no transaction API, so a single statement is the atomicity
+            // tool, and the unit that must never be observed torn is the round (a
+            // getfeequote reader must not see some pairs of round N beside others of
+            // round N-1). Across rounds a partial batch is fine, because each stored
+            // round is independently complete and the rest arrive on the next attempt.
+            let query = `INSERT INTO price_snapshots
+                (round_number, coin_pair, price, reference_block, reference_chain, block_timestamp,
+                 validator_count, consensus_round, consensus_proof, status, source_chain, source_action_index,
+                 push_generation, created_at)
+                VALUES ${placeholders}
+                ON DUPLICATE KEY UPDATE
+                    price = VALUES(price), reference_block = VALUES(reference_block),
+                    reference_chain = VALUES(reference_chain), block_timestamp = VALUES(block_timestamp),
+                    validator_count = VALUES(validator_count), consensus_proof = VALUES(consensus_proof),
+                    status = 'finalized', source_chain = VALUES(source_chain),
+                    source_action_index = VALUES(source_action_index),
+                    push_generation = VALUES(push_generation)`;
+            try {
+                await this.db.doQuery(query, params);
+            } catch (err) {
+                console.error('PriceAggregator: error inserting batch round ' + r.round + ':', err);
+                return {
+                    accepted: false, stored, duplicates,
+                    rejected: rounds.length - stored - duplicates,
+                    reason: 'db error'
+                };
+            }
+
+            // Re-emit on the WS mirror stream exactly as v0-stored rows do, or a
+            // replaying node's mirror never fills and its price barrier never opens.
+            for (let row of insertedRows) {
+                this.emit('row:inserted', { table: 'price_snapshots', row: row });
+            }
+            stored++;
+
+            // Diagnostics only, and guarded: the round is already stored and must never
+            // be flipped to rejected by a coverage warning (item 5335).
+            try {
+                this._checkIngestPairCoverage(sourceChain, r.round, r.pairs);
+            } catch (e) {
+                console.warn('PriceAggregator: pair-coverage check failed for round ' + r.round + ':', e.message);
+            }
+        }
+
+        console.log('PriceAggregator: accepted batch [' + firstRound + '..' + lastRound + '] from '
+            + (sourceChain || 'unknown') + ' (' + stored + ' stored, ' + duplicates + ' duplicate round(s), '
+            + validatorCount + ' sigs)');
+
+        return { accepted: true, stored, duplicates, rejected: 0 };
+    }
+
     async receiveOraclePrice(sourceChain, priceData) {
         if (!priceData || !priceData.source_address || !priceData.coin || !priceData.tick || !priceData.fiat || !priceData.value) {
             return { accepted: false, reason: 'invalid priceData' };
@@ -725,6 +1102,37 @@ class PriceAggregator extends EventEmitter {
 
         // price_snapshots tracks the PRICE v0 round action via source_action_index
         let snapQ = buildArgs('source_action_index');
+
+        // D28: the rounds a retracted BATCH carried, read BEFORE the DELETE because
+        // afterwards there is nothing left to read them off. Batch-sourced rows are the
+        // ones whose consensus_proof is the {"batch":...} object of D23; a v0-sourced
+        // row's proof is a bare signature ARRAY, so the prefix is an exact discriminator
+        // and v0 retraction behaviour is untouched. Only worth a query when a publisher
+        // exposing the clear seam is actually wired: on a mirror hub the answer has no
+        // consumer, so the retraction path stays a two-statement path there.
+        let publisher = this.hub && this.hub.oraclePublisher;
+        let canClearMarkers = !!(publisher && typeof publisher.clearPublishedMarkers === 'function');
+        if (publisher && !canClearMarkers) {
+            console.warn('PriceAggregator: OraclePublisher is wired but exposes no clearPublishedMarkers(rounds);'
+                + ' a retracted PRICE v2 batch will stay marked as published and the at-most-once guard will'
+                + ' suppress the recovery re-publish, costing an hour of price history rather than a round.');
+        }
+        let batchRounds = [];
+        if (canClearMarkers) {
+            try {
+                let rows = await this.db.doQuery(
+                    'SELECT DISTINCT round_number FROM price_snapshots WHERE ' + snapQ.where
+                        + " AND consensus_proof LIKE '{\"batch\":%'",
+                    snapQ.args);
+                for (let row of (rows || [])) {
+                    let n = parseInt(row.round_number);
+                    if (Number.isFinite(n)) batchRounds.push(n);
+                }
+            } catch (e) {
+                console.error('PriceAggregator: could not read the retracted batch rounds for ' + sourceChain + ':', e && e.message);
+            }
+        }
+
         let snapResult = await this.db.doQuery('DELETE FROM price_snapshots WHERE ' + snapQ.where, snapQ.args);
         // oracle_prices tracks the PRICE v1 oracle action via action_index
         let oracleQ = buildArgs('action_index');
@@ -761,6 +1169,21 @@ class PriceAggregator extends EventEmitter {
                 await this.db.bumpPriceIngestWatermark(sourceChain, gen, from);
             } catch (e) {
                 console.error('PriceAggregator: ingest-watermark bump failed for ' + sourceChain + ':', e && e.message);
+            }
+        }
+
+        // D28: clear the publisher's durable at-most-once marker for every round the
+        // retracted batch carried. Without this the marker outlives the rows it stands
+        // for, the at-most-once guard suppresses the re-publish that recovery needs, and
+        // the reorg costs an HOUR of price history instead of a round. Guarded because a
+        // publisher failure must never turn a completed retraction into an error return:
+        // the rows are already gone.
+        if (canClearMarkers && snapDeleted > 0 && batchRounds.length > 0) {
+            try {
+                await publisher.clearPublishedMarkers(batchRounds);
+            } catch (e) {
+                console.error('PriceAggregator: clearing published markers for retracted batch rounds '
+                    + batchRounds.join(',') + ' failed:', e && e.message);
             }
         }
 

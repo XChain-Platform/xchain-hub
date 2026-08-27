@@ -124,7 +124,7 @@ for(const net of coins.NETWORKS) COIN_CONSENSUS_HASHES[net] = coins.consensusHas
 const WRITE_METHODS  = new Set([
     'updateconfig', 'registervalidator', 'rotatevalidator', 'deregistervalidator', 'syncvalidators',
     'propose', 'proposeslashpenalty', 'vote', 'requestattestation', 'reportreorg', 'initiateswap',
-    'pushchaintip', 'pushpriceround', 'pushoracleprice', 'pushpricereorg', 'pushxcallreorg',
+    'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushoracleprice', 'pushpricereorg', 'pushxcallreorg',
     'pushdexreorg', 'anchorflush', 'pauseeffectorspend', 'resumeeffectorspend'
 ]);
 
@@ -136,6 +136,12 @@ const WRITE_METHODS  = new Set([
 // bulk-key compromise cannot fabricate retractions. Unset = legacy behavior
 // (bulk-key gated), rolling-deploy safe. Full fix (2f+1 co-signed retractions)
 // rides the shared flag-day set.
+//
+// pushpricebatch (PRICE v2, spec section 5.7 / decision D22) is deliberately
+// NOT in this set: it is a FORWARD write that delivers new signed rounds, the
+// same role pushpriceround already plays outside the retraction tier. Its own
+// retraction path is pushpricereorg below; a batch push carries no
+// destructive row:deleted broadcast of its own.
 const REORG_WRITE_METHODS = new Set(['pushpricereorg', 'pushxcallreorg', 'pushdexreorg']);
 const HUB_REORG_API_KEY   = process.env.HUB_REORG_API_KEY || '';
 
@@ -739,6 +745,43 @@ async function startApi(){
                 return result;
             } catch (err) {
                 return {error: err.message || "error processing price round"};
+            }
+        },
+
+        // PRICE v2 batch counterpart to pushpriceround (spec section 5.7): one signed
+        // action carries every finalized round in an hourly window as rounds[], keyed
+        // by the batch's own first_round/last_round/btc_block_height rather than a
+        // single round. block_time is new (not on pushpriceround): the hub's
+        // pair-name flag day keys per round on that round's TIMESTAMP, and batching
+        // widens the hub/chain clock skew from ~10 min to ~70 min, so the push must
+        // carry the landing chain's own clock for that gate to resolve correctly.
+        // Indexer has already verified the batch's PBFT signatures locally; the hub
+        // re-verifies once via receiveValidatedBatch, then dedupes per round.
+        async pushpricebatch({source_chain, first_round, last_round, btc_block_height, rounds, block_time, sigs, action_index, block_index, push_generation}){
+            if(!source_chain) return {error: "source_chain is required"};
+            let chainErr = validateChain(source_chain);
+            if (chainErr) return chainErr;
+            if(first_round === undefined || first_round === null) return {error: "first_round is required"};
+            if(last_round === undefined || last_round === null) return {error: "last_round is required"};
+            if(!Array.isArray(rounds)) return {error: "rounds must be an array"};
+            if(!hub.priceAggregator) return {error: "price aggregator not ready"};
+            try {
+                let result = await hub.priceAggregator.receiveValidatedBatch(source_chain, {
+                    first_round:      first_round,
+                    last_round:       last_round,
+                    btc_block_height: btc_block_height,
+                    rounds:           rounds,
+                    block_time:       block_time,
+                    sigs:         sigs,
+                    action_index: action_index,
+                    block_index:  block_index,
+                    // HUB-RETRACT-4 precedent (pushpriceround above): forward the
+                    // source rollback generation so the reorg fence is not inert.
+                    push_generation: push_generation
+                });
+                return result;
+            } catch (err) {
+                return {error: err.message || "error processing price batch"};
             }
         },
 
