@@ -24,6 +24,7 @@ const sinon             = require('sinon');
 const { expect }        = require('chai');
 const PriceAggregator   = require('../../src/PriceAggregator');
 const { createMockHub } = require('../helpers/mockHub');
+const { CANONICAL_REORG_BUFFER } = require('../../src/snapshot_reorg_buffer.js');
 
 // Generate a real Ed25519 validator keypair: { pubkey (64-hex), sign(payload) -> 128-hex }
 function makeValidator() {
@@ -517,6 +518,130 @@ describe('PriceAggregator.receiveValidatedBatch()', function () {
         };
         let r2 = await agg.receiveValidatedBatch('BTC', makeBatch());
         expect(r2.reason).to.equal('validator snapshot truncated');
+    });
+
+    // ---- The validator snapshot resolves on the BATCH'S SIGNED BTC ANCHOR ----
+    //
+    // Capability staking is Bitcoin-only, so the qualifying set is BTC-anchored for
+    // every chain: the hub asks the BTC indexer at a BTC height, and the indexer twin
+    // reads the mirrored capability_snapshots whose snapshot_block IS a BTC height.
+    // Resolving on the landing block instead made the hub agree with the chain only on
+    // Bitcoin, where the two heights are the same number. Measured on a live Dogecoin
+    // regtest federation: three of three batches validated on chain, all three refused
+    // here as 'validator snapshot unavailable', and not one round rebuilt.
+    //
+    // A resolver keyed on a BTC height, exactly as the real CapabilitySnapshot is: it
+    // answers only for the batch anchor and refuses anything else, so a landing-chain
+    // height gets the null the live hub got.
+    function btcKeyedSnapshotResolver(anchor, validators) {
+        return sinon.stub().callsFake(async (capability, blockIndex) => {
+            if (capability !== 'price' || Number(blockIndex) !== anchor) return null;
+            return { ...snapshotOf(validators), blockIndex: anchor };
+        });
+    }
+
+    // A Dogecoin landing height, of the order the live run measured: far above the BTC
+    // regtest tip and naming no BTC block at all.
+    const DOGE_LANDING_BLOCK = 2784;
+
+    it('resolves the snapshot at the signed BTC anchor, so an off-Bitcoin batch is ACCEPTED', async function () {
+        let inserts = stubDb([]);
+        let getSnapshot = btcKeyedSnapshotResolver(BATCH_ANCHOR, V);
+        hub.capabilitySnapshot = { getSnapshot };
+
+        let result = await agg.receiveValidatedBatch('DOGE', makeBatch({ block_index: DOGE_LANDING_BLOCK }));
+
+        expect(result).to.deep.equal({ accepted: true, stored: 6, duplicates: 0, rejected: 0 });
+        expect(getSnapshot.calledOnceWithExactly('price', BATCH_ANCHOR)).to.equal(true);
+        // The landing height is never handed to the resolver: it is not a BTC height.
+        expect(getSnapshot.calledWith('price', DOGE_LANDING_BLOCK)).to.equal(false);
+
+        // reference_block still records the LANDING block (D8). The anchor keys the
+        // validator set; it does not change what the row says the batch landed on.
+        expect(inserts.length).to.equal(6);
+        expect(decodeInsert(inserts[0])[0].reference_block).to.equal(DOGE_LANDING_BLOCK);
+    });
+
+    it('resolves the stake-weighted snapshot at the same anchor, so the two reads name ONE validator set', async function () {
+        // The weight read and the membership read must key alike, or the tally is drawn
+        // from one set and the threshold computed from another.
+        hub.network = 'regtest';                       // stake-weighted quorum active at genesis
+        stubDb([]);
+        let getWeightSnapshot = sinon.stub().callsFake(async (capability, blockIndex) => {
+            if (capability !== 'price' || Number(blockIndex) !== BATCH_ANCHOR) return null;
+            return {
+                capability: 'price',
+                blockIndex: BATCH_ANCHOR,
+                count:      V.length,
+                validators: V.map((v, i) => ({ pubkey: v.pubkey, source: 'src' + i, weight: '100000' }))
+            };
+        });
+        hub.capabilitySnapshot = { getWeightSnapshot };
+
+        let result = await agg.receiveValidatedBatch('DOGE', makeBatch({ block_index: DOGE_LANDING_BLOCK }));
+
+        expect(result).to.deep.equal({ accepted: true, stored: 6, duplicates: 0, rejected: 0 });
+        expect(getWeightSnapshot.calledOnceWithExactly('price', BATCH_ANCHOR)).to.equal(true);
+    });
+
+    it('is a NO-OP on Bitcoin, where the landing block IS the BTC anchor', async function () {
+        // On Bitcoin the batch lands in the block its anchor names, so block_index and
+        // btc_block_height are the same number and the old key and the new key are the
+        // same read. Driven with a resolver that would refuse any other height.
+        let inserts = stubDb([]);
+        let getSnapshot = btcKeyedSnapshotResolver(BATCH_ANCHOR, V);
+        hub.capabilitySnapshot = { getSnapshot };
+
+        let result = await agg.receiveValidatedBatch('BTC', makeBatch({ block_index: BATCH_ANCHOR }));
+
+        expect(result).to.deep.equal({ accepted: true, stored: 6, duplicates: 0, rejected: 0 });
+        expect(getSnapshot.calledOnceWithExactly('price', BATCH_ANCHOR)).to.equal(true);
+        expect(decodeInsert(inserts[0])[0].reference_block).to.equal(BATCH_ANCHOR);
+    });
+
+    it('still FAILS CLOSED when the anchor resolves no snapshot, even with one at the landing block', async function () {
+        // The half that makes the change safe. The set is unresolvable at the anchor
+        // and perfectly resolvable at the landing height, and the batch is refused
+        // anyway: no fallback to a height that names a different chain's block, or a
+        // Byzantine pusher could pick a landing block whose set it controls.
+        let inserts = stubDb([]);
+        let getSnapshot = sinon.stub().callsFake(async (capability, blockIndex) => {
+            if (Number(blockIndex) === DOGE_LANDING_BLOCK) return snapshotOf(V);
+            return null;
+        });
+        hub.capabilitySnapshot = { getSnapshot };
+
+        let result = await agg.receiveValidatedBatch('DOGE', makeBatch({ block_index: DOGE_LANDING_BLOCK }));
+
+        expect(result).to.deep.equal({
+            accepted: false, stored: 0, duplicates: 0, rejected: 6,
+            reason: 'validator snapshot unavailable'
+        });
+        expect(inserts.length).to.equal(0);
+    });
+
+    it('buries a BTC height by the canonical reorg buffer, off Bitcoin as well as on it', async function () {
+        // CapabilitySnapshot subtracts CANONICAL_REORG_BUFFER before it resolves
+        // anything, because stake state at the tip is not reorg-safe. That subtraction
+        // only ever meant BTC confirmations; keyed on the landing block it was six
+        // Dogecoin blocks taken off a number that was never a BTC height. This resolver
+        // buries exactly as the real one does and holds the set at BTC heights only, so
+        // it answers for the buried anchor and for nothing derived from the landing block.
+        let inserts = stubDb([]);
+        let buriedAsked = [];
+        let getSnapshot = sinon.stub().callsFake(async (capability, blockIndex) => {
+            let buried = Math.max(0, Number(blockIndex) - CANONICAL_REORG_BUFFER);
+            buriedAsked.push(buried);
+            if (buried !== BATCH_ANCHOR - CANONICAL_REORG_BUFFER) return null;
+            return { ...snapshotOf(V), blockIndex: buried };
+        });
+        hub.capabilitySnapshot = { getSnapshot };
+
+        let result = await agg.receiveValidatedBatch('DOGE', makeBatch({ block_index: DOGE_LANDING_BLOCK }));
+
+        expect(result).to.deep.equal({ accepted: true, stored: 6, duplicates: 0, rejected: 0 });
+        expect(buriedAsked).to.deep.equal([BATCH_ANCHOR - CANONICAL_REORG_BUFFER]);
+        expect(inserts.length).to.equal(6);
     });
 });
 

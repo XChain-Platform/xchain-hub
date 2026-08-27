@@ -598,9 +598,9 @@ class PriceAggregator extends EventEmitter {
             return refuse('invalid btc_block_height');
         }
 
-        // block_index anchors both the validator snapshot the signatures are checked
-        // against and the stored reference_block (D8); verification is impossible
-        // without it.
+        // block_index is the LANDING block on the landing chain, and it is what the
+        // stored reference_block records (D8). It is NOT what the validator snapshot
+        // resolves on; see the snapshot read below.
         let referenceBlock = parseInt(batchData.block_index);
         if (!Number.isFinite(referenceBlock) || referenceBlock < 0) {
             return refuse('invalid block_index');
@@ -722,19 +722,35 @@ class PriceAggregator extends EventEmitter {
         }
 
         // Both quorum gates resolve on the BATCH anchor, which is what the indexer twin
-        // keys on for a v2 action, and the straddle rule above is what makes one
-        // resolution sound for every round in the window. The validator snapshot itself
-        // (weights and count) still comes from referenceBlock, exactly as v0 resolves it.
+        // keys on for a batch action, and the straddle rule above is what makes one
+        // resolution sound for every round in the window.
         let weighted = swq.isStakeWeightedQuorumActive(btcBlockHeight, network);
 
+        // THE VALIDATOR SNAPSHOT RESOLVES ON THE BATCH'S SIGNED BTC ANCHOR, NOT ON THE
+        // LANDING BLOCK. Capability staking lives only on Bitcoin, so the qualifying set
+        // is BTC-anchored everywhere: the hub reads it from the BTC indexer at a BTC
+        // height, and the indexer twin reads the mirrored capability_snapshots whose
+        // snapshot_block IS a BTC height. Keying this on block_index made the two agree
+        // only on Bitcoin, where the landing block IS the BTC block. Off Bitcoin a
+        // Dogecoin or Litecoin height names no BTC block at all, the read resolved
+        // nothing, and every batch a four-validator federation signed and landed on
+        // chain was refused here as 'validator snapshot unavailable' while the chain
+        // had accepted it. A hub keyed differently from the chain silently drops an
+        // hour of rounds the chain finalized, and under batching this action is the
+        // sole carrier of those rounds.
+        //
+        // The reorg buffer CapabilitySnapshot subtracts before resolving keeps meaning
+        // what it always meant, and only now means it off Bitcoin too: it buries a BTC
+        // height by BTC confirmations, rather than subtracting six landing-chain blocks
+        // from a number that was never a BTC height.
         let capSnap  = this.hub.capabilitySnapshot;
         let snapshot = null;
         if (capSnap) {
             snapshot = weighted
                 ? (typeof capSnap.getWeightSnapshot === 'function'
-                    ? await capSnap.getWeightSnapshot('price', referenceBlock)
+                    ? await capSnap.getWeightSnapshot('price', btcBlockHeight)
                     : null)
-                : await capSnap.getSnapshot('price', referenceBlock);
+                : await capSnap.getSnapshot('price', btcBlockHeight);
         }
         // Fail closed: without the snapshot the sigs cannot be checked against the
         // qualified set, so the batch is refused rather than stored on trust.
