@@ -27,6 +27,7 @@ const Consensus          = require('./Consensus.js');
 const ValidatorIdentity  = require('./ValidatorIdentity.js');
 const OracleConsensus    = require('./OracleConsensus.js');
 const OracleRound        = require('./OracleRound.js');
+const OracleBatchSigner  = require('./OracleBatchSigner.js');
 const RewardTracker      = require('./RewardTracker.js');
 const SlashDetector      = require('./SlashDetector.js');
 const CrossChainEngine   = require('./CrossChainEngine.js');
@@ -97,6 +98,7 @@ class XChainHub {
         this.slashGovernance  = null;
         this.priceAggregator  = null;
         this.oraclePublisher  = null;
+        this.oracleBatchSigner = null;
         this.hubDbBroadcaster = null;
         this.capabilityRegistry      = null;
         this.capabilitySnapshot      = new CapabilitySnapshot(this);  // available pre-startCapabilities so consensus engines can use it from start()
@@ -299,6 +301,14 @@ class XChainHub {
 
         await this.oracleConsensus.start();
         await this.oracle.start();
+
+        // Produces the ONE quorum signature set a PRICE v2 batch's wire carries
+        // (spec section 6). Modeled on StateAnchorPublisher: peer-message wiring is
+        // a no-op with no peerManager, so construction never throws or blocks a
+        // standalone hub, and it must exist before oraclePublisher below, whose
+        // window scheduler calls collectBatchSignatures() on it.
+        this.oracleBatchSigner = new OracleBatchSigner(this);
+        await this.oracleBatchSigner.start();
 
         // Queues finalized rounds for DOGE publishing; inert until a transport is wired.
         this.oraclePublisher = new OraclePublisher(this);
@@ -1779,6 +1789,7 @@ class XChainHub {
         if(this.crossChainCalls)  await this.crossChainCalls.stop();
         if(this.crossChainDex)    await this.crossChainDex.stop();
         if(this.crossChain)       await this.crossChain.stop();
+        if(this.oracleBatchSigner) await this.oracleBatchSigner.stop();
         if(this.oracle)           await this.oracle.stop();
         if(this.oracleConsensus)  await this.oracleConsensus.stop();
         if(this.consensus)        await this.consensus.stop();

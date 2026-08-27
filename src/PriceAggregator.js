@@ -663,6 +663,17 @@ class PriceAggregator extends EventEmitter {
             rounds.push({ round, timestamp, btcBlockHeight: roundAnchor, pairs: r.pairs });
         }
 
+        // THE HEADER ANCHOR IS CONSTRAINED TO THE LAST ROUND'S OWN ANCHOR (§4), the twin
+        // of the indexer parser's structural check. Both quorum gates below resolve on
+        // this one value and the straddle rule inspects only the per-round anchors, so an
+        // unconstrained header would let a colluding signing quorum pick which consensus
+        // rule judges its own batch while every per-round anchor stayed honest. The rounds
+        // are strictly ascending by the loop above, so the last one carries the window's
+        // highest anchor. Checked BEFORE the gates read it, or it protects nothing.
+        if (btcBlockHeight !== rounds[rounds.length - 1].btcBlockHeight) {
+            return refuse('batch anchor does not match the last round');
+        }
+
         let network = this.hub && this.hub.network;
 
         // STRADDLE RULE (D7 / §5.4): a batch resolves the oracle flag days ONCE, on the

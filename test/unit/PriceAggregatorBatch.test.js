@@ -42,14 +42,16 @@ describe('PriceAggregator.receiveValidatedBatch()', function () {
 
     const FIRST_ROUND  = 100;
     const LAST_ROUND   = 105;
-    const BATCH_ANCHOR = 799100;      // the BATCH's BTC anchor: every flag day resolves on this
+    const BATCH_ANCHOR = 799005;      // the BATCH's BTC anchor: every flag day resolves on this
     const BLOCK_INDEX  = 800000;      // the LANDING block on the landing chain (D8)
     const ACTION_INDEX = 42;
     const BLOCK_TIME   = 1700004000;  // the landing block's own clock (D14)
 
     // Six full-body rounds, each with its own timestamp, its own BTC anchor and its
-    // own pairs. Round anchors are deliberately DIFFERENT from BATCH_ANCHOR so a test
-    // that confuses the two is visible.
+    // own pairs. BATCH_ANCHOR equals the LAST round's anchor because §4 requires it,
+    // and it stays different from the other five and from BLOCK_INDEX, so a test that
+    // confuses the batch anchor with a per-round anchor or with the landing block is
+    // still visible.
     function makeRounds() {
         let out = [];
         for (let i = 0; i < 6; i++) {
@@ -320,13 +322,126 @@ describe('PriceAggregator.receiveValidatedBatch()', function () {
         let rounds  = makeRounds();
         rounds[0].btc_block_height = 960999;          // below stake-weighted quorum
         rounds[5].btc_block_height = 961001;          // above it
-        let sigs = signBatch(rounds);
+        // The header anchor tracks the last round, so the straddle rule is what fires
+        // here rather than the anchor check that precedes it.
+        let sigs = signBatch(rounds, V.slice(0, 3), { btc_block_height: 961001 });
 
-        let result = await agg.receiveValidatedBatch('BTC', makeBatch({ rounds, sigs }));
+        let result = await agg.receiveValidatedBatch('BTC', makeBatch({ rounds, sigs, btc_block_height: 961001 }));
 
         expect(result.accepted).to.equal(false);
         expect(result.reason).to.match(/straddles/);
         expect(inserts.length).to.equal(0);
+    });
+
+    // ---- §4: the header anchor is constrained to the LAST round's own anchor ----
+
+    // THE ATTACK, driven end to end. Both quorum gates resolve on the header anchor
+    // and the straddle rule inspects only the per-round anchors, so an unconstrained
+    // header lets a colluding signing quorum choose WHICH consensus rule judges its
+    // own batch. Below, four validators hold wildly uneven stake: two of them are 2
+    // signatures short of the count quorum of 3, but carry ~99.999% of the stake, so
+    // the same batch is refused under the count rule and accepted under the
+    // stake-weighted one. The per-round anchors sit honestly below mainnet's
+    // stake-weighted gate (961000); only the HEADER claims to be above it.
+    const ATTACK_ROUND_ANCHOR = 960990;   // rounds 960990..960995, all below the gate
+    const ATTACK_HEADER       = 961500;   // the header alone claims the far side
+
+    function attackRounds() {
+        return makeRounds().map((r, i) => ({ ...r, btc_block_height: ATTACK_ROUND_ANCHOR + i }));
+    }
+
+    // A weight snapshot the two colluding signers dominate: 3*200000 > 2*200002.
+    function stakeSnapshotOf(validators) {
+        return {
+            capability: 'price',
+            blockIndex: BLOCK_INDEX,
+            count:      validators.length,
+            validators: validators.map((v, i) => ({
+                pubkey: v.pubkey, source: 'src' + i, weight: i < 2 ? '100000' : '1'
+            }))
+        };
+    }
+
+    it('refuses a batch whose header anchor is not the last round anchor, before either quorum gate resolves', async function () {
+        hub.network = 'mainnet';                      // stake-weighted 961000, sig-tally 963000
+        let inserts = stubDb([]);
+        let weightSnap = sinon.stub().resolves(stakeSnapshotOf(V));
+        hub.capabilitySnapshot = {
+            getSnapshot:       sinon.stub().resolves(snapshotOf(V)),
+            getWeightSnapshot: weightSnap
+        };
+
+        let rounds = attackRounds();
+        // Otherwise perfect: the quorum really signed this header, so nothing but the
+        // anchor rule can tell the batch apart from an honest one.
+        let sigs = signBatch(rounds, V.slice(0, 2), { btc_block_height: ATTACK_HEADER });
+
+        let result = await agg.receiveValidatedBatch('BTC', makeBatch({
+            rounds, sigs, btc_block_height: ATTACK_HEADER
+        }));
+
+        expect(result.accepted).to.equal(false);
+        expect(result.reason).to.equal('batch anchor does not match the last round');
+        expect(result.stored).to.equal(0);
+        expect(result.rejected).to.equal(6);
+        expect(inserts.length).to.equal(0);
+        // The check has to run BEFORE the gates or it protects nothing: no snapshot was
+        // ever fetched, so neither quorum rule was selected.
+        expect(weightSnap.called, 'the stake-weighted gate must never have resolved').to.equal(false);
+        expect(hub.capabilitySnapshot.getSnapshot.called).to.equal(false);
+    });
+
+    it('judges the SAME signature set under the honest count rule once the header is truthful', async function () {
+        // The control that makes the case above an attack rather than a typo: with the
+        // header pinned to the last round's own anchor, the batch resolves under the
+        // count rule its per-round anchors really sit under, and two of four signers is
+        // short of quorum. The lie was worth telling.
+        hub.network = 'mainnet';
+        let inserts = stubDb([]);
+        hub.capabilitySnapshot = {
+            getSnapshot:       sinon.stub().resolves(snapshotOf(V)),
+            getWeightSnapshot: sinon.stub().resolves(stakeSnapshotOf(V))
+        };
+
+        let rounds = attackRounds();
+        let honest = rounds[rounds.length - 1].btc_block_height;
+        let sigs   = signBatch(rounds, V.slice(0, 2), { btc_block_height: honest });
+
+        let result = await agg.receiveValidatedBatch('BTC', makeBatch({
+            rounds, sigs, btc_block_height: honest
+        }));
+
+        expect(result.accepted).to.equal(false);
+        expect(result.reason).to.equal('insufficient quorum (2/3)');
+        expect(inserts.length).to.equal(0);
+    });
+
+    it('accepts an honest batch whose header anchor equals the last round anchor', async function () {
+        let inserts = stubDb([]);
+        let rounds  = attackRounds();
+        let honest  = rounds[rounds.length - 1].btc_block_height;
+        let sigs    = signBatch(rounds, V.slice(0, 3), { btc_block_height: honest });
+
+        let result = await agg.receiveValidatedBatch('BTC', makeBatch({
+            rounds, sigs, btc_block_height: honest
+        }));
+
+        expect(result).to.deep.equal({ accepted: true, stored: 6, duplicates: 0, rejected: 0 });
+        expect(inserts.length).to.equal(6);
+    });
+
+    it('refuses a header anchor that is off by one in either direction', async function () {
+        // No tolerance: the rule is equality, so the nearest possible lie is refused.
+        stubDb([]);
+        let rounds = attackRounds();
+        let last   = rounds[rounds.length - 1].btc_block_height;
+        for (let header of [last - 1, last + 1]) {
+            let sigs   = signBatch(rounds, V.slice(0, 3), { btc_block_height: header });
+            let result = await agg.receiveValidatedBatch('BTC', makeBatch({
+                rounds, sigs, btc_block_height: header
+            }));
+            expect(result.reason, 'header ' + header).to.equal('batch anchor does not match the last round');
+        }
     });
 
     // ---- D14: the pair-name flag day keys on the batch's block_time ----
@@ -343,10 +458,11 @@ describe('PriceAggregator.receiveValidatedBatch()', function () {
             btc_block_height: 799000,                 // one side of every mainnet flag day
             pairs: [{ pair: 'XCHAIN/USD', price: '0.05' }]   // 6-character ticker, widened bound only
         }));
-        let sigs = signBatch(rounds, V.slice(0, 3), { btc_block_height: 799100 });
+        // Every round shares anchor 799000, so the header anchor is 799000 too (§4).
+        let sigs = signBatch(rounds, V.slice(0, 3), { btc_block_height: 799000 });
 
         let result = await agg.receiveValidatedBatch('BTC', makeBatch({
-            rounds, sigs, btc_block_height: 799100, block_time: 10000000000
+            rounds, sigs, btc_block_height: 799000, block_time: 10000000000
         }));
 
         expect(result).to.deep.equal({ accepted: true, stored: 6, duplicates: 0, rejected: 0 });
@@ -355,7 +471,7 @@ describe('PriceAggregator.receiveValidatedBatch()', function () {
         // Same batch, landing block BELOW the widening: the legacy 5-character bound
         // applies and the pair is refused.
         let below = await agg.receiveValidatedBatch('BTC', makeBatch({
-            rounds, sigs, btc_block_height: 799100, block_time: 1700004000
+            rounds, sigs, btc_block_height: 799000, block_time: 1700004000
         }));
         expect(below.accepted).to.equal(false);
         expect(below.reason).to.equal('invalid pairs');
