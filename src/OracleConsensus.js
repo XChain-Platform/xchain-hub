@@ -1006,7 +1006,15 @@ class OracleConsensus extends EventEmitter {
         // deviation reference only see qualified validators.
         let leader       = this._getLeader(round, memberPubkeys);
         let submissions  = this._filterSubmissionsToSnapshot(this.oracleRound.getSubmissions(round), memberPubkeys);
-        let isRealLeader = this._isLeaderIdentity(leader, envelope.sender, this._resolveSenderPubkey(envelope.sender));
+        // Identify the proposer by the key that PROVABLY signed this envelope
+        // (PeerManager verified it, and binds a registered sender to its
+        // registered key), not by a registry lookup on the sender addr. The
+        // registry is only a legacy fallback for unsigned envelopes: a hub with
+        // an empty registry (freshly staked, or a non-validator observer) would
+        // otherwise admit the leader's PROPOSE via the chain-effective set and
+        // then reject it as "non-leader" because it could not name its key.
+        let proposerPk   = provenPubkey(envelope) || this._resolveSenderPubkey(envelope.sender);
+        let isRealLeader = this._isLeaderIdentity(leader, envelope.sender, proposerPk);
         let isFallback   = false;
 
         if (!isRealLeader) {
