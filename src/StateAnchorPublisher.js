@@ -81,7 +81,7 @@ const SpendGuard        = require('./lib/spend_guard.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { resolveQuorumNetwork } = require('./lib/quorum_network.js');
 const { isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
-const { sumUtxosCoins } = require('./lib/utxo_balance.js');
+const { sumUtxosCoins, summarizeUtxoConfirmations } = require('./lib/utxo_balance.js');
 const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
 const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
@@ -255,6 +255,64 @@ class StateAnchorPublisher {
         // / _startArchiveRound), so rank-0 publishing keeps its interval and size
         // triggers and the federation still pays for one anchor per checkpoint.
         this.rankWakeMs = parseInt(process.env.ANCHOR_RANK_WAKE_MS || cfg.ANCHOR_RANK_WAKE_MS || '900000');  // 15 min
+        // Startup catch-up flush. The interval timer fires first after a FULL
+        // ANCHOR_INTERVAL_MS, and the rank wake runs failover-only, so a hub that was
+        // recreated more often than once per interval never ran a leader flush at
+        // all: the five testnet validators cut checkpoints every 6 BTC blocks for
+        // weeks and anchored none of them, with no log line saying so.
+        // One normal flush shortly after start closes that hole. It is idempotent
+        // by construction (a row already anchored carries anchor_txid, and a peer's
+        // anchor is stamped by the V0_DONE drain that runs first inside flush), so
+        // a rolling restart of the whole federation still pays for one anchor per
+        // checkpoint. The delay lets the signer hooks, the BTC tip and the DOGE
+        // balance source settle first; flush is fail-closed on all three anyway.
+        // 0 disables (tests, and operators who want the interval to be the only
+        // leader cadence); garbage or a negative value falls back to the default.
+        this.startupFlushMs = parseInt(process.env.ANCHOR_STARTUP_FLUSH_MS || cfg.ANCHOR_STARTUP_FLUSH_MS, 10);
+        if(!Number.isFinite(this.startupFlushMs) || this.startupFlushMs < 0) this.startupFlushMs = 60000;
+        this._startupTimer = null;
+        // CONFIRMED INPUTS ONLY, the same rule the PRICE rail adopted.
+        // Spending our own unconfirmed change chains every anchor onto the one
+        // before it. Dogecoin Core 1.14 miners score each transaction on its OWN
+        // fee rate, not the ancestor package, so a well-paid child never lifts a
+        // cheap or stuck parent: one anchor that does not mine then strands every
+        // anchor built on its change until an operator clears the mempool. Each
+        // anchor must stand alone and be judged on its own rate; the encoder's
+        // package uplift stays as the safety net on chains that do score by package.
+        // The escape hatch is for venues that mine on demand (regtest), where
+        // chaining costs nothing and waiting for a confirmation would stall a harness.
+        // Archive CHUNKS are the one designed exception: they descend from the head
+        // on purpose and are always allowed to spend it (see _publishArchive).
+        this.allowUnconfirmedInputs =
+            String(process.env.ANCHOR_PUBLISH_ALLOW_UNCONFIRMED_INPUTS ||
+                   cfg.ANCHOR_PUBLISH_ALLOW_UNCONFIRMED_INPUTS || 'false') === 'true';
+        // Set by a flush that had to stand down for want of a confirmed input while
+        // it (probably) led a pending row. The next rank wake then runs a NORMAL
+        // flush instead of failover-only, so the deferral costs one wake period
+        // (15 min) rather than one ANCHOR_INTERVAL_MS (24 h). Cleared at the start
+        // of every normal flush; re-set only by another deferral, so a wallet that
+        // has confirmed outputs again returns the wake to failover-only the first
+        // time it runs. This is the one case where the wake may publish a led row.
+        this._leaderRetryDue = false;
+        this.noConfirmedUtxoDeferrals = 0;
+        this.lastNoConfirmedUtxoAt    = null;
+        this.lastUtxoReserve          = null;   // { total, confirmed, unconfirmed, known, at }
+        // Confirmation watchdog over this hub's OWN anchor broadcasts (checkpoint
+        // anchors, archive heads and chunks). Without it an anchor that never mines
+        // leaves getanchorstatus reporting a healthy last publish while the wallet's
+        // whole balance sits as change behind the stuck transaction. Same design as
+        // the PRICE rail's watchdog: in-memory, fail-soft, never re-broadcasts or
+        // fee-bumps.
+        this._pendingConfirmations   = new Map();   // txid -> { txid, kind, ref, sentAt }
+        this.pendingConfirmationsMax = 200;
+        this.confirmCheckIntervalMs  = parseInt(process.env.ANCHOR_CONFIRM_CHECK_MS || cfg.ANCHOR_CONFIRM_CHECK_MS, 10);
+        if(!Number.isFinite(this.confirmCheckIntervalMs) || this.confirmCheckIntervalMs < 0) this.confirmCheckIntervalMs = 300000;   // 5 min
+        this.confirmStaleMs = parseInt(process.env.ANCHOR_CONFIRM_STALE_MS || cfg.ANCHOR_CONFIRM_STALE_MS, 10);
+        if(!Number.isFinite(this.confirmStaleMs) || this.confirmStaleMs < 0) this.confirmStaleMs = 1800000;   // 30 min
+        this._confirmTimer            = null;
+        this.confirmedPublishes       = 0;
+        this.confirmationCheckFailures = 0;
+        this.lastConfirmationCheckAt  = null;
         this.lowBalanceThreshold = parseFloat(process.env.DOGE_LOW_BALANCE_THRESHOLD || cfg.DOGE_LOW_BALANCE_THRESHOLD || '10');
         // Shared SpendGuard for the on-chain anchor spend path. Adds the
         // per-window spend ceiling (count + $2000-clamped USD budget, default-ON) and
@@ -318,6 +376,18 @@ class StateAnchorPublisher {
         // getAnchorStats so an operator sees the CURRENT posture, not only a
         // lifetime tally that a long healthy history would dilute.
         this._lastAnchorRank   = null;   // { chain, network, blockIndex, myRank, publisherCount, isLeader, at }
+        // Cumulative count of candidate checkpoints a flush looked at and stood
+        // down from, split by why. Both skips are correct behavior and were silent,
+        // which made a federation with ZERO anchors ever published indistinguishable
+        // from one with nothing to anchor: every wake walked the same rows and
+        // logged nothing. Exposed via getAnchorStats so getanchorstatus answers
+        // "is anyone even being asked to publish this?" without a code read.
+        //   notOurElection: another hub is the unlocked publisher for the row (or
+        //                   this hub's backup rank has not unlocked yet)
+        //   leaderOnWake:   this hub leads the row but the flush was the failover-
+        //                   only wake, which never publishes a led election
+        this._skippedNotOurElection = 0;
+        this._skippedLeaderOnWake   = 0;
         // Last DOGE balance observed by _checkBalance (refreshed each flush) and
         // when, surfaced via getAnchorStats so an operator/monitor can watch the
         // publisher wallet's runway (it spends real DOGE on every anchor cycle)
@@ -442,6 +512,23 @@ class StateAnchorPublisher {
             anchorsAsLeader:    this._anchorsAsLeader,
             anchorsAsBackup:    this._anchorsAsBackup,
             lastAnchorRank:     this._lastAnchorRank,
+            skippedNotOurElection: this._skippedNotOurElection,
+            skippedLeaderOnWake:   this._skippedLeaderOnWake,
+            startupFlushMs:        this.startupFlushMs,
+            // Landing health. unconfirmedPublishes with an oldestUnconfirmedAgeMs in
+            // the hours is a stuck anchor; noConfirmedUtxoDeferrals climbing while
+            // unconfirmedUtxos is non-zero is the wallet trapped behind it.
+            allowUnconfirmedInputs:   this.allowUnconfirmedInputs,
+            leaderRetryDue:           this._leaderRetryDue,
+            noConfirmedUtxoDeferrals: this.noConfirmedUtxoDeferrals,
+            lastNoConfirmedUtxoAt:    this.lastNoConfirmedUtxoAt,
+            confirmedUtxos:           this.lastUtxoReserve ? this.lastUtxoReserve.confirmed   : null,
+            unconfirmedUtxos:         this.lastUtxoReserve ? this.lastUtxoReserve.unconfirmed : null,
+            unconfirmedPublishes:     this._pendingConfirmations.size,
+            oldestUnconfirmedPublish: this.oldestUnconfirmedPublish(),
+            confirmedPublishes:       this.confirmedPublishes,
+            confirmationCheckFailures: this.confirmationCheckFailures,
+            lastConfirmationCheckAt:  this.lastConfirmationCheckAt,
             archiveChunkLosses: this._archiveChunkLosses,
             anchorMarkerRetentionMs: this.anchorMarkerRetentionMs,
             anchorMarkersPruned:     this.anchorMarkersPruned,
@@ -513,17 +600,32 @@ class StateAnchorPublisher {
         // backup notices its rank unlocking between the (daily by default) ticks
         // instead of leaving a dead leader's work stranded for a whole cycle.
         this._rankWakeTimer = setInterval(() => {
-            this.flush({ failoverOnly: true })
+            this.flush(this._wakeFlushOpts())
                 .catch(err => console.error('StateAnchorPublisher: failover-wake flush error:', err && err.message));
         }, this.rankWakeMs);
         if(this._rankWakeTimer.unref) this._rankWakeTimer.unref();
-        console.log('StateAnchorPublisher started (interval ' + this.intervalMs + 'ms, batch ' + this.batchSize + ', address ' + (this.dogeAddress || '<unset>') + ')');
+        this._startConfirmationWatchdog();
+        // The startup catch-up flush (see startupFlushMs). A NORMAL flush, not a
+        // wake: the point is to run the one leader pass a restart otherwise defers
+        // by a whole interval.
+        if(this.startupFlushMs > 0){
+            this._startupTimer = setTimeout(() => {
+                this._startupTimer = null;
+                this.flush().catch(err => console.error('StateAnchorPublisher: startup flush error:', err && err.message));
+            }, this.startupFlushMs);
+            if(this._startupTimer.unref) this._startupTimer.unref();
+        }
+        console.log('StateAnchorPublisher started (interval ' + this.intervalMs + 'ms, startup flush ' +
+                    (this.startupFlushMs > 0 ? 'in ' + this.startupFlushMs + 'ms' : 'off') +
+                    ', batch ' + this.batchSize + ', address ' + (this.dogeAddress || '<unset>') + ')');
     }
 
     async stop(){
         if(this._timer){ clearInterval(this._timer); this._timer = null; }
         if(this._deferTimer){ clearInterval(this._deferTimer); this._deferTimer = null; }
         if(this._rankWakeTimer){ clearInterval(this._rankWakeTimer); this._rankWakeTimer = null; }
+        if(this._startupTimer){ clearTimeout(this._startupTimer); this._startupTimer = null; }
+        if(this._confirmTimer){ clearInterval(this._confirmTimer); this._confirmTimer = null; }
         if(this._messageHandler && this.peerManager){
             this.peerManager.removeListener('message', this._messageHandler);
             this._messageHandler = null;
@@ -562,10 +664,66 @@ class StateAnchorPublisher {
     // cannot turn into a higher anchoring cadence for a healthy leader; every
     // other caller (interval, size triggers, tests) leaves it off and behaves
     // exactly as before.
+    // What the rank wake should run this tick. Failover-only in the steady state;
+    // a normal flush exactly while a confirmed-input deferral is outstanding, so
+    // the led row it stood down from is retried in minutes rather than a day.
+    _wakeFlushOpts(){
+        return { failoverOnly: !this._leaderRetryDue };
+    }
+
+    // Record a stand-down for want of a confirmed input. Counted, timestamped,
+    // and armed for the next wake; never thrown past the flush.
+    _noteNoConfirmedUtxo(what){
+        this.noConfirmedUtxoDeferrals++;
+        this.lastNoConfirmedUtxoAt = Date.now();
+        this._leaderRetryDue = true;
+        let seen = this.lastUtxoReserve || { unconfirmed: 0 };
+        console.warn('StateAnchorPublisher: NO_CONFIRMED_UTXO - every one of the ' + seen.unconfirmed +
+                     ' spendable output(s) at ' + this.dogeAddress + ' is unconfirmed (change trapped behind ' +
+                     'an unconfirmed chain); deferring ' + what + ', retried on the next rank wake once an output confirms');
+    }
+
+    // Read the publisher address's UTXO set and summarize it, or null when the set
+    // cannot be read. FAIL SOFT, unlike the balance gate: this reading only ever
+    // withholds a broadcast, so an unreachable encoder must leave the decision to the
+    // guards that already fail closed rather than add a second way to stall publishing.
+    async _readUtxoReserve(signer){
+        signer = signer || this._resolveSigner();
+        if(!signer.encoder || !this.dogeAddress) return null;
+        let utxos;
+        try { utxos = await signer.encoder.getUtxos(this.dogeAddress); }
+        catch(err){
+            console.warn('StateAnchorPublisher: UTXO reserve check failed (confirmation state unknown this pass; ' +
+                         'publishing is not blocked on it): ' + (err && err.message));
+            return null;
+        }
+        if(!Array.isArray(utxos)) return null;
+        let summary = summarizeUtxoConfirmations(utxos, 1);
+        this.lastUtxoReserve = { total: summary.total, confirmed: summary.confirmed,
+                                 unconfirmed: summary.unconfirmed, known: summary.known, at: summary.at };
+        return summary;
+    }
+
+    // May a flush build a wire right now? False only for the one provable
+    // condition: the address holds outputs, their confirmation state is known, and
+    // NOT ONE of them is confirmed. Under confirmed-inputs-only that wallet cannot
+    // fund anything; under the escape hatch it is not our call.
+    async _confirmedUtxoAvailable(signer){
+        if(this.allowUnconfirmedInputs) return true;
+        let summary = await this._readUtxoReserve(signer);
+        if(!summary)             return true;   // unreadable: not our call to block
+        if(!summary.known)       return true;   // no confirmations field served
+        if(summary.total === 0)  return true;   // empty wallet is the balance gate's call
+        return summary.confirmed > 0;
+    }
+
     async flush(opts){
         let failoverOnly = !!(opts && opts.failoverOnly);
         if(this._flushing) return { anchored: [], archive: 'none', skipped: 'already_flushing' };
         this._flushing = true;
+        // A normal flush is the retry a deferral was waiting for; it re-arms below
+        // only if it defers again.
+        if(!failoverOnly) this._leaderRetryDue = false;
         try {
             // Drain queued peer announcements FIRST, so a checkpoint another hub already
             // anchored is stamped before this flush's failover-rank check would re-anchor
@@ -609,6 +767,16 @@ class StateAnchorPublisher {
                                  this.lowBalanceThreshold + '; skipping publish this flush (fail-closed)');
                     return { anchored: [], archive: 'none', skipped: 'below_balance_floor' };
                 }
+            }
+            // Confirmed-UTXO reserve. A balance above the floor says nothing about
+            // whether it can be SPENT INTO A MINEABLE WIRE: after an anchor that never
+            // confirms, the whole balance is change sitting unconfirmed behind it.
+            // Defer the flush instead of building on it; rows stay pending, no marker
+            // is armed, no intent is recorded, and the next wake retries as a normal
+            // flush. Fail soft, see _confirmedUtxoAvailable.
+            if(!(await this._confirmedUtxoAvailable(signer))){
+                this._noteNoConfirmedUtxo('this flush');
+                return { anchored: [], archive: 'none', skipped: 'no_confirmed_utxo' };
             }
 
             // Shared SpendGuard gate on the PRIMARY anchor path. A runtime
@@ -713,6 +881,7 @@ class StateAnchorPublisher {
         if(this.network){ pendingSql += ' AND sc.network = ?'; pendingParams.push(this.network); }
         let rows = await this.db.doQuery(pendingSql, pendingParams);
         let anchored = [];
+        let skippedRows = 0;
         for(let row of (rows || [])){
             try {
                 let eligible = await this._getActiveOraclePublishPubkeys(Number(row.snapshot_block));
@@ -726,13 +895,13 @@ class StateAnchorPublisher {
                 }
                 let order = StateAnchorPublisher.hashOrder(this._v0ElectionKey(row), eligible);
                 let since = Number.isFinite(btcBlock) ? btcBlock - Number(row.snapshot_block) : null;
-                if(!this._mayPublish(order, since)) continue;            // someone else's anchor (or not unlocked yet)
+                if(!this._mayPublish(order, since)){ this._skippedNotOurElection++; skippedRows++; continue; }   // someone else's anchor (or not unlocked yet)
                 // On a failover wake, publish only as a BACKUP. Rank 0 is
                 // always unlocked, so without this the 15-minute wake would replace the
                 // leader's ANCHOR_INTERVAL_MS cadence and it would anchor a fresh
                 // checkpoint every wake instead of one per cycle (each superseding the
                 // last, all real DOGE). A row this hub leads keeps its normal cadence.
-                if(failoverOnly && this._isRankZero(order)) continue;
+                if(failoverOnly && this._isRankZero(order)){ this._skippedLeaderOnWake++; skippedRows++; continue; }
                 // SPV Phase 2: emit ANCHOR v3 (carries + signs the light-client roots) when the
                 // checkpoint was signed post-flag-day AND actually carries the roots; otherwise the
                 // legacy v0. The roots-present check keeps a legacy/null-root row (signed over the
@@ -821,6 +990,7 @@ class StateAnchorPublisher {
                     throw e;
                 }
                 let txid = result && result.txid ? result.txid : null;
+                if(txid && !(result && result.exists)) this._notePendingConfirmation('anchor_' + row.chain, txid, String(row.checkpoint_seq));
                 if(!txid){
                     // A confirmed DOGE broadcast always returns a txid; a null txid
                     // is a false/incomplete success (broadcastTx returned empty
@@ -928,8 +1098,20 @@ class StateAnchorPublisher {
                     });
                 }
             } catch(e){
-                console.error('StateAnchorPublisher: v0 publish failed for ' + row.chain + ': ' + (e && e.message));
+                // A mid-flush deferral: an earlier anchor in this same pass spent the last
+                // confirmed output. Not a failure of anything; the row stays pending and
+                // the next wake retries it as a normal flush.
+                if(e && e.anchorNoConfirmedUtxo) this._noteNoConfirmedUtxo('the ' + row.chain + '/' + row.network + ' anchor');
+                else console.error('StateAnchorPublisher: v0 publish failed for ' + row.chain + ': ' + (e && e.message));
             }
+        }
+        // One line per LEADER flush (daily, startup, size-trigger, anchorflush) when
+        // it walked candidates and published none, so the stand-down is visible in the
+        // log at its natural cadence. The 15-minute wake stays silent: its skips are
+        // the designed steady state and the counters above carry them.
+        if(!failoverOnly && skippedRows > 0 && anchored.length === 0){
+            console.log('StateAnchorPublisher: ' + skippedRows + ' pending checkpoint(s) belong to another hub\'s election ' +
+                        '(or our backup rank is still locked); nothing anchored by this hub');
         }
         return anchored;
     }
@@ -3031,6 +3213,13 @@ class StateAnchorPublisher {
         let v1Payload = parts.join('|');
 
         let broadcaster = round.signer.broadcastFn || ((p) => this._defaultBroadcast(p, round.signer));
+        // Chunks descend from the head by design: they go out back-to-back from the
+        // same wallet and there is no confirmed output between them, so they are the
+        // one broadcast that may spend unconfirmed change. A chunk paying the target
+        // rate mines right behind a head that mines; a head that does not mine is
+        // caught by the confirmation watchdog, not by starving its chunks.
+        let chunkBroadcaster = round.signer.broadcastFn ||
+            ((p) => this._defaultBroadcast(p, round.signer, { allowUnconfirmed: true }));
 
         // Armed BEFORE the send, so the window this marker covers starts at the earliest
         // moment DOGE could have moved, and stays armed across the whole v2 chunk loop:
@@ -3057,6 +3246,7 @@ class StateAnchorPublisher {
         }
         let txid = result && result.txid ? result.txid : null;
         if(txid) await this._markArchiveSent(network, round.batchSeq, txid);
+        if(txid && !(result && result.exists)) this._notePendingConfirmation('archive_head', txid, String(round.batchSeq));
 
         // The seq the chunks must be addressed to. Normally this round's own, but when
         // the head above was ADOPTED it is the seq that head actually landed under,
@@ -3082,8 +3272,12 @@ class StateAnchorPublisher {
             // The same content-addressed check guards each chunk slot: a crash can land
             // the head and only some of its chunks, and without per-slot resolution the
             // resume would either re-pay for the chunks that landed or strand the batch.
-            try { await this._broadcastWithRetry(broadcaster, v2Payload, undefined,
-                      () => this._findExistingArchiveChunk(cp, round, i)); }
+            try {
+                let chunkResult = await this._broadcastWithRetry(chunkBroadcaster, v2Payload, undefined,
+                      () => this._findExistingArchiveChunk(cp, round, i));
+                if(chunkResult && chunkResult.txid && !chunkResult.exists)
+                    this._notePendingConfirmation('archive_chunk', chunkResult.txid, round.batchSeq + '/' + i);
+            }
             catch(e){
                 lostChunks++;
                 this._archiveChunkLosses++;
@@ -3960,6 +4154,10 @@ class StateAnchorPublisher {
             }
             catch(e){
                 lastErr = e;
+                // No confirmed input to build from. Pre-send, nothing was signed or
+                // sent, and a 2.5 s retry cannot confirm an output; surface it as the
+                // deferral it is instead of burning the attempt budget on it.
+                if(e && e.anchorNoConfirmedUtxo) throw e;
                 if(e && e.anchorAmbiguousSend){
                     // The send may have been accepted; give the anchor a bounded
                     // window to reach the indexer's mined view, then defer.
@@ -3982,6 +4180,77 @@ class StateAnchorPublisher {
         throw lastErr || new Error('broadcast failed');
     }
 
+    // ----- Landing: confirmation watchdog over our own broadcasts -----
+
+    _startConfirmationWatchdog(){
+        if(this._confirmTimer) return;
+        if(!this.confirmCheckIntervalMs) return;
+        this._confirmTimer = setInterval(() => {
+            this._checkPublishedConfirmations().catch(e =>
+                console.warn('StateAnchorPublisher: confirmation watchdog tick failed: ' + (e && e.message)));
+        }, this.confirmCheckIntervalMs);
+        if(this._confirmTimer.unref) this._confirmTimer.unref();
+    }
+
+    // Record a broadcast as awaiting confirmation. A broadcaster that returns no
+    // txid cannot be watched, so it is not tracked: an untrackable send must not
+    // masquerade as a stalled one. Adopted (already-mined) anchors are not sent here.
+    _notePendingConfirmation(kind, txid, ref){
+        if(!txid) return;
+        let key = String(txid).toLowerCase();
+        if(this._pendingConfirmations.has(key)) return;
+        this._pendingConfirmations.set(key, { txid: key, kind: kind, ref: ref, sentAt: Date.now() });
+        while(this._pendingConfirmations.size > this.pendingConfirmationsMax){
+            let oldest = this._pendingConfirmations.keys().next().value;
+            this._pendingConfirmations.delete(oldest);
+        }
+    }
+
+    // One watchdog pass. Resolves what has landed and leaves the rest ageing.
+    // Two shapes count as landed, because the publisher spends only its own address:
+    //   - the transaction's own change output is in the set at depth 1 or deeper
+    //   - the transaction is absent from the set while some output IS confirmed: its
+    //     change was spent by a descendant, and a confirmed output at this address
+    //     cannot descend from an unmined ancestor
+    // Everything else stays pending, which is exactly the stuck case. Fail soft end
+    // to end: nothing here throws, blocks publishing, re-broadcasts, or spends.
+    async _checkPublishedConfirmations(){
+        if(this._pendingConfirmations.size === 0) return;
+        let summary = null;
+        try { summary = await this._readUtxoReserve(); } catch(e){ summary = null; }
+        if(!summary || !summary.known){ this.confirmationCheckFailures++; return; }
+        this.lastConfirmationCheckAt = Date.now();
+        for(let entry of Array.from(this._pendingConfirmations.values())){
+            let depth = summary.byTxid.get(entry.txid);
+            if(depth !== undefined){
+                if(depth >= 1){ this._pendingConfirmations.delete(entry.txid); this.confirmedPublishes++; }
+                continue;
+            }
+            if(summary.confirmed > 0){ this._pendingConfirmations.delete(entry.txid); this.confirmedPublishes++; }
+        }
+        let oldest = this.oldestUnconfirmedPublish();
+        if(oldest && oldest.ageMs >= this.confirmStaleMs){
+            console.warn('StateAnchorPublisher: UNCONFIRMED_ANCHOR - ' + this._pendingConfirmations.size +
+                         ' broadcast(s) have never been seen confirmed; oldest is ' + oldest.kind + ' ' + oldest.ref +
+                         ' txid ' + oldest.txid + ' sent ' + Math.round(oldest.ageMs / 1000) + 's ago. ' +
+                         'The publisher address holds ' + summary.confirmed + ' confirmed and ' +
+                         summary.unconfirmed + ' unconfirmed output(s). Nothing is re-broadcast or fee-bumped ' +
+                         'automatically; an operator decides how to unstick the transaction.');
+        }
+    }
+
+    // The oldest broadcast still awaiting confirmation, or null. Cheap, in-memory,
+    // and safe to call from getAnchorStats.
+    oldestUnconfirmedPublish(){
+        let oldest = null;
+        for(let entry of this._pendingConfirmations.values()){
+            if(!oldest || entry.sentAt < oldest.sentAt) oldest = entry;
+        }
+        if(!oldest) return null;
+        return { txid: oldest.txid, kind: oldest.kind, ref: oldest.ref, sentAt: oldest.sentAt,
+                 ageMs: Math.max(0, Date.now() - oldest.sentAt) };
+    }
+
     // Classify a broadcast_tx failure: could the transaction have reached the
     // DOGE node despite the error? Definitive rejections (the encoder answered
     // with an RPC error, or an HTTP 4xx auth/rate-limit refusal) and
@@ -3992,18 +4261,37 @@ class StateAnchorPublisher {
         return isAmbiguousSendError(e);
     }
 
-    async _defaultBroadcast(payload, signer){
+    async _defaultBroadcast(payload, signer, opts){
         signer = signer || this._resolveSigner();
         if(!signer.encoder)      throw new Error('no encoder configured (set DOGE_ENCODER_URL)');
         if(!signer.walletSignFn) throw new Error('no wallet sign hook configured');
         if(!this.dogeAddress)    throw new Error('no DOGE_ADDRESS configured');
+        let allowUnconfirmed = this.allowUnconfirmedInputs || !!(opts && opts.allowUnconfirmed);
         let utxos = await signer.encoder.getUtxos(this.dogeAddress);
         if(!utxos || (Array.isArray(utxos) && utxos.length === 0)) throw new Error('no UTXOs available for ' + this.dogeAddress);
+        // Per-broadcast confirmed-input check, BEFORE anything is built or signed.
+        // The flush-level gate saw the wallet before this pass started spending;
+        // several anchors go out back-to-back from one wallet, and the last
+        // confirmed output can be gone by the second one. Typed so the caller can
+        // treat it as a deferral rather than a failed publish.
+        if(!allowUnconfirmed && Array.isArray(utxos)){
+            let summary = summarizeUtxoConfirmations(utxos, 1);
+            this.lastUtxoReserve = { total: summary.total, confirmed: summary.confirmed,
+                                     unconfirmed: summary.unconfirmed, known: summary.known, at: summary.at };
+            if(summary.known && summary.total > 0 && summary.confirmed === 0){
+                let e = new Error('NO_CONFIRMED_UTXO: every spendable output at ' + this.dogeAddress + ' is unconfirmed');
+                e.anchorNoConfirmedUtxo = true;
+                throw e;
+            }
+        }
         // utxos forwarded only while inside the encoder's caller-facing
         // MAX_UTXO_COUNT; past it the param is omitted so the encoder selects from
         // its own uncapped fetch of this same address (lib/encoder_utxo_forward.js).
         let psbtResult = await signer.encoder.createTx({
-            utxos: forwardableUtxos(utxos, 'StateAnchorPublisher'), pubkey: this.dogeAddress, data: payload, change: this.dogeAddress, encoding: 'P2SH'
+            utxos: forwardableUtxos(utxos, 'StateAnchorPublisher'), pubkey: this.dogeAddress, data: payload, change: this.dogeAddress, encoding: 'P2SH',
+            // See allowUnconfirmedInputs in the constructor: each anchor stands on its
+            // own fee rate, so the encoder must not fund it from mempool change.
+            unconfirmed: allowUnconfirmed
         });
         if(!psbtResult || !psbtResult.psbt) throw new Error('encoder returned no PSBT');
         // Refuse phase 1 of a two-transaction encoding before anything is signed: this
