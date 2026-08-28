@@ -107,6 +107,21 @@ const PRICE_WIRE_MAX_BYTES = 8189;
 // at-most-once guard.
 const ASSEMBLED_WINDOW_MEMO_MAX = 4096;
 
+// Confirmation depth at which the watchdog calls a broadcast landed. One block is
+// the whole question here: the failure being watched for is a transaction that never
+// mines at all, not a shallow one that could reorg out.
+const CONFIRMED_DEPTH = 1;
+
+// Millisecond knobs where 0 is a meaningful setting (it disables the timer it sizes),
+// which positiveIntConfig cannot express because it rejects 0 as out of range.
+function nonNegativeIntConfig(raw, dflt, name) {
+    if (raw === undefined || raw === null || raw === '') return dflt;
+    let n = parseInt(raw, 10);
+    if (Number.isInteger(n) && n >= 0) return n;
+    console.warn('config: ' + name + '="' + raw + '" is not a non-negative integer; using the default (' + dflt + ')');
+    return dflt;
+}
+
 class OraclePublisher {
 
     constructor(hub) {
@@ -309,6 +324,58 @@ class OraclePublisher {
         this.lastPublishedWindow     = null;
         this.batchSplitCount         = 0;
         this.batchUnpublishableCount = 0;
+
+        // ---------------- Landing, not just sending (confirmed-UTXO reserve + watchdog) ----------------
+        //
+        // Every guard above answers "did this round's wire leave the process". A wire
+        // that leaves and then never mines satisfies all of them: the round is marked
+        // sent, the queue drains, and lastPublishedTxid reports a healthy rail forever
+        // while the address's entire balance is change trapped behind the stuck
+        // package. The next window then either chains onto that package (stalling
+        // identically) or fails funding outright, because Dogecoin inherits Core's
+        // 25-transaction / 101 kB ancestor limits and refuses the chain past them.
+        //
+        // Two independent pieces answer that: a pre-broadcast reserve check that
+        // refuses to build a wire nothing can mine, and a periodic watchdog that
+        // tracks a broadcast to CONFIRMATION. Neither spends: the watchdog reports,
+        // and the fee decision for a stuck package stays with the operator.
+
+        // Last reading of the publisher address's UTXO set, split by confirmation
+        // depth: { total, confirmed, unconfirmed, known, at }. `known` is false when
+        // the source served no confirmations field at all, which must never be read
+        // as "nothing is confirmed" (that would wedge publishing on a field change).
+        this.lastUtxoReserve          = null;
+        // Lifetime count of publish passes deferred because the address held no
+        // confirmed UTXO, plus when the last one happened. A deferral is not a
+        // broadcast failure: nothing is dead-lettered and no attempt is burned.
+        this.noConfirmedUtxoDeferrals = 0;
+        this.lastNoConfirmedUtxoAt    = null;
+
+        // txid -> { txid, round, sentAt }. Broadcast this process lifetime and not yet
+        // observed confirmed. Deliberately in-memory: through get_utxos a long-confirmed
+        // transaction whose change has since been spent looks exactly like a stuck one,
+        // so hydrating this from the marker table would report stalls that are not
+        // happening.
+        this._pendingConfirmations    = new Map();
+        // Bound on that map so a chain of broadcasts nothing ever confirms cannot grow
+        // it without limit. The OLDEST entry is the diagnostic worth keeping, so the
+        // cap drops the oldest only once every one of them is already reported.
+        this.pendingConfirmationsMax  = 512;
+        this.confirmedPublishes       = 0;
+        this.confirmationCheckFailures = 0;
+        this.lastConfirmationCheckAt  = null;
+        this._confirmTimer            = null;
+        // Watchdog cadence. 0 disables the timer entirely (the counters stay live for
+        // a caller that drives _checkPublishedConfirmations itself).
+        this.confirmCheckIntervalMs   = nonNegativeIntConfig(
+            process.env.ORACLE_PUBLISH_CONFIRM_CHECK_MS || cfg.ORACLE_PUBLISH_CONFIRM_CHECK_MS,
+            300000, 'ORACLE_PUBLISH_CONFIRM_CHECK_MS');
+        // Age past which a still-unconfirmed broadcast is logged rather than only
+        // counted. DOGE targets one-minute blocks, so half an hour of silence is a
+        // stall an operator should see, not ordinary latency.
+        this.confirmStaleMs           = nonNegativeIntConfig(
+            process.env.ORACLE_PUBLISH_CONFIRM_STALE_MS || cfg.ORACLE_PUBLISH_CONFIRM_STALE_MS,
+            1800000, 'ORACLE_PUBLISH_CONFIRM_STALE_MS');
     }
 
     // Set a custom broadcast hook (overrides the default encoder-based pipeline)
@@ -397,6 +464,166 @@ class OraclePublisher {
         return isAmbiguousSendError(e);
     }
 
+    // ----- Landing: confirmed-UTXO reserve -----
+
+    // Split a get_utxos list by confirmation depth. `known` reports whether the
+    // source served a usable confirmations field at all: an entry without one is
+    // counted in `total` and in neither bucket, so a source that stops serving the
+    // field reads as unknown rather than as "everything is unconfirmed".
+    // byTxid holds the deepest confirmation seen per transaction, which is what the
+    // watchdog matches a broadcast against.
+    _summarizeUtxos(utxos) {
+        let summary = { total: 0, confirmed: 0, unconfirmed: 0, known: false,
+                        byTxid: new Map(), at: Date.now() };
+        for (let u of utxos) {
+            if (!u || typeof u !== 'object') continue;
+            summary.total++;
+            let conf = Number(u.confirmations);
+            if (!Number.isFinite(conf) || conf < 0) continue;
+            summary.known = true;
+            if (conf >= CONFIRMED_DEPTH) summary.confirmed++;
+            else                         summary.unconfirmed++;
+            let txid = u.txid ? String(u.txid) : null;
+            if (!txid) continue;
+            let seen = summary.byTxid.get(txid);
+            if (seen === undefined || conf > seen) summary.byTxid.set(txid, conf);
+        }
+        return summary;
+    }
+
+    // Read the publisher address's UTXO set and summarize it, or null when the set
+    // cannot be read. FAIL SOFT, unlike the balance gate: this reading only ever
+    // withholds a broadcast, so an unreachable encoder must leave the decision to the
+    // guards that already fail closed rather than add a second way to stall publishing.
+    async _readUtxoReserve() {
+        if (!this.encoder || !this.dogeAddress) return null;
+        let utxos;
+        try {
+            utxos = await this.encoder.getUtxos(this.dogeAddress);
+        } catch (err) {
+            console.warn('OraclePublisher: UTXO reserve check failed (confirmation state unknown ' +
+                'this pass; publishing is not blocked on it): ', err);
+            return null;
+        }
+        if (!Array.isArray(utxos)) return null;
+        let summary = this._summarizeUtxos(utxos);
+        this.lastUtxoReserve = { total: summary.total, confirmed: summary.confirmed,
+                                 unconfirmed: summary.unconfirmed, known: summary.known,
+                                 at: summary.at };
+        return summary;
+    }
+
+    // May a publish pass build a wire right now? False only for the one provable
+    // condition: the address holds outputs, their confirmation state is known, and
+    // NOT ONE of them is confirmed. That means every spendable input is change
+    // trapped behind an unconfirmed chain, so any wire built here inherits the stuck
+    // package's fate: it either chains onto it and stalls the same way, or is refused
+    // once the chain hits Dogecoin's inherited 25-transaction / 101 kB ancestor limits.
+    // Deferring costs one window; broadcasting costs a fee for a wire that cannot mine.
+    async _confirmedUtxoAvailable() {
+        let summary = await this._readUtxoReserve();
+        if (!summary)                       return true;   // unreadable: not our call to block
+        if (!summary.known)                 return true;   // no confirmations field served
+        if (summary.total === 0)            return true;   // empty wallet is the balance gate's call
+        return summary.confirmed > 0;
+    }
+
+    // ----- Landing: confirmation watchdog -----
+
+    // Start watching broadcasts to confirmation. Unref'd so it never holds the process
+    // open, and a no-op when the cadence is disabled or nothing could ever be read.
+    _startConfirmationWatchdog() {
+        if (this._confirmTimer) return;
+        if (!this.confirmCheckIntervalMs) return;
+        if (!this.encoder || !this.dogeAddress) return;
+        this._confirmTimer = setInterval(() => {
+            this._checkPublishedConfirmations().catch((e) => {
+                // Unreachable in practice (the check swallows its own faults); kept so a
+                // future edit inside it can never reject into an unhandled rejection.
+                console.warn('OraclePublisher: confirmation watchdog tick failed: ', e);
+            });
+        }, this.confirmCheckIntervalMs);
+        if (this._confirmTimer.unref) this._confirmTimer.unref();
+    }
+
+    // Record a broadcast as awaiting confirmation. A broadcaster that returns no txid
+    // cannot be watched, so it is not tracked: an untrackable send must not masquerade
+    // as a stalled one.
+    _notePendingConfirmation(round, txid) {
+        if (!txid) return;
+        let key = String(txid);
+        if (this._pendingConfirmations.has(key)) return;
+        this._pendingConfirmations.set(key, { txid: key, round: round, sentAt: Date.now() });
+        while (this._pendingConfirmations.size > this.pendingConfirmationsMax) {
+            let oldest = this._pendingConfirmations.keys().next().value;
+            this._pendingConfirmations.delete(oldest);
+        }
+    }
+
+    // One watchdog pass. Resolves what has landed and leaves the rest ageing.
+    //
+    // Two shapes count as landed, because the publisher spends only its own address:
+    //   - the transaction's own output is in the set at CONFIRMED_DEPTH or deeper
+    //   - the transaction is absent from the set while some output IS confirmed: its
+    //     change was spent by a descendant, and a confirmed output at this address
+    //     cannot descend from an unmined ancestor
+    // Everything else stays pending, which is exactly the stuck case: a package whose
+    // change is still sitting unconfirmed in the mempool.
+    //
+    // Fail soft end to end. An unreadable encoder returns early with the tail intact,
+    // and nothing here throws, blocks publishing, or spends.
+    async _checkPublishedConfirmations() {
+        if (this._pendingConfirmations.size === 0) return;
+        let summary;
+        try {
+            summary = await this._readUtxoReserve();
+        } catch (e) {
+            summary = null;
+        }
+        if (!summary || !summary.known) {
+            this.confirmationCheckFailures++;
+            return;
+        }
+        this.lastConfirmationCheckAt = Date.now();
+
+        for (let entry of Array.from(this._pendingConfirmations.values())) {
+            let depth = summary.byTxid.get(entry.txid);
+            if (depth !== undefined) {
+                if (depth >= CONFIRMED_DEPTH) {
+                    this._pendingConfirmations.delete(entry.txid);
+                    this.confirmedPublishes++;
+                }
+                continue;
+            }
+            if (summary.confirmed > 0) {
+                this._pendingConfirmations.delete(entry.txid);
+                this.confirmedPublishes++;
+            }
+        }
+
+        let oldest = this.oldestUnconfirmedPublish();
+        if (oldest && oldest.ageMs >= this.confirmStaleMs) {
+            console.warn('OraclePublisher: UNCONFIRMED_PUBLISH - ' + this._pendingConfirmations.size +
+                ' broadcast(s) have never been seen confirmed; oldest is round ' + oldest.round +
+                ' txid ' + oldest.txid + ' sent ' + Math.round(oldest.ageMs / 1000) + 's ago. ' +
+                'The publisher address holds ' + summary.confirmed + ' confirmed and ' +
+                summary.unconfirmed + ' unconfirmed output(s). Nothing is re-broadcast or fee-bumped ' +
+                'automatically; an operator decides how to unstick the package.');
+        }
+    }
+
+    // The oldest broadcast still awaiting confirmation, or null. Cheap, in-memory,
+    // and safe to call from getStats.
+    oldestUnconfirmedPublish() {
+        let oldest = null;
+        for (let entry of this._pendingConfirmations.values()) {
+            if (!oldest || entry.sentAt < oldest.sentAt) oldest = entry;
+        }
+        if (!oldest) return null;
+        return { txid: oldest.txid, round: oldest.round, sentAt: oldest.sentAt,
+                 ageMs: Math.max(0, Date.now() - oldest.sentAt) };
+    }
+
     // Initialize the publisher: ensure queue directory exists, load any pending rounds
     async start() {
         // The per-window spend ceilings were memory-only, so every restart
@@ -451,6 +678,10 @@ class OraclePublisher {
         // before it proposes a batch they cannot yet co-sign.
         this._scheduleBufferCatchup();
 
+        // Watch broadcasts through to a block. Without it a wire that never mines
+        // leaves the rail reporting a healthy lastPublishedTxid indefinitely.
+        this._startConfirmationWatchdog();
+
         console.log('OraclePublisher started (queue: ' + this.queuePath + ', address: ' + (this.dogeAddress || '<unset>') + ')');
     }
 
@@ -464,6 +695,7 @@ class OraclePublisher {
         for (let timer of this._takeoverTimers.values()) clearTimeout(timer);
         this._takeoverTimers.clear();
         if (this._catchupTimer) { clearTimeout(this._catchupTimer); this._catchupTimer = null; }
+        if (this._confirmTimer) { clearInterval(this._confirmTimer); this._confirmTimer = null; }
         if (this._ownedBatchSigner) {
             try { this._ownedBatchSigner.stop(); } catch (e) { /* stopping is best-effort */ }
             this._ownedBatchSigner = null;
@@ -1636,6 +1868,25 @@ class OraclePublisher {
             }
         }
 
+        // Confirmed-UTXO reserve. A balance above the floor says nothing about whether
+        // that balance can be SPENT INTO A MINEABLE WIRE: after a publish that never
+        // confirms, the whole balance is change sitting unconfirmed behind the stuck
+        // package. Building on top of it buys a second wire with the same fate, or the
+        // encoder's "no spendable inputs available" once the ancestor limits bite.
+        // Defer the pass instead: entries stay on the durable queue, nothing is
+        // dead-lettered, and no attempt counter is burned, because this is not a
+        // broadcast failure. Fail soft, see _confirmedUtxoAvailable.
+        if (!(await this._confirmedUtxoAvailable())) {
+            this.noConfirmedUtxoDeferrals++;
+            this.lastNoConfirmedUtxoAt = Date.now();
+            let seen = this.lastUtxoReserve || { unconfirmed: 0 };
+            console.warn('OraclePublisher: NO_CONFIRMED_UTXO - every one of the ' + seen.unconfirmed +
+                ' spendable output(s) at ' + this.dogeAddress + ' is unconfirmed (change trapped behind ' +
+                'an unconfirmed chain); deferring this publish pass, ' + entries.length +
+                ' round(s) remain queued and retry once a publish confirms');
+            return;
+        }
+
         let remaining = [];
         let publishedThisPass = false;
         for (let entry of entries) {
@@ -1809,6 +2060,10 @@ class OraclePublisher {
                 // reporting FIRST_ROUND would make a healthy rail look an hour behind.
                 this.lastPublishedRound = entry.batch ? entry.batch.lastRound : entry.round;
                 this.lastPublishedTxid  = (result && result.txid) || null;
+                // Hand the wire to the watchdog. lastPublishedTxid alone answers "did we
+                // send", never "did it land", and the two diverge for as long as a stuck
+                // package sits in the mempool.
+                this._notePendingConfirmation(this.lastPublishedRound, this.lastPublishedTxid);
                 // Successfully published. Drop from queue (do not add to remaining).
             } catch (err) {
                 // item 2675 - NEVER blind-retry an ambiguous send. A timeout / reset /
@@ -1909,6 +2164,7 @@ class OraclePublisher {
     getStats() {
         let queueDepth = 0;
         try { queueDepth = this._readQueue().length; } catch (e) { queueDepth = null; }
+        let oldestUnconfirmed = this.oldestUnconfirmedPublish();
         return {
             queueDepth:          queueDepth,
             published:           this.publishedCount,
@@ -1923,6 +2179,25 @@ class OraclePublisher {
             lastPublishedRound:  this.lastPublishedRound,
             lastPublishedTxid:   this.lastPublishedTxid,
             lastObservedBalance: this.lastObservedBalance,
+            // Landing, not sending. lastPublishedTxid above answers only "what did we
+            // broadcast last": these answer whether it reached a block. A non-zero
+            // unconfirmedPublishes with an oldestUnconfirmedAgeMs in the hours is a
+            // wedged publisher, whatever the rest of this snapshot reports.
+            unconfirmedPublishes:    this._pendingConfirmations.size,
+            oldestUnconfirmedTxid:   oldestUnconfirmed ? oldestUnconfirmed.txid  : null,
+            oldestUnconfirmedRound:  oldestUnconfirmed ? oldestUnconfirmed.round : null,
+            oldestUnconfirmedAgeMs:  oldestUnconfirmed ? oldestUnconfirmed.ageMs : null,
+            confirmedPublishes:      this.confirmedPublishes,
+            confirmationCheckIntervalMs: this.confirmCheckIntervalMs,
+            confirmationCheckFailures:   this.confirmationCheckFailures,
+            lastConfirmationCheckAt:     this.lastConfirmationCheckAt,
+            // Confirmed-UTXO reserve as last read. confirmedUtxos at 0 while
+            // unconfirmedUtxos is non-zero is the condition that defers a pass, and
+            // noConfirmedUtxoDeferrals counts how often it has.
+            confirmedUtxos:          this.lastUtxoReserve ? this.lastUtxoReserve.confirmed   : null,
+            unconfirmedUtxos:        this.lastUtxoReserve ? this.lastUtxoReserve.unconfirmed : null,
+            noConfirmedUtxoDeferrals: this.noConfirmedUtxoDeferrals,
+            lastNoConfirmedUtxoAt:    this.lastNoConfirmedUtxoAt,
             deadLetterPath:      this.deadLetterPath,
             enabled:             this.enabled,
             // Takeover rail: armed only when a failover window is configured AND this
