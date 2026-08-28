@@ -145,6 +145,11 @@ function makeDb(seed) {
     db.doQuery = sinon.stub().callsFake(async (q, args) => {
         db.queries.push({ q, args });
         if (/FROM\s+price_snapshots/i.test(q)) {
+            // The observation-feed probe asks "has ANY batch ever landed here", with
+            // no round range and no args at all.
+            if (!args || args.length < 2) {
+                return db.snapshots.filter(s => s.batch === true).map(s => ({ seen: 1 }));
+            }
             let first = Number(args[0]);
             let last  = Number(args[1]);
             let rows  = db.snapshots.filter(s => Number(s.round_number) >= first &&
@@ -407,6 +412,103 @@ describe('OraclePublisher PRICE batch rail', function () {
             await h.p._assembleWindow(0);
             expect(h.signer.calls).to.have.length(1);
             expect(h.p.getStats().isLeader).to.equal(true);
+        });
+
+        // Rank-staggered takeover. Before this existed, a window whose leader never
+        // broadcast stayed unpublished forever, however healthy the other hubs were.
+        describe('takeover of a silent leader', function () {
+
+            // ME is rank 0 of three, so window 1 belongs to PEER1 and ME is one step
+            // behind it. `landed` seeds the proof that this hub sees batches land.
+            // start() hydrates the buffer from disk, so the rounds are seeded AFTER it.
+            async function followerOf(opts) {
+                opts = opts || {};
+                let snapshots = [];
+                if (opts.landed) snapshots.push({ round_number: opts.landed, batch: true, status: 'finalized' });
+                for (let r = 0; r < 12; r++) snapshots.push({ round_number: r, status: 'finalized' });
+                let h = makePublisher({
+                    publishers: [ME, PEER1, PEER2],
+                    db:  makeDb({ snapshots: snapshots }),
+                    cfg: Object.assign({ ORACLE_PUBLISH_FAILOVER_WINDOW_BLOCKS: '2' }, opts.cfg || {})
+                });
+                await h.p.start();
+                for (let r = 0; r < 12; r++) h.p._buffer.set(r, bufferedFixture(r));
+                return h;
+            }
+
+            it('arms a timer for a window this hub does not lead, staggered by distance from the leader', async function () {
+                let h = await followerOf({ landed: 99 });
+                await h.p._assembleWindow(1);
+                expect(h.broadcasts).to.have.length(0);
+                expect(h.p._takeoverTimers.has(1)).to.equal(true);
+                expect(h.p.getStats().takeoverPending).to.equal(1);
+            });
+
+            it('arms NOTHING when no failover window is configured (the default)', async function () {
+                let h = await followerOf({ landed: 99, cfg: { ORACLE_PUBLISH_FAILOVER_WINDOW_BLOCKS: '0' } });
+                await h.p._assembleWindow(1);
+                expect(h.p._takeoverTimers.size).to.equal(0);
+                expect(h.p.getStats().takeoverArmed).to.equal(false);
+            });
+
+            it('publishes the identical window when the leader stayed silent', async function () {
+                let h = await followerOf({ landed: 99 });
+                await h.p._assembleWindow(1);
+
+                let took = await h.p._attemptTakeover(1);
+                expect(took).to.equal(true);
+                expect(h.broadcasts).to.have.length(1);
+                expect(h.p.getStats().takeoverPublished).to.equal(1);
+                // The wire is a batch over window 1's rounds, exactly what the leader
+                // would have sent: same rounds, same canonical shape.
+                let entry = readJsonl(h.queuePath).concat(h.broadcasts);
+                expect(String(h.broadcasts[0].wire || h.broadcasts[0])).to.match(/^PRICE\|0\|/);
+                expect(entry.length).to.be.greaterThan(0);
+            });
+
+            it('declines when the leader already published, and prunes instead', async function () {
+                // Window 1 covers rounds 6..11; seeing one of them land is proof.
+                let h = await followerOf({ landed: 7 });
+                let took = await h.p._attemptTakeover(1);
+                expect(took).to.equal(false);
+                expect(h.broadcasts).to.have.length(0);
+            });
+
+            // The safety property: a hub that has never seen a batch land cannot tell
+            // a dark leader from its own deaf feed, and must never pay DOGE on that
+            // ambiguity.
+            it('declines every takeover when no batch has EVER been observed on this hub', async function () {
+                let h = await followerOf();   // no landed row at all
+                await h.p.start();
+                await h.p._assembleWindow(1);
+                let took = await h.p._attemptTakeover(1);
+                expect(took).to.equal(false);
+                expect(h.broadcasts).to.have.length(0);
+                expect(h.p.getStats().takeoverArmed).to.equal(false);
+            });
+
+            it('declines when the hub DB cannot answer whether the window is on chain', async function () {
+                let h = await followerOf({ landed: 99 });
+                await h.p._observationFeedProven();          // prove the feed first
+                h.hub.db.doQuery = sinon.stub().rejects(new Error('hub db down'));
+                let took = await h.p._attemptTakeover(1);
+                expect(took).to.equal(false);
+                expect(h.broadcasts).to.have.length(0);
+            });
+
+            it('never schedules a takeover of its OWN window', async function () {
+                let h = await followerOf({ landed: 99 });
+                await h.p._assembleWindow(0);                // ME leads window 0
+                expect(h.p._takeoverTimers.has(0)).to.equal(false);
+            });
+
+            it('stop() clears pending takeover timers', async function () {
+                let h = await followerOf({ landed: 99 });
+                await h.p._assembleWindow(1);
+                expect(h.p._takeoverTimers.size).to.equal(1);
+                h.p.stop();
+                expect(h.p._takeoverTimers.size).to.equal(0);
+            });
         });
 
         it('publishes NOTHING when the signing round misses quorum, and leaves the window re-proposable', async function () {

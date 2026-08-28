@@ -23,19 +23,24 @@
  * across all nodes. First valid PRICE tx on-chain for a given round wins
  * (and earns the reward).
  *
- * NOT IMPLEMENTED HERE: leader failover. This class publishes only for the
- * rounds it is itself elected to lead; a non-leader records the round in
- * _followerRounds and stops, and the retry sweep only replays rounds THIS hub
- * enqueued as leader. There is no cross-validator takeover and no batch
- * catch-up of another validator's missed rounds, so a dark leader is not
- * self-healing hub-side and nothing in getoraclepublisherstatus fires when one
- * misses its turn. The compensating control is off-hub: the dashboard's
- * publish-coverage rail detects the gap from the chain side, backed by the
- * _lastRankState / _leaderRounds / _followerRounds counters below. Rank-staggered
- * takeover exists only in AttestationPublisher (ATTEST), which is a separate
- * mechanism on a separate rail. The protocol spec's PRICE failover section
- * describes behavior this reference implementation does not have; do not read
- * this file as evidence either way about what the protocol intends.
+ * LEADER FAILOVER: opt-in, off by default. A window's leader publishes it; a
+ * follower arms a timer staggered by its DISTANCE from that leader in the
+ * rotation and, if the window is still not on chain when the timer fires,
+ * re-assembles the identical batch itself (_scheduleTakeover / _attemptTakeover).
+ * Set ORACLE_PUBLISH_FAILOVER_WINDOW_BLOCKS to arm it. Before this existed a
+ * silent leader meant the window was never published by anyone, however healthy
+ * the rest of the set was.
+ *
+ * The safety property is that a hub only steps in when it can PROVE it would
+ * have seen the leader succeed. That proof is the indexer pushing landed PRICE
+ * actions back to this hub (the same feed _pruneObservedWindow reads). A hub
+ * that has never observed one declines every takeover, because on that hub
+ * "not on chain" and "on chain but I was not told" are the same observation,
+ * and guessing wrong pays DOGE twice for a duplicate on-chain batch.
+ *
+ * The off-hub control still applies and is not replaced: the dashboard's
+ * publish-coverage rail detects a gap from the chain side, backed by the
+ * _lastRankState / _leaderRounds / _followerRounds counters below.
  *
  * A round that exhausts its broadcast attempts is written to an append-only
  * dead-letter file (never silently dropped) so the finalized round can be
@@ -80,6 +85,11 @@ const { AtMostOnce, isAmbiguousSendError } = require('./lib/idempotent_broadcast
 const { sumUtxosCoins } = require('./lib/utxo_balance.js');
 const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
 const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
+
+// ~10 min. Translates the rank-staggered takeover window from BTC blocks (the
+// unit the window anchor is denominated in) into wall-clock, the same way
+// AttestationPublisher does for its own failover.
+const APPROX_BTC_BLOCK_MS = 600000;
 const { positiveIntConfig } = require('./lib/config_int.js');
 const { compressPriceBatchBody, PRICE_BATCH_COMPRESSION_MARKER,
         PRICE_BATCH_MAX_ROUND_COUNT } = require('./price_batch_compression.js');
@@ -202,9 +212,31 @@ class OraclePublisher {
         this.spendGuard.minBalance = this.lowBalanceThreshold;
 
         // Per-round state
-        // (No failoverWindowBlocks here: a knob by that name drives real rank-staggered
-        // takeover in AttestationPublisher, and carrying a dead copy on this class read
-        // as evidence that PRICE had the same behavior. It never did, see the header.)
+        //
+        // Rank-staggered window takeover. Without it a window whose leader never
+        // broadcasts stays unpublished forever, because this class publishes only the
+        // windows it leads and the peers holding the identical buffered rounds have no
+        // way in. A follower re-assembles a window its leader left dark, ordered by
+        // rank so the set takes over one at a time rather than all at once.
+        //
+        // Default 0 = OFF. Takeover pays DOGE for a window a peer may already have
+        // paid for, so it stays an opt-in an operator arms per deployment once the
+        // observation feed below is known to work.
+        this.failoverWindowBlocks = parseInt(
+            process.env.ORACLE_PUBLISH_FAILOVER_WINDOW_BLOCKS ||
+            cfg.ORACLE_PUBLISH_FAILOVER_WINDOW_BLOCKS || '0');
+        if (!Number.isFinite(this.failoverWindowBlocks) || this.failoverWindowBlocks < 0) this.failoverWindowBlocks = 0;
+        this.approxBlockMs = parseInt(
+            process.env.ORACLE_PUBLISH_BLOCK_MS || cfg.ORACLE_PUBLISH_BLOCK_MS || APPROX_BTC_BLOCK_MS);
+        if (!Number.isFinite(this.approxBlockMs) || this.approxBlockMs <= 0) this.approxBlockMs = APPROX_BTC_BLOCK_MS;
+        // Timers for windows this hub may take over, keyed by window index.
+        this._takeoverTimers   = new Map();
+        // Memoized proof that landed batches actually reach this hub (see
+        // _observationFeedProven). Never cached as false: a feed can come up later.
+        this._observationProven = false;
+        this._takeoverDarkWarned = false;
+        this.takeoverAttempts  = 0;
+        this.takeoverPublished = 0;
         // Leader-rotation observability (item 3218). A dark peer publisher is
         // otherwise invisible: this hub's own status stays perfect while 1/N of
         // rounds never land on-chain. Track the rank state of the most recent
@@ -429,6 +461,8 @@ class OraclePublisher {
             if (state.timer) clearTimeout(state.timer);
         }
         this._windows.clear();
+        for (let timer of this._takeoverTimers.values()) clearTimeout(timer);
+        this._takeoverTimers.clear();
         if (this._catchupTimer) { clearTimeout(this._catchupTimer); this._catchupTimer = null; }
         if (this._ownedBatchSigner) {
             try { this._ownedBatchSigner.stop(); } catch (e) { /* stopping is best-effort */ }
@@ -804,6 +838,101 @@ class OraclePublisher {
         return pruned;
     }
 
+    // ----- Rank-staggered takeover -----
+
+    // Arm this hub to re-assemble a window its leader may never publish. The delay is
+    // the hub's DISTANCE from the leader in the rotation, not its absolute rank, so
+    // the set steps in one at a time in a deterministic order every hub computes
+    // identically from the same snapshot: rank leader+1 first, then leader+2, and so
+    // on. Each step is failoverWindowBlocks blocks of continued silence.
+    _scheduleTakeover(windowIndex, myRank, leaderRank, publisherCount) {
+        if (!this.failoverWindowBlocks) return;             // opt-in, default off
+        if (!publisherCount || publisherCount < 2) return;  // nobody to take over from
+        if (this._takeoverTimers.has(windowIndex)) return;
+        let offset = ((myRank - leaderRank) % publisherCount + publisherCount) % publisherCount;
+        if (offset === 0) return;                           // that is the leader itself
+        let delay = offset * this.failoverWindowBlocks * this.approxBlockMs;
+        let timer = setTimeout(() => {
+            this._takeoverTimers.delete(windowIndex);
+            this._attemptTakeover(windowIndex).catch(err =>
+                console.error('OraclePublisher: takeover attempt for window ' + windowIndex + ' failed:', err));
+        }, delay);
+        if (timer.unref) timer.unref();
+        this._takeoverTimers.set(windowIndex, timer);
+    }
+
+    // Step in for a silent leader, or decline. Declines for three distinct reasons,
+    // each of which must stay distinguishable in the log from "took over".
+    async _attemptTakeover(windowIndex) {
+        if (!this.enabled) return false;
+        let first = windowIndex * this.batchWindowRounds;
+        let last  = first + this.batchWindowRounds - 1;
+
+        // 1. The leader published after all. Nothing to do; prune our copy.
+        if (await this._pruneObservedWindow(first, last) > 0) return false;
+        if (await this._windowObservedOnChain(first, last)) return false;
+
+        // 2. FAIL CLOSED when this hub has never observed ANY batch on chain. The
+        // observation feed is the indexer pushing landed PRICE actions back to this
+        // hub, and a hub that receives no pushes cannot tell "the leader published
+        // and I did not hear" from "the leader is dark". Taking over on that
+        // ambiguity double-pays DOGE and puts a duplicate batch on chain, so a hub
+        // with an unproven feed declines every takeover and says so once.
+        if (!(await this._observationFeedProven())) {
+            if (!this._takeoverDarkWarned) {
+                this._takeoverDarkWarned = true;
+                console.warn('OraclePublisher: declining takeover of window ' + windowIndex + ' and every ' +
+                    'later one: this hub has never observed an on-chain PRICE batch, so it cannot tell a ' +
+                    'silent leader from a deaf follower. Point this network\'s indexer HUB_API_URL at this ' +
+                    'federation so landed batches are pushed back, then takeover arms itself.');
+            }
+            return false;
+        }
+
+        // 3. Nothing published it and we can prove we would have seen it. Re-assemble
+        // the identical window, bypassing the leader check but nothing else: quorum
+        // signing, coverage, the spend guard and the at-most-once markers all still
+        // apply, and the queue's own guards stop a second wire for rounds already sent.
+        this._assembledWindows.delete(windowIndex);
+        await this._assembleWindow(windowIndex, { takeover: true });
+        return true;
+    }
+
+    // Is any round in [first,last] already carried by a batch this hub has seen land
+    // on chain? Fail CLOSED on a DB error (report observed), so an unreadable hub DB
+    // suppresses takeover instead of licensing a blind duplicate broadcast.
+    async _windowObservedOnChain(first, last) {
+        if (!this.db) return true;
+        try {
+            let rows = await this.db.doQuery(
+                'SELECT 1 AS seen FROM price_snapshots WHERE round_number >= ? AND round_number <= ? ' +
+                'AND consensus_proof LIKE \'{"batch":%\' LIMIT 1', [first, last]);
+            return !!(rows && rows.length);
+        } catch (e) {
+            console.warn('OraclePublisher: cannot check whether rounds ' + first + '..' + last +
+                ' are already on chain; declining takeover: ', e && e.message);
+            return true;
+        }
+    }
+
+    // Has a landed batch EVER reached this hub? Memoized true only: a feed that is
+    // dark now can come up later, and a fresh federation legitimately has nothing to
+    // observe until its first window lands, so this arms itself rather than needing
+    // an operator to flip it.
+    async _observationFeedProven() {
+        if (this._observationProven) return true;
+        if (!this.db) return false;
+        try {
+            let rows = await this.db.doQuery(
+                'SELECT 1 AS seen FROM price_snapshots WHERE consensus_proof LIKE \'{"batch":%\' LIMIT 1');
+            if (rows && rows.length) this._observationProven = true;
+        } catch (e) {
+            console.warn('OraclePublisher: cannot confirm the on-chain observation feed; ' +
+                'takeover stays disarmed: ', e && e.message);
+        }
+        return this._observationProven;
+    }
+
     // ----- The window scheduler -----
 
     _windowIndexOf(round) {
@@ -879,9 +1008,15 @@ class OraclePublisher {
     // ----- Window assembly -----
 
     // Turn one closed window into zero or more signed, enqueued PRICE v0 wires.
-    async _assembleWindow(windowIndex) {
+    //
+    // opts.takeover: this hub is NOT the window's leader and is stepping in after
+    // the leader stayed silent (see _attemptTakeover). Everything downstream of the
+    // leader check is identical, deliberately: a takeover must put the same
+    // canonical content on chain the leader would have, never a variant.
+    async _assembleWindow(windowIndex, opts) {
         if (!this.enabled) return;
-        if (this._assembledWindows.has(windowIndex)) return;
+        let takeover = !!(opts && opts.takeover);
+        if (!takeover && this._assembledWindows.has(windowIndex)) return;
 
         let first  = windowIndex * this.batchWindowRounds;
         let last   = first + this.batchWindowRounds - 1;
@@ -909,16 +1044,20 @@ class OraclePublisher {
             isLeader:       leaderRank === myRank,
             publisherCount: pubkeys.length
         };
-        if (leaderRank !== myRank) {
+        if (leaderRank !== myRank && !takeover) {
             // Not our window. The buffered rounds are NOT dropped here: they are this
             // hub's evidence for the on-chain observation prune, and its material if a
             // later window has to re-propose this one.
             this._followerRounds++;
             this._noteAssembled(windowIndex);
-            await this._pruneObservedWindow(first, last);
+            let pruned = await this._pruneObservedWindow(first, last);
+            // Pruned means the leader's batch is already on chain, so there is
+            // nothing to take over. Only an unobserved window gets a timer.
+            if (pruned === 0) this._scheduleTakeover(windowIndex, myRank, leaderRank, pubkeys.length);
             return;
         }
-        this._leaderRounds++;
+        if (takeover) this.takeoverAttempts++;
+        else this._leaderRounds++;
 
         // The self-check. A window published with a hole in it puts a signed, permanent
         // claim on chain that the missing round did not finalize.
@@ -953,6 +1092,12 @@ class OraclePublisher {
 
         this._noteAssembled(windowIndex);
         if (wires.length === 0) return;
+        if (takeover) {
+            this.takeoverPublished++;
+            console.warn('OraclePublisher: TAKING OVER window [' + first + ',' + last + '] from its ' +
+                'silent leader (rank ' + leaderRank + '); this hub is rank ' + myRank + ' and has seen no ' +
+                'on-chain batch covering it');
+        }
         if (wires.length > 1) {
             // Counted at assembly, not at broadcast: splitting is a decision this code
             // makes, and it stays worth seeing even if the wires then fail to send.
@@ -1780,6 +1925,15 @@ class OraclePublisher {
             lastObservedBalance: this.lastObservedBalance,
             deadLetterPath:      this.deadLetterPath,
             enabled:             this.enabled,
+            // Takeover rail: armed only when a failover window is configured AND this
+            // hub has proof it would see a leader's batch land. takeoverAttempts
+            // climbing while takeoverPublished stays flat means windows are being
+            // re-assembled but not reaching chain.
+            takeoverFailoverWindowBlocks: this.failoverWindowBlocks,
+            takeoverArmed:                this.failoverWindowBlocks > 0 && this._observationProven,
+            takeoverPending:              this._takeoverTimers.size,
+            takeoverAttempts:             this.takeoverAttempts,
+            takeoverPublished:            this.takeoverPublished,
             // Leader-rotation view (item 3218): last finalized round's rank state
             // plus lifetime leader/follower-window counts, so a monitor can tell a
             // healthy-but-never-leader hub from a genuinely idle one and spot a dark
