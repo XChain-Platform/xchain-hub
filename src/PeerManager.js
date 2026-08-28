@@ -36,6 +36,15 @@ const BOOTSTRAP_VALIDATOR_HOSTS = [
 ];
 const BOOTSTRAP_PORT_BY_NETWORK = { mainnet: 10001, testnet: 10002 };
 
+// The two request shapes the read-only mirror feed occupies on the P2P port. They
+// MUST stay byte-identical to what the API server mounts (api.js
+// '/hub-db/snapshot' routes, '/hub-db/subscribe' upgrade) and to what the indexer
+// asks for (xchain-indexer src/hub_db_sync.js _httpGet / _connectWebSocket): the
+// same client code reaches a validator over this port and a private hub over the
+// API port, so a path that differs on one side silently disables the mirror.
+const FEED_SNAPSHOT_PREFIX = '/hub-db/snapshot';
+const FEED_SUBSCRIBE_PATH  = '/hub-db/subscribe';
+
 class PeerManager extends EventEmitter {
     // Default seed list for a network, or [] when there is none to offer
     // (regtest is a local venue and must never dial public seeds).
@@ -97,6 +106,12 @@ class PeerManager extends EventEmitter {
         // Message deduplication: Map<id, expiresAt>
         this.seenIds = new Map();
 
+        // Read-only mirror feed served on the P2P port beside gossip (see
+        // setFeedHandlers). Null until api.js wires it; null means the port serves
+        // gossip only, exactly as before.
+        this.feedRequestHandler = null;
+        this.feedUpgradeHandler = null;
+
         // Server state
         this.httpServer     = null;
         this.wss            = null;
@@ -108,6 +123,35 @@ class PeerManager extends EventEmitter {
 
     setIdentity(identity) {
         this.identity = identity;
+    }
+
+    // Serve the hub's READ-ONLY mirror feed on this same public P2P port, so an
+    // indexer reads its capability/price/checkpoint mirror from the validators
+    // themselves. A validator exposes ONE public port per network (10001 mainnet,
+    // 10002 testnet); anything an indexer needs has to arrive there, because the
+    // JSON-RPC API port is private to the box and there is no separate hub.
+    //
+    // Both handlers come from api.js, so this is a second ENTRANCE to the existing
+    // routes, never a second implementation: no SQL, no auth rule and no schema
+    // version is restated here, and the API's own HUB_API_KEY gate runs unchanged.
+    // Only two shapes are ever delegated (_isFeedRequest / FEED_SUBSCRIBE_PATH):
+    // GET of a mirror snapshot, and the mirror subscribe upgrade. Every other
+    // request on this port is answered 404 and every other upgrade stays gossip,
+    // so the write methods on the private API are not reachable from here.
+    setFeedHandlers(requestHandler, upgradeHandler) {
+        this.feedRequestHandler = requestHandler || null;
+        this.feedUpgradeHandler = upgradeHandler || null;
+    }
+
+    // A mirror-snapshot read: GET only (the bootstrap is a paged GET), and only
+    // under the snapshot prefix. Anything else on this port is not feed traffic.
+    _isFeedRequest(req) {
+        if (!req || req.method !== 'GET' || !req.url) return false;
+        return req.url === FEED_SNAPSHOT_PREFIX || req.url.startsWith(FEED_SNAPSHOT_PREFIX + '/');
+    }
+
+    _isFeedUpgrade(req) {
+        return !!(req && req.url && req.url.startsWith(FEED_SUBSCRIBE_PATH));
     }
 
     setValidatorPubkeys(pubkeyMap) {
@@ -126,10 +170,30 @@ class PeerManager extends EventEmitter {
         let port = this.config.P2P_PORT || 10001;
         let host = this.config.P2P_HOST || '0.0.0.0';
 
-        this.httpServer = http.createServer();
+        // Plain HTTP on this port answers ONLY the mirror-snapshot reads, and only
+        // once api.js has wired them. Everything else gets 404 rather than being
+        // left to hang on an open socket (the pre-feed behaviour of a handler-less
+        // server), so a stray probe cannot hold a connection open.
+        this.httpServer = http.createServer((req, res) => {
+            if (this.feedRequestHandler && this._isFeedRequest(req)) {
+                this.feedRequestHandler(req, res);
+                return;
+            }
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end('{"error":"not found"}');
+        });
         this.wss = new WebSocket.Server({ noServer: true, maxPayload: this.config.P2P_MAX_PAYLOAD || 1048576 });
 
         this.httpServer.on('upgrade', (req, socket, head) => {
+            // Mirror subscribers are handed to the API's own upgrade path (auth,
+            // then HubDbBroadcaster). They never enter the gossip WebSocket server,
+            // so a feed client is never in this.peers: it cannot be broadcast to,
+            // relayed to, counted in any quorum, or pinged as a peer.
+            if (this._isFeedUpgrade(req)) {
+                if (this.feedUpgradeHandler) this.feedUpgradeHandler(req, socket, head);
+                else socket.destroy();
+                return;
+            }
             this.wss.handleUpgrade(req, socket, head, (ws) => {
                 this.wss.emit('connection', ws, req);
             });

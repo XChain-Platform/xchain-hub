@@ -1908,6 +1908,34 @@ async function startApi(){
     // does that in production); prevents proxyquired test instances from hanging.
     pingInterval.unref();
 
+    // Also serve the read-only mirror feed on the PUBLIC P2P port. A validator
+    // exposes one public port per network and its JSON-RPC API port is private to
+    // the box, so this is the only way an indexer can mirror from the validators
+    // themselves rather than from a separate hub standing in for them.
+    //
+    // The handlers below ARE the ones mounted above: PeerManager delegates a GET
+    // under /hub-db/snapshot to this same express app, and a /hub-db/subscribe
+    // upgrade back to this server's own upgrade listener (auth, then
+    // HubDbBroadcaster). Nothing else on that port reaches either. Fail closed
+    // without a key: the snapshot middleware skips its check when HUB_API_KEY is
+    // unset, which is tolerable on a loopback-bound API port and is not on a public
+    // one, so an unkeyed hub simply keeps the port gossip-only.
+    if (hub.peerManager && typeof hub.peerManager.setFeedHandlers === 'function') {
+        if (!HUB_API_KEY) {
+            console.warn('Hub DB feed NOT served on the P2P port: HUB_API_KEY is unset ' +
+                '(fail closed; the port stays gossip-only)');
+        } else if (String(process.env.HUB_P2P_FEED_ENABLED || 'true').toLowerCase() === 'false') {
+            console.log('Hub DB feed on the P2P port disabled by HUB_P2P_FEED_ENABLED=false');
+        } else {
+            hub.peerManager.setFeedHandlers(
+                app,
+                (request, socket, head) => server.emit('upgrade', request, socket, head));
+            console.log('Hub DB feed also served on the P2P port ' +
+                (hub.p2pConfig && hub.p2pConfig.P2P_PORT ? hub.p2pConfig.P2P_PORT : '') +
+                ' (read-only, X-Api-Key required)');
+        }
+    }
+
     server.listen(HUB_PORT, HUB_HOST, () => {
         console.log('Hub API listening on ' + HUB_HOST + ':' + HUB_PORT);
         console.log('Hub DB sync WebSocket available at ws://' + HUB_HOST + ':' + HUB_PORT + '/hub-db/subscribe');
