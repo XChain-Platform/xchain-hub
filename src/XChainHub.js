@@ -1458,6 +1458,16 @@ class XChainHub {
             // Nothing configured is not a cross-network hazard; a tree with other
             // networks but not ours is, so refuse rather than resolve one.
             if(!btc || Object.keys(btc).length === 0) return this.network;
+            // OUR network being present is not a hazard either, whatever sections it
+            // carries. An indexer's pushChainTip writes bitcoin.<network>.chain_tips,
+            // so the mere act of a BTC indexer reporting its tip populated this tree
+            // with our own network and no 'xchain-indexer' section, and the throw below
+            // then fired on a hub whose only bitcoin config was its own. That took out
+            // the BTC anchor on exactly the hub the indexers talk to. The cross-network
+            // question is answered by WHICH networks appear, not by which sections they
+            // hold, so resolve ours and let the caller fall through to
+            // BTC_INDEXER_API_URL when no indexer URL is configured here.
+            if(btc[this.network]) return this.network;
             throw new Error('XChainHub: HUB_NETWORK=' + this.network + ' has no bitcoin xchain-indexer in the ' +
                 'configs table (present: ' + Object.keys(btc).join(', ') + '); refusing to anchor consensus to ' +
                 'another network. Set BTC_INDEXER_API_URL, or push the ' + this.network + ' indexer via updateconfig.');
