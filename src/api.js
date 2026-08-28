@@ -143,6 +143,19 @@ const WRITE_METHODS  = new Set([
 // retraction path is pushpricereorg below; a batch push carries no
 // destructive row:deleted broadcast of its own.
 const REORG_WRITE_METHODS = new Set(['pushpricereorg', 'pushxcallreorg', 'pushdexreorg']);
+
+// The ONLY rpc methods reachable on the public P2P-port feed (PeerManager
+// setFeedHandlers). This is the complete set an indexer sends to its hub
+// (xchain-indexer src/hub_client.js): what landed on its chain, and the
+// retractions when a reorg takes it back. Every one is a WRITE_METHODS or
+// REORG_WRITE_METHODS member, so the x-api-key tiers apply to them here exactly as
+// on the private port; this set only narrows WHICH methods that port will consider.
+// Adding to it widens a public attack surface: a method belongs here only if an
+// indexer must call it and it is signature- or content-validated hub-side.
+const FEED_RPC_METHODS = new Set([
+    'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushoracleprice',
+    'pushpricereorg', 'pushxcallreorg', 'pushdexreorg'
+]);
 const HUB_REORG_API_KEY   = process.env.HUB_REORG_API_KEY || '';
 
 // Read methods whose RESPONSE is mesh-internal, keyed like writes when
@@ -449,6 +462,42 @@ async function startApi(){
                     (SENSITIVE_READ_AUTH && SENSITIVE_READ_METHODS.has(m));
             });
             if (gated && !timingEqual(provided, HUB_API_KEY)) return unauthorized();
+        }
+        next();
+    });
+
+    // Public-port method allowlist. A request stamped by PeerManager arrived on the
+    // PUBLIC P2P port (see setFeedHandlers), where the only callers are indexers
+    // mirroring this validator and reporting what landed on their chain. Hold those
+    // to FEED_RPC_METHODS: every other method (config and validator administration,
+    // governance, slashing, swaps, anchor flush, effector spend, and every read)
+    // stays reachable only on the private API port.
+    //
+    // These are the whole indexer->hub vocabulary (xchain-indexer src/hub_client.js),
+    // and they are not a back door: each is a WRITE_METHODS/REORG_WRITE_METHODS
+    // member that has just cleared the x-api-key gate above exactly as it would on
+    // the private port, and each payload is validated and signature-checked before
+    // anything is stored. Refusing them would leave a validator unable to learn that
+    // its own published batch landed, which is what stops its publisher pruning and
+    // keeps the takeover rail disarmed.
+    //
+    // Runs AFTER the key gate deliberately: an unauthenticated caller gets the same
+    // 401 it would get anywhere, so this port answers "not available" only to a
+    // caller already holding the key, and does not become an oracle for which
+    // methods a hub implements.
+    app.use((req, res, next) => {
+        if (!req.xchainFeedOrigin) return next();
+        if (req.method === 'GET') return next();     // snapshot reads, already path-scoped
+        let calls = Array.isArray(req.body) ? req.body : [req.body];
+        let allowed = calls.length > 0 && calls.every((call) => {
+            let method = call && call.method;
+            return typeof method === 'string' && FEED_RPC_METHODS.has(method.toLowerCase());
+        });
+        if (!allowed) {
+            return res.status(404).json({
+                jsonrpc: '2.0', id: (Array.isArray(req.body) ? null : (req.body && req.body.id)) || null,
+                error: { code: -32601, message: 'Method not available on this port' }
+            });
         }
         next();
     });

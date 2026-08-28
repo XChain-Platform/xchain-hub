@@ -143,11 +143,21 @@ class PeerManager extends EventEmitter {
         this.feedUpgradeHandler = upgradeHandler || null;
     }
 
-    // A mirror-snapshot read: GET only (the bootstrap is a paged GET), and only
-    // under the snapshot prefix. Anything else on this port is not feed traffic.
+    // Feed traffic is exactly two shapes. A mirror-snapshot read: GET only (the
+    // bootstrap is a paged GET), under the snapshot prefix. And the JSON-RPC
+    // endpoint: POST to the root, which is how an indexer reports what landed on
+    // its chain (pushpricebatch and its siblings). WHICH rpc methods are allowed
+    // there is decided in api.js, on the request stamp set below, because the
+    // method name lives in a body this layer has not read yet.
     _isFeedRequest(req) {
-        if (!req || req.method !== 'GET' || !req.url) return false;
-        return req.url === FEED_SNAPSHOT_PREFIX || req.url.startsWith(FEED_SNAPSHOT_PREFIX + '/');
+        if (!req || !req.url) return false;
+        if (req.method === 'GET') {
+            return req.url === FEED_SNAPSHOT_PREFIX || req.url.startsWith(FEED_SNAPSHOT_PREFIX + '/');
+        }
+        if (req.method === 'POST') {
+            return req.url === '/' || req.url.startsWith('/?');
+        }
+        return false;
     }
 
     _isFeedUpgrade(req) {
@@ -176,6 +186,12 @@ class PeerManager extends EventEmitter {
         // server), so a stray probe cannot hold a connection open.
         this.httpServer = http.createServer((req, res) => {
             if (this.feedRequestHandler && this._isFeedRequest(req)) {
+                // Stamp the request as having arrived on the PUBLIC port. api.js
+                // reads this to hold a stamped request to the indexer push
+                // allowlist; an unstamped request (the private API port) keeps the
+                // full method surface. Set here rather than inferred from a port
+                // number downstream, so the two entrances can never be confused.
+                req.xchainFeedOrigin = true;
                 this.feedRequestHandler(req, res);
                 return;
             }

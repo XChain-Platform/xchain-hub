@@ -100,6 +100,47 @@ describe('PeerManager: read-only mirror feed on the P2P port', function () {
         expect(handler.called).to.be.false;
     });
 
+    // The JSON-RPC endpoint is the second feed shape: an indexer reports what
+    // landed on its chain. WHICH methods are allowed is enforced in api.js off the
+    // stamp asserted here (see feedRpcAllowlist.test.js), because the method name
+    // is in a body this layer has not read.
+    it('delegates a POST to the rpc root and stamps it as public-port traffic', async function () {
+        let seen = null;
+        pm.setFeedHandlers((req, res) => {
+            seen = { url: req.url, method: req.method, stamped: req.xchainFeedOrigin === true };
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end('{"jsonrpc":"2.0","result":{}}');
+        }, () => {});
+        let res = await request(port, 'POST', '/');
+        expect(res.status).to.equal(200);
+        expect(seen).to.deep.equal({ url: '/', method: 'POST', stamped: true });
+    });
+
+    it('stamps a snapshot GET too, so the allowlist sees every public-port request', async function () {
+        let stamped = null;
+        pm.setFeedHandlers((req, res) => {
+            stamped = req.xchainFeedOrigin === true;
+            res.writeHead(200); res.end('{}');
+        }, () => {});
+        await get(port, '/hub-db/snapshot/capability_snapshots');
+        expect(stamped).to.be.true;
+    });
+
+    it('404s a POST to any path other than the rpc root', async function () {
+        let handler = sinon.spy((req, res) => { res.writeHead(200); res.end('{}'); });
+        pm.setFeedHandlers(handler, () => {});
+        for (let path of ['/admin', '/hub-db', '/health', '/rpc']) {
+            let res = await request(port, 'POST', path);
+            expect(res.status, path).to.equal(404);
+        }
+        expect(handler.called).to.be.false;
+    });
+
+    it('404s the rpc root when no feed is wired', async function () {
+        let res = await request(port, 'POST', '/');
+        expect(res.status).to.equal(404);
+    });
+
     it('404s the feed path when no feed is wired (gossip-only hub)', async function () {
         let res = await get(port, '/hub-db/snapshot/capability_snapshots');
         expect(res.status).to.equal(404);
