@@ -158,7 +158,7 @@ describe('StateAnchorPublisher: confirmed inputs only (the PRICE-rail rule on th
             const { pub } = buildPub([UNCONFIRMED]);
             let row = { id: 1, chain: 'BTC', network: 'regtest', block_index: 500, block_hash: 'c0'.repeat(32),
                         ledger_hash: 'a1'.repeat(32), actions_hash: 'b2'.repeat(32), contract_hash: 'c3'.repeat(32),
-                        checkpoint_seq: 100, snapshot_block: 100, state_root: null, block_merkle_root: null, anchor_txid: null };
+                        checkpoint_seq: 100, snapshot_block: 100, state_root: 'e4'.repeat(32), state_root_version: 1, block_merkle_root: 'f5'.repeat(32), block_merkle_version: 1, anchor_txid: null };
             pub.hub.db.doQuery = async (sql) => sql.indexOf('FROM state_checkpoints') !== -1 ? [row] : [];
             let me = pub.identity.getPubkeyHex().toLowerCase();
             pub._getActiveOraclePublishPubkeys = async () => [me];       // sole member: rank 0, always unlocked

@@ -309,12 +309,12 @@ describe('StateAnchorPublisher: _findExistingCheckpointAnchor', function () {
     it('does NOT adopt a v6 archive head as this checkpoint\'s anchor', async function () {
         const pub = mkPubWithVersionedIndexer({}, { exists: true, version: 6, status: 'valid', txid: 'ee'.repeat(32) });
         expect(await pub._findExistingCheckpointAnchor(ROW)).to.equal(null);
-        expect(pub._asked, 'falls back to the checkpoint versions').to.deep.equal([null, 0, 3, 4, 5]);
+        expect(pub._asked, 'falls back to the checkpoint versions').to.deep.equal([null, 7]);
     });
 
     it('finds a checkpoint anchor sitting BENEATH a newer archive head (no duplicate publish)', async function () {
         const pub = mkPubWithVersionedIndexer(
-            { 4: { exists: true, version: 4, status: 'valid', txid: 'ab'.repeat(32) } },
+            { 7: { exists: true, version: 7, status: 'valid', txid: 'ab'.repeat(32) } },
             { exists: true, version: 1, status: 'valid', txid: 'ee'.repeat(32) });
         const res = await pub._findExistingCheckpointAnchor(ROW);
         expect(res.exists).to.equal(true);
@@ -322,7 +322,7 @@ describe('StateAnchorPublisher: _findExistingCheckpointAnchor', function () {
     });
 
     it('keeps the single-call path when the top row is a checkpoint version', async function () {
-        const pub = mkPubWithVersionedIndexer({}, { exists: true, version: 3, status: 'valid', txid: 'cd'.repeat(32) });
+        const pub = mkPubWithVersionedIndexer({}, { exists: true, version: 7, status: 'valid', txid: 'cd'.repeat(32) });
         const res = await pub._findExistingCheckpointAnchor(ROW);
         expect(res.txid).to.equal('cd'.repeat(32));
         expect(pub._asked).to.deep.equal([null]);
@@ -339,6 +339,65 @@ describe('StateAnchorPublisher: _findExistingCheckpointAnchor', function () {
         let err = null;
         try { await pub._findExistingCheckpointAnchor(ROW); } catch (e) { err = e; }
         expect(err).to.be.an('error');
+    });
+
+    // The BUNDLE guard (spec §2.4): the failover-race adopt on the checkpoint leg. It is
+    // the per-section lookup above run once per section, and it adopts ONLY when every
+    // section resolves to one mined transaction. A partial answer would stamp sections
+    // from a transaction that does not carry the others.
+    describe('_findExistingBundle', function () {
+
+        const SECTIONS = [{ chain: 'BTC', network: 'regtest', block_index: 494, checkpoint_seq: 7 },
+                          { chain: 'LTC', network: 'regtest', block_index: 990, checkpoint_seq: 7 }];
+
+        // Answers per chain, so a partial or split-txid view can be scripted.
+        function mkPubByChain(byChain){
+            const pub = mkPub();
+            pub.indexers = { DOGE: { url: 'http://doge-indexer' } };
+            pub._indexerCall = async (coin, method, params) => {
+                const a = byChain[params.chain];
+                if (a instanceof Error) throw a;
+                return a;
+            };
+            return pub;
+        }
+        const mined = (txid) => ({ exists: true, version: 7, status: 'valid', txid: txid });
+
+        it('adopts when every section resolves to ONE mined transaction', async function () {
+            const pub = mkPubByChain({ BTC: mined('ab'.repeat(32)), LTC: mined('ab'.repeat(32)) });
+            expect(await pub._findExistingBundle(SECTIONS)).to.deep.equal({ exists: true, txid: 'ab'.repeat(32) });
+        });
+
+        it('does NOT adopt when one section is absent (that transaction is not this bundle)', async function () {
+            const pub = mkPubByChain({ BTC: mined('ab'.repeat(32)), LTC: { exists: false } });
+            expect(await pub._findExistingBundle(SECTIONS)).to.equal(null);
+        });
+
+        it('does NOT adopt when the sections were anchored by DIFFERENT transactions', async function () {
+            // A leftover per-chain history, or two racing publishers that each landed
+            // part of the set: adopting either txid would stamp rows it does not carry.
+            const pub = mkPubByChain({ BTC: mined('ab'.repeat(32)), LTC: mined('cd'.repeat(32)) });
+            expect(await pub._findExistingBundle(SECTIONS)).to.equal(null);
+        });
+
+        it('does NOT adopt against a pre-upgrade indexer that serves no txid', async function () {
+            const pub = mkPubByChain({ BTC: { exists: true, version: 7, status: 'valid' },
+                                       LTC: { exists: true, version: 7, status: 'valid' } });
+            expect(await pub._findExistingBundle(SECTIONS)).to.equal(null);
+        });
+
+        it('propagates an undetermined section (never a false absent, which would double-spend)', async function () {
+            const pub = mkPubByChain({ BTC: mined('ab'.repeat(32)), LTC: new Error('ETIMEDOUT') });
+            let err = null;
+            try { await pub._findExistingBundle(SECTIONS); } catch (e) { err = e; }
+            expect(err).to.be.an('error');
+        });
+
+        it('treats a decoded-invalid section as not-this-bundle', async function () {
+            const pub = mkPubByChain({ BTC: mined('ab'.repeat(32)),
+                                       LTC: { exists: true, version: 7, status: 'invalid: SECTION 1 stale', txid: 'ab'.repeat(32) } });
+            expect(await pub._findExistingBundle(SECTIONS)).to.equal(null);
+        });
     });
 
     it('propagates an undetermined answer from the narrowed lookup (never a false absent)', async function () {

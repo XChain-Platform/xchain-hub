@@ -356,15 +356,21 @@ resolves from `p2pConfig`; the env var is the highest-precedence override.
 
 ## State-anchor publisher (`StateAnchorPublisher`)
 
-ANCHOR v0/v1/v2 on-chain publishing of finalized checkpoints (published on
+ANCHOR v7/v1/v2 on-chain publishing of finalized checkpoints (published on
 DOGE; wallet/encoder settings are in the DOGE oracle publisher section). Each
 variable also resolves from `p2pConfig`; the env var wins.
+
+One ANCHOR v7 per network per cycle carries every chain's newest un-anchored
+checkpoint as a SECTION, so a cycle runs one election, one publisher
+attestation round and one DOGE spend rather than one of each per chain. The
+superseded per-chain wires (v0/v3/v4/v5) are gone. The archive leg (v1 head, v2
+continuation chunks) is unchanged.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `ANCHOR_ENABLED` | No | `true` | Enable on-chain anchoring. Set `false` to disable. |
 | `ANCHOR_INTERVAL_MS` | No | `86400000` (24h) | Anchor cycle interval (ms). |
-| `ANCHOR_CHECKPOINT_EVERY_N` | No | `1` | Anchor only every Nth `checkpoint_seq` (each v0 anchor spends real DOGE; recovery only needs the latest anchored checkpoint). `1` anchors every checkpoint. Deterministic fleet-wide (`seq % N`). |
+| `ANCHOR_CHECKPOINT_EVERY_N` | No | `1` | Anchor only every Nth `checkpoint_seq` (each bundle spends real DOGE; recovery only needs the latest anchored checkpoint). `1` anchors every checkpoint. Deterministic fleet-wide (`seq % N`). Not a cadence control: `ANCHOR_INTERVAL_MS` is. |
 | `ANCHOR_MATCH_BATCH_SIZE` | No | `200` | Rows per archive-batch query page. |
 | `ANCHOR_MAX_BATCH` | No | `1000` | Max rows per archive (v1) anchor batch. |
 | `ANCHOR_CHUNK_MAX_BYTES` | No | `6000` | Max payload bytes per on-chain anchor chunk. |
@@ -383,7 +389,7 @@ variable also resolves from `p2pConfig`; the env var wins.
 | `ANCHOR_ANNOUNCE_QUEUE_MAX` | No | `500` | Max queued announcements per hub; the oldest entry is evicted past this. |
 | `ANCHOR_INTENT_TTL_MS` | No | `21600000` | How long a durable broadcast intent (`anchor_published_checkpoints`) HOLDS its checkpoint when no anchor has mined for it. The publisher arms the marker before the send and stamps `anchor_txid` after it, so a crash in between is the one state where DOGE may have paid with nothing recording it; the hold stops the next flush rebuilding a second transaction from different UTXOs. Same `~6x` the 60-conf DOGE window bound as `ANCHOR_ANNOUNCE_RETRY_TTL_MS`, past which a send that never relayed is not coming back and holding the row costs more than re-broadcasting it. |
 | `ANCHOR_MARKER_RETENTION_MS` | No | `7776000000` (90d) | Retention window for the two durable anchor marker tables (`anchor_published_checkpoints`, `anchor_published_archives`), swept at the end of each publishing flush; `0` disables. Only CONFIRMED rows are ever deleted: a surviving `sent_at IS NULL` row is the ambiguous-send record, the only durable trace that DOGE may already have paid, and it is kept forever. The cutoff is measured on `intent_at` and floored at a multiple of `ANCHOR_INTENT_TTL_MS`, so it can never reach a marker still inside its hold window; lowering this below that floor changes nothing. |
-| `ANCHOR_REWARD_PER_PUBLISH` | No | `10.00000000` | XCHAIN reward recorded per anchor publish (`RewardTracker`). |
+| `ANCHOR_REWARD_PER_PUBLISH` | No | `10.00000000` | XCHAIN reward recorded per anchor publish (`RewardTracker`). One `anchor_bundle` reward per BUNDLE (not per chain), keyed on the bundle's snapshot block. At/above the anchor-reward flag-day the frozen consensus amount is used instead, so this knob only applies below it. |
 
 ### Why those magnitudes (before you retune them)
 
@@ -402,13 +408,23 @@ constructor comment and pinned by
   signature pairs on a v1, or 4+4 on a v6. **Lower this as the federation
   grows:** a 5+5 v6 quorum needs ~5860 or less, a 7+7 quorum ~5080. Going over
   the ceiling is not a loud failure; the decoder silently drops the action.
+- **The v7 bundle budget is 8189 bytes** (`MAX_ACTION_DATA_LENGTH` 8192 less the
+  3-byte push prefix) and is NOT an env knob: it is the on-chain ceiling. What
+  consumes it is the federation's signer count, since a section costs ~420 B plus
+  194 B per `(PUBKEY, SIG)` pair and the publisher tail ~67 B plus 194 B per
+  attesting signer. Measured capacity: **6 chains at 4 signers, 5 at 5, 3 at 7.**
+  Past it the publisher SPLITS the cycle chain-ascending into as many bundles as
+  fit, each electing at its own snapshot block, and logs one line per split. A
+  single section that cannot fit even with a zero-signature tail is refused
+  loudly and counted in `getanchorstatus.bundlesOversize`; it is never sent,
+  because the decoder drops an oversize action silently rather than rejecting it.
 - **`ANCHOR_MATCH_BATCH_SIZE` = 200** is an early-flush latency trigger, and
   **`ANCHOR_MAX_BATCH` = 1000** is the per-cycle DOGE spend bound. Archive rows
   are signature-dominated and do not compress (~0.55 KB of gzip+base64 per
   settled match), so 1000 rows is ~550 KB, ~93 chunks, ~93 DOGE transactions in
   one cycle; 200 rows is ~19.
 - **`ANCHOR_ELECTION_TOLERANCE_BLOCKS` = 36** is ~6h of BTC blocks per failover
-  rank. Blocks, not wall clock, so every hub agrees on the unlock without clock
+  rank, now applied to the BUNDLE rather than to each row. Blocks, not wall clock, so every hub agrees on the unlock without clock
   sync. The ordering is what matters: signing round (120s) + DOGE burial (60
   confs, ~1h) << 36 blocks (~6h) << `ANCHOR_INTERVAL_MS` (24h), which keeps a
   slow leader from being overtaken while still giving ranks 1-3 a slot (~6/12/18h)
@@ -420,6 +436,21 @@ constructor comment and pinned by
   stranded work for a cycle. The wake sits inside the same ordering (120s signing
   round << 15 min << 36 blocks), and it publishes only where this hub is a BACKUP,
   so a slow-but-healthy leader is still never overtaken by it.
+
+### What `getanchorstatus` counts
+
+- **`anchorsPublished`** counts BUNDLES, one per network per cycle. It kept its
+  name through the v7 change, so a figure recorded before the change counted
+  anchors (one per chain) and is not comparable with one recorded after.
+- **`sectionsAnchored`** counts the CHAINS those bundles carried, which is the
+  quantity the old `anchorsPublished` reported. A healthy three-chain federation
+  on a daily cadence advances `anchorsPublished` by 1 and `sectionsAnchored` by 3
+  per cycle; the two moving at the same rate means the cycle is anchoring one
+  chain at a time and the rest of the chains are not producing checkpoints.
+- **`bundlesOversize`** counts sections REFUSED for exceeding the 8189-byte
+  budget on their own. Any non-zero value means a checkpoint is not on chain at
+  all and the federation's signer count (or the section width) has to come down;
+  it never self-clears.
 
 ## Effector spend policy (`SpendGuard`)
 

@@ -32,7 +32,7 @@ const BLOCK  = 100;
 const CP_ROW = {
     id: 1, chain: 'BTC', network: 'regtest', block_index: 500, block_hash: 'c0'.repeat(32),
     ledger_hash: 'a1'.repeat(32), actions_hash: 'b2'.repeat(32), contract_hash: 'c3'.repeat(32),
-    checkpoint_seq: BLOCK, snapshot_block: BLOCK, state_root: null, block_merkle_root: null,
+    checkpoint_seq: BLOCK, snapshot_block: BLOCK, state_root: 'e4'.repeat(32), state_root_version: 1, block_merkle_root: 'f5'.repeat(32), block_merkle_version: 1,
     anchor_txid: null
 };
 
@@ -66,7 +66,7 @@ function buildPub() {
 // that puts this hub at rank 0 or rank 1 in the real hash order.
 function pendingRow(wantLeader) {
     let { pub, me } = buildPub();
-    let key  = pub._v0ElectionKey(CP_ROW);
+    let key  = pub._bundleElectionKey(CP_ROW);
     let peer = null;
     for (let i = 0; i < 256 && peer === null; i++) {
         let candidate = String(20 + (i % 80)).repeat(32).slice(0, 64);

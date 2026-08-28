@@ -350,6 +350,19 @@ describe('RewardTracker', function () {
             expect(h2.db.doQuery.getCall(1).args[1][3]).to.equal('2.50000000');
         });
 
+        it('records the FROZEN anchor amount for a derived anchor_bundle reward, ignoring an env override', async function () {
+            // One bundle, one reward: the indexer credits ANCHOR_REWARD_AMOUNT from the
+            // on-chain v7 tail, so the hub-recorded amount must be the same frozen constant.
+            let h = createMockHub({ p2pConfig: { ANCHOR_REWARD_PER_PUBLISH: '2.5' } });
+            h.network = 'regtest';
+            let rt2 = new RewardTracker(h);
+            await rt2.recordAnchorReward('anchor_bundle', 100, hexPk(1), 100);
+            let ins = h.db.doQuery.getCall(1).args;
+            expect(ins[0]).to.include('INSERT IGNORE INTO validator_rewards');
+            expect(ins[1][2]).to.equal('anchor_bundle');
+            expect(ins[1][3], 'frozen anchor amount, not the 2.5 env override').to.equal('10.00000000');
+        });
+
         it('records the FROZEN archive amount for a derived anchor_archive reward, ignoring an env override', async function () {
             // Same divergence argument as the per-chain frozen amount: the indexer credits
             // the frozen ARCHIVE_REWARD_AMOUNT from the on-chain v6, so the hub's recorded

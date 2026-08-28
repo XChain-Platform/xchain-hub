@@ -17,8 +17,10 @@
  * Publishes the protocol's on-chain commitments on DOGE (and ONLY on DOGE,
  * so BTC/LTC carry zero anchor bytes; spec: protocol/actions/ANCHOR.md):
  *
- *   ANCHOR v0: the latest quorum-signed state checkpoint per chain (signatures
- *               come straight from state_checkpoints; no new signing round).
+ *   ANCHOR v7: ONE bundle per network per cycle carrying every chain's latest
+ *               quorum-signed state checkpoint as a SECTION (signatures come
+ *               straight from state_checkpoints; no new signing round). The
+ *               superseded per-chain wires v0/v3/v4/v5 were deleted pre-launch.
  *   ANCHOR v1: a checkpoint + a compressed archive of full cross_chain_matches
  *               rows (incl. their validator_signatures + the cross_chain
  *               capability_snapshots needed to re-verify them). This is what
@@ -42,9 +44,9 @@
  * OR archived_status <> status (retracted after being archived as finalized).
  *
  * Election (attestation-style hash-ordering, spec §8.2 idiom): each pending
- * checkpoint elects its OWN publisher (oracle_publish validators at the
- * checkpoint's snapshot_block ordered by SHA256(election key ‖ pubkey)
- * ascending, where the key binds chain/network/seq/snapshot_block). Rank 0
+ * BUNDLE elects ONE publisher (oracle_publish validators at the bundle's
+ * snapshot_block ordered by SHA256(election key ‖ pubkey)
+ * ascending, where the key binds network/snapshot_block). Rank 0
  * publishes; if it hasn't after ANCHOR_ELECTION_TOLERANCE_BLOCKS BTC blocks,
  * rank 1 also qualifies, and so on (the DB row's anchor_txid IS NULL is the
  * shared "still pending" signal, so a late rank-0 and an early rank-1 can both
@@ -52,12 +54,10 @@
  * commitments, and the anchor-reward rail does NOT inflate: recordAnchorReward
  * deterministically keeps a single reward per (checkpoint_seq, reward_type)
  * across distinct publisher pubkeys (see below), so the only residual cost of
- * the race is the duplicate DOGE tx fee. A different
- * validator therefore publishes each chain's anchor in a cycle, FROM ITS OWN
- * DOGE WALLET (no UTXO contention between the per-chain anchors, per-chain
- * fault isolation, and publish work plus its DOGE cost spreads across the
- * federation). Each successful publish records an `anchor_<chain>` /
- * `anchor_archive` reward on the validator_rewards rail (oracle-round
+ * the race is the duplicate DOGE tx fee. One validator publishes the whole
+ * bundle in a cycle, FROM ITS OWN DOGE WALLET, and the election rotates that
+ * work across the federation cycle by cycle. Each successful publish records an
+ * `anchor_bundle` / `anchor_archive` reward on the validator_rewards rail (oracle-round
  * pattern; recordAnchorReward collapses failover-race duplicates to a single
  * deterministic per-(round,type) winner, best-effort push to the BTC indexer
  * for COLLECT). The v1 archive round elects a single leader the same way with a
@@ -95,11 +95,11 @@ const ar                    = require('./anchor_reward_activation.js');
 const XANC_SIGN_REQ  = 'XANC_SIGN_REQ';
 const XANC_SIGN      = 'XANC_SIGN';
 const XANC_FINALIZED = 'XANC_FINALIZED';
-const XANC_V0_DONE   = 'XANC_V0_DONE';
+const XANC_BUNDLE_DONE = 'XANC_BUNDLE_DONE';
 // Publisher-attestation round (anchor-reward re-derivation flag-day): the elected
-// checkpoint publisher collects a 2f+1 oracle_publish quorum ATTESTING that it is the
-// legitimate reward earner, carried on-chain in ANCHOR v4/v5 so the indexer DERIVES the
-// reward instead of trusting the forgeable push. Mirrors XANC_SIGN_REQ/SIGN.
+// bundle publisher collects a 2f+1 oracle_publish quorum ATTESTING that it is the
+// legitimate reward earner, carried on-chain in the ANCHOR v7 tail so the indexer
+// DERIVES the reward instead of trusting the forgeable push. Mirrors XANC_SIGN_REQ/SIGN.
 const XANCPUB_SIGN_REQ = 'XANCPUB_SIGN_REQ';
 const XANCPUB_SIGN     = 'XANCPUB_SIGN';
 
@@ -122,6 +122,23 @@ const XANCARCHPUB_SIGN     = 'XANCARCHPUB_SIGN';
 // taken from the message except the tuple identity it independently re-derives the canonical
 // from, and the frozen reward amount is never read off the wire at all.
 const XANCREWARD = 'XANCREWARD';
+
+// The hard on-chain ceiling on one action's data, from
+// xchain-documentation/protocol/constants.js. The DECODER is the arbiter and silently
+// DROPS a larger action, so an oversize bundle is lost fleet-wide rather than rejected
+// loudly. Local copy so the hub can measure without a sibling checkout.
+const MAX_ACTION_DATA_LENGTH = 8192;
+// The encoder compiles the raw payload text into a push whose prefix costs 3 bytes
+// (xchain-encoder/src/validator.js), so compiled size IS raw text + 3.
+const OP_RETURN_PUSH_OVERHEAD = 3;
+// The byte budget a v7 bundle's raw text must stay within (D10). Overflow is SPLIT
+// chain-ascending, never dropped; a single section that cannot fit even with a
+// zero-signature tail is refused loudly and counted (bundlesOversize).
+const ANCHOR_BUNDLE_MAX_BYTES = MAX_ACTION_DATA_LENGTH - OP_RETURN_PUSH_OVERHEAD;   // 8189
+// Wire cost of one (PUBKEY, SIG) pair: '|' + 64-hex pubkey + '|' + 128-hex Ed25519
+// signature. Fixed width, which is what lets the split arithmetic size an attestation
+// tail before the round that fills it has run.
+const ANCHOR_SIG_PAIR_BYTES = 1 + 64 + 1 + 128;   // 194
 
 // Default retention window for anchor_published_checkpoints and
 // anchor_published_archives, mirroring OraclePublisher's ~90-day
@@ -226,7 +243,7 @@ class StateAnchorPublisher {
         //     <<  36 blocks (~6h)  <<  ANCHOR_INTERVAL_MS (24h)
         // Left inequality: a healthy but slow leader is never overtaken, so the
         // federation does not pay DOGE twice for the same checkpoint (it also keeps
-        // the on-chain verification wait in _handleV0Done well inside one rank).
+        // the on-chain verification wait in _handleBundleDone well inside one rank).
         // Right inequality: ranks 1-3 unlock at ~6/12/18h, so up to three backups
         // still get a slot inside one publishing cycle and a dead rank 0 cannot
         // cost the federation a whole day of anchoring. Anything in ~6..144 blocks
@@ -262,7 +279,7 @@ class StateAnchorPublisher {
         // weeks and anchored none of them, with no log line saying so.
         // One normal flush shortly after start closes that hole. It is idempotent
         // by construction (a row already anchored carries anchor_txid, and a peer's
-        // anchor is stamped by the V0_DONE drain that runs first inside flush), so
+        // anchor is stamped by the BUNDLE_DONE drain that runs first inside flush), so
         // a rolling restart of the whole federation still pays for one anchor per
         // checkpoint. The delay lets the signer hooks, the BTC tip and the DOGE
         // balance source settle first; flush is fail-closed on all three anyway.
@@ -361,8 +378,17 @@ class StateAnchorPublisher {
         // a pattern of losses is surfaced here for operator visibility rather
         // than requiring a log-grep.
         this._archiveChunkLosses = 0;
-        // Cumulative count of v0/v3 anchors successfully published on-chain.
+        // Cumulative count of checkpoint BUNDLES successfully published on-chain. The
+        // name is a documented RPC field with no consumer outside the hub, so it keeps
+        // it and changes what it counts (D13): one v7 per network per cycle, where the
+        // retired per-chain wires counted one anchor per chain.
         this._anchorsPublished = 0;
+        // Chains carried by those bundles (one per section, so this is the per-chain
+        // figure), and bundles REFUSED for exceeding the byte budget with a single
+        // section that cannot fit even with a zero-signature tail. Both exist for the
+        // operator's post-deploy check, not for a dashboard tile.
+        this._sectionsAnchored = 0;
+        this._bundlesOversize  = 0;
         // Split of that count by the rank this hub held for the row it anchored.
         // A backup-rank publish means the elected rank-0 publisher did NOT anchor
         // within its ladder step, so the federation is running on failover with
@@ -375,17 +401,19 @@ class StateAnchorPublisher {
         // Rank state of the most recent successful anchor, surfaced via
         // getAnchorStats so an operator sees the CURRENT posture, not only a
         // lifetime tally that a long healthy history would dilute.
-        this._lastAnchorRank   = null;   // { chain, network, blockIndex, myRank, publisherCount, isLeader, at }
+        this._lastAnchorRank   = null;   // { network, snapshotBlock, chains, myRank, publisherCount, isLeader, at }
         // Cumulative count of candidate checkpoints a flush looked at and stood
         // down from, split by why. Both skips are correct behavior and were silent,
         // which made a federation with ZERO anchors ever published indistinguishable
         // from one with nothing to anchor: every wake walked the same rows and
         // logged nothing. Exposed via getAnchorStats so getanchorstatus answers
         // "is anyone even being asked to publish this?" without a code read.
-        //   notOurElection: another hub is the unlocked publisher for the row (or
+        //   notOurElection: another hub is the unlocked publisher for the bundle (or
         //                   this hub's backup rank has not unlocked yet)
-        //   leaderOnWake:   this hub leads the row but the flush was the failover-
+        //   leaderOnWake:   this hub leads the bundle but the flush was the failover-
         //                   only wake, which never publishes a led election
+        // Both count SECTIONS, not bundles, so the operator-facing figure stays "how
+        // many pending checkpoints did this flush stand down from".
         this._skippedNotOurElection = 0;
         this._skippedLeaderOnWake   = 0;
         // Last DOGE balance observed by _checkBalance (refreshed each flush) and
@@ -439,7 +467,7 @@ class StateAnchorPublisher {
         // floor-clamped, see coins.resolveConfirmations).
         this.dogeConfirmations = coins.resolveConfirmations(cfg, this.network).DOGE;
 
-        // XANC_V0_DONE is broadcast the instant _broadcastWithRetry
+        // XANC_BUNDLE_DONE is broadcast the instant _broadcastWithRetry
         // returns a txid, i.e. while the DOGE anchor is still in the mempool, but the
         // receiver only stamps once that anchor is buried dogeConfirmations deep (60 on
         // DOGE, ~1 hour). The announcement is one-shot, so at announce time every peer
@@ -450,7 +478,7 @@ class StateAnchorPublisher {
         // not yet buried and re-run the on-chain verification on a timer. Bounded by
         // size and TTL so a never-mined (evicted or replaced) tx cannot suppress a
         // needed re-anchor indefinitely.
-        this._deferredV0Done      = new Map();
+        this._deferredBundleDone  = new Map();
         // Fabricated-txid half: the SAME queue shape for XANC_FINALIZED. The
         // announcement rides at 0 confirmations too, so the archive head is normally
         // 'absent' at receipt; the entry is re-verified here until the head is buried
@@ -505,6 +533,13 @@ class StateAnchorPublisher {
         return {
             enabled:            this.enabled,
             anchorsPublished:   this._anchorsPublished,
+            // Chains carried by those bundles, and bundles refused for exceeding the
+            // 8189-byte budget. sectionsAnchored climbing at the same rate as
+            // anchorsPublished means the federation is anchoring ONE chain per cycle,
+            // not a bundle; bundlesOversize non-zero means a checkpoint is not on chain
+            // at all and the signer count or the section width has to come down.
+            sectionsAnchored:   this._sectionsAnchored,
+            bundlesOversize:    this._bundlesOversize,
             // Leader-vs-failover split of anchorsPublished plus the last anchor's
             // rank posture. anchorsAsBackup climbing (or lastAnchorRank.isLeader
             // false) is the only signal that the elected rank-0 publisher is dead
@@ -588,10 +623,10 @@ class StateAnchorPublisher {
         }, this.intervalMs);
         if(this._timer.unref) this._timer.unref();
         // Separate, much shorter cadence than the (daily by default) flush: a queued
-        // V0_DONE has to be re-checked on the order of the DOGE confirmation window,
+        // BUNDLE_DONE has to be re-checked on the order of the DOGE confirmation window,
         // not the anchor publishing window.
         this._deferTimer = setInterval(() => {
-            this._drainDeferredV0Done().catch(err => console.error('StateAnchorPublisher: deferred V0_DONE drain error:', err && err.message));
+            this._drainDeferredBundleDone().catch(err => console.error('StateAnchorPublisher: deferred BUNDLE_DONE drain error:', err && err.message));
             this._drainDeferredFinalized().catch(err => console.error('StateAnchorPublisher: deferred FINALIZED drain error:', err && err.message));
             this._drainDeferredRewardAttest().catch(err => console.error('StateAnchorPublisher: deferred reward-attestation drain error:', err && err.message));
         }, this.announceRetryMs);
@@ -729,8 +764,8 @@ class StateAnchorPublisher {
             // anchored is stamped before this flush's failover-rank check would re-anchor
             // it (the whole point of the suppression signal). Never let a drain error
             // abort the flush: the queue is bookkeeping, publishing is the job.
-            await this._drainDeferredV0Done()
-                .catch(err => console.warn('StateAnchorPublisher: deferred V0_DONE drain error: ' + (err && err.message)));
+            await this._drainDeferredBundleDone()
+                .catch(err => console.warn('StateAnchorPublisher: deferred BUNDLE_DONE drain error: ' + (err && err.message)));
             await this._drainDeferredFinalized()
                 .catch(err => console.warn('StateAnchorPublisher: deferred FINALIZED drain error: ' + (err && err.message)));
             await this._drainDeferredRewardAttest()
@@ -820,8 +855,15 @@ class StateAnchorPublisher {
         }).sort((a, b) => (a.hash < b.hash) ? -1 : (a.hash > b.hash ? 1 : 0)).map(e => e.pubkey);
     }
 
-    _v0ElectionKey(row){
-        return 'XANCV0|' + row.chain + '|' + row.network + '|' + String(row.checkpoint_seq) + '|' + String(row.snapshot_block);
+    // The BUNDLE election key. One election per bundle, so the key binds only what a
+    // bundle is identified by: its network and its snapshot_block (the MAX over the
+    // sections, D6). The retired per-row key bound chain and seq as well, which is why
+    // one cycle could elect a different publisher per chain and pay three DOGE fees.
+    // Takes any object carrying `network` + `snapshot_block`, so a raw state_checkpoints
+    // row (every row in a bundle shares the network, and the leader's row carries the
+    // bundle block) resolves the same key the bundle does.
+    _bundleElectionKey(b){
+        return 'XANCV7|' + b.network + '|' + String(b.snapshot_block);
     }
 
     // May THIS hub publish for `order` right now? Rank 0 always may; each
@@ -855,10 +897,14 @@ class StateAnchorPublisher {
         return order.indexOf(String(this.identity.getPubkeyHex()).toLowerCase());
     }
 
-    // v0: one per chain/network (the LATEST checkpoint that has no anchor yet).
-    // Older unanchored checkpoints are superseded (the chained hashes commit to
-    // all prior history), so only the newest per chain costs DOGE bytes.
-    // Each row elects its own publisher (hash-order at its snapshot_block).
+    // ONE ANCHOR v7 bundle per network per cycle: the LATEST un-anchored checkpoint of
+    // every chain rides as a SECTION of one transaction (spec §2.2). Older un-anchored
+    // seqs are superseded (the chained hashes commit to all prior history), so only the
+    // newest per chain costs DOGE bytes. The bundle runs ONE election, ONE attestation
+    // round and ONE UTXO spend where the retired per-chain wires ran N of each.
+    //
+    // The method keeps its name: flush() and the deferral suites drive it, and what
+    // changed is the unit of work inside it, not the seam.
     async _publishPendingCheckpoints(signer, btcBlock, failoverOnly){
         // Pick, per chain, the latest ANCHOR-ELIGIBLE checkpoint (seq divisible by
         // anchorEveryNCheckpoints) that is not yet on-chain. Selecting the max
@@ -871,6 +917,11 @@ class StateAnchorPublisher {
         // a real DOGE anchor on) a dead network's perpetually-unanchored
         // checkpoints. A hub with no configured network keeps the legacy
         // unscoped behavior rather than filtering everything out.
+        //
+        // The SQL is unchanged from the per-chain era ON PURPOSE (D24). The
+        // `anchor_txid IS NULL` predicate sits OUTSIDE the MAX subquery: pushing it in
+        // would resurrect older un-anchored seqs that the chained hashes have already
+        // superseded. Do not move it.
         let pendingSql =
             'SELECT sc.* FROM state_checkpoints sc JOIN (' +
             '  SELECT chain, network, MAX(checkpoint_seq) AS max_seq FROM state_checkpoints' +
@@ -881,244 +932,280 @@ class StateAnchorPublisher {
         if(this.network){ pendingSql += ' AND sc.network = ?'; pendingParams.push(this.network); }
         let rows = await this.db.doQuery(pendingSql, pendingParams);
         let anchored = [];
-        let skippedRows = 0;
+        let skipped  = { rows: 0 };
+
+        // Group the result set into ONE bundle per network. A chain absent from a
+        // group is NOT an anomaly (D4): under the daily cadence the normal case is a
+        // chain whose newest eligible seq is already anchored.
+        let byNetwork = new Map();
         for(let row of (rows || [])){
-            try {
-                let eligible = await this._getActiveOraclePublishPubkeys(Number(row.snapshot_block));
-                // Fail closed: an empty/unresolved oracle_publish set is NOT a
-                // licence for every hub to anchor independently (a guaranteed
-                // N-way double-anchor + DOGE burn). Skip until the set resolves.
-                if(eligible.length === 0){
-                    console.warn('StateAnchorPublisher: v0 anchor for ' + row.chain + '/' + row.network +
-                                 ' @ ' + row.block_index + ' deferred: empty oracle_publish set (fail closed)');
-                    continue;
-                }
-                let order = StateAnchorPublisher.hashOrder(this._v0ElectionKey(row), eligible);
-                let since = Number.isFinite(btcBlock) ? btcBlock - Number(row.snapshot_block) : null;
-                if(!this._mayPublish(order, since)){ this._skippedNotOurElection++; skippedRows++; continue; }   // someone else's anchor (or not unlocked yet)
-                // On a failover wake, publish only as a BACKUP. Rank 0 is
-                // always unlocked, so without this the 15-minute wake would replace the
-                // leader's ANCHOR_INTERVAL_MS cadence and it would anchor a fresh
-                // checkpoint every wake instead of one per cycle (each superseding the
-                // last, all real DOGE). A row this hub leads keeps its normal cadence.
-                if(failoverOnly && this._isRankZero(order)){ this._skippedLeaderOnWake++; skippedRows++; continue; }
-                // SPV Phase 2: emit ANCHOR v3 (carries + signs the light-client roots) when the
-                // checkpoint was signed post-flag-day AND actually carries the roots; otherwise the
-                // legacy v0. The roots-present check keeps a legacy/null-root row (signed over the
-                // rootless canonical) on v0 so its sigs still verify, mirroring the canonical suffix
-                // gating in StateCheckpointEngine._checkpointRootSuffix.
-                let useV3 = ckpt.isCheckpointCommitmentActive(Number(row.snapshot_block), row.network) &&
-                            row.state_root != null && row.block_merkle_root != null &&
-                            row.state_root_version != null && row.block_merkle_version != null;
-                // Consult the durable at-most-once marker BEFORE building a
-                // fresh PSBT, and before the publisher-attestation round below solicits a
-                // peer quorum. The existence check reads mined state only, so it cannot see
-                // a send this hub made and then crashed on; the marker can. A surviving
-                // intent means DOGE may already have paid for this exact checkpoint, so hold
-                // the row (bounded by anchorIntentTtlMs) unless the anchor has since mined,
-                // in which case fall through and let the retry loop adopt it on attempt 0
-                // exactly as it does for a peer's anchor.
-                //
-                // Ordered ahead of the attestation block for the reason _publishArchive
-                // states for its own twin ("Checked ahead of the publisher-attestation round
-                // so a held publish does not burn a peer quorum either"): the round takes the
-                // single _attestRound slot for up to roundTimeoutMs and makes every peer
-                // re-derive the election and byte-match its state_checkpoints row, all for a
-                // publish this branch then declines. A held row must cost one DB read.
-                let intent = await this._getAnchorIntent(row);
-                if(this._anchorIntentHolds(intent)){
-                    let mined = null;
-                    try { mined = await this._findExistingCheckpointAnchor(row); }
-                    catch(_e){ mined = null; }        // undetermined indexer: hold, never spend
-                    if(!(mined && mined.exists)){
-                        console.warn('StateAnchorPublisher: v0 anchor for ' + row.chain + '/' + row.network +
-                                     ' @ ' + row.block_index + ' held: a broadcast intent recorded at ' +
-                                     String(intent.intent_at) + (intent.txid ? ' (txid ' + intent.txid + ')' : '') +
-                                     ' has no mined anchor yet; not rebuilding a second transaction until it ' +
-                                     'mines or the intent ages past ' + this.anchorIntentTtlMs + 'ms');
-                        continue;
-                    }
-                }
-                // Anchor-reward re-derivation flag-day: at/above it, run the publisher-
-                // attestation round (2f+1 oracle_publish quorum over XANCPUB binding THIS
-                // hub as the earner) and emit ANCHOR v4 (rootless) / v5 (root-bearing),
-                // which carries the attestation so the indexer DERIVES the reward and the
-                // forgeable hub push is retired. LIVENESS-SAFE: a degraded round
-                // (timeout / short quorum / not a snapshot member) FALLS BACK to legacy
-                // v0/v3, so the anchor always lands; only reward issuance gains the quorum
-                // dependency. A failed reward attestation must NEVER block the anchor.
-                let me = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
-                let payload;
-                let attested = false;   // a v4/v5 (reward-derivable) payload was actually built
-                let attestSigs = [];    // hoisted so the post-publish attestation-mirror INSERT can carry them
-                if(me && ar.isAnchorRewardActive(Number(row.snapshot_block), row.network)){
-                    let attest = await this._runPublisherAttestationRound(this._cpFromRow(row), me);
-                    if(attest && attest.met && attest.sigs.length >= 1){
-                        payload = useV3 ? this._buildV5Payload(row, me, attest.sigs)
-                                        : this._buildV4Payload(row, me, attest.sigs);
-                        attested = true;
-                        attestSigs = attest.sigs;
-                    } else {
-                        console.warn('StateAnchorPublisher: publisher-attestation quorum not reached for ' +
-                                     row.chain + '/' + row.network + ' @ ' + row.block_index +
-                                     '; publishing legacy v' + (useV3 ? '3' : '0') + ' (anchor lands, no reward)');
-                        payload = useV3 ? this._buildV3Payload(row) : this._buildV0Payload(row);
-                    }
-                } else {
-                    payload = useV3 ? this._buildV3Payload(row) : this._buildV0Payload(row);
-                }
-                let broadcaster = signer.broadcastFn || ((p) => this._defaultBroadcast(p, signer));
-                await this._recordAnchorIntent(row);
-                // Multiple chains' v0 anchors go out back-to-back from the same
-                // wallet; without the retry, every cycle lands only the first
-                // and the rest stagger one chain per 30-min flush (live prod
-                // finding, first post-deploy cycle).
-                // The existence check makes a lost ACK (this flush OR a
-                // previous one) adopt the already-mined anchor instead of paying
-                // for a second one.
-                let result;
-                try {
-                    result = await this._broadcastWithRetry(broadcaster, payload, undefined,
-                        () => this._findExistingCheckpointAnchor(row));
-                } catch(e){
-                    // A definitive failure means nothing reached the DOGE node
-                    // (pre-send build/sign errors, a spend-ceiling refusal, an RPC
-                    // rejection), so withdraw the intent rather than hold the checkpoint
-                    // for the TTL over a send that never happened. An AMBIGUOUS send keeps
-                    // its intent: that case is exactly what the marker is for.
-                    if(!(e && e.anchorAmbiguousSend)) await this._withdrawAnchorIntent(row);
-                    throw e;
-                }
-                let txid = result && result.txid ? result.txid : null;
-                if(txid && !(result && result.exists)) this._notePendingConfirmation('anchor_' + row.chain, txid, String(row.checkpoint_seq));
-                if(!txid){
-                    // A confirmed DOGE broadcast always returns a txid; a null txid
-                    // is a false/incomplete success (broadcastTx returned empty
-                    // instead of throwing). Treat it as a failed publish: leave the
-                    // row pending (anchor_txid stays NULL) and do NOT stamp the row,
-                    // record a reward, or announce XANC_V0_DONE. Stamping NULL keeps
-                    // the row matching the `WHERE sc.anchor_txid IS NULL` selector so
-                    // it re-anchors and re-burns DOGE every flush, and peers ignore a
-                    // null-txid announcement anyway (_handleV0Done early-returns on
-                    // !d.txid). A later flush retries the publish cleanly.
-                    // The intent is NOT withdrawn here. An empty return from
-                    // broadcast_tx is not proof nothing was sent, so the marker holds the
-                    // row for the TTL and the "later flush retries cleanly" above now
-                    // means after that bound rather than immediately.
-                    console.error('StateAnchorPublisher: v0 broadcast returned no txid for ' +
-                                  row.chain + '/' + row.network + ' @ ' + row.block_index +
-                                  '; treating as failed publish (row stays pending)');
-                    continue;
-                }
-                await this._markAnchorSent(row, txid);
-                // First-writer-wins, exactly like the peer path in _handleV0Done
-                // (`... AND anchor_txid IS NULL`). In the documented failover race
-                // (a late rank-0 and an early rank-1 both publish because the
-                // shared pending signal is `anchor_txid IS NULL`) a hub may have
-                // already stamped a peer's txid via V0_DONE; without this guard,
-                // completing our own in-flight publish would overwrite it and
-                // leave the fleet holding divergent anchor_txid bytes for the row.
-                await this.db.doQuery(
-                    'UPDATE state_checkpoints SET anchor_txid = ? WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? AND anchor_txid IS NULL',
-                    [txid, row.chain, row.network, row.block_index, row.checkpoint_seq]);
-                // Name the rank this anchor was published at. A backup-rank publish is
-                // otherwise byte-identical to a healthy leader publish in every observable
-                // signal, so a dead rank-0 stays invisible while the ladder absorbs its
-                // work. Computed from the SAME `order` _mayPublish decided on, so the
-                // label can never disagree with the decision that produced the spend.
-                let myRank = this._myRank(order);
-                this._lastAnchorRank = { chain: row.chain, network: row.network,
-                                         blockIndex: Number(row.block_index), myRank: myRank,
-                                         publisherCount: order.length, isLeader: myRank === 0,
-                                         at: Date.now() };
-                if(myRank > 0) this._anchorsAsBackup++; else this._anchorsAsLeader++;
-                console.log('StateAnchorPublisher: anchored checkpoint ' + row.chain + '/' + row.network +
-                            ' @ ' + row.block_index + ' (txid ' + txid + ')' +
-                            (myRank > 0
-                                ? ' [FAILOVER: published at backup rank ' + myRank + ' of ' + order.length +
-                                  '; the rank-0 publisher did not anchor this checkpoint]'
-                                : ''));
-                anchored.push({ chain: row.chain, network: row.network, block_index: Number(row.block_index), txid: txid });
-                this._anchorsPublished++;
-                // At/above the anchor-reward flag-day the per-chain reward is DERIVED
-                // on-chain from the v4/v5 publisher attestation (the hub push is
-                // retired), and the indexer credits NOTHING for a legacy v0/v3.
-                // Recording the reward on the degraded fallback would strand it in
-                // hub-local + archive bookkeeping only: no live indexer credits it,
-                // but a recovering node restores the archived row, forking the
-                // COLLECT-spendable ledger live-vs-recovered. Record only when the
-                // published payload actually carries the attestation, or below the
-                // flag-day (where the legacy push path credits live indexers).
-                if(result && result.exists){
-                    // Adoption path: we did not pay for THIS anchor in this
-                    // call (a prior lost-ACK broadcast or a peer did). The on-chain
-                    // payload, not the one we just built, names the earner; a v4/v5
-                    // is derived by the indexer, and a legacy push here could
-                    // credit the wrong pubkey. Stamp + announce, but never push.
-                    console.log('StateAnchorPublisher: adopted existing anchor for ' + row.chain + '/' +
-                                row.network + ' @ ' + row.block_index + '; reward push skipped');
-                } else if(attested || !ar.isAnchorRewardActive(Number(row.snapshot_block), row.network)){
-                    this._recordReward('anchor_' + row.chain, Number(row.checkpoint_seq),
-                                       this.identity ? this.identity.getPubkeyHex() : null,
-                                       Number(row.snapshot_block), row.network);
-                    // Option C: at/above the derive-relocation flag-day, publish the
-                    // XANCPUB quorum to the append-only anchor_reward_attestations mirror so the
-                    // BTC indexer (where the stake source resolves) derives the reward. Only when
-                    // the v4/v5 attestation actually landed on-chain, so reward <=> anchor published.
-                    // "landed" now means MINED, not broadcast. `txid` above is a mempool
-                    // txid, so the row is queued and written by _drainDeferredRewardAttest once
-                    // this exact txid is buried at this exact ANCHOR version; an evicted or
-                    // reorged anchor never produces one.
-                    if(attested)
-                        this._deferRewardAttestation({
-                            chain: row.chain, network: row.network,
-                            blockIndex: Number(row.block_index), checkpointSeq: Number(row.checkpoint_seq),
-                            txid: txid, anchorVersion: useV3 ? 5 : 4,
-                            rewardType: 'anchor_' + row.chain, roundReference: Number(row.checkpoint_seq),
-                            snapshotBlock: Number(row.snapshot_block),
-                            publisher: String(me).toLowerCase(), attestSigs: attestSigs,
-                            // We are the publisher, so we own the fan-out: once the drain proves
-                            // this anchor mined, the confirmed row goes to every peer (XANCREWARD).
-                            federate: true
-                        });
-                } else {
-                    console.log('StateAnchorPublisher: degraded legacy anchor at/above the reward flag-day for ' +
-                                row.chain + '/' + row.network + ' @ ' + row.block_index +
-                                '; reward withheld (no live indexer derives it from a v' + (useV3 ? '3' : '0') + ')');
-                }
-                // Tell peers so THEIR copy of the row stops being pending.
-                // Without this, every hub whose failover rank unlocks would
-                // re-anchor a checkpoint someone else already paid for.
-                if(this.peerManager && this.identity){
-                    this.peerManager.broadcast(XANC_V0_DONE, {
-                        chain: row.chain, network: row.network, block_index: Number(row.block_index),
-                        checkpoint_seq: Number(row.checkpoint_seq), txid: txid,
-                        sig_pubkey: this.identity.getPubkeyHex().toLowerCase(),
-                        sig: this.identity.sign(this._v0DoneCanonical(row, txid))
-                    });
-                }
-            } catch(e){
-                // A mid-flush deferral: an earlier anchor in this same pass spent the last
-                // confirmed output. Not a failure of anything; the row stays pending and
-                // the next wake retries it as a normal flush.
-                if(e && e.anchorNoConfirmedUtxo) this._noteNoConfirmedUtxo('the ' + row.chain + '/' + row.network + ' anchor');
-                else console.error('StateAnchorPublisher: v0 publish failed for ' + row.chain + ': ' + (e && e.message));
+            // D8: the bundle is root-bearing by construction, so a row with no
+            // light-client roots cannot ride one. Below CHECKPOINT_COMMITMENT_ACTIVATION
+            // (regtest 0, testnet 146000, mainnet 961000) no federation cutting
+            // checkpoints today produces such a row, so this is a loud skip rather than
+            // a rootless fallback wire.
+            if(row.state_root == null || row.block_merkle_root == null ||
+               row.state_root_version == null || row.block_merkle_version == null){
+                console.warn('StateAnchorPublisher: checkpoint ' + row.chain + '/' + row.network + ' @ ' +
+                             row.block_index + ' (seq ' + row.checkpoint_seq + ') carries no light-client roots; ' +
+                             'skipped, an ANCHOR v7 section is root-bearing by construction');
+                continue;
             }
+            let net = String(row.network);
+            if(!byNetwork.has(net)) byNetwork.set(net, []);
+            byNetwork.get(net).push(row);
         }
+
+        for(let [network, sections] of byNetwork){
+            // The bundle's election and attestation block is the MAX of the sections'
+            // snapshot blocks (D6); in the normal case every section shares it, and a
+            // lagging chain's older un-anchored row rides at its own block.
+            let snapshotBlock = sections.reduce((m, s) => Math.max(m, Number(s.snapshot_block)), 0);
+            let eligible;
+            try { eligible = await this._getActiveOraclePublishPubkeys(snapshotBlock); }
+            catch(_e){ eligible = []; }
+            // Fail closed: an empty/unresolved oracle_publish set is NOT a licence for
+            // every hub to anchor independently (a guaranteed N-way double-anchor + DOGE
+            // burn). Skip until the set resolves.
+            if(!eligible || eligible.length === 0){
+                console.warn('StateAnchorPublisher: bundle for ' + network + ' @ ' + snapshotBlock +
+                             ' deferred: empty oracle_publish set (fail closed)');
+                continue;
+            }
+            let me = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
+            // Split BEFORE electing, so each bundle the split produces runs its own
+            // election at its own SNAPSHOT_BLOCK. Sizing uses the FULL oracle_publish
+            // set as the attestation tail, which is the upper bound on what the round
+            // can return, so a bundle sized here can never overflow once signed.
+            let split = this._splitBundle(sections, me, eligible.length);
+            for(let refused of split.oversize){
+                this._bundlesOversize++;
+                console.error('StateAnchorPublisher: REFUSING to anchor ' + refused.chain + '/' + network +
+                              ' @ ' + refused.block_index + ': the section alone is ' + refused.bytes +
+                              ' bytes, past the ' + ANCHOR_BUNDLE_MAX_BYTES + '-byte budget even with a ' +
+                              'zero-signature tail. The decoder DROPS an oversize action silently, so this ' +
+                              'checkpoint stays off chain until the federation signer count comes down');
+            }
+            for(let group of split.bundles)
+                await this._publishBundle(signer, network, group, btcBlock, failoverOnly, eligible, anchored, skipped);
+        }
+
         // One line per LEADER flush (daily, startup, size-trigger, anchorflush) when
         // it walked candidates and published none, so the stand-down is visible in the
         // log at its natural cadence. The 15-minute wake stays silent: its skips are
         // the designed steady state and the counters above carry them.
-        if(!failoverOnly && skippedRows > 0 && anchored.length === 0){
-            console.log('StateAnchorPublisher: ' + skippedRows + ' pending checkpoint(s) belong to another hub\'s election ' +
+        if(!failoverOnly && skipped.rows > 0 && anchored.length === 0){
+            console.log('StateAnchorPublisher: ' + skipped.rows + ' pending checkpoint(s) belong to another hub\'s election ' +
                         '(or our backup rank is still locked); nothing anchored by this hub');
         }
         return anchored;
     }
 
+    // Publish ONE bundle: election, marker check, attestation round, build, broadcast,
+    // per-section stamp, reward, announcement. Split out of the selector so the byte
+    // budget can hand it several bundles for one network in one flush, each electing
+    // independently. Never throws past a mid-flush deferral; every other failure is
+    // logged and leaves the sections pending for the next flush.
+    async _publishBundle(signer, network, group, btcBlock, failoverOnly, eligible, anchored, skipped){
+        let chains = group.map(s => String(s.chain)).join(',');
+        try {
+            let snapshotBlock = group.reduce((m, s) => Math.max(m, Number(s.snapshot_block)), 0);
+            let order = StateAnchorPublisher.hashOrder(
+                this._bundleElectionKey({ network: network, snapshot_block: snapshotBlock }), eligible);
+            let since = Number.isFinite(btcBlock) ? btcBlock - snapshotBlock : null;
+            // Someone else's bundle (or our backup rank has not unlocked yet).
+            if(!this._mayPublish(order, since)){
+                this._skippedNotOurElection += group.length;
+                skipped.rows += group.length;
+                return;
+            }
+            // On a failover wake, publish only as a BACKUP. Rank 0 is always unlocked, so
+            // without this the 15-minute wake would replace the leader's
+            // ANCHOR_INTERVAL_MS cadence and it would anchor a fresh bundle every wake
+            // instead of one per cycle (each superseding the last, all real DOGE).
+            if(failoverOnly && this._isRankZero(order)){
+                this._skippedLeaderOnWake += group.length;
+                skipped.rows += group.length;
+                return;
+            }
+
+            // The durable at-most-once marker, consulted BEFORE building a fresh PSBT and
+            // before the attestation round solicits a peer quorum. The existence check
+            // reads mined state only, so it cannot see a send this hub made and then
+            // crashed on; the marker can. The marker table is UNCHANGED (D11): one row per
+            // section, and the bundle holds if ANY section's marker holds, because any one
+            // of them is evidence that DOGE may already have paid for this exact set.
+            let held = null;
+            for(let s of group){
+                let intent = await this._getAnchorIntent(s);
+                if(this._anchorIntentHolds(intent)){ held = { section: s, intent: intent }; break; }
+            }
+            if(held){
+                let mined = null;
+                try { mined = await this._findExistingBundle(group); }
+                catch(_e){ mined = null; }        // undetermined indexer: hold, never spend
+                if(!(mined && mined.exists)){
+                    console.warn('StateAnchorPublisher: bundle ' + chains + '/' + network + ' @ ' + snapshotBlock +
+                                 ' held: a broadcast intent for ' + held.section.chain + ' recorded at ' +
+                                 String(held.intent.intent_at) + (held.intent.txid ? ' (txid ' + held.intent.txid + ')' : '') +
+                                 ' has no mined anchor yet; not rebuilding a second transaction until it ' +
+                                 'mines or the intent ages past ' + this.anchorIntentTtlMs + 'ms');
+                    return;
+                }
+            }
+
+            // ONE publisher-attestation round for the whole bundle (spec §2.5): a 2f+1
+            // oracle_publish quorum over the XANCPUB canonical binding THIS hub as the
+            // earner, carried in the v7 tail so the indexer DERIVES the reward.
+            // LIVENESS-SAFE: a degraded round (timeout / short quorum / not a snapshot
+            // member) falls back to a v7 with ATTEST_SIG_COUNT 0, so the anchor always
+            // lands and only the reward gains the quorum dependency.
+            let me = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
+            let bundle = { network: network, snapshot_block: snapshotBlock, sections: group };
+            let attested   = false;
+            let attestSigs = [];
+            if(me && ar.isAnchorRewardActive(snapshotBlock, network)){
+                let attest = await this._runPublisherAttestationRound(bundle, me);
+                if(attest && attest.met && attest.sigs.length >= 1){
+                    attested   = true;
+                    attestSigs = attest.sigs;
+                } else {
+                    console.warn('StateAnchorPublisher: publisher-attestation quorum not reached for bundle ' +
+                                 chains + '/' + network + ' @ ' + snapshotBlock +
+                                 '; publishing with ATTEST_SIG_COUNT 0 (anchor lands, no reward)');
+                }
+            }
+            let payload = this._buildV7Payload(group, me, attestSigs);
+
+            let broadcaster = signer && signer.broadcastFn
+                ? signer.broadcastFn : ((p) => this._defaultBroadcast(p, signer));
+            for(let s of group) await this._recordAnchorIntent(s);
+            // The existence check makes a lost ACK (this flush OR a previous one) adopt
+            // the already-mined bundle instead of paying for a second one.
+            let result;
+            try {
+                result = await this._broadcastWithRetry(broadcaster, payload, undefined,
+                    () => this._findExistingBundle(group));
+            } catch(e){
+                // A definitive failure means nothing reached the DOGE node (pre-send
+                // build/sign errors, a spend-ceiling refusal, an RPC rejection), so
+                // withdraw the intents rather than hold the sections for the TTL over a
+                // send that never happened. An AMBIGUOUS send keeps its intents: that
+                // case is exactly what the markers are for.
+                if(!(e && e.anchorAmbiguousSend)) for(let s of group) await this._withdrawAnchorIntent(s);
+                throw e;
+            }
+            let txid = result && result.txid ? result.txid : null;
+            if(txid && !(result && result.exists))
+                this._notePendingConfirmation('anchor_bundle', txid, network + '/' + snapshotBlock);
+            if(!txid){
+                // A confirmed DOGE broadcast always returns a txid; a null txid is a
+                // false/incomplete success (broadcastTx returned empty instead of
+                // throwing). Treat it as a failed publish: leave the sections pending
+                // (anchor_txid stays NULL) and do NOT stamp, reward, or announce.
+                // Stamping NULL keeps the rows matching the selector so the bundle
+                // re-anchors and re-burns DOGE every flush, and peers ignore a null-txid
+                // announcement anyway (_handleBundleDone early-returns on !d.txid).
+                // The intents are NOT withdrawn: an empty return from broadcast_tx is not
+                // proof nothing was sent, so the markers hold the sections for the TTL.
+                console.error('StateAnchorPublisher: v7 bundle broadcast returned no txid for ' + chains + '/' +
+                              network + ' @ ' + snapshotBlock + '; treating as failed publish (rows stay pending)');
+                return;
+            }
+            for(let s of group) await this._markAnchorSent(s, txid);
+            // First-writer-wins per section, exactly like the peer path in
+            // _applyBundleDone. In the documented failover race a hub may already have
+            // stamped a peer's txid; without the IS NULL guard, completing our own
+            // in-flight publish would overwrite it and leave the fleet holding divergent
+            // anchor_txid bytes.
+            for(let s of group){
+                await this.db.doQuery(
+                    'UPDATE state_checkpoints SET anchor_txid = ? WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? AND anchor_txid IS NULL',
+                    [txid, s.chain, s.network, s.block_index, s.checkpoint_seq]);
+                anchored.push({ chain: String(s.chain), network: String(s.network),
+                                block_index: Number(s.block_index), txid: txid });
+            }
+            // Name the rank this bundle was published at. A backup-rank publish is
+            // otherwise byte-identical to a healthy leader publish in every observable
+            // signal, so a dead rank-0 stays invisible while the ladder absorbs its work.
+            // Computed from the SAME `order` _mayPublish decided on, so the label can
+            // never disagree with the decision that produced the spend.
+            let myRank = this._myRank(order);
+            this._lastAnchorRank = { network: network, snapshotBlock: snapshotBlock,
+                                     chains: group.map(s => String(s.chain)), myRank: myRank,
+                                     publisherCount: order.length, isLeader: myRank === 0,
+                                     at: Date.now() };
+            if(myRank > 0) this._anchorsAsBackup++; else this._anchorsAsLeader++;
+            this._anchorsPublished++;
+            this._sectionsAnchored += group.length;
+            console.log('StateAnchorPublisher: anchored bundle ' + network + ' @ ' + snapshotBlock +
+                        ' with ' + group.length + ' section(s) [' + chains + '] (txid ' + txid + ')' +
+                        (myRank > 0
+                            ? ' [FAILOVER: published at backup rank ' + myRank + ' of ' + order.length +
+                              '; the rank-0 publisher did not anchor this bundle]'
+                            : ''));
+
+            // At/above the anchor-reward flag-day the reward is DERIVED on-chain from the
+            // v7 publisher attestation (the hub push is retired), and the indexer credits
+            // NOTHING for a bundle whose tail carries no attestation. Recording the reward
+            // on the degraded fallback would strand it in hub-local + archive bookkeeping
+            // only: no live indexer credits it, but a recovering node restores the
+            // archived row, forking the COLLECT-spendable ledger live-vs-recovered.
+            if(result && result.exists){
+                // Adoption path: we did not pay for THIS bundle in this call (a prior
+                // lost-ACK broadcast or a peer did). The on-chain payload, not the one we
+                // just built, names the earner. Stamp + announce, but never push.
+                console.log('StateAnchorPublisher: adopted existing bundle for ' + network + ' @ ' +
+                            snapshotBlock + '; reward push skipped');
+            } else if(attested || !ar.isAnchorRewardActive(snapshotBlock, network)){
+                // ONE anchor_bundle reward per bundle, round_reference = SNAPSHOT_BLOCK (D3, D21).
+                this._recordReward('anchor_bundle', snapshotBlock, me, snapshotBlock, network);
+                if(attested)
+                    this._deferRewardAttestation({
+                        // The identity the mined-anchor proof re-SELECTs and re-verifies
+                        // against: the FIRST section (chain-ascending), which carries the
+                        // same txid as every other. The attestation ROW's chain is 'DOGE'
+                        // (D21), resolved in _recordRewardAttestation from the reward type.
+                        chain: String(group[0].chain), network: network,
+                        blockIndex: Number(group[0].block_index), checkpointSeq: Number(group[0].checkpoint_seq),
+                        txid: txid, anchorVersion: 7,
+                        rewardType: 'anchor_bundle', roundReference: snapshotBlock,
+                        snapshotBlock: snapshotBlock,
+                        publisher: String(me).toLowerCase(), attestSigs: attestSigs,
+                        // We are the publisher, so we own the fan-out: once the drain proves
+                        // this anchor mined, the confirmed row goes to every peer (XANCREWARD).
+                        federate: true
+                    });
+            } else {
+                console.log('StateAnchorPublisher: degraded bundle (no attestation) at/above the reward flag-day for ' +
+                            network + ' @ ' + snapshotBlock + '; reward withheld (no live indexer derives it)');
+            }
+
+            // Tell peers so THEIR copies of every section stop being pending. Without
+            // this, every hub whose failover rank unlocks would re-anchor a bundle
+            // someone else already paid for.
+            if(this.peerManager && this.identity){
+                let announced = {
+                    network: network, snapshot_block: snapshotBlock, txid: txid,
+                    sections: group.map(s => ({ chain: String(s.chain), block_index: Number(s.block_index),
+                                                checkpoint_seq: Number(s.checkpoint_seq) }))
+                };
+                announced.sig_pubkey = this.identity.getPubkeyHex().toLowerCase();
+                announced.sig        = this.identity.sign(this._bundleDoneCanonical(announced, txid));
+                this.peerManager.broadcast(XANC_BUNDLE_DONE, announced);
+            }
+        } catch(e){
+            // A mid-flush deferral: an earlier anchor in this same pass spent the last
+            // confirmed output. Not a failure of anything; the sections stay pending and
+            // the next wake retries them as a normal flush.
+            if(e && e.anchorNoConfirmedUtxo) this._noteNoConfirmedUtxo('the ' + network + ' bundle');
+            else console.error('StateAnchorPublisher: v7 bundle publish failed for ' + network + ': ' + (e && e.message));
+        }
+    }
+
     // Anchor-publish reward: the validator that paid the DOGE earns it. Recorded
     // on EVERY hub (by the publisher at publish time and by peers from the
-    // signature-verified V0_DONE / FINALIZED announcements) with blockIndex =
+    // signature-verified BUNDLE_DONE / FINALIZED announcements) with blockIndex =
     // the quorum-agreed snapshot_block of the rewarded checkpoint, so all hubs
     // hold identical row bytes and the archived rewards section verifies by
     // re-derivation. recordAnchorReward dedups all paths, including a failover
@@ -1136,7 +1223,7 @@ class StateAnchorPublisher {
             .catch(e => console.warn('StateAnchorPublisher: reward record failed (' + rewardType + '/' + roundNumber + '): ' + (e && e.message)));
     }
 
-    // Option C (derive-on-BTC-side): after a v4/v5/v6 anchor lands on-chain, publish
+    // Option C (derive-on-BTC-side): after a v6/v7 anchor lands on-chain, publish
     // the XANCPUB publisher-attestation quorum to the append-only anchor_reward_attestations
     // table, mirrored via hub_db_sync (HUB_STATE_TABLES) to every indexer ATTACHED TO THIS HUB.
     // ANCHOR is DOGE-only but capability staking (hence the resolvable stake source
@@ -1148,14 +1235,13 @@ class StateAnchorPublisher {
     // attempted + silently dropped). INSERT IGNORE keeps it idempotent on the tuple identity; a
     // failover double-publish inserts a second row and the indexer winner-reconcile collapses it.
     //
-    // "every indexer attached to this hub" USED to be the whole reach, and that was the
-    // defect. HubDbSync holds ONE hubUrl (xchain-indexer/src/hub_db_sync.js), the row is
-    // written only on the ELECTED publisher, and the v0 publisher rotates per checkpoint by
-    // hashOrder, so a federation's hubs held DISJOINT subsets and an indexer derived only the
-    // subset its own hub happened to publish. The gap was the PRODUCER's, not the mirror's,
-    // and that is where the fix went: `e` carries the confirmed anchor txid and, on the
+    // The mirror alone is not enough reach: HubDbSync holds ONE hubUrl
+    // (xchain-indexer/src/hub_db_sync.js), the row is written only on the ELECTED publisher,
+    // and the publisher rotates per bundle by hashOrder, so without federation a federation's
+    // hubs would hold DISJOINT subsets and an indexer would derive only the subset its own hub
+    // published. So the PRODUCER federates: `e` carries the confirmed anchor txid and, on the
     // publisher, a truthy `federate`, which broadcasts XANCREWARD after the local write so
-    // every peer independently re-verifies and writes its own copy. Two notes still stand:
+    // every peer independently re-verifies and writes its own copy. Two notes:
     //   - Do NOT "correct" the sibling sentence in src/sql/anchor_reward_attestations.sql. Its
     //     "exactly like state_checkpoints" is TRUE and scoped to the MIRROR semantics (id-parity
     //     INSERT IGNORE, never retracted); hub_db_sync.js states the identical property for both
@@ -1172,6 +1258,12 @@ class StateAnchorPublisher {
         if(!ar.isAnchorRewardDeriveActive(Number(snapshotBlock), network)) return;
         if(!publisher || !Array.isArray(attestSigs) || attestSigs.length === 0) return;
         let amount = (rewardType === 'anchor_archive') ? ar.ARCHIVE_REWARD_AMOUNT : ar.ANCHOR_REWARD_AMOUNT;
+        // anchor_reward_attestations.chain is NOT NULL and part of uq_reward_tuple, and a
+        // BUNDLE spans every chain, so the bundle row writes the ANCHOR chain 'DOGE'
+        // (D21) - the archive precedent already recorded in that column's comment. The
+        // `chain` argument stays the checkpoint identity the mined-anchor proof ran
+        // against, so the two never get conflated.
+        let rowChain = (rewardType === 'anchor_bundle') ? 'DOGE' : chain;
         let sigs   = attestSigs.map(s => ({ pubkey: String(s.pubkey).toLowerCase(), sig: String(s.sig).toLowerCase() }));
         let sigsJson = JSON.stringify(sigs);
         // The txid the drain PROVED mined for this exact tuple. Never taken from a
@@ -1183,11 +1275,11 @@ class StateAnchorPublisher {
                 'INSERT IGNORE INTO anchor_reward_attestations ' +
                 '(chain, network, reward_type, round_reference, snapshot_block, publisher, reward_amount, publisher_attestations, doge_anchor_txid) ' +
                 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [chain, network, rewardType, roundReference, snapshotBlock, publisher, amount, sigsJson, txid]);
+                [rowChain, network, rewardType, roundReference, snapshotBlock, publisher, amount, sigsJson, txid]);
             let rows = await this.db.doQuery(
                 'SELECT id, chain, network, reward_type, round_reference, snapshot_block, publisher, reward_amount, publisher_attestations, doge_anchor_txid, created_at ' +
                 'FROM anchor_reward_attestations WHERE chain = ? AND network = ? AND reward_type = ? AND round_reference = ? AND snapshot_block = ? AND publisher = ? LIMIT 1',
-                [chain, network, rewardType, roundReference, snapshotBlock, publisher]);
+                [rowChain, network, rewardType, roundReference, snapshotBlock, publisher]);
             if(rows && rows[0] && this.hub.hubDbBroadcaster && typeof this.hub.hubDbBroadcaster.broadcastRow === 'function')
                 this.hub.hubDbBroadcaster.broadcastRow({ table: 'anchor_reward_attestations', row: rows[0] });
         } catch(err){
@@ -1272,14 +1364,14 @@ class StateAnchorPublisher {
         if(!chain || !publisher || !sender) return;
         if(!/^[0-9a-f]{64}$/.test(txid)) return;
         if(!Number.isFinite(roundRef) || !Number.isFinite(blockIndex) || !Number.isFinite(cpSeq)) return;
-        if(![4, 5, 6].includes(version)) return;                             // only the attestation-bearing ANCHOR versions carry a reward
-        if(rewardType !== 'anchor_archive' && rewardType !== 'anchor_' + chain) return;
-        // BIND the two: v6 is the archive leg, v4/v5 the per-chain leg, which is the
+        if(![6, 7].includes(version)) return;                                // only the attestation-bearing ANCHOR versions carry a reward
+        if(rewardType !== 'anchor_archive' && rewardType !== 'anchor_bundle') return;
+        // BIND the two: v6 is the archive leg, v7 the checkpoint-bundle leg, which is the
         // pairing the BTC derive path enforces (indexer anchor_proof_client._judge:
-        // "a v4 can never prove an archive reward and vice versa"). Checked
+        // "a v7 can never prove an archive reward and vice versa"). Checked
         // independently, a mis-paired tuple still passes everything downstream: the
         // XANCPUB canonical is rebuilt from the reward_type, so a publisher that really
-        // collected a per-chain quorum can federate it against the v6 archive head that
+        // collected a bundle quorum can federate it against the v6 archive head that
         // wraps the same checkpoint, and the drain's byte-match (four core hashes,
         // identical on both legs) confirms it. The row it writes is append-only and
         // never retracted, and the derive path rejects it forever: consensus-table
@@ -1300,10 +1392,12 @@ class StateAnchorPublisher {
 
         // Rebuild the XANCPUB canonical from the tuple and the FROZEN amount. Nothing from the
         // wire enters it, so an inflated reward_amount cannot be co-signed into existence.
-        let cp        = { chain: chain, network: network, checkpoint_seq: roundRef, snapshot_block: snapshotBlock };
+        // A bundle canonical binds only network + snapshot_block (the six positional
+        // fields of §2.5); `chain` on this wire is the checkpoint IDENTITY the mined-anchor
+        // proof re-runs against, never part of what was signed.
         let canonical = (rewardType === 'anchor_archive')
             ? this._archiveAttestationCanonical({ network: network, snapshot_block: snapshotBlock }, roundRef, publisher)
-            : this._attestationCanonical(cp, publisher);
+            : this._attestationCanonical({ network: network, snapshot_block: snapshotBlock }, publisher);
 
         let seen = new Set(), signers = [], sigs = [];
         for(let s of d.attest_sigs){
@@ -1390,7 +1484,7 @@ class StateAnchorPublisher {
     }
 
     // Write the queued reward attestations whose anchor has since been buried. Runs on
-    // the announceRetryMs timer and at the head of every flush, beside the V0_DONE and
+    // the announceRetryMs timer and at the head of every flush, beside the BUNDLE_DONE and
     // FINALIZED drains.
     //
     // Only 'verified' writes: _verifyAnchorOnChain binds the exact txid AND the exact
@@ -1443,63 +1537,103 @@ class StateAnchorPublisher {
         }
     }
 
-    _buildV0Payload(row){
-        let sigs = this._parseSigs(row.validator_signatures);
-        let parts = ['ANCHOR', '0', row.chain, row.network, String(row.block_index), row.block_hash,
-                     row.ledger_hash, row.actions_hash, row.contract_hash,
-                     String(row.checkpoint_seq), String(row.snapshot_block), String(sigs.length)];
-        for(let s of sigs) parts.push(s.pubkey, s.sig);
-        return parts.join('|');
-    }
-
-    // SPV Phase 2 (spec §6.3): v0 checkpoint PLUS the two light-client roots + version
-    // bytes appended before SIG_COUNT (positional). The roots come straight from the
-    // signed state_checkpoints row; the row's sigs already cover them (the post-flag-day
-    // checkpoint canonical includes the same roots), so this transports signed data.
-    _buildV3Payload(row){
-        let sigs = this._parseSigs(row.validator_signatures);
-        let parts = ['ANCHOR', '3', row.chain, row.network, String(row.block_index), row.block_hash,
-                     row.ledger_hash, row.actions_hash, row.contract_hash,
-                     String(row.checkpoint_seq), String(row.snapshot_block),
-                     String(row.state_root || '').toLowerCase(), String(row.state_root_version),
-                     String(row.block_merkle_root || '').toLowerCase(), String(row.block_merkle_version),
-                     String(sigs.length)];
-        for(let s of sigs) parts.push(s.pubkey, s.sig);
-        return parts.join('|');
-    }
-
-    // ANCHOR v4 (anchor-reward flag-day): the rootless v0 checkpoint PLUS the elected
-    // PUBLISHER pubkey and a 2f+1 oracle_publish attestation (XANCPUB) over the reward
-    // tuple, appended AFTER the root signature list. The indexer re-derives the reward
-    // from these bytes (anchor.js formats[4]), so the trusted hub push is retired.
-    // Field order MUST match the indexer parser: ...|SIG_COUNT|PUBKEY|SIG|...|PUBLISHER|
-    // ATTEST_SIG_COUNT|APUBKEY|ASIG|...
-    _buildV4Payload(row, publisher, attestSigs){
-        let sigs = this._parseSigs(row.validator_signatures);
-        let parts = ['ANCHOR', '4', row.chain, row.network, String(row.block_index), row.block_hash,
-                     row.ledger_hash, row.actions_hash, row.contract_hash,
-                     String(row.checkpoint_seq), String(row.snapshot_block), String(sigs.length)];
-        for(let s of sigs) parts.push(s.pubkey, s.sig);
-        parts.push(String(publisher).toLowerCase(), String((attestSigs || []).length));
+    // ANCHOR v7, the checkpoint BUNDLE (spec §2.1). One action per network per cycle:
+    //
+    //   ANCHOR|7|NETWORK|SNAPSHOT_BLOCK|SECTION_COUNT
+    //         |CHAIN|BLOCK_INDEX|BLOCK_HASH|LEDGER_HASH|ACTIONS_HASH|CONTRACT_HASH
+    //          |CHECKPOINT_SEQ|SECTION_SNAPSHOT_BLOCK
+    //          |STATE_ROOT|STATE_ROOT_VERSION|BLOCK_MERKLE_ROOT|BLOCK_MERKLE_VERSION
+    //          |SIG_COUNT|PUBKEY|SIG|...                    (x SECTION_COUNT)
+    //         |PUBLISHER|ATTEST_SIG_COUNT|APUBKEY|ASIG|...
+    //
+    // Each section is the retired v5 body minus NETWORK: the indexer rebuilds every
+    // section's XCHECKPOINT canonical with the HEADER network, so nothing about
+    // per-chain checkpoint verification changes and the stored signatures still verify.
+    //
+    // TWO ORDERING RULES, and both are load-bearing (D5):
+    //   - sections by CHAIN ascending;
+    //   - within a section, the (PUBKEY, SIG) pairs by PUBKEY ascending.
+    // _parseSigs returns the stored JSON order UNSORTED, so without the inner sort two
+    // publishers racing the same bundle emit different bytes for identical state, and
+    // the attestation round's DB byte-match (§2.5) becomes non-deterministic. The frozen
+    // vector deliberately feeds this builder out-of-order input to prove both sorts run.
+    //
+    // NETWORK comes from the sections (every row in a bundle shares it) and
+    // SNAPSHOT_BLOCK is the MAX of the sections' own snapshot blocks (D6).
+    _buildV7Payload(sections, publisher, attestSigs){
+        let ordered = (sections || []).slice().sort((a, b) => {
+            let x = String(a.chain), y = String(b.chain);
+            return x < y ? -1 : (x > y ? 1 : 0);
+        });
+        let network = ordered.length > 0 ? String(ordered[0].network) : '';
+        let snapshotBlock = ordered.reduce((m, s) => Math.max(m, Number(s.snapshot_block)), 0);
+        let parts = ['ANCHOR', '7', network, String(snapshotBlock), String(ordered.length)];
+        for(let s of ordered){
+            let sigs = this._parseSigs(s.validator_signatures).slice().sort((a, b) => {
+                let x = String(a.pubkey), y = String(b.pubkey);
+                return x < y ? -1 : (x > y ? 1 : 0);
+            });
+            parts.push(String(s.chain), String(s.block_index), s.block_hash,
+                       s.ledger_hash, s.actions_hash, s.contract_hash,
+                       String(s.checkpoint_seq), String(s.snapshot_block),
+                       String(s.state_root || '').toLowerCase(), String(s.state_root_version),
+                       String(s.block_merkle_root || '').toLowerCase(), String(s.block_merkle_version),
+                       String(sigs.length));
+            for(let sg of sigs) parts.push(sg.pubkey, sg.sig);
+        }
+        parts.push(String(publisher || '').toLowerCase(), String((attestSigs || []).length));
         for(let s of (attestSigs || [])) parts.push(String(s.pubkey).toLowerCase(), String(s.sig).toLowerCase());
         return parts.join('|');
     }
 
-    // ANCHOR v5: the root-bearing v3 checkpoint (SPV light-client roots + version bytes)
-    // PLUS the same publisher + XANCPUB attestation tail as v4 (indexer formats[5]). Emitted
-    // instead of v3 when the checkpoint carries roots AND the anchor-reward flag-day is met.
-    _buildV5Payload(row, publisher, attestSigs){
-        let sigs = this._parseSigs(row.validator_signatures);
-        let parts = ['ANCHOR', '5', row.chain, row.network, String(row.block_index), row.block_hash,
-                     row.ledger_hash, row.actions_hash, row.contract_hash,
-                     String(row.checkpoint_seq), String(row.snapshot_block),
-                     String(row.state_root || '').toLowerCase(), String(row.state_root_version),
-                     String(row.block_merkle_root || '').toLowerCase(), String(row.block_merkle_version),
-                     String(sigs.length)];
-        for(let s of sigs) parts.push(s.pubkey, s.sig);
-        parts.push(String(publisher).toLowerCase(), String((attestSigs || []).length));
-        for(let s of (attestSigs || [])) parts.push(String(s.pubkey).toLowerCase(), String(s.sig).toLowerCase());
-        return parts.join('|');
+    // Wire bytes a bundle would occupy with `attestSigCount` attesting signers, WITHOUT
+    // the signatures existing yet. The split has to run before the attestation round (each
+    // split bundle elects and attests on its own), and a (PUBKEY, SIG) pair is fixed width,
+    // so the tail is arithmetic: measure the body with an empty tail, then widen
+    // ATTEST_SIG_COUNT from its '0' to the real decimal and add one pair per signer.
+    _v7Bytes(sections, publisher, attestSigCount){
+        let n    = Math.max(0, Number(attestSigCount) || 0);
+        let base = Buffer.byteLength(this._buildV7Payload(sections, publisher, []), 'utf8');
+        return base - 1 + String(n).length + (n * ANCHOR_SIG_PAIR_BYTES);
+    }
+
+    // The byte budget and its split rule (D10). Sections are packed chain-ascending into
+    // as many bundles as fit under ANCHOR_BUNDLE_MAX_BYTES; overflow is SPLIT, never
+    // dropped, because the decoder discards an oversize action silently and a dropped
+    // checkpoint is invisible fleet-wide. Returns { bundles, oversize }:
+    //   bundles  - section groups, each of which fits with `attestSigCount` attesting
+    //              signers, in chain order;
+    //   oversize - sections REFUSED because one alone exceeds the budget even with a
+    //              zero-signature tail. The caller counts them (bundlesOversize) and says
+    //              so loudly; nothing is sent.
+    // A section that fits alone with a zero-signature tail but not with the full
+    // attestation tail rides as its own bundle and takes the degraded ATTEST_SIG_COUNT 0
+    // path §2.5 already provides, because a failed attestation must never block an anchor.
+    _splitBundle(sections, publisher, attestSigCount){
+        let ordered = (sections || []).slice().sort((a, b) => {
+            let x = String(a.chain), y = String(b.chain);
+            return x < y ? -1 : (x > y ? 1 : 0);
+        });
+        let bundles = [], oversize = [], current = [];
+        for(let s of ordered){
+            let alone = this._v7Bytes([s], publisher, 0);
+            if(alone > ANCHOR_BUNDLE_MAX_BYTES){
+                oversize.push({ chain: String(s.chain), block_index: Number(s.block_index), bytes: alone });
+                continue;
+            }
+            if(current.length > 0 && this._v7Bytes(current.concat([s]), publisher, attestSigCount) > ANCHOR_BUNDLE_MAX_BYTES){
+                bundles.push(current);
+                current = [];
+            }
+            current.push(s);
+        }
+        if(current.length > 0) bundles.push(current);
+        if(bundles.length > 1)
+            console.log('StateAnchorPublisher: bundle for ' + (ordered[0] ? ordered[0].network : '') +
+                        ' exceeds the ' + ANCHOR_BUNDLE_MAX_BYTES + '-byte budget at ' + attestSigCount +
+                        ' attesting signers; split chain-ascending into ' + bundles.length + ' bundles [' +
+                        bundles.map(b => b.map(s => String(s.chain)).join('+')).join(', ') + ']');
+        return { bundles: bundles, oversize: oversize };
     }
 
     // Publisher-attestation canonical (XANCPUB): the string the 2f+1 oracle_publish quorum
@@ -1507,55 +1641,67 @@ class StateAnchorPublisher {
     // indexer's Anchor._rewardCanonical (a divergence forks the derived reward row). The
     // amount is the FROZEN consensus constant (ar.ANCHOR_REWARD_AMOUNT, read from the twin
     // module, NOT the operator-tunable ANCHOR_REWARD_PER_PUBLISH env). The EQUIV wrapper uses
-    // the checkpoint's NETWORK (cp.network) like _canonical/_archiveCanonical, NOT this.network,
+    // the bundle's NETWORK (b.network) like _canonical/_archiveCanonical, NOT this.network,
     // and a distinct 'XANCPUB|...' roundId gives the attestation its own equivocation family so
     // a validator that signs both the checkpoint root canonical and this reward attestation in
     // the same round is never falsely slashable.
-    _attestationCanonical(cp, publisher){
-        let base = ['XANCPUB', 'anchor_' + cp.chain, String(cp.checkpoint_seq),
-                    String(cp.snapshot_block), String(publisher || '').toLowerCase(),
+    //
+    // SIX positional fields, unchanged in COUNT from the retired per-chain form (D22):
+    // slash.js reads snapshot_block at field index 3 for every XANCPUB family, so a
+    // five-field bundle canonical would have made every bundle equivocation read
+    // 'invalid: snapshot_block'. Field 2 is round_reference, which for a bundle IS the
+    // snapshot block, hence the repeat.
+    //
+    //   XANCPUB|anchor_bundle|SNAPSHOT_BLOCK|SNAPSHOT_BLOCK|PUBLISHER|ANCHOR_REWARD_AMOUNT
+    //
+    // The roundId 'XANCPUB|bundle|NETWORK|SNAPSHOT_BLOCK' is disjoint from the archive
+    // family ('XANCPUB|archive|...'), so the two can never equivocation-collide.
+    _attestationCanonical(b, publisher){
+        let base = ['XANCPUB', 'anchor_bundle', String(b.snapshot_block),
+                    String(b.snapshot_block), String(publisher || '').toLowerCase(),
                     ar.ANCHOR_REWARD_AMOUNT].join('|');
-        if(eq.isEquivHeaderActive(cp.snapshot_block, cp.network)){
-            let roundId = 'XANCPUB|' + cp.chain + '|' + cp.network + '|' + cp.checkpoint_seq + '|' + cp.snapshot_block;
+        if(eq.isEquivHeaderActive(b.snapshot_block, b.network)){
+            let roundId = 'XANCPUB|bundle|' + b.network + '|' + b.snapshot_block;
             return eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT, roundId, 0, base);
         }
         return base;
     }
 
-    // Run the publisher-attestation round for a checkpoint THIS hub is publishing.
+    // Run the publisher-attestation round for a BUNDLE this hub is publishing (spec §2.5).
     // Resolves { met, sigs:[{pubkey,sig}], publisher } once a 2f+1 oracle_publish quorum
     // (stake-weighted at/above STAKE_WEIGHTED_QUORUM, else count) co-signs XANCPUB, or
-    // { met:false } on timeout / short quorum. The SIGNING/QUORUM set is resolved at the
-    // checkpoint's snapshot_block, the SAME set the indexer (anchor.js) verifies the
-    // attestation against, so the hub never collects a quorum the chain then rejects.
-    async _runPublisherAttestationRound(cp, publisher){
+    // { met:false } on timeout / short quorum. ONE round per bundle, where the retired
+    // per-chain path ran one per row. The SIGNING/QUORUM set is resolved at the bundle's
+    // snapshot_block, the SAME set the indexer (anchor.js) verifies the attestation
+    // against, so the hub never collects a quorum the chain then rejects.
+    async _runPublisherAttestationRound(b, publisher){
         if(!this.identity) return { met: false, sigs: [] };
 
         // _resolveCapabilitySet FAILS CLOSED off regtest (it throws when the
         // deterministic snapshot is unavailable), which is right for the callers that
         // must not build on a divergent set. Here it would abort the whole anchor: this
-        // round is awaited inside the per-row publish loop, whose catch only logs 'v0
-        // publish failed' and drops the row, so a transient snapshot outage would
-        // withhold the ANCHOR itself rather than just its reward. Degrade instead,
-        // byte-identically to the snapCount === 0 abstain below: no attestation, legacy
-        // v0/v3 lands, no reward is recorded. Scoped to the resolve call only, so an
-        // unrelated throw inside the round still surfaces.
+        // round is awaited inside _publishBundle, whose catch only logs the failure and
+        // drops the bundle, so a transient snapshot outage would withhold the ANCHOR
+        // itself rather than just its reward. Degrade instead, byte-identically to the
+        // snapCount === 0 abstain below: no attestation, a v7 with ATTEST_SIG_COUNT 0
+        // lands, no reward is recorded. Scoped to the resolve call only, so an unrelated
+        // throw inside the round still surfaces.
         let signingSet;
         try {
-            signingSet = await this._resolveCapabilitySet('oracle_publish', Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));
+            signingSet = await this._resolveCapabilitySet('oracle_publish', Number(b.snapshot_block), resolveQuorumNetwork(b, this.network));
         } catch(e){
             console.warn('StateAnchorPublisher: oracle_publish set unresolvable at snapshot_block ' +
-                         Number(cp.snapshot_block) + ' (' + (e && e.message) + '); abstaining from the ' +
-                         'publisher-attestation round (legacy anchor, no reward) rather than blocking the anchor');
+                         Number(b.snapshot_block) + ' (' + (e && e.message) + '); abstaining from the ' +
+                         'publisher-attestation round (unattested bundle, no reward) rather than blocking the anchor');
             return { met: false, sigs: [] };
         }
         let signingPubkeys = signingSet.map(v => v.pubkey);
         let snapCount      = signingPubkeys.length;
-        let weighted       = swq.isStakeWeightedQuorumActive(Number(cp.snapshot_block), resolveQuorumNetwork(cp, this.network));   // gate on the RECORD network to match the indexer
+        let weighted       = swq.isStakeWeightedQuorumActive(Number(b.snapshot_block), resolveQuorumNetwork(b, this.network));   // gate on the RECORD network to match the indexer
         let quorum         = bftQuorumOrSingle(snapCount, 1);   // majority-floored BFT quorum
 
         let me        = this.identity.getPubkeyHex().toLowerCase();
-        let canonical = this._attestationCanonical(cp, publisher);
+        let canonical = this._attestationCanonical(b, publisher);
         let mySig     = this.identity.sign(canonical);
 
         // An UNRESOLVED (empty) signing set is not a quorum of one: abstain. The rest of
@@ -1563,20 +1709,20 @@ class StateAnchorPublisher {
         // one round can legitimately disagree (_getActiveOraclePublishPubkeys reads the
         // capability snapshot, _resolveCapabilitySet may take the weighted one), so a
         // hub can pass the eligible.length fail-closed gate in _publishPendingCheckpoints
-        // and still resolve snapCount 0 here. Self-attesting on that would emit a v4/v5
+        // and still resolve snapCount 0 here. Self-attesting on that would emit a v7
         // carrying one signature that every indexer rejects (it resolves a non-empty set),
         // while THIS hub banks and archives an anchor reward no live indexer credits: the
-        // live-vs-recovered ledger fork the reward gates exist to prevent. Falling back to
-        // a legacy anchor is degraded, not divergent.
+        // live-vs-recovered ledger fork the reward gates exist to prevent. An unattested
+        // bundle is degraded, not divergent.
         if(snapCount === 0){
             console.warn('StateAnchorPublisher: unresolved oracle_publish set at snapshot_block ' +
-                         Number(cp.snapshot_block) + '; abstaining from the publisher-attestation round ' +
-                         '(legacy anchor, no reward) rather than self-attesting');
+                         Number(b.snapshot_block) + '; abstaining from the publisher-attestation round ' +
+                         '(unattested bundle, no reward) rather than self-attesting');
             return { met: false, sigs: [] };
         }
         // The publisher must itself hold oracle_publish at snapshot_block, or the indexer
-        // drops the reward (PUBLISHER must be in the verified set). Fall back to a legacy
-        // anchor rather than emit a v4/v5 whose reward can never be credited.
+        // drops the reward (PUBLISHER must be in the verified set). Fall back to an
+        // unattested bundle rather than emit one whose reward can never be credited.
         if(!signingPubkeys.includes(me)) return { met: false, sigs: [] };
 
         let signatures = new Map();
@@ -1593,12 +1739,12 @@ class StateAnchorPublisher {
             let roundValidators = signingSet.map(v => ({ pubkey: v.pubkey, source: String(v.source != null ? v.source : ''), weight: String(v.amount != null ? v.amount : '0') }));
             // Preserve the truncation flag so the weighted reward quorum
             // (_checkAttestQuorum via meetsStakeThreshold) fails closed on an over-cap
-            // oracle_publish snapshot, identical to the archive round (_startArchiveRound:899).
-            // Without this the publisher-attestation quorum fail-OPENS on a truncated set,
-            // emitting a v4/v5 whose reward the indexer would drop (stranded credit).
+            // oracle_publish snapshot, identical to the archive round. Without this the
+            // publisher-attestation quorum fail-OPENS on a truncated set, emitting a v7
+            // whose reward the indexer would drop (stranded credit).
             if(signingSet.truncated === true) roundValidators.truncated = true;
             let round = {
-                cp, publisher, canonical, quorum, weighted, resolve,
+                bundle: b, publisher, canonical, quorum, weighted, resolve,
                 validators: roundValidators,
                 signatures, done: false, timer: null
             };
@@ -1607,15 +1753,24 @@ class StateAnchorPublisher {
                 if(this._attestRound === round && !round.done){
                     round.done = true;
                     this._attestRound = null;
-                    console.warn('StateAnchorPublisher: publisher-attestation round (seq ' + cp.checkpoint_seq +
-                                 ') timed out at ' + round.signatures.size + '/' + quorum + ' sigs; legacy fallback');
+                    console.warn('StateAnchorPublisher: publisher-attestation round (bundle ' + b.network + ' @ ' +
+                                 b.snapshot_block + ') timed out at ' + round.signatures.size + '/' + quorum +
+                                 ' sigs; unattested fallback');
                     resolve({ met: false, sigs: Array.from(round.signatures, ([pubkey, sig]) => ({ pubkey, sig })) });
                 }
             }, this.roundTimeoutMs);
             if(round.timer.unref) round.timer.unref();
 
+            // The followers re-derive everything; the wire carries identity plus the BODY
+            // they byte-match their own rebuild against (§2.5). `body` is the v7 with an
+            // EMPTY attestation tail, which is exactly the part a follower can reproduce
+            // from its own state_checkpoints rows before any signature exists.
             this.peerManager.broadcast(XANCPUB_SIGN_REQ, {
-                checkpoint: cp, publisher: publisher, sig_pubkey: me, sig: mySig
+                network: String(b.network), snapshot_block: Number(b.snapshot_block),
+                sections: b.sections.map(s => ({ chain: String(s.chain), block_index: Number(s.block_index),
+                                                 checkpoint_seq: Number(s.checkpoint_seq) })),
+                body: this._buildV7Payload(b.sections, publisher, []),
+                publisher: publisher, sig_pubkey: me, sig: mySig
             });
             this._checkAttestQuorum();
         });
@@ -1634,15 +1789,18 @@ class StateAnchorPublisher {
         round.resolve({ met: true, sigs: Array.from(round.signatures, ([pubkey, sig]) => ({ pubkey, sig })), publisher: round.publisher });
     }
 
-    // Follower: co-sign the publisher attestation ONLY when the proposer is the
-    // legitimately rank-unlocked publisher of a checkpoint that byte-matches our own
-    // state_checkpoints row, and we ourselves hold oracle_publish at its snapshot_block.
-    // The frozen amount is enforced implicitly: we rebuild the canonical with
-    // ar.ANCHOR_REWARD_AMOUNT, so a wire-supplied amount can never be co-signed.
+    // Follower: co-sign the BUNDLE publisher attestation ONLY when the proposer is the
+    // legitimately rank-unlocked publisher of a bundle that BYTE-MATCHES the one we
+    // rebuild from our own state_checkpoints rows, and we ourselves hold oracle_publish
+    // at its snapshot_block. The frozen amount is enforced implicitly: we rebuild the
+    // canonical with ar.ANCHOR_REWARD_AMOUNT, so a wire-supplied amount can never be
+    // co-signed.
     async _handleAttestSignReq(envelope){
         let d = envelope.data;
-        if(!this.identity || !d || !d.checkpoint) return;
-        let cp        = d.checkpoint;
+        if(!this.identity || !d || !Array.isArray(d.sections) || d.sections.length === 0) return;
+        let network       = String(d.network || '');
+        let snapshotBlock = Number(d.snapshot_block);
+        if(!network || !Number.isFinite(snapshotBlock)) return;
         let myPubkey  = this.identity.getPubkeyHex().toLowerCase();
         let sender    = String(d.sig_pubkey || '').toLowerCase();
         if(sender === myPubkey) return;
@@ -1651,47 +1809,50 @@ class StateAnchorPublisher {
         let publisher = String(d.publisher || '').toLowerCase();
         if(publisher !== sender) return;
 
-        // Re-run the v0 publisher election (oracle_publish @ snapshot_block, hash-ordered by
-        // the v0 election key) and confirm the proposer is rank-unlocked on the SAME failover
-        // ladder _publishPendingCheckpoints used, bounded to our own BTC tip (anti-spam; the
-        // binding security is the checkpoint + frozen-amount re-derivation below).
-        let eligible = await this._getActiveOraclePublishPubkeys(Number(cp.snapshot_block));
+        // Re-run the BUNDLE publisher election (oracle_publish @ snapshot_block,
+        // hash-ordered by the bundle election key) and confirm the proposer is
+        // rank-unlocked on the SAME failover ladder _publishBundle used, bounded to our own
+        // BTC tip (anti-spam; the binding security is the byte-match below).
+        let eligible = await this._getActiveOraclePublishPubkeys(snapshotBlock);
         if(eligible.length === 0) return;
         {
             // Run the ladder check for EVERY set size: a single-member set must
             // still bind sender === eligible[0] (rank 0), or any current member
             // could impersonate the sole elected publisher.
-            let order = StateAnchorPublisher.hashOrder(this._v0ElectionKey(cp), eligible);
+            let order = StateAnchorPublisher.hashOrder(
+                this._bundleElectionKey({ network: network, snapshot_block: snapshotBlock }), eligible);
             let myBtc = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
-            let since = Number.isFinite(myBtc) ? myBtc - Number(cp.snapshot_block) : null;
+            let since = Number.isFinite(myBtc) ? myBtc - snapshotBlock : null;
             if(!this._rankUnlocked(order, sender, since)) return;          // proposer not unlocked
         }
         // Only co-sign if WE hold oracle_publish at snapshot_block, or the indexer would drop
         // our attestation signature anyway (same gate the archive follower applies).
         if(!eligible.includes(myPubkey)) return;
 
-        // The checkpoint must equal OUR own state_checkpoints row (latest seq for the height);
-        // a reorg-superseded row never attests. canonicalCheckpoint binds chain/network/
-        // block_index/hashes/checkpoint_seq/snapshot_block, so this also rejects a proposer
-        // whose seq or snapshot_block differs from ours.
-        let local = await this.db.doQuery(
-            'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? ORDER BY checkpoint_seq DESC LIMIT 1',
-            [cp.chain, cp.network, Number(cp.block_index)]);
-        if(!local || local.length === 0) return;
-        let mine = this._cpFromRow(local[0]);
-        // Compare the ROOTLESS canonical deliberately: the attestation canonical this
-        // path signs carries no SPV root suffix, and _cpFromRow omits the root fields,
-        // so both operands are rootless today. Using _rawCanonicalCheckpoint pins that
-        // intent so a future root-bearing operand on one side can't flip this guard
-        // fail-closed post-flag-day.
-        if(StateCheckpointEngine._rawCanonicalCheckpoint(mine) !== StateCheckpointEngine._rawCanonicalCheckpoint(cp)) return;
+        // THE byte-match (§2.5). Rebuild every announced section from OUR OWN
+        // state_checkpoints row and rebuild the bundle body with the 2.1 ordering rules.
+        // One rebuild covers every claim the wire makes at once: hashes, roots, per-section
+        // seq and snapshot block, the section set, the MAX snapshot block, and both sorts.
+        // A reorg-superseded row, a missing section, an extra section or a single flipped
+        // hex digit all fail here.
+        let mine = [];
+        for(let sec of d.sections){
+            let local = await this.db.doQuery(
+                'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? LIMIT 1',
+                [String(sec.chain), network, Number(sec.block_index), Number(sec.checkpoint_seq)]);
+            if(!local || local.length === 0) return;                       // we cannot vouch for a section we do not hold
+            mine.push(local[0]);
+        }
+        if(this._buildV7Payload(mine, publisher, []) !== String(d.body || '')) return;
+        // The proposer's own SNAPSHOT_BLOCK claim has to be the one our rows produce, or
+        // the canonical we co-sign would name a block the bundle does not commit to.
+        if(mine.reduce((m, r) => Math.max(m, Number(r.snapshot_block)), 0) !== snapshotBlock) return;
 
-        let canonical = this._attestationCanonical(cp, publisher);
+        let canonical = this._attestationCanonical({ network: network, snapshot_block: snapshotBlock }, publisher);
         if(!ValidatorIdentity.verify(canonical, String(d.sig || ''), sender)) return;   // proposer's own sig
 
         this.peerManager.broadcast(XANCPUB_SIGN, {
-            chain: cp.chain, network: cp.network,
-            checkpoint_seq: Number(cp.checkpoint_seq), snapshot_block: Number(cp.snapshot_block),
+            network: network, snapshot_block: snapshotBlock,
             sig_pubkey: myPubkey, sig: this.identity.sign(canonical)
         });
     }
@@ -1700,10 +1861,10 @@ class StateAnchorPublisher {
         let d = envelope.data;
         let round = this._attestRound;
         if(!round || round.done || !d) return;
-        // Match the active round by checkpoint identity (chain/network/seq/snapshot_block).
-        if(String(d.chain) !== String(round.cp.chain) || String(d.network) !== String(round.cp.network) ||
-           Number(d.checkpoint_seq) !== Number(round.cp.checkpoint_seq) ||
-           Number(d.snapshot_block) !== Number(round.cp.snapshot_block)) return;
+        // Match the active round by bundle identity (network/snapshot_block), the same
+        // pair the election key and the canonical are built from.
+        if(String(d.network) !== String(round.bundle.network) ||
+           Number(d.snapshot_block) !== Number(round.bundle.snapshot_block)) return;
         let pubkey = String(d.sig_pubkey || '').toLowerCase();
         if(!round.validators.some(v => v.pubkey === pubkey)) return;
         if(!ValidatorIdentity.verify(round.canonical, String(d.sig || ''), pubkey)) return;
@@ -1759,7 +1920,7 @@ class StateAnchorPublisher {
         let canonical = this._archiveAttestationCanonical(cp, batchSeq, publisher);
         let mySig     = this.identity.sign(canonical);
 
-        // Unresolved (empty) set: abstain, exactly as the v4/v5 round does. Self-attesting
+        // Unresolved (empty) set: abstain, exactly as the v7 bundle round does. Self-attesting
         // here would emit a v6 whose lone signature every indexer rejects while this hub
         // banks and archives the archive-anchor reward locally.
         if(snapCount === 0){
@@ -1783,7 +1944,7 @@ class StateAnchorPublisher {
         return await new Promise((resolve) => {
             let roundValidators = signingSet.map(v => ({ pubkey: v.pubkey, source: String(v.source != null ? v.source : ''), weight: String(v.amount != null ? v.amount : '0') }));
             // Preserve the truncation flag so the weighted quorum fails closed on an
-            // over-cap oracle_publish snapshot (same reasoning as the v4/v5 round: a
+            // over-cap oracle_publish snapshot (same reasoning as the v7 bundle round: a
             // fail-open would emit a v6 whose reward the indexer drops).
             if(signingSet.truncated === true) roundValidators.truncated = true;
             let round = {
@@ -1894,7 +2055,7 @@ class StateAnchorPublisher {
         // hub._resolveBtcLatestBlock() returned, and that is null whenever the pushed tip
         // is stale, the indexer lags past MAX_INDEXER_LAG_BLOCKS, or the RPC fails. A null
         // block makes _getActiveOraclePublishPubkeys take its block-UNPINNED branch, whose
-        // own contract scopes it to the coarse V0_DONE / FINALIZED sender pre-filter: it
+        // own contract scopes it to the coarse BUNDLE_DONE / FINALIZED sender pre-filter: it
         // answers from the per-hub, gossip-driven capabilityRegistry, so two hubs would
         // elect over different member lists on a path that spends real DOGE. The follower
         // side already refuses this round (_handleSignReq bounds election_block to its own
@@ -1947,7 +2108,7 @@ class StateAnchorPublisher {
         //     transport. The original invariant holds here.
         //   - anchor_<CHAIN> AT/ABOVE the anchor-reward flag-day, and anchor_archive
         //     AT/ABOVE the archive-reward flag-day: the indexer DOES re-derive these
-        //     on-chain from the v4/v5/v6 XANCPUB publisher attestation (anchor.js
+        //     on-chain from the v6/v7 XANCPUB publisher attestation (anchor.js
         //     createValidatorReward / reconcileAnchorRewardWinner), crediting the same
         //     frozen ANCHOR_REWARD_AMOUNT / ARCHIVE_REWARD_AMOUNT. The hub still records the row locally
         //     (RewardTracker isDerived path) and this selector still archives it, so the
@@ -2417,7 +2578,7 @@ class StateAnchorPublisher {
             case XANC_SIGN_REQ:  this._handleSignReq(envelope).catch(e => console.error('StateAnchorPublisher: SIGN_REQ error: ' + (e && e.message))); break;
             case XANC_SIGN:      this._handleSign(envelope).catch(e => console.error('StateAnchorPublisher: SIGN error: ' + (e && e.message)));        break;
             case XANC_FINALIZED: this._handleFinalized(envelope).catch(e => console.error('StateAnchorPublisher: FINALIZED error: ' + (e && e.message))); break;
-            case XANC_V0_DONE:   this._handleV0Done(envelope).catch(e => console.error('StateAnchorPublisher: V0_DONE error: ' + (e && e.message)));     break;
+            case XANC_BUNDLE_DONE:   this._handleBundleDone(envelope).catch(e => console.error('StateAnchorPublisher: BUNDLE_DONE error: ' + (e && e.message)));     break;
             case XANCPUB_SIGN_REQ: this._handleAttestSignReq(envelope).catch(e => console.error('StateAnchorPublisher: XANCPUB_SIGN_REQ error: ' + (e && e.message))); break;
             case XANCPUB_SIGN:     this._handleAttestSign(envelope).catch(e => console.error('StateAnchorPublisher: XANCPUB_SIGN error: ' + (e && e.message)));         break;
             case XANCARCHPUB_SIGN_REQ: this._handleArchiveAttestSignReq(envelope).catch(e => console.error('StateAnchorPublisher: XANCARCHPUB_SIGN_REQ error: ' + (e && e.message))); break;
@@ -2426,205 +2587,207 @@ class StateAnchorPublisher {
         }
     }
 
-    // Peer back-fill for a published v0 anchor. Gated on membership + signature +
-    // the sender being the rank-unlocked ELECTED v0 publisher for the referenced
-    // checkpoint (see the election re-derivation below); a non-elected member can
+    // Peer back-fill for a published ANCHOR v7 BUNDLE. Gated on membership + signature +
+    // the sender being the rank-unlocked ELECTED bundle publisher for the referenced
+    // snapshot block (see the election re-derivation below); a non-elected member can
     // no longer suppress the anchor or mirror itself the reward. The residual
-    // (a Byzantine elected publisher announcing a fake txid) needs on-chain txid
-    // verification. First writer wins (IS NULL guard).
-    async _handleV0Done(envelope){
+    // (a Byzantine elected publisher announcing a fake txid) is closed by the per-section
+    // on-chain verification below. First writer wins per section (IS NULL guard).
+    async _handleBundleDone(envelope){
         let d = envelope.data;
-        if(!d || !d.chain || !d.txid) return;
+        if(!d || !d.txid || !Array.isArray(d.sections) || d.sections.length === 0) return;
+        let network = String(d.network || '');
+        if(!network) return;
         let sender = String(d.sig_pubkey || '').toLowerCase();
         let pubkeys = await this._getActiveOraclePublishPubkeys(null);
         // Fail CLOSED on an empty set: d.sig_pubkey is self-asserted and the sig is
         // verified against it, so membership in the oracle_publish set is the ONLY
         // thing tying this announcement to a federation member. An empty set (startup /
-        // registry hiccup) must reject, not admit anyone -- otherwise a forged V0_DONE
+        // registry hiccup) must reject, not admit anyone -- otherwise a forged BUNDLE_DONE
         // stamps a bogus anchor_txid (suppressing the real anchor) and mirrors rewards.
         if(pubkeys.length === 0 || !pubkeys.includes(sender)) return;
-        if(!ValidatorIdentity.verify(this._v0DoneCanonical(d, String(d.txid)), String(d.sig || ''), sender)) return;
-        // XANC-V0DONE-SUPPRESS-1 / XANC-REWARD-THEFT-1: membership + signature alone let ANY
-        // oracle_publish member self-assert an anchor for a checkpoint it never published,
-        // stamping a bogus anchor_txid (suppressing the real anchor fleet-wide via the
-        // `anchor_txid IS NULL` selector) and mirroring itself the reward. Re-run the SAME v0
-        // publisher election the real publisher ran (_publishPendingCheckpoints): resolve
-        // oracle_publish at THIS checkpoint's snapshot_block and require the sender to be
-        // rank-unlocked on the failover ladder. snapshot_block is read from our own
-        // quorum-agreed checkpoint row (not the wire), so this needs NO signed-canonical
-        // change. It rejects any NON-elected member; a Byzantine ELECTED publisher (a far
-        // smaller surface, fully closed only by on-chain txid verification - open item) can
-        // still self-suppress its own election share. Rejecting a V0_DONE only ever risks a
-        // redundant re-anchor (benign, the direction the code already tolerates), never a
-        // fork, so using the receiver's own BTC-tip view for rank-unlock is safe here (same
-        // pattern as _handleSignReq).
-        let ckptRows = await this.db.doQuery(
-            'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? LIMIT 1',
-            [String(d.chain), String(d.network), Number(d.block_index), Number(d.checkpoint_seq)]);
-        if(!ckptRows || ckptRows.length === 0) return;   // no local copy of the referenced checkpoint: cannot vet the election
-        let electionSet = await this._getActiveOraclePublishPubkeys(Number(ckptRows[0].snapshot_block));
+        if(!ValidatorIdentity.verify(this._bundleDoneCanonical(d, String(d.txid)), String(d.sig || ''), sender)) return;
+
+        // Our OWN copy of every announced section. Without all of them we cannot vet the
+        // election: the bundle's snapshot_block is the MAX over the sections' own, read
+        // from quorum-agreed rows, never from the wire.
+        let rows = [];
+        for(let sec of d.sections){
+            let r = await this.db.doQuery(
+                'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? LIMIT 1',
+                [String(sec.chain), network, Number(sec.block_index), Number(sec.checkpoint_seq)]);
+            if(!r || r.length === 0) return;   // no local copy of a section: cannot vet the election
+            rows.push(r[0]);
+        }
+        let snapshotBlock = rows.reduce((m, r) => Math.max(m, Number(r.snapshot_block)), 0);
+        // The announced block is signed into the canonical, so a mismatch against what our
+        // own rows produce is either a forge or a state divergence; either way, abstain.
+        if(Number(d.snapshot_block) !== snapshotBlock) return;
+
+        // Membership + signature alone let ANY oracle_publish member self-assert a bundle
+        // it never published, stamping bogus anchor_txids (suppressing the real anchor
+        // fleet-wide via the `anchor_txid IS NULL` selector) and mirroring itself the
+        // reward. Re-run the SAME bundle election the real publisher ran and require the
+        // sender to be rank-unlocked on the failover ladder. Rejecting a BUNDLE_DONE only
+        // ever risks a redundant re-anchor (benign, the direction the code already
+        // tolerates), never a fork, so using the receiver's own BTC-tip view is safe here.
+        let electionSet = await this._getActiveOraclePublishPubkeys(snapshotBlock);
         if(electionSet.length === 0) return;             // fail closed: unresolved election set
         {
-            // Run the ladder check for EVERY set size. A size-1 set previously
-            // skipped it, so any CURRENT oracle_publish member (even one that
-            // joined after snapshot_block) could stamp the sole elected
-            // publisher's on-chain anchor with a V0_DONE naming itself and,
-            // pre-ANCHOR_REWARD flag-day, capture the mirrored reward.
             let order = StateAnchorPublisher.hashOrder(
-                this._v0ElectionKey({ chain: d.chain, network: d.network, checkpoint_seq: d.checkpoint_seq, snapshot_block: Number(ckptRows[0].snapshot_block) }),
-                electionSet);
+                this._bundleElectionKey({ network: network, snapshot_block: snapshotBlock }), electionSet);
             let myBtc = this.hub._resolveBtcLatestBlock ? await this.hub._resolveBtcLatestBlock() : null;
-            let since = Number.isFinite(myBtc) ? myBtc - Number(ckptRows[0].snapshot_block) : null;
+            let since = Number.isFinite(myBtc) ? myBtc - snapshotBlock : null;
             if(!this._rankUnlocked(order, sender, since)) return;   // sender is not a rank-unlocked elected publisher
         }
-        // XANC-V0DONE-SUPPRESS-1 / XANC-ELECTED-FORGE-1 (v0 half): the election gate
-        // above proves the SENDER is an elected v0 publisher, NOT that it ever
-        // published this anchor. A Byzantine ELECTED publisher can still announce a
-        // phantom/never-mined txid, stamping a bogus anchor_txid (suppressing the real
-        // anchor via the `anchor_txid IS NULL` selector) and mirroring itself the
-        // reward. Confirm the anchor is really on DOGE at >= XCHAIN_CONFIRMATIONS_DOGE
-        // depth by asking OUR OWN DOGE indexer for the DECODED anchor_actions row for
-        // THIS checkpoint (payload hashes must byte-match our own copy). ABSTAIN (skip
-        // stamp+reward, the benign redundant-re-anchor direction this handler already
-        // tolerates) when the DOGE indexer is unwired/unreachable or the anchor is
-        // absent/shallow; REJECT on a decoded-invalid status or a hash mismatch. The
-        // failover ladder unlocks at ~electionToleranceBlocks BTC blocks per rank
-        // (hours), far slower than the ~60-conf DOGE window, so waiting for depth does
-        // not open a practical double-anchor race.
-        //
-        // d.txid is bound into the signed _v0DoneCanonical, so binding it here closes
-        // the v0 half of XANC-ELECTED-FORGE-1: an ELECTED publisher announcing a
-        // never-mined txid, or pointing at a real anchor for a DIFFERENT checkpoint,
-        // no longer stamps (the phantom stamp is what suppresses the real anchor via
-        // the `anchor_txid IS NULL` selector).
-        let vOnChain = await this._verifyAnchorOnChain(ckptRows[0], { txid: String(d.txid), rejectVersions: [1, 2, 6] });
-        if(vOnChain !== 'verified'){
-            // NOT a rejection for the not-yet-buried verdicts. The publisher announces at
-            // 0 confirmations (the broadcast returns a mempool txid), so 'absent' /
-            // 'shallow' is the NORMAL first answer for a perfectly honest anchor, and
-            // 'unreachable' / 'no-indexer' / 'no-txid-support' are local-wiring faults
-            // that clear on their own. Dropping those was what left anchor_txid NULL
-            // fleet-wide. Queue for re-verification instead; only a positively-detected
-            // forge ('rejected:*') is discarded here. The queued entry is re-verified in
-            // full before it can stamp anything, so queuing grants no authority.
-            if(String(vOnChain).startsWith('rejected')){
-                console.warn('StateAnchorPublisher: V0_DONE for ' + d.chain + '/' + d.network + ' @ ' +
-                             d.block_index + '/' + d.checkpoint_seq + ' REJECTED on-chain (' + vOnChain +
-                             '); skipping stamp + reward');
-                return;
-            }
-            this._deferV0Done(d, sender, vOnChain);
+        // The election gate proves the SENDER is an elected publisher, NOT that it ever
+        // published this anchor. Confirm the bundle is really on DOGE at >=
+        // XCHAIN_CONFIRMATIONS_DOGE depth by asking OUR OWN DOGE indexer for the DECODED
+        // row of EVERY section (payload hashes must byte-match our own copies), which is
+        // also what proves the txid carries the whole announced set rather than one chain.
+        // ABSTAIN (queue) when the indexer is unwired/unreachable or the anchor is
+        // absent/shallow; REJECT on a decoded-invalid status or a hash mismatch.
+        let verdicts = [];
+        for(let row of rows)
+            verdicts.push(await this._verifyAnchorOnChain(row, { txid: String(d.txid), rejectVersions: [1, 2, 6] }));
+        let rejected = verdicts.find(v => String(v).startsWith('rejected'));
+        if(rejected){
+            console.warn('StateAnchorPublisher: BUNDLE_DONE for ' + network + ' @ ' + snapshotBlock +
+                         ' REJECTED on-chain (' + rejected + '); skipping stamp + reward');
             return;
         }
-        await this._applyV0Done(d, sender, ckptRows[0]);
+        let unproven = verdicts.find(v => v !== 'verified');
+        if(unproven){
+            // NOT a rejection: the publisher announces at 0 confirmations (the broadcast
+            // returns a mempool txid), so 'absent' / 'shallow' is the NORMAL first answer
+            // for a perfectly honest bundle, and 'unreachable' / 'no-indexer' /
+            // 'no-txid-support' are local-wiring faults that clear on their own. Dropping
+            // those is what left anchor_txid NULL fleet-wide. Queue for re-verification;
+            // the queued entry is re-verified in full before it can stamp anything, so
+            // queuing grants no authority.
+            this._deferBundleDone(d, sender, unproven);
+            return;
+        }
+        await this._applyBundleDone(d, sender, rows);
     }
 
-    // Queue an authenticated-but-not-yet-buried V0_DONE for re-verification. Keyed on
-    // the announcement's full identity INCLUDING the txid, so two competing txids for
-    // one checkpoint are tracked separately and whichever actually confirms wins.
-    _deferV0Done(d, sender, reason){
-        let key = [String(d.chain), String(d.network), Number(d.block_index),
-                   Number(d.checkpoint_seq), String(d.txid)].join('|');
-        if(this._deferredV0Done.has(key)) return;
+    // Queue an authenticated-but-not-yet-buried BUNDLE_DONE for re-verification. Keyed on
+    // the announcement's identity INCLUDING the txid, so two competing txids for one
+    // bundle are tracked separately and whichever actually confirms wins.
+    _deferBundleDone(d, sender, reason){
+        let key = [String(d.network), Number(d.snapshot_block), String(d.txid)].join('|');
+        if(this._deferredBundleDone.has(key)) return;
         // Bounded: drop the OLDEST entry rather than the new one (Map preserves
         // insertion order), so a flood cannot pin the queue on stale announcements.
-        if(this._deferredV0Done.size >= this.announceQueueMax){
-            let oldest = this._deferredV0Done.keys().next().value;
-            this._deferredV0Done.delete(oldest);
-            console.warn('StateAnchorPublisher: deferred V0_DONE queue full (' + this.announceQueueMax +
+        if(this._deferredBundleDone.size >= this.announceQueueMax){
+            let oldest = this._deferredBundleDone.keys().next().value;
+            this._deferredBundleDone.delete(oldest);
+            console.warn('StateAnchorPublisher: deferred BUNDLE_DONE queue full (' + this.announceQueueMax +
                          '); dropped the oldest entry ' + oldest);
         }
-        this._deferredV0Done.set(key, { d: d, sender: sender, at: Date.now() });
-        console.log('StateAnchorPublisher: V0_DONE for ' + d.chain + '/' + d.network + ' @ ' +
-                    d.block_index + '/' + d.checkpoint_seq + ' not yet buried (' + reason +
-                    '); queued for re-verification (' + this._deferredV0Done.size + ' pending)');
+        this._deferredBundleDone.set(key, { d: d, sender: sender, at: Date.now() });
+        console.log('StateAnchorPublisher: BUNDLE_DONE for ' + d.network + ' @ ' + d.snapshot_block +
+                    ' not yet buried (' + reason + '); queued for re-verification (' +
+                    this._deferredBundleDone.size + ' pending)');
     }
 
-    // Re-verify queued V0_DONE announcements and stamp the ones that have since been
+    // Re-verify queued BUNDLE_DONE announcements and stamp the ones that have since been
     // buried. Runs on its own timer (announceRetryMs) and at the head of every flush.
     // The announcement's authenticity (membership, signature over the txid-bearing
-    // canonical, publisher election at the checkpoint's immutable snapshot_block) was
-    // settled at receipt and cannot change; what is re-checked is the ONE thing that
-    // does change, namely whether the anchor is really on DOGE at depth.
-    async _drainDeferredV0Done(){
-        if(this._deferredV0Done.size === 0) return;
-        for(let [key, entry] of [...this._deferredV0Done]){
+    // canonical, publisher election at the bundle's immutable snapshot_block) was settled
+    // at receipt and cannot change; what is re-checked is the ONE thing that does change,
+    // namely whether the bundle is really on DOGE at depth.
+    async _drainDeferredBundleDone(){
+        if(this._deferredBundleDone.size === 0) return;
+        for(let [key, entry] of [...this._deferredBundleDone]){
             let d = entry.d;
             if(Date.now() - entry.at > this.announceRetryTtlMs){
-                this._deferredV0Done.delete(key);
-                console.warn('StateAnchorPublisher: deferred V0_DONE ' + key + ' expired after ' +
+                this._deferredBundleDone.delete(key);
+                console.warn('StateAnchorPublisher: deferred BUNDLE_DONE ' + key + ' expired after ' +
                              this.announceRetryTtlMs + 'ms without confirming; dropping so the failover ' +
-                             'ladder can re-anchor if the checkpoint is still pending');
+                             'ladder can re-anchor if the bundle is still pending');
                 continue;
             }
             try {
-                let rows = await this.db.doQuery(
-                    'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? LIMIT 1',
-                    [String(d.chain), String(d.network), Number(d.block_index), Number(d.checkpoint_seq)]);
-                if(!rows || rows.length === 0) continue;              // checkpoint gone (reorg): let the TTL clear it
-                if(rows[0].anchor_txid != null){                      // already stamped by our own publish or another announcement
-                    this._deferredV0Done.delete(key);
+                let rows = [], allStamped = true;
+                for(let sec of d.sections){
+                    let r = await this.db.doQuery(
+                        'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? LIMIT 1',
+                        [String(sec.chain), String(d.network), Number(sec.block_index), Number(sec.checkpoint_seq)]);
+                    if(!r || r.length === 0){ rows = null; break; }   // section gone (reorg): let the TTL clear it
+                    if(r[0].anchor_txid == null) allStamped = false;
+                    rows.push(r[0]);
+                }
+                if(!rows) continue;
+                if(allStamped){                    // our own publish or another announcement got there
+                    this._deferredBundleDone.delete(key);
                     continue;
                 }
-                let v = await this._verifyAnchorOnChain(rows[0], { txid: String(d.txid), rejectVersions: [1, 2, 6] });
-                if(v === 'verified'){
-                    this._deferredV0Done.delete(key);
-                    await this._applyV0Done(d, entry.sender, rows[0]);
-                    console.log('StateAnchorPublisher: deferred V0_DONE ' + key + ' confirmed on DOGE; stamped');
-                } else if(String(v).startsWith('rejected')){
-                    this._deferredV0Done.delete(key);
-                    console.warn('StateAnchorPublisher: deferred V0_DONE ' + key + ' REJECTED on re-verification (' + v + '); dropped');
+                let verdicts = [];
+                for(let row of rows)
+                    verdicts.push(await this._verifyAnchorOnChain(row, { txid: String(d.txid), rejectVersions: [1, 2, 6] }));
+                let rejected = verdicts.find(v => String(v).startsWith('rejected'));
+                if(rejected){
+                    this._deferredBundleDone.delete(key);
+                    console.warn('StateAnchorPublisher: deferred BUNDLE_DONE ' + key + ' REJECTED on re-verification (' +
+                                 rejected + '); dropped');
+                    continue;
+                }
+                if(verdicts.every(v => v === 'verified')){
+                    this._deferredBundleDone.delete(key);
+                    await this._applyBundleDone(d, entry.sender, rows);
+                    console.log('StateAnchorPublisher: deferred BUNDLE_DONE ' + key + ' confirmed on DOGE; stamped');
                 }
             } catch(e){
-                console.warn('StateAnchorPublisher: deferred V0_DONE ' + key + ' re-verification error: ' + (e && e.message));
+                console.warn('StateAnchorPublisher: deferred BUNDLE_DONE ' + key + ' re-verification error: ' + (e && e.message));
             }
         }
     }
 
-    // Apply a fully-verified V0_DONE: stamp anchor_txid and mirror the reward.
-    // Shared by the immediate receipt path and the deferred re-verification drain, so
-    // an announcement that arrives at 0 confirmations lands EXACTLY the same rows as
-    // one that arrives already buried.
-    async _applyV0Done(d, sender, ckptRow){
-        // Key the stamp on checkpoint_seq exactly as the publisher's own stamp does:
-        // checkpoint_seq is part of the signed _v0DoneCanonical, so binding it here
-        // stops one V0_DONE from marking a DIFFERENT (or multiple) seq row(s) at the
+    // Apply a fully-verified BUNDLE_DONE: stamp anchor_txid on EVERY section and mirror
+    // the reward. Shared by the immediate receipt path and the deferred re-verification
+    // drain, so an announcement that arrives at 0 confirmations lands EXACTLY the same
+    // rows as one that arrives already buried.
+    async _applyBundleDone(d, sender, rows){
+        // Key each stamp on checkpoint_seq exactly as the publisher's own stamp does:
+        // the section list is part of the signed _bundleDoneCanonical, so binding seq here
+        // stops one BUNDLE_DONE from marking a DIFFERENT (or multiple) seq row(s) at the
         // same height.
-        await this.db.doQuery(
-            'UPDATE state_checkpoints SET anchor_txid = ? WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? AND anchor_txid IS NULL',
-            [String(d.txid), String(d.chain), String(d.network), Number(d.block_index), Number(d.checkpoint_seq)]);
-        // Mirror the publisher's anchor reward locally (the caller has already
-        // signature-verified the sender and confirmed the anchor on-chain) so every
-        // hub holds the same reward rows and any of them can archive/verify the
-        // rewards section. The snapshot_block comes from OUR copy of the checkpoint
-        // row (quorum-agreed state, identical on every hub).
-        // Mirror against the EXACT announced+verified checkpoint (ckptRow, keyed on
-        // d.checkpoint_seq above), NOT the latest seq at this height. When a reorg leaves
-        // more than one checkpoint_seq at the same block_index with different
-        // snapshot_blocks, the latest-seq row's snapshot_block diverges from the seq the
-        // publisher actually anchored + recorded its reward under, forking peer reward rows
-        // from the publisher's (a live-vs-recovered COLLECT-ledger fork).
-        let cps = [{ snapshot_block: ckptRow.snapshot_block }];
-        // At/above the anchor-reward flag-day the per-chain reward is indexer-
-        // DERIVED from the on-chain v4/v5 attestation. V0_DONE does not say (and
-        // its signed canonical does not bind) WHICH payload version landed, so a
-        // mirror here could mint a reward for a degraded legacy v0/v3 fallback
-        // that no live indexer credits (a stranded archive-only credit; the
-        // live-vs-recovered fork). Skip the mirror at/above the flag-day: the
-        // attested publisher records its own row (the archive transport), and
-        // live + recovering indexers both derive the credit from the on-chain
-        // attestation. Below the flag-day the mirror remains the only transport.
-        if(cps && cps.length > 0 && !ar.isAnchorRewardActive(Number(cps[0].snapshot_block), String(d.network)))
-            this._recordReward('anchor_' + String(d.chain), Number(d.checkpoint_seq), sender, Number(cps[0].snapshot_block), String(d.network));
+        for(let row of rows){
+            await this.db.doQuery(
+                'UPDATE state_checkpoints SET anchor_txid = ? WHERE chain = ? AND network = ? AND block_index = ? AND checkpoint_seq = ? AND anchor_txid IS NULL',
+                [String(d.txid), String(row.chain), String(d.network), Number(row.block_index), Number(row.checkpoint_seq)]);
+        }
+        // The bundle's own block, re-derived from OUR copies of the rows (quorum-agreed
+        // state, identical on every hub), never from the wire.
+        let snapshotBlock = rows.reduce((m, r) => Math.max(m, Number(r.snapshot_block)), 0);
+        // At/above the anchor-reward flag-day the reward is indexer-DERIVED from the
+        // on-chain v7 attestation. BUNDLE_DONE does not say (and its signed canonical does
+        // not bind) whether the tail carried an attestation at all, so a mirror here could
+        // mint a reward for a degraded ATTEST_SIG_COUNT 0 bundle that no live indexer
+        // credits (a stranded archive-only credit; the live-vs-recovered fork). Skip the
+        // mirror at/above the flag-day: the attested publisher records its own row and
+        // live + recovering indexers both derive the credit from the on-chain attestation.
+        // Below the flag-day the mirror remains the only transport.
+        if(!ar.isAnchorRewardActive(snapshotBlock, String(d.network)))
+            this._recordReward('anchor_bundle', snapshotBlock, sender, snapshotBlock, String(d.network));
     }
 
-    _v0DoneCanonical(row, txid){
-        return 'XANCV0DONE|' + row.chain + '|' + row.network + '|' + String(row.block_index) + '|' +
-               String(row.checkpoint_seq) + '|' + String(txid || '');
+    // The string a BUNDLE_DONE sender signs. It binds the network, the bundle's block,
+    // the announced txid AND the full section list (chain:block_index:checkpoint_seq,
+    // chain-ascending), so a sender cannot re-point a signed announcement at a different
+    // set of checkpoint rows than the one it published.
+    _bundleDoneCanonical(d, txid){
+        let sections = (d.sections || []).slice().sort((a, b) => {
+            let x = String(a.chain), y = String(b.chain);
+            return x < y ? -1 : (x > y ? 1 : 0);
+        }).map(s => [String(s.chain), String(s.block_index), String(s.checkpoint_seq)].join(':')).join(',');
+        return 'XANCBUNDLEDONE|' + String(d.network) + '|' + String(d.snapshot_block) + '|' +
+               sections + '|' + String(txid || '');
     }
 
     // On-chain ANCHOR verification (XANC-ELECTED-FORGE-1 / XANC-V0DONE-SUPPRESS-1
-    // residual). A peer's V0_DONE / FINALIZED announcement is authenticated (signed
+    // residual). A peer's BUNDLE_DONE / FINALIZED announcement is authenticated (signed
     // by an elected sender) but its txid is SELF-ASSERTED: an elected-yet-Byzantine
     // publisher can announce a checkpoint it never actually anchored on DOGE,
     // suppressing the real anchor (bogus anchor_txid stamp) or minting itself a
@@ -2643,7 +2806,7 @@ class StateAnchorPublisher {
     // 'rejected:txid' / 'rejected:version' are a positively-detected forge.
     //
     // `expect` BINDS the announcement to a specific on-chain transaction:
-    //   expect.txid    - the txid the peer announced (signed into the V0_DONE /
+    //   expect.txid    - the txid the peer announced (signed into the BUNDLE_DONE /
     //                    FINALIZED canonical), so an elected-but-Byzantine publisher
     //                    cannot point at a real-but-different anchor, nor at a
     //                    never-mined one (XANC-ELECTED-FORGE-1).
@@ -2651,7 +2814,7 @@ class StateAnchorPublisher {
     //                    the v1 head), since one checkpoint_seq carries both the v0/v3
     //                    checkpoint anchor and the v1 archive anchor.
     //   expect.rejectVersions - a set of ANCHOR versions to REJECT when no single
-    //                    exact version is expected (the V0_DONE checkpoint path passes
+    //                    exact version is expected (the BUNDLE_DONE checkpoint path passes
     //                    {1,2,6}, the archive-carrying set ARCHIVE_VERSIONS names in
     //                    _findExistingCheckpointAnchor, so an archive anchor cannot pose
     //                    as a checkpoint anchor).
@@ -2700,7 +2863,7 @@ class StateAnchorPublisher {
         }
         if(want.version != null && Number(res.version) !== Number(want.version)) return 'rejected:version';
         // Reject a disallowed version even when no single exact version is
-        // expected. The V0_DONE path accepts any CHECKPOINT-anchor version
+        // expected. The BUNDLE_DONE path accepts any CHECKPOINT-anchor version
         // ({0,3,4,5}) but must not accept an ARCHIVE anchor ({1,2,6}): one
         // checkpoint_seq carries both, and the 4-core-hash byte-match below
         // passes for a v1/v6 archive whose wrapper is this same checkpoint, so
@@ -2712,12 +2875,13 @@ class StateAnchorPublisher {
         // Byte-match the decoded on-chain payload against our own checkpoint. The
         // four core hashes are present on every checkpoint version; state_root and
         // block_merkle_root are compared only when the on-chain anchor is a
-        // root-bearing version (v3/v5), matching the payload the publisher signed.
+        // root-bearing version (v7), matching the payload the publisher signed. The
+        // v1/v6 archive heads carry no roots and are rejected by rejectVersions above.
         if(!this._anchorHashEq(res.block_hash,    cp.block_hash)    ||
            !this._anchorHashEq(res.ledger_hash,   cp.ledger_hash)   ||
            !this._anchorHashEq(res.actions_hash,  cp.actions_hash)  ||
            !this._anchorHashEq(res.contract_hash, cp.contract_hash)) return 'rejected:mismatch';
-        if(Number(res.version) === 3 || Number(res.version) === 5){
+        if(Number(res.version) === 7){
             if(!this._anchorHashEq(res.state_root,        cp.state_root) ||
                !this._anchorHashEq(res.block_merkle_root, cp.block_merkle_root)) return 'rejected:mismatch';
         }
@@ -2768,7 +2932,7 @@ class StateAnchorPublisher {
         // Fail CLOSED on an unresolved election set, the same way the LEADER does
         // at the identical condition (_startArchiveRound: "empty oracle_publish set,
         // deferring round (fail closed)") and the same way _handleFinalized and
-        // _handleV0Done already do. The old fall-through skipped BOTH the rank ladder and
+        // _handleBundleDone already do. The old fall-through skipped BOTH the rank ladder and
         // every membership tie to the federation, so during an unresolved window a
         // NON-MEMBER could solicit co-signatures from the historical wrapper set and
         // assemble a duplicate v1 under a batch_seq of its own choosing: honest CONTENT
@@ -3364,14 +3528,14 @@ class StateAnchorPublisher {
             // v6 publisher attestation, and the indexer credits NOTHING for a degraded
             // legacy v1. Recording it anyway would strand the credit in hub-local +
             // archive bookkeeping only, forking the COLLECT rail live-vs-recovered (same
-            // reasoning as the v4/v5 degraded-fallback withhold).
+            // reasoning as the v7 degraded-fallback withhold).
             if(attested || !ar.isArchiveRewardActive(Number(round.cp.snapshot_block), round.cp.network)){
                 this._recordReward('anchor_archive', round.batchSeq,
                                    this.identity ? this.identity.getPubkeyHex() : null,
                                    Number(round.cp.snapshot_block), round.cp.network);
                 // Option C: mirror the archive XANCPUB quorum so the BTC indexer derives
                 // the anchor_archive reward (only when the v6 attestation actually landed).
-                // Same confirm-then-write rule as the v4/v5 site. onChainValid above
+                // Same confirm-then-write rule as the v7 site. onChainValid above
                 // is a signature-quorum verdict, not proof the v6 head was mined, and `txid` is
                 // the mempool txid _broadcastWithRetry returned, so the row is queued until the
                 // head is buried at version 6.
@@ -3385,7 +3549,7 @@ class StateAnchorPublisher {
                             rewardType: 'anchor_archive', roundReference: Number(round.batchSeq),
                             snapshotBlock: Number(round.cp.snapshot_block),
                             publisher: mePk, attestSigs: attestSigs,
-                            federate: true      // archive leader owns the fan-out, same as the v4/v5 site
+                            federate: true      // archive leader owns the fan-out, same as the v7 site
                         });
                 }
             } else {
@@ -3401,7 +3565,7 @@ class StateAnchorPublisher {
         if(!d || !Array.isArray(d.matches)) return;
         let sender = String(d.sig_pubkey || '').toLowerCase();
         let pubkeys = await this._getActiveOraclePublishPubkeys(null);
-        // Fail CLOSED on an empty set (see _handleV0Done): membership is the only tie
+        // Fail CLOSED on an empty set (see _handleBundleDone): membership is the only tie
         // to a federation member, so an empty set must reject. Otherwise a forged
         // FINALIZED backfills real matches as archived and strands them for recovery.
         if(pubkeys.length === 0 || !pubkeys.includes(sender)) return;
@@ -3459,8 +3623,8 @@ class StateAnchorPublisher {
         // only the NULL-txid half: a FABRICATED-but-plausible txid still stamps, and
         // closing that needs the announced txid verified on DOGE at depth. That gate
         // cannot simply be inlined here - the FINALIZED is broadcast at 0 confirmations
-        // (mempool) exactly like XANC_V0_DONE, so it needs the same defer-and-re-verify
-        // queue (_deferV0Done / _drainDeferredV0Done), plus an archive-head version SET
+        // (mempool) exactly like XANC_BUNDLE_DONE, so it needs the same defer-and-re-verify
+        // queue (_deferBundleDone / _drainDeferredBundleDone), plus an archive-head version SET
         // {1, 6} in _verifyArchiveCheckpointOnChain, which today hardcodes v1 because it
         // only runs below the flag-day.
         let terminalAnnounced = (d.matches || []).some(m => m && m.status !== '__partial__') ||
@@ -3559,7 +3723,7 @@ class StateAnchorPublisher {
                                   calls, rewards);
         // Mirror the leader's archive-publish reward (sender is signature-
         // verified) so all hubs hold the same reward rows (same rail as the
-        // V0_DONE mirror). Only a COMPLETE publish earns it (the leader skips
+        // BUNDLE_DONE mirror). Only a COMPLETE publish earns it (the leader skips
         // its own reward on lost chunks and marks rows __partial__).
         let partial = (d.matches || []).some(m => m && m.status === '__partial__') ||
                       calls.some(c => c && c.status === '__partial__');
@@ -3637,7 +3801,7 @@ class StateAnchorPublisher {
 
     // Re-verify queued FINALIZED announcements and stamp the ones whose archive head has
     // since been buried. Runs on the announceRetryMs timer and at the head of every
-    // flush, alongside the V0_DONE drain. Authenticity (membership, signature over the
+    // flush, alongside the BUNDLE_DONE drain. Authenticity (membership, signature over the
     // txid-bearing canonical, observed-leader) was settled at receipt and cannot change;
     // what is re-checked is the head's on-chain depth, plus the announced CONTENT, which
     // can move (a row may have advanced status while the entry sat in the queue).
@@ -4051,7 +4215,7 @@ class StateAnchorPublisher {
                 '); abstaining from this pinned election');
             return [];
         }
-        // Unpinned CURRENT-membership query (blockIndex null): the coarse V0_DONE /
+        // Unpinned CURRENT-membership query (blockIndex null): the coarse BUNDLE_DONE /
         // FINALIZED sender pre-filter, which wants "is this sender a current
         // oracle_publish member" and NOT a block-pinned set. Every such caller
         // re-checks the sender against the block-PINNED election / observed-leader
@@ -4312,7 +4476,7 @@ class StateAnchorPublisher {
         }
     }
 
-    // Existence check for a CHECKPOINT anchor (v0/v3/v4/v5): asks our own
+    // Existence check for ONE SECTION of a checkpoint anchor (v7): asks our own
     // DOGE indexer whether this checkpoint already has a mined, non-invalid
     // anchor. Returns { exists: true, txid } / null (definitively absent);
     // THROWS when undetermined (no indexer wired, unreachable, error reply), so
@@ -4321,12 +4485,12 @@ class StateAnchorPublisher {
     // double-spend regardless of whether it is deep enough to 'verify' yet.
     //
     // getanchoraction does NOT serve checkpoint anchors only. Its
-    // CHECKPOINT_VERSIONS set (indexer anchor-action-query.js: [0,1,3,4,5,6])
+    // CHECKPOINT_VERSIONS set (indexer anchor-action-query.js: [1,6,7])
     // carries the v1/v6 ARCHIVE HEADS as well, and an archive head wraps a
     // checkpoint under the SAME (chain, network, block_index, checkpoint_seq)
     // identity it is keyed on, so an UNFILTERED lookup answers with whichever
     // row landed at the higher action_index. Adopting an archive head as this
-    // checkpoint's anchor stamps the archive txid, skips the real v4/v5 publish
+    // checkpoint's anchor stamps the archive txid, skips the real v7 publish
     // and the reward derived from it, and satisfies the anchor cadence with the
     // wrong artifact on every hub that flushes after the head lands.
     //
@@ -4343,9 +4507,12 @@ class StateAnchorPublisher {
         if(!ix || !ix.url) throw new Error('no DOGE indexer wired');
         // ANCHOR versions carrying an archive batch (v1/v6 head, v2 continuation
         // chunk) and the ones that really anchor a checkpoint. Mirrors the
-        // rejectVersions/{0,3,4,5} split the receiver paths already use.
+        // rejectVersions/{7} split the receiver paths already use. The retired
+        // per-chain wires v0/v3/v4/v5 are gone: the hub never emits them and the
+        // indexer no longer parses them (D2), so asking for them would be a lookup
+        // that can only ever answer absent.
         const ARCHIVE_VERSIONS    = [1, 2, 6];
-        const CHECKPOINT_VERSIONS = [0, 3, 4, 5];
+        const CHECKPOINT_VERSIONS = [7];
         let ask = async (version) => {
             let params = {
                 chain: String(row.chain), network: String(row.network),
@@ -4364,7 +4531,7 @@ class StateAnchorPublisher {
         if(!res.exists) return null;
         // An indexer too old to report `version` answers NaN here, which is not an
         // archive version, so it keeps the pre-filter behavior rather than
-        // fanning out four lookups it would answer identically.
+        // fanning out a lookup it would answer identically.
         if(ARCHIVE_VERSIONS.includes(Number(res.version))){
             for(let v of CHECKPOINT_VERSIONS){
                 let r = await ask(v);          // throws (undetermined) exactly as the unfiltered call does
@@ -4382,6 +4549,34 @@ class StateAnchorPublisher {
         }
         if(!usable(res)) return null;
         return { exists: true, txid: res.txid || null };
+    }
+
+    // Existence check for a whole BUNDLE (spec §2.4), the failover-race guard on the
+    // checkpoint leg. Needs NO new RPC and no new index: it calls the per-section lookup
+    // above once per section, on the section's own (chain, network, block_index,
+    // checkpoint_seq), which is exactly the key `getanchoraction` already serves.
+    //
+    // Adopts ONLY when EVERY section resolves to a mined, non-invalid v7 row sharing ONE
+    // txid. Anything less is not this bundle: a partial answer would stamp some sections
+    // from a transaction that does not carry the others, and a second spend for the
+    // missing ones is the correct outcome. THROWS when any section is undetermined (no
+    // indexer, unreachable), so _broadcastWithRetry keeps its "absent" vs "can't tell"
+    // distinction and never re-broadcasts on an unreadable view.
+    //
+    // The byte-determinism rule (D5) is what makes this sound in a race: two publishers
+    // building the same bundle emit identical bytes, so a section adopted here is the
+    // section we would have published.
+    async _findExistingBundle(sections){
+        let txid = null;
+        for(let s of sections || []){
+            let r = await this._findExistingCheckpointAnchor(s);   // throws when undetermined
+            if(!(r && r.exists)) return null;                      // one section absent: not this bundle
+            let t = r.txid ? String(r.txid).toLowerCase() : null;
+            if(!t) return null;                                    // cannot prove one transaction carried the set
+            if(txid === null) txid = t;
+            else if(txid !== t) return null;                       // sections anchored by DIFFERENT transactions
+        }
+        return txid ? { exists: true, txid: txid } : null;
     }
 
     // CONTENT-ADDRESSED existence check for an ARCHIVE anchor (v1/v6 head + its v2
@@ -4761,7 +4956,7 @@ module.exports = StateAnchorPublisher;
 module.exports.XANC_SIGN_REQ  = XANC_SIGN_REQ;
 module.exports.XANC_SIGN      = XANC_SIGN;
 module.exports.XANC_FINALIZED = XANC_FINALIZED;
-module.exports.XANC_V0_DONE   = XANC_V0_DONE;
+module.exports.XANC_BUNDLE_DONE   = XANC_BUNDLE_DONE;
 module.exports.XANCPUB_SIGN_REQ = XANCPUB_SIGN_REQ;
 module.exports.XANCPUB_SIGN     = XANCPUB_SIGN;
 module.exports.XANCARCHPUB_SIGN_REQ = XANCARCHPUB_SIGN_REQ;

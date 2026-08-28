@@ -85,11 +85,11 @@ class RewardTracker {
         console.log('Rewards: Round ' + round + ': ' + perValidator + ' XCHAIN each to ' + validParticipants.length + ' validators (hub-local; indexer derives the consensus rows from PRICE v0)');
     }
 
-    // Record a single anchor-publish reward (ANCHOR v0 per-chain or v1 archive).
-    // rewardType: 'anchor_<chain>' / 'anchor_archive'; roundNumber: checkpoint_seq /
+    // Record a single anchor-publish reward (ANCHOR v7 checkpoint bundle or v1 archive).
+    // rewardType: 'anchor_bundle' / 'anchor_archive'; roundNumber: snapshot_block /
     // batch_seq. The publisher that paid the DOGE earns it. Called on EVERY hub
     // (the publisher at publish time; peers from the signature-verified
-    // V0_DONE/FINALIZED announcements), and blockIndex MUST be the quorum-agreed
+    // BUNDLE_DONE/FINALIZED announcements), and blockIndex MUST be the quorum-agreed
     // snapshot_block of the rewarded checkpoint, so all hubs record identical
     // row bytes and the ANCHOR archive's rewards section verifies by
     // re-derivation.
@@ -168,9 +168,16 @@ class RewardTracker {
                       : ((this.hub && this.hub.network) ? this.hub.network : '');
         let isDerivedChain   = /^anchor_(BTC|LTC|DOGE)$/.test(String(rewardType)) &&
                                ar.isAnchorRewardActive(Number(blockIndex), network);
+        // The BUNDLE reward: ONE anchor_bundle per network per cycle, derived on-chain
+        // from the ANCHOR v7 publisher attestation. Same frozen ANCHOR_REWARD_AMOUNT and
+        // the same flag-day as the per-chain form it replaces, so a hub that records it
+        // and an indexer that derives it agree on the amount whatever
+        // ANCHOR_REWARD_PER_PUBLISH is set to locally.
+        let isDerivedBundle  = String(rewardType) === 'anchor_bundle' &&
+                               ar.isAnchorRewardActive(Number(blockIndex), network);
         let isDerivedArchive = String(rewardType) === 'anchor_archive' &&
                                ar.isArchiveRewardActive(Number(blockIndex), network);
-        let amount = parseFloat(isDerivedChain ? ar.ANCHOR_REWARD_AMOUNT
+        let amount = parseFloat((isDerivedChain || isDerivedBundle) ? ar.ANCHOR_REWARD_AMOUNT
                               : isDerivedArchive ? ar.ARCHIVE_REWARD_AMOUNT : this.anchorReward);
         if (!Number.isFinite(amount) || amount <= 0) return;
         let amountStr = amount.toFixed(8);
