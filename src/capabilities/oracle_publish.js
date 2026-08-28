@@ -22,7 +22,29 @@
  * Config shape:
  *   { oracle_publish: { doge_address: 'D...', doge_wallet: '~/.dogecoin/wallet' } }
  *
+ * THE ADDRESS FORMAT IS PER-NETWORK. Which DOGE chain this hub publishes to is
+ * not derived from HUB_NETWORK: OraclePublisher broadcasts through whatever
+ * DOGE_ENCODER_URL points at, so a testnet federation publishes on DOGE testnet
+ * with faucet coin and a mainnet one spends real DOGE. A hardcoded mainnet 'D'
+ * prefix here rejects the CORRECT address for every testnet and regtest
+ * validator and leaves oracle_publish unreachable on any non-mainnet deployment
+ * (project-run or community), so the check validates against the hub's declared
+ * network instead.
+ *
+ * Gated per-network rather than accepting either format, deliberately: a mainnet
+ * hub configured with a testnet address would pass a permissive check and then
+ * publish nowhere, which is the silent failure this self-test exists to catch.
+ *
  ********************************************************************/
+
+// Dogecoin base58 pay-to-pubkey-hash prefixes by network. Mainnet version byte
+// 0x1e renders as 'D'; testnet/regtest version byte 0x71 renders as 'n'. P2SH is
+// not accepted: the publisher signs with a single-key wallet.
+const DOGE_ADDRESS_RE = {
+    mainnet: /^D[a-km-zA-HJ-NP-Z1-9]{33}$/,
+    testnet: /^n[a-km-zA-HJ-NP-Z1-9]{33}$/,
+    regtest: /^n[a-km-zA-HJ-NP-Z1-9]{33}$/,
+};
 
 exports.selfTest = async (config) => {
     let entry = (config && config.oracle_publish) || null;
@@ -32,9 +54,20 @@ exports.selfTest = async (config) => {
     if (!entry.doge_address) {
         return { ok: false, reason: 'oracle_publish.doge_address not configured' };
     }
-    // DOGE address: D-prefix, 33 base58 chars after = 34 total
-    if (!/^D[a-km-zA-HJ-NP-Z1-9]{33}$/.test(String(entry.doge_address))) {
-        return { ok: false, reason: 'oracle_publish.doge_address has invalid format' };
+
+    // Fail closed on an unknown/absent network rather than falling back to
+    // mainnet: guessing here is what would let a testnet hub silently validate a
+    // mainnet address and spend real DOGE.
+    let network = String((config && config.HUB_NETWORK) || '').toLowerCase();
+    let re = DOGE_ADDRESS_RE[network];
+    if (!re) {
+        return { ok: false, reason: 'oracle_publish cannot validate doge_address: HUB_NETWORK is ' +
+                                    (network ? '"' + network + '" (unknown)' : 'not set') };
+    }
+    if (!re.test(String(entry.doge_address))) {
+        return { ok: false, reason: 'oracle_publish.doge_address is not a valid DOGE ' + network +
+                                    ' address (expected ' + (network === 'mainnet' ? "'D'" : "'n'") +
+                                    ' prefix, 34 chars)' };
     }
     if (!entry.doge_wallet) {
         return { ok: false, reason: 'oracle_publish.doge_wallet not configured' };
