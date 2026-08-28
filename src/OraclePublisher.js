@@ -252,6 +252,15 @@ class OraclePublisher {
         this._takeoverDarkWarned = false;
         this.takeoverAttempts  = 0;
         this.takeoverPublished = 0;
+
+        // Whether a publish may spend this address's own unconfirmed change. Default
+        // FALSE: chaining is what lets one underpaid batch strand every later one,
+        // because miners score by ancestor package. The escape hatch exists for a
+        // venue that mines on demand (regtest), where chaining is free and waiting
+        // for a confirmation would stall the harness.
+        this.allowUnconfirmedInputs =
+            String(process.env.ORACLE_PUBLISH_ALLOW_UNCONFIRMED_INPUTS ||
+                   cfg.ORACLE_PUBLISH_ALLOW_UNCONFIRMED_INPUTS || 'false') === 'true';
         // Leader-rotation observability (item 3218). A dark peer publisher is
         // otherwise invisible: this hub's own status stays perfect while 1/N of
         // rounds never land on-chain. Track the rank state of the most recent
@@ -425,7 +434,18 @@ class OraclePublisher {
             pubkey:   this.dogeAddress,
             data:     payload,
             change:   this.dogeAddress,
-            encoding: 'P2SH'
+            encoding: 'P2SH',
+            // CONFIRMED INPUTS ONLY. Spending our own unconfirmed change chains every
+            // batch onto the one before it, and miners score a transaction by its whole
+            // ancestor package: one cheap early transaction then holds down every batch
+            // published after it, however much the newest one pays. That is what turned
+            // a single underpaid batch into a nine-hour backlog of nine transactions,
+            // where the newest paid 1.36 per kB and still could not move a package
+            // anchored to ancestors paying 0.003. Each batch must stand alone and be
+            // judged on its own fee rate. When no confirmed output is available the
+            // pass defers (see the NO_CONFIRMED_UTXO gate), which is the correct
+            // outcome: a deferred window is recoverable, a chained package is not.
+            unconfirmed: this.allowUnconfirmedInputs
         });
         if (!psbtResult || !psbtResult.psbt) {
             throw new Error('encoder returned no PSBT');

@@ -455,3 +455,31 @@ describe('OraclePublisher landing guards', function () {
         });
     });
 });
+
+// One underpaid batch stranded every batch published after it, because the
+// publisher spent its own unconfirmed change and miners score a transaction by
+// its whole ancestor package. Nine transactions, nine hours, the newest paying
+// 1.36 per kB against ancestors paying 0.003.
+describe('OraclePublisher confirmed-input policy @regression', function () {
+    const OraclePublisher = require('../../src/OraclePublisher.js');
+
+    function pub(cfg) {
+        return new OraclePublisher({ p2pConfig: Object.assign({}, cfg || {}), db: null,
+                                     getIdentity: () => null, capabilitySnapshot: null });
+    }
+
+    it('refuses unconfirmed inputs by default', function () {
+        if (pub().allowUnconfirmedInputs !== false) throw new Error('default must be false');
+    });
+
+    it('allows them only when a deployment explicitly opts in', function () {
+        if (pub({ ORACLE_PUBLISH_ALLOW_UNCONFIRMED_INPUTS: 'true' }).allowUnconfirmedInputs !== true) {
+            throw new Error('explicit true must opt in');
+        }
+        for (const v of ['false', '1', 'yes', '', 'TRUE']) {
+            if (pub({ ORACLE_PUBLISH_ALLOW_UNCONFIRMED_INPUTS: v }).allowUnconfirmedInputs !== false) {
+                throw new Error('only the exact string true opts in, got ' + v);
+            }
+        }
+    });
+});
