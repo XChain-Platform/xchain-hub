@@ -27,7 +27,24 @@ const WebSocket        = require('ws');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const { positiveIntConfig } = require('./lib/config_int.js');
 
+// Bootstrap peers every new hub can reach. One hostname per validator; the
+// PORT selects the network, so a seed on the wrong port reaches the wrong
+// federation. Hostnames, not IPs, so a validator can move boxes.
+const BOOTSTRAP_VALIDATOR_HOSTS = [
+    'validator01.xchain.io', 'validator02.xchain.io', 'validator03.xchain.io',
+    'validator04.xchain.io', 'validator05.xchain.io'
+];
+const BOOTSTRAP_PORT_BY_NETWORK = { mainnet: 10001, testnet: 10002 };
+
 class PeerManager extends EventEmitter {
+    // Default seed list for a network, or [] when there is none to offer
+    // (regtest is a local venue and must never dial public seeds).
+    static bootstrapSeeds(network) {
+        const port = BOOTSTRAP_PORT_BY_NETWORK[String(network || '').toLowerCase()];
+        if (!port) return [];
+        return BOOTSTRAP_VALIDATOR_HOSTS.map(h => 'ws://' + h + ':' + port);
+    }
+
 
     constructor(config, db) {
         super();
@@ -153,7 +170,19 @@ class PeerManager extends EventEmitter {
 
         this.running = true;
 
+        // A hub with no SEED_NODES dials nobody and joins no gossip mesh, while
+        // running and looking healthy. Fall back to the bootstrap peers.
+        // regtest gets none: a local venue must never dial public seeds.
         let seeds = this.config.SEED_NODES || [];
+        if (seeds.length === 0) {
+            const defaults = PeerManager.bootstrapSeeds(this.config.HUB_NETWORK);
+            if (defaults.length) {
+                // Never dial ourselves: one of the five IS one of the five.
+                seeds = defaults.filter(a => !host || host === '0.0.0.0' ? true : !a.includes(host));
+                console.log('PeerManager: no SEED_NODES configured; using the ' + seeds.length +
+                            ' default bootstrap seed(s) for ' + this.config.HUB_NETWORK);
+            }
+        }
         for (let addr of seeds) {
             this._connectToPeer(addr);
             // Record seed in DB (fire and forget). validator_id is the peer's own addr,

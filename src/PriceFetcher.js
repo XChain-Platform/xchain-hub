@@ -14,6 +14,13 @@
  *
  * XChain Hub - Price Fetcher
  *
+ * Sources, and what each costs:
+ *   CoinGecko  keyless, 1 request,  36/36 pairs
+ *   Kraken     keyless, 1 request,  17/36 pairs (it lists no others)
+ *   Coinbase   keyless, 3 requests, 36/36 pairs (one per coin)
+ *   CMC        API KEY, 1 request,  36/36 pairs, billed 12 credits per call
+ *              (one per convert-currency), so it is opt-in only.
+ *
  * Fetches cryptocurrency prices from multiple external APIs and
  * computes a local median for each coin pair. Used by the oracle
  * round system to generate price submissions.
@@ -168,12 +175,16 @@ class PriceFetcher {
             results[pair] = [];
         }
 
-        // Fetch from all sources in parallel. CoinGecko and Kraken are both keyless,
-        // so every hub has two uncorrelated upstreams out of the box;
-        // CoinMarketCap is added as a third only when an API key is configured.
+        // Fetch from all sources in parallel. CoinGecko, Kraken and Coinbase are all
+        // keyless, so every hub has THREE uncorrelated upstreams out of the box, and
+        // CoinGecko and Coinbase both cover all 36 pairs: no pair is left resting on
+        // a single API the way the thin fiats were when Kraken (17 pairs) was the
+        // only companion. CoinMarketCap is added as a fourth only when an API key is
+        // configured; it is billed per convert-currency (12 credits per call here),
+        // which is why it stays opt-in rather than assumed.
         // Each fetcher fails soft (returns null on error), so one source erroring
         // never drops the others.
-        let fetches = [this.fetchFromCoinGecko(), this.fetchFromKraken()];
+        let fetches = [this.fetchFromCoinGecko(), this.fetchFromKraken(), this.fetchFromCoinbase()];
         if (this.coinmarketcapApiKey) {
             fetches.push(this.fetchFromCoinMarketCap());
         }
@@ -200,7 +211,7 @@ class PriceFetcher {
         if (liveSources < 2) {
             console.warn('PriceFetcher: only ' + liveSources + ' live price source(s) this round ' +
                 '(need at least 2 uncorrelated sources for a healthy oracle). ' +
-                'Check CoinGecko / Kraken reachability' +
+                'Check CoinGecko / Kraken / Coinbase reachability' +
                 (this.coinmarketcapApiKey ? ' / CoinMarketCap API key.' : '.'));
         }
 
@@ -311,6 +322,62 @@ class PriceFetcher {
         }
         this._reportBoundRejects('coingecko', 'CoinGecko', rejected);
         return prices;
+    }
+
+    // Fetch all coin/fiat pairs from Coinbase's keyless exchange-rates endpoint,
+    // retrying on 429/503 with the same backoff+jitter as the other sources.
+    //
+    // ONE REQUEST PER COIN: /v2/exchange-rates takes a single `currency` and prices
+    // it in ~640 others, so three calls cover all 36 pairs. The only source here
+    // costing more than one round trip, and the only free one covering every pair.
+    //
+    // On fiats with no traded market this is likely COIN/USD times an FX rate, and
+    // CoinGecko may derive its own the same way: the source COUNT overstates
+    // independence on those pairs.
+    //
+    // Returns: { 'BTC/USD': number, ..., 'DOGE/KRW': number } or null
+    async fetchFromCoinbase() {
+        // Same startup-collision jitter as CoinGecko: several hubs behind one NAT
+        // would otherwise hit this endpoint in lockstep every round.
+        if (this.fetchJitterMs > 0)
+            await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * this.fetchJitterMs)));
+
+        let prices = {};
+        let rejected = [];
+        let anyCoinSucceeded = false;
+
+        for (let coin of COINS) {
+            let url = 'https://api.coinbase.com/v2/exchange-rates?currency=' + encodeURIComponent(coin);
+            let response;
+            try {
+                response = await this._fetchWithRetry(url, { timeout: this.timeout, headers: {} });
+            } catch (err) {
+                // Per-coin failure only. One coin erroring must not discard the two
+                // that answered, the same fail-soft rule the other sources follow.
+                console.warn('Coinbase fetch failed after retries for ' + coin + ': ' +
+                             (err ? err.message : 'unknown error'));
+                continue;
+            }
+            anyCoinSucceeded = true;
+
+            let rates = response.data && response.data.data && response.data.data.rates;
+            if (!rates) continue;
+            for (let fiat of FIATS) {
+                let raw = rates[fiat];
+                if (raw === undefined || raw === null) continue;
+                let val = parseFloat(raw);
+                if (Number.isFinite(val) && val > 0 && val < PRICE_MAX) {
+                    prices[coin + '/' + fiat] = val;
+                } else {
+                    rejected.push(PriceFetcher._rejectSample(coin + '/' + fiat, raw));
+                }
+            }
+        }
+
+        this._reportBoundRejects('coinbase', 'Coinbase', rejected);
+        // null, not {}, when every coin failed: fetchPrices counts a source as live
+        // only if it contributed a price, and null keeps that distinction honest.
+        return anyCoinSucceeded ? prices : null;
     }
 
     // Fetch coin/fiat pairs from Kraken's keyless public ticker in a single request,

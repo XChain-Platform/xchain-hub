@@ -239,7 +239,7 @@ describe('PriceFetcher', function () {
             expect(prices).to.deep.equal([]);
         });
 
-        it('fetches CoinGecko + Kraken when no CMC key', async function () {
+        it('fetches CoinGecko + Kraken + Coinbase when no CMC key', async function () {
             pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0, PRICE_FETCH_JITTER_MS: 0 });
             axiosStub.get.callsFake(function (url) {
                 if (hostIs(url, 'api.coingecko.com')) {
@@ -253,14 +253,25 @@ describe('PriceFetcher', function () {
                         data: { error: [], result: { XBTUSD: { c: ['50000', '1'] } } }
                     });
                 }
+                if (hostIs(url, 'api.coinbase.com')) {
+                    // Coinbase answers ONE coin per call, priced in every currency.
+                    let coin = /currency=([A-Z]+)/.exec(url);
+                    let usd  = { BTC: '50000', LTC: '40', DOGE: '0.1' }[coin && coin[1]] || '1';
+                    return Promise.resolve({ data: { data: { rates: { USD: usd } } } });
+                }
                 return Promise.reject(new Error('unexpected URL: ' + url));
             });
 
             let prices = await pf.fetchPrices();
-            expect(axiosStub.get.calledTwice).to.be.true;
-            let urls = [axiosStub.get.firstCall.args[0], axiosStub.get.secondCall.args[0]];
+            // Five calls, not three: CoinGecko and Kraken batch into one request each,
+            // while Coinbase needs one per coin (its endpoint takes a single currency).
+            expect(axiosStub.get.callCount).to.equal(5);
+            let urls = axiosStub.get.getCalls().map(c => c.args[0]);
             expect(urls.some(u => hostIs(u, 'api.coingecko.com'))).to.be.true;
             expect(urls.some(u => hostIs(u, 'api.kraken.com'))).to.be.true;
+            expect(urls.filter(u => hostIs(u, 'api.coinbase.com'))).to.have.lengthOf(3);
+            // The point of the test: no key, so CMC is never contacted.
+            expect(urls.some(u => hostIs(u, 'pro-api.coinmarketcap.com'))).to.be.false;
             expect(prices).to.have.lengthOf(3);
         });
 
