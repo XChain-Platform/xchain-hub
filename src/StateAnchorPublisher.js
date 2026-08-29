@@ -254,13 +254,18 @@ class StateAnchorPublisher {
         //
         // SCOPE: the ladder above unlocks on the ARCHIVE leg only, whose election
         // anchors to a STALLED batch, so its `since` grows without bound. On the v7
-        // CHECKPOINT BUNDLE leg rank 0 is the only rank ever eligible, because
-        // snapshot_block tracks the live BTC tip and the selector takes
-        // MAX(checkpoint_seq): `since` is bounded by the 6-block cadence, and
-        // floor(6/36) = 0. A bundle therefore has no failover, and its liveness rests
-        // on per-cycle re-election plus each hub's independent 24h timer; a missed
-        // cycle costs one snapshot its own anchor, which the chained hashes recover.
-        // Lowering the tolerance does not fix that: below the DOGE burial window it
+        // CHECKPOINT BUNDLE leg the newest ELIGIBLE checkpoint tracks the live BTC
+        // tip, so `since` is bounded by CHECKPOINT_INTERVAL_BLOCKS *
+        // ANCHOR_CHECKPOINT_EVERY_N, i.e. 6 at the defaults. Rank 1 needs `since` >=
+        // 36, so at the default cadence NO rank above 0 is ever eligible and a bundle
+        // has no failover at all; its liveness rests on per-cycle re-election plus
+        // each hub's independent 24h timer, and a missed cycle costs one snapshot its
+        // own anchor, which the chained hashes recover.
+        // The inertness is therefore a property of the CADENCE, not of the ladder:
+        // ANCHOR_CHECKPOINT_EVERY_N >= 6 puts the bound at or above 36 and the backup
+        // ranks start unlocking here too. Raising that knob is not a cadence-only
+        // change; re-read this stanza before doing it.
+        // Lowering the tolerance is still not the fix: below the DOGE burial window it
         // buys duplicate spends. A meaningful bundle ladder must measure time or
         // flush attempts, not BTC-block age against a tip-tracking snapshot.
         // The same value also bounds how far a peer's claimed election_block may
@@ -1057,9 +1062,10 @@ class StateAnchorPublisher {
             let snapshotBlock = group.reduce((m, s) => Math.max(m, Number(s.snapshot_block)), 0);
             let order = StateAnchorPublisher.hashOrder(
                 this._bundleElectionKey({ network: network, snapshot_block: snapshotBlock }), eligible);
-            // Bounded by the 6-block checkpoint cadence, since snapshotBlock tracks the
-            // tip, so no rank above 0 unlocks on this leg. Intended: see the
-            // ANCHOR_ELECTION_TOLERANCE_BLOCKS derivation above.
+            // Bounded by CHECKPOINT_INTERVAL_BLOCKS * ANCHOR_CHECKPOINT_EVERY_N (6 at the
+            // defaults), since the newest eligible snapshotBlock tracks the tip, so no rank
+            // above 0 unlocks here unless that product reaches the tolerance. Intended: see
+            // the ANCHOR_ELECTION_TOLERANCE_BLOCKS derivation above.
             let since = Number.isFinite(btcBlock) ? btcBlock - snapshotBlock : null;
             // Someone else's bundle (or our backup rank has not unlocked yet).
             if(!this._mayPublish(order, since)){
