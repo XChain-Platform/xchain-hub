@@ -1184,7 +1184,22 @@ describe('StateAnchorPublisher', function () {
         // It stamps the txid its OWN indexer reports for the mined sections, which is what
         // the adopt path exists to recover: the bundle is on chain, so nothing is re-sent.
         expect(backup.db.checkpoints[0].anchor_txid, 'the backup adopts the mined bundle').to.equal('onchain-txid');
-        expect(backup.pub.getAnchorStats().anchorsAsBackup, 'counted as a failover publish').to.equal(1);
+        // An adoption is NOT a publish: this hub spent nothing, so every publish counter
+        // stays flat and only the adoption counter moves.
+        let st = backup.pub.getAnchorStats();
+        expect(st.anchorsPublished,  'adoption is not a publish').to.equal(0);
+        expect(st.sectionsAnchored,  'no sections were paid for').to.equal(0);
+        expect(st.anchorsAsBackup,   'no failover publish happened').to.equal(0);
+        expect(st.anchorsAsLeader,   'nor a leader publish').to.equal(0);
+        expect(st.anchorsAdopted,    'the adoption is still visible').to.equal(1);
+        expect(st.lastAnchorRank.adopted, 'and the last-anchor posture names it').to.equal(true);
+        expect(st.anchorsAsLeader + st.anchorsAsBackup, 'the split still sums to anchorsPublished')
+            .to.equal(st.anchorsPublished);
+        // Contrast that keeps the assertions above honest: the paying hub still counts,
+        // so this is a narrowed signal rather than a silenced one.
+        let ls = leader.pub.getAnchorStats();
+        expect(ls.anchorsPublished, 'the hub that paid still counts the publish').to.equal(1);
+        expect(ls.anchorsAdopted,   'and did not adopt anything').to.equal(0);
     });
 
     it('followers refuse an archive that diverges from their own match rows', async function () {

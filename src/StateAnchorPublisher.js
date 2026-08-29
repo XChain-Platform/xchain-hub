@@ -251,6 +251,18 @@ class StateAnchorPublisher {
         // DOGE on duplicate anchors, above ~144 a dead leader stalls a cycle.
         // Never a divergence risk in either direction: concurrent unlocked
         // publishers build byte-identical archives (see _rankUnlocked).
+        //
+        // SCOPE: the ladder above unlocks on the ARCHIVE leg only, whose election
+        // anchors to a STALLED batch, so its `since` grows without bound. On the v7
+        // CHECKPOINT BUNDLE leg rank 0 is the only rank ever eligible, because
+        // snapshot_block tracks the live BTC tip and the selector takes
+        // MAX(checkpoint_seq): `since` is bounded by the 6-block cadence, and
+        // floor(6/36) = 0. A bundle therefore has no failover, and its liveness rests
+        // on per-cycle re-election plus each hub's independent 24h timer; a missed
+        // cycle costs one snapshot its own anchor, which the chained hashes recover.
+        // Lowering the tolerance does not fix that: below the DOGE burial window it
+        // buys duplicate spends. A meaningful bundle ladder must measure time or
+        // flush attempts, not BTC-block age against a tip-tracking snapshot.
         // The same value also bounds how far a peer's claimed election_block may
         // sit from our own BTC tip in _handleSignReq (anti-spam only; the security
         // property there is the DB byte-match).
@@ -412,6 +424,10 @@ class StateAnchorPublisher {
         // _leaderRounds/_followerRounds on the PRICE rail.
         this._anchorsAsLeader  = 0;
         this._anchorsAsBackup  = 0;
+        // Counts bundles STAMPED without paying (the existence check adopted an
+        // already-mined one). Kept apart from _anchorsPublished so the leader/backup
+        // split keeps summing to the bundles this hub actually spent DOGE on.
+        this._anchorsAdopted   = 0;
         // Rank state of the most recent successful anchor, surfaced via
         // getAnchorStats so an operator sees the CURRENT posture, not only a
         // lifetime tally that a long healthy history would dilute.
@@ -570,6 +586,9 @@ class StateAnchorPublisher {
             // and the ladder is absorbing its work.
             anchorsAsLeader:    this._anchorsAsLeader,
             anchorsAsBackup:    this._anchorsAsBackup,
+            // Stamped without paying. Holds anchorsAsLeader + anchorsAsBackup ==
+            // anchorsPublished; lastAnchorRank.adopted names the most recent one.
+            anchorsAdopted:     this._anchorsAdopted,
             lastAnchorRank:     this._lastAnchorRank,
             skippedNotOurElection: this._skippedNotOurElection,
             skippedLeaderOnWake:   this._skippedLeaderOnWake,
@@ -1038,6 +1057,9 @@ class StateAnchorPublisher {
             let snapshotBlock = group.reduce((m, s) => Math.max(m, Number(s.snapshot_block)), 0);
             let order = StateAnchorPublisher.hashOrder(
                 this._bundleElectionKey({ network: network, snapshot_block: snapshotBlock }), eligible);
+            // Bounded by the 6-block checkpoint cadence, since snapshotBlock tracks the
+            // tip, so no rank above 0 unlocks on this leg. Intended: see the
+            // ANCHOR_ELECTION_TOLERANCE_BLOCKS derivation above.
             let since = Number.isFinite(btcBlock) ? btcBlock - snapshotBlock : null;
             // Someone else's bundle (or our backup rank has not unlocked yet).
             if(!this._mayPublish(order, since)){
@@ -1157,16 +1179,25 @@ class StateAnchorPublisher {
             // Computed from the SAME `order` _mayPublish decided on, so the label can
             // never disagree with the decision that produced the spend.
             let myRank = this._myRank(order);
+            // Gate the publish counters and the log verb on whether this call actually
+            // spent: an adopted bundle was paid for by a prior broadcast of ours or by a
+            // peer, and must never read as an anchor this hub bought.
+            let adopted = !!(result && result.exists);
             this._lastAnchorRank = { network: network, snapshotBlock: snapshotBlock,
                                      chains: group.map(s => String(s.chain)), myRank: myRank,
                                      publisherCount: order.length, isLeader: myRank === 0,
-                                     at: Date.now() };
-            if(myRank > 0) this._anchorsAsBackup++; else this._anchorsAsLeader++;
-            this._anchorsPublished++;
-            this._sectionsAnchored += group.length;
-            console.log('StateAnchorPublisher: anchored bundle ' + network + ' @ ' + snapshotBlock +
+                                     adopted: adopted, at: Date.now() };
+            if(adopted){
+                this._anchorsAdopted++;
+            } else {
+                if(myRank > 0) this._anchorsAsBackup++; else this._anchorsAsLeader++;
+                this._anchorsPublished++;
+                this._sectionsAnchored += group.length;
+            }
+            console.log('StateAnchorPublisher: ' + (adopted ? 'adopted' : 'anchored') + ' bundle ' +
+                        network + ' @ ' + snapshotBlock +
                         ' with ' + group.length + ' section(s) [' + chains + '] (txid ' + txid + ')' +
-                        (myRank > 0
+                        (!adopted && myRank > 0
                             ? ' [FAILOVER: published at backup rank ' + myRank + ' of ' + order.length +
                               '; the rank-0 publisher did not anchor this bundle]'
                             : ''));
