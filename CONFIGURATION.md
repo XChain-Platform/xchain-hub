@@ -397,7 +397,7 @@ continuation chunks) is unchanged.
 None of these is consensus data, so two hubs on different values still produce
 mutually verifiable anchors. Three of them do encode a real bound, and the full
 derivation lives in
-[ANCHOR.md](https://github.com/XChain-Platform/xchain-documentation/blob/master/protocol/actions/ANCHOR.md)
+[ANCHOR.md](https://github.com/XChain-Platform/xchain-documentation/blob/master/protocol/actions/anchor.md)
 ("Where the publisher constants come from"), mirrored in the `StateAnchorPublisher`
 constructor comment and pinned by
 `test/unit/StateAnchorPublisher.constant-derivations.test.js`. In short:
