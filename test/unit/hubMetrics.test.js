@@ -123,6 +123,40 @@ describe('hub oracle-round heartbeat metrics (item a98d6746)', function () {
         expect(observability.registry.render()).to.not.match(/xchain_oracle_round_timeouts_total \d/);
     });
 
+    // Source diversity is the opposite failure to a quorum timeout: the round
+    // finalized NORMALLY, so every series above stays healthy while PRICE v0 went
+    // out with only one uncorrelated upstream behind it.
+
+    it('renders the single-source-round counter beside the quorum-timeout one', function () {
+        const observability = realObservability();
+        installHubOracleMetrics(observability, {
+            getOracle: () => ({
+                currentRound: 12, consecutiveSkippedRounds: 0,
+                oracleConsensus: { _roundTimeouts: 0, _singleSourceRounds: 5 }
+            })
+        });
+        const out = observability.registry.render();
+        expect(out).to.match(/xchain_oracle_single_source_rounds_total 5\b/);
+        expect(out).to.match(/xchain_oracle_round_timeouts_total 0\b/);
+    });
+
+    it('never walks the single-source counter backwards when the oracle is re-minted', function () {
+        const observability = realObservability();
+        let consensus = { _roundTimeouts: 0, _singleSourceRounds: 9 };
+        installHubOracleMetrics(observability, { getOracle: () => ({ oracleConsensus: consensus }) });
+        expect(observability.registry.render()).to.match(/xchain_oracle_single_source_rounds_total 9\b/);
+        consensus = { _roundTimeouts: 0, _singleSourceRounds: 0 };
+        expect(observability.registry.render()).to.match(/xchain_oracle_single_source_rounds_total 9\b/);
+    });
+
+    it('leaves the single-source series alone before the consensus handle is wired', function () {
+        const observability = realObservability();
+        installHubOracleMetrics(observability, {
+            getOracle: () => ({ currentRound: 1, consecutiveSkippedRounds: 0, oracleConsensus: null })
+        });
+        expect(observability.registry.render()).to.not.match(/xchain_oracle_single_source_rounds_total \d/);
+    });
+
     it('registers nothing on a metrics-off hub', function () {
         const off = installObservability(null, { service: 'xchain-hub', env: {} });
         expect(off.registry).to.equal(null);

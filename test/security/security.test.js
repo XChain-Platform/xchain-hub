@@ -1431,6 +1431,28 @@ describe('Security Hardening', function () {
                 let result = await controller.requestattestation({ source_chain: 'BTC', source_action_index: bad, dest_chain: 'LTC' });
                 expect(result.error).to.include('source_action_index');
             });
+
+            // The read side of the same field. It binds against the attestations BIGINT
+            // column, which MariaDB coerces rather than rejects, so an ungated '1e3'
+            // returned the attestation for action 1000 with no error at all.
+            it(`getattestation rejects a partial-integer source_action_index ${JSON.stringify(bad)}`, async function () {
+                let result = await controller.getattestation({ source_chain: 'BTC', source_action_index: bad });
+                expect(result.error).to.include('source_action_index');
+            });
+        });
+
+        it('getattestation rejects invalid source_chain', async function () {
+            let result = await controller.getattestation({ source_chain: 'ETH', source_action_index: 1 });
+            expect(result.error).to.include('BTC');
+        });
+
+        // Negative control for the two guards above: a well-formed call must reach
+        // past them (the suite's hub stub returns no cross-chain engine, so the
+        // handler's own downstream error is what proves validation did NOT fire).
+        it('getattestation accepts a well-formed chain and index', async function () {
+            let result = await controller.getattestation({ source_chain: 'BTC', source_action_index: '7' });
+            expect(result.error).to.not.include('source_action_index');
+            expect(result.error).to.not.include('chain must be one of');
         });
 
         it('initiateswap rejects a partial-integer dest_action_index', async function () {

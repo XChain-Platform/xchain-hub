@@ -433,6 +433,39 @@ describe('PriceFetcher', function () {
             expect(pf._boundRejects.coingecko).to.equal(0);   // counters are per source
         });
 
+        it('Coinbase: rejections are counted, not accumulated as NaN (#6190)', async function () {
+            // Coinbase reaches _reportBoundRejects like every other source, but its key
+            // was missing from the _boundRejects declaration, so `undefined + n` pinned
+            // the counter at NaN on the first rejection and the warn line printed
+            // "Cumulative for this source: NaN." for the rest of the process, on the
+            // source with the widest pair coverage.
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0 });
+            // One request per coin (BTC/LTC/DOGE), each answering a zero USD rate and a
+            // healthy EUR one: 3 rejections in one fetch, 3 surviving pairs.
+            axiosStub.get.resolves({ data: { data: { rates: { USD: '0', EUR: '90000' } } } });
+
+            let result = await pf.fetchFromCoinbase();
+            expect(result['BTC/USD']).to.be.undefined;
+            expect(result['BTC/EUR']).to.equal(90000);
+
+            let warns = boundWarns();
+            expect(warns).to.have.lengthOf(1);
+            expect(warns[0]).to.include('Coinbase');
+            expect(warns[0]).to.include('BTC/USD=0');
+            expect(warns[0]).to.not.include('NaN');
+            expect(pf._boundRejects.coinbase).to.equal(3);
+            expect(pf._boundRejects.coingecko).to.equal(0);   // counters are per source
+        });
+
+        it('a source key absent from the declaration self-initialises instead of going NaN (#6190)', async function () {
+            // The structural half: a future fifth source that misses the declaration
+            // must degrade to a correct count, not to a counter that reads as working.
+            pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0 });
+            pf._reportBoundRejects('a-source-nobody-declared', 'NewSource', ['X/USD=0', 'Y/USD=0']);
+            pf._reportBoundRejects('a-source-nobody-declared', 'NewSource', ['Z/USD=0']);
+            expect(pf._boundRejects['a-source-nobody-declared']).to.equal(3);
+        });
+
         it('CoinMarketCap: an out-of-bound price is warned and counted; a null price is not', async function () {
             pf = new PriceFetcher({ PRICE_FETCH_JITTER_MS: 0, COINMARKETCAP_API_KEY: 'k' });
             axiosStub.get.resolves({

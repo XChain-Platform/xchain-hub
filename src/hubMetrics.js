@@ -69,6 +69,14 @@ function installHubOracleMetrics(observability, hub){
         name: 'xchain_oracle_round_timeouts_total',
         help: 'Oracle rounds evicted before reaching commit quorum, leader and follower seats alike'
     });
+    // Source-diversity collapse, and the opposite failure to the two above: the round
+    // DID reach quorum and was signed normally, so nothing else here moves, while the
+    // federation had only one uncorrelated upstream behind a pair that normally has two
+    // and PRICE v0 went out with its outlier rejection gone.
+    const singleSourceRounds = registry.counter({
+        name: 'xchain_oracle_single_source_rounds_total',
+        help: 'Oracle rounds finalized with one uncorrelated price source on a normally-multi-source pair'
+    });
 
     registry.addCollector(() => {
         const oracle = hub.getOracle();
@@ -92,6 +100,9 @@ function installHubOracleMetrics(observability, hub){
         const consensus = oracle.oracleConsensus;
         if(consensus && Number.isFinite(Number(consensus._roundTimeouts))) {
             roundTimeouts.setMonotonic({}, Number(consensus._roundTimeouts));
+        }
+        if(consensus && Number.isFinite(Number(consensus._singleSourceRounds))) {
+            singleSourceRounds.setMonotonic({}, Number(consensus._singleSourceRounds));
         }
     });
 

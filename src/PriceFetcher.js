@@ -122,7 +122,13 @@ class PriceFetcher {
         // in this pipeline already says it out loud (OracleRound._handleMessage,
         // OracleConsensus._aggregate, XchainPriceSource._entry); this was the
         // last silent one.
-        this._boundRejects = { coingecko: 0, kraken: 0, coinmarketcap: 0 };
+        // One entry per source that calls _reportBoundRejects. Coinbase was added to
+        // the dispatch after this counter and missed the list, so its first rejection
+        // evaluated `undefined + n` and pinned the counter at NaN for the process
+        // lifetime, on the source with the widest pair coverage. The accumulator
+        // self-initialises now (see _reportBoundRejects), so this list documents the
+        // reporting sources rather than gating them.
+        this._boundRejects = { coingecko: 0, coinbase: 0, kraken: 0, coinmarketcap: 0 };
     }
 
     // Emit ONE aggregated warn per source per fetch for the values that source's
@@ -134,7 +140,10 @@ class PriceFetcher {
     // return) are NOT counted; only values that were present and failed the bound.
     _reportBoundRejects(sourceKey, label, rejected) {
         if (!rejected || rejected.length === 0) return;
-        this._boundRejects[sourceKey] += rejected.length;
+        // Self-initialising: a source key missing from the declaration above must
+        // degrade to a correct count, never to a permanent NaN that reads as a
+        // working counter in the warn line below.
+        this._boundRejects[sourceKey] = (this._boundRejects[sourceKey] || 0) + rejected.length;
         let sample = rejected.slice(0, BOUND_REJECT_SAMPLE);
         console.warn('PriceFetcher: ' + label + ' returned ' + rejected.length +
             ' value(s) outside the ingestion bound (0 < value < ' + PRICE_MAX + ') this fetch; ' +

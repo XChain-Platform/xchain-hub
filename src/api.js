@@ -67,6 +67,7 @@ const { HUB_SCHEMA_VERSION } = require('./hub-schema-version');   // stamped on 
 const { buildOraclePricesSnapshotQuery } = require('./oraclePricesSnapshotQuery');   // page (indexer bootstrap) vs latest-per-feed (dashboard) query selection
 const { evaluateAuthPosture } = require('./lib/auth_posture.js');   // boot refuses on an undeclared unauthenticated write surface
 const { parseCorsOrigin } = require('./lib/corsOrigin.js');
+const { resolveMaxBatch, makeRpcBatchGuard } = require('./rpcBatchGuard.js');   // JSON-RPC batch cardinality cap
 // #1299: single source of truth for the co-sign/slash deviation band (no re-declared 0.05 literal).
 // #2653: oracle round-interval/submission-window defaults shared with OracleRound.js and XChainHub.js.
 const { ORACLE_DEVIATION_THRESHOLD, DEFAULT_ORACLE_ROUND_INTERVAL_MS,
@@ -1385,10 +1386,19 @@ async function startApi(){
         async getattestation({source_chain, source_action_index}){
             if(!source_chain || !source_action_index)
                 return {error: "source_chain and source_action_index are required"};
+            let scErr = validateChain(source_chain);
+            if (scErr) return scErr;
+            // source_action_index reaches a BIGINT bind in CrossChainEngine.getAttestation,
+            // and MariaDB COERCES a non-integer string on comparison instead of erroring:
+            // '1e3' reads as action 1000 and garbage reads as 0, so the caller is answered
+            // with a DIFFERENT attestation than it named. Same band getswap enforces.
+            let srcIdx = strictInt(source_action_index);
+            if (srcIdx === null || srcIdx <= 0)
+                return {error: "source_action_index must be a positive integer"};
             try {
                 let cc = hub.getCrossChain();
                 if(!cc) return {error: "cross-chain engine not active"};
-                let att = await cc.getAttestation(source_chain, source_action_index);
+                let att = await cc.getAttestation(source_chain, srcIdx);
                 return att || {error: "attestation not found"};
             } catch (err) {
                 return {error: "error fetching attestation"};
@@ -1876,6 +1886,17 @@ async function startApi(){
         res.set('Cache-Control', 'public, max-age=3600');
         res.type('application/json').send(openrpcSpec);
     });
+
+    // Bound JSON-RPC batch cardinality (src/rpcBatchGuard.js). The router below runs
+    // Promise.all over every element of a batch array while the per-IP rate limiter at
+    // the top of this stack charges the whole batch ONE token, so a single ~100 KB body
+    // fans out into ~1,400 concurrent handlers on the shared DB pool. Mounted here, in
+    // front of the router rather than globally, so it governs the dispatcher that
+    // amplifies and cannot reject a REST route's array body; the limiter has already
+    // charged its token by this point, so an oversize batch is never free.
+    // Default 20, matching encoder/decoder/utxo-tracker. No hub caller batches at all
+    // (every connector sends one call object), so the cap breaks no existing client.
+    app.use(makeRpcBatchGuard(resolveMaxBatch(process.env.HUB_MAX_RPC_BATCH, 20)));
 
     // Express 5 / body-parser 2.x leaves req.body undefined when a request carries
     // no JSON body (a GET, or a POST without application/json), whereas body-parser

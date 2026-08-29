@@ -104,6 +104,17 @@ class OracleConsensus extends EventEmitter {
         // the dashboard can alert on quorum-loss frequency (reviews 1468/1469).
         this._roundTimeouts = 0;
 
+        // Rounds finalized with single-source corroboration on a normally-multi-source
+        // pair, plus the last such round. Same shape and the same reason as
+        // _roundTimeouts above: the diversity collapse is computed at finalization and
+        // was then only console.warn'd, so a federation publishing PRICE v0 off one
+        // upstream left no trace any dashboard rail could read. Exposed as
+        // single_source_rounds / lastSingleSourceRound through
+        // OracleRound.getSubmissionsInfo, and as xchain_oracle_single_source_rounds_total
+        // on the metrics surface.
+        this._singleSourceRounds    = 0;
+        this._lastSingleSourceRound = null;
+
         // When each round became ready to finalize (Date.now() at finalizeRound's
         // follower path). The receiver-side leader-timeout grace in _handlePropose
         // is measured from here so every honest hub applies the same window before
@@ -493,6 +504,12 @@ class OracleConsensus extends EventEmitter {
             ? this.oracleRound.priceFetcher.multiSourceCapablePairs() : null;
         let minRoundSources = this._minRoundSources(submissions, capablePairs);
         if (Number.isFinite(minRoundSources) && minRoundSources <= 1) {
+            // Count it as well as logging it. The warn reaches one hub's stdout, which is
+            // below every threshold the dashboard can act on, so a fleet-wide loss of the
+            // second upstream was observable only to whoever was tailing that hub.
+            // Counting only, never gating: the round's outcome is unchanged.
+            this._singleSourceRounds++;
+            this._lastSingleSourceRound = round;
             console.warn('Oracle: Round ' + round + ' finalizing with single-source corroboration ' +
                 'on a normally-multi-source pair (minimum source count across the ' + submissions.size +
                 ' submissions, restricted to multi-source-capable pairs = ' + minRoundSources +

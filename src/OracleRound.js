@@ -484,6 +484,18 @@ class OracleRound {
             round_timeouts:           this.oracleConsensus
                 ? (this.oracleConsensus._roundTimeouts || 0)
                 : 0,
+            // Rounds finalized with only one uncorrelated upstream behind a
+            // normally-multi-source pair. A different failure from round_timeouts above:
+            // the round reached quorum and was signed normally, so nothing else in this
+            // payload moves, while PRICE v0 was published with no outlier rejection
+            // behind it. Monotonic for the process, same as its sibling.
+            single_source_rounds:     this.oracleConsensus
+                ? (this.oracleConsensus._singleSourceRounds || 0)
+                : 0,
+            lastSingleSourceRound:    this.oracleConsensus
+                ? (this.oracleConsensus._lastSingleSourceRound != null
+                    ? this.oracleConsensus._lastSingleSourceRound : null)
+                : null,
             oracle_fetch_failures:    this.fetchFailures,
             lastSuccessfulRoundTime:  this.lastSuccessfulRoundTime,
             // Server-computed age of the last successful round. The dashboard

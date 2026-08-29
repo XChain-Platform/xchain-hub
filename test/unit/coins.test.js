@@ -192,12 +192,27 @@ describe('coins registry', () => {
     // catches changes to fields already IN the subset, not omissions).
     const NON_CONSENSUS_TOP_LEVEL_KEYS = new Set([
         'tick', 'fullName', 'displayName', 'site', // identity/display metadata
-        'decimals', 'confirmations',               // display / operator-tunable depth
+        'decimals',                                // display metadata
+        // confirmations: LOCAL, hub-side trust policy, deliberately tunable per operator
+        // (resolveConfirmations, floored at the default on mainnet and testnet). It stays
+        // out of the hash because it is not a ledger input. The one path that could make it
+        // one, the BTC indexer's anchor-reward mint gate, reads a frozen ledger constant of
+        // its own instead (ANCHOR_REWARD_DOGE_MIN_CONFIRMATIONS in
+        // anchor_reward_activation.js), so a divergent bundle cannot derive the same reward
+        // at a different height with the pin verifying clean. A future consensus path
+        // reaching for this field is what would make folding it in correct; today folding
+        // it in would only freeze a knob four hub engines legitimately tune.
+        'confirmations',
         'network',                                 // redundant with the (tick, network) hash key
         'genesis',                                 // deliberately excluded: genesis.js fail-closes on its own hashes
         'chainGenesisHash',                        // identifies the ENDPOINT's chain, not how bytes are read; pinning one must not move CONSENSUS_CONFIG_PIN
         'FEE_PAYMENT_MODE',                        // informational only; not read at runtime (see coin files)
-        'wireFormat',                              // block/tx parse family (decoder/utxo-tracker); not hashed, mirrors the pre-existing decoder-local constant
+        // wireFormat was listed here as "not hashed" until it was folded INTO
+        // consensusSubset() on 2026-07-28. The guard `continue`s on membership, so the
+        // stale entry was silent and, worse, load-bearing in the wrong direction: had
+        // wireFormat later been dropped from the subset, its exclusion here would have
+        // waved the omission through. Removed, so the completeness guard now enforces its
+        // presence. A key belongs in this set only while it is genuinely out of the hash.
         'DISPLAY_ONLY_ADDRESS_ROLES',              // classification metadata, not coin data; drives the address exclusion above
         'networks',                                // the per-network container itself; its OWN keys are enumerated by the guard
     ]);
@@ -470,11 +485,13 @@ describe('coins registry', () => {
         });
     });
 
-    // / CF-1: on mainnet an XCHAIN_CONFIRMATIONS_<COIN> override may only
-    // raise the depth above the per-coin default, never lower it. A validator
+    // / CF-1: on mainnet AND testnet an XCHAIN_CONFIRMATIONS_<COIN> override
+    // may only raise the depth above the per-coin default, never lower it. A validator
     // running a lowered depth would co-sign source actions the rest of the
-    // federation still considers reorg-able.
-    describe('resolveConfirmations mainnet floor', () => {
+    // federation still considers reorg-able. testnet is inside the floor because it is
+    // a multi-operator federation with an armed consensus pin, not a drill network;
+    // regtest, the single-operator drill network, keeps the full override.
+    describe('resolveConfirmations mainnet + testnet floor', () => {
         const saved = {};
         beforeEach(() => {
             for(const tick of coins.ALLOWED_COINS){
@@ -512,10 +529,40 @@ describe('coins registry', () => {
             expect(out.BTC).to.equal(coins.DEFAULT_CONFIRMATIONS.BTC + 4);
         });
 
-        it('allows lowering the depth on testnet and regtest (drill seam)', () => {
+        // Flipped from 'allows lowering the depth on testnet and regtest (drill seam)'.
+        // The old case encoded the invariant this change removes: testnet is an
+        // externally-operated federation with an armed pin, so a lowered depth diverges
+        // co-signing there exactly as it would on mainnet. regtest stays the drill seam.
+        it('clamps a lowered depth on testnet, honors it on regtest (drill seam)', () => {
             process.env.XCHAIN_CONFIRMATIONS_LTC = '1';
-            expect(coins.resolveConfirmations({}, 'testnet').LTC).to.equal(1);
+            expect(coins.resolveConfirmations({}, 'testnet').LTC).to.equal(coins.DEFAULT_CONFIRMATIONS.LTC);
             expect(coins.resolveConfirmations({}, 'regtest').LTC).to.equal(1);
+        });
+
+        it('clamps a p2pConfig override below the default on testnet', () => {
+            const out = coins.resolveConfirmations({ XCHAIN_CONFIRMATIONS_DOGE: '2' }, 'testnet');
+            expect(out.DOGE).to.equal(coins.DEFAULT_CONFIRMATIONS.DOGE);
+        });
+
+        // Raising is unilaterally conservative (the validator just waits longer), so the
+        // floor must not take the safe direction away on a floored network.
+        it('allows raising the depth above the default on testnet', () => {
+            process.env.XCHAIN_CONFIRMATIONS_BTC = String(coins.DEFAULT_CONFIRMATIONS.BTC + 4);
+            const out = coins.resolveConfirmations({}, 'testnet');
+            expect(out.BTC).to.equal(coins.DEFAULT_CONFIRMATIONS.BTC + 4);
+        });
+
+        // The cross-service half of the same invariant: the hub's attest gate resolves
+        // through this function while the BTC indexer's anchor-reward MINT gate is frozen
+        // at the per-coin default (ANCHOR_REWARD_DOGE_MIN_CONFIRMATIONS). On the two
+        // consensus-real networks the floor is what guarantees the hub can never attest an
+        // anchor shallower than the fleet will ever mint.
+        it('never resolves below the frozen anchor-reward mint depth on a floored network', () => {
+            process.env.XCHAIN_CONFIRMATIONS_DOGE = '2';
+            const mintDepth = require('../../src/anchor_reward_activation.js').ANCHOR_REWARD_DOGE_MIN_CONFIRMATIONS;
+            expect(mintDepth).to.equal(coins.DEFAULT_CONFIRMATIONS.DOGE);
+            for(const net of ['mainnet', 'testnet'])
+                expect(coins.resolveConfirmations({}, net).DOGE, net).to.be.at.least(mintDepth);
         });
 
         it('env override takes precedence over p2pConfig', () => {

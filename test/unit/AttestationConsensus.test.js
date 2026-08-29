@@ -265,6 +265,25 @@ describe('AttestationConsensus: lifecycle', function () {
         let c = new AttestationConsensus(createMockHub(), makeProviderRegistry());
         expect(() => c._handleMessage({ type: 'NOT_AN_ATTEST_MESSAGE', data: {} })).to.not.throw();
     });
+
+    it('a NEGATIVE ATTESTATION_ROUND_TIMEOUT_MS falls back rather than firing every round on the next tick (#6175)', function () {
+        // setTimeout with a negative delay fires immediately, so a negative that
+        // survived `parseInt(cfg) || DEFAULT` tore every round down before any peer
+        // PROPOSE/PREPARE/COMMIT could arrive. The ring caps in this same constructor
+        // already went through positiveIntConfig for exactly this reason.
+        let warn = sinon.stub(console, 'warn');
+        let c = new AttestationConsensus(
+            createMockHub({ p2pConfig: { ATTESTATION_ROUND_TIMEOUT_MS: '-120000' } }), makeProviderRegistry());
+        expect(c.roundTimeoutMs).to.be.greaterThan(0);
+        expect(warn.getCalls().filter(x => String(x.args[0]).includes('ATTESTATION_ROUND_TIMEOUT_MS')).length)
+            .to.be.greaterThan(0);
+    });
+
+    it('a POSITIVE ATTESTATION_ROUND_TIMEOUT_MS is honoured exactly (#6175)', function () {
+        let c = new AttestationConsensus(
+            createMockHub({ p2pConfig: { ATTESTATION_ROUND_TIMEOUT_MS: '30000' } }), makeProviderRegistry());
+        expect(c.roundTimeoutMs).to.equal(30000);
+    });
 });
 
 describe('AttestationConsensus: _buildCanonical / _signCanonical', function () {

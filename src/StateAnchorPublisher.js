@@ -340,17 +340,31 @@ class StateAnchorPublisher {
         this.spendGuard.minBalance = this.lowBalanceThreshold;
         // Decouple on-chain anchoring from checkpoint production: checkpoints are
         // free (off-chain hub-DB mirror, good for light-client verify) but each
-        // on-chain v0 anchor spends real DOGE on 3 chains. Only anchor checkpoints
-        // whose checkpoint_seq is a multiple of N (recovery needs just the LATEST
-        // anchored checkpoint per chain, so the skipped seqs stay off-chain). N=1
-        // keeps the original anchor-every-checkpoint behaviour. checkpoint_seq
-        // is now the round's BTC snapshot_block (deriveCheckpointSeq), still consensus
-        // data (identical on every hub) so `seq % N` stays deterministic fleet-wide;
-        // with the default N=1 (MOD(seq,1)=0 for all) this is unchanged, and an
-        // operator setting N>1 now sub-samples by snapshot_block divisibility rather
-        // than by a dense per-chain counter.
+        // on-chain v0 anchor spends real DOGE on 3 chains. Only anchor every Nth
+        // checkpoint (recovery needs just the LATEST anchored checkpoint per chain, so
+        // the skipped rounds stay off-chain). N=1 keeps the original
+        // anchor-every-checkpoint behaviour.
+        //
+        // Eligibility is a CHECKPOINT ORDINAL, not the raw seq. checkpoint_seq is the
+        // round's BTC snapshot_block (deriveCheckpointSeq), and the cadence latch
+        // advances it by exactly CHECKPOINT_INTERVAL_BLOCKS per round
+        // (StateCheckpointEngine._tick), so `seq % N` is NOT a 1-in-N sample: it is a
+        // residue class pinned by the first checkpoint after the latch is seeded.
+        // Whenever N shares a factor with the interval (N=2 or 3 against the default 6)
+        // every round lands in the same residue, so the federation either anchors every
+        // cadence or anchors NOTHING, permanently and with no eligible row to log about.
+        // Dividing by the interval first gives an ordinal that advances by 1 per round,
+        // so the residues cycle: the worst case is N-1 rounds of delay, never a halt.
+        // Both knobs are already required to be fleet-uniform, and checkpoint_seq is
+        // consensus data, so the predicate stays deterministic fleet-wide. At the
+        // default N=1 (MOD(anything,1)=0) it is a no-op, exactly as before.
         this.anchorEveryNCheckpoints = Math.max(1,
             parseInt(process.env.ANCHOR_CHECKPOINT_EVERY_N || cfg.ANCHOR_CHECKPOINT_EVERY_N || '1') || 1);
+        // The engine's own cadence step (StateCheckpointEngine.js), read the same way so
+        // the two cannot drift. Floored at 1: a zero divisor makes the SQL MOD NULL,
+        // which would silently select nothing.
+        this.checkpointIntervalBlocks = Math.max(1,
+            parseInt(process.env.CHECKPOINT_INTERVAL_BLOCKS || cfg.CHECKPOINT_INTERVAL_BLOCKS || '6') || 6);
 
         this.dogeAddress   = process.env.DOGE_ADDRESS    || cfg.DOGE_ADDRESS    || '';
         this.dogePubkeyHex = process.env.DOGE_PUBKEY_HEX || cfg.DOGE_PUBKEY_HEX || '';
@@ -463,8 +477,18 @@ class StateAnchorPublisher {
         // Confirmation depth an ANCHOR must reach on DOGE before a peer's
         // announcement is trusted for stamp/reward (operator decision: reject
         // 0-conf, depth = XCHAIN_CONFIRMATIONS_DOGE). Same env -> p2pConfig ->
-        // per-coin default idiom the cross-chain engines use (mainnet
-        // floor-clamped, see coins.resolveConfirmations).
+        // per-coin default idiom the cross-chain engines use (floor-clamped on
+        // mainnet and testnet, see coins.resolveConfirmations).
+        //
+        // This is HUB-LOCAL trust policy and it is the only end of the anchor path the
+        // knob moves. The BTC indexer's anchor-reward MINT gate does NOT read it: minting
+        // happens inside the block transaction, so its depth is a ledger input frozen at
+        // ANCHOR_REWARD_DOGE_MIN_CONFIRMATIONS (anchor_reward_activation.js), equal to the
+        // per-coin default. Because the resolver's floor is that same default, a hub on
+        // mainnet or testnet can never attest shallower than the fleet will mint. On
+        // regtest a lowered override deliberately can: the hub attests early and the BTC
+        // indexer defers the block until the anchor reaches the frozen depth, which is a
+        // drill-venue property to plan around, not a divergence.
         this.dogeConfirmations = coins.resolveConfirmations(cfg, this.network).DOGE;
 
         // XANC_BUNDLE_DONE is broadcast the instant _broadcastWithRetry
@@ -906,11 +930,13 @@ class StateAnchorPublisher {
     // The method keeps its name: flush() and the deferral suites drive it, and what
     // changed is the unit of work inside it, not the seam.
     async _publishPendingCheckpoints(signer, btcBlock, failoverOnly){
-        // Pick, per chain, the latest ANCHOR-ELIGIBLE checkpoint (seq divisible by
-        // anchorEveryNCheckpoints) that is not yet on-chain. Selecting the max
-        // eligible seq rather than the absolute max means accumulated
-        // non-multiple seqs never block: they simply stay off-chain. With N=1
-        // (MOD(seq,1)=0 for all) this is identical to anchoring every checkpoint.
+        // Pick, per chain, the latest ANCHOR-ELIGIBLE checkpoint (its checkpoint
+        // ORDINAL, seq divided by the cadence step, divisible by
+        // anchorEveryNCheckpoints - see the constructor for why the raw seq cannot
+        // carry this) that is not yet on-chain. Selecting the max eligible seq rather
+        // than the absolute max means ineligible rounds never block: they simply stay
+        // off-chain. With N=1 (MOD(x,1)=0 for all) this is identical to anchoring every
+        // checkpoint.
         // Scoped to this.network when one is configured (matching
         // StateCheckpointEngine's latch loader): a hub DB carrying rows from a
         // prior network deployment must never re-elect publishers for (or spend
@@ -925,10 +951,10 @@ class StateAnchorPublisher {
         let pendingSql =
             'SELECT sc.* FROM state_checkpoints sc JOIN (' +
             '  SELECT chain, network, MAX(checkpoint_seq) AS max_seq FROM state_checkpoints' +
-            '  WHERE MOD(checkpoint_seq, ?) = 0 GROUP BY chain, network' +
+            '  WHERE MOD(FLOOR(checkpoint_seq / ?), ?) = 0 GROUP BY chain, network' +
             ') t ON sc.chain = t.chain AND sc.network = t.network AND sc.checkpoint_seq = t.max_seq ' +
             'WHERE sc.anchor_txid IS NULL';
-        let pendingParams = [this.anchorEveryNCheckpoints];
+        let pendingParams = [this.checkpointIntervalBlocks, this.anchorEveryNCheckpoints];
         if(this.network){ pendingSql += ' AND sc.network = ?'; pendingParams.push(this.network); }
         let rows = await this.db.doQuery(pendingSql, pendingParams);
         let anchored = [];
@@ -3156,9 +3182,17 @@ class StateAnchorPublisher {
             // so a leader's own archived rows verify here.
             let isDerivedChain   = /^anchor_(BTC|LTC|DOGE)$/.test(String(rr.reward_type || '')) &&
                                    ar.isAnchorRewardActive(Number(rr.block_index), recordNetwork);
+            // anchor_bundle is the ONLY per-anchor reward the v7 rail records, and it takes the
+            // per-chain form's frozen amount and flag-day (RewardTracker isDerivedBundle). Omit
+            // it here and every bundle row falls through to the operator-tunable
+            // ANCHOR_REWARD_PER_PUBLISH, so a hub carrying that override refuses to co-sign a
+            // correct archive (quorum stalls) or signs a non-frozen amount into COLLECT
+            // bookkeeping. Keep this branch in lockstep with RewardTracker.
+            let isDerivedBundle  = String(rr.reward_type || '') === 'anchor_bundle' &&
+                                   ar.isAnchorRewardActive(Number(rr.block_index), recordNetwork);
             let isDerivedArchive = String(rr.reward_type || '') === 'anchor_archive' &&
                                    ar.isArchiveRewardActive(Number(rr.block_index), recordNetwork);
-            let expectedAmount = isDerivedChain
+            let expectedAmount = (isDerivedChain || isDerivedBundle)
                 ? ar.ANCHOR_REWARD_AMOUNT
                 : isDerivedArchive
                 ? ar.ARCHIVE_REWARD_AMOUNT

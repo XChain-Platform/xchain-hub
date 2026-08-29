@@ -40,6 +40,7 @@ const esc    = require('./attestation_escalation.js');
 // SUPPORTED_CONSENSUS_STRATEGIES is the admission allowlist _startRound declines an
 // unrecognised block-anchored strategy against; shared with the dispatch sites it names.
 const { DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS, SUPPORTED_CONSENSUS_STRATEGIES } = require('./constants.js');
+const { positiveIntConfig } = require('./lib/config_int.js');
 
 const ATTEST_PROPOSE = 'ATTEST_PROPOSE';
 
@@ -86,13 +87,23 @@ class AttestationRound {
         // stack a second concurrent _pollPending that races this.pollCursor.
         this._pollRunning    = false;
 
-        this.pollMs         = parseInt(this.config.ATTESTATION_POLL_MS)        || DEFAULT_POLL_MS;
-        this.confirmations  = parseInt(this.config.ATTESTATION_CONFIRMATIONS)  || DEFAULT_CONFIRMATIONS;
-        this.fetchTimeoutMs = parseInt(this.config.ATTESTATION_FETCH_TIMEOUT)  || DEFAULT_FETCH_TIMEOUT;
+        // positiveIntConfig, not `parseInt(cfg) || DEFAULT`, for the reason
+        // AttestationConsensus states over its own ring caps: a negative is TRUTHY, so
+        // it survives the `||` fallback and silently inverts the gate it sizes. A
+        // negative ATTESTATION_CONFIRMATIONS makes `block_index + confirmations >
+        // latestBlock` false below spec §14 depth, so this hub pays for fetches on
+        // requests the federation still considers reorg-able; a negative POLL_MS or
+        // FETCH_TIMEOUT collapses the poll cadence and the fetch budget the same way.
+        // Zero and garbage already fell back, so this changes nothing an operator can
+        // configure today except that a negative now warns and falls back too.
+        this.pollMs         = positiveIntConfig(this.config.ATTESTATION_POLL_MS,       DEFAULT_POLL_MS,       'ATTESTATION_POLL_MS');
+        this.confirmations  = positiveIntConfig(this.config.ATTESTATION_CONFIRMATIONS, DEFAULT_CONFIRMATIONS, 'ATTESTATION_CONFIRMATIONS');
+        this.fetchTimeoutMs = positiveIntConfig(this.config.ATTESTATION_FETCH_TIMEOUT, DEFAULT_FETCH_TIMEOUT, 'ATTESTATION_FETCH_TIMEOUT');
         // Blocks of leader silence before the round leader rotates one slot down
         // the responsible set (and the model-fallback ladder advances; both are
         // pure functions of chain height, see attestation_escalation.js).
-        this.leaderRotationBlocks = parseInt(this.config.ATTESTATION_LEADER_ROTATION_BLOCKS) || esc.DEFAULT_ROTATION_WINDOW_BLOCKS;
+        this.leaderRotationBlocks = positiveIntConfig(this.config.ATTESTATION_LEADER_ROTATION_BLOCKS,
+            esc.DEFAULT_ROTATION_WINDOW_BLOCKS, 'ATTESTATION_LEADER_ROTATION_BLOCKS');
         // How long a request stays in `seen` before it can be re-evaluated.
         // Defaults to 5 poll cycles so transient skips clear quickly while
         // still suppressing the steady-state re-poll of confirmed work.
@@ -110,10 +121,14 @@ class AttestationRound {
         // one-sidedly re-nested the window on any hub with no explicit key. The paid
         // fetch is also short-circuited directly in _startRound via
         // consensus.isRoundActive(), but flooring closes the nesting at its root.
-        let roundTimeoutMs  = parseInt(this.config.ATTESTATION_ROUND_TIMEOUT_MS)
-                            || DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS;
+        // The floor is only as strong as the weaker of the two parses: a negative
+        // ATTESTATION_ROUND_TIMEOUT_MS survived `||` here and in the consensus copy,
+        // collapsing this Math.max to 5*pollMs while every round died on the next tick,
+        // which is the paid-duplicate-fetch nesting the paragraph above closes.
+        let roundTimeoutMs  = positiveIntConfig(this.config.ATTESTATION_ROUND_TIMEOUT_MS,
+            DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS, 'ATTESTATION_ROUND_TIMEOUT_MS');
         this.retryAfterMs   = Math.max(
-            parseInt(this.config.ATTESTATION_RETRY_AFTER_MS) || (5 * this.pollMs),
+            positiveIntConfig(this.config.ATTESTATION_RETRY_AFTER_MS, 5 * this.pollMs, 'ATTESTATION_RETRY_AFTER_MS'),
             roundTimeoutMs + this.pollMs
         );
         // How long a `rounds` entry is retained before lazy eviction. A round's

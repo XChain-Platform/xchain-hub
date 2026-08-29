@@ -103,6 +103,58 @@ describe('CapabilitySnapshot', function () {
             expect(result).to.equal(null);
         });
 
+        it('rejects a snapshot whose echoed capability differs from the request (#6125)', async function () {
+            // The other half of the request key. `capability` selects which stake rows
+            // the indexer filters, so a mismatched echo is a validator set for the wrong
+            // POPULATION - cached under the requested key for the full TTL and consumed
+            // as the round's N. Refused (null), never cached, exactly like a block echo.
+            axiosStub.post.resolves({ data: { result: {
+                capability: 'oracle_publish', block_index: 100, count: 1,
+                validators: [{ pubkey: 'ab', amount: '50000' }]
+            } } });
+            sinon.stub(console, 'error');
+            let registry = { getMinStake: sinon.stub().returns('25000') };
+            let snap = new CapabilitySnapshot(makeHub(registry));
+
+            expect(await snap.getSnapshot('attestation', 106)).to.equal(null);
+            expect(snap.cache.size, 'a rejected snapshot is never cached').to.equal(0);
+        });
+
+        it('rejects a snapshot with NO capability field at all (#6125)', async function () {
+            // A stripped field is indistinguishable from a wrong one at this seam, so
+            // the guard is strict about absence the way the block echo already is.
+            axiosStub.post.resolves({ data: { result: {
+                block_index: 100, count: 1, validators: [{ pubkey: 'ab', amount: '50000' }]
+            } } });
+            sinon.stub(console, 'error');
+            let registry = { getMinStake: sinon.stub().returns('25000') };
+            let snap = new CapabilitySnapshot(makeHub(registry));
+
+            expect(await snap.getSnapshot('attestation', 106)).to.equal(null);
+        });
+
+        it('rejects a WEIGHT snapshot whose echoed capability differs from the request (#6125)', async function () {
+            axiosStub.post.resolves({ data: { result: {
+                capability: 'oracle_publish', block_index: 100, count: 1, source_count: 1,
+                validators: [{ pubkey: 'ab', source: 'src1', weight: '50000' }]
+            } } });
+            sinon.stub(console, 'error');
+            let registry = { getMinStake: sinon.stub().returns('25000') };
+            let snap = new CapabilitySnapshot(makeHub(registry));
+
+            expect(await snap.getWeightSnapshot('attestation', 106)).to.equal(null);
+        });
+
+        it('accepts a snapshot whose capability echo matches (#6125)', async function () {
+            axiosStub.post.resolves(okResult());
+            let registry = { getMinStake: sinon.stub().returns('25000') };
+            let snap = new CapabilitySnapshot(makeHub(registry));
+
+            let result = await snap.getSnapshot('attestation', 106);
+            expect(result).to.not.equal(null);
+            expect(result.capability).to.equal('attestation');
+        });
+
         it('coerces a numeric MIN_STAKE to a string', async function () {
             axiosStub.post.resolves(okResult());
             let registry = { getMinStake: sinon.stub().returns(25000) };
@@ -193,8 +245,17 @@ describe('CapabilitySnapshot', function () {
 
             // One row that satisfies BOTH RPC shapes: the same stub answers the count
             // fetch (amount) and the weight fetch (source+weight), and a weight
-            // snapshot missing its weight is refused rather than cached.
-            axiosStub.post.resolves(resultWith([{ pubkey: 'old', amount: '30000', source: 'src1', weight: '30000' }]));
+            // snapshot missing its weight is refused rather than cached. The stub
+            // ECHOES the requested capability, like the real indexer: a static
+            // 'attestation' echo is now rejected for the 'price' read by the
+            // capability-echo guard (#6125), which is the guard doing its job rather
+            // than anything about flushing.
+            axiosStub.post.callsFake((url, body) => Promise.resolve({ data: { result: {
+                capability:  body.params.capability,
+                block_index: 100,
+                count:       1,
+                validators:  [{ pubkey: 'old', amount: '30000', source: 'src1', weight: '30000' }]
+            } } }));
             await snap.getSnapshot('attestation', 106);
             await snap.getWeightSnapshot('attestation', 106);
             // A different capability's entry must survive the flush.

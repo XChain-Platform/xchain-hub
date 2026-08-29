@@ -147,11 +147,15 @@ function memDb() {
         async doQuery(sql, params) {
             params = params || [];
             if (sql.startsWith('SELECT sc.* FROM state_checkpoints sc JOIN')) {
-                let everyN = params[0] || 1;                       // ANCHOR_CHECKPOINT_EVERY_N
-                let net    = sql.includes('AND sc.network = ?') ? params[1] : null; // network scope (when configured)
+                // Faithful to the SQL: eligibility is the checkpoint ORDINAL
+                // (FLOOR(seq / CHECKPOINT_INTERVAL_BLOCKS)) mod N, not the raw seq. A
+                // mock that kept `seq % N` would stay green on the halting predicate.
+                let step   = params[0] || 1;                       // CHECKPOINT_INTERVAL_BLOCKS
+                let everyN = params[1] || 1;                       // ANCHOR_CHECKPOINT_EVERY_N
+                let net    = sql.includes('AND sc.network = ?') ? params[2] : null; // network scope (when configured)
                 let latest = {};
                 for (let r of checkpoints) {
-                    if (r.checkpoint_seq % everyN !== 0) continue; // only anchor-eligible seqs
+                    if (Math.floor(r.checkpoint_seq / step) % everyN !== 0) continue; // only anchor-eligible ordinals
                     let k = r.chain + '|' + r.network;
                     if (!latest[k] || r.checkpoint_seq > latest[k].checkpoint_seq) latest[k] = r;
                 }
@@ -1009,36 +1013,40 @@ describe('StateAnchorPublisher', function () {
         expect(nd.rewards.filter(r => r.type === 'anchor_archive').length).to.equal(0);
     });
 
-    it('ANCHOR_CHECKPOINT_EVERY_N anchors only the latest divisible seq; off-multiples stay off-chain', async function () {
-        // Decouple on-chain anchoring from checkpoint production. With N=2 only
-        // even seqs are eligible; the odd one is never anchored (it lives only in
-        // the off-chain mirror). Seeds: seq6 already anchored, seq7 (odd, null),
-        // seq8 (even, null) - the latest eligible unanchored is seq8.
+    it('ANCHOR_CHECKPOINT_EVERY_N sub-samples by checkpoint ORDINAL, so an odd-seeded cadence still anchors (#6127)', async function () {
+        // Decouple on-chain anchoring from checkpoint production. checkpoint_seq is
+        // the round's BTC snapshot_block and the cadence latch advances it by exactly
+        // CHECKPOINT_INTERVAL_BLOCKS (6), so a `seq % 2` predicate is a residue class
+        // pinned by the seed, not a 1-in-2 sample: seeded odd, as here, EVERY round is
+        // ineligible and the federation anchors nothing, forever, with no row for the
+        // stand-down log to mention. Eligibility is therefore FLOOR(seq / 6) % N.
+        // Seeds (step 6, odd): 970001 already anchored, 970007 (ordinal 161667, odd ->
+        // skipped), 970013 (ordinal 161668, even -> the latest eligible un-anchored).
         let bus = buildMesh(1, {
             cfg: { ANCHOR_CHECKPOINT_EVERY_N: '2' },
             mutate: (self, db) => {
                 db.checkpoints.length = 0;
-                db.checkpoints.push(Object.assign({}, CP_ROW, { id: 1, block_index: 493, checkpoint_seq: 6, anchor_txid: 'old' }));
-                db.checkpoints.push(Object.assign({}, CP_ROW, { id: 2, block_index: 494, checkpoint_seq: 7, anchor_txid: null }));
-                db.checkpoints.push(Object.assign({}, CP_ROW, { id: 3, block_index: 495, checkpoint_seq: 8, anchor_txid: null }));
+                db.checkpoints.push(Object.assign({}, CP_ROW, { id: 1, block_index: 493, checkpoint_seq: 970001, anchor_txid: 'old' }));
+                db.checkpoints.push(Object.assign({}, CP_ROW, { id: 2, block_index: 494, checkpoint_seq: 970007, anchor_txid: null }));
+                db.checkpoints.push(Object.assign({}, CP_ROW, { id: 3, block_index: 495, checkpoint_seq: 970013, anchor_txid: null }));
             }
         });
         let nd = bus.nodes[0];
         await startAll(bus);
         await nd.pub.flush();
-        await waitUntil(() => nd.db.checkpoints.some(r => r.checkpoint_seq === 8 && r.anchor_txid), { label: 'the latest divisible seq to be anchored' });
+        await waitUntil(() => nd.db.checkpoints.some(r => r.checkpoint_seq === 970013 && r.anchor_txid), { label: 'the latest eligible ordinal to be anchored' });
 
         let bundles = nd.published.filter(p => p.split('|')[1] === '7');
         expect(bundles.length, 'exactly one v7 bundle').to.equal(1);
         let secs = parseV7Sections(bundles[0]);
-        expect(secs.length, 'one section: only the latest divisible seq is eligible').to.equal(1);
-        expect(secs[0].block_index, 'block_index of anchored row').to.equal(495);   // seq 8
-        expect(secs[0].checkpoint_seq, 'checkpoint_seq anchored').to.equal(8);
+        expect(secs.length, 'one section: only the latest eligible ordinal is eligible').to.equal(1);
+        expect(secs[0].block_index, 'block_index of anchored row').to.equal(495);   // seq 970013
+        expect(secs[0].checkpoint_seq, 'checkpoint_seq anchored').to.equal(970013);
 
         let bySeq = s => nd.db.checkpoints.find(r => r.checkpoint_seq === s);
-        expect(bySeq(8).anchor_txid, 'seq8 anchored on-chain').to.be.a('string');
-        expect(bySeq(7).anchor_txid, 'odd seq7 stays off-chain').to.equal(null);
-        expect(bySeq(6).anchor_txid, 'seq6 untouched').to.equal('old');
+        expect(bySeq(970013).anchor_txid, 'the eligible ordinal anchored on-chain').to.be.a('string');
+        expect(bySeq(970007).anchor_txid, 'the skipped ordinal stays off-chain').to.equal(null);
+        expect(bySeq(970001).anchor_txid, 'the already-anchored round untouched').to.equal('old');
     });
 
     it('oversized archive splits into v1 + v2 chunks that reassemble byte-identically', async function () {

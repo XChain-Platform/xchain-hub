@@ -85,6 +85,7 @@ signatures.
 | `HUB_ALLOW_UNAUTHENTICATED` | No | _unset_ | Declares that this hub knowingly runs with an unauthenticated write surface. Only consulted when `HUB_API_KEY` is empty. |
 | `HUB_CONSENSUS_INPUT_ALERT_AFTER` | No | `3` | Consecutive consensus-input fetch failures before the hub alerts and `/health` reports degraded. |
 | `HUB_RATE_LIMIT_RPM` | No | `100` | Requests per minute per client. |
+| `HUB_MAX_RPC_BATCH` | No | `20` | Maximum JSON-RPC calls in one batch array. The router dispatches every element concurrently while the rate limit above charges the whole batch one token, so an uncapped batch amplifies one request into hundreds of DB-touching handlers. Over the cap the hub answers `400` with JSON-RPC error `-32600`. An unparseable or non-positive value keeps the default. |
 | `CORS_ORIGIN` | No | `false` | Allowed CORS origin(s); unset disables cross-origin requests. `*` allows any origin, or give one origin or a comma-separated allowlist matched per-origin (browser wallet shells each send a different origin). A stray `*` inside a list is not a wildcard, so the grant fails closed. |
 
 ## Database (MariaDB)
@@ -309,7 +310,7 @@ precedence override.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `XCHAIN_CONFIRMATIONS_<COIN>` | No | per-coin | Cross-chain attestation/swap confirmation depth for `<COIN>` (e.g. `XCHAIN_CONFIRMATIONS_BTC`). Consensus-affecting: read by `CrossChainEngine` / `CrossChainCallEngine`. |
+| `XCHAIN_CONFIRMATIONS_<COIN>` | No | per-coin | Cross-chain attestation/swap confirmation depth for `<COIN>` (e.g. `XCHAIN_CONFIRMATIONS_BTC`). Consensus-affecting: read by `CrossChainEngine`, `CrossChainCallEngine`, `AttestationRelay` and `StateAnchorPublisher`. **May only RAISE the depth on mainnet and testnet**: a below-default value is clamped back up to the per-coin default, because a validator co-signing at a shallower depth accepts source actions the rest of the federation still considers reorg-able. Only regtest, the single-operator drill network, honours a lowered value. |
 | `CHECKPOINT_CONFIRMATIONS` | No | `6` | State-checkpoint confirmation depth (`StateCheckpointEngine`). Consensus-affecting. |
 
 ## Cross-chain attestation persistence (`CrossChainEngine`)
@@ -370,7 +371,7 @@ continuation chunks) is unchanged.
 |---|---|---|---|
 | `ANCHOR_ENABLED` | No | `true` | Enable on-chain anchoring. Set `false` to disable. |
 | `ANCHOR_INTERVAL_MS` | No | `86400000` (24h) | Anchor cycle interval (ms). |
-| `ANCHOR_CHECKPOINT_EVERY_N` | No | `1` | Anchor only every Nth `checkpoint_seq` (each bundle spends real DOGE; recovery only needs the latest anchored checkpoint). `1` anchors every checkpoint. Deterministic fleet-wide (`seq % N`). Not a cadence control: `ANCHOR_INTERVAL_MS` is. |
+| `ANCHOR_CHECKPOINT_EVERY_N` | No | `1` | Anchor only every Nth checkpoint round (each bundle spends real DOGE; recovery only needs the latest anchored checkpoint). `1` anchors every checkpoint. Eligibility is the checkpoint ORDINAL, `FLOOR(checkpoint_seq / CHECKPOINT_INTERVAL_BLOCKS) % N`, because `checkpoint_seq` is the round's BTC `snapshot_block` and the cadence latch advances it by exactly one interval per round: a raw `seq % N` would be a residue class pinned by the seed, not a sample, and for any N sharing a factor with the interval (2 or 3 against the default 6) the federation would either anchor every cadence or anchor nothing at all, permanently. Deterministic fleet-wide, so N and `CHECKPOINT_INTERVAL_BLOCKS` must both be uniform across the federation. Not a cadence control: `ANCHOR_INTERVAL_MS` is. |
 | `ANCHOR_MATCH_BATCH_SIZE` | No | `200` | Rows per archive-batch query page. |
 | `ANCHOR_MAX_BATCH` | No | `1000` | Max rows per archive (v1) anchor batch. |
 | `ANCHOR_CHUNK_MAX_BYTES` | No | `6000` | Max payload bytes per on-chain anchor chunk. |
@@ -384,7 +385,7 @@ continuation chunks) is unchanged.
 | `ANCHOR_CONFIRM_CHECK_MS` | No | `300000` (5m) | How often the confirmation watchdog re-reads the publisher address to see which of this hub's own anchor broadcasts have mined. `0` disables. |
 | `ANCHOR_CONFIRM_STALE_MS` | No | `1800000` (30m) | Age past which a still-unconfirmed anchor broadcast is logged as `UNCONFIRMED_ANCHOR` on every watchdog pass. Nothing is re-broadcast or fee-bumped. |
 | `ANCHOR_RANK_WAKE_MS` | No | `900000` (15m) | How often a BACKUP re-checks whether its failover rank has unlocked, between `ANCHOR_INTERVAL_MS` ticks. The wake flush runs in failover-only mode, so it never publishes an election this hub leads and a healthy leader keeps its interval and size-trigger cadence. |
-| `ANCHOR_ANNOUNCE_RETRY_MS` | No | `300000` | How often a receiver re-verifies queued `XANC_V0_DONE` announcements. The publisher announces at 0 confirmations, so peers queue the announcement and stamp `anchor_txid` once the anchor is buried `XCHAIN_CONFIRMATIONS_DOGE` deep. |
+| `ANCHOR_ANNOUNCE_RETRY_MS` | No | `300000` | How often a receiver re-verifies queued `XANC_V0_DONE` announcements. The publisher announces at 0 confirmations, so peers queue the announcement and stamp `anchor_txid` once the anchor is buried `XCHAIN_CONFIRMATIONS_DOGE` deep. That knob governs the hub's stamp/attest gate only; the BTC indexer's anchor-reward mint gate applies a frozen ledger depth (`ANCHOR_REWARD_DOGE_MIN_CONFIRMATIONS`, equal to the per-coin DOGE default) that no environment variable moves. On regtest, where a lowered override is honoured, the hub therefore attests before the indexer will mint and BTC block processing defers until the anchor reaches the frozen depth. |
 | `ANCHOR_ANNOUNCE_RETRY_TTL_MS` | No | `21600000` | How long a queued announcement is retried before it is dropped, so a never-mined (evicted or replaced) anchor tx cannot suppress a needed re-anchor forever. |
 | `ANCHOR_ANNOUNCE_QUEUE_MAX` | No | `500` | Max queued announcements per hub; the oldest entry is evicted past this. |
 | `ANCHOR_INTENT_TTL_MS` | No | `21600000` | How long a durable broadcast intent (`anchor_published_checkpoints`) HOLDS its checkpoint when no anchor has mined for it. The publisher arms the marker before the send and stamps `anchor_txid` after it, so a crash in between is the one state where DOGE may have paid with nothing recording it; the hold stops the next flush rebuilding a second transaction from different UTXOs. Same `~6x` the 60-conf DOGE window bound as `ANCHOR_ANNOUNCE_RETRY_TTL_MS`, past which a send that never relayed is not coming back and holding the row costs more than re-broadcasting it. |

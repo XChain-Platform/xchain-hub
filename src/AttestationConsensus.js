@@ -245,7 +245,12 @@ class AttestationConsensus extends EventEmitter {
             'ATTESTATION_TORNDOWN_MAX');
 
         this._messageHandler = null;
-        this.roundTimeoutMs  = parseInt(this.config.ATTESTATION_ROUND_TIMEOUT_MS) || DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS;
+        // Same rule as the ring caps above, and its sharpest instance: setTimeout with a
+        // NEGATIVE delay fires on the next tick, so a negative here tears every round
+        // down before any peer PROPOSE/PREPARE/COMMIT can arrive and the attestation
+        // rail goes silent while roundTimeoutCount climbs.
+        this.roundTimeoutMs  = positiveIntConfig(this.config.ATTESTATION_ROUND_TIMEOUT_MS,
+            DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS, 'ATTESTATION_ROUND_TIMEOUT_MS');
     }
 
     async start(){
@@ -794,7 +799,12 @@ class AttestationConsensus extends EventEmitter {
             // provider fetch, so a slow-drip judge vendor call cannot overrun
             // the round window (see the wall-clock deadline guard in
             // providers/llm.js's transports).
-            let judgeTimeoutMs = parseInt(this.config.ATTESTATION_FETCH_TIMEOUT) || 10000;
+            // positiveIntConfig for the reason the constructor gives: a negative budget
+            // makes providers/llm.js's deadlineAt already elapsed, so the judge fallback
+            // chain breaks at its first iteration ("judge budget exhausted") and every
+            // judge_model round resolves no_quorum.
+            let judgeTimeoutMs = positiveIntConfig(this.config.ATTESTATION_FETCH_TIMEOUT, 10000,
+                'ATTESTATION_FETCH_TIMEOUT');
             // expectedN pins the majority denominator to the responsible-set size,
             // not the surviving ok-proposal count (item 2642). Without it, failed
             // fetches shrink `proposals.length` and a lone unreplicated body clears

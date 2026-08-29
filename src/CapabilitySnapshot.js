@@ -207,6 +207,23 @@ class CapabilitySnapshot {
         return false;
     }
 
+    // The OTHER half of the request key, guarded the same way and for the same
+    // reason. `capability` selects which stake rows the indexer filters, so a
+    // response answering for a different capability is a validator set for the wrong
+    // population - and it would be cached under the REQUESTED key for the full TTL
+    // and consumed as the round's N by every quorum caller. Strict, exactly like the
+    // block echo: an ABSENT capability field fails too, because a stripped field is
+    // indistinguishable here from a wrong one. Fail-closed costs this hub a vote;
+    // fail-open casts a wrong one. Only the two capability-scoped fetchers call this;
+    // the whole-federation ('*') fetchers send no capability and have nothing to echo.
+    _capabilityEchoOk(method, result, requested) {
+        if (String(result.capability) === String(requested)) return true;
+        this._fail(method, REASONS.ECHO_MISMATCH,
+            'Returned capability ' + result.capability + ' for requested capability ' + requested +
+            '; rejecting the snapshot (echo mismatch, possible indexer bug or misconfiguration).');
+        return false;
+    }
+
     // Fetch (or read from cache) the deterministic validator set for the given
     // capability at the given block boundary. Returns:
     //   { validators: [{pubkey, amount}, ...], count, blockIndex, capability }
@@ -260,6 +277,7 @@ class CapabilitySnapshot {
             let validators = this._coerceValidators(result);
             if (validators === null) return this._fail('getcapabilityvalidators', REASONS.MALFORMED, MALFORMED_DETAIL);
             if (!this._blockEchoOk('getcapabilityvalidators', result, blockIndex)) return null;
+            if (!this._capabilityEchoOk('getcapabilityvalidators', result, capability)) return null;
             this.monitor.recordSuccess('getcapabilityvalidators');
             let snapshot = {
                 capability:  result.capability,
@@ -321,6 +339,7 @@ class CapabilitySnapshot {
             if (validators === null) return this._fail('getstakeweightsbycapability', REASONS.MALFORMED,
                 Array.isArray(result.validators) ? WEIGHTLESS_DETAIL : MALFORMED_DETAIL);
             if (!this._blockEchoOk('getstakeweightsbycapability', result, blockIndex)) return null;
+            if (!this._capabilityEchoOk('getstakeweightsbycapability', result, capability)) return null;
             this.monitor.recordSuccess('getstakeweightsbycapability');
             let snapshot = {
                 capability:  result.capability,
