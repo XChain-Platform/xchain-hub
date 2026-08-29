@@ -12,14 +12,20 @@
 // CONSENSUS-CRITICAL: the XCHECKPOINT canonical is rebuilt by the hub
 // (StateCheckpointEngine / StateAnchorPublisher), the indexer (anchor.js /
 // recovery.js), the SDK (checkpoint.js) and the explorer. They MUST produce
-// byte-identical bytes at every gate state, and the v0 (per-block) and v1
-// (archive) canonicals (which legitimately share checkpoint_seq) MUST carry
-// DISTINCT equivocation keys. Otherwise an honest validator that signs both is falsely
-// slashable (R-4). A mismatch here forks the chain.
+// byte-identical bytes at every gate state, and the per-block checkpoint canonical
+// and the archive (v1/v6) canonical (which legitimately share checkpoint_seq) MUST
+// carry DISTINCT equivocation keys. Otherwise an honest validator that signs both is
+// falsely slashable (R-4). A mismatch here forks the chain.
 const { expect } = require('chai');
-const eq  = require('../../src/equivocation_header.js');
-const SCE = require('../../src/StateCheckpointEngine.js');
-const SAP = require('../../src/StateAnchorPublisher.js');
+const eq   = require('../../src/equivocation_header.js');
+const ckpt = require('../../src/checkpoint_commitment_activation.js');
+const SCE  = require('../../src/StateCheckpointEngine.js');
+const SAP  = require('../../src/StateAnchorPublisher.js');
+// The frozen ANCHOR v7 wire vector, vendored byte-identically from
+// xchain-documentation/protocol/test-vectors/anchor_canonical.json and guarded by
+// anchor-golden-vectors.test.js. Driving the section parity off these bytes means the
+// three canonical builders meet a real bundle, not three transcriptions of one literal.
+const GOLDEN = require('../fixtures/anchor_canonical_vectors.json');
 
 // The cross-service parity checks require the sibling SDK and indexer sources,
 // which only exist in the monorepo layout. In single-repo CI (hub checked out
@@ -35,12 +41,13 @@ const SAP = require('../../src/StateAnchorPublisher.js');
 // otherwise turn both blocks into permanent pendings on a green run. So there the
 // missing sibling is a hard failure, matching ConsensusPrimitiveConformance.test.js
 // and the indexer's coins-conformance / anchorRewardActivationParity guards.
-let sdkCheckpoint = null, Anchor = null, AnchorRecovery = null;
-let sdkErr = null, anchorErr = null, recoveryErr = null;
+let sdkCheckpoint = null, sdkLight = null, Anchor = null, AnchorRecovery = null;
+let sdkErr = null, lightErr = null, anchorErr = null, recoveryErr = null;
 try { sdkCheckpoint = require('../../../xchain-sdk/src/checkpoint.js'); } catch (e) { sdkErr = e; }
+try { sdkLight = require('../../../xchain-sdk/src/light.js'); } catch (e) { lightErr = e; }
 try { Anchor = require('../../../xchain-indexer/src/actions/anchor.js'); } catch (e) { anchorErr = e; }
 try { AnchorRecovery = require('../../../xchain-indexer/src/recovery.js'); } catch (e) { recoveryErr = e; }
-const haveSiblings = Boolean(sdkCheckpoint && Anchor && AnchorRecovery);
+const haveSiblings = Boolean(sdkCheckpoint && sdkLight && Anchor && AnchorRecovery);
 
 // before() hook shared by every sibling-gated block: escalate to a throw when the
 // required-siblings lane is active, otherwise skip. Named so the failure message
@@ -50,6 +57,7 @@ function requireSiblings() {
     if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') {
         const missing = [];
         if (!sdkCheckpoint)  missing.push('xchain-sdk/src/checkpoint.js (' + (sdkErr && sdkErr.message) + ')');
+        if (!sdkLight)       missing.push('xchain-sdk/src/light.js (' + (lightErr && lightErr.message) + ')');
         if (!Anchor)         missing.push('xchain-indexer/src/actions/anchor.js (' + (anchorErr && anchorErr.message) + ')');
         if (!AnchorRecovery) missing.push('xchain-indexer/src/recovery.js (' + (recoveryErr && recoveryErr.message) + ')');
         throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but the XCHECKPOINT cross-service parity siblings are unloadable: '
@@ -70,10 +78,12 @@ const RAW_OFF = 'XCHECKPOINT|BTC|mainnet|500|bh|lh|ah|ch|7|5';
 
 // Minimal indexer Anchor (constructor only assigns; _canonical uses `d` + eq).
 const anchor = Anchor ? new Anchor({ config:{}, decoderDb:null, indexerDb:null, util:null, mapper:null }) : null;
-const dV0 = { FORMAT:0, CHAIN:'BTC', NETWORK:'regtest', BLOCK_INDEX_CHECKPOINTED:500,
+// The rootless BASE _canonical builds for any format that adds no extension: it is what
+// the archive canonical nests and what the hub's rootless checkpoint canonical must equal.
+const dBase = { CHAIN:'BTC', NETWORK:'regtest', BLOCK_INDEX_CHECKPOINTED:500,
               BLOCK_HASH:'bh', LEDGER_HASH:'lh', ACTIONS_HASH:'ah', CONTRACT_HASH:'ch',
               CHECKPOINT_SEQ:7, SNAPSHOT_BLOCK:480 };
-const dV1 = Object.assign({}, dV0, { FORMAT:1, MATCH_BATCH_SEQ:3, MATCH_COUNT:10,
+const dV1 = Object.assign({}, dBase, { FORMAT:1, MATCH_BATCH_SEQ:3, MATCH_COUNT:10,
               BATCH_CRC32:'cc', TOTAL_CHUNKS:2 });
 const RAW_V1 = RAW_ON + '|3|10|cc|2';
 
@@ -85,11 +95,11 @@ function keyOf(canon){
 
 describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
 
-    describe('gate behavior (v0)', function () {
+    describe('gate behavior (per-block checkpoint)', function () {
         it('below the flag-day → bare raw bytes (regression-safe)', function () {
             expect(SCE.canonicalCheckpoint(cpOff)).to.equal(RAW_OFF);
         });
-        it('at/above the flag-day → header-wrapped (TAG=XCHECKPOINT, v0 round id, VIEW=0)', function () {
+        it('at/above the flag-day → header-wrapped (TAG=XCHECKPOINT, per-block round id, VIEW=0)', function () {
             expect(SCE.canonicalCheckpoint(cpOn))
                 .to.equal('EQUIV|XCHECKPOINT|BTC|regtest|500|7|0||' + RAW_ON);
         });
@@ -107,32 +117,40 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
         it('hub == sdk (below gate)', function () {
             expect(sdkCheckpoint.canonicalCheckpoint(cpOff)).to.equal(SCE.canonicalCheckpoint(cpOff));
         });
-        it('hub == indexer anchor._canonical (v0, above gate)', function () {
-            expect(anchor._canonical(dV0)).to.equal(SCE.canonicalCheckpoint(cpOn));
+        it('hub == indexer anchor._canonical (rootless base, above gate)', function () {
+            expect(anchor._canonical(dBase)).to.equal(SCE.canonicalCheckpoint(cpOn));
         });
-        it('indexer anchor._canonical v0 below gate == bare bytes', function () {
-            const off = Object.assign({}, dV0, { NETWORK:'mainnet', SNAPSHOT_BLOCK:5 });
+        it('indexer anchor._canonical rootless base below gate == bare bytes', function () {
+            const off = Object.assign({}, dBase, { NETWORK:'mainnet', SNAPSHOT_BLOCK:5 });
             expect(anchor._canonical(off)).to.equal(RAW_OFF);
         });
     });
 
-    // ── rooted (post-CHECKPOINT_COMMITMENT) canonical: the shape mainnet signs today ──
+    // ── ANCHOR v7 SECTION canonical: the rooted shape mainnet signs today ──
     //
-    // Every fixture above is ROOTLESS, and only FORMAT 0/1/6 ever reach the indexer
-    // builder, so the SPV-root suffix branch is dead on BOTH sides of every assertion
-    // in this file: the three builders are compared only where all three provably emit
-    // the empty suffix, i.e. they agree for the wrong reason, and a one-sided edit to
-    // the suffix (field order, the .toLowerCase(), the pipe count, either gate) ships
+    // Every fixture above is ROOTLESS, and the indexer appends the SPV root suffix only
+    // on its FORMAT 7 branch, so that branch is dead on both sides of every assertion in
+    // the other blocks: the three builders are compared only where all three provably
+    // emit the empty suffix, i.e. they agree for the wrong reason, and a one-sided edit
+    // to the suffix (field order, the .toLowerCase(), the pipe count, either gate) ships
     // green. The two sides gate that suffix by DIFFERENT rules on purpose (the hub on
-    // the flag-day AND root presence, StateCheckpointEngine._checkpointRootSuffix; the
-    // indexer on the wire VERSION 3/5, anchor.js), which makes their equivalence on a
-    // REAL rooted checkpoint exactly the property that needs asserting.
-    // CHECKPOINT_COMMITMENT and the EQUIV header both arm mainnet at 961000, so a
-    // high-snapshot mainnet row is simultaneously rooted and header-wrapped; the hub is
-    // the producer of the bytes validators sign and the indexer is their on-chain
-    // verifier, and those were the two copies nothing pinned on this shape (the SDK,
+    // CHECKPOINT_COMMITMENT AND root presence, StateCheckpointEngine._checkpointRootSuffix;
+    // the indexer on the wire VERSION being 7, anchor.js), which makes their equivalence
+    // on a REAL v7 section exactly the property that needs asserting. Spec D41 records
+    // that the difference is safe only because a v7 section is root-bearing by
+    // construction: the engine computes roots at/above the same flag-day and the
+    // publisher skips a null-root row (D8), so no v7 section below the
+    // CHECKPOINT_COMMITMENT height can exist. The frozen-vector case below asserts that
+    // invariant rather than resting on it.
+    //
+    // A section drops its own NETWORK on the wire, so the canonical the indexer rebuilds
+    // takes the BUNDLE HEADER's network and the section's own SECTION_SNAPSHOT_BLOCK
+    // (spec 2.1). CHECKPOINT_COMMITMENT and the EQUIV header both arm mainnet at 961000,
+    // so a high-snapshot mainnet section is simultaneously rooted and header-wrapped; the
+    // hub is the producer of the bytes validators sign and the indexer is their on-chain
+    // verifier, and those are the two copies nothing else pins on this shape (the SDK,
     // sync and explorer copies are each pinned elsewhere).
-    describe('rooted checkpoint canonical: hub == sdk == indexer', function () {
+    describe('ANCHOR v7 section canonical: hub == sdk == indexer', function () {
         before(requireSiblings);
 
         const SR = 'd4'.repeat(32), BMR = 'e5'.repeat(32);
@@ -142,10 +160,13 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
         const cpRootsMain = Object.assign({}, cpRootsOn, { network:'mainnet', snapshot_block:961000 });
 
         // ONE fixture, projected into the indexer's field naming, so a transcription
-        // slip cannot make the two sides agree for the wrong reason.
-        function indexerRooted(cp, format) {
+        // slip cannot make the two sides agree for the wrong reason. `headerNetwork`
+        // is the bundle header's NETWORK, which _parseBundle stamps onto every section
+        // before handing it to _canonical; SNAPSHOT_BLOCK is the section's own block,
+        // never the bundle MAX, because that is what the signatures were made over.
+        function indexerSection(cp, headerNetwork) {
             return anchor._canonical({
-                FORMAT: format, CHAIN: cp.chain, NETWORK: cp.network,
+                FORMAT: 7, CHAIN: cp.chain, NETWORK: headerNetwork || cp.network,
                 BLOCK_INDEX_CHECKPOINTED: cp.block_index, BLOCK_HASH: cp.block_hash,
                 LEDGER_HASH: cp.ledger_hash, ACTIONS_HASH: cp.actions_hash,
                 CONTRACT_HASH: cp.contract_hash, CHECKPOINT_SEQ: cp.checkpoint_seq,
@@ -155,11 +176,11 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
             });
         }
 
-        it('regtest, roots present: hub == sdk == indexer(v3)', function () {
+        it('regtest, roots present: hub == sdk == indexer(v7 section)', function () {
             const hub = SCE.canonicalCheckpoint(cpRootsOn);
             expect(sdkCheckpoint.canonicalCheckpoint(cpRootsOn), 'SDK checkpoint.js drifted from the hub root suffix')
                 .to.equal(hub);
-            expect(indexerRooted(cpRootsOn, 3), 'indexer Anchor._canonical(FORMAT=3) drifted from the hub root suffix')
+            expect(indexerSection(cpRootsOn), 'indexer Anchor._canonical(FORMAT=7) drifted from the hub root suffix')
                 .to.equal(hub);
             // Pinned literal reconstructed from the spec parts, not read off a builder, so
             // a THREE-sided edit still fails (the same reason the v1/v6 block below gives).
@@ -171,13 +192,9 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
         it('mainnet at/above 961000: rooted AND header-wrapped, all three agree', function () {
             const hub = SCE.canonicalCheckpoint(cpRootsMain);
             expect(sdkCheckpoint.canonicalCheckpoint(cpRootsMain)).to.equal(hub);
-            expect(indexerRooted(cpRootsMain, 3)).to.equal(hub);
+            expect(indexerSection(cpRootsMain)).to.equal(hub);
             expect(hub).to.equal('EQUIV|XCHECKPOINT|BTC|mainnet|500|7|0||' +
                 'XCHECKPOINT|BTC|mainnet|500|bh|lh|ah|ch|7|961000|' + SR + '|1|' + BMR + '|1');
-        });
-
-        it('v5 (publisher-bearing) canonical is byte-identical to v3', function () {
-            expect(indexerRooted(cpRootsOn, 5)).to.equal(indexerRooted(cpRootsOn, 3));
         });
 
         it('binds the root field ORDER identically in all three (a root swap diverges everywhere)', function () {
@@ -187,26 +204,65 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
             const hub = SCE.canonicalCheckpoint(swapped);
             expect(hub).to.not.equal(SCE.canonicalCheckpoint(cpRootsOn));
             expect(sdkCheckpoint.canonicalCheckpoint(swapped)).to.equal(hub);
-            expect(indexerRooted(swapped, 3)).to.equal(hub);
+            expect(indexerSection(swapped)).to.equal(hub);
         });
 
-        it('a rootless post-flag-day row still emits NO suffix on both sides (legacy v0/v4)', function () {
-            // The complement, and the reason the two gates may legitimately differ: the
-            // hub withholds the suffix when a root is absent, and the indexer keeps a v0
-            // rootless whatever the flag-day says, so old signatures still verify.
+        it('every section of the frozen v7 vector: hub == sdk == indexer, through the SDK parser', function () {
+            // The three literal-driven cases above bind the builders to a hand-written
+            // fixture. This one binds them to the bytes the protocol froze: the SDK's own
+            // entry points (parseAnchorV7 + anchorBundleSection) turn the wire into the
+            // section shape a light client verifies, and that shape must produce the same
+            // canonical as the hub producer and the indexer verifier for every chain.
+            const bundle = GOLDEN.fixture.bundle;
+            const parsed = sdkLight.parseAnchorV7(GOLDEN.vectors.v7);
+            expect(parsed.network).to.equal(bundle.network);
+            expect(parsed.sections.length).to.equal(bundle.sections.length);
+            for (const src of bundle.sections) {
+                const sec = sdkLight.anchorBundleSection(parsed, src.chain);
+                expect(sec, 'the frozen bundle carries no section for ' + src.chain).to.not.equal(null);
+                // A parsed section already carries the header network, so the same object
+                // drives all three builders with no per-service transcription.
+                expect(sec.network).to.equal(parsed.network);
+                expect(sec.snapshot_block).to.equal(src.snapshot_block);
+                // D41's invariant, asserted rather than assumed: the section's own block is
+                // at/above CHECKPOINT_COMMITMENT for the header network, which is the only
+                // reason the hub's presence-and-flag-day gate and the indexer's
+                // unconditional v7 suffix can agree.
+                expect(ckpt.isCheckpointCommitmentActive(sec.snapshot_block, parsed.network),
+                    src.chain + ' section sits below CHECKPOINT_COMMITMENT, which no v7 section may do')
+                    .to.equal(true);
+                const hub = SCE.canonicalCheckpoint(sec);
+                expect(sdkCheckpoint.canonicalCheckpoint(sec),
+                    'SDK checkpoint.js drifted from the hub on the frozen ' + src.chain + ' section').to.equal(hub);
+                expect(indexerSection(sec, parsed.network),
+                    'indexer Anchor._canonical(FORMAT=7) drifted from the hub on the frozen ' + src.chain + ' section')
+                    .to.equal(hub);
+                // The suffix is genuinely in the signed bytes, so the equalities above are
+                // not three builders agreeing on an empty tail.
+                expect(hub.endsWith('|' + src.state_root + '|' + src.state_root_version +
+                    '|' + src.block_merkle_root + '|' + src.block_merkle_version)).to.equal(true);
+            }
+        });
+
+        it('a null-root row keeps the rootless canonical on both sides (the base the archive leg nests)', function () {
+            // The complement, and the reason the two gates may legitimately differ: the hub
+            // withholds the suffix when a root is absent, and the indexer's shared base (the
+            // string the v1/v6 archive canonical nests) carries no suffix whatever the
+            // flag-day says, so signatures over rootless rows still verify.
             expect(SCE.canonicalCheckpoint(cpOn)).to.equal('EQUIV|XCHECKPOINT|BTC|regtest|500|7|0||' + RAW_ON);
-            expect(indexerRooted(cpOn, 0)).to.equal(SCE.canonicalCheckpoint(cpOn));
+            expect(sdkCheckpoint.canonicalCheckpoint(cpOn)).to.equal(SCE.canonicalCheckpoint(cpOn));
+            expect(anchor._canonical(dBase)).to.equal(SCE.canonicalCheckpoint(cpOn));
         });
     });
 
-    describe('v0/v1 collision fix (R-4)', function () {
+    describe('checkpoint/archive equivocation-key split (R-4)', function () {
         before(requireSiblings);
 
         it('v1 archive canonical is header-wrapped with batch_seq in the round id', function () {
             expect(anchor._canonical(dV1))
                 .to.equal('EQUIV|XCHECKPOINT|BTC|regtest|500|7|3|0||' + RAW_V1);
         });
-        it('v0 and v1 carry DISTINCT equivocation keys (no false-slash)', function () {
+        it('the checkpoint and archive canonicals carry DISTINCT equivocation keys (no false-slash)', function () {
             const k0 = keyOf(SCE.canonicalCheckpoint(cpOn));   // ...|7|0
             const k1 = keyOf(anchor._canonical(dV1));          // ...|7|3|0
             expect(k0).to.equal('XCHECKPOINT|BTC|regtest|500|7|0');
@@ -224,7 +280,7 @@ describe('EQUIV checkpoint canonical (WI-2 bump 2)', function () {
     //   recovery  xchain-indexer  AnchorRecovery._wrapperCanonical
     // Every existing test is self-referential: the hub verifies its own published
     // sigs with its own builder, the indexer fixture (anchor-archive.js) signs with
-    // a FOURTH inline reimplementation, and the golden vectors cover v0/v3/v4/v5
+    // a FOURTH inline reimplementation, and the golden vector covers the v7 bundle
     // only. A one-sided edit to the batch segment (field order, the crc position, or
     // the `|batch_seq` ROUND_ID suffix) therefore ships with every suite green and
     // forks archive verification: recovery.js:229 throws 'wrapper signatures fail
