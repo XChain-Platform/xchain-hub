@@ -21,6 +21,12 @@
 const dotenv = require('dotenv');
 dotenv.config();
 
+// Before anything else logs. The env-validation failures immediately below are
+// exactly the lines an operator needs levelled and timestamped, and
+// installObservability does not run until ~380 lines further down.
+const { patchConsole } = require('./observability');
+patchConsole({ service: 'xchain-hub', version: require('../package.json').version });
+
 const { resolveSecretEnv, deprecatedSecretEnvNames } = require('./secret-env');
 
 const REQUIRED_ENV = ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_PORT'];
