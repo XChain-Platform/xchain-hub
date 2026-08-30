@@ -29,6 +29,7 @@ const coins        = require('./coins');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { positiveIntConfig } = require('./lib/config_int.js');
 const { isAdmissibleSigner, provenPubkey } = require('./lib/chain_signer_admission.js');
+const { noteDrop } = require('./consensusDiagnostics');
 
 const XCHAIN_ATTEST_PROPOSE = 'XCHAIN_ATTEST_PROPOSE';
 const XCHAIN_ATTEST_PREPARE = 'XCHAIN_ATTEST_PREPARE';
@@ -437,7 +438,10 @@ class CrossChainEngine extends EventEmitter {
 
         // Discard proposals from senders that are not registered validators
         // before doing any snapshot/indexer work for them.
-        if (!this._isKnownSender(envelope)) return;
+        if (!this._isKnownSender(envelope)) {
+            noteDrop({ reason: 'unknown_sender', phase: 'xchain_propose', sender: envelope.sender, envelope });
+            return;
+        }
 
         // Verify digest
         let computedDigest = this._digest(attestationId, confirmations);
@@ -528,7 +532,10 @@ class CrossChainEngine extends EventEmitter {
         if (!attestationId || !digest) return;
 
         // Only count PREPARE votes whose signing key the chain or the registry attributes.
-        if (!this._isKnownSender(envelope)) return;
+        if (!this._isKnownSender(envelope)) {
+            noteDrop({ reason: 'unknown_sender', phase: 'xchain_prepare', sender: envelope.sender, envelope });
+            return;
+        }
 
         let pending = this.pendingAttestations.get(attestationId);
         if (!pending || pending.digest !== digest) return;
@@ -542,7 +549,10 @@ class CrossChainEngine extends EventEmitter {
         if (!attestationId || !digest) return;
 
         // Only count COMMIT votes whose signing key the chain or the registry attributes.
-        if (!this._isKnownSender(envelope)) return;
+        if (!this._isKnownSender(envelope)) {
+            noteDrop({ reason: 'unknown_sender', phase: 'xchain_commit', sender: envelope.sender, envelope });
+            return;
+        }
 
         let pending = this.pendingAttestations.get(attestationId);
         if (!pending || pending.digest !== digest) return;

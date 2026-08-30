@@ -27,6 +27,12 @@ dotenv.config();
 const { patchConsole } = require('./observability');
 patchConsole({ service: 'xchain-hub', version: require('../package.json').version });
 
+// The hub relies on per-tick .catch() and has no uncaughtException handler at
+// all, so a throw outside a promise chain exits with node's default stderr dump
+// and nothing a collector can key on.
+const { installCrashHandlers, noteShutdown } = require('./consensusDiagnostics');
+installCrashHandlers({ service: 'xchain-hub' });
+
 const { resolveSecretEnv, deprecatedSecretEnvNames } = require('./secret-env');
 
 const REQUIRED_ENV = ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_PORT'];
@@ -2077,8 +2083,10 @@ async function startApi(){
         }
     }
 
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGINT',  () => shutdown('SIGINT'));
+    // A SHUTDOWN record is what lets a reader tell an operator-driven restart
+    // from a crash: without it both look like a service that stopped emitting.
+    process.on('SIGTERM', () => { noteShutdown('SIGTERM'); shutdown('SIGTERM'); });
+    process.on('SIGINT',  () => { noteShutdown('SIGINT');  shutdown('SIGINT'); });
 }
 
 startApi();

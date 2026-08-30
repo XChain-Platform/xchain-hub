@@ -39,6 +39,7 @@ const bcmath            = require('./bcmath.js');
 const devband           = require('./lib/deviation_band.js');
 const { isAdmissibleSigner, provenPubkey } = require('./lib/chain_signer_admission.js');
 const { canonicalValidatorOrder } = require('./validator_order.js');
+const { noteDrop } = require('./consensusDiagnostics');
 
 const ORACLE_PROPOSE = 'ORACLE_PROPOSE';
 const ORACLE_PREPARE = 'ORACLE_PREPARE';
@@ -347,6 +348,11 @@ class OracleConsensus extends EventEmitter {
     _pruneEarlyMessages(now) {
         for (let [round, expiresAt] of this.earlyMessageTtl) {
             if (expiresAt <= now) {
+                // A healthy round drains its buffer, so anything still parked
+                // here at expiry is a round that never assembled: the vote is
+                // gone and this is the only place that says so.
+                let lost = this.earlyMessages.get(round);
+                noteDrop({ reason: 'early_ttl', phase: 'buffer', round, count: lost ? lost.length : 0 });
                 this.earlyMessages.delete(round);
                 this.earlyMessageTtl.delete(round);
             }
@@ -364,13 +370,18 @@ class OracleConsensus extends EventEmitter {
             // Map iteration is insertion-ordered, so evict the OLDEST round key first.
             while (this.earlyMessages.size >= this.earlyMessageMaxRounds) {
                 let oldest = this.earlyMessages.keys().next().value;
+                let lost = this.earlyMessages.get(oldest);
+                noteDrop({ reason: 'early_capacity', phase: 'buffer', round: oldest, count: lost ? lost.length : 0, evicted_for: round });
                 this.earlyMessages.delete(oldest);
                 this.earlyMessageTtl.delete(oldest);
             }
             arr = [];
             this.earlyMessages.set(round, arr);
         }
-        if (arr.length >= this.earlyMessageMaxPerRound) return;
+        if (arr.length >= this.earlyMessageMaxPerRound) {
+            noteDrop({ reason: 'early_capacity', phase: 'buffer', round, sender: envelope && envelope.sender, envelope });
+            return;
+        }
         arr.push(envelope);
         this.earlyMessageTtl.set(round, now + this.earlyMessageTtlMs);
     }
@@ -919,7 +930,10 @@ class OracleConsensus extends EventEmitter {
 
         // Discard proposals from senders that are not registered validators
         // before doing any snapshot/indexer work for them.
-        if (!this._isKnownSender(envelope)) return;
+        if (!this._isKnownSender(envelope)) {
+            noteDrop({ reason: 'unknown_sender', phase: 'propose', sender: envelope.sender, envelope });
+            return;
+        }
 
         // Verify digest
         let computedDigest = this._digest(round, prices);
@@ -1378,7 +1392,10 @@ class OracleConsensus extends EventEmitter {
         if (!Number.isInteger(round) || round < 0 || !digest) return;   // round 0 is valid (see _handlePropose)
 
         // Only count PREPARE votes whose signing key the chain or the registry attributes.
-        if (!this._isKnownSender(envelope)) return;
+        if (!this._isKnownSender(envelope)) {
+            noteDrop({ reason: 'unknown_sender', phase: 'prepare', sender: envelope.sender, envelope });
+            return;
+        }
 
         let pending = this.pendingRounds.get(round);
         if (!pending) {
@@ -1386,9 +1403,13 @@ class OracleConsensus extends EventEmitter {
             // handler mid-await on the snapshot fetch. Buffer instead of
             // dropping (finding F7); replayed once pendingRounds is populated.
             if (!this.finalized.has(round)) this._bufferEarlyMessage(round, envelope);
+            else noteDrop({ reason: 'round_torn_down', phase: 'prepare', round, sender: envelope.sender, envelope });
             return;
         }
-        if (pending.digest !== digest) return;
+        if (pending.digest !== digest) {
+            noteDrop({ reason: 'digest_mismatch', phase: 'prepare', round, sender: envelope.sender, envelope });
+            return;
+        }
 
         this._addVote(pending.prepares, envelope);
         if (sig_pubkey && sig) this._verifyAndStoreSig(pending, sig_pubkey, sig);
@@ -1400,15 +1421,22 @@ class OracleConsensus extends EventEmitter {
         if (!Number.isInteger(round) || round < 0 || !digest) return;   // round 0 is valid (see _handlePropose)
 
         // Only count COMMIT votes whose signing key the chain or the registry attributes.
-        if (!this._isKnownSender(envelope)) return;
+        if (!this._isKnownSender(envelope)) {
+            noteDrop({ reason: 'unknown_sender', phase: 'commit', sender: envelope.sender, envelope });
+            return;
+        }
 
         let pending = this.pendingRounds.get(round);
         if (!pending) {
             // Same early-arrival race as _handlePrepare (finding F7).
             if (!this.finalized.has(round)) this._bufferEarlyMessage(round, envelope);
+            else noteDrop({ reason: 'round_torn_down', phase: 'commit', round, sender: envelope.sender, envelope });
             return;
         }
-        if (pending.digest !== digest) return;
+        if (pending.digest !== digest) {
+            noteDrop({ reason: 'digest_mismatch', phase: 'commit', round, sender: envelope.sender, envelope });
+            return;
+        }
 
         this._addVote(pending.commits, envelope);
         if (sig_pubkey && sig) this._verifyAndStoreSig(pending, sig_pubkey, sig);

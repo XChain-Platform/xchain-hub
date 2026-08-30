@@ -49,6 +49,7 @@ const { positiveIntConfig } = require('./lib/config_int.js');
 // 2 minutes per request lifecycle. Lives in constants.js because
 // AttestationRound floors its `seen` window on the same default; see there.
 const { DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS } = require('./constants.js');
+const { noteDrop } = require('./consensusDiagnostics');
 
 const ATTEST_PROPOSE = 'ATTEST_PROPOSE';
 const ATTEST_PREPARE = 'ATTEST_PREPARE';
@@ -315,7 +316,10 @@ class AttestationConsensus extends EventEmitter {
     // finalization) so _bufferEarlyMessage drops rather than parks its late
     // envelopes. Ring-bounded FIFO, mirroring _markFinalized (item 2640).
     _markTornDown(rid){
-        if(this.tornDown.has(rid)) return;
+        if(this.tornDown.has(rid)){
+            noteDrop({ reason: 'round_torn_down', phase: 'attest_buffer', round: rid, sender: envelope && envelope.sender, envelope });
+            return;
+        }
         this.tornDown.add(rid);
         this._tornDownOrder.push(rid);
         if(this._tornDownOrder.length > this.tornDownMax){
@@ -335,6 +339,10 @@ class AttestationConsensus extends EventEmitter {
     _pruneEarlyMessages(now){
         for(let [rid, expiresAt] of this.earlyMessageTtl){
             if(expiresAt <= now){
+                // A round that drains clears its buffer, so anything parked here
+                // at expiry belongs to a round that never assembled.
+                let lost = this.earlyMessages.get(rid);
+                noteDrop({ reason: 'early_ttl', phase: 'attest_buffer', round: rid, count: lost ? lost.length : 0 });
                 this.earlyMessages.delete(rid);
                 this.earlyMessageTtl.delete(rid);
             }
@@ -353,8 +361,14 @@ class AttestationConsensus extends EventEmitter {
         // max_response_bytes fallback x1.4 base64) with headroom; only abuse is cut.
         let sz;
         try { sz = JSON.stringify(envelope.data || '').length; }
-        catch(e){ return; }   // unserializable (cycle) -> never a real gossip message
-        if(sz > this.earlyMessageMaxBytes) return;
+        catch(e){
+            noteDrop({ reason: 'oversized', phase: 'attest_buffer', round: rid, why: 'unserializable' });
+            return;   // unserializable (cycle) -> never a real gossip message
+        }
+        if(sz > this.earlyMessageMaxBytes){
+            noteDrop({ reason: 'oversized', phase: 'attest_buffer', round: rid, bytes: sz, sender: envelope && envelope.sender, envelope });
+            return;
+        }
         let arr = this.earlyMessages.get(rid);
         if(!arr){
             // Distinct-rid ceiling (A-F5): evict the OLDEST buffered rid (Map is
@@ -362,12 +376,19 @@ class AttestationConsensus extends EventEmitter {
             // fresh requestIds cannot grow the buffer without bound within the TTL.
             if(this.earlyMessages.size >= this.earlyMessageMaxDistinctIds){
                 let oldest = this.earlyMessages.keys().next().value;
-                if(oldest !== undefined){ this.earlyMessages.delete(oldest); this.earlyMessageTtl.delete(oldest); }
+                if(oldest !== undefined){
+                    let lost = this.earlyMessages.get(oldest);
+                    noteDrop({ reason: 'early_capacity', phase: 'attest_buffer', round: oldest, count: lost ? lost.length : 0, evicted_for: rid });
+                    this.earlyMessages.delete(oldest); this.earlyMessageTtl.delete(oldest);
+                }
             }
             arr = [];
             this.earlyMessages.set(rid, arr);
         }
-        if(arr.length >= this.earlyMessageMaxPerRid) return;
+        if(arr.length >= this.earlyMessageMaxPerRid){
+            noteDrop({ reason: 'early_capacity', phase: 'attest_buffer', round: rid, sender: envelope && envelope.sender, envelope });
+            return;
+        }
         arr.push(envelope);
         this.earlyMessageTtl.set(rid, now + this.earlyMessageTtlMs);
     }

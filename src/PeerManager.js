@@ -26,6 +26,7 @@ const http             = require('http');
 const WebSocket        = require('ws');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const { positiveIntConfig } = require('./lib/config_int.js');
+const { notePeerReject, stampRemoteIp } = require('./consensusDiagnostics');
 
 // Bootstrap peers every new hub can reach. One hostname per validator; the
 // PORT selects the network, so a seed on the wrong port reaches the wrong
@@ -514,11 +515,13 @@ class PeerManager extends EventEmitter {
         let rateCeil = this.peers.has(knownAddr || ws._peerAddr) ? this.knownMsgRateLimit : this.msgRateLimit;
         if (!this._checkMsgRate(ratePeer, rateCeil)) {
             console.warn('P2P: Rate limit exceeded for peer ' + ratePeer + '; dropping message');
+            notePeerReject({ peer: ratePeer, reason: 'rate_limit' });
             return;
         }
 
         if (!this._verifySignature(envelope)) {
             console.warn('P2P: Invalid signature from ' + envelope.sender + '; dropping message');
+            notePeerReject({ peer: ws._remoteIp || envelope.sender, reason: 'invalid_signature' });
             return;
         }
 
@@ -538,6 +541,11 @@ class PeerManager extends EventEmitter {
         // publisher and will diverge from peerAddr on relayed messages.
         this._recordPeer(peerAddr, peerAddr, false);
 
+        // Consensus sees only the envelope, never the socket, so the one
+        // identity a remote cannot mint is stamped on here. Non-enumerable and
+        // Symbol-keyed, so it cannot reach a persisted row, a re-broadcast
+        // payload or a signature preimage through JSON.stringify.
+        stampRemoteIp(envelope, ws._remoteIp);
         this.emit('message', envelope);
         if (envelope.type === 'HEARTBEAT') {
             this.emit('heartbeat', envelope.sender, envelope.timestamp);

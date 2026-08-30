@@ -31,6 +31,7 @@ const eq     = require('./equivocation_header.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { isAdmissibleSigner } = require('./lib/chain_signer_admission.js');
 const { canonicalValidatorOrder } = require('./validator_order.js');
+const { noteDrop } = require('./consensusDiagnostics');
 
 const PBFT_PRE_PREPARE = 'PBFT_PRE_PREPARE';
 const PBFT_PREPARE     = 'PBFT_PREPARE';
@@ -475,7 +476,10 @@ class Consensus {
 
         // Discard proposals from senders that are not registered validators
         // before doing any snapshot/indexer work for them.
-        if (!this._isKnownSender(envelope)) return;
+        if (!this._isKnownSender(envelope)) {
+            noteDrop({ reason: 'unknown_sender', phase: 'preprepare', sender: envelope.sender, envelope });
+            return;
+        }
 
         // The leader stamps its view into the envelope so the identity guard
         // below can evaluate the rotation at the CLAIMED (seq, view). A viewless
@@ -719,7 +723,10 @@ class Consensus {
         if (!seq || !configDigest) return;
 
         // Only count PREPARE votes from registered validators.
-        if (!this._isKnownSender(envelope)) return;
+        if (!this._isKnownSender(envelope)) {
+            noteDrop({ reason: 'unknown_sender', phase: 'prepare', sender: envelope.sender, envelope });
+            return;
+        }
 
         let proposal = this.pendingProposals.get(seq);
         // No proposal yet: this hub is still locking the snapshot for a
@@ -945,7 +952,10 @@ class Consensus {
         if (!seq || !configDigest) return;
 
         // Only count COMMIT votes from registered validators.
-        if (!this._isKnownSender(envelope)) return;
+        if (!this._isKnownSender(envelope)) {
+            noteDrop({ reason: 'unknown_sender', phase: 'commit', sender: envelope.sender, envelope });
+            return;
+        }
 
         let proposal = this.pendingProposals.get(seq);
         // The vote that this buffer exists for: a leader heavy enough to meet the
@@ -1053,7 +1063,10 @@ class Consensus {
 
         // Only count VIEW_CHANGE votes from registered validators; view-change
         // quorum is the same Set.size tally as PREPARE/COMMIT.
-        if (!this._isKnownSender(envelope)) return;
+        if (!this._isKnownSender(envelope)) {
+            noteDrop({ reason: 'unknown_sender', phase: 'view_change', sender: envelope.sender, envelope });
+            return;
+        }
 
         if (!this.pendingViewChanges.has(view)) {
             this.pendingViewChanges.set(view, new Set());

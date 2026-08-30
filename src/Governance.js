@@ -31,6 +31,7 @@ const { canonicalValidatorOrder } = require('./validator_order.js');
 // Federation-uniform oracle co-sign band: the absolute floor under the slash band
 // (see _validateSlashBandFloor). constants.js requires nothing, so no cycle.
 const { ORACLE_DEVIATION_THRESHOLD } = require('./constants.js');
+const { noteDrop } = require('./consensusDiagnostics');
 
 const GOV_PROPOSE = 'GOV_PROPOSE';
 const GOV_VOTE    = 'GOV_VOTE';
@@ -534,7 +535,10 @@ class Governance extends EventEmitter {
         // proposalIds (unbounded governance_proposals growth on every hub, a DoS), and
         // any non-validator that slips past a null-registry window could inject
         // proposals. Mirrors the _isKnownSender gate on GOV_RESULT / GOV_VOTE.
-        if (!this._isKnownSender(envelope.sender)) return;
+        if (!this._isKnownSender(envelope.sender)) {
+            noteDrop({ reason: 'unknown_sender', phase: 'gov_propose', sender: envelope.sender, envelope });
+            return;
+        }
 
         // Bind the declared proposerPubkey to the authenticated sender (GOV-PROPOSER-SPOOF-1).
         // proposer_pubkey is persisted verbatim from the wire and surfaced by getProposals /
@@ -839,7 +843,10 @@ class Governance extends EventEmitter {
         // a permanent governance split-brain. The tally side is already leader-pinned
         // (_isTallyLeader); this closes the result-ACCEPTANCE side. The leader's own loopback
         // of its broadcast still passes (sender == leader) and is absorbed by the 0-row guard.
-        if (!this._isKnownSender(envelope.sender)) return;
+        if (!this._isKnownSender(envelope.sender)) {
+            noteDrop({ reason: 'unknown_sender', phase: 'gov_result', sender: envelope.sender, envelope });
+            return;
+        }
         let leader = this._getProposalLeader(proposalId);
         if (!leader || leader.addr !== envelope.sender) return;
 
