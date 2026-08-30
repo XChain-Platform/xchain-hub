@@ -237,3 +237,54 @@ describe('consensus diagnostics: unknown-sender throttling', function () {
         expect(observability.getRegistry().render()).to.include('reason="unknown_reason"');
     });
 });
+
+describe('consensus diagnostics: checkpoint cadence stalls', function () {
+    let sink;
+    beforeEach(function () {
+        observability._resetObservability();
+        diagnostics._resetDiagnostics();
+        sink = { lines: [] };
+        const push = (m) => sink.lines.push(m);
+        observability.installObservability(null, {
+            service: 'xchain-hub', env: {}, console: { log: push, warn: push, error: push }
+        });
+    });
+    afterEach(function () {
+        observability._resetObservability();
+        diagnostics._resetDiagnostics();
+    });
+
+    it('records every stalled tick, not one in sixty', function () {
+        // The prose line beside this is throttled so a persistent stall does not
+        // flood an operator's tail. The record must NOT share that throttle: a
+        // collector counting stalled ticks needs every one, and dropping 59 of
+        // every 60 makes a worsening cadence read as a steady one.
+        const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
+        const engine = Object.create(StateCheckpointEngine.prototype);
+        engine._cadenceStalls = 0;
+        engine._cadenceStallLoggedAt = Date.now();   // throttle CLOSED
+        engine._cadenceStallLogMs = 600000;
+        engine.coin = 'BTC';
+
+        for (let i = 0; i < 5; i++) engine._noteCadenceStall(100 + i, 'no qualified oracle_publish validator set');
+
+        const records = sink.lines.filter((l) => l.includes('CHECKPOINT_STALLED'));
+        expect(records).to.have.lengthOf(5);
+        expect(records[0]).to.include('chain=BTC');
+        expect(records[0]).to.include('reason="no qualified oracle_publish validator set"');
+        expect(records[4]).to.include('stalls=5');
+    });
+
+    it('carries the block it could not lead, and says unknown rather than dropping the field', function () {
+        const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
+        const engine = Object.create(StateCheckpointEngine.prototype);
+        engine._cadenceStalls = 0;
+        engine._cadenceStallLoggedAt = Date.now();
+        engine._cadenceStallLogMs = 600000;
+
+        engine._noteCadenceStall(null, 'no snapshot rows');
+        const rec = sink.lines.find((l) => l.includes('CHECKPOINT_STALLED'));
+        expect(rec).to.include('reason="no snapshot rows"');
+        expect(rec).to.not.include('seq=');
+    });
+});

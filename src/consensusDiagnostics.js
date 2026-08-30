@@ -205,6 +205,24 @@ function installCrashHandlers({ exitOnUncaught = true, service = 'xchain-hub' } 
     });
 }
 
+/**
+ * Record a checkpoint cadence round this hub could not lead.
+ *
+ * Lives here rather than in the consumers, which was where an earlier reading of
+ * the spec put it: the indexer only MIRRORS state_checkpoints from the hub and
+ * derives no cadence of its own, the encoder and tracker have no checkpoint
+ * concept, and sync's checkpoint module is a client-side verifier that returns a
+ * verdict rather than stalling. The hub is the only place a cadence can stall.
+ */
+function noteCheckpointStalled({ chain, seq, reason, stalls } = {}) {
+    try {
+        const fields = { chain: chain || 'unknown', reason: reason || 'unknown' };
+        if (seq !== undefined && seq !== null) fields.seq = seq;
+        if (stalls !== undefined) fields.stalls = stalls;
+        return getLogger().warn('CHECKPOINT_STALLED', fields);
+    } catch { return null; }
+}
+
 /** Record a clean shutdown, so a restart can be told from a crash. */
 function noteShutdown(signal) {
     try { return getLogger().warn('SHUTDOWN', { signal: signal || 'unknown' }); }
@@ -218,7 +236,7 @@ function _resetDiagnostics() {
 }
 
 module.exports = {
-    noteDrop, notePeerReject, noteShutdown, installCrashHandlers,
+    noteDrop, notePeerReject, noteShutdown, noteCheckpointStalled, installCrashHandlers,
     stampRemoteIp, remoteIpOf, REMOTE_IP,
     DROP_REASONS, DEDUPE_MAX_KEYS, DEDUPE_WINDOW_MS,
     _resetDiagnostics
