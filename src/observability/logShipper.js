@@ -47,13 +47,34 @@ const LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 // Key names whose values never leave the box in a log line.
 const SECRET_KEY_RE = /(pass(word|phrase)?|secret|token|api[_-]?key|apikey|auth|credential|wif|priv(ate)?[_-]?key|mnemonic|seed|cookie|session)/i;
 
-// `password=hunter2`, `api_key: abc`, `token="x"` embedded in free text.
-const SECRET_INLINE_RE = /\b(pass(?:word|phrase)?|secret|token|api[_-]?key|apikey|authorization|credential|wif|priv(?:ate)?[_-]?key|mnemonic|seed)\b(\s*[:=]\s*)("[^"]*"|'[^']*'|\S+)/gi;
+// `password=hunter2`, `api_key: abc`, `token="x"`, `HUB_DB_SECRET=...` embedded
+// in free text.
+//
+// The key is allowed to carry a prefix and a suffix, and the leading boundary is
+// "not preceded by another key character" rather than `\b`. `\b` does not fire
+// between two word characters, and `_` is a word character, so an anchored
+// pattern silently misses every env-shaped name the services actually print:
+// `HUB_DB_SECRET`, `INDEXER_DB_PASS`, `db_password`. Those are precisely what an
+// env-validation failure puts on stdout, and with LOG_SHIP_* on they would go
+// off-box in the clear.
+const SECRET_INLINE_RE = /(?<![A-Za-z0-9])([A-Za-z0-9_]*(?:pass(?:word|phrase|wd)?|secret|token|api[_-]?key|apikey|authorization|credential|wif|priv(?:ate)?[_-]?key|mnemonic|seed)[A-Za-z0-9_]*\s*[:=]\s*)(?:bearer\s+)?("[^"]*"|'[^']*'|\S+)/gi;
+
+// A bearer token with no key in front of it, as a header line is usually quoted.
+// The `authorization: Bearer x` shape is handled above, where the value group
+// would otherwise capture the word "Bearer" and leave the token in the clear.
+const BEARER_RE = /\bbearer\s+[A-Za-z0-9._~+/-]{8,}={0,2}/gi;
 
 const REDACTED = '[redacted]';
 
+// Deliberately NOT swept here: bare hex. Hub and indexer lines are full of
+// legitimate 64-char hex (txids, block hashes, state roots, digests) and
+// redacting those would gut the logs this spec exists to make readable. The
+// watch collector applies a hex-key sweep at its own boundary instead, where the
+// output is a committed report rather than an operator's live tail.
 function scrubMessage(msg) {
-    return String(msg).replace(SECRET_INLINE_RE, (_m, key, sep) => `${key}${sep}${REDACTED}`);
+    return String(msg)
+        .replace(SECRET_INLINE_RE, (_m, keyAndSep) => `${keyAndSep}${REDACTED}`)
+        .replace(BEARER_RE, REDACTED);
 }
 
 // Envelope keys are rendered as the line's own prefix, so they never repeat in

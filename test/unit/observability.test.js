@@ -603,6 +603,52 @@ describe('observability/logShipper: text-with-fields format', function () {
     });
 });
 
+describe('observability/logShipper: message redaction', function () {
+    // An env-validation failure prints the variable NAME and its value, and the
+    // names the services use are all prefixed (HUB_DB_SECRET, INDEXER_DB_PASS,
+    // db_password). A `\b`-anchored key never matches those, because `_` is a
+    // word character and `\b` does not fire between two word characters. With
+    // LOG_SHIP_* configured, an unscrubbed line goes off-box in the clear.
+    const leaky = [
+        ['prefixed env secret',   'Missing required environment variable: HUB_DB_SECRET=hunter2swordfish'],
+        ['prefixed db pass',      'connect failed db_password=hunter2swordfish'],
+        ['screaming env pass',    'INDEXER_DB_PASS=hunter2swordfish'],
+        ['api key',               'HUB_API_KEY=hunter2swordfish'],
+        ['keyed bearer',          'Authorization: Bearer eyJhbGciOi.SECRETPAYLOAD.sig'],
+        ['bare bearer',           'sending Bearer eyJhbGciOi.SECRETPAYLOAD.sig upstream'],
+        ['quoted mnemonic',       'mnemonic="correct horse battery staple"'],
+    ];
+    for (const [name, line] of leaky) {
+        it(`scrubs a ${name}`, function () {
+            const out = scrubMessage(line);
+            expect(out).to.not.match(/hunter2swordfish|SECRETPAYLOAD|correct horse/);
+            expect(out).to.include(REDACTED);
+        });
+    }
+
+    it('redacts the token, not the word Bearer', function () {
+        // The value group would otherwise capture "Bearer" and stop, leaving the
+        // token itself in the clear immediately after a [redacted] marker that
+        // makes the line look handled.
+        const out = scrubMessage('Authorization: Bearer eyJhbGciOi.SECRETPAYLOAD.sig');
+        expect(out).to.not.include('SECRETPAYLOAD');
+    });
+
+    it('leaves real operational lines untouched, hex identifiers included', function () {
+        // Hub and indexer lines are full of legitimate 64-char hex (txids, block
+        // hashes, state roots). A hex sweep here would gut the logs this work
+        // exists to make readable.
+        const keep = [
+            'Oracle: Round 12 finalized with 4 of 5 votes',
+            'StateAnchorPublisher: anchored bundle regtest @ 100 (txid a3f9bc21de)',
+            'P2P: Invalid signature from xc1qexampleaddr; dropping message',
+            'seed block=5 imported',
+            'PBFT_DROP reason=digest_mismatch phase=prepare round=42'
+        ];
+        for (const line of keep) expect(scrubMessage(line)).to.equal(line);
+    });
+});
+
 describe('observability/patchConsole', function () {
     const { patchConsole, unpatchConsole, getLogger, getRegistry, _resetObservability } =
         require('../../src/observability/index.js');
