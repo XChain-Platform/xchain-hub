@@ -179,7 +179,14 @@ const HUB_REORG_API_KEY   = process.env.HUB_REORG_API_KEY || '';
 // proxy POST publicly and this tier carries the policy. Escape hatch for a
 // staged rollout or emergency rollback: HUB_SENSITIVE_READ_AUTH=0 disables
 // enforcement for these methods only (writes stay keyed).
-const SENSITIVE_READ_METHODS = new Set(['getallconfigs']);
+// getrollcallstatus is here for a different reason than getallconfigs: it carries
+// no credential, but it reports how many validators have answered a given ROLLCALL
+// epoch, and an epoch's signer count is a PRE-EVICTION TARGETING surface. A caller
+// polling every hub can tell which keys are close to the K-epoch absence streak
+// before the chain evicts them, which is a map of who to knock over. The ledger
+// facts themselves (last_rolled_epoch, absent_streak) are deliberately NOT served
+// here at all; they live on the BTC indexer, where they are authoritative.
+const SENSITIVE_READ_METHODS = new Set(['getallconfigs', 'getrollcallstatus']);
 const SENSITIVE_READ_AUTH = process.env.HUB_SENSITIVE_READ_AUTH !== '0';
 
 function validateChain(chain) {
@@ -1092,6 +1099,27 @@ async function startApi(){
         async getanchorstatus(){
             if(!hub.stateAnchorPublisher) return { active: false };
             return { active: true, ...hub.stateAnchorPublisher.getAnchorStats() };
+        },
+
+        // ROLLCALL publisher status (sensitive read; see SENSITIVE_READ_METHODS).
+        // PUBLISHER STATE ONLY, for the newest epoch this hub is tracking: whether we
+        // signed it, how many verified signatures we have collected, how many of them
+        // we last observed on chain, who leads the election, our own rank, the txids
+        // we broadcast, and whether this hub's signer module can publish at all.
+        //
+        // It reports NO ledger facts. `last_rolled_epoch` and `absent_streak` are the
+        // BTC indexer's (getrollcallabsences), where they are authoritative; serving a
+        // hub's opinion of them here would give two answers to one question and the
+        // wrong one would read as an eviction.
+        //
+        // Mirrors getanchorstatus: always 200, {active:false} plus a fully-shaped body
+        // when no round engine is running, so a poller never has to branch on presence.
+        async getrollcallstatus(){
+            if(!hub.rollcallRound)
+                return { active: false, epoch: null, signed: false, gossiped_count: 0,
+                         on_chain_count: null, leader: null, our_rank: -1, txids: [],
+                         broadcast_capable: false };
+            return { active: true, ...hub.rollcallRound.getStatus() };
         },
 
         // ORACLE (PRICE v0) publisher status (read, no auth): publish-rail health for

@@ -35,7 +35,26 @@
  * hub configured with a testnet address would pass a permissive check and then
  * publish nowhere, which is the silent failure this self-test exists to catch.
  *
+ * THE SIGNER MODULE MUST EXPORT `broadcast(payload)` WHEN IT IS CONFIGURED AT
+ * ALL. Every chunked publish this capability leads (a PRICE round's signature
+ * list, an ANCHOR, a ROLLCALL) is a two-phase P2SH encoding, and the hub's
+ * built-in pipeline can only broadcast the FUNDING transaction of those two: it
+ * fails closed at lib/two_phase_guard.js rather than publishing a payload no
+ * indexer can decode. signer-loader treats `broadcast` as OPTIONAL, so a
+ * hand-built module exporting only walletSign loads cleanly, signs everything it
+ * is asked to, and publishes nothing, with no error anywhere. The CLI-generated
+ * signer (xchain-node's `validator init`) already exports it; hand-built modules
+ * are the gap, so it is checked here.
+ *
+ * The check is scoped to a CONFIGURED module. An unset HUB_SIGNER_MODULE is the
+ * hub's documented "no operator signer, publishers stay idle" posture, which this
+ * self-test has never spoken to and which the publishers already announce
+ * themselves; failing it here would strip oracle_publish from every hub that has
+ * never had a signer, which is not the silent failure being closed.
+ *
  ********************************************************************/
+
+const { loadSignerHooks } = require('../lib/signer-loader.js');
 
 // Dogecoin base58 pay-to-pubkey-hash prefixes by network. Mainnet version byte
 // 0x1e renders as 'D'; testnet/regtest version byte 0x71 renders as 'n'. P2SH is
@@ -71,6 +90,24 @@ exports.selfTest = async (config) => {
     }
     if (!entry.doge_wallet) {
         return { ok: false, reason: 'oracle_publish.doge_wallet not configured' };
+    }
+
+    // A configured-but-unloadable module is a hard failure of the operator's own
+    // declaration (loadSignerHooks throws for it and for a module without
+    // walletSign); report it rather than letting the throw become an opaque
+    // 'selfTest threw' line in the capability registry.
+    let hooks;
+    try {
+        hooks = loadSignerHooks();
+    } catch (e) {
+        return { ok: false, reason: 'HUB_SIGNER_MODULE is configured but unusable: ' +
+                                    (e && e.message ? e.message : String(e)) };
+    }
+    if (hooks && typeof hooks.broadcastFn !== 'function') {
+        return { ok: false, reason: 'HUB_SIGNER_MODULE (' + hooks.source + ') exports no broadcast(payload); ' +
+                                    'every chunked publish this capability leads is a two-phase P2SH encoding ' +
+                                    'the built-in pipeline cannot finish, so this hub would sign publishes it ' +
+                                    'can never land. See examples/doge-signer.example.js' };
     }
     return { ok: true };
 };

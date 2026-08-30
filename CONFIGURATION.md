@@ -532,6 +532,81 @@ env var, else the bundled per-coin `FULLNODE` block.
 | `FULLNODE_BTC_RPC` | If enabled | _empty_ | Bitcoin RPC endpoint the full-node capability probes. |
 | `FULLNODE_SPEND_LOG_PATH` | No | `./data/fullnode-verdict.spend.jsonl` | Durable spend-audit JSONL for the fee-bearing NODEPROOF verdict send. An intent line is fsync'd before the broadcast and the broadcast is gated on that write, so an unwritable path defers the verdict rather than spending with no record. |
 
+## ROLLCALL presence proofs (`RollcallRound`)
+
+Validator liveness. Every hub signs a canonical bound to a BTC epoch block's
+`ledger_hash`, gossips the signature, and an elected leader lands the collected
+signatures on DOGE as a `ROLLCALL` action; the BTC indexer closes the epoch and
+evicts sources absent for K consecutive rolled epochs. Publishing reuses the DOGE
+oracle-publisher rail (`DOGE_ADDRESS`, `DOGE_ENCODER_URL`, `HUB_SIGNER_MODULE`,
+`DOGE_LOW_BALANCE_THRESHOLD`) and the shared `SpendGuard`, so there is no second
+wallet and no second key.
+
+**The consensus constants are not here and have no env surface.** The epoch
+cadence, accept window, proof delay, DOGE maturity, K, the streak lookback, the
+publish reward and the activation heights live in `src/rollcall_activation.js`,
+byte-identical to the indexer's copy, because the hub signs what the indexer
+judges and a one-sided edit forks the fleet at the epoch boundary. Only the three
+publish tunables below are policy: no chain rule reads any of them, so two hubs on
+different values still produce roll calls each other's indexers accept.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `ROLLCALL_ENABLED` | No | `true` | Enable the roll-call round. `false` stops this hub signing, which over K rolled epochs is what eviction means; it is not a way to reduce cost. |
+| `ROLLCALL_POLL_MS` | No | `30000` | Poll interval (ms) for the round timer. |
+| `ROLLCALL_PUBLISH_DELAY_BLOCKS` | No | `12` (regtest `1`) | BTC blocks after the epoch before the elected leader may publish, so peers' signatures have arrived before the first action is paid for. |
+| `ROLLCALL_ELECTION_TOLERANCE_BLOCKS` | No | `36` (regtest `3`) | Failover ladder step: BTC blocks of leader silence before the next-ranked publisher's slot unlocks. Deliberately a SEPARATE knob from `ANCHOR_ELECTION_TOLERANCE_BLOCKS`, so changing the roll-call cadence cannot re-inert the anchor ladder. |
+| `ROLLCALL_SELF_PUBLISH_BLOCKS` | No | `100` (regtest `9`) | BTC blocks after the epoch at which a hub whose OWN signature is still not on chain publishes a one-signature roll call itself. The censorship escape hatch, not the liveness failover; the ladder above is that. The regtest pair is 3 and 9 rather than 2 and 6 because a deadline of 6 sits exactly on the canonical reorg buffer, so it would already have expired on a round's first tick and no sweeper would ever get a turn. |
+| `ROLLCALL_SPEND_LOG_PATH` | No | `./data/rollcall-publish.spend.jsonl` | Durable spend-audit JSONL for the fee-bearing publish. An intent line is fsync'd before the broadcast and the broadcast is gated on that write, so an unwritable path defers the publish rather than spending with no record, and a restart cannot re-publish an epoch a prior process already committed. |
+| `ROLLCALL_SIGN_LOG_PATH` | No | `./data/rollcall-signatures.jsonl` | Durable store of this hub's own epoch signatures, so a restart inside the accept window re-emits the SAME signature instead of falling silent for an epoch it had already answered. |
+
+### Why those magnitudes (before you retune them)
+
+The ordering is what binds, and
+`test/unit/RollcallRound.invariants.test.js` pins both halves of it for every
+network's defaults:
+
+- **`PUBLISH_DELAY` < `SELF_PUBLISH` < `ACCEPT_WINDOW - 24`.** The 24 BTC blocks
+  of margin cover the DOGE landing plus a Dogecoin miner's two-hour timestamp
+  slack, so a self-publish issued at the last moment still lands inside the window
+  the BTC close cuts. Push `SELF_PUBLISH` past that margin and the escape hatch
+  publishes into an epoch that has stopped counting.
+- **At least three ranks unlock inside the accept window.** The epoch height is
+  FIXED while the tip advances through the window, so `since` grows to the full
+  `ACCEPT_WINDOW` and `floor(144 / 36) = 4` ranks come up. (The anchor ladder is
+  inert on its bundle rail for the opposite reason: a checkpoint's `snapshot_block`
+  chases the tip, so its `since` never grows.) Raising the tolerance past a third
+  of the window leaves a dead leader with no sweeper, which costs the epoch.
+
+Cost is about **0.006 DOGE per one-chunk roll call** (two transactions at ~0.003
+DOGE each, because every ROLLCALL is a two-phase P2SH publish). There is no
+fee-bump and no RBF anywhere in the hub, by design: a fee spike that keeps every
+action out of the window costs the epoch, and an unrolled epoch counts for nobody
+and evicts nobody. The dashboard alerts on consecutive unrolled epochs.
+
+### `HUB_SIGNER_MODULE` must export `broadcast(payload)`
+
+Every ROLLCALL is a two-phase P2SH encoding and the built-in encoder pipeline can
+only broadcast the funding transaction of the two, so it fails closed instead. A
+signer module exporting only `walletSign` therefore signs roll calls it can never
+publish. `validator init` generates a module that exports `broadcast`; a
+hand-built one is the gap. `getrollcallstatus.broadcast_capable` reports it and
+the `oracle_publish` self-test fails on it, so the condition is visible rather
+than showing up as a federation that mysteriously never rolls. A hub without it
+still SIGNS and gossips, and the sweepers carry its presence to chain: that is
+exactly why there are several of them.
+
+### `getrollcallstatus`
+
+A SENSITIVE read (keyed by `HUB_API_KEY` like `getallconfigs`), always HTTP 200.
+It reports this hub's publisher state for the newest epoch it is tracking:
+`{epoch, signed, gossiped_count, on_chain_count, leader, our_rank, txids,
+broadcast_capable}`. It carries no credential, but a per-epoch signer count is a
+pre-eviction targeting surface: a caller polling every hub could tell which keys
+are close to the absence streak before the chain acts on it. The ledger facts
+(`last_rolled_epoch`, `absent_streak`) are deliberately absent; they belong to the
+BTC indexer's `getrollcallabsences`, where they are authoritative.
+
 ## Governance
 
 | Variable | Required | Default | Description |

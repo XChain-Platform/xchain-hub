@@ -53,6 +53,7 @@ const AttestationConsensus   = require('./AttestationConsensus.js');
 const AttestationPublisher   = require('./AttestationPublisher.js');
 const AttestationRelay       = require('./AttestationRelay.js');
 const FullNodeChallengeRound = require('./FullNodeChallengeRound.js');
+const RollcallRound          = require('./RollcallRound.js');
 const AttestationSpotChecker = require('./AttestationSpotChecker.js');
 const { bcmul, bcdiv }   = require('./bcmath.js');
 const mathjs             = require('mathjs');
@@ -108,6 +109,8 @@ class XChainHub {
         this.attestationPublisher    = null;
         this.attestationSpotChecker  = null;
         this.attestationRelay        = null;
+        this.fullNodeChallenge       = null;
+        this.rollcallRound           = null;
         this._capabilityRecheckTimer = null;
         this._capabilityConfigWatcher = null;
         this._stakePollTimer          = null;
@@ -410,8 +413,25 @@ class XChainHub {
             console.log('FullNodeChallengeRound: operator signer wired (' + fnSignerHooks.source + ')');
         }
         await this.fullNodeChallenge.start();
+
+        // ROLLCALL presence proofs (validator liveness). Signs every BTC epoch and
+        // gossips the signature regardless of whether this hub can publish: the
+        // sweepers exist so a wallet-less validator still gets rolled, so signing
+        // must never be gated on a DOGE rail. Publishing needs a signer module
+        // exporting broadcast(payload) (every ROLLCALL is two-phase P2SH); without
+        // one the engine stays sign-and-gossip only and getrollcallstatus says so.
+        // The DOGE hooks are borrowed at send time via _resolveSigner, so this
+        // construction does not depend on startOracle having run.
+        this.rollcallRound = new RollcallRound(this);
+        let rcSignerHooks = loadSignerHooks();
+        if(rcSignerHooks){
+            applySignerHooks(this.rollcallRound, rcSignerHooks);
+            console.log('RollcallRound: operator signer wired (' + rcSignerHooks.source + ')');
+        }
+        await this.rollcallRound.start();
     }
 
+    getRollcallRound(){          return this.rollcallRound; }
     getFullNodeChallenge(){      return this.fullNodeChallenge; }
     getAttestationRound(){       return this.attestationRound; }
     getAttestationConsensus(){   return this.attestationConsensus; }
@@ -1794,6 +1814,7 @@ class XChainHub {
         if(this._capabilityConfigWatcher){ try { this._capabilityConfigWatcher.close(); } catch(e){} this._capabilityConfigWatcher = null; }
         if(this.governance)       await this.governance.stop();
         if(this.reorgHandler)     await this.reorgHandler.stop();
+        if(this.rollcallRound)    await this.rollcallRound.stop();
         if(this.stateAnchorPublisher) await this.stateAnchorPublisher.stop();
         if(this.retractionConsensus) this.retractionConsensus.stop();
         if(this.stateCheckpoints) await this.stateCheckpoints.stop();

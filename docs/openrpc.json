@@ -679,6 +679,17 @@
       }
     },
     {
+      "name": "getrollcallstatus",
+      "summary": "ROLLCALL presence-proof publisher status for this hub: the epoch it last worked, whether it signed, how many signatures it holds and how many are already on chain, the elected leader and this hub's rank, any txids it published, and whether its signer module can broadcast. Publisher state only: the authoritative roll-call record lives on the BTC indexer.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-auth": "x-api-key header, when HUB_API_KEY is configured"
+    },
+    {
       "name": "getoraclepublisherstatus",
       "summary": "ORACLE (PRICE v0) publisher status: queue depth, lifetime published/abandoned (dead-letter) counts, last-published round + txid, and the last-observed DOGE publisher wallet balance for runway monitoring.",
       "paramStructure": "by-name",
