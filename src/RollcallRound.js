@@ -239,6 +239,19 @@ class RollcallRound {
                          JSON.stringify(this.network) + '; the engine stays idle');
             return;
         }
+        // Do not start on a network whose activation height is the INERT
+        // placeholder. Every epoch would fail isRollcallActive and the tick would
+        // do nothing, but it would still poll the BTC indexer forever, and on a
+        // hub with no BTC indexer configured (which is every mainnet hub today,
+        // since nothing there needs one yet) each of those polls throws and logs.
+        // A feature the operator has not armed should cost nothing and say
+        // nothing, not emit a recurring warning that reads as a fault.
+        let armedAt = rca.ROLLCALL_ACTIVATION[this.network];
+        if(!Number.isFinite(armedAt)){
+            console.log('RollcallRound: inert on ' + JSON.stringify(this.network) +
+                        ' (no activation height set); the engine stays idle');
+            return;
+        }
         if(this.peerManager) this.peerManager.on('message', this._handler);
         // Both logs must be consumed BEFORE the first tick: the recovered epochs
         // gate the very round that tick reconstructs.

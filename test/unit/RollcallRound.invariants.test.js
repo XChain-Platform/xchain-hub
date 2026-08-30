@@ -168,3 +168,56 @@ describe('RollcallRound publish-tunable invariants (D88)', function () {
             missing.join(', '));
     });
 });
+
+// A network whose activation height is the INERT placeholder must cost nothing
+// at runtime, not merely decide nothing. Without this the engine starts, polls
+// its BTC indexer every 30 seconds forever, and each poll throws and logs on a
+// hub that has no BTC indexer configured, which is every mainnet hub today.
+// A recurring warning about a feature nobody armed reads as a fault.
+describe('RollcallRound stays inert where the operator has not armed it', function () {
+
+    // Constructed without going through the real hub: start() must decide from
+    // the network alone, before it touches an indexer, a peer manager or a log.
+    function engineFor(network) {
+        const eng = Object.create(RollcallRound.prototype);
+        eng.enabled = true;
+        eng.network = network;
+        eng.interval = rca.ROLLCALL_INTERVAL_BLOCKS[network];
+        eng.pollMs = 30000;
+        eng.peerManager = null;
+        eng._started = false;
+        eng._loadSignLog = () => { eng._started = true; };
+        eng._loadSpendLog = () => { eng._started = true; };
+        eng.spendGuard = { persistTo: () => { eng._started = true; } };
+        eng._tick = async () => { eng._started = true; };
+        // start() logs a summary line that reads both of these on the armed path.
+        eng._signatures = new Map();
+        eng.broadcastCapable = () => false;
+        return eng;
+    }
+
+    it('refuses to start on a network with no activation height', async function () {
+        assert.strictEqual(rca.ROLLCALL_ACTIVATION.mainnet, null,
+            'this test is about the inert placeholder; if mainnet has been armed, retarget it');
+        const eng = engineFor('mainnet');
+        const logged = [];
+        const real = console.log;
+        console.log = (...a) => { logged.push(a.join(' ')); };
+        try { await eng.start(); } finally { console.log = real; }
+        assert.strictEqual(eng._started, false,
+            'an inert network must not load logs, arm a spend guard, or tick even once');
+        assert.strictEqual(eng._timer, undefined, 'an inert network must not install a poll timer');
+        assert.ok(logged.some((l) => /inert/.test(l)), 'it must say why it is idle rather than start silently');
+    });
+
+    it('does start on the networks that are armed', async function () {
+        for (const net of ['testnet', 'regtest']) {
+            assert.ok(Number.isFinite(rca.ROLLCALL_ACTIVATION[net]), net + ' is expected to be armed');
+            const eng = engineFor(net);
+            const real = console.log;
+            console.log = () => {};
+            try { await eng.start(); } finally { console.log = real; clearInterval(eng._timer); }
+            assert.strictEqual(eng._started, true, net + ' must start: it has an activation height');
+        }
+    });
+});
