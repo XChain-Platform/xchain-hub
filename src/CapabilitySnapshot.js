@@ -24,9 +24,15 @@
  *
  * Self-test / enabled flags are NOT part of the snapshot (those are
  * local-per-hub). A validator whose self-test fails simply doesn't
- * participate in the round and gets slashed for non-participation; N
- * still includes it. This is what makes the snapshot cross-hub
- * deterministic.
+ * participate in the round; N still includes it. This is what makes
+ * the snapshot cross-hub deterministic.
+ *
+ * Nothing on-chain penalises that absence: SLASH burns on equivocation
+ * proofs only, and the hub-local suspended status is not a stake effect
+ * (no quorum read consults it). On a network where ROLLCALL is active,
+ * a source absent for K consecutive rolled epochs is evicted by
+ * deactivation (protocol/actions/rollcall.md), and N then shrinks the
+ * way it shrinks for any UNSTAKE.
  *
  ********************************************************************/
 
