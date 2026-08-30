@@ -16,7 +16,7 @@
 // RewardTracker._recordAnchorRewardLocked derives THREE frozen forms
 // (anchor_<CHAIN>, anchor_bundle, anchor_archive); the archive co-sign verifier
 // carried only two, so an anchor_bundle row fell through to the operator-tunable
-// ANCHOR_REWARD_PER_PUBLISH. anchor_bundle is the only per-anchor reward the v7
+// ANCHOR_REWARD_PER_PUBLISH. anchor_bundle is the only per-anchor reward the v0 bundle
 // rail records, so on any hub whose knob is not the frozen '10.00000000' every
 // follower refused to co-sign a correct archive and the round stalled below quorum.
 //

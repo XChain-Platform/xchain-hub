@@ -287,7 +287,7 @@ describe('StateAnchorPublisher: _findExistingCheckpointAnchor', function () {
         expect(err).to.be.an('error');
     });
 
-    // getanchoraction's CHECKPOINT_VERSIONS carries the v1/v6 ARCHIVE HEADS, which
+    // getanchoraction's CHECKPOINT_VERSIONS carries the v1 ARCHIVE HEADS, which
     // wrap a checkpoint under the SAME identity this lookup is keyed on, so an
     // unfiltered answer can be an archive head. Adopting one skips the real
     // checkpoint publish and the reward derived from it; calling it "absent" would
@@ -306,15 +306,15 @@ describe('StateAnchorPublisher: _findExistingCheckpointAnchor', function () {
         return pub;
     }
 
-    it('does NOT adopt a v6 archive head as this checkpoint\'s anchor', async function () {
-        const pub = mkPubWithVersionedIndexer({}, { exists: true, version: 6, status: 'valid', txid: 'ee'.repeat(32) });
+    it('does NOT adopt a v1 archive head as this checkpoint\'s anchor', async function () {
+        const pub = mkPubWithVersionedIndexer({}, { exists: true, version: 1, status: 'valid', txid: 'ee'.repeat(32) });
         expect(await pub._findExistingCheckpointAnchor(ROW)).to.equal(null);
-        expect(pub._asked, 'falls back to the checkpoint versions').to.deep.equal([null, 7]);
+        expect(pub._asked, 'falls back to the checkpoint versions').to.deep.equal([null, 0]);
     });
 
     it('finds a checkpoint anchor sitting BENEATH a newer archive head (no duplicate publish)', async function () {
         const pub = mkPubWithVersionedIndexer(
-            { 7: { exists: true, version: 7, status: 'valid', txid: 'ab'.repeat(32) } },
+            { 0: { exists: true, version: 0, status: 'valid', txid: 'ab'.repeat(32) } },
             { exists: true, version: 1, status: 'valid', txid: 'ee'.repeat(32) });
         const res = await pub._findExistingCheckpointAnchor(ROW);
         expect(res.exists).to.equal(true);
@@ -322,7 +322,7 @@ describe('StateAnchorPublisher: _findExistingCheckpointAnchor', function () {
     });
 
     it('keeps the single-call path when the top row is a checkpoint version', async function () {
-        const pub = mkPubWithVersionedIndexer({}, { exists: true, version: 7, status: 'valid', txid: 'cd'.repeat(32) });
+        const pub = mkPubWithVersionedIndexer({}, { exists: true, version: 0, status: 'valid', txid: 'cd'.repeat(32) });
         const res = await pub._findExistingCheckpointAnchor(ROW);
         expect(res.txid).to.equal('cd'.repeat(32));
         expect(pub._asked).to.deep.equal([null]);
@@ -332,7 +332,7 @@ describe('StateAnchorPublisher: _findExistingCheckpointAnchor', function () {
         // Such an indexer answers every narrowed lookup with the same archive head;
         // accepting it is the adoption this branch exists to stop, and calling it
         // absent would re-broadcast over an anchor that may already exist.
-        const head = { exists: true, version: 6, status: 'valid', txid: 'ee'.repeat(32) };
+        const head = { exists: true, version: 1, status: 'valid', txid: 'ee'.repeat(32) };
         const pub = mkPub();
         pub.indexers = { DOGE: { url: 'http://doge-indexer' } };
         pub._indexerCall = async () => head;
@@ -361,7 +361,7 @@ describe('StateAnchorPublisher: _findExistingCheckpointAnchor', function () {
             };
             return pub;
         }
-        const mined = (txid) => ({ exists: true, version: 7, status: 'valid', txid: txid });
+        const mined = (txid) => ({ exists: true, version: 0, status: 'valid', txid: txid });
 
         it('adopts when every section resolves to ONE mined transaction', async function () {
             const pub = mkPubByChain({ BTC: mined('ab'.repeat(32)), LTC: mined('ab'.repeat(32)) });
@@ -381,8 +381,8 @@ describe('StateAnchorPublisher: _findExistingCheckpointAnchor', function () {
         });
 
         it('does NOT adopt against a pre-upgrade indexer that serves no txid', async function () {
-            const pub = mkPubByChain({ BTC: { exists: true, version: 7, status: 'valid' },
-                                       LTC: { exists: true, version: 7, status: 'valid' } });
+            const pub = mkPubByChain({ BTC: { exists: true, version: 0, status: 'valid' },
+                                       LTC: { exists: true, version: 0, status: 'valid' } });
             expect(await pub._findExistingBundle(SECTIONS)).to.equal(null);
         });
 
@@ -395,7 +395,7 @@ describe('StateAnchorPublisher: _findExistingCheckpointAnchor', function () {
 
         it('treats a decoded-invalid section as not-this-bundle', async function () {
             const pub = mkPubByChain({ BTC: mined('ab'.repeat(32)),
-                                       LTC: { exists: true, version: 7, status: 'invalid: SECTION 1 stale', txid: 'ab'.repeat(32) } });
+                                       LTC: { exists: true, version: 0, status: 'invalid: SECTION 1 stale', txid: 'ab'.repeat(32) } });
             expect(await pub._findExistingBundle(SECTIONS)).to.equal(null);
         });
     });
@@ -404,7 +404,7 @@ describe('StateAnchorPublisher: _findExistingCheckpointAnchor', function () {
         const pub = mkPub();
         pub.indexers = { DOGE: { url: 'http://doge-indexer' } };
         pub._indexerCall = async (coin, method, params) => {
-            if (params.version === undefined) return { exists: true, version: 6, status: 'valid', txid: 'ee'.repeat(32) };
+            if (params.version === undefined) return { exists: true, version: 1, status: 'valid', txid: 'ee'.repeat(32) };
             throw new Error('ETIMEDOUT');
         };
         let err = null;

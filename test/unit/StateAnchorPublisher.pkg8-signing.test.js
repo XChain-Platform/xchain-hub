@@ -79,7 +79,7 @@ describe('StateAnchorPublisher publisher-attestation abstains on an unresolved s
         expect(r.met).to.equal(false);
     });
 
-    it('v6 archive round: an EMPTY oracle_publish set abstains instead of self-attesting', async () => {
+    it('v1 archive round: an EMPTY oracle_publish set abstains instead of self-attesting', async () => {
         let { pub } = buildPub();
         pub._resolveCapabilitySet = async () => [];
         let r = await pub._runArchiveAttestationRound(CP, 7, 'D'.repeat(34));
@@ -87,7 +87,7 @@ describe('StateAnchorPublisher publisher-attestation abstains on an unresolved s
         expect(r.sigs).to.deep.equal([]);
     });
 
-    it('v6 archive round: a genuine single-member set containing us still self-signs', async () => {
+    it('v1 archive round: a genuine single-member set containing us still self-signs', async () => {
         let { pub, identity } = buildPub();
         let me = identity.getPubkeyHex().toLowerCase();
         pub._resolveCapabilitySet = async () => [{ pubkey: me, amount: '1', source: '' }];
@@ -109,7 +109,7 @@ describe('StateAnchorPublisher publisher-attestation abstains on an unresolved s
         expect(r.sigs).to.deep.equal([]);
     });
 
-    it('v6 archive round: a THROWING resolver degrades to the legacy v1 instead of discarding the round', async () => {
+    it('v1 archive round: a THROWING resolver degrades to ATTEST_SIG_COUNT 0 instead of discarding the round', async () => {
         let { pub } = buildPub({ network: 'mainnet' });
         pub._resolveCapabilitySet = async () => { throw new Error('deterministic snapshot unavailable'); };
         let r = await pub._runArchiveAttestationRound(CP, 7, 'D'.repeat(34));

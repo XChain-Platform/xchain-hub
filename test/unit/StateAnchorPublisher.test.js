@@ -27,7 +27,7 @@ const eq                    = require('../../src/equivocation_header.js');
 const ccr                   = require('../../src/cross_chain_royalty_activation.js');
 const { waitUntil }         = require('../helpers/waitUntil');
 
-// An ANCHOR v7 section is root-bearing by construction (D8), so the base checkpoint
+// An ANCHOR v0 section is root-bearing by construction (D8), so the base checkpoint
 // row carries the two light-client roots and their version bytes; a row without them is
 // skipped by the selector and never rides a bundle.
 const CP_ROW = {
@@ -104,7 +104,7 @@ function callCanonical(c) {
     return raw;
 }
 
-// Walk an ANCHOR v7 wire and return its sections' identities. The harness needs this
+// Walk an ANCHOR v0 bundle wire and return its sections' identities. The harness needs this
 // in two places (modelling what a broadcast bundle puts on chain, and asserting section
 // order/content), and doing it positionally here is the test's independent read of the
 // field order the producer claims - not a call back into the producer.
@@ -127,7 +127,7 @@ function parseV7Sections(payload) {
     return out;
 }
 
-// The v7 publisher tail that follows the last section.
+// The v0 bundle publisher tail that follows the last section.
 function parseV7Tail(payload) {
     let f = String(payload).split('|');
     let count = Number(f[4]), i = 5;
@@ -273,8 +273,9 @@ describe('StateAnchorPublisher', function () {
     // These legacy v0/v1/v3 production tests exercise the PRE-anchor-reward-flag-day
     // producer path (still real below the flag-day on mainnet, and as the degraded-
     // federation fallback). Pin the regtest flag-day DORMANT here so the producer keeps
-    // emitting v0/v3; the nested 'publisher-attestation round (v4/v5)' suite below
-    // re-activates it. save/restore keeps the toggle isolation-safe regardless of order.
+    // emitting bundles with an empty attestation tail; the nested publisher-attestation
+    // suites below re-activate it. save/restore keeps the toggle isolation-safe regardless
+    // of order.
     let savedRegtestFlagDay, savedArchiveRegtestFlagDay;
     beforeEach(function () {
         savedRegtestFlagDay        = arMod.ANCHOR_REWARD_ACTIVATION.regtest;
@@ -437,11 +438,11 @@ describe('StateAnchorPublisher', function () {
             };
             self.pub.setBroadcastHook(async (payload) => {
                 self.published.push(payload);
-                // Model mining: a broadcast CHECKPOINT anchor (v7) becomes visible to
+                // Model mining: a broadcast CHECKPOINT anchor (v0) becomes visible to
                 // every node's getanchoraction stub (bus.onchain), one entry per SECTION,
                 // because that is the granularity getanchoraction answers at.
                 let f = String(payload).split('|');
-                if (f[0] === 'ANCHOR' && f[1] === '7') {
+                if (f[0] === 'ANCHOR' && f[1] === '0') {
                     for (let sec of parseV7Sections(payload))
                         bus.onchain.push({ chain: sec.chain, network: f[2], block_index: sec.block_index });
                 }
@@ -454,7 +455,7 @@ describe('StateAnchorPublisher', function () {
             });
             bus.nodes.push(self);
         }
-        // Stake-weighted quorum setup. The reward-attestation payloads (v4/v5/v6) can
+        // Stake-weighted quorum setup. The attestation-bearing payloads (v0/v1) can
         // only be produced at/above the anchor/archive reward flag-day, which on every
         // network activates at or above the SWQ height (mainnet 961000/963000, regtest 0),
         // so a round that emits them ALWAYS runs on the weighted quorum path - there is no
@@ -514,11 +515,11 @@ describe('StateAnchorPublisher', function () {
     async function flushAll(bus) { for (let nd of bus.nodes) await nd.pub.flush(); }
 
     // Publisher-attestation round: at/above the anchor-reward flag-day the producer
-    // emits an ANCHOR v7 whose tail carries the elected publisher + a 2f+1
+    // emits an ANCHOR v0 whose tail carries the elected publisher + a 2f+1
     // oracle_publish attestation over XANCPUB, so the indexer DERIVES the reward and the
     // forgeable hub push is retired. ONE round per BUNDLE, not one per chain. This suite
     // RE-ACTIVATES the regtest flag-day (the parent suite pins it dormant).
-    describe('publisher-attestation round (v7 bundle tail)', function () {
+    describe('publisher-attestation round (v0 bundle tail)', function () {
 
         beforeEach(function () { arMod.ANCHOR_REWARD_ACTIVATION.regtest = 0; });   // active at genesis
 
@@ -556,7 +557,7 @@ describe('StateAnchorPublisher', function () {
                 pub._archiveAttestationCanonical({ network: b.network, snapshot_block: b.snapshot_block }, 0, publisher));
         });
 
-        it('single-node: flush emits ANCHOR v7 with a self-attestation the indexer can verify', async function () {
+        it('single-node: flush emits ANCHOR v0 with a self-attestation the indexer can verify', async function () {
             // Weighted: the attested tail only appears at/above the anchor-reward flag-day,
             // which everywhere sits at/above the SWQ height, so there is no count-path block
             // for it. Keep regtest and back the round with one equal-weight source.
@@ -564,10 +565,10 @@ describe('StateAnchorPublisher', function () {
             let nd  = bus.nodes[0];
             await startAll(bus);
             await nd.pub.flush();
-            await waitUntil(() => nd.published.some(p => p.split('|')[1] === '7'), { label: 'the single-node flush to emit a v7 bundle' });
+            await waitUntil(() => nd.published.some(p => p.split('|')[1] === '0'), { label: 'the single-node flush to emit a v0 bundle' });
 
-            let v7 = nd.published.find(p => p.split('|')[1] === '7');
-            expect(v7, 'a v7 bundle was published').to.be.a('string');
+            let v7 = nd.published.find(p => p.split('|')[1] === '0');
+            expect(v7, 'a v0 bundle was published').to.be.a('string');
             let tail = parseV7Tail(v7);
             expect(tail.publisher, 'PUBLISHER').to.equal(nd.pubkey);
             expect(tail.attestCount, 'ATTEST_SIG_COUNT').to.equal(1);
@@ -627,9 +628,9 @@ describe('StateAnchorPublisher', function () {
             let nd = bus.nodes[0];
             await startAll(bus);
             await nd.pub.flush();
-            await waitUntil(() => nd.published.some(p => p.split('|')[1] === '7'), { label: 'the root-bearing flush to emit a v7 bundle' });
+            await waitUntil(() => nd.published.some(p => p.split('|')[1] === '0'), { label: 'the root-bearing flush to emit a v0 bundle' });
 
-            let v7 = nd.published.find(p => p.split('|')[1] === '7');
+            let v7 = nd.published.find(p => p.split('|')[1] === '0');
             let sec = parseV7Sections(v7)[0];
             expect(sec.state_root, 'STATE_ROOT').to.equal('aa'.repeat(32));
             expect(sec.state_root_version).to.equal('1');
@@ -646,10 +647,10 @@ describe('StateAnchorPublisher', function () {
             await startAll(bus);
             let leader = v0Order(bus)[0];                                   // rank-0 bundle publisher
             await leader.pub.flush();
-            await waitUntil(() => leader.published.some(p => p.split('|')[1] === '7'), { label: 'the rank-0 publisher to emit a v7 bundle' });
+            await waitUntil(() => leader.published.some(p => p.split('|')[1] === '0'), { label: 'the rank-0 publisher to emit a v0 bundle' });
 
-            let v7 = leader.published.find(p => p.split('|')[1] === '7');
-            expect(v7, 'rank-0 publisher emitted a v7').to.be.a('string');
+            let v7 = leader.published.find(p => p.split('|')[1] === '0');
+            expect(v7, 'rank-0 publisher emitted a v0').to.be.a('string');
             let tail = parseV7Tail(v7);
             expect(tail.publisher, 'PUBLISHER').to.equal(leader.pubkey);
             expect(tail.attestCount, '2f+1 attestation quorum').to.be.at.least(3);
@@ -674,9 +675,9 @@ describe('StateAnchorPublisher', function () {
             let leader = v0Order(bus)[0];
             await leader.pub.start();                                       // followers intentionally NOT started
             await leader.pub.flush();
-            await waitUntil(() => leader.published.some(p => p.split('|')[1] === '7'), { label: 'the timed-out attestation round to land an unattested bundle' });
+            await waitUntil(() => leader.published.some(p => p.split('|')[1] === '0'), { label: 'the timed-out attestation round to land an unattested bundle' });
 
-            let v7 = leader.published.find(p => p.split('|')[1] === '7');
+            let v7 = leader.published.find(p => p.split('|')[1] === '0');
             expect(parseV7Tail(v7).attestCount, 'degraded tail carries no attestation').to.equal(0);
             expect(leader.db.checkpoints[0].anchor_txid, 'anchor still landed').to.be.a('string');
             // Reward-parity guard: at/above the flag-day no live indexer derives a reward
@@ -746,17 +747,18 @@ describe('StateAnchorPublisher', function () {
         });
     });
 
-    // Archive publisher-attestation round (v6): at/above the archive-reward
-    // flag-day the elected archive leader emits ANCHOR v6 (the v1 archive anchor + the
-    // publisher tail) carrying a 2f+1 oracle_publish attestation over the archive XANCPUB
-    // canonical, so the indexer DERIVES the anchor_archive reward and the last
-    // key-authenticated push rail is retired. This suite RE-ACTIVATES the archive
-    // regtest flag-day only (the checkpoint side stays legacy v0, isolating the leg).
-    describe('archive publisher-attestation round (v6)', function () {
+    // Archive publisher-attestation round (the v1 publisher tail): at/above the
+    // archive-reward flag-day the elected archive leader emits ANCHOR v1 carrying a 2f+1
+    // oracle_publish attestation over the archive XANCPUB canonical, so the indexer
+    // DERIVES the anchor_archive reward and the last key-authenticated push rail is
+    // retired. The version byte no longer encodes whether the round met quorum (D4): a
+    // degraded round emits the SAME v1 with ATTEST_SIG_COUNT 0. This suite RE-ACTIVATES
+    // the archive regtest flag-day only, isolating the leg from the bundle side.
+    describe('archive publisher-attestation round (v1 publisher tail)', function () {
 
         beforeEach(function () { arMod.ARCHIVE_REWARD_ACTIVATION.regtest = 0; });   // active at genesis
 
-        // Independent reimplementation of the indexer's Anchor._rewardCanonical (FORMAT 6):
+        // Independent reimplementation of the indexer's Anchor._rewardCanonical (FORMAT 1):
         // the hub's _archiveAttestationCanonical MUST be byte-identical to this.
         function archiveRewardCanonical(cp, batchSeq, publisher) {
             let base = ['XANCPUB', 'anchor_archive', String(batchSeq),
@@ -783,17 +785,18 @@ describe('StateAnchorPublisher', function () {
             expect(pub._archiveAttestationCanonical(cp, 0, publisher)).to.equal(expected);
         });
 
-        it('single-node: flush emits ANCHOR v6 with a self-attestation the indexer can verify', async function () {
-            // Weighted: v6 only emits at/above the archive-reward flag-day (>= SWQ height),
-            // so keep regtest (flag-day active here) and self-attest one equal-weight source.
+        it('single-node: flush emits ANCHOR v1 with a self-attestation the indexer can verify', async function () {
+            // Weighted: the attestation tail only fills at/above the archive-reward flag-day
+            // (>= SWQ height), so keep regtest (flag-day active here) and self-attest one
+            // equal-weight source.
             let bus = buildMesh(1, { stakeWeighted: true });
             let nd  = bus.nodes[0];
             await startAll(bus);
             await nd.pub.flush();
-            await waitUntil(() => nd.published.some(p => p.split('|')[1] === '6'), { label: 'the single-node flush to emit a v6 archive anchor' });
+            await waitUntil(() => nd.published.some(p => p.split('|')[1] === '1'), { label: 'the single-node flush to emit a v1 archive anchor' });
 
-            let v6 = nd.published.find(p => p.split('|')[1] === '6');
-            expect(v6, 'a v6 archive anchor was published').to.be.a('string');
+            let v6 = nd.published.find(p => p.split('|')[1] === '1');
+            expect(v6, 'a v1 archive anchor was published').to.be.a('string');
             let parts = v6.split('|');
             expect(parts[11], 'MATCH_BATCH_SEQ').to.equal('0');
             expect(parts[14], 'TOTAL_CHUNKS').to.equal('1');
@@ -815,18 +818,18 @@ describe('StateAnchorPublisher', function () {
             expect(nd.rewards.filter(r => r.type === 'anchor_archive').length).to.equal(1);
         });
 
-        it('N=4: the elected archive leader collects a 2f+1 archive attestation quorum and emits v6', async function () {
-            // v6 requires the archive-reward flag-day active (>= SWQ height everywhere), so
+        it('N=4: the elected archive leader collects a 2f+1 archive attestation quorum and emits v1', async function () {
+            // The tail requires the archive-reward flag-day active (>= SWQ height everywhere), so
             // the archive signing + attestation rounds run weighted; equal source-weights make
             // the 2/3-stake bar coincide with 2f+1 (3-of-4), keeping the assertions unchanged.
             let bus = buildMesh(4, { btcBlock: 100, stakeWeighted: true });
             await startAll(bus);
             for (let nd of bus.nodes) await nd.pub.flush();
-            await waitUntil(() => bus.nodes.some(nd => nd.published.some(p => p.split('|')[1] === '6')), { label: 'the elected archive leader to emit a v6' });
+            await waitUntil(() => bus.nodes.some(nd => nd.published.some(p => p.split('|')[1] === '1')), { label: 'the elected archive leader to emit a v1' });
 
-            let leader = bus.nodes.find(nd => nd.published.some(p => p.split('|')[1] === '6'));
-            expect(leader, 'an elected leader emitted a v6').to.exist;
-            let parts = leader.published.find(p => p.split('|')[1] === '6').split('|');
+            let leader = bus.nodes.find(nd => nd.published.some(p => p.split('|')[1] === '1'));
+            expect(leader, 'an elected leader emitted a v1').to.exist;
+            let parts = leader.published.find(p => p.split('|')[1] === '1').split('|');
             let sigCount = Number(parts[16]);
             let pubBase  = 17 + 2 * sigCount;
             expect(parts[pubBase], 'PUBLISHER is the leader').to.equal(leader.pubkey);
@@ -846,16 +849,18 @@ describe('StateAnchorPublisher', function () {
             expect(signers).to.include(leader.pubkey);
         });
 
-        it('liveness fallback: a leader that cannot reach attestation quorum emits legacy v1 and withholds the reward', async function () {
+        it('liveness fallback: a degraded round still emits v1, with an EMPTY attestation list', async function () {
             // Degraded federation: the elected archive leader is the ONLY started node
             // in a 4-member snapshot, so no peer co-signs the archive XANCPUB. The
-            // bounded round times out, the leader FALLS BACK to a legacy v1 (the archive
-            // must always land), and the anchor_archive reward is withheld: at/above the
-            // flag-day no live indexer derives a reward from a v1, so recording one would
+            // bounded round times out and the leader emits the SAME v1 wire with
+            // ATTEST_SIG_COUNT 0 (D4) rather than a second, tail-less shape: one archive
+            // head version, one parser branch, and the count field carries the degradation.
+            // The anchor_archive reward is still withheld, because at/above the flag-day
+            // no live indexer derives a reward from a count-0 tail, so recording one would
             // strand it in hub/archive bookkeeping and fork a recovered ledger.
-            // Weighted (v6 needs the archive-reward flag-day, >= SWQ height): the archive
-            // SIGNING round must still reach the stake-weighted quorum so a head publishes,
-            // while the severed attestation round times out into the legacy v1 fallback.
+            // Weighted (the tail needs the archive-reward flag-day, >= SWQ height): the
+            // archive SIGNING round must still reach the stake-weighted quorum so a head
+            // publishes, while the severed attestation round times out.
             let bus = buildMesh(4, { btcBlock: 100, stakeWeighted: true, cfg: { ANCHOR_ROUND_TIMEOUT_MS: '40' } });
             await startAll(bus);
             // Sever ONLY the archive-attestation gossip: the archive SIGNING round must
@@ -866,22 +871,59 @@ describe('StateAnchorPublisher', function () {
                 nd.handler = (env) => { if (String(env.type).startsWith('XANCARCHPUB')) return; orig(env); };
             }
             for (let nd of bus.nodes) await nd.pub.flush();
-            await waitUntil(() => bus.nodes.some(nd => nd.published.some(p => ['1', '6'].includes(p.split('|')[1]))), { label: 'an archive head to be published' });
+            await waitUntil(() => bus.nodes.some(nd => nd.published.some(p => p.split('|')[1] === '1')), { label: 'an archive head to be published' });
 
-            let archiveHeads = bus.nodes.flatMap(nd => nd.published.filter(p => ['1', '6'].includes(p.split('|')[1])));
+            let archiveHeads = bus.nodes.flatMap(nd => nd.published.filter(p => p.split('|')[1] === '1'));
             expect(archiveHeads.length, 'an archive head was still published').to.be.at.least(1);
-            expect(archiveHeads.every(p => p.split('|')[1] === '1'), 'fell back to legacy v1, no v6').to.be.true;
             let leader = bus.nodes.find(nd => nd.published.some(p => p.split('|')[1] === '1'));
+            // NOTHING but the count degrades: the publisher tail is still on the wire, so
+            // the indexer parses the same v1 layout on the degraded and the attested round.
+            for (let head of archiveHeads) {
+                let parts    = head.split('|');
+                let sigCount = Number(parts[16]);                       // wrapper SIG_COUNT
+                let pubBase  = 17 + 2 * sigCount;
+                expect(parts[pubBase], 'PUBLISHER is still appended on a degraded round')
+                    .to.match(/^[0-9a-f]{64}$/);
+                expect(parts[pubBase + 1], 'ATTEST_SIG_COUNT is the literal 0').to.equal('0');
+                expect(parts.length, 'no (APUBKEY,ASIG) pair follows a count of 0')
+                    .to.equal(pubBase + 2);
+            }
             expect(leader.rewards.filter(r => r.type === 'anchor_archive').length,
-                'no anchor_archive reward on a degraded legacy fallback').to.equal(0);
+                'no anchor_archive reward on a count-0 tail').to.equal(0);
+        });
+
+        it('below the archive-reward flag-day the tail is still appended, with count 0', async function () {
+            // The other way into an empty attestation list: no round runs at all. The wire
+            // shape must not fork on the flag-day either, or an indexer at a pre-flag-day
+            // height would need a second parser branch for a tail-less v1 (which is exactly
+            // the legacy shape this spec deleted).
+            // Mainnet at the fixture's snapshot_block 100 is far below
+            // ARCHIVE_REWARD_ACTIVATION.mainnet (963000), so no attestation round runs at
+            // all. It is also below the 961000 SWQ activation, which is the count-path
+            // archive setup the single-node round-trip case already proves out.
+            let bus = buildMesh(1, { network: 'mainnet' });
+            let nd  = bus.nodes[0];
+            await startAll(bus);
+            await nd.pub.flush();
+            await waitUntil(() => nd.published.some(p => p.split('|')[1] === '1'), { label: 'the pre-flag-day archive head' });
+
+            let parts    = nd.published.find(p => p.split('|')[1] === '1').split('|');
+            let sigCount = Number(parts[16]);
+            let pubBase  = 17 + 2 * sigCount;
+            expect(parts[1], 'still a v1, not a second tail-less wire').to.equal('1');
+            expect(parts[pubBase], 'PUBLISHER').to.equal(nd.pubkey);
+            expect(parts[pubBase + 1], 'ATTEST_SIG_COUNT').to.equal('0');
+            expect(parts.length, 'the wire ends at the count').to.equal(pubBase + 2);
+            // Below the flag-day the push rail is NOT retired, so the reward is recorded.
+            expect(nd.rewards.filter(r => r.type === 'anchor_archive').length).to.equal(1);
         });
     });
 
-    it('v7 payload matches the ANCHOR spec field order', function () {
+    it('v0 bundle payload matches the ANCHOR spec field order', function () {
         let bus = buildMesh(1);
         let row = Object.assign({}, CP_ROW, { validator_signatures: '[{"pubkey":"pk1","sig":"sg1"}]' });
         let payload = bus.nodes[0].pub._buildV7Payload([row], 'pub1', [{ pubkey: 'ap1', sig: 'as1' }]);
-        expect(payload).to.equal(['ANCHOR', '7', 'regtest', '100', '1',
+        expect(payload).to.equal(['ANCHOR', '0', 'regtest', '100', '1',
             'BTC', '494', CP_ROW.block_hash, CP_ROW.ledger_hash, CP_ROW.actions_hash, CP_ROW.contract_hash,
             '7', '100', CP_ROW.state_root, '1', CP_ROW.block_merkle_root, '1',
             '1', 'pk1', 'sg1',
@@ -890,7 +932,7 @@ describe('StateAnchorPublisher', function () {
 
     // Frozen wire-byte golden vectors: the PRODUCER half of the hub<->indexer ANCHOR
     // byte-identity contract. The field-order test above hand-asserts one shape; this
-    // pins the full v7 wire bytes against a vendored fixture that the indexer parser
+    // pins the full v0 wire bytes against a vendored fixture that the indexer parser
     // asserts the OTHER half of (xchain-indexer test/unit/actions/anchor-golden-vectors.test.js,
     // same anchor_canonical_vectors.json). A field reorder in either repo breaks its own
     // side against the shared frozen string. The builder is invoked via the prototype
@@ -906,8 +948,8 @@ describe('StateAnchorPublisher', function () {
         const att = GOLDEN.fixture.bundle.attest_sigs;
         const build = (secs) => StateAnchorPublisher.prototype._buildV7Payload.call(stub, secs, pub, att);
 
-        it('v7 builder reproduces the frozen vector byte-for-byte', function () {
-            expect(build(sections)).to.equal(GOLDEN.vectors.v7);
+        it('v0 builder reproduces the frozen vector byte-for-byte', function () {
+            expect(build(sections)).to.equal(GOLDEN.vectors.v0);
         });
 
         // The fixture lists its sections LTC, BTC, DOGE and one signature list b,a on
@@ -921,7 +963,7 @@ describe('StateAnchorPublisher', function () {
                 .to.deep.equal(['LTC', 'BTC', 'DOGE']);
             expect(parseV7Sections(build(sections)).map(x => x.chain)).to.deep.equal(['BTC', 'DOGE', 'LTC']);
             // Reversing the input cannot change one byte.
-            expect(build(sections.slice().reverse())).to.equal(GOLDEN.vectors.v7);
+            expect(build(sections.slice().reverse())).to.equal(GOLDEN.vectors.v0);
         });
 
         it('orders (PUBKEY, SIG) pairs by PUBKEY ascending within every section', function () {
@@ -945,18 +987,18 @@ describe('StateAnchorPublisher', function () {
         });
     });
 
-    it('single-node: flush publishes v7 + v1, archive round-trips, batch back-filled', async function () {
+    it('single-node: flush publishes v0 + v1, archive round-trips, batch back-filled', async function () {
         // Count-path archive mechanics: a mainnet record below the 961000 SWQ activation
         // takes the legacy count snapshot the getSnapshot stub serves (weighted has its own suite).
         let bus = buildMesh(1, { network: 'mainnet' });
         let nd = bus.nodes[0];
         await startAll(bus);
         await nd.pub.flush();
-        await waitUntil(() => nd.published.length >= 2, { label: 'the v7 bundle and v1 archive to both be broadcast' });
+        await waitUntil(() => nd.published.length >= 2, { label: 'the v0 bundle and v1 archive to both be broadcast' });
 
-        expect(nd.published.length).to.equal(2);                       // v7 bundle + v1 archive
+        expect(nd.published.length).to.equal(2);                       // v0 bundle + v1 archive
         let v7 = nd.published[0].split('|');
-        expect(v7[1]).to.equal('7');
+        expect(v7[1]).to.equal('0');
         expect(nd.db.checkpoints[0].anchor_txid).to.equal('txid1');
 
         let v1 = nd.published[1].split('|');
@@ -993,7 +1035,7 @@ describe('StateAnchorPublisher', function () {
         // the anchor_archive reward for an anchor that never landed on-chain.
         let bus = buildMesh(1, { network: 'mainnet' });   // count-path archive mechanics (SWQ off below 961000)
         let nd = bus.nodes[0];
-        // The v7 bundle still gets a txid; only the v1 archive broadcast returns none.
+        // The v0 bundle still gets a txid; only the v1 archive broadcast returns none.
         nd.pub.setBroadcastHook(async (payload) => {
             nd.published.push(payload);
             let isArchiveV1 = payload.split('|')[1] === '1';
@@ -1001,9 +1043,9 @@ describe('StateAnchorPublisher', function () {
         });
         await startAll(bus);
         await nd.pub.flush();
-        await waitUntil(() => nd.published.length >= 2, { label: 'the v7 bundle and the txid-less v1 archive to both be attempted' });
+        await waitUntil(() => nd.published.length >= 2, { label: 'the v0 bundle and the txid-less v1 archive to both be attempted' });
 
-        expect(nd.published.length).to.equal(2);                       // v7 + v1 both attempted
+        expect(nd.published.length).to.equal(2);                       // v0 + v1 both attempted
         expect(nd.published[1].split('|')[1]).to.equal('1');           // the archive v1
         // Row stays eligible: archived_status is the __partial__ sentinel (!= status),
         // so the next flush re-archives it under a fresh batch seq instead of leaving a hole.
@@ -1036,8 +1078,8 @@ describe('StateAnchorPublisher', function () {
         await nd.pub.flush();
         await waitUntil(() => nd.db.checkpoints.some(r => r.checkpoint_seq === 970013 && r.anchor_txid), { label: 'the latest eligible ordinal to be anchored' });
 
-        let bundles = nd.published.filter(p => p.split('|')[1] === '7');
-        expect(bundles.length, 'exactly one v7 bundle').to.equal(1);
+        let bundles = nd.published.filter(p => p.split('|')[1] === '0');
+        expect(bundles.length, 'exactly one v0 bundle').to.equal(1);
         let secs = parseV7Sections(bundles[0]);
         expect(secs.length, 'one section: only the latest eligible ordinal is eligible').to.equal(1);
         expect(secs[0].block_index, 'block_index of anchored row').to.equal(495);   // seq 970013
@@ -1086,7 +1128,7 @@ describe('StateAnchorPublisher', function () {
         await waitUntil(() => bus.nodes.every(nd => nd.db.checkpoints[0].anchor_txid) && bus.nodes.some(nd => nd.published.some(p => p.split('|')[1] === '1')), { label: 'the v0 back-fill to reach every hub and the archive to publish' });
 
         // Exactly one v0, published by the hash-order rank-0 node for that row's key.
-        let v0s = bus.nodes.flatMap(nd => nd.published.filter(p => p.split('|')[1] === '7').map(() => nd));
+        let v0s = bus.nodes.flatMap(nd => nd.published.filter(p => p.split('|')[1] === '0').map(() => nd));
         expect(v0s.length).to.equal(1);
         expect(v0s[0]).to.equal(v0Pub);
         // XANC_BUNDLE_DONE back-fills every peer's rows, so no other hub re-anchors.
@@ -1136,9 +1178,9 @@ describe('StateAnchorPublisher', function () {
                 chain: chain, anchor_txid: chain === 'LTC' ? 'already-anchored' : null }));
         await startAll(bus);
         await nd.pub.flush();
-        await waitUntil(() => nd.published.some(p => p.split('|')[1] === '7'), { label: 'the short bundle to be published' });
+        await waitUntil(() => nd.published.some(p => p.split('|')[1] === '0'), { label: 'the short bundle to be published' });
 
-        let bundle = nd.published.find(p => p.split('|')[1] === '7');
+        let bundle = nd.published.find(p => p.split('|')[1] === '0');
         expect(bundle.split('|')[4], 'SECTION_COUNT').to.equal('2');
         expect(parseV7Sections(bundle).map(x => x.chain), 'LTC is absent, the cycle still anchors')
             .to.deep.equal(['BTC', 'DOGE']);
@@ -1156,9 +1198,9 @@ describe('StateAnchorPublisher', function () {
             state_root: null, state_root_version: null, block_merkle_root: null, block_merkle_version: null }));
         await startAll(bus);
         await nd.pub.flush();
-        await waitUntil(() => nd.published.some(p => p.split('|')[1] === '7'), { label: 'the root-bearing section to be published' });
+        await waitUntil(() => nd.published.some(p => p.split('|')[1] === '0'), { label: 'the root-bearing section to be published' });
 
-        expect(parseV7Sections(nd.published.find(p => p.split('|')[1] === '7')).map(x => x.chain))
+        expect(parseV7Sections(nd.published.find(p => p.split('|')[1] === '0')).map(x => x.chain))
             .to.deep.equal(['BTC']);
         expect(nd.db.checkpoints.find(c => c.chain === 'LTC').anchor_txid, 'the rootless row stays pending').to.equal(null);
     });
@@ -1319,7 +1361,7 @@ describe('StateAnchorPublisher', function () {
         await nd.pub.flush();
         // Nothing to poll on the negative claim, so gate it on the round it belongs to:
         // the v0 checkpoint anchor still goes out, and the archive must not follow it.
-        await waitUntil(() => nd.published.some(p => p.split('|')[1] === '7'), { label: 'the v0 checkpoint anchor to be broadcast' });
+        await waitUntil(() => nd.published.some(p => p.split('|')[1] === '0'), { label: 'the v0 checkpoint anchor to be broadcast' });
 
         expect(nd.published.find(p => p.split('|')[1] === '1'), 'no v1 archive published').to.equal(undefined);
         expect(nd.db.rewardRows[0].batch_seq, 'reward stays pending').to.equal(null);
@@ -1391,16 +1433,16 @@ describe('StateAnchorPublisher', function () {
 
         await order[2].pub.flush();                                    // rank 2: still locked
         await order[3].pub.flush();                                    // rank 3: still locked
-        expect(bus.nodes.flatMap(nd => nd.published).filter(p => p.split('|')[1] === '7').length).to.equal(0);
+        expect(bus.nodes.flatMap(nd => nd.published).filter(p => p.split('|')[1] === '0').length).to.equal(0);
 
         await order[1].pub.flush();                                    // rank 1: unlocked (rank 0 absent)
-        await waitUntil(() => bus.nodes.some(nd => nd.published.some(p => p.split('|')[1] === '7')), { label: 'the unlocked rank-1 publisher to emit the v0 anchor' });
-        let v0s = bus.nodes.filter(nd => nd.published.some(p => p.split('|')[1] === '7'));
+        await waitUntil(() => bus.nodes.some(nd => nd.published.some(p => p.split('|')[1] === '0')), { label: 'the unlocked rank-1 publisher to emit the v0 anchor' });
+        let v0s = bus.nodes.filter(nd => nd.published.some(p => p.split('|')[1] === '0'));
         expect(v0s.length).to.equal(1);
         expect(v0s[0]).to.equal(order[1]);
         // Back-fill reached rank 0 too - it won't double-publish when it returns.
         await order[0].pub.flush();
-        expect(bus.nodes.flatMap(nd => nd.published).filter(p => p.split('|')[1] === '7').length).to.equal(1);
+        expect(bus.nodes.flatMap(nd => nd.published).filter(p => p.split('|')[1] === '0').length).to.equal(1);
     });
 
     it('archive failover ladder: a non-leader publishes once its rank unlocks, with full co-sign quorum', async function () {
@@ -1431,7 +1473,7 @@ describe('StateAnchorPublisher', function () {
     });
 
     it('every chain rides ONE bundle under ONE election, not one anchor per chain', async function () {
-        // The whole point of v7. Three pending checkpoints, one per chain, all at the
+        // The whole point of the bundle. Three pending checkpoints, one per chain, all at the
         // same block: exactly one hub publishes exactly one transaction carrying three
         // sections, and exactly one anchor_bundle reward is earned. The retired per-row
         // election could hand these to three different publishers and three DOGE fees.
@@ -1445,13 +1487,13 @@ describe('StateAnchorPublisher', function () {
         await flushAll(bus);
         await waitUntil(() => bus.nodes.every(nd => nd.db.checkpoints.every(c => c.anchor_txid)), { label: 'every chain to be anchored on every hub' });
 
-        let bundles = bus.nodes.flatMap(nd => nd.published.filter(p => p.split('|')[1] === '7'));
+        let bundles = bus.nodes.flatMap(nd => nd.published.filter(p => p.split('|')[1] === '0'));
         expect(bundles.length, 'ONE transaction for the whole cycle').to.equal(1);
         expect(parseV7Sections(bundles[0]).map(x => x.chain), 'three sections, chain-ascending')
             .to.deep.equal(['BTC', 'DOGE', 'LTC']);
 
         let expectedPublisher = v0Order(bus)[0];
-        let publishers = bus.nodes.filter(nd => nd.published.some(p => p.split('|')[1] === '7'));
+        let publishers = bus.nodes.filter(nd => nd.published.some(p => p.split('|')[1] === '0'));
         expect(publishers.length, 'one elected publisher for the bundle').to.equal(1);
         expect(publishers[0]).to.equal(expectedPublisher);
         expect(publishers[0].rewards.filter(r => r.type === 'anchor_bundle' && r.round === 100).length,
@@ -1679,7 +1721,7 @@ describe('StateAnchorPublisher', function () {
         let nd = bus.nodes[0];
         let v0Failures = 0, failuresLeft = 2;
         nd.pub.setBroadcastHook(async (payload) => {
-            if (payload.split('|')[1] === '7' && failuresLeft > 0) {
+            if (payload.split('|')[1] === '0' && failuresLeft > 0) {
                 failuresLeft--; v0Failures++;
                 throw new Error('Encoder RPC error: 258: txn-mempool-conflict');
             }
@@ -2014,7 +2056,7 @@ describe('StateAnchorPublisher', function () {
         // ARCHIVE_REWARD_ACTIVATION[''] is undefined so isArchiveRewardActive('') is
         // false and the OLD code failed to retire the mirror even for a checkpoint
         // whose OWN network is at/above the archive flag-day, push-mirroring a reward
-        // the indexer independently derives from v6 (a COLLECT-spendable double-credit).
+        // the indexer independently derives from the v1 tail (a COLLECT-spendable double-credit).
         // The fix reads the checkpoint's network from the stashed identity, so the
         // mirror correctly retires. Here the checkpoint is regtest AT the flag-day
         // while the hub is unscoped.
@@ -2501,7 +2543,11 @@ describe('StateAnchorPublisher', function () {
         }
         let matching = {
             block_hash: CP_ROW.block_hash, ledger_hash: CP_ROW.ledger_hash,
-            actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash
+            actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash,
+            // A v0 BUNDLE section is root-bearing by construction, and _verifyAnchorOnChain
+            // byte-matches the two light-client roots on exactly that version, so an honest
+            // indexer answer carries them.
+            state_root: CP_ROW.state_root, block_merkle_root: CP_ROW.block_merkle_root
         };
 
         it('ACCEPTS when the DOGE indexer confirms the anchor at depth with matching hashes', async function () {
@@ -2595,6 +2641,39 @@ describe('StateAnchorPublisher', function () {
             await receiver.pub._handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
             expect(receiver.db.checkpoints[0].anchor_txid, 'decoded-invalid anchor must not stamp').to.equal(null);
             expect(receiver.rewards.length, 'decoded-invalid anchor must not mirror a reward').to.equal(0);
+        });
+
+        // The four core hashes ride every checkpoint version, but the two light-client
+        // ROOTS are compared only on the root-bearing wire, which the version restart
+        // moved from v7 to v0. Nothing else in the suite drives that branch: every other
+        // honest stub agrees on the roots, so pointing the gate at a version the hub can
+        // no longer emit would leave a real forge undetected while every suite stayed
+        // green. A v0 whose STATE_ROOT diverges is exactly that forge: the four core
+        // hashes still match (the announcement wraps our checkpoint), and the rows would
+        // be stamped fleet-wide against a bundle committing to a different SPV root.
+        it('REJECTS a v0 whose light-client ROOTS diverge, though the core hashes match', async function () {
+            let bus = buildMesh(3);
+            let { publisher, receiver, d } = electedBundleDone(bus, 'ba'.repeat(32));
+            receiver.pub._indexerCall = async (coin, method, params) => Object.assign(
+                {}, matching,
+                { exists: true, checkpoint_anchored: true, status: 'valid', version: 0,
+                  confirmations: 60, txid: params.txid,
+                  state_root: '1f'.repeat(32) });                // diverges from CP_ROW.state_root
+            await receiver.pub._handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
+            expect(receiver.db.checkpoints[0].anchor_txid, 'a root-mismatched v0 must not stamp').to.equal(null);
+            expect(receiver.rewards.length, 'a root-mismatched v0 must not mirror a reward').to.equal(0);
+        });
+
+        it('REJECTS a v0 whose BLOCK_MERKLE root diverges (both roots are bound, not just the first)', async function () {
+            let bus = buildMesh(3);
+            let { publisher, receiver, d } = electedBundleDone(bus, 'bb'.repeat(32));
+            receiver.pub._indexerCall = async (coin, method, params) => Object.assign(
+                {}, matching,
+                { exists: true, checkpoint_anchored: true, status: 'valid', version: 0,
+                  confirmations: 60, txid: params.txid,
+                  block_merkle_root: '2f'.repeat(32) });
+            await receiver.pub._handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: publisher.pubkey, data: d });
+            expect(receiver.db.checkpoints[0].anchor_txid, 'a merkle-root-mismatched v0 must not stamp').to.equal(null);
         });
 
         it('REJECTS when the on-chain payload hashes do NOT byte-match our checkpoint', async function () {
@@ -2996,7 +3075,7 @@ describe('StateAnchorPublisher reward attestation confirm-then-write (#4456)', f
         return Object.assign({
             chain: CP_ROW.chain, network: CP_ROW.network,
             blockIndex: CP_ROW.block_index, checkpointSeq: CP_ROW.checkpoint_seq,
-            txid: TXID, anchorVersion: 7,
+            txid: TXID, anchorVersion: 0,
             rewardType: 'anchor_bundle', roundReference: CP_ROW.snapshot_block,
             snapshotBlock: CP_ROW.snapshot_block,
             publisher: 'ab'.repeat(32), attestSigs: ATTEST
@@ -3004,11 +3083,11 @@ describe('StateAnchorPublisher reward attestation confirm-then-write (#4456)', f
     }
 
     const onChain = (over) => Object.assign({
-        exists: true, checkpoint_anchored: true, status: 'valid', version: 7,
+        exists: true, checkpoint_anchored: true, status: 'valid', version: 0,
         confirmations: 60, txid: TXID,
         block_hash: CP_ROW.block_hash, ledger_hash: CP_ROW.ledger_hash,
         actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash,
-        // A v7 is root-bearing, so _verifyAnchorOnChain byte-matches the roots too.
+        // A v0 bundle is root-bearing, so _verifyAnchorOnChain byte-matches the roots too.
         state_root: CP_ROW.state_root, block_merkle_root: CP_ROW.block_merkle_root
     }, over || {});
 
@@ -3070,13 +3149,13 @@ describe('StateAnchorPublisher reward attestation confirm-then-write (#4456)', f
         expect(inserts(queries).length).to.equal(0);
     });
 
-    it('drops on a decided content rejection (a v0 fallback landed, not the attested v4)', async function () {
+    it('drops on a decided content rejection (a v1 archive head landed, not the attested v0 bundle)', async function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries } = makeRewardPub();
         pub._deferRewardAttestation(entry());
-        pub._indexerCall = async () => onChain({ version: 0 });
+        pub._indexerCall = async () => onChain({ version: 1 });
         await pub._drainDeferredRewardAttest();
-        expect(inserts(queries).length, 'a legacy v0 anchor derives no reward').to.equal(0);
+        expect(inserts(queries).length, 'an archive head cannot prove a bundle reward').to.equal(0);
         expect(pub._deferredRewardAttest.size, 'terminal verdict clears the entry').to.equal(0);
     });
 
@@ -3092,18 +3171,18 @@ describe('StateAnchorPublisher reward attestation confirm-then-write (#4456)', f
         expect(pub._deferredRewardAttest.size).to.equal(0);
     });
 
-    it('binds version 6 for the archive leg, so a legacy v1 head derives nothing', async function () {
+    it('binds version 1 for the archive leg, so a v0 bundle head derives nothing', async function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const { pub, queries } = makeRewardPub();
-        const archive = () => entry({ anchorVersion: 6, rewardType: 'anchor_archive', roundReference: 42 });
+        const archive = () => entry({ anchorVersion: 1, rewardType: 'anchor_archive', roundReference: 42 });
+        pub._deferRewardAttestation(archive());
+        pub._indexerCall = async () => onChain({ version: 0 });
+        await pub._drainDeferredRewardAttest();
+        expect(inserts(queries).length, 'a v0 checkpoint bundle cannot prove an archive reward').to.equal(0);
         pub._deferRewardAttestation(archive());
         pub._indexerCall = async () => onChain({ version: 1 });
         await pub._drainDeferredRewardAttest();
-        expect(inserts(queries).length, 'a degraded v1 archive head derives no reward').to.equal(0);
-        pub._deferRewardAttestation(archive());
-        pub._indexerCall = async () => onChain({ version: 6 });
-        await pub._drainDeferredRewardAttest();
-        expect(inserts(queries).length, 'the attested v6 head does').to.equal(1);
+        expect(inserts(queries).length, 'the v1 archive head does').to.equal(1);
     });
 
     it('is bounded: a flood evicts the OLDEST entry and never writes one', function () {
@@ -3157,7 +3236,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
         return { pub, queries, broadcast, sent, set };
     }
 
-    // A signed XANCREWARD payload for the BUNDLE (v7) reward on CP_ROW, attested by
+    // A signed XANCREWARD payload for the BUNDLE (v0) reward on CP_ROW, attested by
     // `signers` (ValidatorIdentity instances) and relayed by `sender`. `chain` on this
     // wire is the checkpoint IDENTITY the mined-anchor proof re-runs against; the row it
     // eventually writes carries 'DOGE' (D21).
@@ -3167,7 +3246,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
             chain: CP_ROW.chain, network: CP_ROW.network,
             reward_type: 'anchor_bundle', round_reference: CP_ROW.snapshot_block,
             snapshot_block: CP_ROW.snapshot_block, publisher: publisher,
-            doge_anchor_txid: TXID, anchor_version: 7,
+            doge_anchor_txid: TXID, anchor_version: 0,
             block_index: CP_ROW.block_index, checkpoint_seq: CP_ROW.checkpoint_seq
         }, over || {});
         const canonical = (d.reward_type === 'anchor_archive')
@@ -3182,11 +3261,11 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
     }
 
     const onChain = (over) => Object.assign({
-        exists: true, checkpoint_anchored: true, status: 'valid', version: 7,
+        exists: true, checkpoint_anchored: true, status: 'valid', version: 0,
         confirmations: 60, txid: TXID,
         block_hash: CP_ROW.block_hash, ledger_hash: CP_ROW.ledger_hash,
         actions_hash: CP_ROW.actions_hash, contract_hash: CP_ROW.contract_hash,
-        // A v7 is root-bearing, so _verifyAnchorOnChain byte-matches the roots too.
+        // A v0 bundle is root-bearing, so _verifyAnchorOnChain byte-matches the roots too.
         state_root: CP_ROW.state_root, block_merkle_root: CP_ROW.block_merkle_root
     }, over || {});
 
@@ -3201,7 +3280,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
         pub._deferRewardAttestation({
             chain: CP_ROW.chain, network: CP_ROW.network,
             blockIndex: CP_ROW.block_index, checkpointSeq: CP_ROW.checkpoint_seq,
-            txid: TXID, anchorVersion: 7,
+            txid: TXID, anchorVersion: 0,
             rewardType: 'anchor_bundle', roundReference: CP_ROW.snapshot_block,
             snapshotBlock: CP_ROW.snapshot_block, publisher: me,
             attestSigs: [{ pubkey: me, sig: 'ef'.repeat(64) }],
@@ -3225,7 +3304,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
         pub._deferRewardAttestation({
             chain: CP_ROW.chain, network: CP_ROW.network,
             blockIndex: CP_ROW.block_index, checkpointSeq: CP_ROW.checkpoint_seq,
-            txid: TXID, anchorVersion: 7,
+            txid: TXID, anchorVersion: 0,
             rewardType: 'anchor_bundle', roundReference: CP_ROW.snapshot_block,
             snapshotBlock: CP_ROW.snapshot_block, publisher: me,
             attestSigs: [{ pubkey: me, sig: 'ef'.repeat(64) }]
@@ -3332,7 +3411,7 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
     });
 
     // reward_type and anchor_version were validated INDEPENDENTLY, so a cross-paired
-    // tuple got in: v6 is the archive leg and v7 the checkpoint-bundle leg, and the BTC
+    // tuple got in: v1 is the archive leg and v0 the checkpoint-bundle leg, and the BTC
     // derive path (indexer anchor_proof_client._judge) enforces that pairing forever.
     // A cross-paired row passes the drain's byte-match (an archive head wraps the same
     // checkpoint, so the four core hashes agree) and lands permanently in an
@@ -3341,8 +3420,8 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
         sinon.stub(arMod, 'isAnchorRewardDeriveActive').returns(true);
         const relayer = new ValidatorIdentity(ValidatorIdentity.generate().privkeyHex);
         const { pub } = makeReceiver([relayer.getPubkeyHex().toLowerCase()]);
-        for (const over of [{ anchor_version: 6 },                                  // bundle leg on an archive version
-                            { reward_type: 'anchor_archive', anchor_version: 7 }]) {  // archive leg on the bundle version
+        for (const over of [{ anchor_version: 1 },                                  // bundle leg on an archive version
+                            { reward_type: 'anchor_archive', anchor_version: 0 }]) {  // archive leg on the bundle version
             await pub._handleRewardAttestation({ data: payloadFrom(pub, relayer, [relayer], over) });
             expect(pub._deferredRewardAttest.size, JSON.stringify(over)).to.equal(0);
         }
@@ -3359,8 +3438,8 @@ describe('StateAnchorPublisher XANCREWARD federation (#4170)', function () {
         const { pub } = makeReceiver([]);
         const d = { chain: 'BTC', network: 'regtest', reward_type: 'anchor_bundle', round_reference: 100,
                     snapshot_block: 100, publisher: 'ab'.repeat(32), doge_anchor_txid: TXID,
-                    anchor_version: 7, block_index: 494, checkpoint_seq: 7 };
+                    anchor_version: 0, block_index: 494, checkpoint_seq: 7 };
         expect(pub._rewardFederationCanonical(d)).to.equal(
-            'XANCREWARD|BTC|regtest|anchor_bundle|100|100|' + 'ab'.repeat(32) + '|' + TXID + '|7|494|7');
+            'XANCREWARD|BTC|regtest|anchor_bundle|100|100|' + 'ab'.repeat(32) + '|' + TXID + '|0|494|7');
     });
 });

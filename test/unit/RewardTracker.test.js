@@ -252,7 +252,7 @@ describe('RewardTracker', function () {
     describe('the reward push rail is retired', function () {
         // The hub no longer POSTs any reward to the BTC indexer. Every anchor reward is
         // derived on-chain by each indexer (per-chain from the ANCHOR v4/v5 publisher
-        // attestation, archive from v6), and both flag-days are behind mainnet and sit at
+        // attestation, archive from the v1 tail), and both flag-days are behind mainnet and sit at
         // 0 on testnet and regtest, so the indexer refused every push on every live
         // network. What survives here is the AMOUNT rule, which is a separate question:
         // a derived reward must record the frozen consensus constant so the hub's
@@ -352,7 +352,7 @@ describe('RewardTracker', function () {
 
         it('records the FROZEN anchor amount for a derived anchor_bundle reward, ignoring an env override', async function () {
             // One bundle, one reward: the indexer credits ANCHOR_REWARD_AMOUNT from the
-            // on-chain v7 tail, so the hub-recorded amount must be the same frozen constant.
+            // on-chain v0 tail, so the hub-recorded amount must be the same frozen constant.
             let h = createMockHub({ p2pConfig: { ANCHOR_REWARD_PER_PUBLISH: '2.5' } });
             h.network = 'regtest';
             let rt2 = new RewardTracker(h);
@@ -365,7 +365,7 @@ describe('RewardTracker', function () {
 
         it('records the FROZEN archive amount for a derived anchor_archive reward, ignoring an env override', async function () {
             // Same divergence argument as the per-chain frozen amount: the indexer credits
-            // the frozen ARCHIVE_REWARD_AMOUNT from the on-chain v6, so the hub's recorded
+            // the frozen ARCHIVE_REWARD_AMOUNT from the on-chain v1, so the hub's recorded
             // (and therefore archived) amount has to match or recovery forks the COLLECT rail.
             let h = createMockHub({ p2pConfig: { ANCHOR_REWARD_PER_PUBLISH: '2.5' } });
             h.network = 'regtest';                                         // archive flag-day = genesis

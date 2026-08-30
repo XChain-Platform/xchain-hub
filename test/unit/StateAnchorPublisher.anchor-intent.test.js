@@ -40,7 +40,7 @@ function mkRow(){
     return {
         chain: 'BTC', network: 'regtest', block_index: 900, block_hash: 'bh', ledger_hash: 'lh',
         actions_hash: 'ah', contract_hash: 'ch', checkpoint_seq: 100, snapshot_block: 800,
-        // Root-bearing: an ANCHOR v7 section carries the light-client roots by
+        // Root-bearing: an ANCHOR v0 section carries the light-client roots by
         // construction, and the selector skips a row that has none (D8).
         state_root: 'aa'.repeat(32), state_root_version: 1,
         block_merkle_root: 'bb'.repeat(32), block_merkle_version: 1,
