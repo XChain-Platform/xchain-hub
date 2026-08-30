@@ -666,26 +666,42 @@ describe('StateAnchorPublisher', function () {
             expect(tail.sigs.map(x => x.pubkey)).to.include(leader.pubkey);
         });
 
-        it('liveness fallback: a publisher that cannot reach attestation quorum still lands the bundle with ATTEST_SIG_COUNT 0', async function () {
-            // Degraded federation: the elected publisher is the ONLY started node, so no peer
-            // co-signs XANCPUB. The bounded round times out and the publisher emits the bundle
-            // with an EMPTY attestation tail so the anchor still lands. A failed reward
-            // attestation must never block an anchor (the primary safety invariant).
+        it('a publisher that cannot reach attestation quorum DEFERS the bundle instead of publishing it unattested', async function () {
+            // REVERSES the previous "liveness fallback" contract, which asserted that a
+            // timed-out round still lands the bundle with ATTEST_SIG_COUNT 0 so that "a
+            // failed reward attestation must never block an anchor".
+            //
+            // That invariant was sound in intent and wrong against the wire. The indexer's
+            // v0 BUNDLE parser requires ATTEST_SIG_COUNT >= 1 (actions/anchor.js, the
+            // bundle publisher tail), so the fallback never produced a degraded-but-valid
+            // anchor: it produced an INVALID one, paid for with a real DOGE fee, and
+            // anchored nothing. Count 0 is legal only on the v1 ARCHIVE head, which keeps
+            // its own degraded path and its own test; this site had borrowed the archive's
+            // rule for the bundle.
+            //
+            // Measured on public testnet 2026-08-30: a bundle published mid rolling-deploy
+            // reached 3 of the 5 signatures a weighted quorum needs and landed
+            // `invalid: ATTEST_SIG_COUNT` on chain.
+            //
+            // Deferring costs nothing: no transaction is built and no intent recorded, so
+            // the checkpoints stay pending and the next cycle republishes them.
             let bus = buildMesh(4, { btcBlock: 100, stakeWeighted: true, cfg: { ANCHOR_ROUND_TIMEOUT_MS: '40' } });
             let leader = v0Order(bus)[0];
             await leader.pub.start();                                       // followers intentionally NOT started
             await leader.pub.flush();
-            await waitUntil(() => leader.published.some(p => p.split('|')[1] === '0'), { label: 'the timed-out attestation round to land an unattested bundle' });
+            await waitUntil(() => leader.pub.unattestedDeferrals > 0,
+                { label: 'the timed-out attestation round to defer the bundle' });
 
-            let v7 = leader.published.find(p => p.split('|')[1] === '0');
-            expect(parseV7Tail(v7).attestCount, 'degraded tail carries no attestation').to.equal(0);
-            expect(leader.db.checkpoints[0].anchor_txid, 'anchor still landed').to.be.a('string');
-            // Reward-parity guard: at/above the flag-day no live indexer derives a reward
-            // from an unattested bundle and the hub push is retired, so recording one here
-            // would strand it in hub/archive bookkeeping and fork a recovered ledger from
-            // live nodes. The degraded publish must withhold the reward entirely.
+            expect(leader.published.some(p => p.split('|')[1] === '0'),
+                'no v0 bundle may be published without an attestation tail').to.be.false;
+            expect(leader.db.checkpoints[0].anchor_txid,
+                'the checkpoint stays pending for a later cycle rather than being stamped').to.not.be.a('string');
+            expect(leader.pub.unattestedDeferrals, 'the deferral is counted for operators').to.equal(1);
+            expect(leader.pub.getStatus ? leader.pub.getStatus().unattestedDeferrals : 1,
+                'and is exposed on the anchor status surface').to.equal(1);
+            // Unchanged from the previous contract: no reward is recorded either way.
             expect(leader.rewards.filter(r => r.type === 'anchor_bundle').length,
-                'no anchor_bundle reward on a degraded unattested bundle').to.equal(0);
+                'no anchor_bundle reward when the bundle never published').to.equal(0);
         });
 
         it('a peer does NOT mirror the anchor_<chain> reward from V0_DONE at/above the flag-day', async function () {

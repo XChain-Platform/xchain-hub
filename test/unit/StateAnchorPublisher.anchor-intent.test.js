@@ -197,7 +197,13 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
             const pub = mkPub(db);
             pub.identity = { getPubkeyHex: () => 'AA' };   // arms the isAnchorRewardActive branch
             pub.rounds   = 0;
-            pub._runPublisherAttestationRound = async () => { pub.rounds++; return null; };
+            // A MET round. These cases are about WHERE the marker is read relative to the
+            // round, not about what a degraded round does, and a degraded one now defers
+            // the bundle before the publish path they exist to exercise is reached.
+            pub._runPublisherAttestationRound = async () => {
+                pub.rounds++;
+                return { met: true, sigs: [{ pubkey: 'aa'.repeat(32), sig: 'bb'.repeat(64) }], publisher: 'aa' };
+            };
             return pub;
         }
 

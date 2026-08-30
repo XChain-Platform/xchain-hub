@@ -336,6 +336,11 @@ class StateAnchorPublisher {
         this._leaderRetryDue = false;
         this.noConfirmedUtxoDeferrals = 0;
         this.lastNoConfirmedUtxoAt    = null;
+        // Bundles held back because the publisher-attestation round did not reach quorum.
+        // Climbing while the federation is whole means peers are not co-signing; climbing
+        // during a rolling deploy is expected and stops when the roll finishes.
+        this.unattestedDeferrals      = 0;
+        this.lastUnattestedDeferralAt = null;
         this.lastUtxoReserve          = null;   // { total, confirmed, unconfirmed, known, at }
         // Confirmation watchdog over this hub's OWN anchor broadcasts (checkpoint
         // anchors, archive heads and chunks). Without it an anchor that never mines
@@ -611,6 +616,8 @@ class StateAnchorPublisher {
             leaderRetryDue:           this._leaderRetryDue,
             noConfirmedUtxoDeferrals: this.noConfirmedUtxoDeferrals,
             lastNoConfirmedUtxoAt:    this.lastNoConfirmedUtxoAt,
+            unattestedDeferrals:      this.unattestedDeferrals,
+            lastUnattestedDeferralAt: this.lastUnattestedDeferralAt,
             confirmedUtxos:           this.lastUtxoReserve ? this.lastUtxoReserve.confirmed   : null,
             unconfirmedUtxos:         this.lastUtxoReserve ? this.lastUtxoReserve.unconfirmed : null,
             unconfirmedPublishes:     this._pendingConfirmations.size,
@@ -1122,9 +1129,23 @@ class StateAnchorPublisher {
             // ONE publisher-attestation round for the whole bundle (spec §2.5): a 2f+1
             // oracle_publish quorum over the XANCPUB canonical binding THIS hub as the
             // earner, carried in the v0 tail so the indexer DERIVES the reward.
-            // LIVENESS-SAFE: a degraded round (timeout / short quorum / not a snapshot
-            // member) falls back to a v0 with ATTEST_SIG_COUNT 0, so the anchor always
-            // lands and only the reward gains the quorum dependency.
+            //
+            // A DEGRADED ROUND DEFERS THE BUNDLE, rather than falling through to publish a
+            // v0 carrying ATTEST_SIG_COUNT 0 on the reasoning that "the anchor always
+            // lands and only the reward gains the quorum dependency". That reasoning is
+            // false against the wire: the indexer's v0 BUNDLE parser requires
+            // ATTEST_SIG_COUNT >= 1 (actions/anchor.js, the bundle publisher tail), so a
+            // count-0 bundle is not a degraded anchor, it is an INVALID one. The fallback
+            // therefore paid a real DOGE fee to put a permanently invalid row on chain and
+            // still anchored nothing. Count 0 is legal only on the v1 ARCHIVE head, which
+            // has its own `< 0` check and its own degraded path; the two are not
+            // interchangeable and this site had borrowed the archive's rule.
+            //
+            // Deferring is safe: nothing is recorded and no transaction is built, so the
+            // checkpoints stay pending and the next cycle republishes them. The failure
+            // this protects against is transient by nature (peers restarting, a rolling
+            // deploy, a split federation), and if it is NOT transient then publishing
+            // would not have helped either, it would only have spent fees to say so.
             let me = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
             let bundle = { network: network, snapshot_block: snapshotBlock, sections: group };
             let attested   = false;
@@ -1135,9 +1156,14 @@ class StateAnchorPublisher {
                     attested   = true;
                     attestSigs = attest.sigs;
                 } else {
+                    this.unattestedDeferrals++;
+                    this.lastUnattestedDeferralAt = Date.now();
                     console.warn('StateAnchorPublisher: publisher-attestation quorum not reached for bundle ' +
                                  chains + '/' + network + ' @ ' + snapshotBlock +
-                                 '; publishing with ATTEST_SIG_COUNT 0 (anchor lands, no reward)');
+                                 '; DEFERRING (a v0 bundle with ATTEST_SIG_COUNT 0 is rejected by the ' +
+                                 'indexer, so publishing would spend a fee to land an invalid anchor). ' +
+                                 'The checkpoints stay pending and the next cycle republishes them.');
+                    return;
                 }
             }
             let payload = this._buildV7Payload(group, me, attestSigs);

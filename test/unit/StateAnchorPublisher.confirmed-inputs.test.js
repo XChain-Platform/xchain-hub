@@ -165,6 +165,12 @@ describe('StateAnchorPublisher: confirmed inputs only (the PRICE-rail rule on th
             pub._recordAnchorIntent   = async () => {};
             pub._withdrawAnchorIntent = async () => {};
             pub._findExistingCheckpointAnchor = async () => null;
+            // A MET attestation round. This case is about the UTXO deferral downstream of
+            // the round; without this the round resolves its own capability set, comes back
+            // degraded, and the bundle now defers there instead of reaching the wallet path
+            // under test.
+            pub._runPublisherAttestationRound = async () => ({
+                met: true, sigs: [{ pubkey: me, sig: 'bb'.repeat(64) }], publisher: me });
             let errors = [];
             let origErr = console.error;
             console.error = (...a) => errors.push(a.join(' '));
