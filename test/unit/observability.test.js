@@ -733,6 +733,41 @@ describe('observability/patchConsole', function () {
         expect(seen[0]).to.match(/ warn \[svc\] LATE_EVENT reason=x$/);
     });
 
+    // A trailing Error argument expands across lines under util.inspect, and only
+    // the first line carries the prefix. Measured on the live fleet as orphaned
+    // fragments like "  fatal: true," from a pretty-printed mariadb SqlError:
+    // no operation, no error, no coin, and unparseable by anything keying on the
+    // prefix. One console call must be one line.
+    it('renders a multi-line message as ONE line with the breaks escaped', () => {
+        const sink = fakeConsole();
+        const log = createLogShipper({ service: 'xchain-hub', env: {}, console: sink });
+        log.error('DB write failed: SqlError: connect ECONNREFUSED\n  fatal: true,\n  errno: -111');
+        expect(sink.lines.error).to.have.lengthOf(1);
+        expect(sink.lines.error[0]).to.not.match(/\n/);
+        expect(sink.lines.error[0]).to.include('\\n  fatal: true,');
+        expect(sink.lines.error[0]).to.match(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z error \[xchain-hub\] DB write failed:/);
+    });
+
+    it('escapes a bare carriage return too, so a progress writer cannot split a record', () => {
+        const sink = fakeConsole();
+        const log = createLogShipper({ service: 'xchain-hub', env: {}, console: sink });
+        log.warn('rewriting\rline');
+        expect(sink.lines.warn).to.have.lengthOf(1);
+        expect(sink.lines.warn[0]).to.include('rewriting\\nline');
+    });
+
+    // JSON mode needs no escaping of its own: JSON.stringify already emits one
+    // physical line and keeps the true characters, which is better fidelity for a
+    // machine reader than a lossy substitution would be.
+    it('JSON mode keeps the real newlines and still emits one physical line', () => {
+        const sink = fakeConsole();
+        const log = createLogShipper({ service: 'xchain-hub', env: { LOG_FORMAT: 'json' }, console: sink });
+        log.error('line one\nline two');
+        expect(sink.lines.error).to.have.lengthOf(1);
+        expect(sink.lines.error[0]).to.not.match(/\n/);
+        expect(JSON.parse(sink.lines.error[0]).msg).to.equal('line one\nline two');
+    });
+
     it('does not double-format: a shipper built AFTER the patch writes to the pre-patch sink', function () {
         // The shim's default sink is the global console by reference. A shipper
         // taking that default once console is patched emits its formatted line
