@@ -39,6 +39,28 @@ function buildController(hub) {
     return {
         async ping() { return { status: 'success' }; },
 
+        // The two read methods an off-box prober asks every validator for. They were
+        // absent here while the controller claimed to mirror src/api.js, so a prober
+        // pointed at this cluster saw every node as unreachable and the agreement
+        // check it was written to exercise never ran at all.
+        // `health` keeps only the part a prober keys on (the status token); the
+        // production probe's oracle-staleness and consensus-input degradation need a
+        // running feed and are out of scope for a cluster fixture.
+        async health() {
+            let dbOk = false;
+            try { await hub.db.doQuery('SELECT 1', []); dbOk = true; }
+            catch (err) { dbOk = false; }
+            return { status: dbOk ? 'healthy' : 'degraded' };
+        },
+
+        // Byte-for-byte the src/api.js:1064 body: the engine is optional, and a
+        // throw is reported rather than propagated.
+        async getcheckpointstats() {
+            if (!hub.stateCheckpoints) return { error: 'checkpoint engine not active' };
+            try { return await hub.stateCheckpoints.getStats(); }
+            catch (err) { return { error: 'error fetching checkpoint stats' }; }
+        },
+
         async getallconfigs() {
             try { return { configs: await hub.getAllConfigs(), seq: await hub.getLastSeq() }; }
             catch (err) { return { error: 'error getting configs' }; }
