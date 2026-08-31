@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - JSON-RPC batches are capped, and the testnet confirmations override has a floor.
 
 ### Changed
+- ROLLCALL is inert on regtest: arming a network commits every BTC indexer on it to a wired DOGE peer, which a single-coin regtest venue cannot have.
 - The roll call stays idle on a network nobody has armed.
 - Credential scrubbing covers prefixed names and the token after a bearer prefix.
 - Service logging routes through the shared log shim, one line per console call.

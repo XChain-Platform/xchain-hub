@@ -111,8 +111,9 @@ describe('RollcallRound canonical + wire conformance', function () {
     });
 
     it('epoch 0 is a real epoch, not a falsy no-op', function () {
-        // ROLLCALL_ACTIVATION.regtest is 0, so a falsy check on the height would
-        // build 'EQUIV|XROLLCALL||0||...' or skip the epoch outright.
+        // _canonical is pure string building and does not consult ROLLCALL_ACTIVATION,
+        // so this holds whether or not regtest is armed. A falsy check on the height
+        // would build 'EQUIV|XROLLCALL||0||...' or skip the epoch outright.
         const out = builder('regtest')._canonical(0, V.canonical.ledger_hash);
         assert.strictEqual(out, 'EQUIV|XROLLCALL|0|0||regtest|0|' + V.canonical.ledger_hash);
     });
