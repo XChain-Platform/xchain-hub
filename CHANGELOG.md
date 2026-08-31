@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-08-30
+
+### Added
+- ROLLCALL: hubs sign each epoch, gossip the signatures, and an elected publisher lands the roll call on chain.
+- Anchors publish one bundle per network per cycle, replacing one anchor per chain.
+
+### Fixed
+- The MariaDB connector moves to 3.5.3, closing three high-severity advisories against the pinned 3.5.2.
+- A bundle the attestation round could not attest is deferred rather than published unattested.
+- The anchor rail runs on start, spends only confirmed inputs, and watches its own transaction ids.
+- An adopted anchor no longer reports as one this hub paid for.
+- Silent consensus drops report a reason and a counter.
+- A stalled checkpoint cadence is recorded rather than passing as one tick in sixty.
+- JSON-RPC batches are capped, and the testnet confirmations override has a floor.
+
+### Changed
+- ROLLCALL is inert on regtest: arming a network commits every BTC indexer on it to a wired DOGE peer, which a single-coin regtest venue cannot have.
+- The roll call stays idle on a network nobody has armed.
+- Credential scrubbing covers prefixed names and the token after a bearer prefix.
+- Service logging routes through the shared log shim, one line per console call.
+
 ## [0.11.0] - 2026-08-25
 
 ### Fixed
