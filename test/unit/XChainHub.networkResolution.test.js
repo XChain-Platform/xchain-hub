@@ -110,6 +110,40 @@ describe('XChainHub network resolution honours HUB_NETWORK', function () {
             expect(threw.message).to.contain('HUB_NETWORK=mainnet');
         });
 
+        // An indexer's pushChainTip writes bitcoin.<network>.chain_tips, so a BTC
+        // indexer merely reporting its tip puts OUR network in this tree with no
+        // 'xchain-indexer' section. Throwing there took out the BTC anchor on the one
+        // hub every indexer pushes to, while the tree named no other network at all.
+        it('resolves our own network when its only section is a pushed chain tip', async function () {
+            const hub = validatorHub('testnet', {
+                bitcoin: { testnet: { chain_tips: { block_height: '150200', block_time: '1787900000' } } }
+            });
+            expect(await hub._resolveBtcNetwork()).to.equal('testnet');
+        });
+
+        it('resolves our own network when the tree holds ours (tip only) beside another network', async function () {
+            const hub = validatorHub('testnet', {
+                bitcoin: {
+                    regtest: { 'xchain-indexer': { host: '127.0.0.1', port: 3514 } },
+                    testnet: { chain_tips: { block_height: '150200', block_time: '1787900000' } }
+                }
+            });
+            expect(await hub._resolveBtcNetwork()).to.equal('testnet');
+        });
+
+        it('still fails closed when other networks are present and ours is absent entirely', async function () {
+            const hub = validatorHub('testnet', {
+                bitcoin: {
+                    regtest: { chain_tips: { block_height: '99', block_time: '1787900000' } },
+                    mainnet: { 'xchain-indexer': { host: '10.0.0.9', port: 3500 } }
+                }
+            });
+            let threw = null;
+            try { await hub._resolveBtcNetwork(); } catch (e) { threw = e; }
+            expect(threw).to.not.equal(null);
+            expect(threw.message).to.contain('HUB_NETWORK=testnet');
+        });
+
         it('returns its own network (never mainnet) when nothing is configured', async function () {
             expect(await validatorHub('regtest', {})._resolveBtcNetwork()).to.equal('regtest');
             expect(await validatorHub('regtest', { bitcoin: {} })._resolveBtcNetwork()).to.equal('regtest');

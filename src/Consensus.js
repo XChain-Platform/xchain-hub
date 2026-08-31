@@ -29,7 +29,9 @@ const crypto = require('crypto');
 const swq    = require('./stake_weighted_quorum.js');
 const eq     = require('./equivocation_header.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
+const { isAdmissibleSigner } = require('./lib/chain_signer_admission.js');
 const { canonicalValidatorOrder } = require('./validator_order.js');
+const { noteDrop } = require('./consensusDiagnostics');
 
 const PBFT_PRE_PREPARE = 'PBFT_PRE_PREPARE';
 const PBFT_PREPARE     = 'PBFT_PREPARE';
@@ -350,12 +352,17 @@ class Consensus {
                 // repeat PRE_PREPARE, NEW_VIEW) is answered from the set the
                 // round was opened over rather than from the live peer set.
                 memberPubkeys:  memberPubkeys || null,
-                preparePubkeys: weighted ? new Set() : null,
-                commitPubkeys:  weighted ? new Set() : null
+                // Always allocated, in BOTH quorum modes. The count path tallies these
+                // keys (see _quorumMet): a sender addr is a self-asserted wire field, so
+                // counting addrs let ONE authorized key forge a full quorum by naming N
+                // of them, and left a chain-attributed validator uncountable because it
+                // has no registry addr at all.
+                preparePubkeys: new Set(),
+                commitPubkeys:  new Set()
             };
 
             proposal.prepares.add(this.peerManager.validatorAddr);
-            if (proposal.weighted) this._addSelfPubkey(proposal.preparePubkeys);
+            this._addSelfPubkey(proposal.preparePubkeys);
 
             this.pendingProposals.set(seq, proposal);
 
@@ -432,30 +439,14 @@ class Consensus {
         return { snapshot: snapshot, weighted: weighted, requestedBlockIndex: blockHeight };
     }
 
-    // Defense-in-depth: only tally votes from senders that are registered
-    // validators. PeerManager already drops any message whose signature doesn't
-    // match a registered pubkey, so in normal operation an unregistered sender
-    // never reaches these handlers. But counting raw envelope.sender values
-    // means a forged sender that slipped past that layer (e.g. during a
-    // null-registry window) could otherwise inflate quorum from a single
-    // connection. The registry is keyed by addr, the same value used as the
-    // sender. A null registry fails closed (matches the vulnerability scenario);
-    // an empty registry stays lenient ONLY until a chain-effective signer set exists (genuine pre-bootstrap, where no peer
-    // votes should be arriving and the sig layer already rejects unknown
-    // senders).
-    _isKnownSender(sender) {
-        let registry = this.peerManager && this.peerManager.validatorPubkeys;
-        if (!registry) return false;
-        if (registry.size === 0) {
-            // Empty-registry leniency is for the genuine pre-bootstrap window ONLY
-            // (G-1): once the on-chain snapshot has produced a non-empty
-            // effective signer set, an empty registry is a misconfiguration or
-            // wipe window, not bootstrap, and counting unattributable senders
-            // would reopen count-mode quorum forgery. Fail closed instead.
-            let signerSet = this.peerManager.effectiveSignerSet;
-            return !(signerSet && signerSet.size > 0);
-        }
-        return registry.has(sender);
+    // Whether an authenticated envelope may be counted toward config-PBFT quorum.
+    // Admits on the PROVEN signing key (chain-effective set OR registry), never on
+    // envelope.sender. Quorum N here comes from the on-chain federation snapshot,
+    // so admitting by address stranded every staked joiner in the denominator.
+    // Shared definition and the full security argument in
+    // lib/chain_signer_admission.js.
+    _isKnownSender(envelope) {
+        return isAdmissibleSigner(this.peerManager, envelope);
     }
 
     _handleMessage(envelope) {
@@ -485,7 +476,10 @@ class Consensus {
 
         // Discard proposals from senders that are not registered validators
         // before doing any snapshot/indexer work for them.
-        if (!this._isKnownSender(envelope.sender)) return;
+        if (!this._isKnownSender(envelope)) {
+            noteDrop({ reason: 'unknown_sender', phase: 'preprepare', sender: envelope.sender, envelope });
+            return;
+        }
 
         // The leader stamps its view into the envelope so the identity guard
         // below can evaluate the rotation at the CLAIMED (seq, view). A viewless
@@ -598,8 +592,8 @@ class Consensus {
                 weighted:       !!weighted,
                 validators:     this._normalizeValidators(snapshot, weighted),
                 memberPubkeys:  this._memberPubkeySet(snapshot),
-                preparePubkeys: weighted ? new Set() : null,
-                commitPubkeys:  weighted ? new Set() : null
+                preparePubkeys: new Set(),
+                commitPubkeys:  new Set()
             };
 
             // Set cleanup timeout (follower proposals expire too)
@@ -634,11 +628,9 @@ class Consensus {
 
         proposal.prepares.add(envelope.sender);
         proposal.prepares.add(this.peerManager.validatorAddr);
-        if (proposal.weighted) {
-            let proposerPk = this._resolveSenderPubkey(envelope);
-            if (proposerPk) proposal.preparePubkeys.add(proposerPk);
-            this._addSelfPubkey(proposal.preparePubkeys);
-        }
+        let proposerPk = this._resolveSenderPubkey(envelope);
+        if (proposerPk) proposal.preparePubkeys.add(proposerPk);
+        this._addSelfPubkey(proposal.preparePubkeys);
 
         this.peerManager.broadcast(PBFT_PREPARE, Object.assign({
             seq:          seq,
@@ -731,7 +723,10 @@ class Consensus {
         if (!seq || !configDigest) return;
 
         // Only count PREPARE votes from registered validators.
-        if (!this._isKnownSender(envelope.sender)) return;
+        if (!this._isKnownSender(envelope)) {
+            noteDrop({ reason: 'unknown_sender', phase: 'prepare', sender: envelope.sender, envelope });
+            return;
+        }
 
         let proposal = this.pendingProposals.get(seq);
         // No proposal yet: this hub is still locking the snapshot for a
@@ -742,7 +737,7 @@ class Consensus {
         if (configDigest !== proposal.digest) return;
 
         proposal.prepares.add(envelope.sender);
-        if (proposal.weighted && proposal.preparePubkeys) {
+        if (proposal.preparePubkeys) {
             let pk = this._resolveSenderPubkey(envelope);
             if (pk) proposal.preparePubkeys.add(pk);
         }
@@ -918,7 +913,14 @@ class Consensus {
         if (ctx.weighted)
             return swq.meetsStakeThreshold(ctx.validators, pubkeySet || new Set());
         let quorum = (typeof ctx.quorum === 'number') ? ctx.quorum : this._getQuorum();
-        return addrSet.size >= quorum;
+        // Count DISTINCT SIGNING KEYS, not sender addrs. Both are populated, but the
+        // key set is the honest one: it dedupes a key that voted under several addrs
+        // and it counts a chain-attributed validator that has no registry addr. The
+        // addr set is retained for diagnostics and for the pre-bootstrap window where
+        // no envelope carries a key (pubkeySet empty), which is the only case that
+        // falls back to it.
+        let keyed = pubkeySet ? pubkeySet.size : 0;
+        return (keyed > 0 ? keyed : addrSet.size) >= quorum;
     }
 
     _checkPrepareQuorum(seq) {
@@ -933,7 +935,7 @@ class Consensus {
                 proposal._commitSent = true;
 
                 proposal.commits.add(this.peerManager.validatorAddr);
-                if (proposal.weighted) this._addSelfPubkey(proposal.commitPubkeys);
+                this._addSelfPubkey(proposal.commitPubkeys);
 
                 this.peerManager.broadcast(PBFT_COMMIT, Object.assign({
                     seq:          seq,
@@ -950,7 +952,10 @@ class Consensus {
         if (!seq || !configDigest) return;
 
         // Only count COMMIT votes from registered validators.
-        if (!this._isKnownSender(envelope.sender)) return;
+        if (!this._isKnownSender(envelope)) {
+            noteDrop({ reason: 'unknown_sender', phase: 'commit', sender: envelope.sender, envelope });
+            return;
+        }
 
         let proposal = this.pendingProposals.get(seq);
         // The vote that this buffer exists for: a leader heavy enough to meet the
@@ -961,7 +966,7 @@ class Consensus {
         if (configDigest !== proposal.digest) return;
 
         proposal.commits.add(envelope.sender);
-        if (proposal.weighted && proposal.commitPubkeys) {
+        if (proposal.commitPubkeys) {
             let pk = this._resolveSenderPubkey(envelope);
             if (pk) proposal.commitPubkeys.add(pk);
         }
@@ -1058,7 +1063,10 @@ class Consensus {
 
         // Only count VIEW_CHANGE votes from registered validators; view-change
         // quorum is the same Set.size tally as PREPARE/COMMIT.
-        if (!this._isKnownSender(envelope.sender)) return;
+        if (!this._isKnownSender(envelope)) {
+            noteDrop({ reason: 'unknown_sender', phase: 'view_change', sender: envelope.sender, envelope });
+            return;
+        }
 
         if (!this.pendingViewChanges.has(view)) {
             this.pendingViewChanges.set(view, new Set());
@@ -1083,14 +1091,14 @@ class Consensus {
         }
         if (vcCtx.quorum === 0) return;
 
-        // Weighted rounds tally view-change votes by signer stake (parallel pubkey
-        // set); the address set above stays authoritative for the count path.
-        if (vcCtx.weighted) {
-            if (!this.pendingViewChangePubkeys.has(view))
-                this.pendingViewChangePubkeys.set(view, new Set());
-            let pk = this._resolveSenderPubkey(envelope);
-            if (pk) this.pendingViewChangePubkeys.get(view).add(pk);
-        }
+        // View-change votes are tallied by SIGNING KEY in both quorum modes, for the
+        // same reason PREPARE/COMMIT are: an addr-keyed count would let one key force
+        // a view change by naming several, and would not count a chain-attributed
+        // validator at all.
+        if (!this.pendingViewChangePubkeys.has(view))
+            this.pendingViewChangePubkeys.set(view, new Set());
+        let vcPk = this._resolveSenderPubkey(envelope);
+        if (vcPk) this.pendingViewChangePubkeys.get(view).add(vcPk);
 
         if (this._quorumMet(vcCtx, this.pendingViewChanges.get(view), this.pendingViewChangePubkeys.get(view))) {
             // View change accepted; update view and check if we're the new leader.

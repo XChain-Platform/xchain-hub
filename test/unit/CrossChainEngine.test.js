@@ -347,6 +347,9 @@ describe('CrossChainEngine', function () {
             engine.setValidatorSet(VALIDATORS_4);
             wireLiveMirrorSnapshot(engine, hub);
             pm.validatorAddr = VALIDATORS_4[0].addr;
+            // Vote sets hold signing keys, so this hub's identity has to BE the
+            // validator its addr names or its own vote is an unknown key.
+            hub.getIdentity = sinon.stub().returns({ getPubkeyHex: () => VALIDATORS_4[0].pubkey });
         });
 
         it('PROPOSE from peer creates pending and broadcasts PREPARE', async function () {
@@ -355,14 +358,15 @@ describe('CrossChainEngine', function () {
 
             await engine._handlePropose({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
                         destChain: 'LTC', confirmations: 3, digest, btcBlockHeight: 900000 }
             });
 
             expect(engine.pendingAttestations.has(attestationId)).to.be.true;
             let pending = engine.pendingAttestations.get(attestationId);
-            expect(pending.prepares.has(VALIDATORS_4[1].addr)).to.be.true;
-            expect(pending.prepares.has(pm.validatorAddr)).to.be.true;
+            expect(pending.prepares.has(VALIDATORS_4[1].pubkey)).to.be.true;
+            expect(pending.prepares.has(VALIDATORS_4[0].pubkey)).to.be.true;   // self
             // N=4, quorum=3, have 2 prepares → PREPARE broadcast but no COMMIT yet
             expect(pm.broadcast.calledOnce).to.be.true;
             expect(pm.broadcast.getCall(0).args[0]).to.equal('XCHAIN_ATTEST_PREPARE');
@@ -373,6 +377,7 @@ describe('CrossChainEngine', function () {
         it('PROPOSE with wrong digest is rejected', function () {
             engine._handlePropose({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { attestationId: 'BTC:1:LTC', digest: 'wrong', confirmations: 3 }
             });
             expect(engine.pendingAttestations.size).to.equal(0);
@@ -394,6 +399,7 @@ describe('CrossChainEngine', function () {
             // Third prepare → quorum met
             engine._handlePrepare({
                 sender: VALIDATORS_4[2].addr,
+                sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { attestationId, digest }
             });
 
@@ -423,6 +429,7 @@ describe('CrossChainEngine', function () {
             // Third commit → quorum met
             engine._handleCommit({
                 sender: VALIDATORS_4[2].addr,
+                sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { attestationId, digest }
             });
 
@@ -467,7 +474,7 @@ describe('CrossChainEngine', function () {
                 hub.db.doQuery.resolves([]);
 
                 engine.pendingAttestations.set(attestationId, quorateRound(attestationId, digest));
-                engine._handleCommit({ sender: VALIDATORS_4[2].addr, data: { attestationId, digest } });
+                engine._handleCommit({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { attestationId, digest } });
 
                 await waitUntil(() => emitted.length === 1, { label: 'the retried store to finalize the round' });
 
@@ -486,7 +493,7 @@ describe('CrossChainEngine', function () {
                 hub.db.doQuery.rejects(new Error('ER_CON_COUNT_ERROR'));
 
                 engine.pendingAttestations.set(attestationId, quorateRound(attestationId, digest));
-                engine._handleCommit({ sender: VALIDATORS_4[2].addr, data: { attestationId, digest } });
+                engine._handleCommit({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { attestationId, digest } });
 
                 // Every attempt fails, so the observable is the retry budget being spent.
                 await waitUntil(() => hub.db.doQuery.callCount === engine.storeRetryAttempts, { label: 'the store retries to be exhausted' });
@@ -502,7 +509,7 @@ describe('CrossChainEngine', function () {
                 // DB recovers; a retransmitted COMMIT re-enters the quorum check.
                 hub.db.doQuery.resetBehavior();
                 hub.db.doQuery.resolves([]);
-                engine._handleCommit({ sender: VALIDATORS_4[3].addr, data: { attestationId, digest } });
+                engine._handleCommit({ sender: VALIDATORS_4[3].addr, sig_pubkey: VALIDATORS_4[3].pubkey, data: { attestationId, digest } });
 
                 await waitUntil(() => emitted.length === 1, { label: 'the retransmitted COMMIT to finalize the round' });
 
@@ -517,6 +524,7 @@ describe('CrossChainEngine', function () {
             engine.finalized.add('BTC:1:LTC');
             engine._handlePropose({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { attestationId: 'BTC:1:LTC', digest: 'x', confirmations: 3 }
             });
             expect(engine.pendingAttestations.size).to.equal(0);
@@ -589,6 +597,7 @@ describe('CrossChainEngine', function () {
 
             await engine._handlePropose({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
                         destChain: 'LTC', confirmations: 3, digest, btcBlockHeight: 500 }
             });
@@ -610,6 +619,7 @@ describe('CrossChainEngine', function () {
 
             await engine._handlePropose({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 2,
                         destChain: 'LTC', confirmations: 3, digest, btcBlockHeight: 500 }
             });
@@ -659,6 +669,7 @@ describe('CrossChainEngine', function () {
             let digest = engine._digest(attestationId, 3);
             await engine._handlePropose({
                 sender: MEMBERS[1].addr,
+                sig_pubkey: MEMBERS[1].pubkey,
                 data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
                         destChain: 'LTC', confirmations: 3, digest, btcBlockHeight: 900000 }
             });
@@ -678,12 +689,13 @@ describe('CrossChainEngine', function () {
             let digest = await openRound();     // prepares = {self, MEMBERS[1]} = 2 members
             pm.broadcast.resetHistory();
 
-            engine._handlePrepare({ sender: OUTSIDER.addr, data: { attestationId, digest } });
+            engine._handlePrepare({ sender: OUTSIDER.addr, sig_pubkey: OUTSIDER.pubkey, data: { attestationId, digest } });
 
-            // The outsider is a known sender, so it lands in the raw set, but it is not in
-            // the snapshot the quorum of 3 was sized from, so it must not tip the round.
+            // The outsider's key is attributed (it is in the registry), so it lands in the
+            // vote set, but it is not in the snapshot the quorum of 3 was sized from, so it
+            // must not tip the round.
             let pending = engine.pendingAttestations.get(attestationId);
-            expect(pending.prepares.has(OUTSIDER.addr)).to.be.true;
+            expect(pending.prepares.has(OUTSIDER.pubkey)).to.be.true;
             expect(pm.broadcast.called).to.be.false;
         });
 
@@ -692,15 +704,16 @@ describe('CrossChainEngine', function () {
             pm.broadcast.resetHistory();
 
             // MEMBERS[1] (already counted from the PROPOSE) votes a second time under a
-            // second addr the registry binds to the SAME key. Addr-keyed that reads as a
-            // third vote and would tip the quorum of 3 on its own.
-            engine._handlePrepare({ sender: ALT_ADDR,          data: { attestationId, digest } });
+            // second addr bound to the SAME key. Addr-keyed that read as a third vote and
+            // would tip the quorum of 3 on its own; keyed on the proven signing key it
+            // collapses onto the vote MEMBERS[1] already cast.
+            engine._handlePrepare({ sender: ALT_ADDR, sig_pubkey: MEMBERS[1].pubkey, data: { attestationId, digest } });
             let pending = engine.pendingAttestations.get(attestationId);
-            expect(pending.prepares.size).to.equal(3, 'both addrs are in the raw addr set');
+            expect(pending.prepares.size).to.equal(2, 'one key is one vote, whatever addr it names');
             expect(pm.broadcast.called).to.be.false;
 
             // A genuinely distinct third member does tip it.
-            engine._handlePrepare({ sender: MEMBERS[3].addr,   data: { attestationId, digest } });
+            engine._handlePrepare({ sender: MEMBERS[3].addr, sig_pubkey: MEMBERS[3].pubkey,   data: { attestationId, digest } });
             expect(pm.broadcast.called).to.be.true;
             expect(pm.broadcast.getCall(0).args[0]).to.equal('XCHAIN_ATTEST_COMMIT');
         });
@@ -708,7 +721,7 @@ describe('CrossChainEngine', function () {
         it('finalizes on three distinct snapshot members', async function () {
             let digest = await openRound();
             pm.broadcast.resetHistory();
-            engine._handlePrepare({ sender: MEMBERS[2].addr, data: { attestationId, digest } });
+            engine._handlePrepare({ sender: MEMBERS[2].addr, sig_pubkey: MEMBERS[2].pubkey, data: { attestationId, digest } });
             expect(pm.broadcast.called).to.be.true;
             expect(pm.broadcast.getCall(0).args[0]).to.equal('XCHAIN_ATTEST_COMMIT');
         });
@@ -718,16 +731,16 @@ describe('CrossChainEngine', function () {
             let pending = engine.pendingAttestations.get(attestationId);
             let stored = sinon.stub(engine, '_storeWithRetry').resolves();
 
-            // Four COMMIT addrs, but one is the outsider and one is the alt addr of a key
-            // that already committed: two distinct members, below the quorum of 3.
-            pending.commits.add(MEMBERS[0].addr);
-            engine._handleCommit({ sender: MEMBERS[1].addr, data: { attestationId, digest } });
-            engine._handleCommit({ sender: ALT_ADDR,        data: { attestationId, digest } });
-            engine._handleCommit({ sender: OUTSIDER.addr,   data: { attestationId, digest } });
-            expect(pending.commits.size).to.equal(4, 'raw addr set holds all four');
+            // Four COMMIT envelopes, but one is the outsider and one is an alt addr of a key
+            // that already committed: two distinct MEMBERS, below the quorum of 3.
+            pending.commits.add(MEMBERS[0].pubkey);
+            engine._handleCommit({ sender: MEMBERS[1].addr, sig_pubkey: MEMBERS[1].pubkey, data: { attestationId, digest } });
+            engine._handleCommit({ sender: ALT_ADDR,        sig_pubkey: MEMBERS[1].pubkey, data: { attestationId, digest } });
+            engine._handleCommit({ sender: OUTSIDER.addr, sig_pubkey: OUTSIDER.pubkey,   data: { attestationId, digest } });
+            expect(pending.commits.size).to.equal(3, 'the alt addr collapsed onto its key');
             expect(stored.called).to.be.false;
 
-            engine._handleCommit({ sender: MEMBERS[2].addr, data: { attestationId, digest } });
+            engine._handleCommit({ sender: MEMBERS[2].addr, sig_pubkey: MEMBERS[2].pubkey, data: { attestationId, digest } });
             expect(stored.called).to.be.true;
         });
 
@@ -740,19 +753,25 @@ describe('CrossChainEngine', function () {
             expect(engine._countedVotes(pending, pending.prepares)).to.equal(2);
         });
 
-        it('degrades to the legacy raw tally when the registry cannot attribute senders', async function () {
-            // The pre-bootstrap window _isKnownSender is deliberately lenient in (and
-            // already fences: a non-empty effective signer set makes an empty registry
-            // fail closed before a vote reaches this tally).
+        it('an empty registry no longer buys a non-member a vote', async function () {
+            // The old raw-tally escape here existed only because senders were resolved
+            // to keys THROUGH the registry, so an empty registry made every vote
+            // unresolvable and the tally fell back to counting addrs. Votes ARE keys
+            // now, so registry state cannot affect membership: a key outside the locked
+            // snapshot is not counted whatever the registry looks like.
             pm.validatorPubkeys = new Map();
-            let pending = { quorum: 2, memberPubkeys: new Set([MEMBERS[0].pubkey]), prepares: new Set(['a', 'b']) };
-            expect(engine._countedVotes(pending, pending.prepares)).to.equal(2);
+            let pending = { quorum: 2, memberPubkeys: new Set([MEMBERS[0].pubkey]),
+                            prepares: new Set([MEMBERS[0].pubkey, 'ff'.repeat(32)]) };
+            expect(engine._countedVotes(pending, pending.prepares)).to.equal(1);
         });
     });
 
     describe('quorum locking', function () {
 
-        beforeEach(function () { wireLiveMirrorSnapshot(engine, hub); });
+        beforeEach(function () {
+            wireLiveMirrorSnapshot(engine, hub);
+            hub.getIdentity = sinon.stub().returns({ getPubkeyHex: () => VALIDATORS_4[0].pubkey });
+        });
 
         it('locks quorum into the pending object on the leader (PROPOSE) path', async function () {
             engine.setValidatorSet(VALIDATORS_4); // N=4 → quorum=3
@@ -774,6 +793,7 @@ describe('CrossChainEngine', function () {
 
             await engine._handlePropose({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
                         destChain: 'LTC', confirmations: 3, digest, btcBlockHeight: 900000 }
             });
@@ -791,6 +811,7 @@ describe('CrossChainEngine', function () {
 
             await engine._handlePropose({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
                         destChain: 'LTC', confirmations: 3, digest, btcBlockHeight: 900000 }
             });
@@ -803,6 +824,7 @@ describe('CrossChainEngine', function () {
             // Third prepare arrives → 3 prepares. Locked quorum=3 → COMMIT must fire.
             engine._handlePrepare({
                 sender: VALIDATORS_4[2].addr,
+                sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { attestationId, digest }
             });
 
@@ -820,6 +842,7 @@ describe('CrossChainEngine', function () {
 
             await engine._handlePropose({
                 sender: VALIDATORS_7[1].addr,
+                sig_pubkey: VALIDATORS_7[1].pubkey,
                 data: { attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
                         destChain: 'LTC', confirmations: 3, digest, btcBlockHeight: 900000 }
             });
@@ -831,6 +854,7 @@ describe('CrossChainEngine', function () {
             // Third prepare → 3 prepares. Locked quorum=5 → still NOT met, no COMMIT.
             engine._handlePrepare({
                 sender: VALIDATORS_7[2].addr,
+                sig_pubkey: VALIDATORS_7[2].pubkey,
                 data: { attestationId, digest }
             });
 
@@ -856,6 +880,9 @@ describe('CrossChainEngine', function () {
             engine.setValidatorSet(VALIDATORS_4);
             wireLiveMirrorSnapshot(engine, hub);
             pm.validatorAddr = VALIDATORS_4[0].addr;
+            // Vote sets hold signing keys, so this hub's identity has to BE the
+            // validator its addr names or its own vote is an unknown key.
+            hub.getIdentity = sinon.stub().returns({ getPubkeyHex: () => VALIDATORS_4[0].pubkey });
         });
 
         function propose(overrides = {}) {
@@ -864,6 +891,7 @@ describe('CrossChainEngine', function () {
             let digest = engine._digest(attestationId, confirmations);
             return engine._handlePropose({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: Object.assign({ attestationId, sourceChain: 'BTC', sourceActionIndex: 1,
                                       destChain: 'LTC', confirmations, digest, btcBlockHeight: 900000 }, overrides.data)
             });

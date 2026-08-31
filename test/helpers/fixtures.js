@@ -79,13 +79,39 @@ const SAMPLE_PRICES = [
 ];
 
 // Build an oracle submission map from an array of { sender, prices }
+// The signing key makeValidator(i) would have produced for a fixture addr, or
+// null for an addr outside that scheme. Submission maps are keyed by sender but
+// every entry carries the PROVEN signing key (OracleRound takes it straight off
+// the envelope), and the snapshot-membership filter keys on that key, so a
+// fixture map without it is not the shape the engine actually sees.
+function fixturePubkeyForAddr(addr) {
+    let m = /^ws:\/\/validator-(\d+):/.exec(String(addr || ''));
+    return m ? makeValidator(Number(m[1])).pubkey : null;
+}
+
+// A stable 64-hex signing key for an arbitrary test sender. Distinct senders get
+// distinct keys and one sender always gets the same key, which is what keeps
+// per-sender first-wins and per-key dedup assertions meaningful once admission
+// and dedup key on the signing key rather than the addr. Tests that need two
+// senders to SHARE a key pass it explicitly instead.
+function pubkeyForTestSender(sender) {
+    let known = fixturePubkeyForAddr(sender);
+    if (known) return known;
+    return require('crypto').createHash('sha256').update(String(sender)).digest('hex');
+}
+
+// entry.pubkey is honoured verbatim when supplied (including an explicit null),
+// which is how a test binds two senders to ONE key to exercise dedup.
 function buildSubmissions(entries) {
     let map = new Map();
     for (let entry of entries) {
         map.set(entry.sender, {
             prices:    entry.prices,
             sources:   entry.sources || 2,
-            timestamp: entry.timestamp || Date.now()
+            timestamp: entry.timestamp || Date.now(),
+            pubkey:    Object.prototype.hasOwnProperty.call(entry, 'pubkey')
+                ? entry.pubkey
+                : fixturePubkeyForAddr(entry.sender)
         });
     }
     return map;
@@ -95,6 +121,7 @@ function buildSubmissions(entries) {
 function buildUniformSubmissions(validators, prices) {
     let entries = validators.map(v => ({
         sender: v.addr,
+        pubkey: v.pubkey,
         prices: prices
     }));
     return buildSubmissions(entries);
@@ -102,6 +129,8 @@ function buildUniformSubmissions(validators, prices) {
 
 module.exports = {
     makeValidator,
+    fixturePubkeyForAddr,
+    pubkeyForTestSender,
     makeWeightedValidator,
     makeWeightSnapshot,
     makeFederationSnapshot,

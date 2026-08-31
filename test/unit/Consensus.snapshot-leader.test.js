@@ -28,7 +28,7 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const Consensus  = require('../../src/Consensus');
 const { createMockHub } = require('../helpers/mockHub');
-const { VALIDATORS_4, makeValidator, makeFederationSnapshot } = require('../helpers/fixtures');
+const { VALIDATORS_4, makeValidator, makeFederationSnapshot, fixturePubkeyForAddr } = require('../helpers/fixtures');
 
 // The block-locked population: the four validators that were staked at the
 // round's BTC block. Sorted member pubkeys are v1 < v2 < v3 < v4.
@@ -216,6 +216,9 @@ describe('Consensus: snapshot-pinned leader election', function () {
         function prePrepare(sender, extra) {
             return consensus._handlePrePrepare(Object.assign({
                 sender: sender,
+                // Envelopes carry the proven signing key; admission and leader
+                // identity both resolve through it now, not through the addr.
+                sig_pubkey: fixturePubkeyForAddr(sender),
                 data: { seq: SEQ, view: 0, configDigest: digest, config: config, btcBlockHeight: 800000 }
             }, extra || {}));
         }
@@ -267,6 +270,7 @@ describe('Consensus: snapshot-pinned leader election', function () {
         it('drops a viewless envelope before any snapshot work (anti-DoS pre-filter)', async function () {
             await consensus._handlePrePrepare({
                 sender: SNAPSHOT_LEADER.addr,
+                sig_pubkey: SNAPSHOT_LEADER.pubkey,
                 data: { seq: SEQ, configDigest: digest, config: config, btcBlockHeight: 800000 }
             });
             expect(hub.capabilitySnapshot.getActiveValidatorSnapshot.called).to.be.false;
@@ -305,8 +309,8 @@ describe('Consensus: snapshot-pinned leader election', function () {
             seedProposal();
             pm.validatorAddr = PINNED_NEW_LEADER.addr;
 
-            consensus._handleViewChange({ sender: VALIDATORS_4[0].addr, data: { view: 1, seq: SEQ } });
-            consensus._handleViewChange({ sender: VALIDATORS_4[1].addr, data: { view: 1, seq: SEQ } });
+            consensus._handleViewChange({ sender: VALIDATORS_4[0].addr, sig_pubkey: VALIDATORS_4[0].pubkey, data: { view: 1, seq: SEQ } });
+            consensus._handleViewChange({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { view: 1, seq: SEQ } });
 
             expect(consensus.view).to.equal(1);
             expect(pm.broadcast.calledWith('PBFT_NEW_VIEW', { view: 1, seq: SEQ }),
@@ -317,8 +321,8 @@ describe('Consensus: snapshot-pinned leader election', function () {
             seedProposal();
             pm.validatorAddr = DRIFTED_LIVE_SET[1].addr;   // (5 + 1) % 5 = 1
 
-            consensus._handleViewChange({ sender: VALIDATORS_4[0].addr, data: { view: 1, seq: SEQ } });
-            consensus._handleViewChange({ sender: VALIDATORS_4[2].addr, data: { view: 1, seq: SEQ } });
+            consensus._handleViewChange({ sender: VALIDATORS_4[0].addr, sig_pubkey: VALIDATORS_4[0].pubkey, data: { view: 1, seq: SEQ } });
+            consensus._handleViewChange({ sender: VALIDATORS_4[2].addr, sig_pubkey: VALIDATORS_4[2].pubkey, data: { view: 1, seq: SEQ } });
 
             expect(consensus.view).to.equal(1);
             expect(pm.broadcast.calledWith('PBFT_NEW_VIEW', sinon.match.any)).to.be.false;
@@ -345,7 +349,7 @@ describe('Consensus: snapshot-pinned leader election', function () {
             consensus.pendingProposals.set(SEQ, {
                 digest: 'd', timer: null, memberPubkeys: memberSetOf(SNAPSHOT_SET)
             });
-            consensus._handleNewView({ sender: PINNED_NEW_LEADER.addr, data: { view: 1, seq: SEQ } });
+            consensus._handleNewView({ sender: PINNED_NEW_LEADER.addr, sig_pubkey: PINNED_NEW_LEADER.pubkey, data: { view: 1, seq: SEQ } });
             expect(consensus.view, 'the pinned leader announced its own view change').to.equal(1);
         });
 
@@ -353,7 +357,7 @@ describe('Consensus: snapshot-pinned leader election', function () {
             consensus.pendingProposals.set(SEQ, {
                 digest: 'd', timer: null, memberPubkeys: memberSetOf(SNAPSHOT_SET)
             });
-            consensus._handleNewView({ sender: LIVE_NEW_LEADER.addr, data: { view: 1, seq: SEQ } });
+            consensus._handleNewView({ sender: LIVE_NEW_LEADER.addr, sig_pubkey: LIVE_NEW_LEADER.pubkey, data: { view: 1, seq: SEQ } });
             expect(consensus.view).to.equal(0);
         });
 
@@ -361,7 +365,7 @@ describe('Consensus: snapshot-pinned leader election', function () {
             consensus.viewChangeQuorums.set(SEQ, {
                 quorum: 2, weighted: false, validators: [], memberPubkeys: memberSetOf(SNAPSHOT_SET)
             });
-            consensus._handleNewView({ sender: PINNED_NEW_LEADER.addr, data: { view: 1, seq: SEQ } });
+            consensus._handleNewView({ sender: PINNED_NEW_LEADER.addr, sig_pubkey: PINNED_NEW_LEADER.pubkey, data: { view: 1, seq: SEQ } });
             expect(consensus.view).to.equal(1);
         });
 
@@ -372,10 +376,10 @@ describe('Consensus: snapshot-pinned leader election', function () {
         it('ACCEPTED RESIDUAL: with no round context it falls back to the live set', function () {
             expect(consensus._memberPubkeysForSeq(SEQ)).to.equal(null);
 
-            consensus._handleNewView({ sender: PINNED_NEW_LEADER.addr, data: { view: 1, seq: SEQ } });
+            consensus._handleNewView({ sender: PINNED_NEW_LEADER.addr, sig_pubkey: PINNED_NEW_LEADER.pubkey, data: { view: 1, seq: SEQ } });
             expect(consensus.view, 'unpinned: the snapshot leader is NOT recognized here').to.equal(0);
 
-            consensus._handleNewView({ sender: LIVE_NEW_LEADER.addr, data: { view: 1, seq: SEQ } });
+            consensus._handleNewView({ sender: LIVE_NEW_LEADER.addr, sig_pubkey: LIVE_NEW_LEADER.pubkey, data: { view: 1, seq: SEQ } });
             expect(consensus.view, 'unpinned: the live-set leader still is').to.equal(1);
         });
     });

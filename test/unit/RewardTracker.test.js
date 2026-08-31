@@ -208,17 +208,17 @@ describe('RewardTracker', function () {
             expect(hub.db.doQuery.callCount).to.equal(1);   // SELECT only: no DELETE, no INSERT
         });
 
-        it('pushes the reward to the BTC indexer with its own reward_type', async function () {
+        it('records the reward hub-locally and pushes NOTHING to the BTC indexer', async function () {
+            // The push rail is retired: every anchor reward is derived on-chain by each
+            // indexer, so the hub's only job here is its own row.
             rt.btcIndexerApiUrl = 'http://indexer:3000';
             let post = sinon.stub(axios, 'post').resolves({ data: {} });
             await rt.recordAnchorReward('anchor_archive', 3, hexPk(2), 953200);
             await new Promise(r => setImmediate(r));
-            expect(post.calledOnce).to.be.true;
-            let body = post.getCall(0).args[1];
-            expect(body.params.reward_type).to.equal('anchor_archive');
-            expect(body.params.round).to.equal(3);
-            expect(body.params.block_index).to.equal(953200);
-            expect(body.params.rewards).to.deep.equal([{ pubkey: hexPk(2), amount: '10.00000000' }]);
+            expect(post.called, 'no reward may leave the hub over the retired rail').to.be.false;
+            let ins = hub.db.doQuery.getCall(1).args;   // getCall(0) is the dedup SELECT
+            expect(ins[0]).to.include('INSERT IGNORE INTO validator_rewards');
+            expect(ins[1]).to.deep.equal([hexPk(2), 3, 'anchor_archive', '10.00000000', 953200]);
         });
 
         it('honors ANCHOR_REWARD_PER_PUBLISH config', async function () {
@@ -246,53 +246,59 @@ describe('RewardTracker', function () {
     });
 
     // -----------------------------------------------------------------
-    // Anchor-reward flag-day push gating (#5311)
+    // The retired reward push rail
     // -----------------------------------------------------------------
 
-    describe('push gating at/above the anchor-reward flag-day', function () {
-        // At/above the flag-day the indexer DERIVES the per-chain anchor reward from the
-        // on-chain ANCHOR v4/v5 publisher attestation, so the forgeable push is retired for
-        // anchor_<chain>. The hub still RECORDS the reward locally and still pushes
-        // anchor_archive (which the indexer does not derive) and pre-flag-day rewards.
+    describe('the reward push rail is retired', function () {
+        // The hub no longer POSTs any reward to the BTC indexer. Every anchor reward is
+        // derived on-chain by each indexer (per-chain from the ANCHOR v4/v5 publisher
+        // attestation, archive from the v1 tail), and both flag-days are behind mainnet and sit at
+        // 0 on testnet and regtest, so the indexer refused every push on every live
+        // network. What survives here is the AMOUNT rule, which is a separate question:
+        // a derived reward must record the frozen consensus constant so the hub's
+        // archived amount matches what every indexer credits.
         let post;
         beforeEach(function () {
             post = sinon.stub(axios, 'post').resolves({ data: {} });
         });
 
-        it('does NOT push anchor_<chain> once the flag-day is active (indexer derives it)', async function () {
-            hub.network = 'regtest';                                       // flag-day = genesis
-            rt.btcIndexerApiUrl = 'http://indexer:3000';
-            await rt.recordAnchorReward('anchor_DOGE', 8, hexPk(1), 100);
-            await new Promise(r => setImmediate(r));
-            expect(post.called, 'derived reward is not pushed').to.be.false;
+        it('pushes no per-chain anchor reward, at or below the flag-day, on any network', async function () {
+            for (const [network, block] of [['regtest', 100], ['mainnet', 100], ['mainnet', 963000]]) {
+                hub.network = network;
+                rt.btcIndexerApiUrl = 'http://indexer:3000';
+                await rt.recordAnchorReward('anchor_BTC', 5, hexPk(1), block);
+                await new Promise(r => setImmediate(r));
+                expect(post.called, network + ' @ ' + block).to.be.false;
+            }
         });
 
-        it('STILL pushes anchor_archive below the ARCHIVE_REWARD flag-day (legacy rail stands)', async function () {
-            hub.network = 'mainnet';                                       // archive flag-day = 963000 (armed 07-16)
-            rt.btcIndexerApiUrl = 'http://indexer:3000';
-            await rt.recordAnchorReward('anchor_archive', 3, hexPk(1), 100);   // 100 < flag-day
-            await new Promise(r => setImmediate(r));
-            expect(post.calledOnce, 'pre-flag-day archive reward still pushed').to.be.true;
-            expect(post.getCall(0).args[1].params.reward_type).to.equal('anchor_archive');
+        it('pushes no archive reward either, including the pre-flag-day mainnet case', async function () {
+            // This case is the one the rail existed for last: a mainnet archive reward
+            // below block 963000. It is recorded hub-locally and goes no further.
+            for (const [network, block] of [['mainnet', 100], ['regtest', 100], ['mainnet', 963000]]) {
+                hub.network = network;
+                rt.btcIndexerApiUrl = 'http://indexer:3000';
+                await rt.recordAnchorReward('anchor_archive', 3, hexPk(1), block);
+                await new Promise(r => setImmediate(r));
+                expect(post.called, network + ' @ ' + block).to.be.false;
+            }
         });
 
-        it('does NOT push anchor_archive once the ARCHIVE_REWARD flag-day is active (indexer derives it from v6)', async function () {
-            hub.network = 'regtest';                                       // archive flag-day = genesis
-            rt.btcIndexerApiUrl = 'http://indexer:3000';
-            await rt.recordAnchorReward('anchor_archive', 3, hexPk(2), 100);
-            await new Promise(r => setImmediate(r));
-            expect(post.called, 'derived archive reward is not pushed').to.be.false;
+        it('exposes no push method to call, so nothing can re-arm the rail by accident', function () {
+            expect(rt._pushRewardsToBtcIndexer, '_pushRewardsToBtcIndexer must be gone').to.equal(undefined);
+            expect(RewardTracker.isTerminalPushError, 'its terminal-error predicate goes with it').to.equal(undefined);
         });
 
-        it('STILL pushes anchor_<chain> below the flag-day (legacy push path stands)', async function () {
-            hub.network = 'mainnet';                                       // flag-day = 999999999 (dormant)
+        it('still records the reward locally when the push would have fired', async function () {
+            hub.network = 'mainnet';
             rt.btcIndexerApiUrl = 'http://indexer:3000';
-            await rt.recordAnchorReward('anchor_BTC', 5, hexPk(1), 100);   // 100 < flag-day
-            await new Promise(r => setImmediate(r));
-            expect(post.calledOnce, 'pre-flag-day reward still pushed').to.be.true;
+            await rt.recordAnchorReward('anchor_BTC', 5, hexPk(1), 100);
+            let ins = hub.db.doQuery.getCall(1).args;                      // getCall(0) is the dedup SELECT
+            expect(ins[0]).to.include('INSERT IGNORE INTO validator_rewards');
+            expect(ins[1]).to.deep.equal([hexPk(1), 5, 'anchor_BTC', '10.00000000', 100]);
         });
 
-        it('gates on the THREADED reward network, not the hub network: an unscoped hub does not double-credit (#2236)', async function () {
+        it('gates the AMOUNT on the THREADED reward network, not the hub network (#2236)', async function () {
             // The build half (StateAnchorPublisher) gates the v4/v5 payload on the
             // checkpoint ROW's network. An unscoped hub (network='') re-deriving
             // the record-half gate from hub.network saw ''->inactive and credited
@@ -309,11 +315,12 @@ describe('RewardTracker', function () {
         });
 
         it('falls back to the hub network when no reward network is threaded (legacy callers unchanged)', async function () {
-            hub.network = 'regtest';
+            hub.network = 'regtest';                                       // flag-day = genesis
             rt.btcIndexerApiUrl = 'http://indexer:3000';
             await rt.recordAnchorReward('anchor_DOGE', 9, hexPk(1), 100);  // no network arg
             await new Promise(r => setImmediate(r));
-            expect(post.called, 'derived reward is not pushed').to.be.false;
+            let ins = hub.db.doQuery.getCall(1).args;                      // getCall(0) is the dedup SELECT
+            expect(ins[1][3], 'the hub network resolves the reward as derived, so the frozen amount').to.equal('10.00000000');
         });
 
         it('records the FROZEN amount for a derived anchor_<chain> reward, ignoring an env override', async function () {
@@ -343,9 +350,22 @@ describe('RewardTracker', function () {
             expect(h2.db.doQuery.getCall(1).args[1][3]).to.equal('2.50000000');
         });
 
+        it('records the FROZEN anchor amount for a derived anchor_bundle reward, ignoring an env override', async function () {
+            // One bundle, one reward: the indexer credits ANCHOR_REWARD_AMOUNT from the
+            // on-chain v0 tail, so the hub-recorded amount must be the same frozen constant.
+            let h = createMockHub({ p2pConfig: { ANCHOR_REWARD_PER_PUBLISH: '2.5' } });
+            h.network = 'regtest';
+            let rt2 = new RewardTracker(h);
+            await rt2.recordAnchorReward('anchor_bundle', 100, hexPk(1), 100);
+            let ins = h.db.doQuery.getCall(1).args;
+            expect(ins[0]).to.include('INSERT IGNORE INTO validator_rewards');
+            expect(ins[1][2]).to.equal('anchor_bundle');
+            expect(ins[1][3], 'frozen anchor amount, not the 2.5 env override').to.equal('10.00000000');
+        });
+
         it('records the FROZEN archive amount for a derived anchor_archive reward, ignoring an env override', async function () {
             // Same divergence argument as the per-chain frozen amount: the indexer credits
-            // the frozen ARCHIVE_REWARD_AMOUNT from the on-chain v6, so the hub's recorded
+            // the frozen ARCHIVE_REWARD_AMOUNT from the on-chain v1, so the hub's recorded
             // (and therefore archived) amount has to match or recovery forks the COLLECT rail.
             let h = createMockHub({ p2pConfig: { ANCHOR_REWARD_PER_PUBLISH: '2.5' } });
             h.network = 'regtest';                                         // archive flag-day = genesis
@@ -421,21 +441,12 @@ describe('RewardTracker', function () {
             expect(post.getCall(0).args[0]).to.equal('http://configs-table-indexer:3000');
         });
 
-        it('pushes rewards to the hub-resolved endpoint when the env field is empty', async function () {
-            rt.btcIndexerApiUrl = '';
-            hub._resolveBtcIndexerUrl = sinon.stub().resolves('http://configs-table-indexer:3000');
-            let post = sinon.stub(axios, 'post').resolves({});
-            await rt._pushRewardsToBtcIndexer(7, [hexPk(1)], '5.00000000', 800000, 'anchor_archive');
-            expect(post.getCall(0).args[0]).to.equal('http://configs-table-indexer:3000');
-        });
-
-        it('still fails closed (null / no push) when neither env nor the hub resolver yields a URL', async function () {
+        it('still fails closed (null, no call) when neither env nor the hub resolver yields a URL', async function () {
             rt.btcIndexerApiUrl = '';
             hub._resolveBtcIndexerUrl = sinon.stub().resolves('');
             let post = sinon.stub(axios, 'post').resolves({});
             let result = await rt.resolveSourceByPubkey(hexPk(1), 1);
             expect(result).to.equal(null);
-            await rt._pushRewardsToBtcIndexer(1, [hexPk(1)], '1.00000000', 1);
             expect(post.called).to.be.false;
         });
 
@@ -501,88 +512,6 @@ describe('RewardTracker', function () {
             hub.db.doQuery.resolves([]);
             let result = await rt.getTotalDistributed();
             expect(result).to.equal('0');
-        });
-    });
-
-    // -----------------------------------------------------------------
-    // _pushRewardsToBtcIndexer()
-    // -----------------------------------------------------------------
-
-    describe('_pushRewardsToBtcIndexer()', function () {
-        it('returns early (no POST) when no BTC indexer URL is configured', async function () {
-            let post = sinon.stub(axios, 'post').resolves({});
-            rt.btcIndexerApiUrl = '';
-            await rt._pushRewardsToBtcIndexer(1, [hexPk(1)], '2.00000000', 800000);
-            expect(post.called).to.be.false;
-        });
-
-        it('POSTs a pushvalidatorrewards JSON-RPC body to the indexer', async function () {
-            let post = sinon.stub(axios, 'post').resolves({});
-            rt.btcIndexerApiUrl = 'http://btc-indexer/api';
-            await rt._pushRewardsToBtcIndexer(7, [hexPk(1), hexPk(2)], '5.00000000', 800000);
-
-            expect(post.calledOnce).to.be.true;
-            let [url, body, opts] = post.getCall(0).args;
-            expect(url).to.equal('http://btc-indexer/api');
-            expect(body.jsonrpc).to.equal('2.0');
-            expect(body.method).to.equal('pushvalidatorrewards');
-            expect(body.params.round).to.equal(7);
-            expect(body.params.reward_type).to.equal('oracle_round');
-            expect(body.params.block_index).to.equal(800000);
-            expect(body.params.rewards).to.deep.equal([
-                { pubkey: hexPk(1), amount: '5.00000000' },
-                { pubkey: hexPk(2), amount: '5.00000000' }
-            ]);
-            expect(opts.headers['Content-Type']).to.equal('application/json');
-            expect(opts.headers).to.not.have.property('x-api-key');
-        });
-
-        it('includes the x-api-key header when an API key is configured', async function () {
-            let post = sinon.stub(axios, 'post').resolves({});
-            rt.btcIndexerApiUrl = 'http://btc-indexer/api';
-            rt.btcIndexerApiKey = 'test-fixture-key';
-            await rt._pushRewardsToBtcIndexer(1, [hexPk(1)], '1.00000000', 1);
-            expect(post.getCall(0).args[2].headers['x-api-key']).to.equal('test-fixture-key');
-        });
-
-        it('swallows a POST failure without throwing, after exhausting the bounded retry', async function () {
-            let post = sinon.stub(axios, 'post').rejects(new Error('econnrefused'));
-            rt.btcIndexerApiUrl = 'http://btc-indexer/api';
-            rt.pushRetryDelayMs = 0;
-            await rt._pushRewardsToBtcIndexer(1, [hexPk(1)], '1.00000000', 1);
-            // A transport failure is exactly the drop that loses the reward permanently,
-            // so it is retried rather than logged once and abandoned.
-            expect(post.callCount).to.equal(rt.pushMaxAttempts);
-        });
-
-        it('retries a transient error envelope and stops on the first acceptance', async function () {
-            let post = sinon.stub(axios, 'post');
-            post.onFirstCall().resolves({ data: { result: { error: 'indexer database not ready' } } });
-            post.onSecondCall().resolves({ data: { result: { status: 'success', written: 1, skipped: 0 } } });
-            rt.btcIndexerApiUrl = 'http://btc-indexer/api';
-            rt.pushRetryDelayMs = 0;
-            await rt._pushRewardsToBtcIndexer(9, [hexPk(1)], '10.00000000', 800000, 'anchor_archive');
-            expect(post.callCount).to.equal(2);
-        });
-
-        it('does NOT retry a terminal refusal (flag-day retirement / unpushable type)', async function () {
-            let post = sinon.stub(axios, 'post').resolves({
-                data: { result: { error: 'reward_type anchor_archive at block 963000 is derived on-chain from ANCHOR v6; push retired' } }
-            });
-            rt.btcIndexerApiUrl = 'http://btc-indexer/api';
-            rt.pushRetryDelayMs = 0;
-            await rt._pushRewardsToBtcIndexer(9, [hexPk(1)], '10.00000000', 963000, 'anchor_archive');
-            expect(post.calledOnce).to.be.true;
-        });
-
-        it('treats a written=0/skipped>0 acceptance as a non-retryable un-minted reward', async function () {
-            let post = sinon.stub(axios, 'post').resolves({
-                data: { result: { status: 'success', written: 0, skipped: 1 } }
-            });
-            rt.btcIndexerApiUrl = 'http://btc-indexer/api';
-            rt.pushRetryDelayMs = 0;
-            await rt._pushRewardsToBtcIndexer(9, [hexPk(1)], '10.00000000', 800000, 'anchor_archive');
-            expect(post.calledOnce).to.be.true;
         });
     });
 });

@@ -904,7 +904,7 @@ describe('OracleConsensus', function () {
             oracleRound.getSubmissions.returns(buildSubmissions([
                 { sender: VALIDATORS_3[(round + 1) % 3].addr, prices: [{ coinPair: 'BTC/USD', price: '100000' }] }
             ]));
-            return { type: 'ORACLE_PROPOSE', sender: leader.addr, data: Object.assign({
+            return { type: 'ORACLE_PROPOSE', sender: leader.addr, sig_pubkey: leader.pubkey, data: Object.assign({
                 round, prices, digest: oc._digest(round, prices)
             }, extra || {}) };
         }
@@ -965,10 +965,11 @@ describe('OracleConsensus', function () {
 
             oc._handlePrepare({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { round: 1, digest }
             });
 
-            expect(oc.pendingRounds.get(1).prepares.has(VALIDATORS_4[1].addr)).to.be.true;
+            expect(oc.pendingRounds.get(1).prepares.has(VALIDATORS_4[1].pubkey)).to.be.true;
         });
 
         it('PREPARE with wrong digest is rejected', function () {
@@ -982,6 +983,7 @@ describe('OracleConsensus', function () {
 
             oc._handlePrepare({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { round: 1, digest: 'wrong-digest' }
             });
 
@@ -1004,6 +1006,7 @@ describe('OracleConsensus', function () {
             // Third prepare → quorum met
             oc._handlePrepare({
                 sender: VALIDATORS_4[2].addr,
+                sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { round: 1, digest }
             });
 
@@ -1033,6 +1036,7 @@ describe('OracleConsensus', function () {
             // Third commit → quorum met
             oc._handleCommit({
                 sender: VALIDATORS_4[2].addr,
+                sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: { round: 1, digest }
             });
 
@@ -1053,8 +1057,8 @@ describe('OracleConsensus', function () {
                 finalized: false, timer: null
             });
 
-            oc._handlePrepare({ sender: VALIDATORS_4[1].addr, data: { round: 1, digest } });
-            oc._handlePrepare({ sender: VALIDATORS_4[1].addr, data: { round: 1, digest } });
+            oc._handlePrepare({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { round: 1, digest } });
+            oc._handlePrepare({ sender: VALIDATORS_4[1].addr, sig_pubkey: VALIDATORS_4[1].pubkey, data: { round: 1, digest } });
 
             expect(oc.pendingRounds.get(1).prepares.size).to.equal(1);
         });
@@ -1145,6 +1149,7 @@ describe('OracleConsensus', function () {
 
             await oc._handlePropose({
                 sender: VALIDATORS_4[2].addr,
+                sig_pubkey: VALIDATORS_4[2].pubkey,
                 data: {
                     round:          4,
                     prices,
@@ -1182,6 +1187,7 @@ describe('OracleConsensus', function () {
 
             await oc._handlePropose({
                 sender: VALIDATORS_4[3].addr,
+                sig_pubkey: VALIDATORS_4[3].pubkey,
                 data: {
                     round:          4,
                     prices,
@@ -1209,6 +1215,7 @@ describe('OracleConsensus', function () {
 
             await oc._handlePropose({
                 sender: VALIDATORS_4[3].addr,
+                sig_pubkey: VALIDATORS_4[3].pubkey,
                 data: {
                     round:          4,
                     prices,
@@ -1237,6 +1244,7 @@ describe('OracleConsensus', function () {
 
             await oc._handlePropose({
                 sender: VALIDATORS_4[3].addr,
+                sig_pubkey: VALIDATORS_4[3].pubkey,
                 data: { round: 4, prices, digest }
             });
 
@@ -1344,6 +1352,7 @@ describe('OracleConsensus', function () {
             let digest = oc._digest(4, prices);
             await oc._handlePropose({
                 sender: VALIDATORS_4[0].addr,
+                sig_pubkey: VALIDATORS_4[0].pubkey,
                 data: { round: 4, prices, digest, btcBlockHeight: 900000 }
             });
             expect(oc.pendingRounds.has(4)).to.be.true;
@@ -1376,6 +1385,7 @@ describe('OracleConsensus', function () {
             // Fallback PROPOSE from validator-2 BEFORE the grace → rejected.
             await oc._handlePropose({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { round: 4, prices, digest }
             });
             expect(oc.pendingRounds.has(4)).to.be.false;
@@ -1385,6 +1395,7 @@ describe('OracleConsensus', function () {
             clock.tick(oc.leaderTimeout);
             await oc._handlePropose({
                 sender: VALIDATORS_4[1].addr,
+                sig_pubkey: VALIDATORS_4[1].pubkey,
                 data: { round: 4, prices, digest, btcBlockHeight: 900000 }
             });
             expect(oc.pendingRounds.has(4)).to.be.true;
@@ -1413,6 +1424,7 @@ describe('OracleConsensus', function () {
 
             await oc._handlePropose({
                 sender: VALIDATORS_4[3].addr,   // v4: not the lowest non-leader
+                sig_pubkey: VALIDATORS_4[3].pubkey,
                 data: { round: 4, prices, digest }
             });
             expect(oc.pendingRounds.has(4)).to.be.false;

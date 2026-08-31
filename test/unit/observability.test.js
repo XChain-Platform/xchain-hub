@@ -75,10 +75,21 @@ describe('observability/metrics: exposition format', function () {
         expect(() => reg.counter({ name: 'ok2_total', help: 'x', labelNames: ['__name__'] })).to.throw(/reserved/);
     });
 
-    it('refuses a duplicate metric registration', function () {
+    it('hands back the same metric when an identical declaration repeats', function () {
+        // Modules register their counters wherever they are required, and the
+        // registry is now process-wide, so an identical re-declaration is a
+        // normal event rather than a conflict.
         const reg = new Registry();
-        reg.gauge({ name: 'dup_gauge', help: 'x' });
-        expect(() => reg.gauge({ name: 'dup_gauge', help: 'y' })).to.throw(/already registered/);
+        const first = reg.gauge({ name: 'dup_gauge', help: 'x' });
+        expect(reg.gauge({ name: 'dup_gauge', help: 'y' })).to.equal(first);
+    });
+
+    it('still refuses a duplicate name declared with a different shape', function () {
+        const reg = new Registry();
+        reg.gauge({ name: 'shape_clash', help: 'x' });
+        expect(() => reg.counter({ name: 'shape_clash', help: 'x' })).to.throw(/different shape/);
+        reg.gauge({ name: 'label_clash', help: 'x', labelNames: ['a'] });
+        expect(() => reg.gauge({ name: 'label_clash', help: 'x', labelNames: ['b'] })).to.throw(/different shape/);
     });
 
     it('rejects a negative counter increment and an unknown label', function () {
@@ -205,7 +216,8 @@ describe('observability/logShipper', function () {
         expect(log.config.shipEnabled).to.equal(false);
         expect(log.buffer.length).to.equal(0);
         expect(log.timer).to.equal(null);
-        expect(sink.lines.log).to.deep.equal(['hello world']);
+        expect(sink.lines.log).to.have.lengthOf(1);
+        expect(sink.lines.log[0]).to.match(/^\S+Z info \[svc\] hello world$/);
     });
 
     it('emits NDJSON with the envelope keys when LOG_FORMAT=json', function () {
@@ -357,6 +369,11 @@ describe('observability/logShipper', function () {
 
 describe('observability/installObservability', function () {
 
+    // The registry and shipper are process-wide by design (one process is one
+    // service), so a suite that installs many times has to drop them between
+    // cases or it reads the previous case's service label and HTTP series.
+    afterEach(function () { require('../../src/observability/index.js')._resetObservability(); });
+
     it('reads a default-off config from an empty env', function () {
         const cfg = readObservabilityEnv({});
         expect(cfg.metricsEnabled).to.equal(false);
@@ -370,12 +387,16 @@ describe('observability/installObservability', function () {
             .to.equal('/internal/metrics');
     });
 
-    it('registers NO route and no registry when the flag is unset', async function () {
+    it('registers NO route when the flag is unset, but still hands back a registry', async function () {
         const app = express();
         app.get('/health', (req, res) => res.json({ ok: true }));
         const obs = installObservability(app, { service: 'xchain-hub', env: {}, console: fakeConsole() });
         expect(obs.enabled).to.equal(false);
-        expect(obs.registry).to.equal(null);
+        // The registry is deliberately NOT gated: a counter a consensus module
+        // registers has to exist on the default fleet, or it can never record.
+        // Only the endpoint is an operator decision.
+        expect(obs.registry).to.not.equal(null);
+        expect(typeof obs.registry.counter).to.equal('function');
 
         const srv = await listen(app);
         try {
@@ -502,6 +523,280 @@ describe('observability/installObservability', function () {
         const obs = installObservability(null, { service: 'worker', env: {}, console: sink });
         expect(obs.enabled).to.equal(false);
         obs.logger.info('tick');
-        expect(sink.lines.log).to.deep.equal(['tick']);
+        expect(sink.lines.log).to.have.lengthOf(1);
+        expect(sink.lines.log[0]).to.match(/^\S+Z info \[worker\] tick$/);
+    });
+});
+
+// The fleet runs text mode, so text mode is where the structured record has to
+// survive. Before this, _emitLocal's text branch printed the message alone and
+// threw the whole record away: LOG_LEVEL and LOG_FORMAT changed nothing an
+// operator could see on any box.
+describe('observability/logShipper: text-with-fields format', function () {
+    it('renders ts, lowercase level, service tag, message, then key=value', function () {
+        const sink = fakeConsole();
+        const log = createLogShipper({ service: 'xchain-hub', env: {}, console: sink });
+        log.warn('PBFT_DROP', { reason: 'digest_mismatch', phase: 'prepare', round: 42 });
+        expect(sink.lines.warn).to.have.lengthOf(1);
+        expect(sink.lines.warn[0]).to.match(
+            /^\d{4}-\d{2}-\d{2}T[\d:.]+Z warn \[xchain-hub\] PBFT_DROP reason=digest_mismatch phase=prepare round=42$/
+        );
+    });
+
+    it('keeps the level token lowercase so the server-monitor ERROR|FATAL grep does not match it', function () {
+        const sink = fakeConsole();
+        const log = createLogShipper({ service: 'svc', env: {}, console: sink });
+        log.error('boom');
+        // collect-snapshot.sh counts `grep -cE 'ERROR|FATAL'`. An uppercase
+        // token would make every console.error line count and trip the crit
+        // threshold fleet-wide on first deploy.
+        expect(sink.lines.error[0]).to.not.match(/ERROR|FATAL/);
+        expect(sink.lines.error[0]).to.include(' error [svc] boom');
+    });
+
+    it('puts the message immediately after the service tag so existing substring greps still match', function () {
+        const sink = fakeConsole();
+        const log = createLogShipper({ service: 'xchain-hub', env: {}, console: sink });
+        log.info('Oracle: Round 12 finalized');
+        expect(sink.lines.log[0]).to.include('Oracle: Round 12 finalized');
+    });
+
+    it('quotes a value carrying whitespace, = or a quote, and leaves plain tokens bare', function () {
+        const sink = fakeConsole();
+        const log = createLogShipper({ service: 'svc', env: {}, console: sink });
+        log.info('m', { plain: 'abc', spaced: 'a b', eq: 'k=v', num: 3, flag: true, nil: null });
+        const line = sink.lines.log[0];
+        expect(line).to.include('plain=abc');
+        expect(line).to.include('spaced="a b"');
+        expect(line).to.include('eq="k=v"');
+        expect(line).to.include('num=3');
+        expect(line).to.include('flag=true');
+        expect(line).to.include('nil=null');
+    });
+
+    it('redacts a credential-shaped field and an inline credential in the message', function () {
+        const sink = fakeConsole();
+        const log = createLogShipper({ service: 'svc', env: {}, console: sink });
+        log.warn('connect failed password=hunter2', { db_password: 'hunter2', host: 'db1' });
+        const line = sink.lines.warn[0];
+        expect(line).to.not.include('hunter2');
+        expect(line).to.include(REDACTED);
+        expect(line).to.include('host=db1');
+    });
+
+    it('emits one NDJSON record per line under LOG_FORMAT=json', function () {
+        const sink = fakeConsole();
+        const log = createLogShipper({ service: 'svc', env: { LOG_FORMAT: 'json' }, console: sink });
+        log.info('hello', { a: 1 });
+        const parsed = JSON.parse(sink.lines.log[0]);
+        expect(parsed).to.include({ level: 'info', service: 'svc', msg: 'hello', a: 1 });
+        expect(parsed.ts).to.be.a('string');
+    });
+
+    it('silences info under LOG_LEVEL=warn while still emitting warn', function () {
+        const sink = fakeConsole();
+        const log = createLogShipper({ service: 'svc', env: { LOG_LEVEL: 'warn' }, console: sink });
+        log.info('quiet');
+        log.warn('loud');
+        expect(sink.lines.log).to.have.lengthOf(0);
+        expect(sink.lines.warn).to.have.lengthOf(1);
+    });
+});
+
+describe('observability/logShipper: message redaction', function () {
+    // An env-validation failure prints the variable NAME and its value, and the
+    // names the services use are all prefixed (HUB_DB_SECRET, INDEXER_DB_PASS,
+    // db_password). A `\b`-anchored key never matches those, because `_` is a
+    // word character and `\b` does not fire between two word characters. With
+    // LOG_SHIP_* configured, an unscrubbed line goes off-box in the clear.
+    const leaky = [
+        ['prefixed env secret',   'Missing required environment variable: HUB_DB_SECRET=hunter2swordfish'],
+        ['prefixed db pass',      'connect failed db_password=hunter2swordfish'],
+        ['screaming env pass',    'INDEXER_DB_PASS=hunter2swordfish'],
+        ['api key',               'HUB_API_KEY=hunter2swordfish'],
+        ['keyed bearer',          'Authorization: Bearer eyJhbGciOi.SECRETPAYLOAD.sig'],
+        ['bare bearer',           'sending Bearer eyJhbGciOi.SECRETPAYLOAD.sig upstream'],
+        ['quoted mnemonic',       'mnemonic="correct horse battery staple"'],
+    ];
+    for (const [name, line] of leaky) {
+        it(`scrubs a ${name}`, function () {
+            const out = scrubMessage(line);
+            expect(out).to.not.match(/hunter2swordfish|SECRETPAYLOAD|correct horse/);
+            expect(out).to.include(REDACTED);
+        });
+    }
+
+    it('redacts the token, not the word Bearer', function () {
+        // The value group would otherwise capture "Bearer" and stop, leaving the
+        // token itself in the clear immediately after a [redacted] marker that
+        // makes the line look handled.
+        const out = scrubMessage('Authorization: Bearer eyJhbGciOi.SECRETPAYLOAD.sig');
+        expect(out).to.not.include('SECRETPAYLOAD');
+    });
+
+    it('leaves real operational lines untouched, hex identifiers included', function () {
+        // Hub and indexer lines are full of legitimate 64-char hex (txids, block
+        // hashes, state roots). A hex sweep here would gut the logs this work
+        // exists to make readable.
+        const keep = [
+            'Oracle: Round 12 finalized with 4 of 5 votes',
+            'StateAnchorPublisher: anchored bundle regtest @ 100 (txid a3f9bc21de)',
+            'P2P: Invalid signature from xc1qexampleaddr; dropping message',
+            'seed block=5 imported',
+            'PBFT_DROP reason=digest_mismatch phase=prepare round=42'
+        ];
+        for (const line of keep) expect(scrubMessage(line)).to.equal(line);
+    });
+});
+
+describe('observability/patchConsole', function () {
+    const { patchConsole, unpatchConsole, getLogger, getRegistry, _resetObservability } =
+        require('../../src/observability/index.js');
+
+    afterEach(function () { _resetObservability(); });
+
+    it('routes console.* through the shim, mapping log to info', function () {
+        const handle = patchConsole({ service: 'xchain-hub', env: {} });
+        const seen = [];
+        // Read the shipper's own output by swapping its sink after the patch,
+        // which is the only place the bound originals are reachable from.
+        handle.logger.console = { log: (m) => seen.push(m), warn: (m) => seen.push(m), error: (m) => seen.push(m) };
+        console.log('plain');
+        console.warn('careful');
+        console.error('bad');
+        unpatchConsole();
+        expect(seen[0]).to.match(/ info \[xchain-hub\] plain$/);
+        expect(seen[1]).to.match(/ warn \[xchain-hub\] careful$/);
+        expect(seen[2]).to.match(/ error \[xchain-hub\] bad$/);
+    });
+
+    it('resolves printf format strings and keeps an Error stack, via util.format', function () {
+        const handle = patchConsole({ service: 'svc', env: {} });
+        const seen = [];
+        handle.logger.console = { log: (m) => seen.push(m), warn: (m) => seen.push(m), error: (m) => seen.push(m) };
+        console.log('round %d of %s', 7, 'oracle');
+        console.error('crashed:', new Error('kaboom'));
+        unpatchConsole();
+        expect(seen[0]).to.include('round 7 of oracle');
+        expect(seen[1]).to.include('kaboom');
+        expect(seen[1]).to.include('Error');
+    });
+
+    it('does not recurse: the sink holds bound originals captured BEFORE the patch', function () {
+        // `const orig = console` would hand the logger the very object about to
+        // be replaced, so every line would re-enter the wrapper forever. The
+        // proof is simply that a line completes and arrives once.
+        const realLog = console.log;
+        let depth = 0;
+        let maxDepth = 0;
+        console.log = (...a) => { depth += 1; maxDepth = Math.max(maxDepth, depth); depth -= 1; return realLog.apply(console, a); };
+        const captured = console.log;
+        try {
+            patchConsole({ service: 'svc', env: {} });
+            expect(console.log).to.not.equal(captured);
+            console.log('one line');
+            unpatchConsole();
+        } finally {
+            console.log = realLog;
+        }
+        expect(maxDepth).to.equal(1);
+    });
+
+    it('no-ops under XCHAIN_LOG_PATCH=0 so test bootstraps see stock console', function () {
+        const before = console.log;
+        const handle = patchConsole({ service: 'svc', env: { XCHAIN_LOG_PATCH: '0' } });
+        expect(handle.patched).to.equal(false);
+        expect(console.log).to.equal(before);
+    });
+
+    it('is idempotent and restores the exact original functions on unpatch', function () {
+        const before = { log: console.log, warn: console.warn, error: console.error };
+        const first = patchConsole({ service: 'svc', env: {} });
+        const second = patchConsole({ service: 'other', env: {} });
+        expect(second).to.equal(first);
+        unpatchConsole();
+        expect(console.log).to.equal(before.log);
+        expect(console.warn).to.equal(before.warn);
+        expect(console.error).to.equal(before.error);
+    });
+
+    it('getLogger works before any install and reaches the real shipper after', function () {
+        // A module that logs while being required must not be able to crash the
+        // process just because it loaded before the wiring.
+        const log = getLogger();
+        expect(() => log.info('early', { a: 1 })).to.not.throw();
+        const handle = patchConsole({ service: 'svc', env: {} });
+        const seen = [];
+        handle.logger.console = { log: (m) => seen.push(m), warn: (m) => seen.push(m), error: (m) => seen.push(m) };
+        log.warn('LATE_EVENT', { reason: 'x' });
+        unpatchConsole();
+        expect(seen[0]).to.match(/ warn \[svc\] LATE_EVENT reason=x$/);
+    });
+
+    // A trailing Error argument expands across lines under util.inspect, and only
+    // the first line carries the prefix. Measured on the live fleet as orphaned
+    // fragments like "  fatal: true," from a pretty-printed mariadb SqlError:
+    // no operation, no error, no coin, and unparseable by anything keying on the
+    // prefix. One console call must be one line.
+    it('renders a multi-line message as ONE line with the breaks escaped', () => {
+        const sink = fakeConsole();
+        const log = createLogShipper({ service: 'xchain-hub', env: {}, console: sink });
+        log.error('DB write failed: SqlError: connect ECONNREFUSED\n  fatal: true,\n  errno: -111');
+        expect(sink.lines.error).to.have.lengthOf(1);
+        expect(sink.lines.error[0]).to.not.match(/\n/);
+        expect(sink.lines.error[0]).to.include('\\n  fatal: true,');
+        expect(sink.lines.error[0]).to.match(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z error \[xchain-hub\] DB write failed:/);
+    });
+
+    it('escapes a bare carriage return too, so a progress writer cannot split a record', () => {
+        const sink = fakeConsole();
+        const log = createLogShipper({ service: 'xchain-hub', env: {}, console: sink });
+        log.warn('rewriting\rline');
+        expect(sink.lines.warn).to.have.lengthOf(1);
+        expect(sink.lines.warn[0]).to.include('rewriting\\nline');
+    });
+
+    // JSON mode needs no escaping of its own: JSON.stringify already emits one
+    // physical line and keeps the true characters, which is better fidelity for a
+    // machine reader than a lossy substitution would be.
+    it('JSON mode keeps the real newlines and still emits one physical line', () => {
+        const sink = fakeConsole();
+        const log = createLogShipper({ service: 'xchain-hub', env: { LOG_FORMAT: 'json' }, console: sink });
+        log.error('line one\nline two');
+        expect(sink.lines.error).to.have.lengthOf(1);
+        expect(sink.lines.error[0]).to.not.match(/\n/);
+        expect(JSON.parse(sink.lines.error[0]).msg).to.equal('line one\nline two');
+    });
+
+    it('does not double-format: a shipper built AFTER the patch writes to the pre-patch sink', function () {
+        // The shim's default sink is the global console by reference. A shipper
+        // taking that default once console is patched emits its formatted line
+        // INTO the wrapper and gets it formatted again, so the line reads
+        // `<ts> warn [svc] <ts> warn [svc] msg`. Caught by driving the real hub
+        // suite, not by reading the diff.
+        const seen = [];
+        const realWarn = console.warn;
+        console.warn = (m) => seen.push(m);
+        try {
+            patchConsole({ service: 'svc', env: {} });
+            // A custom transport means this handle does NOT adopt the process
+            // shipper, so it builds a second one: the path where the global
+            // console would otherwise be taken as the default sink.
+            const second = installObservability(null, { service: 'svc', env: {}, logTransport: () => Promise.resolve() });
+            second.logger.warn('once only');
+        } finally {
+            unpatchConsole();
+            console.warn = realWarn;
+        }
+        expect(seen).to.have.lengthOf(1);
+        expect(seen[0]).to.match(/^\S+Z warn \[svc\] once only$/);
+    });
+
+    it('hands out one registry, always constructed, before any install call', function () {
+        const reg = getRegistry({ service: 'svc' });
+        expect(reg).to.equal(getRegistry());
+        const c = reg.counter({ name: 'xchain_probe_total', help: 'probe' });
+        c.inc({}, 1);
+        expect(reg.render()).to.include('xchain_probe_total');
     });
 });

@@ -21,6 +21,18 @@
 const dotenv = require('dotenv');
 dotenv.config();
 
+// Before anything else logs. The env-validation failures immediately below are
+// exactly the lines an operator needs levelled and timestamped, and
+// installObservability does not run until ~380 lines further down.
+const { patchConsole } = require('./observability');
+patchConsole({ service: 'xchain-hub', version: require('../package.json').version });
+
+// The hub relies on per-tick .catch() and has no uncaughtException handler at
+// all, so a throw outside a promise chain exits with node's default stderr dump
+// and nothing a collector can key on.
+const { installCrashHandlers, noteShutdown } = require('./consensusDiagnostics');
+installCrashHandlers({ service: 'xchain-hub' });
+
 const { resolveSecretEnv, deprecatedSecretEnvNames } = require('./secret-env');
 
 const REQUIRED_ENV = ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_PORT'];
@@ -67,6 +79,7 @@ const { HUB_SCHEMA_VERSION } = require('./hub-schema-version');   // stamped on 
 const { buildOraclePricesSnapshotQuery } = require('./oraclePricesSnapshotQuery');   // page (indexer bootstrap) vs latest-per-feed (dashboard) query selection
 const { evaluateAuthPosture } = require('./lib/auth_posture.js');   // boot refuses on an undeclared unauthenticated write surface
 const { parseCorsOrigin } = require('./lib/corsOrigin.js');
+const { resolveMaxBatch, makeRpcBatchGuard } = require('./rpcBatchGuard.js');   // JSON-RPC batch cardinality cap
 // #1299: single source of truth for the co-sign/slash deviation band (no re-declared 0.05 literal).
 // #2653: oracle round-interval/submission-window defaults shared with OracleRound.js and XChainHub.js.
 const { ORACLE_DEVIATION_THRESHOLD, DEFAULT_ORACLE_ROUND_INTERVAL_MS,
@@ -124,7 +137,7 @@ for(const net of coins.NETWORKS) COIN_CONSENSUS_HASHES[net] = coins.consensusHas
 const WRITE_METHODS  = new Set([
     'updateconfig', 'registervalidator', 'rotatevalidator', 'deregistervalidator', 'syncvalidators',
     'propose', 'proposeslashpenalty', 'vote', 'requestattestation', 'reportreorg', 'initiateswap',
-    'pushchaintip', 'pushpriceround', 'pushoracleprice', 'pushpricereorg', 'pushxcallreorg',
+    'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushoracleprice', 'pushpricereorg', 'pushxcallreorg',
     'pushdexreorg', 'anchorflush', 'pauseeffectorspend', 'resumeeffectorspend'
 ]);
 
@@ -136,7 +149,26 @@ const WRITE_METHODS  = new Set([
 // bulk-key compromise cannot fabricate retractions. Unset = legacy behavior
 // (bulk-key gated), rolling-deploy safe. Full fix (2f+1 co-signed retractions)
 // rides the shared flag-day set.
+//
+// pushpricebatch (PRICE v0, spec section 5.7 / decision D22) is deliberately
+// NOT in this set: it is a FORWARD write that delivers new signed rounds, the
+// same role pushpriceround already plays outside the retraction tier. Its own
+// retraction path is pushpricereorg below; a batch push carries no
+// destructive row:deleted broadcast of its own.
 const REORG_WRITE_METHODS = new Set(['pushpricereorg', 'pushxcallreorg', 'pushdexreorg']);
+
+// The ONLY rpc methods reachable on the public P2P-port feed (PeerManager
+// setFeedHandlers). This is the complete set an indexer sends to its hub
+// (xchain-indexer src/hub_client.js): what landed on its chain, and the
+// retractions when a reorg takes it back. Every one is a WRITE_METHODS or
+// REORG_WRITE_METHODS member, so the x-api-key tiers apply to them here exactly as
+// on the private port; this set only narrows WHICH methods that port will consider.
+// Adding to it widens a public attack surface: a method belongs here only if an
+// indexer must call it and it is signature- or content-validated hub-side.
+const FEED_RPC_METHODS = new Set([
+    'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushoracleprice',
+    'pushpricereorg', 'pushxcallreorg', 'pushdexreorg'
+]);
 const HUB_REORG_API_KEY   = process.env.HUB_REORG_API_KEY || '';
 
 // Read methods whose RESPONSE is mesh-internal, keyed like writes when
@@ -147,7 +179,14 @@ const HUB_REORG_API_KEY   = process.env.HUB_REORG_API_KEY || '';
 // proxy POST publicly and this tier carries the policy. Escape hatch for a
 // staged rollout or emergency rollback: HUB_SENSITIVE_READ_AUTH=0 disables
 // enforcement for these methods only (writes stay keyed).
-const SENSITIVE_READ_METHODS = new Set(['getallconfigs']);
+// getrollcallstatus is here for a different reason than getallconfigs: it carries
+// no credential, but it reports how many validators have answered a given ROLLCALL
+// epoch, and an epoch's signer count is a PRE-EVICTION TARGETING surface. A caller
+// polling every hub can tell which keys are close to the K-epoch absence streak
+// before the chain evicts them, which is a map of who to knock over. The ledger
+// facts themselves (last_rolled_epoch, absent_streak) are deliberately NOT served
+// here at all; they live on the BTC indexer, where they are authoritative.
+const SENSITIVE_READ_METHODS = new Set(['getallconfigs', 'getrollcallstatus']);
 const SENSITIVE_READ_AUTH = process.env.HUB_SENSITIVE_READ_AUTH !== '0';
 
 function validateChain(chain) {
@@ -447,6 +486,42 @@ async function startApi(){
         next();
     });
 
+    // Public-port method allowlist. A request stamped by PeerManager arrived on the
+    // PUBLIC P2P port (see setFeedHandlers), where the only callers are indexers
+    // mirroring this validator and reporting what landed on their chain. Hold those
+    // to FEED_RPC_METHODS: every other method (config and validator administration,
+    // governance, slashing, swaps, anchor flush, effector spend, and every read)
+    // stays reachable only on the private API port.
+    //
+    // These are the whole indexer->hub vocabulary (xchain-indexer src/hub_client.js),
+    // and they are not a back door: each is a WRITE_METHODS/REORG_WRITE_METHODS
+    // member that has just cleared the x-api-key gate above exactly as it would on
+    // the private port, and each payload is validated and signature-checked before
+    // anything is stored. Refusing them would leave a validator unable to learn that
+    // its own published batch landed, which is what stops its publisher pruning and
+    // keeps the takeover rail disarmed.
+    //
+    // Runs AFTER the key gate deliberately: an unauthenticated caller gets the same
+    // 401 it would get anywhere, so this port answers "not available" only to a
+    // caller already holding the key, and does not become an oracle for which
+    // methods a hub implements.
+    app.use((req, res, next) => {
+        if (!req.xchainFeedOrigin) return next();
+        if (req.method === 'GET') return next();     // snapshot reads, already path-scoped
+        let calls = Array.isArray(req.body) ? req.body : [req.body];
+        let allowed = calls.length > 0 && calls.every((call) => {
+            let method = call && call.method;
+            return typeof method === 'string' && FEED_RPC_METHODS.has(method.toLowerCase());
+        });
+        if (!allowed) {
+            return res.status(404).json({
+                jsonrpc: '2.0', id: (Array.isArray(req.body) ? null : (req.body && req.body.id)) || null,
+                error: { code: -32601, message: 'Method not available on this port' }
+            });
+        }
+        next();
+    });
+
     const jsonRpcController = {
 
         async ping(params, {res}) {
@@ -742,6 +817,43 @@ async function startApi(){
             }
         },
 
+        // PRICE batch counterpart to pushpriceround (spec section 5.7): one signed
+        // action carries every finalized round in an hourly window as rounds[], keyed
+        // by the batch's own first_round/last_round/btc_block_height rather than a
+        // single round. block_time is new (not on pushpriceround): the hub's
+        // pair-name flag day keys per round on that round's TIMESTAMP, and batching
+        // widens the hub/chain clock skew from ~10 min to ~70 min, so the push must
+        // carry the landing chain's own clock for that gate to resolve correctly.
+        // Indexer has already verified the batch's PBFT signatures locally; the hub
+        // re-verifies once via receiveValidatedBatch, then dedupes per round.
+        async pushpricebatch({source_chain, first_round, last_round, btc_block_height, rounds, block_time, sigs, action_index, block_index, push_generation}){
+            if(!source_chain) return {error: "source_chain is required"};
+            let chainErr = validateChain(source_chain);
+            if (chainErr) return chainErr;
+            if(first_round === undefined || first_round === null) return {error: "first_round is required"};
+            if(last_round === undefined || last_round === null) return {error: "last_round is required"};
+            if(!Array.isArray(rounds)) return {error: "rounds must be an array"};
+            if(!hub.priceAggregator) return {error: "price aggregator not ready"};
+            try {
+                let result = await hub.priceAggregator.receiveValidatedBatch(source_chain, {
+                    first_round:      first_round,
+                    last_round:       last_round,
+                    btc_block_height: btc_block_height,
+                    rounds:           rounds,
+                    block_time:       block_time,
+                    sigs:         sigs,
+                    action_index: action_index,
+                    block_index:  block_index,
+                    // HUB-RETRACT-4 precedent (pushpriceround above): forward the
+                    // source rollback generation so the reorg fence is not inert.
+                    push_generation: push_generation
+                });
+                return result;
+            } catch (err) {
+                return {error: err.message || "error processing price batch"};
+            }
+        },
+
         async pushoracleprice({source_chain, source_address, coin, tick, fiat, value, fee, memo, block_time, action_index, push_generation}){
             if(!source_chain) return {error: "source_chain is required"};
             let chainErr = validateChain(source_chain);
@@ -987,6 +1099,27 @@ async function startApi(){
         async getanchorstatus(){
             if(!hub.stateAnchorPublisher) return { active: false };
             return { active: true, ...hub.stateAnchorPublisher.getAnchorStats() };
+        },
+
+        // ROLLCALL publisher status (sensitive read; see SENSITIVE_READ_METHODS).
+        // PUBLISHER STATE ONLY, for the newest epoch this hub is tracking: whether we
+        // signed it, how many verified signatures we have collected, how many of them
+        // we last observed on chain, who leads the election, our own rank, the txids
+        // we broadcast, and whether this hub's signer module can publish at all.
+        //
+        // It reports NO ledger facts. `last_rolled_epoch` and `absent_streak` are the
+        // BTC indexer's (getrollcallabsences), where they are authoritative; serving a
+        // hub's opinion of them here would give two answers to one question and the
+        // wrong one would read as an eviction.
+        //
+        // Mirrors getanchorstatus: always 200, {active:false} plus a fully-shaped body
+        // when no round engine is running, so a poller never has to branch on presence.
+        async getrollcallstatus(){
+            if(!hub.rollcallRound)
+                return { active: false, epoch: null, signed: false, gossiped_count: 0,
+                         on_chain_count: null, leader: null, our_rank: -1, txids: [],
+                         broadcast_capable: false };
+            return { active: true, ...hub.rollcallRound.getStatus() };
         },
 
         // ORACLE (PRICE v0) publisher status (read, no auth): publish-rail health for
@@ -1293,10 +1426,19 @@ async function startApi(){
         async getattestation({source_chain, source_action_index}){
             if(!source_chain || !source_action_index)
                 return {error: "source_chain and source_action_index are required"};
+            let scErr = validateChain(source_chain);
+            if (scErr) return scErr;
+            // source_action_index reaches a BIGINT bind in CrossChainEngine.getAttestation,
+            // and MariaDB COERCES a non-integer string on comparison instead of erroring:
+            // '1e3' reads as action 1000 and garbage reads as 0, so the caller is answered
+            // with a DIFFERENT attestation than it named. Same band getswap enforces.
+            let srcIdx = strictInt(source_action_index);
+            if (srcIdx === null || srcIdx <= 0)
+                return {error: "source_action_index must be a positive integer"};
             try {
                 let cc = hub.getCrossChain();
                 if(!cc) return {error: "cross-chain engine not active"};
-                let att = await cc.getAttestation(source_chain, source_action_index);
+                let att = await cc.getAttestation(source_chain, srcIdx);
                 return att || {error: "attestation not found"};
             } catch (err) {
                 return {error: "error fetching attestation"};
@@ -1785,6 +1927,17 @@ async function startApi(){
         res.type('application/json').send(openrpcSpec);
     });
 
+    // Bound JSON-RPC batch cardinality (src/rpcBatchGuard.js). The router below runs
+    // Promise.all over every element of a batch array while the per-IP rate limiter at
+    // the top of this stack charges the whole batch ONE token, so a single ~100 KB body
+    // fans out into ~1,400 concurrent handlers on the shared DB pool. Mounted here, in
+    // front of the router rather than globally, so it governs the dispatcher that
+    // amplifies and cannot reject a REST route's array body; the limiter has already
+    // charged its token by this point, so an oversize batch is never free.
+    // Default 20, matching encoder/decoder/utxo-tracker. No hub caller batches at all
+    // (every connector sends one call object), so the cap breaks no existing client.
+    app.use(makeRpcBatchGuard(resolveMaxBatch(process.env.HUB_MAX_RPC_BATCH, 20)));
+
     // Express 5 / body-parser 2.x leaves req.body undefined when a request carries
     // no JSON body (a GET, or a POST without application/json), whereas body-parser
     // 1.x set it to {}. express-json-rpc-router requires req.body to be an object or
@@ -1865,6 +2018,34 @@ async function startApi(){
     // does that in production); prevents proxyquired test instances from hanging.
     pingInterval.unref();
 
+    // Also serve the read-only mirror feed on the PUBLIC P2P port. A validator
+    // exposes one public port per network and its JSON-RPC API port is private to
+    // the box, so this is the only way an indexer can mirror from the validators
+    // themselves rather than from a separate hub standing in for them.
+    //
+    // The handlers below ARE the ones mounted above: PeerManager delegates a GET
+    // under /hub-db/snapshot to this same express app, and a /hub-db/subscribe
+    // upgrade back to this server's own upgrade listener (auth, then
+    // HubDbBroadcaster). Nothing else on that port reaches either. Fail closed
+    // without a key: the snapshot middleware skips its check when HUB_API_KEY is
+    // unset, which is tolerable on a loopback-bound API port and is not on a public
+    // one, so an unkeyed hub simply keeps the port gossip-only.
+    if (hub.peerManager && typeof hub.peerManager.setFeedHandlers === 'function') {
+        if (!HUB_API_KEY) {
+            console.warn('Hub DB feed NOT served on the P2P port: HUB_API_KEY is unset ' +
+                '(fail closed; the port stays gossip-only)');
+        } else if (String(process.env.HUB_P2P_FEED_ENABLED || 'true').toLowerCase() === 'false') {
+            console.log('Hub DB feed on the P2P port disabled by HUB_P2P_FEED_ENABLED=false');
+        } else {
+            hub.peerManager.setFeedHandlers(
+                app,
+                (request, socket, head) => server.emit('upgrade', request, socket, head));
+            console.log('Hub DB feed also served on the P2P port ' +
+                (hub.p2pConfig && hub.p2pConfig.P2P_PORT ? hub.p2pConfig.P2P_PORT : '') +
+                ' (read-only, X-Api-Key required)');
+        }
+    }
+
     server.listen(HUB_PORT, HUB_HOST, () => {
         console.log('Hub API listening on ' + HUB_HOST + ':' + HUB_PORT);
         console.log('Hub DB sync WebSocket available at ws://' + HUB_HOST + ':' + HUB_PORT + '/hub-db/subscribe');
@@ -1930,8 +2111,10 @@ async function startApi(){
         }
     }
 
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGINT',  () => shutdown('SIGINT'));
+    // A SHUTDOWN record is what lets a reader tell an operator-driven restart
+    // from a crash: without it both look like a service that stopped emitting.
+    process.on('SIGTERM', () => { noteShutdown('SIGTERM'); shutdown('SIGTERM'); });
+    process.on('SIGINT',  () => { noteShutdown('SIGINT');  shutdown('SIGINT'); });
 }
 
 startApi();

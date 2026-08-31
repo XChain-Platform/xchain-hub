@@ -12,7 +12,7 @@
 
 // Crash-safety for the ARCHIVE publish path.
 //
-// _publishArchive broadcasts the v1/v6 head and every v2 continuation chunk BEFORE
+// _publishArchive broadcasts the v1 head and every v2 continuation chunk BEFORE
 // _backfillBatch records the batch, so a crash in that window leaves the rows pending
 // and the next flush re-elects the identical matches and pays for the whole archive a
 // second time. The checkpoint path has guarded this since its own existence check

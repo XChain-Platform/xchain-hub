@@ -16,6 +16,7 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 const { createMockHub } = require('../helpers/mockHub');
+const { pubkeyForTestSender } = require('../helpers/fixtures');
 
 describe('OracleRound ingest gate (stress-sweep 2026-07-08)', function () {
 
@@ -39,10 +40,13 @@ describe('OracleRound ingest gate (stress-sweep 2026-07-08)', function () {
 
     afterEach(function () { sinon.restore(); });
 
-    function submit(sender, prices, round) {
+    // sigPubkey defaults to a key unique to this sender. Admission keys on the
+    // PROVEN signing key now, so an envelope without one is never counted.
+    function submit(sender, prices, round, sigPubkey) {
         or._handleMessage({
             type: 'ORACLE_PRICE_SUBMIT',
             sender,
+            sig_pubkey: sigPubkey || pubkeyForTestSender(sender),
             data: { round, prices, sources: 1, timestamp: Date.now() }
         });
     }
@@ -56,7 +60,8 @@ describe('OracleRound ingest gate (stress-sweep 2026-07-08)', function () {
             ['ws://real-peer:10001', 'bb'.repeat(32)]
         ]);
 
-        submit('ws://forged-sender-xyz:10001', [{ coinPair: 'BTC/USD', price: '1' }], round);
+        submit('ws://forged-sender-xyz:10001', [{ coinPair: 'BTC/USD', price: '1' }], round,
+            'ee'.repeat(32));   // a key neither the chain nor the registry attributes
 
         let subs = or.submissions.get(round);
         expect(subs.has('ws://forged-sender-xyz:10001')).to.equal(false);
@@ -70,7 +75,7 @@ describe('OracleRound ingest gate (stress-sweep 2026-07-08)', function () {
             ['ws://real-peer:10001', 'bb'.repeat(32)]
         ]);
 
-        submit('ws://real-peer:10001', [{ coinPair: 'BTC/USD', price: '100001' }], round);
+        submit('ws://real-peer:10001', [{ coinPair: 'BTC/USD', price: '100001' }], round, 'bb'.repeat(32));
 
         expect(or.submissions.get(round).has('ws://real-peer:10001')).to.equal(true);
     });

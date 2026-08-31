@@ -22,14 +22,17 @@ const sinon            = require('sinon');
 const { expect }       = require('chai');
 const OracleConsensus  = require('../../src/OracleConsensus');
 const { createMockHub } = require('../helpers/mockHub');
+const { pubkeyForTestSender } = require('../helpers/fixtures');
 
 describe('OracleConsensus: early-message buffer for F7', function () {
 
     let hub, pm, oc, oracleRound;
+    // Each entry needs its signing key: votes are tallied by key, so a validator
+    // with no key casts nothing.
     const VALSET = [
-        { addr: 'ws://val-a:10001' },
-        { addr: 'ws://val-b:10002' },
-        { addr: 'ws://val-c:10003' },
+        { addr: 'ws://val-a:10001', pubkey: 'a1'.repeat(32) },
+        { addr: 'ws://val-b:10002', pubkey: 'b2'.repeat(32) },
+        { addr: 'ws://val-c:10003', pubkey: 'c3'.repeat(32) },
     ];
     // round % 3 === 0 → leader is VALSET[0]
     const ROUND  = 300;
@@ -39,11 +42,16 @@ describe('OracleConsensus: early-message buffer for F7', function () {
         return {
             type:   'ORACLE_PROPOSE',
             sender: VALSET[0].addr,
+            sig_pubkey: VALSET[0].pubkey,
             data:   { round: ROUND, prices: PRICES, digest, btcBlockHeight: 1000, btcBlockTime: 1700000000 }
         };
     }
     function voteEnvelope(type, sender, digest) {
-        return { type, sender, data: { round: ROUND, digest } };
+        let v = VALSET.find(x => x.addr === sender);
+        // Senders outside VALSET (the flood case) still need a distinct admissible
+        // key: the buffer cap only has something to cap once a vote is countable.
+        return { type, sender, sig_pubkey: v ? v.pubkey : pubkeyForTestSender(sender),
+                 data: { round: ROUND, digest } };
     }
 
     beforeEach(function () {
@@ -104,8 +112,8 @@ describe('OracleConsensus: early-message buffer for F7', function () {
         expect(oc.earlyMessages.has(ROUND)).to.be.false;            // drained
         let pending = oc.pendingRounds.get(ROUND);
         expect(pending, 'pending round must exist').to.exist;
-        expect(pending.prepares.has(VALSET[2].addr)).to.be.true;    // replayed
-        expect(pending.commits.has(VALSET[2].addr)).to.be.true;     // replayed
+        expect(pending.prepares.has(VALSET[2].pubkey)).to.be.true;  // replayed
+        expect(pending.commits.has(VALSET[2].pubkey)).to.be.true;   // replayed
     });
 
     it('reaches commit quorum from replayed votes alone (the missed-round scenario)', async function () {
@@ -139,7 +147,7 @@ describe('OracleConsensus: early-message buffer for F7', function () {
 
         let pending = oc.pendingRounds.get(ROUND);
         expect(pending).to.exist;
-        expect(pending.commits.has(VALSET[2].addr)).to.be.true;
+        expect(pending.commits.has(VALSET[2].pubkey)).to.be.true;
         expect(oc.earlyMessages.has(ROUND)).to.be.false;
     });
 

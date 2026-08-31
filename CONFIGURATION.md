@@ -85,6 +85,7 @@ signatures.
 | `HUB_ALLOW_UNAUTHENTICATED` | No | _unset_ | Declares that this hub knowingly runs with an unauthenticated write surface. Only consulted when `HUB_API_KEY` is empty. |
 | `HUB_CONSENSUS_INPUT_ALERT_AFTER` | No | `3` | Consecutive consensus-input fetch failures before the hub alerts and `/health` reports degraded. |
 | `HUB_RATE_LIMIT_RPM` | No | `100` | Requests per minute per client. |
+| `HUB_MAX_RPC_BATCH` | No | `20` | Maximum JSON-RPC calls in one batch array. The router dispatches every element concurrently while the rate limit above charges the whole batch one token, so an uncapped batch amplifies one request into hundreds of DB-touching handlers. Over the cap the hub answers `400` with JSON-RPC error `-32600`. An unparseable or non-positive value keeps the default. |
 | `CORS_ORIGIN` | No | `false` | Allowed CORS origin(s); unset disables cross-origin requests. `*` allows any origin, or give one origin or a comma-separated allowlist matched per-origin (browser wallet shells each send a different origin). A stray `*` inside a list is not a wildcard, so the grant fails closed. |
 
 ## Database (MariaDB)
@@ -309,7 +310,7 @@ precedence override.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `XCHAIN_CONFIRMATIONS_<COIN>` | No | per-coin | Cross-chain attestation/swap confirmation depth for `<COIN>` (e.g. `XCHAIN_CONFIRMATIONS_BTC`). Consensus-affecting: read by `CrossChainEngine` / `CrossChainCallEngine`. |
+| `XCHAIN_CONFIRMATIONS_<COIN>` | No | per-coin | Cross-chain attestation/swap confirmation depth for `<COIN>` (e.g. `XCHAIN_CONFIRMATIONS_BTC`). Consensus-affecting: read by `CrossChainEngine`, `CrossChainCallEngine`, `AttestationRelay` and `StateAnchorPublisher`. **May only RAISE the depth on mainnet and testnet**: a below-default value is clamped back up to the per-coin default, because a validator co-signing at a shallower depth accepts source actions the rest of the federation still considers reorg-able. Only regtest, the single-operator drill network, honours a lowered value. |
 | `CHECKPOINT_CONFIRMATIONS` | No | `6` | State-checkpoint confirmation depth (`StateCheckpointEngine`). Consensus-affecting. |
 
 ## Cross-chain attestation persistence (`CrossChainEngine`)
@@ -356,15 +357,21 @@ resolves from `p2pConfig`; the env var is the highest-precedence override.
 
 ## State-anchor publisher (`StateAnchorPublisher`)
 
-ANCHOR v0/v1/v2 on-chain publishing of finalized checkpoints (published on
+ANCHOR v7/v1/v2 on-chain publishing of finalized checkpoints (published on
 DOGE; wallet/encoder settings are in the DOGE oracle publisher section). Each
 variable also resolves from `p2pConfig`; the env var wins.
+
+One ANCHOR v7 per network per cycle carries every chain's newest un-anchored
+checkpoint as a SECTION, so a cycle runs one election, one publisher
+attestation round and one DOGE spend rather than one of each per chain. The
+superseded per-chain wires (v0/v3/v4/v5) are gone. The archive leg (v1 head, v2
+continuation chunks) is unchanged.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `ANCHOR_ENABLED` | No | `true` | Enable on-chain anchoring. Set `false` to disable. |
 | `ANCHOR_INTERVAL_MS` | No | `86400000` (24h) | Anchor cycle interval (ms). |
-| `ANCHOR_CHECKPOINT_EVERY_N` | No | `1` | Anchor only every Nth `checkpoint_seq` (each v0 anchor spends real DOGE; recovery only needs the latest anchored checkpoint). `1` anchors every checkpoint. Deterministic fleet-wide (`seq % N`). |
+| `ANCHOR_CHECKPOINT_EVERY_N` | No | `1` | Anchor only every Nth checkpoint round (each bundle spends real DOGE; recovery only needs the latest anchored checkpoint). `1` anchors every checkpoint. Eligibility is the checkpoint ORDINAL, `FLOOR(checkpoint_seq / CHECKPOINT_INTERVAL_BLOCKS) % N`, because `checkpoint_seq` is the round's BTC `snapshot_block` and the cadence latch advances it by exactly one interval per round: a raw `seq % N` would be a residue class pinned by the seed, not a sample, and for any N sharing a factor with the interval (2 or 3 against the default 6) the federation would either anchor every cadence or anchor nothing at all, permanently. Deterministic fleet-wide, so N and `CHECKPOINT_INTERVAL_BLOCKS` must both be uniform across the federation. Not a cadence control: `ANCHOR_INTERVAL_MS` is. |
 | `ANCHOR_MATCH_BATCH_SIZE` | No | `200` | Rows per archive-batch query page. |
 | `ANCHOR_MAX_BATCH` | No | `1000` | Max rows per archive (v1) anchor batch. |
 | `ANCHOR_CHUNK_MAX_BYTES` | No | `6000` | Max payload bytes per on-chain anchor chunk. |
@@ -373,20 +380,24 @@ variable also resolves from `p2pConfig`; the env var wins.
 | `ANCHOR_AMBIGUOUS_POLL_ATTEMPTS` | No | `3` | Ambiguous-send existence poll: attempts to find a maybe-accepted anchor in the indexer's mined view before deferring. |
 | `ANCHOR_AMBIGUOUS_POLL_MS` | No | `5000` | Delay (ms) between ambiguous-send poll attempts. |
 | `ANCHOR_ELECTION_TOLERANCE_BLOCKS` | No | `36` | Failover ladder: BTC blocks of elected-publisher silence before the next-ranked validator's publish slot unlocks. |
+| `ANCHOR_STARTUP_FLUSH_MS` | No | `60000` (1m) | Delay before the one normal (leader) flush a hub runs after start. The interval timer first fires a full `ANCHOR_INTERVAL_MS` after start and the rank wake is failover-only, so without this a hub restarted more often than once per interval never anchored anything. Idempotent across a rolling restart. `0` disables. |
+| `ANCHOR_PUBLISH_ALLOW_UNCONFIRMED_INPUTS` | No | `false` | Whether an anchor may be funded from this address's own unconfirmed change. Off, each anchor stands on its own fee rate (Dogecoin Core 1.14 miners score a transaction alone, so a child never lifts a stuck parent); a flush with no confirmed output defers with `NO_CONFIRMED_UTXO` and the next rank wake retries it as a normal flush. Archive chunks always spend the head's change by design. Set `true` only on venues that mine on demand. |
+| `ANCHOR_CONFIRM_CHECK_MS` | No | `300000` (5m) | How often the confirmation watchdog re-reads the publisher address to see which of this hub's own anchor broadcasts have mined. `0` disables. |
+| `ANCHOR_CONFIRM_STALE_MS` | No | `1800000` (30m) | Age past which a still-unconfirmed anchor broadcast is logged as `UNCONFIRMED_ANCHOR` on every watchdog pass. Nothing is re-broadcast or fee-bumped. |
 | `ANCHOR_RANK_WAKE_MS` | No | `900000` (15m) | How often a BACKUP re-checks whether its failover rank has unlocked, between `ANCHOR_INTERVAL_MS` ticks. The wake flush runs in failover-only mode, so it never publishes an election this hub leads and a healthy leader keeps its interval and size-trigger cadence. |
-| `ANCHOR_ANNOUNCE_RETRY_MS` | No | `300000` | How often a receiver re-verifies queued `XANC_V0_DONE` announcements. The publisher announces at 0 confirmations, so peers queue the announcement and stamp `anchor_txid` once the anchor is buried `XCHAIN_CONFIRMATIONS_DOGE` deep. |
+| `ANCHOR_ANNOUNCE_RETRY_MS` | No | `300000` | How often a receiver re-verifies queued `XANC_V0_DONE` announcements. The publisher announces at 0 confirmations, so peers queue the announcement and stamp `anchor_txid` once the anchor is buried `XCHAIN_CONFIRMATIONS_DOGE` deep. That knob governs the hub's stamp/attest gate only; the BTC indexer's anchor-reward mint gate applies a frozen ledger depth (`ANCHOR_REWARD_DOGE_MIN_CONFIRMATIONS`, equal to the per-coin DOGE default) that no environment variable moves. On regtest, where a lowered override is honoured, the hub therefore attests before the indexer will mint and BTC block processing defers until the anchor reaches the frozen depth. |
 | `ANCHOR_ANNOUNCE_RETRY_TTL_MS` | No | `21600000` | How long a queued announcement is retried before it is dropped, so a never-mined (evicted or replaced) anchor tx cannot suppress a needed re-anchor forever. |
 | `ANCHOR_ANNOUNCE_QUEUE_MAX` | No | `500` | Max queued announcements per hub; the oldest entry is evicted past this. |
 | `ANCHOR_INTENT_TTL_MS` | No | `21600000` | How long a durable broadcast intent (`anchor_published_checkpoints`) HOLDS its checkpoint when no anchor has mined for it. The publisher arms the marker before the send and stamps `anchor_txid` after it, so a crash in between is the one state where DOGE may have paid with nothing recording it; the hold stops the next flush rebuilding a second transaction from different UTXOs. Same `~6x` the 60-conf DOGE window bound as `ANCHOR_ANNOUNCE_RETRY_TTL_MS`, past which a send that never relayed is not coming back and holding the row costs more than re-broadcasting it. |
 | `ANCHOR_MARKER_RETENTION_MS` | No | `7776000000` (90d) | Retention window for the two durable anchor marker tables (`anchor_published_checkpoints`, `anchor_published_archives`), swept at the end of each publishing flush; `0` disables. Only CONFIRMED rows are ever deleted: a surviving `sent_at IS NULL` row is the ambiguous-send record, the only durable trace that DOGE may already have paid, and it is kept forever. The cutoff is measured on `intent_at` and floored at a multiple of `ANCHOR_INTENT_TTL_MS`, so it can never reach a marker still inside its hold window; lowering this below that floor changes nothing. |
-| `ANCHOR_REWARD_PER_PUBLISH` | No | `10.00000000` | XCHAIN reward recorded per anchor publish (`RewardTracker`). |
+| `ANCHOR_REWARD_PER_PUBLISH` | No | `10.00000000` | XCHAIN reward recorded per anchor publish (`RewardTracker`). One `anchor_bundle` reward per BUNDLE (not per chain), keyed on the bundle's snapshot block. At/above the anchor-reward flag-day the frozen consensus amount is used instead, so this knob only applies below it. |
 
 ### Why those magnitudes (before you retune them)
 
 None of these is consensus data, so two hubs on different values still produce
 mutually verifiable anchors. Three of them do encode a real bound, and the full
 derivation lives in
-[ANCHOR.md](https://github.com/XChain-Platform/xchain-documentation/blob/master/protocol/actions/ANCHOR.md)
+[ANCHOR.md](https://github.com/XChain-Platform/xchain-documentation/blob/master/protocol/actions/anchor.md)
 ("Where the publisher constants come from"), mirrored in the `StateAnchorPublisher`
 constructor comment and pinned by
 `test/unit/StateAnchorPublisher.constant-derivations.test.js`. In short:
@@ -398,13 +409,23 @@ constructor comment and pinned by
   signature pairs on a v1, or 4+4 on a v6. **Lower this as the federation
   grows:** a 5+5 v6 quorum needs ~5860 or less, a 7+7 quorum ~5080. Going over
   the ceiling is not a loud failure; the decoder silently drops the action.
+- **The v7 bundle budget is 8189 bytes** (`MAX_ACTION_DATA_LENGTH` 8192 less the
+  3-byte push prefix) and is NOT an env knob: it is the on-chain ceiling. What
+  consumes it is the federation's signer count, since a section costs ~420 B plus
+  194 B per `(PUBKEY, SIG)` pair and the publisher tail ~67 B plus 194 B per
+  attesting signer. Measured capacity: **6 chains at 4 signers, 5 at 5, 3 at 7.**
+  Past it the publisher SPLITS the cycle chain-ascending into as many bundles as
+  fit, each electing at its own snapshot block, and logs one line per split. A
+  single section that cannot fit even with a zero-signature tail is refused
+  loudly and counted in `getanchorstatus.bundlesOversize`; it is never sent,
+  because the decoder drops an oversize action silently rather than rejecting it.
 - **`ANCHOR_MATCH_BATCH_SIZE` = 200** is an early-flush latency trigger, and
   **`ANCHOR_MAX_BATCH` = 1000** is the per-cycle DOGE spend bound. Archive rows
   are signature-dominated and do not compress (~0.55 KB of gzip+base64 per
   settled match), so 1000 rows is ~550 KB, ~93 chunks, ~93 DOGE transactions in
   one cycle; 200 rows is ~19.
 - **`ANCHOR_ELECTION_TOLERANCE_BLOCKS` = 36** is ~6h of BTC blocks per failover
-  rank. Blocks, not wall clock, so every hub agrees on the unlock without clock
+  rank, now applied to the BUNDLE rather than to each row. Blocks, not wall clock, so every hub agrees on the unlock without clock
   sync. The ordering is what matters: signing round (120s) + DOGE burial (60
   confs, ~1h) << 36 blocks (~6h) << `ANCHOR_INTERVAL_MS` (24h), which keeps a
   slow leader from being overtaken while still giving ranks 1-3 a slot (~6/12/18h)
@@ -416,6 +437,21 @@ constructor comment and pinned by
   stranded work for a cycle. The wake sits inside the same ordering (120s signing
   round << 15 min << 36 blocks), and it publishes only where this hub is a BACKUP,
   so a slow-but-healthy leader is still never overtaken by it.
+
+### What `getanchorstatus` counts
+
+- **`anchorsPublished`** counts BUNDLES, one per network per cycle. It kept its
+  name through the v7 change, so a figure recorded before the change counted
+  anchors (one per chain) and is not comparable with one recorded after.
+- **`sectionsAnchored`** counts the CHAINS those bundles carried, which is the
+  quantity the old `anchorsPublished` reported. A healthy three-chain federation
+  on a daily cadence advances `anchorsPublished` by 1 and `sectionsAnchored` by 3
+  per cycle; the two moving at the same rate means the cycle is anchoring one
+  chain at a time and the rest of the chains are not producing checkpoints.
+- **`bundlesOversize`** counts sections REFUSED for exceeding the 8189-byte
+  budget on their own. Any non-zero value means a checkpoint is not on chain at
+  all and the federation's signer count (or the section width) has to come down;
+  it never self-clears.
 
 ## Effector spend policy (`SpendGuard`)
 
@@ -495,6 +531,81 @@ env var, else the bundled per-coin `FULLNODE` block.
 | `FULLNODE_GENESIS_VERIFIERS` | No | per-coin | Comma-separated genesis verifier pubkeys (lowercased). |
 | `FULLNODE_BTC_RPC` | If enabled | _empty_ | Bitcoin RPC endpoint the full-node capability probes. |
 | `FULLNODE_SPEND_LOG_PATH` | No | `./data/fullnode-verdict.spend.jsonl` | Durable spend-audit JSONL for the fee-bearing NODEPROOF verdict send. An intent line is fsync'd before the broadcast and the broadcast is gated on that write, so an unwritable path defers the verdict rather than spending with no record. |
+
+## ROLLCALL presence proofs (`RollcallRound`)
+
+Validator liveness. Every hub signs a canonical bound to a BTC epoch block's
+`ledger_hash`, gossips the signature, and an elected leader lands the collected
+signatures on DOGE as a `ROLLCALL` action; the BTC indexer closes the epoch and
+evicts sources absent for K consecutive rolled epochs. Publishing reuses the DOGE
+oracle-publisher rail (`DOGE_ADDRESS`, `DOGE_ENCODER_URL`, `HUB_SIGNER_MODULE`,
+`DOGE_LOW_BALANCE_THRESHOLD`) and the shared `SpendGuard`, so there is no second
+wallet and no second key.
+
+**The consensus constants are not here and have no env surface.** The epoch
+cadence, accept window, proof delay, DOGE maturity, K, the streak lookback, the
+publish reward and the activation heights live in `src/rollcall_activation.js`,
+byte-identical to the indexer's copy, because the hub signs what the indexer
+judges and a one-sided edit forks the fleet at the epoch boundary. Only the three
+publish tunables below are policy: no chain rule reads any of them, so two hubs on
+different values still produce roll calls each other's indexers accept.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `ROLLCALL_ENABLED` | No | `true` | Enable the roll-call round. `false` stops this hub signing, which over K rolled epochs is what eviction means; it is not a way to reduce cost. |
+| `ROLLCALL_POLL_MS` | No | `30000` | Poll interval (ms) for the round timer. |
+| `ROLLCALL_PUBLISH_DELAY_BLOCKS` | No | `12` (regtest `1`) | BTC blocks after the epoch before the elected leader may publish, so peers' signatures have arrived before the first action is paid for. |
+| `ROLLCALL_ELECTION_TOLERANCE_BLOCKS` | No | `36` (regtest `3`) | Failover ladder step: BTC blocks of leader silence before the next-ranked publisher's slot unlocks. Deliberately a SEPARATE knob from `ANCHOR_ELECTION_TOLERANCE_BLOCKS`, so changing the roll-call cadence cannot re-inert the anchor ladder. |
+| `ROLLCALL_SELF_PUBLISH_BLOCKS` | No | `100` (regtest `9`) | BTC blocks after the epoch at which a hub whose OWN signature is still not on chain publishes a one-signature roll call itself. The censorship escape hatch, not the liveness failover; the ladder above is that. The regtest pair is 3 and 9 rather than 2 and 6 because a deadline of 6 sits exactly on the canonical reorg buffer, so it would already have expired on a round's first tick and no sweeper would ever get a turn. |
+| `ROLLCALL_SPEND_LOG_PATH` | No | `./data/rollcall-publish.spend.jsonl` | Durable spend-audit JSONL for the fee-bearing publish. An intent line is fsync'd before the broadcast and the broadcast is gated on that write, so an unwritable path defers the publish rather than spending with no record, and a restart cannot re-publish an epoch a prior process already committed. |
+| `ROLLCALL_SIGN_LOG_PATH` | No | `./data/rollcall-signatures.jsonl` | Durable store of this hub's own epoch signatures, so a restart inside the accept window re-emits the SAME signature instead of falling silent for an epoch it had already answered. |
+
+### Why those magnitudes (before you retune them)
+
+The ordering is what binds, and
+`test/unit/RollcallRound.invariants.test.js` pins both halves of it for every
+network's defaults:
+
+- **`PUBLISH_DELAY` < `SELF_PUBLISH` < `ACCEPT_WINDOW - 24`.** The 24 BTC blocks
+  of margin cover the DOGE landing plus a Dogecoin miner's two-hour timestamp
+  slack, so a self-publish issued at the last moment still lands inside the window
+  the BTC close cuts. Push `SELF_PUBLISH` past that margin and the escape hatch
+  publishes into an epoch that has stopped counting.
+- **At least three ranks unlock inside the accept window.** The epoch height is
+  FIXED while the tip advances through the window, so `since` grows to the full
+  `ACCEPT_WINDOW` and `floor(144 / 36) = 4` ranks come up. (The anchor ladder is
+  inert on its bundle rail for the opposite reason: a checkpoint's `snapshot_block`
+  chases the tip, so its `since` never grows.) Raising the tolerance past a third
+  of the window leaves a dead leader with no sweeper, which costs the epoch.
+
+Cost is about **0.006 DOGE per one-chunk roll call** (two transactions at ~0.003
+DOGE each, because every ROLLCALL is a two-phase P2SH publish). There is no
+fee-bump and no RBF anywhere in the hub, by design: a fee spike that keeps every
+action out of the window costs the epoch, and an unrolled epoch counts for nobody
+and evicts nobody. The dashboard alerts on consecutive unrolled epochs.
+
+### `HUB_SIGNER_MODULE` must export `broadcast(payload)`
+
+Every ROLLCALL is a two-phase P2SH encoding and the built-in encoder pipeline can
+only broadcast the funding transaction of the two, so it fails closed instead. A
+signer module exporting only `walletSign` therefore signs roll calls it can never
+publish. `validator init` generates a module that exports `broadcast`; a
+hand-built one is the gap. `getrollcallstatus.broadcast_capable` reports it and
+the `oracle_publish` self-test fails on it, so the condition is visible rather
+than showing up as a federation that mysteriously never rolls. A hub without it
+still SIGNS and gossips, and the sweepers carry its presence to chain: that is
+exactly why there are several of them.
+
+### `getrollcallstatus`
+
+A SENSITIVE read (keyed by `HUB_API_KEY` like `getallconfigs`), always HTTP 200.
+It reports this hub's publisher state for the newest epoch it is tracking:
+`{epoch, signed, gossiped_count, on_chain_count, leader, our_rank, txids,
+broadcast_capable}`. It carries no credential, but a per-epoch signer count is a
+pre-eviction targeting surface: a caller polling every hub could tell which keys
+are close to the absence streak before the chain acts on it. The ledger facts
+(`last_rolled_epoch`, `absent_streak`) are deliberately absent; they belong to the
+BTC indexer's `getrollcallabsences`, where they are authoritative.
 
 ## Governance
 

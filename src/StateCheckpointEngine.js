@@ -57,6 +57,7 @@ const eq                = require('./equivocation_header.js');
 const ckpt              = require('./checkpoint_commitment_activation.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const coins             = require('./coins');
+const { noteCheckpointStalled } = require('./consensusDiagnostics');
 
 const XCHK_SIGN_REQ  = 'XCHK_SIGN_REQ';
 const XCHK_SIGN      = 'XCHK_SIGN';
@@ -170,6 +171,13 @@ class StateCheckpointEngine extends EventEmitter {
         this._cadenceStalls++;
         this._cadenceStallReason = reason;
         this._cadenceStallBlock  = (block == null ? null : Number(block));
+
+        // The structured record is NOT throttled with the prose line below it.
+        // The throttle exists so a persistent stall does not flood an operator's
+        // tail; a collector counting stalled ticks needs every one, and dropping
+        // 59 of every 60 is how a worsening cadence reads as a steady one.
+        noteCheckpointStalled({ chain: this.coin || 'BTC', seq: this._cadenceStallBlock, reason, stalls: this._cadenceStalls });
+
         let now = Date.now();
         if(now - this._cadenceStallLoggedAt < this._cadenceStallLogMs) return;
         this._cadenceStallLoggedAt = now;

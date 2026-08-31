@@ -826,17 +826,23 @@ describe('OraclePublisher', function () {
             expect(enqueueSpy.called).to.be.false;
         });
 
-        it('enqueues when this hub is the leader', async function () {
+        it('BUFFERS rather than enqueuing, even as the leader: the per-round v0 rail is retired', async function () {
+            // A finalized round does not ride its own transaction. It buffers, and it
+            // leaves as part of a signed batch, on every hub and every network. The
+            // leader check belongs at window close, because window leadership is decided
+            // at the window's anchor and that anchor is not known when the window's
+            // first round finalizes.
             let hub = makeHub();
             let pub = new OraclePublisher(hub);
-            // rank=0, count=3, round=3: leaderRank=3%3=0 === rank=0
             sinon.stub(pub, '_getMyRank').resolves(0);
             sinon.stub(pub, '_getActiveOraclePublishCount').resolves(3);
-            let enqueueStub = sinon.stub(pub, '_enqueue').resolves();
-            let processStub = sinon.stub(pub, '_processQueue').resolves();
+            let enqueueStub  = sinon.stub(pub, '_enqueue').resolves();
+            let processStub  = sinon.stub(pub, '_processQueue').resolves();
+            let bufferStub   = sinon.stub(pub, '_bufferFinalizedRound').resolves();
             await pub.onRoundFinalized({ round: 3, btcBlockHeight: 100, btcBlockTime: 0, prices: [], signatures: [{ pubkey: 'pk', sig: 'sig' }] });
-            expect(enqueueStub.calledOnce).to.be.true;
-            expect(processStub.calledOnce).to.be.true;
+            expect(bufferStub.calledOnce).to.be.true;
+            expect(enqueueStub.called).to.be.false;
+            expect(processStub.called).to.be.false;
         });
     });
 
@@ -1135,20 +1141,22 @@ describe('OraclePublisher', function () {
             return out;
         }
 
-        it('counts the drop, dead-letters it, and does not enqueue', async function () {
+        it('cannot be reached through onRoundFinalized any more: the v0 emit rail is retired', async function () {
+            // The oversized-v0 drop guarded a per-round wire that onRoundFinalized no
+            // longer builds. The equivalent for a batch is batchUnpublishableCount, which
+            // is louder by design (a CRITICAL line plus a dead-letter) and is driven in
+            // OraclePublisherBatch.test.js. Kept as a pin that nothing silently restores
+            // the v0 emit path: a round this oversized must still never enqueue a wire.
             sinon.stub(console, 'error');
             let pub = new OraclePublisher(makeHub());
             sinon.stub(pub, '_getMyRank').resolves(0);
             sinon.stub(pub, '_getActiveOraclePublishCount').resolves(3);
             let enqueueSpy = sinon.spy(pub, '_enqueue');
-            let dead = sinon.stub(pub, '_deadLetter');
+            sinon.stub(pub, '_bufferFinalizedRound').resolves();
             await pub.onRoundFinalized({ round: 3, btcBlockHeight: 100, btcBlockTime: 0,
                 prices: bigPrices(), signatures: [{ pubkey: 'pk', sig: 'sig' }] });
-            expect(pub.oversizedDrops).to.equal(1);
-            expect(dead.calledOnce).to.be.true;
-            expect(dead.firstCall.args[0]).to.include({ round: 3 });
-            expect(dead.firstCall.args[1]).to.match(/exceeds encoder limit/);
             expect(enqueueSpy.called).to.be.false;
+            expect(pub.oversizedDrops).to.equal(0);
         });
 
         it('surfaces oversizedDrops via getStats()', function () {

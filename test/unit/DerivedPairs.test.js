@@ -142,7 +142,7 @@ describe('DERIVED_PAIRS admission allow-list @regression', function () {
         }
 
         function propose(prices) {
-            return { sender: leader.addr, data: {
+            return { sender: leader.addr, sig_pubkey: leader.pubkey, data: {
                 round: ROUND, prices, digest: oc._digest(ROUND, prices),
                 btcBlockHeight: 100, btcBlockTime: 1700000000
             } };

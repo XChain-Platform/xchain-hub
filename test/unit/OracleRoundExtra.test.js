@@ -23,6 +23,7 @@ const sinon             = require('sinon');
 const { expect }        = require('chai');
 const proxyquire        = require('proxyquire');
 const { createMockHub } = require('../helpers/mockHub');
+const { pubkeyForTestSender } = require('../helpers/fixtures');
 
 describe('OracleRound (extra coverage)', function () {
 
@@ -229,7 +230,7 @@ describe('OracleRound (extra coverage)', function () {
     describe('_handleMessage(): edge cases', function () {
 
         it('ignores messages with missing round/prices', function () {
-            or._handleMessage({ type: 'ORACLE_PRICE_SUBMIT', sender: 'peer', data: { round: null, prices: null } });
+            or._handleMessage({ type: 'ORACLE_PRICE_SUBMIT', sender: 'peer', sig_pubkey: pubkeyForTestSender('peer'), data: { round: null, prices: null } });
             expect(or.submissions.size).to.equal(0);
         });
 
@@ -237,7 +238,7 @@ describe('OracleRound (extra coverage)', function () {
             await or._executeRound(); // sets currentRound=N
             or._handleMessage({
                 type:   'ORACLE_PRICE_SUBMIT',
-                sender: 'peer',
+                sender: 'peer', sig_pubkey: pubkeyForTestSender('peer'),
                 data: {
                     round:  or.currentRound - 2,  // too old
                     prices: [{ coinPair: 'BTC/USD', price: '100' }]
@@ -250,7 +251,7 @@ describe('OracleRound (extra coverage)', function () {
             await or._executeRound();
             or._handleMessage({
                 type:   'ORACLE_PRICE_SUBMIT',
-                sender: 'peer',
+                sender: 'peer', sig_pubkey: pubkeyForTestSender('peer'),
                 data: {
                     round:  or.currentRound + 2,  // too far ahead
                     prices: [{ coinPair: 'BTC/USD', price: '100' }]
@@ -266,7 +267,7 @@ describe('OracleRound (extra coverage)', function () {
             or.roundStartTime = Date.now() - (or.submissionWindow + 1000);
             or._handleMessage({
                 type:   'ORACLE_PRICE_SUBMIT',
-                sender: 'latepeer',
+                sender: 'latepeer', sig_pubkey: pubkeyForTestSender('latepeer'),
                 data: { round, prices: [{ coinPair: 'BTC/USD', price: '100' }], sources: 1 }
             });
             // Still recorded (late but accepted)
@@ -285,7 +286,7 @@ describe('OracleRound (extra coverage)', function () {
             // Now try to add one more
             or._handleMessage({
                 type:   'ORACLE_PRICE_SUBMIT',
-                sender: 'overflow_peer',
+                sender: 'overflow_peer', sig_pubkey: pubkeyForTestSender('overflow_peer'),
                 data: { round, prices: [{ coinPair: 'BTC/USD', price: '100' }], sources: 1 }
             });
             expect(subs.has('overflow_peer')).to.be.false;
@@ -296,7 +297,7 @@ describe('OracleRound (extra coverage)', function () {
             let round = or.currentRound;
             or._handleMessage({
                 type:   'ORACLE_PRICE_SUBMIT',
-                sender: 'badpeer',
+                sender: 'badpeer', sig_pubkey: pubkeyForTestSender('badpeer'),
                 data: {
                     round,
                     prices: [
@@ -309,16 +310,18 @@ describe('OracleRound (extra coverage)', function () {
             expect(subs && subs.has('badpeer')).to.be.false;
         });
 
-        it('persists submission when validator pubkey is known', async function () {
+        it('persists submission when the signing key is attributed', async function () {
             await or._executeRound();
             let round = or.currentRound;
             let sender = 'ws://peer-with-pubkey:10001';
-            pm.validatorPubkeys = new Map([[sender, 'pubkey_hex']]);
+            let pubkey = 'dd'.repeat(32);
+            pm.validatorPubkeys = new Map([[sender, pubkey]]);
             hub.db.doQuery = sinon.stub().resolves([]);
 
             or._handleMessage({
                 type:   'ORACLE_PRICE_SUBMIT',
                 sender: sender,
+                sig_pubkey: pubkey,
                 data: {
                     round,
                     prices: [{ coinPair: 'BTC/USD', price: '100000' }],

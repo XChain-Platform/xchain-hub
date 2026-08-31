@@ -26,8 +26,35 @@ const http             = require('http');
 const WebSocket        = require('ws');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const { positiveIntConfig } = require('./lib/config_int.js');
+const { notePeerReject, stampRemoteIp } = require('./consensusDiagnostics');
+
+// Bootstrap peers every new hub can reach. One hostname per validator; the
+// PORT selects the network, so a seed on the wrong port reaches the wrong
+// federation. Hostnames, not IPs, so a validator can move boxes.
+const BOOTSTRAP_VALIDATOR_HOSTS = [
+    'validator01.xchain.io', 'validator02.xchain.io', 'validator03.xchain.io',
+    'validator04.xchain.io', 'validator05.xchain.io'
+];
+const BOOTSTRAP_PORT_BY_NETWORK = { mainnet: 10001, testnet: 10002 };
+
+// The two request shapes the read-only mirror feed occupies on the P2P port. They
+// MUST stay byte-identical to what the API server mounts (api.js
+// '/hub-db/snapshot' routes, '/hub-db/subscribe' upgrade) and to what the indexer
+// asks for (xchain-indexer src/hub_db_sync.js _httpGet / _connectWebSocket): the
+// same client code reaches a validator over this port and a private hub over the
+// API port, so a path that differs on one side silently disables the mirror.
+const FEED_SNAPSHOT_PREFIX = '/hub-db/snapshot';
+const FEED_SUBSCRIBE_PATH  = '/hub-db/subscribe';
 
 class PeerManager extends EventEmitter {
+    // Default seed list for a network, or [] when there is none to offer
+    // (regtest is a local venue and must never dial public seeds).
+    static bootstrapSeeds(network) {
+        const port = BOOTSTRAP_PORT_BY_NETWORK[String(network || '').toLowerCase()];
+        if (!port) return [];
+        return BOOTSTRAP_VALIDATOR_HOSTS.map(h => 'ws://' + h + ':' + port);
+    }
+
 
     constructor(config, db) {
         super();
@@ -80,6 +107,12 @@ class PeerManager extends EventEmitter {
         // Message deduplication: Map<id, expiresAt>
         this.seenIds = new Map();
 
+        // Read-only mirror feed served on the P2P port beside gossip (see
+        // setFeedHandlers). Null until api.js wires it; null means the port serves
+        // gossip only, exactly as before.
+        this.feedRequestHandler = null;
+        this.feedUpgradeHandler = null;
+
         // Server state
         this.httpServer     = null;
         this.wss            = null;
@@ -91,6 +124,45 @@ class PeerManager extends EventEmitter {
 
     setIdentity(identity) {
         this.identity = identity;
+    }
+
+    // Serve the hub's READ-ONLY mirror feed on this same public P2P port, so an
+    // indexer reads its capability/price/checkpoint mirror from the validators
+    // themselves. A validator exposes ONE public port per network (10001 mainnet,
+    // 10002 testnet); anything an indexer needs has to arrive there, because the
+    // JSON-RPC API port is private to the box and there is no separate hub.
+    //
+    // Both handlers come from api.js, so this is a second ENTRANCE to the existing
+    // routes, never a second implementation: no SQL, no auth rule and no schema
+    // version is restated here, and the API's own HUB_API_KEY gate runs unchanged.
+    // Only two shapes are ever delegated (_isFeedRequest / FEED_SUBSCRIBE_PATH):
+    // GET of a mirror snapshot, and the mirror subscribe upgrade. Every other
+    // request on this port is answered 404 and every other upgrade stays gossip,
+    // so the write methods on the private API are not reachable from here.
+    setFeedHandlers(requestHandler, upgradeHandler) {
+        this.feedRequestHandler = requestHandler || null;
+        this.feedUpgradeHandler = upgradeHandler || null;
+    }
+
+    // Feed traffic is exactly two shapes. A mirror-snapshot read: GET only (the
+    // bootstrap is a paged GET), under the snapshot prefix. And the JSON-RPC
+    // endpoint: POST to the root, which is how an indexer reports what landed on
+    // its chain (pushpricebatch and its siblings). WHICH rpc methods are allowed
+    // there is decided in api.js, on the request stamp set below, because the
+    // method name lives in a body this layer has not read yet.
+    _isFeedRequest(req) {
+        if (!req || !req.url) return false;
+        if (req.method === 'GET') {
+            return req.url === FEED_SNAPSHOT_PREFIX || req.url.startsWith(FEED_SNAPSHOT_PREFIX + '/');
+        }
+        if (req.method === 'POST') {
+            return req.url === '/' || req.url.startsWith('/?');
+        }
+        return false;
+    }
+
+    _isFeedUpgrade(req) {
+        return !!(req && req.url && req.url.startsWith(FEED_SUBSCRIBE_PATH));
     }
 
     setValidatorPubkeys(pubkeyMap) {
@@ -109,10 +181,36 @@ class PeerManager extends EventEmitter {
         let port = this.config.P2P_PORT || 10001;
         let host = this.config.P2P_HOST || '0.0.0.0';
 
-        this.httpServer = http.createServer();
+        // Plain HTTP on this port answers ONLY the mirror-snapshot reads, and only
+        // once api.js has wired them. Everything else gets 404 rather than being
+        // left to hang on an open socket (the pre-feed behaviour of a handler-less
+        // server), so a stray probe cannot hold a connection open.
+        this.httpServer = http.createServer((req, res) => {
+            if (this.feedRequestHandler && this._isFeedRequest(req)) {
+                // Stamp the request as having arrived on the PUBLIC port. api.js
+                // reads this to hold a stamped request to the indexer push
+                // allowlist; an unstamped request (the private API port) keeps the
+                // full method surface. Set here rather than inferred from a port
+                // number downstream, so the two entrances can never be confused.
+                req.xchainFeedOrigin = true;
+                this.feedRequestHandler(req, res);
+                return;
+            }
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end('{"error":"not found"}');
+        });
         this.wss = new WebSocket.Server({ noServer: true, maxPayload: this.config.P2P_MAX_PAYLOAD || 1048576 });
 
         this.httpServer.on('upgrade', (req, socket, head) => {
+            // Mirror subscribers are handed to the API's own upgrade path (auth,
+            // then HubDbBroadcaster). They never enter the gossip WebSocket server,
+            // so a feed client is never in this.peers: it cannot be broadcast to,
+            // relayed to, counted in any quorum, or pinged as a peer.
+            if (this._isFeedUpgrade(req)) {
+                if (this.feedUpgradeHandler) this.feedUpgradeHandler(req, socket, head);
+                else socket.destroy();
+                return;
+            }
             this.wss.handleUpgrade(req, socket, head, (ws) => {
                 this.wss.emit('connection', ws, req);
             });
@@ -153,7 +251,19 @@ class PeerManager extends EventEmitter {
 
         this.running = true;
 
+        // A hub with no SEED_NODES dials nobody and joins no gossip mesh, while
+        // running and looking healthy. Fall back to the bootstrap peers.
+        // regtest gets none: a local venue must never dial public seeds.
         let seeds = this.config.SEED_NODES || [];
+        if (seeds.length === 0) {
+            const defaults = PeerManager.bootstrapSeeds(this.config.HUB_NETWORK);
+            if (defaults.length) {
+                // Never dial ourselves: one of the five IS one of the five.
+                seeds = defaults.filter(a => !host || host === '0.0.0.0' ? true : !a.includes(host));
+                console.log('PeerManager: no SEED_NODES configured; using the ' + seeds.length +
+                            ' default bootstrap seed(s) for ' + this.config.HUB_NETWORK);
+            }
+        }
         for (let addr of seeds) {
             this._connectToPeer(addr);
             // Record seed in DB (fire and forget). validator_id is the peer's own addr,
@@ -405,11 +515,13 @@ class PeerManager extends EventEmitter {
         let rateCeil = this.peers.has(knownAddr || ws._peerAddr) ? this.knownMsgRateLimit : this.msgRateLimit;
         if (!this._checkMsgRate(ratePeer, rateCeil)) {
             console.warn('P2P: Rate limit exceeded for peer ' + ratePeer + '; dropping message');
+            notePeerReject({ peer: ratePeer, reason: 'rate_limit' });
             return;
         }
 
         if (!this._verifySignature(envelope)) {
             console.warn('P2P: Invalid signature from ' + envelope.sender + '; dropping message');
+            notePeerReject({ peer: ws._remoteIp || envelope.sender, reason: 'invalid_signature' });
             return;
         }
 
@@ -429,6 +541,11 @@ class PeerManager extends EventEmitter {
         // publisher and will diverge from peerAddr on relayed messages.
         this._recordPeer(peerAddr, peerAddr, false);
 
+        // Consensus sees only the envelope, never the socket, so the one
+        // identity a remote cannot mint is stamped on here. Non-enumerable and
+        // Symbol-keyed, so it cannot reach a persisted row, a re-broadcast
+        // payload or a signature preimage through JSON.stringify.
+        stampRemoteIp(envelope, ws._remoteIp);
         this.emit('message', envelope);
         if (envelope.type === 'HEARTBEAT') {
             this.emit('heartbeat', envelope.sender, envelope.timestamp);

@@ -128,4 +128,31 @@ function sumUtxosCoins(utxos){
     return satoshisToCoins(sumUtxosSatoshis(utxos));
 }
 
-module.exports = { sumUtxosCoins, sumUtxosSatoshis, utxoToCoins, utxoToSatoshis, SATOSHI_PER_COIN };
+// Split a get_utxos list by confirmation depth. `known` reports whether the
+// source served a usable confirmations field at all: an entry without one is
+// counted in `total` and in neither bucket, so a source that stops serving the
+// field reads as unknown rather than as "everything is unconfirmed". byTxid
+// holds the deepest confirmation seen per transaction, which is what a
+// confirmation watchdog matches a broadcast against. Shared by the publishers
+// so the PRICE and ANCHOR rails cannot disagree on what "confirmed" means.
+function summarizeUtxoConfirmations(utxos, confirmedDepth){
+    let depthFloor = Number.isFinite(confirmedDepth) && confirmedDepth > 0 ? confirmedDepth : 1;
+    let summary = { total: 0, confirmed: 0, unconfirmed: 0, known: false, byTxid: new Map(), at: Date.now() };
+    if(!Array.isArray(utxos)) return summary;
+    for(let u of utxos){
+        if(!u || typeof u !== 'object') continue;
+        summary.total++;
+        let conf = Number(u.confirmations);
+        if(!Number.isFinite(conf) || conf < 0) continue;
+        summary.known = true;
+        if(conf >= depthFloor) summary.confirmed++;
+        else                   summary.unconfirmed++;
+        let txid = u.txid ? String(u.txid) : null;
+        if(!txid) continue;
+        let seen = summary.byTxid.get(txid);
+        if(seen === undefined || conf > seen) summary.byTxid.set(txid, conf);
+    }
+    return summary;
+}
+
+module.exports = { sumUtxosCoins, sumUtxosSatoshis, utxoToCoins, utxoToSatoshis, summarizeUtxoConfirmations, SATOSHI_PER_COIN };

@@ -90,14 +90,76 @@ describe('capabilities/oracle_publish selfTest()', function () {
 
     it('returns ok=false when doge_address has invalid format', async function () {
         let r = await oraclePub.selfTest({
+            HUB_NETWORK: 'mainnet',
             oracle_publish: { doge_address: 'not-a-doge-address', doge_wallet: '/path' }
         });
         expect(r.ok).to.be.false;
-        expect(r.reason).to.include('invalid format');
+        expect(r.reason).to.include('not a valid DOGE mainnet address');
+    });
+
+    // The address prefix is per-network because the publish TARGET is per-network:
+    // OraclePublisher broadcasts through DOGE_ENCODER_URL, not through HUB_NETWORK,
+    // so a testnet federation publishes on DOGE testnet. The prefix was hardcoded
+    // to mainnet 'D', which rejected the correct address on every non-mainnet
+    // deployment and made oracle_publish unreachable there.
+    it('accepts a testnet DOGE address on a testnet hub', async function () {
+        let r = await oraclePub.selfTest({
+            HUB_NETWORK: 'testnet',
+            oracle_publish: { doge_address: 'n' + 'A'.repeat(33), doge_wallet: '/path' }
+        });
+        expect(r.ok).to.be.true;
+    });
+
+    it('accepts a testnet-format DOGE address on a regtest hub', async function () {
+        let r = await oraclePub.selfTest({
+            HUB_NETWORK: 'regtest',
+            oracle_publish: { doge_address: 'n' + 'A'.repeat(33), doge_wallet: '/path' }
+        });
+        expect(r.ok).to.be.true;
+    });
+
+    // Gated per-network rather than permissive: a mainnet hub holding a testnet
+    // address would pass a both-formats check and then publish nowhere.
+    it('rejects a MAINNET address on a testnet hub', async function () {
+        let r = await oraclePub.selfTest({
+            HUB_NETWORK: 'testnet',
+            oracle_publish: { doge_address: 'DPVuXtvCWXSBFEkgWKfeSCL1e4YqfbwXkg', doge_wallet: '/path' }
+        });
+        expect(r.ok).to.be.false;
+        expect(r.reason).to.include('not a valid DOGE testnet address');
+    });
+
+    it('rejects a TESTNET address on a mainnet hub', async function () {
+        let r = await oraclePub.selfTest({
+            HUB_NETWORK: 'mainnet',
+            oracle_publish: { doge_address: 'n' + 'A'.repeat(33), doge_wallet: '/path' }
+        });
+        expect(r.ok).to.be.false;
+        expect(r.reason).to.include('not a valid DOGE mainnet address');
+    });
+
+    // Fails closed rather than assuming mainnet: guessing is what would let a
+    // testnet hub validate a mainnet address and spend real DOGE.
+    it('returns ok=false when HUB_NETWORK is absent', async function () {
+        let r = await oraclePub.selfTest({
+            oracle_publish: { doge_address: 'DPVuXtvCWXSBFEkgWKfeSCL1e4YqfbwXkg', doge_wallet: '/path' }
+        });
+        expect(r.ok).to.be.false;
+        expect(r.reason).to.include('HUB_NETWORK is not set');
+    });
+
+    it('returns ok=false when HUB_NETWORK is unrecognised', async function () {
+        let r = await oraclePub.selfTest({
+            HUB_NETWORK: 'stagenet',
+            oracle_publish: { doge_address: 'DPVuXtvCWXSBFEkgWKfeSCL1e4YqfbwXkg', doge_wallet: '/path' }
+        });
+        expect(r.ok).to.be.false;
+        expect(r.reason).to.include('unknown');
     });
 
     it('returns ok=false when doge_wallet is missing', async function () {
         let r = await oraclePub.selfTest({
+            HUB_NETWORK: 'mainnet',
             oracle_publish: {
                 doge_address: 'D' + 'A'.repeat(33),
                 // no doge_wallet
@@ -109,6 +171,7 @@ describe('capabilities/oracle_publish selfTest()', function () {
 
     it('returns ok=true with valid address (D-prefix + 33 base58 chars) and wallet', async function () {
         let r = await oraclePub.selfTest({
+            HUB_NETWORK: 'mainnet',
             oracle_publish: {
                 doge_address: 'DPVuXtvCWXSBFEkgWKfeSCL1e4YqfbwXkg', // valid format
                 doge_wallet:  '/path/to/wallet'

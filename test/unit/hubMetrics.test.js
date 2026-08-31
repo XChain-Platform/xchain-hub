@@ -27,6 +27,11 @@ function realObservability(){
 
 describe('hub oracle-round heartbeat metrics (item a98d6746)', function () {
 
+    // The observability registry is process-wide now (one process is one
+    // service), so a case asserting a series is ABSENT has to start from a
+    // clean registry rather than inheriting the previous case's series.
+    afterEach(function () { require('../../src/observability')._resetObservability(); });
+
     it('renders freshness, round number and skip streak from live oracle state', function () {
         const observability = realObservability();
         const oracle = {
@@ -123,9 +128,54 @@ describe('hub oracle-round heartbeat metrics (item a98d6746)', function () {
         expect(observability.registry.render()).to.not.match(/xchain_oracle_round_timeouts_total \d/);
     });
 
-    it('registers nothing on a metrics-off hub', function () {
+    // Source diversity is the opposite failure to a quorum timeout: the round
+    // finalized NORMALLY, so every series above stays healthy while PRICE v0 went
+    // out with only one uncorrelated upstream behind it.
+
+    it('renders the single-source-round counter beside the quorum-timeout one', function () {
+        const observability = realObservability();
+        installHubOracleMetrics(observability, {
+            getOracle: () => ({
+                currentRound: 12, consecutiveSkippedRounds: 0,
+                oracleConsensus: { _roundTimeouts: 0, _singleSourceRounds: 5 }
+            })
+        });
+        const out = observability.registry.render();
+        expect(out).to.match(/xchain_oracle_single_source_rounds_total 5\b/);
+        expect(out).to.match(/xchain_oracle_round_timeouts_total 0\b/);
+    });
+
+    it('never walks the single-source counter backwards when the oracle is re-minted', function () {
+        const observability = realObservability();
+        let consensus = { _roundTimeouts: 0, _singleSourceRounds: 9 };
+        installHubOracleMetrics(observability, { getOracle: () => ({ oracleConsensus: consensus }) });
+        expect(observability.registry.render()).to.match(/xchain_oracle_single_source_rounds_total 9\b/);
+        consensus = { _roundTimeouts: 0, _singleSourceRounds: 0 };
+        expect(observability.registry.render()).to.match(/xchain_oracle_single_source_rounds_total 9\b/);
+    });
+
+    it('leaves the single-source series alone before the consensus handle is wired', function () {
+        const observability = realObservability();
+        installHubOracleMetrics(observability, {
+            getOracle: () => ({ currentRound: 1, consecutiveSkippedRounds: 0, oracleConsensus: null })
+        });
+        expect(observability.registry.render()).to.not.match(/xchain_oracle_single_source_rounds_total \d/);
+    });
+
+    it('still registers the series on a metrics-off hub, where only the endpoint is gated', function () {
+        // Building the registry under METRICS_ENABLED would leave these counters
+        // absent on the default fleet, which is every box: nothing could record
+        // into them, so enabling metrics later starts from zero history instead
+        // of revealing what happened. The endpoint stays the operator's
+        // decision; the series do not.
         const off = installObservability(null, { service: 'xchain-hub', env: {} });
-        expect(off.registry).to.equal(null);
-        expect(installHubOracleMetrics(off, { getOracle: () => ({}) })).to.equal(false);
+        expect(off.enabled).to.equal(false);
+        expect(off.registry).to.not.equal(null);
+        expect(installHubOracleMetrics(off, { getOracle: () => ({ currentRound: 4, consecutiveSkippedRounds: 0 }) })).to.equal(true);
+        expect(off.registry.render()).to.match(/xchain_oracle_current_round 4\b/);
+    });
+
+    it('refuses to register without a registry at all', function () {
+        expect(installHubOracleMetrics({ registry: null }, { getOracle: () => ({}) })).to.equal(false);
     });
 });

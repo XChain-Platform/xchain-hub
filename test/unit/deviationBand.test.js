@@ -90,7 +90,7 @@ describe('deviation_band helper (shared band)', function () {
         afterEach(function () { sinon.restore(); });
 
         function proposeEnvelope(prices, round = ROUND) {
-            return { sender: leader.addr, data: {
+            return { sender: leader.addr, sig_pubkey: leader.pubkey, data: {
                 round, prices, digest: oc._digest(round, prices),
                 btcBlockHeight: 100, btcBlockTime: 1700000000
             } };

@@ -162,6 +162,102 @@ describe('StateAnchorPublisher: ANCHOR constant derivations', function () {
         });
     });
 
+    // The ANCHOR v7 bundle budget (D10). Same ceiling, different producer: the bundle
+    // packs N checkpoint SECTIONS plus one attestation tail into one action, so the
+    // knob that overflows first is the federation's SIGNER COUNT, not a chunk size.
+    // Overflow is SPLIT chain-ascending, never dropped, because the decoder discards an
+    // oversize action silently.
+    describe('ANCHOR_BUNDLE_MAX_BYTES: how many chains fit at what signer count', function () {
+
+        // The compiled push costs 3 bytes more than the raw text
+        // (xchain-encoder/src/validator.js), so the raw budget is 8192 - 3.
+        const BUNDLE_BUDGET = MAX_ACTION_DATA_LENGTH - 3;
+
+        // A worst-case mainnet-height section: 7-digit block_index, 6-digit seq and
+        // snapshot block, a 4-character chain name, both roots present. Narrower fields
+        // only ever leave MORE room, so a capacity proved here holds in production.
+        function section(chain, signers){
+            return {
+                chain: chain, network: 'mainnet', block_index: 9625000,
+                block_hash: hex(64), ledger_hash: hex(64), actions_hash: hex(64), contract_hash: hex(64),
+                checkpoint_seq: 962500, snapshot_block: 962500,
+                state_root: hex(64), state_root_version: 1,
+                block_merkle_root: hex(64), block_merkle_version: 1,
+                validator_signatures: JSON.stringify(Array.from({ length: signers }, (_, i) => ({
+                    pubkey: String(i % 10).repeat(64), sig: String(i % 10).repeat(128)
+                })))
+            };
+        }
+        const CHAINS = ['AAAA', 'BBBB', 'CCCC', 'DDDD', 'EEEE', 'FFFF', 'GGGG', 'HHHH'];
+        const sections = (n, signers) => CHAINS.slice(0, n).map(c => section(c, signers));
+
+        it('the budget is the on-chain ceiling less the push prefix', function () {
+            expect(BUNDLE_BUDGET).to.equal(8189);
+        });
+
+        it('a (PUBKEY, SIG) pair costs the same 194 bytes in a section and in the tail', function () {
+            const pub = mkPub();
+            const one = pub._v7Bytes(sections(1, 1), hex(64), 0);
+            const two = pub._v7Bytes(sections(1, 2), hex(64), 0);
+            expect(two - one, 'one more section signature').to.equal(SIG_PAIR_BYTES);
+            expect(pub._v7Bytes(sections(1, 1), hex(64), 1) - one, 'one more attesting signer').to.equal(SIG_PAIR_BYTES);
+        });
+
+        it('_v7Bytes predicts the real wire length without the signatures existing yet', function () {
+            // The split has to size a tail BEFORE the attestation round fills it, so the
+            // arithmetic must agree with the builder byte for byte.
+            const pub  = mkPub();
+            const att  = Array.from({ length: 5 }, (_, i) => ({ pubkey: String(i).repeat(64), sig: String(i).repeat(128) }));
+            const real = Buffer.byteLength(pub._buildV7Payload(sections(3, 5), hex(64), att), 'utf8');
+            expect(pub._v7Bytes(sections(3, 5), hex(64), att.length)).to.equal(real);
+        });
+
+        it('fits 6 chains at 4 signers, 5 at 5, and 3 at 7 - the documented capacity cliff', function () {
+            const pub = mkPub();
+            for(const [signers, chains] of [[4, 6], [5, 5], [7, 3]]){
+                expect(pub._v7Bytes(sections(chains, signers), hex(64), signers),
+                    signers + ' signers, ' + chains + ' chains').to.be.at.most(BUNDLE_BUDGET);
+                expect(pub._v7Bytes(sections(chains + 1, signers), hex(64), signers),
+                    signers + ' signers, ' + (chains + 1) + ' chains overflows').to.be.above(BUNDLE_BUDGET);
+            }
+        });
+
+        // AT8: the split itself, not just the arithmetic.
+        it('AT8: a 7-signer 4-chain bundle splits into two, chain-ascending, each under the budget', function () {
+            const pub   = mkPub();
+            const split = pub._splitBundle(sections(4, 7).slice().reverse(), hex(64), 7);   // input out of order
+            expect(split.oversize, 'nothing is refused: every section fits alone').to.deep.equal([]);
+            expect(split.bundles.length, 'split into two bundles').to.equal(2);
+            expect(split.bundles.map(b => b.map(x => x.chain)),
+                'chain-ascending, three then the remainder').to.deep.equal([['AAAA', 'BBBB', 'CCCC'], ['DDDD']]);
+            for(const b of split.bundles)
+                expect(pub._v7Bytes(b, hex(64), 7), 'each bundle fits').to.be.at.most(BUNDLE_BUDGET);
+            // Unsplit, the same four sections do NOT fit: the split is doing real work.
+            expect(pub._v7Bytes(sections(4, 7), hex(64), 7)).to.be.above(BUNDLE_BUDGET);
+        });
+
+        it('AT8: a single section wider than the budget is refused and counted, never sent', function () {
+            const pub  = mkPub();
+            // 45 signers on one section puts it past the budget with a zero-signature tail,
+            // which is the refusal criterion: no split can rescue it.
+            const huge = section('AAAA', 45);
+            expect(pub._v7Bytes([huge], hex(64), 0)).to.be.above(BUNDLE_BUDGET);
+            const split = pub._splitBundle([huge, section('BBBB', 4)], hex(64), 4);
+            expect(split.oversize.map(x => x.chain), 'the wide section is refused').to.deep.equal(['AAAA']);
+            expect(split.oversize[0].bytes).to.be.above(BUNDLE_BUDGET);
+            expect(split.bundles.map(b => b.map(x => x.chain)),
+                'the rest of the cycle still anchors').to.deep.equal([['BBBB']]);
+        });
+
+        it('a bundle that already fits is never split', function () {
+            const pub   = mkPub();
+            const split = pub._splitBundle(sections(3, 5), hex(64), 5);
+            expect(split.bundles.length).to.equal(1);
+            expect(split.bundles[0].map(x => x.chain)).to.deep.equal(['AAAA', 'BBBB', 'CCCC']);
+            expect(split.oversize).to.deep.equal([]);
+        });
+    });
+
     describe('ANCHOR_MAX_BATCH: the per-cycle DOGE spend bound', function () {
 
         it('bounds one archive to roughly a hundred DOGE transactions', function () {

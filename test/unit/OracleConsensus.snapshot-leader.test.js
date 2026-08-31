@@ -149,7 +149,7 @@ describe('OracleConsensus: block-locked snapshot leader', function () {
         oracleRound.getSubmissions.returns(buildSubmissions([
             { sender: VALIDATORS_3[1].addr, prices: prices }
         ]));
-        await oc._handlePropose({ sender: VALIDATORS_3[0].addr, data: {
+        await oc._handlePropose({ sender: VALIDATORS_3[0].addr, sig_pubkey: VALIDATORS_3[0].pubkey, data: {
             round: ROUND, prices, digest: oc._digest(ROUND, prices),
             btcBlockHeight: 100, btcBlockTime: 1700000000
         } });
@@ -169,7 +169,7 @@ describe('OracleConsensus: block-locked snapshot leader', function () {
             { sender: VALIDATORS_3[0].addr, prices: prices },
             { sender: VALIDATORS_3[1].addr, prices: prices }
         ]));
-        await oc._handlePropose({ sender: VALIDATORS_3[1].addr, data: {
+        await oc._handlePropose({ sender: VALIDATORS_3[1].addr, sig_pubkey: VALIDATORS_3[1].pubkey, data: {
             round: ROUND, prices, digest: oc._digest(ROUND, prices),
             btcBlockHeight: 100, btcBlockTime: 1700000000
         } });
@@ -186,11 +186,49 @@ describe('OracleConsensus: block-locked snapshot leader', function () {
             { sender: VALIDATORS_3[1].addr, prices: prices },
             { sender: VALIDATORS_3[2].addr, prices: prices }
         ]));
-        await oc._handlePropose({ sender: VALIDATORS_3[1].addr, data: {
+        await oc._handlePropose({ sender: VALIDATORS_3[1].addr, sig_pubkey: VALIDATORS_3[1].pubkey, data: {
             round: ROUND, prices, digest: oc._digest(ROUND, prices),
             btcBlockHeight: 100, btcBlockTime: 1700000000
         } });
         expect(oc.pendingRounds.has(ROUND)).to.be.true;
+    });
+
+    it('_handlePropose: accepts the snapshot leader on its proven sig_pubkey with an EMPTY registry and validator set', async function () {
+        // Follower view: this hub is v2 and knows nobody by addr (no registry
+        // rows, no loaded validator set), only the chain-locked snapshot. The
+        // leader's addr cannot be resolved (leader.addr is null), so the match
+        // must come from the key that signed the envelope. Before the fix this
+        // was dropped as "PROPOSE from non-leader".
+        pm.validatorAddr = VALIDATORS_3[1].addr;
+        pm.validatorPubkeys = new Map();
+        hub._identity.getPubkeyHex.returns(VALIDATORS_3[1].pubkey);
+        oc.setValidatorSet([]);
+        let prices = [{ coinPair: 'BTC/USD', price: '100000' }];
+        oracleRound.getSubmissions.returns(buildSubmissions([
+            { sender: VALIDATORS_3[1].addr, prices: prices, pubkey: VALIDATORS_3[1].pubkey }
+        ]));
+        await oc._handlePropose({ sender: VALIDATORS_3[0].addr, sig_pubkey: VALIDATORS_3[0].pubkey, data: {
+            round: ROUND, prices, digest: oc._digest(ROUND, prices),
+            btcBlockHeight: 100, btcBlockTime: 1700000000
+        } });
+        expect(oc.pendingRounds.has(ROUND)).to.be.true;
+    });
+
+    it('_handlePropose: an empty registry does not let a non-leader in on a proven key that is not the leader\'s', async function () {
+        pm.validatorAddr = VALIDATORS_3[2].addr;
+        pm.validatorPubkeys = new Map();
+        hub._identity.getPubkeyHex.returns(VALIDATORS_3[2].pubkey);
+        oc.setValidatorSet([]);
+        let prices = [{ coinPair: 'BTC/USD', price: '100000' }];
+        oracleRound.getSubmissions.returns(buildSubmissions([
+            { sender: VALIDATORS_3[0].addr, prices: prices, pubkey: VALIDATORS_3[0].pubkey },
+            { sender: VALIDATORS_3[1].addr, prices: prices, pubkey: VALIDATORS_3[1].pubkey }
+        ]));
+        await oc._handlePropose({ sender: VALIDATORS_3[1].addr, sig_pubkey: VALIDATORS_3[1].pubkey, data: {
+            round: ROUND, prices, digest: oc._digest(ROUND, prices),
+            btcBlockHeight: 100, btcBlockTime: 1700000000
+        } });
+        expect(oc.pendingRounds.has(ROUND)).to.be.false;
     });
 
     it('_leaderSubmissionAddr matches the leader submission by verified pubkey under a different addr binding', function () {

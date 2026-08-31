@@ -39,6 +39,7 @@ const axios        = require('axios');
 const EventEmitter = require('events');
 const coins        = require('./coins');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
+const { noteDrop } = require('./consensusDiagnostics');
 
 const REORG_ALERT          = 'REORG_ALERT';
 const XCHAIN_REORG_PREPARE = 'XCHAIN_REORG_PREPARE';
@@ -345,7 +346,10 @@ class ReorgHandler extends EventEmitter {
     }
 
     async _handleAlert(envelope) {
-        if (!this._isKnownSender(envelope.sender)) return;
+        if (!this._isKnownSender(envelope.sender)) {
+            noteDrop({ reason: 'unknown_sender', phase: 'reorg_alert', sender: envelope.sender, envelope });
+            return;
+        }
         let { chain, reorgHeight, timestamp, reorgId, oldHash, newHash } = envelope.data;
         if (!chain || !reorgHeight || !timestamp || !reorgId) return;
         // Bind reorgId to its canonical (chain:reorgHeight:timestamp) form so one valid
@@ -445,7 +449,10 @@ class ReorgHandler extends EventEmitter {
     }
 
     async _handlePrepare(envelope) {
-        if (!this._isKnownSender(envelope.sender)) return;
+        if (!this._isKnownSender(envelope.sender)) {
+            noteDrop({ reason: 'unknown_sender', phase: 'reorg_prepare', sender: envelope.sender, envelope });
+            return;
+        }
         let { reorgId, chain, reorgHeight, timestamp, affectedChains, digest, oldHash, newHash } = envelope.data;
         if (!reorgId || !digest) return;
         // Same canonical-reorgId binding as _handleAlert: reject a PREPARE whose reorgId is
@@ -534,7 +541,10 @@ class ReorgHandler extends EventEmitter {
     }
 
     _handleCommit(envelope) {
-        if (!this._isKnownSender(envelope.sender)) return;
+        if (!this._isKnownSender(envelope.sender)) {
+            noteDrop({ reason: 'unknown_sender', phase: 'reorg_commit', sender: envelope.sender, envelope });
+            return;
+        }
         let { reorgId, digest } = envelope.data;
         if (!reorgId || !digest) return;
 

@@ -40,7 +40,7 @@ PLATFORM_ROOT="${XCHAIN_PLATFORM_ROOT:-$(cd "$HUB_ROOT/.." && pwd)}"
 SRC_DIR="$HUB_ROOT/src/observability"
 FILES=(metrics.js logShipper.js index.js README.md)
 
-CONSUMERS=(xchain-indexer xchain-decoder xchain-encoder xchain-utxo-tracker xchain-explorer)
+CONSUMERS=(xchain-indexer xchain-decoder xchain-encoder xchain-utxo-tracker xchain-explorer xchain-sync)
 
 CHECK_ONLY=0
 if [[ "${1:-}" == "--check" ]]; then CHECK_ONLY=1; fi

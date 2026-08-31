@@ -27,6 +27,7 @@ const Consensus          = require('./Consensus.js');
 const ValidatorIdentity  = require('./ValidatorIdentity.js');
 const OracleConsensus    = require('./OracleConsensus.js');
 const OracleRound        = require('./OracleRound.js');
+const OracleBatchSigner  = require('./OracleBatchSigner.js');
 const RewardTracker      = require('./RewardTracker.js');
 const SlashDetector      = require('./SlashDetector.js');
 const CrossChainEngine   = require('./CrossChainEngine.js');
@@ -52,6 +53,7 @@ const AttestationConsensus   = require('./AttestationConsensus.js');
 const AttestationPublisher   = require('./AttestationPublisher.js');
 const AttestationRelay       = require('./AttestationRelay.js');
 const FullNodeChallengeRound = require('./FullNodeChallengeRound.js');
+const RollcallRound          = require('./RollcallRound.js');
 const AttestationSpotChecker = require('./AttestationSpotChecker.js');
 const { bcmul, bcdiv }   = require('./bcmath.js');
 const mathjs             = require('mathjs');
@@ -97,6 +99,7 @@ class XChainHub {
         this.slashGovernance  = null;
         this.priceAggregator  = null;
         this.oraclePublisher  = null;
+        this.oracleBatchSigner = null;
         this.hubDbBroadcaster = null;
         this.capabilityRegistry      = null;
         this.capabilitySnapshot      = new CapabilitySnapshot(this);  // available pre-startCapabilities so consensus engines can use it from start()
@@ -106,6 +109,8 @@ class XChainHub {
         this.attestationPublisher    = null;
         this.attestationSpotChecker  = null;
         this.attestationRelay        = null;
+        this.fullNodeChallenge       = null;
+        this.rollcallRound           = null;
         this._capabilityRecheckTimer = null;
         this._capabilityConfigWatcher = null;
         this._stakePollTimer          = null;
@@ -270,13 +275,14 @@ class XChainHub {
         this.oracleConsensus.on('round:finalized', async (event) => {
             // A rejection out of an EventEmitter listener is an unhandled rejection.
             try {
-                let participantPubkeys = [];
-                if(this.peerManager.validatorPubkeys){
-                    for(let addr of event.participants){
-                        let pk = this.peerManager.validatorPubkeys.get(addr);
-                        if(pk) participantPubkeys.push(pk);
-                    }
-                }
+                // event.participants are SIGNING KEYS (OracleConsensus tallies votes
+                // by proven key), so they need no registry translation. That is the
+                // point: the old addr->pubkey lookup silently paid nobody for a
+                // validator the chain attributes but the local registry has no row
+                // for, so a community validator could vote and never be rewarded.
+                let participantPubkeys = (event.participants || [])
+                    .filter(pk => pk)
+                    .map(pk => String(pk).toLowerCase());
 
                 await this.rewardTracker.distributeRewards(event.round, participantPubkeys, event.btcBlockHeight);
 
@@ -299,6 +305,14 @@ class XChainHub {
 
         await this.oracleConsensus.start();
         await this.oracle.start();
+
+        // Produces the ONE quorum signature set a PRICE batch's wire carries
+        // (spec section 6). Modeled on StateAnchorPublisher: peer-message wiring is
+        // a no-op with no peerManager, so construction never throws or blocks a
+        // standalone hub, and it must exist before oraclePublisher below, whose
+        // window scheduler calls collectBatchSignatures() on it.
+        this.oracleBatchSigner = new OracleBatchSigner(this);
+        await this.oracleBatchSigner.start();
 
         // Queues finalized rounds for DOGE publishing; inert until a transport is wired.
         this.oraclePublisher = new OraclePublisher(this);
@@ -399,8 +413,25 @@ class XChainHub {
             console.log('FullNodeChallengeRound: operator signer wired (' + fnSignerHooks.source + ')');
         }
         await this.fullNodeChallenge.start();
+
+        // ROLLCALL presence proofs (validator liveness). Signs every BTC epoch and
+        // gossips the signature regardless of whether this hub can publish: the
+        // sweepers exist so a wallet-less validator still gets rolled, so signing
+        // must never be gated on a DOGE rail. Publishing needs a signer module
+        // exporting broadcast(payload) (every ROLLCALL is two-phase P2SH); without
+        // one the engine stays sign-and-gossip only and getrollcallstatus says so.
+        // The DOGE hooks are borrowed at send time via _resolveSigner, so this
+        // construction does not depend on startOracle having run.
+        this.rollcallRound = new RollcallRound(this);
+        let rcSignerHooks = loadSignerHooks();
+        if(rcSignerHooks){
+            applySignerHooks(this.rollcallRound, rcSignerHooks);
+            console.log('RollcallRound: operator signer wired (' + rcSignerHooks.source + ')');
+        }
+        await this.rollcallRound.start();
     }
 
+    getRollcallRound(){          return this.rollcallRound; }
     getFullNodeChallenge(){      return this.fullNodeChallenge; }
     getAttestationRound(){       return this.attestationRound; }
     getAttestationConsensus(){   return this.attestationConsensus; }
@@ -1447,6 +1478,16 @@ class XChainHub {
             // Nothing configured is not a cross-network hazard; a tree with other
             // networks but not ours is, so refuse rather than resolve one.
             if(!btc || Object.keys(btc).length === 0) return this.network;
+            // OUR network being present is not a hazard either, whatever sections it
+            // carries. An indexer's pushChainTip writes bitcoin.<network>.chain_tips,
+            // so the mere act of a BTC indexer reporting its tip populated this tree
+            // with our own network and no 'xchain-indexer' section, and the throw below
+            // then fired on a hub whose only bitcoin config was its own. That took out
+            // the BTC anchor on exactly the hub the indexers talk to. The cross-network
+            // question is answered by WHICH networks appear, not by which sections they
+            // hold, so resolve ours and let the caller fall through to
+            // BTC_INDEXER_API_URL when no indexer URL is configured here.
+            if(btc[this.network]) return this.network;
             throw new Error('XChainHub: HUB_NETWORK=' + this.network + ' has no bitcoin xchain-indexer in the ' +
                 'configs table (present: ' + Object.keys(btc).join(', ') + '); refusing to anchor consensus to ' +
                 'another network. Set BTC_INDEXER_API_URL, or push the ' + this.network + ' indexer via updateconfig.');
@@ -1773,12 +1814,14 @@ class XChainHub {
         if(this._capabilityConfigWatcher){ try { this._capabilityConfigWatcher.close(); } catch(e){} this._capabilityConfigWatcher = null; }
         if(this.governance)       await this.governance.stop();
         if(this.reorgHandler)     await this.reorgHandler.stop();
+        if(this.rollcallRound)    await this.rollcallRound.stop();
         if(this.stateAnchorPublisher) await this.stateAnchorPublisher.stop();
         if(this.retractionConsensus) this.retractionConsensus.stop();
         if(this.stateCheckpoints) await this.stateCheckpoints.stop();
         if(this.crossChainCalls)  await this.crossChainCalls.stop();
         if(this.crossChainDex)    await this.crossChainDex.stop();
         if(this.crossChain)       await this.crossChain.stop();
+        if(this.oracleBatchSigner) await this.oracleBatchSigner.stop();
         if(this.oracle)           await this.oracle.stop();
         if(this.oracleConsensus)  await this.oracleConsensus.stop();
         if(this.consensus)        await this.consensus.stop();

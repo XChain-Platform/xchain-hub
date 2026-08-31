@@ -40,7 +40,10 @@ function mkRow(){
     return {
         chain: 'BTC', network: 'regtest', block_index: 900, block_hash: 'bh', ledger_hash: 'lh',
         actions_hash: 'ah', contract_hash: 'ch', checkpoint_seq: 100, snapshot_block: 800,
-        state_root: null, state_root_version: null, block_merkle_root: null, block_merkle_version: null,
+        // Root-bearing: an ANCHOR v0 section carries the light-client roots by
+        // construction, and the selector skips a row that has none (D8).
+        state_root: 'aa'.repeat(32), state_root_version: 1,
+        block_merkle_root: 'bb'.repeat(32), block_merkle_version: 1,
         validator_signatures: '[]', anchor_txid: null
     };
 }
@@ -54,7 +57,7 @@ function mkPub(db){
     pub.ambiguousPollAttempts = 1;
     pub.network               = null;                 // no network filter on the pending select
     pub.identity              = null;                 // skips the publisher-attestation round
-    pub.peerManager           = null;                 // skips the XANC_V0_DONE announce
+    pub.peerManager           = null;                 // skips the XANC_BUNDLE_DONE announce
     pub._getActiveOraclePublishPubkeys = async () => ['aa'];
     pub._mayPublish           = () => true;
     return pub;
@@ -194,7 +197,13 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
             const pub = mkPub(db);
             pub.identity = { getPubkeyHex: () => 'AA' };   // arms the isAnchorRewardActive branch
             pub.rounds   = 0;
-            pub._runPublisherAttestationRound = async () => { pub.rounds++; return null; };
+            // A MET round. These cases are about WHERE the marker is read relative to the
+            // round, not about what a degraded round does, and a degraded one now defers
+            // the bundle before the publish path they exist to exercise is reached.
+            pub._runPublisherAttestationRound = async () => {
+                pub.rounds++;
+                return { met: true, sigs: [{ pubkey: 'aa'.repeat(32), sig: 'bb'.repeat(64) }], publisher: 'aa' };
+            };
             return pub;
         }
 
@@ -347,7 +356,7 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
         it('runs the sweep at the end of a flush that reached the publishing stage', async function () {
             const db  = mkRetentionDb(1);
             const pub = mkPub(db);
-            pub._drainDeferredV0Done       = async () => {};
+            pub._drainDeferredBundleDone   = async () => {};
             pub._drainDeferredFinalized    = async () => {};
             pub._drainDeferredRewardAttest = async () => {};
             pub._publishPendingCheckpoints = async () => [];
@@ -364,7 +373,7 @@ describe('StateAnchorPublisher: durable at-most-once anchor intent', function ()
         it('never lets a retention failure fail a flush that already spent DOGE', async function () {
             const db  = mkRetentionDb(0, true);   // every DELETE throws
             const pub = mkPub(db);
-            pub._drainDeferredV0Done       = async () => {};
+            pub._drainDeferredBundleDone   = async () => {};
             pub._drainDeferredFinalized    = async () => {};
             pub._drainDeferredRewardAttest = async () => {};
             pub._publishPendingCheckpoints = async () => [{ chain: 'BTC', txid: 'paid' }];

@@ -132,6 +132,46 @@ describe('AttestationRound', function () {
             let ar  = new AttestationRound(hub, makeProviderRegistry());
             expect(ar.identity).to.be.null;
         });
+
+        it('a NEGATIVE operator knob falls back to the default instead of inverting the gate (#6175)', function () {
+            // `parseInt(cfg) || DEFAULT` accepts a negative, because a negative is
+            // truthy. Each of these then inverts the gate it sizes rather than merely
+            // loosening it: a negative CONFIRMATIONS makes `block_index + confirmations
+            // > latestBlock` false below spec §14 depth, so the hub pays for fetches on
+            // reorg-able requests; a negative ROUND_TIMEOUT_MS collapses the
+            // retryAfterMs floor to 5*pollMs while every round dies on the next tick.
+            let warn = sinon.stub(console, 'warn');
+            let hub  = makeHub({ p2pConfig: {
+                ATTESTATION_POLL_MS:                '-5000',
+                ATTESTATION_CONFIRMATIONS:          '-1',
+                ATTESTATION_FETCH_TIMEOUT:          '-1000',
+                ATTESTATION_LEADER_ROTATION_BLOCKS: '-2',
+                ATTESTATION_ROUND_TIMEOUT_MS:       '-120000',
+                ATTESTATION_RETRY_AFTER_MS:         '-1'
+            } });
+            let ar = new AttestationRound(hub, makeProviderRegistry());
+
+            expect(ar.pollMs,         'poll cadence').to.equal(15000);
+            expect(ar.confirmations,  'reorg depth').to.equal(3);
+            expect(ar.fetchTimeoutMs, 'fetch budget').to.equal(10000);
+            expect(ar.leaderRotationBlocks).to.be.greaterThan(0);
+            // The floor still sits above the (defaulted) consensus round window rather
+            // than collapsing onto 5*pollMs.
+            expect(ar.retryAfterMs).to.be.greaterThan(5 * ar.pollMs);
+            // The fallback is loud: a silent one is the failure mode this closes.
+            expect(warn.getCalls().filter(c => String(c.args[0]).includes('is not a positive integer')).length)
+                .to.be.greaterThan(0);
+        });
+
+        it('a POSITIVE operator knob is still honoured exactly (#6175)', function () {
+            let hub = makeHub({ p2pConfig: {
+                ATTESTATION_POLL_MS: '5000', ATTESTATION_CONFIRMATIONS: '6', ATTESTATION_FETCH_TIMEOUT: '2500'
+            } });
+            let ar = new AttestationRound(hub, makeProviderRegistry());
+            expect(ar.pollMs).to.equal(5000);
+            expect(ar.confirmations).to.equal(6);
+            expect(ar.fetchTimeoutMs).to.equal(2500);
+        });
     });
 
     // ── setConsensus / getRoundState ────────────────────────────────────────

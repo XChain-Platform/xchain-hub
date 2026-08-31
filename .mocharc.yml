@@ -1,0 +1,6 @@
+# Loaded by every mocha invocation in this repo, which is the point: the unit,
+# security, regression, integration and e2e scripts are separate command lines,
+# and a bootstrap wired into only one of them leaves the others running with the
+# console patch installed. See test/setup.js for what it does and why.
+require:
+  - ./test/setup.js

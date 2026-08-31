@@ -916,6 +916,11 @@ describe('XChainHub', function () {
                     './OracleRound.js':      function () { return { setConsensus: sinon.stub(), start: sinon.stub().resolves() }; },
                     './RewardTracker.js':    function () { return { distributeRewards: sinon.stub().resolves() }; },
                     './SlashDetector.js':    function () { return slashDetector; },
+                    // Stubbed here too: this describe block is about validator-set
+                    // freshness, not the signing round, and the fixture peerManager
+                    // below has no .on(), which the real OracleBatchSigner.start()
+                    // would call.
+                    './OracleBatchSigner.js': function () { return { start: sinon.stub().resolves(), stop: sinon.stub().resolves(), getStats: sinon.stub().returns({}) }; },
                     './OraclePublisher.js':  function () { return { start: sinon.stub().resolves() }; },
                     './lib/signer-loader.js': { loadSignerHooks: () => null, applySignerHooks: () => {} }
                 }
@@ -967,6 +972,76 @@ describe('XChainHub', function () {
 
             expect(stubs.slashDetector.checkRound.callCount).to.equal(2);
             expect(stubs.slashDetector.checkRound.getCall(1).args[4]).to.deep.equal(fresh);
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // startOracle() constructs/starts OracleBatchSigner; close() stops it
+    // -----------------------------------------------------------------
+
+    describe('startOracle() wires OracleBatchSigner', function () {
+
+        // Every OTHER oracle dependency is stubbed so this suite exercises the
+        // hub's wiring, not their internals. OracleBatchSigner itself is
+        // deliberately left un-stubbed (the real './OracleBatchSigner.js' is
+        // required): the row this covers is "the hub constructs the REAL class",
+        // so a fake standing in for it would prove nothing.
+        function batchSignerDeps() {
+            return {
+                './db':                 function () { return mockDb; },
+                './OracleConsensus.js': function () { return { setValidatorSet: sinon.stub(), on: sinon.stub(), start: sinon.stub().resolves(), stop: sinon.stub().resolves() }; },
+                './OracleRound.js':     function () { return { setConsensus: sinon.stub(), start: sinon.stub().resolves(), stop: sinon.stub().resolves() }; },
+                './RewardTracker.js':   function () { return { distributeRewards: sinon.stub().resolves() }; },
+                './SlashDetector.js':   function () { return { checkRound: sinon.stub().resolves() }; },
+                './OraclePublisher.js': function () { return { start: sinon.stub().resolves() }; },
+                './lib/signer-loader.js': { loadSignerHooks: () => null, applySignerHooks: () => {} }
+            };
+        }
+
+        it('constructs, starts, subscribes and cleanly stops OracleBatchSigner on a hub running oracle consensus', async function () {
+            this.timeout(30000);
+            const Hub = proxyquire('../../src/XChainHub', batchSignerDeps());
+            let hub = new Hub('h', 1, 'd', 'u', 'p', { P2P_PORT: 10001 });
+            sinon.stub(hub, '_loadValidatorSet').resolves([]);
+
+            const handlers = new Map();
+            hub.peerManager = {
+                on:             sinon.stub().callsFake((evt, fn) => handlers.set(evt, fn)),
+                removeListener: sinon.stub(),
+                stop:           sinon.stub().resolves(),
+                validatorPubkeys: new Map()
+            };
+
+            await hub.startOracle();
+
+            // Constructed and exposed on the hub the same way its siblings
+            // (oraclePublisher, stateAnchorPublisher) are: a plain property, so
+            // the publisher can reach hub.oracleBatchSigner.collectBatchSignatures().
+            expect(hub.oracleBatchSigner).to.be.an('object');
+            expect(hub.oracleBatchSigner.getStats()).to.have.property('batchSignTimeouts', 0);
+
+            // Started: subscribed to the peer message bus exactly once.
+            expect(hub.peerManager.on.calledOnceWith('message')).to.be.true;
+            let messageHandler = handlers.get('message');
+            expect(messageHandler).to.be.a('function');
+
+            hub.db = { close: sinon.stub().resolves() };
+            await hub.close();
+
+            // Stopped cleanly: the SAME handler instance is unsubscribed.
+            expect(hub.peerManager.removeListener.calledOnceWith('message', messageHandler)).to.be.true;
+        });
+
+        it('starts and stops with no OracleBatchSigner on a hub not running oracle consensus', async function () {
+            const Hub = proxyquire('../../src/XChainHub', batchSignerDeps());
+            let hub = new Hub('h', 1, 'd', 'u', 'p', null);   // no p2pConfig -> no peerManager
+
+            await hub.startOracle();
+            expect(hub.oracleBatchSigner).to.be.null;
+
+            hub.db = { close: sinon.stub().resolves() };
+            await hub.close();   // must not throw with no signer ever started
+            expect(hub.oracleBatchSigner).to.be.null;
         });
     });
 

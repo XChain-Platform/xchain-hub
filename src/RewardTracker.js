@@ -33,19 +33,11 @@ class RewardTracker {
         this.rewardPerRound = hub.p2pConfig.ORACLE_REWARD_PER_ROUND || '10.00000000';
         this.anchorReward   = process.env.ANCHOR_REWARD_PER_PUBLISH || hub.p2pConfig.ANCHOR_REWARD_PER_PUBLISH || '10.00000000';
 
-        // BTC indexer push config (for replicating rewards to indexer's validator_rewards table)
+        // BTC indexer endpoint, READ-ONLY: the only call made on it is
+        // resolveSourceByPubkey, which asks which staking source owned a signing pubkey
+        // at a block. Nothing here writes to the indexer (see recordAnchorReward).
         this.btcIndexerApiUrl = process.env.BTC_INDEXER_API_URL || '';
         this.btcIndexerApiKey = process.env.BTC_INDEXER_API_KEY || '';
-
-        // Retry budget for the reward push. The push MINTS the COLLECT-spendable
-        // validator_rewards row on the indexer, and below the reward flag-days nothing
-        // re-derives it from chain, so a dropped push loses the reward permanently.
-        // Bounded and in-process on purpose: the rail is retired at/above the flag-days
-        // (see _pushRewardsToBtcIndexer), so a durable outbox would be new schema for a
-        // path with a scheduled end. Overridable so a test does not pay the backoff.
-        this.pushMaxAttempts  = parseInt(process.env.REWARD_PUSH_MAX_ATTEMPTS || '3', 10) || 3;
-        this.pushRetryDelayMs = parseInt(process.env.REWARD_PUSH_RETRY_DELAY_MS || '2000', 10);
-        if(!Number.isFinite(this.pushRetryDelayMs) || this.pushRetryDelayMs < 0) this.pushRetryDelayMs = 2000;
     }
 
     // Distribute rewards for a finalized oracle round. HUB-LOCAL ONLY (ops
@@ -93,11 +85,11 @@ class RewardTracker {
         console.log('Rewards: Round ' + round + ': ' + perValidator + ' XCHAIN each to ' + validParticipants.length + ' validators (hub-local; indexer derives the consensus rows from PRICE v0)');
     }
 
-    // Record a single anchor-publish reward (ANCHOR v0 per-chain or v1 archive).
-    // rewardType: 'anchor_<chain>' / 'anchor_archive'; roundNumber: checkpoint_seq /
+    // Record a single anchor-publish reward (ANCHOR v7 checkpoint bundle or v1 archive).
+    // rewardType: 'anchor_bundle' / 'anchor_archive'; roundNumber: snapshot_block /
     // batch_seq. The publisher that paid the DOGE earns it. Called on EVERY hub
     // (the publisher at publish time; peers from the signature-verified
-    // V0_DONE/FINALIZED announcements), and blockIndex MUST be the quorum-agreed
+    // BUNDLE_DONE/FINALIZED announcements), and blockIndex MUST be the quorum-agreed
     // snapshot_block of the rewarded checkpoint, so all hubs record identical
     // row bytes and the ANCHOR archive's rewards section verifies by
     // re-derivation.
@@ -176,10 +168,16 @@ class RewardTracker {
                       : ((this.hub && this.hub.network) ? this.hub.network : '');
         let isDerivedChain   = /^anchor_(BTC|LTC|DOGE)$/.test(String(rewardType)) &&
                                ar.isAnchorRewardActive(Number(blockIndex), network);
+        // The BUNDLE reward: ONE anchor_bundle per network per cycle, derived on-chain
+        // from the ANCHOR v7 publisher attestation. Same frozen ANCHOR_REWARD_AMOUNT and
+        // the same flag-day as the per-chain form it replaces, so a hub that records it
+        // and an indexer that derives it agree on the amount whatever
+        // ANCHOR_REWARD_PER_PUBLISH is set to locally.
+        let isDerivedBundle  = String(rewardType) === 'anchor_bundle' &&
+                               ar.isAnchorRewardActive(Number(blockIndex), network);
         let isDerivedArchive = String(rewardType) === 'anchor_archive' &&
                                ar.isArchiveRewardActive(Number(blockIndex), network);
-        let isDerived = isDerivedChain || isDerivedArchive;
-        let amount = parseFloat(isDerivedChain ? ar.ANCHOR_REWARD_AMOUNT
+        let amount = parseFloat((isDerivedChain || isDerivedBundle) ? ar.ANCHOR_REWARD_AMOUNT
                               : isDerivedArchive ? ar.ARCHIVE_REWARD_AMOUNT : this.anchorReward);
         if (!Number.isFinite(amount) || amount <= 0) return;
         let amountStr = amount.toFixed(8);
@@ -216,13 +214,11 @@ class RewardTracker {
 
         console.log('Rewards: ' + rewardType + ' #' + roundNumber + ': ' + amountStr + ' XCHAIN to ' + lcPubkey.substring(0, 16) + '…');
 
-        // A derived reward (per-chain at/above the anchor-reward flag-day, anchor_archive
-        // at/above the archive-reward flag-day) is credited on-chain by every indexer, so the
-        // forgeable `pushvalidatorrewards` write is retired for it. The push
-        // survives below each flag-day; `oracle_round` never pushes here.
-        if(!isDerived)
-            this._pushRewardsToBtcIndexer(roundNumber, [lcPubkey], amountStr, blockIndex || roundNumber, rewardType)
-                .catch(e => console.warn('Rewards: failed to push anchor reward to BTC indexer:', e));
+        // The row above is hub-local, and that is the end of it: the hub never writes a
+        // reward anywhere else. Every anchor reward is derived from on-chain bytes by the
+        // indexer itself (per-chain from the ANCHOR v4/v5 publisher attestation, archive
+        // from v6), so a hub-side write would be a second, weaker source for a row the
+        // chain already determines.
     }
 
     // Resolve the staking source address that owns a signing pubkey at a block,
@@ -268,82 +264,6 @@ class RewardTracker {
         } catch (err) {
             console.warn('Rewards: source resolution failed for ' + String(pubkey).substring(0, 16) + '…:', err && err.message);
             return null;
-        }
-    }
-
-    // Is `error`, as returned in the indexer's pushvalidatorrewards envelope, a refusal
-    // that a retry can never turn into an acceptance? The handler answers with a plain
-    // {error} body for both kinds: a validation/flag-day REFUSAL (the answer is final,
-    // and re-asking is a loop against a live node) and a NOT-READY indexer (transient,
-    // and the exact drop this retry budget exists for). Matched on the handler's own
-    // strings; an unrecognised error is treated as transient, which costs at most
-    // pushMaxAttempts idempotent posts.
-    static isTerminalPushError(error) {
-        return /is not pushable|push retired|is required|must be an array/i.test(String(error || ''));
-    }
-
-    // Push validator rewards to the BTC indexer's local DB via JSON-RPC.
-    // Called fire-and-forget: this never throws and never blocks the consensus path.
-    //
-    // Delivery is CHECKED, not assumed. HTTP 200 is not acceptance: the handler answers
-    // {error} for a not-ready indexer and a flag-day refusal alike, and {written,
-    // skipped} for a partial write, so treating any 200 as delivered silently loses a
-    // 10 XCHAIN COLLECT-spendable row that nothing below the flag-days re-derives.
-    // Transport failures and transient envelopes are retried within pushMaxAttempts;
-    // the indexer write is idempotent (INSERT IGNORE behind a UNIQUE index on
-    // source+pubkey+type+round), so a duplicate delivery can never double-credit.
-    // A terminal refusal stops immediately, and an exhausted budget is logged as the
-    // permanent loss it is rather than a warning that reads like a retry pending.
-    async _pushRewardsToBtcIndexer(round, pubkeys, amount, blockIndex, rewardType) {
-        let indexerUrl = await this._getBtcIndexerUrl();
-        if (!indexerUrl) return;
-        let rewards = pubkeys.map(pk => ({ pubkey: pk, amount: amount }));
-        let body = {
-            jsonrpc: '2.0',
-            id:      Date.now(),
-            method:  'pushvalidatorrewards',
-            params:  {
-                round:       round,
-                reward_type: rewardType || 'oracle_round',
-                block_index: blockIndex,
-                rewards:     rewards
-            }
-        };
-        let headers = { 'Content-Type': 'application/json' };
-        if (this.btcIndexerApiKey) headers['x-api-key'] = this.btcIndexerApiKey;
-        let label = (rewardType || 'oracle_round') + ' #' + round + ' @ ' + blockIndex;
-        for (let attempt = 1; attempt <= this.pushMaxAttempts; attempt++) {
-            let transient;
-            try {
-                let res    = await axios.post(indexerUrl, body, { headers: headers, timeout: 5000 });
-                let result = (res && res.data) ? res.data.result : null;
-                let error  = (result && result.error) ? String(result.error) : '';
-                if (error && RewardTracker.isTerminalPushError(error)) {
-                    console.warn('Rewards: BTC indexer REFUSED the push for ' + label + ': ' + error + ' (not retried)');
-                    return;
-                }
-                if (!error) {
-                    // A 200 with nothing written is a silent drop in the old shape: the
-                    // pubkey is unknown to the indexer, or it holds no active stake at
-                    // this block. Retrying cannot resolve either, so surface it and stop.
-                    if (result && Number(result.written) === 0 && Number(result.skipped) > 0)
-                        console.error('Rewards: BTC indexer ACCEPTED but wrote NOTHING for ' + label +
-                                      ' (skipped ' + result.skipped + '); the reward row was NOT minted');
-                    return;
-                }
-                transient = error;
-            } catch (err) {
-                transient = (err && err.message) ? err.message : String(err);
-            }
-            if (attempt >= this.pushMaxAttempts) {
-                console.error('Rewards: BTC indexer push for ' + label + ' PERMANENTLY DROPPED after ' +
-                              attempt + ' attempts (last failure: ' + transient + ')');
-                return;
-            }
-            console.warn('Rewards: BTC indexer push for ' + label + ' failed (' + transient +
-                         '); retrying (attempt ' + attempt + ' of ' + this.pushMaxAttempts + ')');
-            if (this.pushRetryDelayMs > 0)
-                await new Promise(resolve => setTimeout(resolve, this.pushRetryDelayMs * attempt));
         }
     }
 

@@ -14,7 +14,7 @@ const sinon          = require('sinon');
 const { expect }     = require('chai');
 const proxyquire     = require('proxyquire');
 const { createMockHub }     = require('../helpers/mockHub');
-const { buildSubmissions }  = require('../helpers/fixtures');
+const { buildSubmissions, pubkeyForTestSender }  = require('../helpers/fixtures');
 
 describe('OracleRound', function () {
 
@@ -330,7 +330,7 @@ describe('OracleRound', function () {
 
             or._handleMessage({
                 type:   'ORACLE_PRICE_SUBMIT',
-                sender: 'ws://peer-1:10001',
+                sender: 'ws://peer-1:10001', sig_pubkey: pubkeyForTestSender('ws://peer-1:10001'),
                 data: {
                     round:  round,
                     prices: [{ coinPair: 'BTC/USD', price: '100001', sources: 1 }],
@@ -348,11 +348,11 @@ describe('OracleRound', function () {
             let round = or.getCurrentRound();
 
             or._handleMessage({
-                type: 'ORACLE_PRICE_SUBMIT', sender: 'ws://peer-1:10001',
+                type: 'ORACLE_PRICE_SUBMIT', sender: 'ws://peer-1:10001', sig_pubkey: pubkeyForTestSender('ws://peer-1:10001'),
                 data: { round, prices: [{ coinPair: 'BTC/USD', price: '111' }], sources: 1, timestamp: Date.now() }
             });
             or._handleMessage({
-                type: 'ORACLE_PRICE_SUBMIT', sender: 'ws://peer-1:10001',
+                type: 'ORACLE_PRICE_SUBMIT', sender: 'ws://peer-1:10001', sig_pubkey: pubkeyForTestSender('ws://peer-1:10001'),
                 data: { round, prices: [{ coinPair: 'BTC/USD', price: '222' }], sources: 1, timestamp: Date.now() }
             });
 
@@ -362,7 +362,7 @@ describe('OracleRound', function () {
         });
 
         it('ignores non-ORACLE_PRICE_SUBMIT messages', function () {
-            or._handleMessage({ type: 'HEARTBEAT', sender: 'x', data: {} });
+            or._handleMessage({ type: 'HEARTBEAT', sender: 'x', sig_pubkey: pubkeyForTestSender('x'), data: {} });
             expect(or.getSubmissions(0)).to.be.undefined;
         });
     });
@@ -479,7 +479,7 @@ describe('OracleRound', function () {
             await or._executeRound();              // sets currentRound + its own round map
             let next = or.getCurrentRound() + 1;   // a round with no map yet
             or._handleMessage({
-                type: 'ORACLE_PRICE_SUBMIT', sender: 'ws://peer-9:10001',
+                type: 'ORACLE_PRICE_SUBMIT', sender: 'ws://peer-9:10001', sig_pubkey: pubkeyForTestSender('ws://peer-9:10001'),
                 data: { round: next, prices: [{ coinPair: 'BTC/USD', price: '123' }], sources: 1, timestamp: Date.now() }
             });
             expect(or.getSubmissions(next).has('ws://peer-9:10001')).to.be.true;

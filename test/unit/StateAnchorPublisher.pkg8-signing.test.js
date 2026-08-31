@@ -79,7 +79,7 @@ describe('StateAnchorPublisher publisher-attestation abstains on an unresolved s
         expect(r.met).to.equal(false);
     });
 
-    it('v6 archive round: an EMPTY oracle_publish set abstains instead of self-attesting', async () => {
+    it('v1 archive round: an EMPTY oracle_publish set abstains instead of self-attesting', async () => {
         let { pub } = buildPub();
         pub._resolveCapabilitySet = async () => [];
         let r = await pub._runArchiveAttestationRound(CP, 7, 'D'.repeat(34));
@@ -87,7 +87,7 @@ describe('StateAnchorPublisher publisher-attestation abstains on an unresolved s
         expect(r.sigs).to.deep.equal([]);
     });
 
-    it('v6 archive round: a genuine single-member set containing us still self-signs', async () => {
+    it('v1 archive round: a genuine single-member set containing us still self-signs', async () => {
         let { pub, identity } = buildPub();
         let me = identity.getPubkeyHex().toLowerCase();
         pub._resolveCapabilitySet = async () => [{ pubkey: me, amount: '1', source: '' }];
@@ -109,7 +109,7 @@ describe('StateAnchorPublisher publisher-attestation abstains on an unresolved s
         expect(r.sigs).to.deep.equal([]);
     });
 
-    it('v6 archive round: a THROWING resolver degrades to the legacy v1 instead of discarding the round', async () => {
+    it('v1 archive round: a THROWING resolver degrades to ATTEST_SIG_COUNT 0 instead of discarding the round', async () => {
         let { pub } = buildPub({ network: 'mainnet' });
         pub._resolveCapabilitySet = async () => { throw new Error('deterministic snapshot unavailable'); };
         let r = await pub._runArchiveAttestationRound(CP, 7, 'D'.repeat(34));
@@ -275,32 +275,39 @@ describe('StateAnchorPublisher follower co-sign gate follows the flag-day', () =
     });
 });
 
-// The publisher broadcasts XANC_V0_DONE the instant the DOGE
+// The publisher broadcasts XANC_BUNDLE_DONE the instant the DOGE
 // broadcast returns a txid (0 confirmations), while the receiver only stamps at
 // dogeConfirmations depth (60 on DOGE, ~1h). Because the announcement is one-shot,
-// every peer used to answer 'absent' and drop it, so anchor_txid stayed NULL forever
-// and the duplicate-anchor suppression that the `anchor_txid IS NULL` selector exists
-// for could never engage: each hub re-anchored (real DOGE) as its rank unlocked.
-describe('StateAnchorPublisher defers a not-yet-buried V0_DONE instead of dropping it', () => {
+// a peer that answers 'absent' and drops it leaves anchor_txid NULL forever, and the
+// duplicate-anchor suppression that the `anchor_txid IS NULL` selector exists for never
+// engages: each hub re-anchors (real DOGE) as its rank unlocks. So a not-yet-buried
+// announcement is deferred and re-verified, never dropped.
+describe('StateAnchorPublisher defers a not-yet-buried BUNDLE_DONE instead of dropping it', () => {
 
     // A receiver whose on-chain verdict is scripted, with the DB reduced to the two
-    // statements the V0_DONE path touches.
+    // statements the BUNDLE_DONE path touches. The announcement carries TWO sections,
+    // so the per-section stamp and the all-sections-verified rule are both exercised.
     function buildReceiver(opts) {
         opts = opts || {};
         let identity = new ValidatorIdentity('11'.repeat(32));
         let me = identity.getPubkeyHex().toLowerCase();
-        let row = { chain: 'BTC', network: 'regtest', block_index: 494, checkpoint_seq: 7,
-                    snapshot_block: 100, anchor_txid: null,
-                    block_hash: 'c0'.repeat(32), ledger_hash: 'a1'.repeat(32),
-                    actions_hash: 'b2'.repeat(32), contract_hash: 'c3'.repeat(32) };
+        let base = { network: 'regtest', snapshot_block: 100, anchor_txid: null,
+                     block_hash: 'c0'.repeat(32), ledger_hash: 'a1'.repeat(32),
+                     actions_hash: 'b2'.repeat(32), contract_hash: 'c3'.repeat(32) };
+        let rows = [Object.assign({ chain: 'BTC', block_index: 494, checkpoint_seq: 7 }, base),
+                    Object.assign({ chain: 'LTC', block_index: 990, checkpoint_seq: 7 }, base)];
         let updates = [];
         let { pub } = buildPub({
             identity,
             async doQuery(sql, params) {
-                if (sql.startsWith('SELECT * FROM state_checkpoints')) return [Object.assign({}, row)];
+                if (sql.startsWith('SELECT * FROM state_checkpoints')) {
+                    let hit = rows.find(r => r.chain === params[0] && Number(r.block_index) === Number(params[2]));
+                    return hit ? [Object.assign({}, hit)] : [];
+                }
                 if (sql.startsWith('UPDATE state_checkpoints SET anchor_txid')) {
                     updates.push(params);
-                    if (row.anchor_txid == null) row.anchor_txid = params[0];
+                    let hit = rows.find(r => r.chain === params[1] && Number(r.block_index) === Number(params[3]));
+                    if (hit && hit.anchor_txid == null) hit.anchor_txid = params[0];
                     return [];
                 }
                 return [];
@@ -311,96 +318,111 @@ describe('StateAnchorPublisher defers a not-yet-buried V0_DONE instead of droppi
         pub.verdict = opts.verdict || 'absent';
         pub._verifyAnchorOnChain = async () => pub.verdict;
 
-        let d = { chain: 'BTC', network: 'regtest', block_index: 494, checkpoint_seq: 7, txid: 'aa'.repeat(32) };
+        let d = { network: 'regtest', snapshot_block: 100, txid: 'aa'.repeat(32),
+                  sections: rows.map(r => ({ chain: r.chain, block_index: r.block_index, checkpoint_seq: r.checkpoint_seq })) };
         d.sig_pubkey = me;
-        d.sig = identity.sign(pub._v0DoneCanonical(d, d.txid));
-        return { pub, d, me, row, updates, envelope: { type: 'XANC_V0_DONE', sender: me, data: d } };
+        d.sig = identity.sign(pub._bundleDoneCanonical(d, d.txid));
+        return { pub, d, me, rows, updates, envelope: { type: 'XANC_BUNDLE_DONE', sender: me, data: d } };
     }
 
-    it('queues a mempool-age announcement, then stamps it once the anchor confirms', async () => {
+    it('queues a mempool-age announcement, then stamps every section once the anchor confirms', async () => {
         let r = buildReceiver({ verdict: 'absent' });
 
-        await r.pub._handleV0Done(r.envelope);
+        await r.pub._handleBundleDone(r.envelope);
         expect(r.updates.length, 'nothing stamped off an unconfirmed anchor').to.equal(0);
-        expect(r.pub._deferredV0Done.size, 'announcement retained for re-verification').to.equal(1);
+        expect(r.pub._deferredBundleDone.size, 'announcement retained for re-verification').to.equal(1);
 
         // Still not buried: the drain leaves it queued and stamps nothing.
         r.pub.verdict = 'shallow';
-        await r.pub._drainDeferredV0Done();
+        await r.pub._drainDeferredBundleDone();
         expect(r.updates.length).to.equal(0);
-        expect(r.pub._deferredV0Done.size).to.equal(1);
+        expect(r.pub._deferredBundleDone.size).to.equal(1);
 
-        // 60 confirmations later.
+        // 60 confirmations later. EVERY section is stamped from the one announcement.
         r.pub.verdict = 'verified';
-        await r.pub._drainDeferredV0Done();
-        expect(r.updates.length, 'stamped once buried').to.equal(1);
-        expect(r.updates[0][0]).to.equal(r.d.txid);
+        await r.pub._drainDeferredBundleDone();
+        expect(r.updates.length, 'stamped once buried, one row per section').to.equal(2);
+        expect(r.updates.map(u => u[0])).to.deep.equal([r.d.txid, r.d.txid]);
+        expect(r.updates.map(u => u[1]), 'both chains').to.deep.equal(['BTC', 'LTC']);
         expect(r.updates[0][4], 'keyed on checkpoint_seq').to.equal(7);
-        expect(r.pub._deferredV0Done.size, 'queue drained').to.equal(0);
+        expect(r.pub._deferredBundleDone.size, 'queue drained').to.equal(0);
     });
 
     it('an already-buried announcement still stamps immediately, without queuing', async () => {
         let r = buildReceiver({ verdict: 'verified' });
-        await r.pub._handleV0Done(r.envelope);
-        expect(r.updates.length).to.equal(1);
-        expect(r.pub._deferredV0Done.size).to.equal(0);
+        await r.pub._handleBundleDone(r.envelope);
+        expect(r.updates.length).to.equal(2);
+        expect(r.pub._deferredBundleDone.size).to.equal(0);
     });
 
     it('a positively-detected forge is dropped, never queued', async () => {
         for (let verdict of ['rejected:mismatch', 'rejected:txid', 'rejected:version', 'rejected:status']) {
             let r = buildReceiver({ verdict });
-            await r.pub._handleV0Done(r.envelope);
+            await r.pub._handleBundleDone(r.envelope);
             expect(r.updates.length, verdict).to.equal(0);
-            expect(r.pub._deferredV0Done.size, verdict + ' must not be retried').to.equal(0);
+            expect(r.pub._deferredBundleDone.size, verdict + ' must not be retried').to.equal(0);
         }
     });
 
     it('a queued announcement that never confirms expires, so the failover ladder can re-anchor', async () => {
         let r = buildReceiver({ verdict: 'absent' });
         r.pub.announceRetryTtlMs = -1;                      // already past its TTL on the next drain
-        await r.pub._handleV0Done(r.envelope);
-        expect(r.pub._deferredV0Done.size).to.equal(1);
+        await r.pub._handleBundleDone(r.envelope);
+        expect(r.pub._deferredBundleDone.size).to.equal(1);
 
         r.pub.verdict = 'verified';                          // even a late confirm cannot resurrect it
-        await r.pub._drainDeferredV0Done();
-        expect(r.pub._deferredV0Done.size, 'expired entry dropped').to.equal(0);
+        await r.pub._drainDeferredBundleDone();
+        expect(r.pub._deferredBundleDone.size, 'expired entry dropped').to.equal(0);
         expect(r.updates.length, 'nothing stamped from an expired entry').to.equal(0);
     });
 
-    it('drops the queued entry (without a second stamp) once the row is already anchored', async () => {
+    it('drops the queued entry (without a second stamp) once every section is already anchored', async () => {
         let r = buildReceiver({ verdict: 'absent' });
-        await r.pub._handleV0Done(r.envelope);
-        r.row.anchor_txid = 'bb'.repeat(32);                 // our own publish stamped it meanwhile
+        await r.pub._handleBundleDone(r.envelope);
+        for (let row of r.rows) row.anchor_txid = 'bb'.repeat(32);   // our own publish stamped them meanwhile
         r.pub.verdict = 'verified';
-        await r.pub._drainDeferredV0Done();
+        await r.pub._drainDeferredBundleDone();
         expect(r.updates.length, 'no redundant UPDATE').to.equal(0);
-        expect(r.pub._deferredV0Done.size).to.equal(0);
+        expect(r.pub._deferredBundleDone.size).to.equal(0);
     });
 
     it('the queue is bounded: a flood evicts the oldest entry, never grows without limit', async () => {
         let r = buildReceiver({ verdict: 'absent' });
         r.pub.announceQueueMax = 3;
-        for (let seq = 1; seq <= 10; seq++)
-            r.pub._deferV0Done({ chain: 'BTC', network: 'regtest', block_index: 400 + seq, checkpoint_seq: seq, txid: 'cc'.repeat(32) }, r.me, 'absent');
-        expect(r.pub._deferredV0Done.size).to.equal(3);
-        expect([...r.pub._deferredV0Done.keys()].some(k => k.includes('|8|')), 'newest kept').to.equal(true);
-        expect([...r.pub._deferredV0Done.keys()].some(k => k.includes('|1|')), 'oldest evicted').to.equal(false);
+        for (let block = 1; block <= 10; block++)
+            r.pub._deferBundleDone({ network: 'regtest', snapshot_block: block, txid: 'cc'.repeat(32),
+                                     sections: [{ chain: 'BTC', block_index: 400 + block, checkpoint_seq: block }] }, r.me, 'absent');
+        expect(r.pub._deferredBundleDone.size).to.equal(3);
+        expect([...r.pub._deferredBundleDone.keys()].some(k => k.startsWith('regtest|8|')), 'newest kept').to.equal(true);
+        expect([...r.pub._deferredBundleDone.keys()].some(k => k.startsWith('regtest|1|')), 'oldest evicted').to.equal(false);
     });
 
     it('a duplicate announcement for the same txid does not double-queue', async () => {
         let r = buildReceiver({ verdict: 'absent' });
-        await r.pub._handleV0Done(r.envelope);
-        await r.pub._handleV0Done(r.envelope);
-        expect(r.pub._deferredV0Done.size).to.equal(1);
+        await r.pub._handleBundleDone(r.envelope);
+        await r.pub._handleBundleDone(r.envelope);
+        expect(r.pub._deferredBundleDone.size).to.equal(1);
     });
 
     it('flush drains the queue before the failover-rank re-anchor decision', async () => {
         let r = buildReceiver({ verdict: 'verified' });
-        r.pub._deferV0Done(r.d, r.me, 'absent');
+        r.pub._deferBundleDone(r.d, r.me, 'absent');
         r.pub._publishPendingCheckpoints = async () => [];   // isolate flush from the publish pipeline
         r.pub._startArchiveRound        = async () => 'none';
         await r.pub.flush();
-        expect(r.updates.length, 'queued announcement applied during flush').to.equal(1);
-        expect(r.pub._deferredV0Done.size).to.equal(0);
+        expect(r.updates.length, 'queued announcement applied during flush').to.equal(2);
+        expect(r.pub._deferredBundleDone.size).to.equal(0);
+    });
+
+    it('refuses an announcement whose signed section list does not match what it carries', async () => {
+        // The canonical binds every section identity, so re-pointing a signed
+        // announcement at a different checkpoint row invalidates the signature.
+        let r = buildReceiver({ verdict: 'verified' });
+        let tampered = Object.assign({}, r.d, {
+            sections: [{ chain: 'BTC', block_index: 494, checkpoint_seq: 7 },
+                       { chain: 'LTC', block_index: 990, checkpoint_seq: 8 }]
+        });
+        await r.pub._handleBundleDone({ type: 'XANC_BUNDLE_DONE', sender: r.me, data: tampered });
+        expect(r.updates.length, 'nothing stamped from a re-pointed announcement').to.equal(0);
     });
 });
