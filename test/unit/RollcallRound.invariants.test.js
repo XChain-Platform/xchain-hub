@@ -196,22 +196,26 @@ describe('RollcallRound stays inert where the operator has not armed it', functi
         return eng;
     }
 
-    it('refuses to start on a network with no activation height', async function () {
-        assert.strictEqual(rca.ROLLCALL_ACTIVATION.mainnet, null,
-            'this test is about the inert placeholder; if mainnet has been armed, retarget it');
-        const eng = engineFor('mainnet');
-        const logged = [];
-        const real = console.log;
-        console.log = (...a) => { logged.push(a.join(' ')); };
-        try { await eng.start(); } finally { console.log = real; }
-        assert.strictEqual(eng._started, false,
-            'an inert network must not load logs, arm a spend guard, or tick even once');
-        assert.strictEqual(eng._timer, undefined, 'an inert network must not install a poll timer');
-        assert.ok(logged.some((l) => /inert/.test(l)), 'it must say why it is idle rather than start silently');
+    // Regtest joined mainnet as inert on 2026-08-31: arming a network commits every
+    // BTC indexer on it to a wired DOGE peer, and a single-coin regtest venue has none.
+    ['mainnet', 'regtest'].forEach(function (net) {
+        it('refuses to start on ' + net + ', which has no activation height', async function () {
+            assert.strictEqual(rca.ROLLCALL_ACTIVATION[net], null,
+                'this test is about the inert placeholder; if ' + net + ' has been armed, retarget it');
+            const eng = engineFor(net);
+            const logged = [];
+            const real = console.log;
+            console.log = (...a) => { logged.push(a.join(' ')); };
+            try { await eng.start(); } finally { console.log = real; }
+            assert.strictEqual(eng._started, false,
+                'an inert network must not load logs, arm a spend guard, or tick even once');
+            assert.strictEqual(eng._timer, undefined, 'an inert network must not install a poll timer');
+            assert.ok(logged.some((l) => /inert/.test(l)), 'it must say why it is idle rather than start silently');
+        });
     });
 
     it('does start on the networks that are armed', async function () {
-        for (const net of ['testnet', 'regtest']) {
+        for (const net of ['testnet']) {
             assert.ok(Number.isFinite(rca.ROLLCALL_ACTIVATION[net]), net + ' is expected to be armed');
             const eng = engineFor(net);
             const real = console.log;

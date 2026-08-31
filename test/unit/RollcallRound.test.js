@@ -28,6 +28,7 @@ const EventEmitter = require('events');
 
 const ValidatorIdentity    = require('../../src/ValidatorIdentity.js');
 const StateAnchorPublisher = require('../../src/StateAnchorPublisher.js');
+const rca                  = require('../../src/rollcall_activation.js');
 
 const BTC_URL  = 'http://btc-indexer.test';
 const DOGE_URL = 'http://doge-indexer.test';
@@ -140,6 +141,19 @@ function parseWire(payload) {
 
 describe('RollcallRound', function () {
 
+    // These are ENGINE tests: they drive signing, ranks, sweepers and self-publish,
+    // all of which need a network the engine will actually start on. Regtest went
+    // INERT on 2026-08-31 (a single-coin BTC regtest venue has no DOGE peer to prove
+    // a close), so the suite arms it for its own duration and restores it after.
+    // Whether regtest ships armed is asserted by RollcallRound.invariants.test.js,
+    // deliberately in a different file so this stub can never mask that question.
+    let savedRegtestActivation;
+    before(function () {
+        savedRegtestActivation = rca.ROLLCALL_ACTIVATION.regtest;
+        rca.ROLLCALL_ACTIVATION.regtest = 0;
+    });
+    after(function () { rca.ROLLCALL_ACTIVATION.regtest = savedRegtestActivation; });
+
     beforeEach(function () {
         savedEnv = {};
         for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
@@ -187,7 +201,10 @@ describe('RollcallRound', function () {
             assert.strictEqual(eng.newestSignableEpoch(43), null, 'since=13 is past the 12-block window');
         });
 
-        it('treats epoch 0 as a real epoch on regtest', function () {
+        // The subject is the falsy-zero trap in the epoch arithmetic, not which
+        // networks ship armed: epoch 0 must survive `if(!epoch)` wherever a network
+        // IS armed from genesis, which the suite-level hook above supplies.
+        it('treats epoch 0 as a real epoch where a network is armed from genesis', function () {
             const eng = makeEngine({});
             assert.strictEqual(eng.newestSignableEpoch(6), 0, 'a falsy height check would skip epoch 0');
         });
