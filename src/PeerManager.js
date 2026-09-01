@@ -25,6 +25,7 @@ const EventEmitter     = require('events');
 const http             = require('http');
 const WebSocket        = require('ws');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
+const coins            = require('./coins');
 const { positiveIntConfig } = require('./lib/config_int.js');
 const { notePeerReject, stampRemoteIp } = require('./consensusDiagnostics');
 
@@ -53,6 +54,21 @@ class PeerManager extends EventEmitter {
         const port = BOOTSTRAP_PORT_BY_NETWORK[String(network || '').toLowerCase()];
         if (!port) return [];
         return BOOTSTRAP_VALIDATOR_HOSTS.map(h => 'ws://' + h + ':' + port);
+    }
+
+    // Blocks a confirmed STAKE waits before it joins the chain-effective signer set.
+    // Read from the canonical coins registry (staking is BTC-anchored, the same path
+    // _assertCanonicalMinStakes uses) so an operator-facing hint can never quote a
+    // delay the chain does not enforce. Null when the network cannot be resolved;
+    // callers then omit the hint rather than print an invented number.
+    static stakeActivationBlocks(network) {
+        try {
+            const cfg = coins.getCoinConfig('BTC', String(network || '').toLowerCase());
+            const n = (cfg && cfg.STAKING) ? cfg.STAKING.ACTIVATION_DELAY_BLOCKS : null;
+            return Number.isFinite(n) ? n : null;
+        } catch (e) {
+            return null;
+        }
     }
 
 
@@ -373,7 +389,14 @@ class PeerManager extends EventEmitter {
     //
     // Backward-compat (no sig_pubkey): fall back to the static addr->pubkey
     // registry so pre-A and A hubs interoperate during a rolling deploy.
-    _verifySignature(envelope) {
+    //
+    // `outcome` is an optional caller-owned object that classifies a rejection.
+    // A membership miss sets outcome.reason = 'not_in_signer_set'; every other
+    // rejection leaves it unset, so the caller's default (a real signature
+    // failure) still applies. It is an out-param rather than a richer return
+    // because every caller and test treats this method as a predicate, and the
+    // boolean is the security-critical value.
+    _verifySignature(envelope, outcome) {
         // If signatures not required, accept unsigned messages
         if (!this.requireSigs && !envelope.sig) return true;
         // If signatures required but missing, reject
@@ -391,7 +414,13 @@ class PeerManager extends EventEmitter {
                      || this._registryHasPubkey(pk);
             // Not a member: reject when sigs are required (fail closed); preserve
             // the permissive mode otherwise, matching the unknown-sender path.
-            if (!inSet) return !this.requireSigs;
+            // The reason is reported separately from a crypto failure: a joining
+            // validator whose STAKE has not activated yet signs perfectly well, and
+            // telling it its SIGNATURE is bad sends its operator hunting keys.
+            if (!inSet) {
+                if (outcome) outcome.reason = 'not_in_signer_set';
+                return !this.requireSigs;
+            }
             if (!ValidatorIdentity.verify(
                 ValidatorIdentity.getSignablePayload(envelope), envelope.sig, pk))
                 return false;
@@ -428,7 +457,11 @@ class PeerManager extends EventEmitter {
         // Look up sender's pubkey
         let pubkeyHex = this.validatorPubkeys.get(envelope.sender);
         if (!pubkeyHex) {
-            // Unknown sender: accept if sigs not required, reject if required
+            // Unknown sender: accept if sigs not required, reject if required.
+            // A membership miss on this path too (the registry is the only signer
+            // set a pre-A envelope is checked against), so it reports the same
+            // reason rather than blaming the peer's signature.
+            if (outcome) outcome.reason = 'not_in_signer_set';
             return !this.requireSigs;
         }
         // Verify the signature
@@ -519,9 +552,27 @@ class PeerManager extends EventEmitter {
             return;
         }
 
-        if (!this._verifySignature(envelope)) {
+        // Two very different faults share this return path: a key we do not
+        // authenticate at all (never staked, stake not yet activated, wrong key)
+        // and a signature that fails to verify. The peer being dropped only ever
+        // sees OUR log line, so the two are named apart; the drop itself, and the
+        // membership-before-crypto order that produces it, are unchanged. No extra
+        // throttling here: the per-peer rate limit above already bounds this line,
+        // exactly as it did for the single invalid-signature message.
+        let verdict = {};
+        if (!this._verifySignature(envelope, verdict)) {
+            let peer = ws._remoteIp || envelope.sender;
+            if (verdict.reason === 'not_in_signer_set') {
+                let blocks = PeerManager.stakeActivationBlocks(this.config.HUB_NETWORK);
+                console.warn('P2P: sender not in signer set (no active stake or registry entry): ' +
+                    envelope.sender + '; dropping message' +
+                    (blocks === null ? '' : ' (a STAKE activates ' + blocks +
+                        ' blocks after the transaction confirms)'));
+                notePeerReject({ peer: peer, reason: 'not_in_signer_set' });
+                return;
+            }
             console.warn('P2P: Invalid signature from ' + envelope.sender + '; dropping message');
-            notePeerReject({ peer: ws._remoteIp || envelope.sender, reason: 'invalid_signature' });
+            notePeerReject({ peer: peer, reason: 'invalid_signature' });
             return;
         }
 

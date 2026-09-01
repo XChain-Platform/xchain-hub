@@ -755,6 +755,70 @@ describe('XChainHub', function () {
     });
 
     // -----------------------------------------------------------------
+    // transport signer-set self-report
+    // -----------------------------------------------------------------
+    //
+    // The hub knows its own pubkey and resolves the effective signer set, so
+    // it reports its own membership locally; without this the only evidence of
+    // being outside the set is a reject line in the logs of the PEERS dropping
+    // it, which this hub's operator cannot read.
+
+    describe('own-pubkey signer-set self-report', function () {
+
+        const OWN   = 'ab'.repeat(32);
+        const OTHER = 'cd'.repeat(32);
+
+        let hub, warnings, logs;
+
+        function refreshWith(pubkeys) {
+            hub.capabilitySnapshot = {
+                getActiveValidatorSnapshot: sinon.stub().resolves({ validators: pubkeys.map(pk => ({ pubkey: pk })) })
+            };
+            return hub._refreshTransportSignerSet();
+        }
+
+        beforeEach(function () {
+            hub = new XChainHub('h', 1, 'd', 'u', 'p', { HUB_NETWORK: 'testnet' });
+            hub.db = mockDb;
+            hub.peerManager = { setEffectiveSignerSet: sinon.stub() };
+            hub.identity    = { getPubkeyHex: () => OWN };
+            hub._resolveBtcLatestBlock = async () => 100;
+            warnings = [];
+            logs     = [];
+            sinon.stub(console, 'warn').callsFake((m) => warnings.push(String(m)));
+            sinon.stub(console, 'log').callsFake((m) => logs.push(String(m)));
+        });
+
+        it('warns once that peers will reject this hub while its pubkey is out of the set', async function () {
+            await refreshWith([OTHER]);
+            let line = warnings.find(l => l.includes('NOT in the chain-effective signer set'));
+            expect(line, 'the out-of-set state is reported locally').to.be.a('string');
+            expect(line).to.include('until a STAKE for it confirms and activates');
+            expect(line, 'the operator can match the key').to.include(OWN);
+
+            // A refresh loop must not turn one standing condition into a log flood.
+            await refreshWith([OTHER]);
+            expect(warnings.filter(l => l.includes('NOT in the chain-effective signer set'))).to.have.lengthOf(1);
+        });
+
+        it('logs once when the pubkey is admitted, and stays quiet after', async function () {
+            await refreshWith([OTHER]);
+            await refreshWith([OTHER, OWN]);
+            await refreshWith([OTHER, OWN]);
+
+            let admitted = logs.filter(l => l.includes('is now in the chain-effective signer set'));
+            expect(admitted, 'one line on the transition, not one per refresh').to.have.lengthOf(1);
+            expect(admitted[0]).to.include(OWN);
+        });
+
+        it('says nothing on a hub with no signing identity', async function () {
+            hub.identity = null;
+            await refreshWith([OTHER]);
+            expect(warnings.filter(l => l.includes('signer set'))).to.have.lengthOf(0);
+        });
+    });
+
+    // -----------------------------------------------------------------
     // validator-set loaders
     // -----------------------------------------------------------------
 
