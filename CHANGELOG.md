@@ -26,6 +26,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Credential scrubbing covers prefixed names and the token after a bearer prefix.
 - Service logging routes through the shared log shim, one line per console call.
 
+## [0.12.3] - 2026-09-01
+
+### Fixed
+- A peer that is not in the effective signer set is told so, instead of being reported as having sent an invalid signature; a validator whose stake has not activated yet no longer reads as a broken key.
+- A hub running in validator mode reports whether its own key is in the signer set, and says so again when it is admitted.
+
+## [0.12.0] - 2026-08-30
+
+### Added
+- ROLLCALL: signed epochs, gossip, and an elected publisher that lands them; inert on a network nobody has armed.
+- The anchor wire version set restarts, bundling on 0 and the archive head on 1.
+
+### Fixed
+- A stalled checkpoint cadence gets a record, and not one tick in sixty.
+- A bundle the attestation round could not attest is deferred rather than published.
+- An adopted anchor no longer reports as one this hub paid for.
+- Silent PBFT drops now say so, with a reason and a counter.
+- JSON-RPC batches are capped and the testnet confirmations override is floored.
+
+### Security
+- Credential scrubbing covers names carrying a prefix, and the token after Bearer.
+
 ## [0.11.0] - 2026-08-25
 
 ### Fixed
