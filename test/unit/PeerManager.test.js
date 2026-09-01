@@ -15,6 +15,7 @@ const { expect }         = require('chai');
 const EventEmitter       = require('events');
 const ValidatorIdentity  = require('../../src/ValidatorIdentity');
 const PeerManager        = require('../../src/PeerManager');
+const observability      = require('../../src/observability');
 
 describe('PeerManager', function () {
 
@@ -269,6 +270,117 @@ describe('PeerManager', function () {
             pm.setValidatorPubkeys(new Map([['ws://peer:10001', keypair.pubkeyHex]]));
             pm.setEffectiveSignerSet(null);
             expect(pm._verifySignature(env)).to.be.true;
+        });
+    });
+
+    // -----------------------------------------------------------------
+    // Reject reason: membership miss vs bad crypto
+    // -----------------------------------------------------------------
+    //
+    // A membership miss and a failed Ed25519 verify are different operator
+    // problems (stake not active yet vs a genuinely bad key), so they must
+    // read apart on both surfaces a peer's counterpart can see: the console
+    // line and the PEER_REJECT record.
+
+    describe('reject reason for a dropped inbound message', function () {
+
+        let identity, mockWs, warnings, sink;
+
+        beforeEach(function () {
+            observability._resetObservability();
+            sink = { lines: [] };
+            const push = (m) => sink.lines.push(m);
+            observability.installObservability(null, {
+                service: 'xchain-hub', env: {}, console: { log: push, warn: push, error: push }
+            });
+
+            pm.requireSigs = true;
+            pm.config.HUB_NETWORK = 'testnet';
+            pm.setValidatorPubkeys(new Map());
+            identity = new ValidatorIdentity(keypair.privkeyHex);
+            mockWs   = { _peerAddr: 'ws://peer:10001', _remoteIp: '203.0.113.9', send: sinon.stub() };
+
+            warnings = [];
+            sinon.stub(console, 'warn').callsFake((m) => warnings.push(String(m)));
+        });
+
+        afterEach(function () {
+            observability._resetObservability();
+        });
+
+        function signedRaw() {
+            let env = {
+                id: 'xc2016-' + Math.random(), type: 'TEST', sender: 'ws://peer:10001',
+                timestamp: Date.now(), data: { x: 1 }, sig_pubkey: keypair.pubkeyHex
+            };
+            env.sig = identity.signEnvelope(env);
+            return env;
+        }
+
+        function rejects(reason) {
+            return sink.lines.filter(l => l.includes('PEER_REJECT') && l.includes('reason=' + reason));
+        }
+
+        it('names the signer set (not the signature) for a valid signature from a non-member', function () {
+            pm.setEffectiveSignerSet(new Set());   // staked by nobody: the joining-validator state
+            let emitted = 0;
+            pm.on('message', () => emitted++);
+
+            pm._handleInbound(mockWs, JSON.stringify(signedRaw()), null);
+
+            expect(emitted, 'the message is still dropped').to.equal(0);
+            expect(warnings.join('\n')).to.match(/sender not in signer set \(no active stake or registry entry\)/);
+            expect(warnings.join('\n'), 'never blames the signature').to.not.match(/Invalid signature/);
+            expect(rejects('not_in_signer_set'), 'records the membership reason').to.have.lengthOf(1);
+            expect(rejects('invalid_signature')).to.have.lengthOf(0);
+        });
+
+        it('quotes the canonical stake activation delay in the non-member line', function () {
+            pm.setEffectiveSignerSet(new Set());
+            pm._handleInbound(mockWs, JSON.stringify(signedRaw()), null);
+
+            let blocks = PeerManager.stakeActivationBlocks('testnet');
+            expect(blocks, 'the coins registry resolves the delay').to.be.a('number');
+            expect(warnings.join('\n')).to.include('a STAKE activates ' + blocks + ' blocks after the transaction confirms');
+        });
+
+        it('a member key with a bad signature still reports invalid_signature', function () {
+            pm.setEffectiveSignerSet(new Set([keypair.pubkeyHex.toLowerCase()]));
+            let env = signedRaw();
+            env.sig = 'aa'.repeat(64);   // corrupt: membership passes, crypto fails
+
+            pm._handleInbound(mockWs, JSON.stringify(env), null);
+
+            expect(warnings.join('\n')).to.match(/Invalid signature from ws:\/\/peer:10001/);
+            expect(warnings.join('\n')).to.not.match(/not in signer set/);
+            expect(rejects('invalid_signature')).to.have.lengthOf(1);
+            expect(rejects('not_in_signer_set')).to.have.lengthOf(0);
+        });
+
+        it('a pre-A envelope from a sender the registry does not know is a membership miss', function () {
+            let env = {
+                id: 'xc2016-preA', type: 'TEST', sender: 'ws://stranger:10001',
+                timestamp: Date.now(), data: {}
+            };
+            env.sig = identity.signEnvelope(env);   // no sig_pubkey: backward-compat path
+
+            pm._handleInbound(mockWs, JSON.stringify(env), null);
+
+            expect(rejects('not_in_signer_set')).to.have.lengthOf(1);
+            expect(rejects('invalid_signature')).to.have.lengthOf(0);
+        });
+
+        it('_verifySignature keeps its boolean verdict and only annotates the out-param', function () {
+            pm.setEffectiveSignerSet(new Set());
+            let outcome = {};
+            expect(pm._verifySignature(signedRaw(), outcome), 'fail closed is unchanged').to.be.false;
+            expect(outcome.reason).to.equal('not_in_signer_set');
+
+            // Permissive mode is unchanged too: the reason is reported, the verdict is not.
+            pm.requireSigs = false;
+            let permissive = {};
+            expect(pm._verifySignature(signedRaw(), permissive)).to.be.true;
+            expect(permissive.reason).to.equal('not_in_signer_set');
         });
     });
 

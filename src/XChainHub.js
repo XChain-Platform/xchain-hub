@@ -120,6 +120,7 @@ class XChainHub {
         this._transportSetRefreshRunning = false;
         this._transportSignerSet      = new Set();  // last-known-good effective set, lowercased pubkey hex
         this._transportSignerSetAt    = 0;       // ms epoch of the last successful refresh (0 = never)
+        this._ownPubkeyInSignerSet    = null;    // true/false once resolved; null = never resolved
         this._latestBlockIndex        = null;
         this._latestStakeAmount       = null;
     }
@@ -225,9 +226,36 @@ class XChainHub {
             this._transportSignerSet   = set;
             this._transportSignerSetAt = Date.now();
             this.peerManager.setEffectiveSignerSet(set);
+            this._reportOwnSignerSetMembership(set);
         } finally {
             this._transportSetRefreshRunning = false;
         }
+    }
+
+    // Say on THIS hub whether its own signing key is in the set every peer authenticates
+    // against. An unstaked or not-yet-activated validator is otherwise silent locally:
+    // the only evidence is a reject line in the logs of the peers dropping it, which its
+    // operator cannot read. Logged on transition only (the first resolved set counts as a
+    // transition), so a hub waiting out stake activation prints one line, not one per
+    // refresh, and prints one more when it is admitted.
+    _reportOwnSignerSetMembership(set){
+        if(!this.identity || !set) return;
+        let pubkey;
+        try { pubkey = String(this.identity.getPubkeyHex()).toLowerCase(); }
+        catch(e){ return; }
+        let inSet = set.has(pubkey);
+        if(inSet === this._ownPubkeyInSignerSet) return;
+        this._ownPubkeyInSignerSet = inSet;
+        if(inSet){
+            console.log('XChainHub: this hub\'s signing pubkey is now in the chain-effective signer ' +
+                'set; peers will accept its messages (pubkey ' + pubkey + ')');
+            return;
+        }
+        let blocks = PeerManager.stakeActivationBlocks(this.network);
+        console.warn('XChainHub: this hub\'s signing pubkey is NOT in the chain-effective signer set, ' +
+            'so peers will REJECT its messages until a STAKE for it confirms and activates' +
+            (blocks === null ? '' : ' (' + blocks + ' blocks after the transaction confirms)') +
+            ' (pubkey ' + pubkey + ')');
     }
 
     // Warn once the last good refresh ages past a threshold. Never clears the set (the
