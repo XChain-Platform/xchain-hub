@@ -4,8 +4,8 @@
 # XChain Platform Hub
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.11.0-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tests-3%2C871%2B%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/version-0.12.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/tests-5%2C439%2B%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node">
   <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License">
 </p>
@@ -193,19 +193,19 @@ which you can run locally with `bin/sync-observability.sh --check`.
 |---|---|
 | `npm run api` | Start the hub API server |
 | `bin/run-db-tiers.sh` | Run the DB-backed tiers against a throwaway MariaDB it starts and drops |
-| `npm test` | Run unit tests (~3,171 tests) |
+| `npm test` | Run unit tests (~4,637 tests) |
 | `npm run test:integration` | Integration tests (~89 tests, requires MariaDB) |
 | `npm run test:e2e` | End-to-end tests (~70 tests, requires full stack) |
-| `npm run test:fuzz` | Fuzz tests (property-based via fast-check) |
-| `npm run test:chaos` | Chaos engineering tests |
-| `npm run test:smoke` | Smoke tests (quick sanity check) |
-| `npm run test:regression` | Regression tests (tagged across all suites) |
-| `npm run test:regression:p0` | P0-priority regression tests |
-| `npm run test:regression:p0p1` | P0+P1 regression tests |
-| `npm run test:perf` | All performance tests |
+| `npm run test:fuzz` | Fuzz tests (property-based via fast-check, 90 tests) |
+| `npm run test:chaos` | Chaos engineering tests (81 tests) |
+| `npm run test:smoke` | Smoke tests (quick sanity check, 25 tests) |
+| `npm run test:regression` | Regression tests (tagged across all suites, 235 tests) |
+| `npm run test:regression:p0` | P0-priority regression tests (109 tests) |
+| `npm run test:regression:p0p1` | P0+P1 regression tests (194 tests) |
+| `npm run test:perf` | All performance tests (50 tests) |
 | `npm run test:mutate` | Mutation tests (Stryker) |
 | `npm run test:mutate:pilot` | Pilot mutation tests (phase 1) |
-| `npm run test:all` | Complete test suite |
+| `npm run test:all` | Complete test suite (5,439 tests) |
 
 ### Running the DB-backed tiers
 
