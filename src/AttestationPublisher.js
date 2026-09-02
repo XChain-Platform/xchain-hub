@@ -354,7 +354,12 @@ class AttestationPublisher {
         // path rather than rank against a set the other two copies do not agree with.
         let eventProvider = (event.providerId != null) ? event.providerId
                           : ((event.request && event.request.provider_id != null) ? event.request.provider_id : null);
-        let responsible  = (requestBlock != null) ? await this._computeResponsible(rid, requestBlock, redundancy, eventProvider) : null;
+        // Widening slots the round was granted, carried on the event rather than
+        // re-derived: ranking over a narrower set than the one that signed would leave a
+        // widened member with no rank and no step-in schedule. Absent (older event or
+        // queue entry) reads as 0, the pre-widening ordering.
+        let widen        = Math.max(0, Number(event.widen) || 0);
+        let responsible  = (requestBlock != null) ? await this._computeResponsible(rid, requestBlock, redundancy, eventProvider, widen) : null;
         let leaderPubkey = event.leaderPubkey ? String(event.leaderPubkey).toLowerCase()
                          : (responsible && responsible.length ? responsible[0] : null);
 
@@ -377,6 +382,7 @@ class AttestationPublisher {
             status:       responseStatus,
             requestBlock: requestBlock,
             responsible:  responsible || undefined,
+            widen:        widen || undefined,
             leaderPubkey: leaderPubkey || undefined
         });
         if (!queued){
@@ -901,7 +907,11 @@ class AttestationPublisher {
     // not agree with means followers step in early or the true rank-1 steps in late,
     // so it tracks them exactly. An unresolvable floor returns null (rank unknown),
     // which the caller already handles as "snapshot unavailable".
-    async _computeResponsible(rid, blockIndex, redundancy, providerId){
+    // `widen` mirrors AttestationRound's liveness ladder (attest_responsible_widening_activation.js):
+    // the failover rank must be computed over the SAME set the round authorized, or a
+    // widened member never learns it is allowed to step in and publish. 0 below the
+    // flag-day, where this is byte-for-byte its pre-widening self.
+    async _computeResponsible(rid, blockIndex, redundancy, providerId, widen){
         try {
             if (!this.hub.capabilitySnapshot) return null;
             let weighted = swq.isStakeWeightedQuorumActive(blockIndex, this.hub.network);
@@ -933,7 +943,9 @@ class AttestationPublisher {
                     return true;
                 });
             }
-            return withHash.slice(0, Math.max(1, redundancy)).map(x => x.pubkey);
+            let extra = Number(widen);
+            if (!Number.isFinite(extra) || extra < 0) extra = 0;
+            return withHash.slice(0, Math.max(1, redundancy) + extra).map(x => x.pubkey);
         } catch (e) {
             return null;
         }
