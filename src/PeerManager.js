@@ -25,6 +25,7 @@ const EventEmitter     = require('events');
 const http             = require('http');
 const WebSocket        = require('ws');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
+const rulesDigest = require('./consensus_rules_digest.js');
 const coins            = require('./coins');
 const { positiveIntConfig } = require('./lib/config_int.js');
 const { notePeerReject, stampRemoteIp } = require('./consensusDiagnostics');
@@ -89,6 +90,16 @@ class PeerManager extends EventEmitter {
         // (a pubkey in EITHER is admitted); null until the first refresh. Never
         // cleared to empty on an upstream failure; the registry is the floor.
         this.effectiveSignerSet = null;   // Set<pubkeyHex> | null
+
+        // Consensus-rule agreement, keyed by envelope.sender:
+        //   { digest, version, at }  (digest null for a pre-0.12.3 peer that sends none)
+        // Bounded by the federation size, and only ever written for a sender whose
+        // signature already verified, so an unauthenticated peer cannot grow it.
+        this.peerRules = new Map();
+        // Throttle for the two upgrade alarms. Without it a mismatch reprints every
+        // heartbeat (15s x every peer), which buries the line it is trying to raise.
+        this._rulesWarnedAt = new Map();
+        this.rulesWarnIntervalMs = parseInt(this.config.RULES_WARN_INTERVAL_MS) || (30 * 60 * 1000);
         // Optional operator denylist of signing pubkeys (comma-separated hex).
         this.denyPubkeys = new Set(
             String(config.P2P_DENY_PUBKEYS || '')
@@ -599,7 +610,8 @@ class PeerManager extends EventEmitter {
         stampRemoteIp(envelope, ws._remoteIp);
         this.emit('message', envelope);
         if (envelope.type === 'HEARTBEAT') {
-            this.emit('heartbeat', envelope.sender, envelope.timestamp);
+            this.emit('heartbeat', envelope.sender, envelope.timestamp, envelope.data);
+            this._notePeerRules(envelope);
         }
         // Capability gossip; see CapabilityRegistry.
         if (envelope.type === 'CAPABILITY_ACTIVATED' ||
@@ -774,12 +786,108 @@ class PeerManager extends EventEmitter {
         peer.reconnectDelay = Math.min(delay * 2, maxDelay);
     }
 
+// Record a peer's advertised consensus rules and raise the two alarms this
+    // module exists for. Called only after _verifySignature passed, so `sender` is
+    // an authenticated staked key and `data.rules` is covered by that signature.
+    //
+    // TWO ALARMS, and the second is the one that matters. Telling an operator that
+    // some peer disagrees is mildly useful; telling them that THEIR OWN hub is the
+    // odd one out is the message that gets a node upgraded, and it is the message
+    // nothing in the platform sent before this.
+    _notePeerRules(envelope) {
+        let sender = envelope && envelope.sender;
+        if (!sender) return;
+        let data   = envelope.data || {};
+        let digest = (typeof data.rules === 'string' && /^[0-9a-f]{64}$/.test(data.rules)) ? data.rules : null;
+        this.peerRules.set(sender, {
+            digest:  digest,
+            version: (typeof data.version === 'string') ? data.version : null,
+            at:      Date.now()
+        });
+
+        let mine = rulesDigest.computeConsensusRulesDigest().digest;
+
+        // A peer that advertises no digest is running a build from before this field
+        // existed. That is worth saying once per throttle window, but it is NOT a
+        // mismatch: it carries no claim to disagree with.
+        if (digest === null) {
+            this._warnRulesOnce('legacy:' + sender, 'P2P: peer ' + sender + ' advertises no consensus-rules digest' +
+                ' (version ' + (this.peerRules.get(sender).version || 'unknown') + '); it predates the digest and cannot be' +
+                ' checked for flag-day agreement. Ask its operator to upgrade.');
+            return;
+        }
+        if (digest === mine) return;
+
+        this._warnRulesOnce('peer:' + sender, 'P2P: CONSENSUS-RULE MISMATCH with peer ' + sender +
+            ' (its version ' + (this.peerRules.get(sender).version || 'unknown') + '). It applies different flag-day' +
+            ' heights than this hub, so the two will disagree about which actions are valid once a differing gate is' +
+            ' reached. peer=' + digest.substring(0, 16) + '... ours=' + mine.substring(0, 16) + '...');
+
+        // Am I the minority? Count DISTINCT senders seen inside the staleness window,
+        // so a peer that has gone away stops voting. Strictly more peers agreeing with
+        // each other than with me means this hub is the one that needs upgrading.
+        let cutoff = Date.now() - (2 * (parseInt(this.config.P2P_HEARTBEAT_INTERVAL) || 15000) * 4);
+        let tally = new Map();
+        let live  = 0;
+        for (let [, r] of this.peerRules) {
+            if (!r || !r.digest || r.at < cutoff) continue;
+            live++;
+            tally.set(r.digest, (tally.get(r.digest) || 0) + 1);
+        }
+        if (live === 0) return;
+        let topDigest = null, topCount = 0;
+        for (let [d, n] of tally) if (n > topCount) { topCount = n; topDigest = d; }
+        let mineCount = (tally.get(mine) || 0) + 1;   // +1: this hub's own vote
+        if (topDigest && topDigest !== mine && topCount >= mineCount) {
+            this._warnRulesOnce('self', 'P2P: THIS HUB IS RUNNING CONSENSUS RULES THE FEDERATION DOES NOT SHARE. ' +
+                topCount + ' of ' + (live + 1) + ' peers agree on ' + topDigest.substring(0, 16) + '... while this hub has ' +
+                mine.substring(0, 16) + '... Once the chain reaches a gate where they differ, this hub will judge actions' +
+                ' differently from the federation and its state will diverge. UPGRADE THIS NODE.');
+        }
+    }
+
+    _warnRulesOnce(key, message) {
+        let now  = Date.now();
+        let last = this._rulesWarnedAt.get(key) || 0;
+        if (now - last < this.rulesWarnIntervalMs) return;
+        this._rulesWarnedAt.set(key, now);
+        console.warn(message);
+    }
+
+    // Snapshot for the operator-facing surfaces (hub status / health). `agree` is the
+    // count of live peers on this hub's own digest, so a monitor can alarm on it
+    // without re-deriving the comparison.
+    getConsensusRulesReport() {
+        let mine = rulesDigest.computeConsensusRulesDigest();
+        let peers = [];
+        for (let [addr, r] of this.peerRules) {
+            peers.push({ peer: addr, digest: r.digest, version: r.version, at: r.at,
+                         agrees: r.digest === mine.digest });
+        }
+        return {
+            digest:    mine.digest,
+            gates:     mine.gates,
+            peers:     peers,
+            agree:     peers.filter(p => p.agrees).length,
+            disagree:  peers.filter(p => p.digest && !p.agrees).length,
+            unknown:   peers.filter(p => !p.digest).length
+        };
+    }
+
     _startHeartbeat() {
         let interval = this.config.P2P_HEARTBEAT_INTERVAL || 15000;
         let version = '0.0.0';
         try { version = require('../package.json').version; } catch(e) {}
         this.heartbeatTimer = setInterval(() => {
-            this.broadcast('HEARTBEAT', { version: version });
+            // `rules` rides INSIDE data, not beside it, because getSignablePayload's
+            // preimage is a fixed field list (id/type/sender/timestamp/data/sig_pubkey)
+            // that hashes `data` verbatim: a key added here is covered by the signature,
+            // while a new TOP-LEVEL envelope field would be unsigned and so spoofable by
+            // anyone who can reach the socket. Safe across a rolling deploy in both
+            // directions: an older hub verifies a newer sender's signature over the data
+            // it actually received and simply ignores the key it does not know, and a
+            // newer hub reports `rules: null` for an older sender rather than a mismatch.
+            this.broadcast('HEARTBEAT', { version: version, rules: rulesDigest.computeConsensusRulesDigest().digest });
         }, interval);
     }
 

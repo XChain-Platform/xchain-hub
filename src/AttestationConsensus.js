@@ -1581,7 +1581,14 @@ class AttestationConsensus extends EventEmitter {
             status:       pending.status,
             signatures:   sigsArray,
             leaderPubkey: pending.leaderPubkey,
-            role:         pending.role
+            role:         pending.role,
+            // Extra responsible slots the liveness ladder granted this round
+            // (attest_responsible_widening_activation.js). Derived from the set consensus actually
+            // ran, not recomputed, so the publisher's failover rank is ordered over the
+            // SAME membership that signed. 0 below the flag-day, and an older queue entry
+            // carrying no field reads as 0, which is the pre-widening ordering.
+            widen:        Math.max(0, (Array.isArray(pending.responsible) ? pending.responsible.length : 0)
+                                      - Math.max(1, Number(pending.redundancy) || 1))
         });
 
         this.earlyCommits.delete(rid);

@@ -35,6 +35,7 @@ const axios  = require('axios');
 const bc     = require('./bcmath.js');
 const swq    = require('./stake_weighted_quorum.js');
 const esc    = require('./attestation_escalation.js');
+const wid    = require('./attest_responsible_widening_activation.js');
 // The consensus round-timeout default the seen-window floor below is keyed to.
 // Required, never re-spelled: see the constant's own note in constants.js.
 // SUPPORTED_CONSENSUS_STRATEGIES is the admission allowlist _startRound declines an
@@ -414,7 +415,20 @@ class AttestationRound {
                          '" has no min_stake_xchain floor at block ' + snapshotBlk + ' (failing closed)');
             return;
         }
-        let responsible = this._computeResponsibleSet(snapshot.validators, rid, redundancy, weighted, providerFloor);
+        // RESPONSIBLE-SET WIDENING (spec §8.2 liveness ladder). A staked validator that
+        // serves nothing keeps its slot forever, because the snapshot is drawn from stake
+        // alone, so a set holding one dead member can never produce the `redundancy`
+        // signatures finalization needs and the request burns its whole window. The set
+        // therefore grows by one slot per segment of the request's own serviceable span.
+        // Pure function of chain height and the request's own fields, on FROZEN constants
+        // rather than this hub's tunables, so every hub and every indexer derive the same
+        // widening; flag-day gated per network, and 0 below it, where this is byte-for-byte
+        // the legacy fixed-REDUNDANCY selection. `needed` is untouched: widening grows the
+        // pool permitted to sign, never the count required to finalize.
+        let widen = Number.isFinite(Number(latestBlock)) && Number(latestBlock) > 0
+            ? wid.widenSlots(Number(latestBlock), snapshotBlk, Number(request.deadline_block), this.hub.network)
+            : 0;
+        let responsible = this._computeResponsibleSet(snapshot.validators, rid, redundancy, weighted, providerFloor, widen);
         // Unservable-redundancy guard (Pkg 7 / 87441a53): when the snapshot (or
         // its weighted source-dedupe) yields fewer responsible slots than
         // REDUNDANCY, the round can never finalize; the indexer requires
@@ -681,7 +695,10 @@ class AttestationRound {
     // carries the source-aggregate `weight` the floor is defined against, which is why
     // the floor rides the STAKE_WEIGHTED_QUORUM anchor instead of minting its own
     // flag-day height. Below the gate the capability threshold stays the only bar.
-    _computeResponsibleSet(validators, requestId, redundancy, weighted, minStake){
+    // `widen` is the liveness ladder's extra slot count for the current chain height
+    // (attest_responsible_widening_activation.js), 0 below its flag-day and on an unratified
+    // network, where this routine is byte-for-byte its pre-widening self.
+    _computeResponsibleSet(validators, requestId, redundancy, weighted, minStake, widen){
         if(weighted)
             validators = validators.filter(v => this._meetsProviderFloor(v && v.weight, minStake));
         let withHash = validators.map(v => {
@@ -699,7 +716,9 @@ class AttestationRound {
                 return true;
             });
         }
-        return withHash.slice(0, Math.max(1, redundancy));
+        let extra = Number(widen);
+        if(!Number.isFinite(extra) || extra < 0) extra = 0;
+        return withHash.slice(0, Math.max(1, redundancy) + extra);
     }
 
     // CONSENSUS-CRITICAL predicate: does a weighted-snapshot row clear the provider
