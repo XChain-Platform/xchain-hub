@@ -62,7 +62,7 @@ const SIBLINGS = [
       guards: 'consensus-primitive conformance (quorum, equivocation header, attestation round) and the constant map' },
     { repo: 'xchain-indexer', envs: ['XCHAIN_INDEXER_DIR'],
       marker: path.join('src', 'actions'),
-      guards: 'attestation-relay, cross-chain-call, price activation and coin-guard twins' },
+      guards: 'attestation-relay, cross-chain-call, price activation, rollcall activation and coin-guard twins' },
     { repo: 'xchain-explorer', envs: [],
       marker: path.join('src', 'protocol', 'constants.js'),
       guards: 'the equivocation-header twin and the oracle band constant mirror' },
