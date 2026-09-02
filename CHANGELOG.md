@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-09-02
+
+### Added
+- Validators gossip a consensus-rules digest on the heartbeat and warn when a peer, or this node itself, is applying different flag-day heights.
+
+### Fixed
+- A stalled attestation round now widens its responsible set as the request's window elapses, so a single validator that never answers can no longer strand every request assigned to it.
+
+### Activation
+- Attestation responsible-set widening activates on Bitcoin testnet at block 150780 and on regtest from genesis. Mainnet is unratified and the rule is inert there. Below the height, and on an unratified network, behaviour is byte-for-byte unchanged.
+- This train changes state derived from existing bytes, so nodes on either side of the height disagree once a widened response lands. Upgrade every indexer and hub before the height.
+
 ## [0.12.0] - 2026-08-30
 
 ### Added
