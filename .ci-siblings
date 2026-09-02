@@ -28,3 +28,13 @@ xchain-wallet
 xchain-vm
 # The sixth oracle band constant mirror: PRICE_MAX, ORACLE_DEVIATION_THRESHOLD.
 xchain-decoder
+
+# The three below are here for ONE guard: bin/sync-observability.sh --check,
+# which byte-compares the vendored src/observability/ copy in each of the six
+# consumers against the hub's canonical module. The other three consumers
+# (explorer, indexer, decoder) are already declared above for other guards.
+# That check treats an absent consumer as a failure rather than a skip, so a
+# venue missing one of these fails loudly instead of gating green on a subset.
+xchain-encoder
+xchain-utxo-tracker
+xchain-sync

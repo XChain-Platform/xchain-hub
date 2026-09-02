@@ -43,7 +43,8 @@
     "test:mutate": "stryker run",
     "test:mutate:pilot": "stryker run stryker.config.phase1.json",
     "test:boundary": "mocha 'test/boundary/**/*.boundary.test.js' 'test/unit/boundary/**/*.boundary.test.js' --timeout 5000 --recursive",
-    "check:blind-sleeps": "node bin/check-blind-sleeps.js"
+    "check:blind-sleeps": "node bin/check-blind-sleeps.js",
+    "check:observability-sync": "bash bin/sync-observability.sh --check"
   },
   "devDependencies": {
     "@stryker-mutator/core": "^9.6.1",

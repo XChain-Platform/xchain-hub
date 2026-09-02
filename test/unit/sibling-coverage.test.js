@@ -78,6 +78,19 @@ const SIBLINGS = [
     { repo: 'xchain-decoder', envs: [],
       marker: path.join('src', 'protocol', 'constants.js'),
       guards: 'the oracle band constant mirror (PRICE_MAX, ORACLE_DEVIATION_THRESHOLD)' },
+    // The three below carry no constant mirror; they are here for the vendored
+    // observability shim alone. bin/sync-observability.sh --check byte-compares
+    // its copy in each of the six consumers, and the ported-suite header guard
+    // in observabilitySyncGate.test.js reads the same checkouts.
+    { repo: 'xchain-encoder', envs: [],
+      marker: path.join('src', 'observability', 'metrics.js'),
+      guards: 'the vendored observability shim parity check and its ported-suite header guard' },
+    { repo: 'xchain-utxo-tracker', envs: [],
+      marker: path.join('src', 'observability', 'metrics.js'),
+      guards: 'the vendored observability shim parity check and its ported-suite header guard' },
+    { repo: 'xchain-sync', envs: [],
+      marker: path.join('src', 'observability', 'metrics.js'),
+      guards: 'the vendored observability shim parity check and its ported-suite header guard' },
 ];
 
 function resolve(entry) {

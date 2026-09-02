@@ -121,6 +121,13 @@ jobs:
   # elsewhere: the served chain-registry snapshot, canonical in xchain-wallet.
   # xchain-wallet is private pre-launch, so its checkout uses a read-only
   # deploy key; drop the ssh-key line when the repos flip public at launch.
+  #
+  # The hub is also canonical for src/observability/, which bin/sync-observability.sh
+  # vendors byte-for-byte into six consumers. That parity is easy to drift
+  # unnoticed, so the check runs here as well as in the pre-push
+  # gate (bin/ci-full.sh). Its consumers are cloned sparsely below rather than via
+  # the checkout-siblings action: the check is `cmp` on four files per repo, so it
+  # needs neither the full history nor the sibling's node_modules.
   drift-guards:
     runs-on: ubuntu-latest
     steps:
@@ -143,6 +150,36 @@ jobs:
 
       - name: Chain-registry snapshot vs canonical wallet descriptors
         run: node xchain-wallet/bin/sync-chain-registry.mjs --check
+
+      # The roster is read out of the script itself, so adding a consumer there
+      # cannot leave this job checking a stale subset.
+      - name: Check out the observability shim consumers
+        env:
+          SIBLINGS_REF: ${{ github.ref == 'refs/heads/master' && 'master' || 'develop' }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          consumers=$(sed -n 's/^CONSUMERS=(\(.*\))$/\1/p' xchain-hub/bin/sync-observability.sh)
+          if [ -z "$consumers" ]; then
+            echo "could not read CONSUMERS from bin/sync-observability.sh" >&2
+            exit 1
+          fi
+          for repo in $consumers; do
+            url="https://github.com/$OWNER/$repo.git"
+            # Fall back to the default branch when a consumer has no branch of
+            # this name, matching the shared checkout-siblings action.
+            git clone --quiet --depth 1 --filter=blob:none --sparse \
+              --branch "$SIBLINGS_REF" "$url" "$repo" 2>/dev/null \
+              || git clone --quiet --depth 1 --filter=blob:none --sparse "$url" "$repo"
+            git -C "$repo" sparse-checkout set src/observability
+            echo "consumer $repo @ $(git -C "$repo" rev-parse --short HEAD)"
+          done
+
+      - name: Vendored observability shim vs canonical module
+        working-directory: xchain-hub
+        # No --allow-missing: every consumer is cloned above, so an absent one
+        # means the step above broke, not that there is less to compare.
+        run: npm run check:observability-sync
 
       - name: Coin consensus-pin conformance (canonical bundle)
         working-directory: xchain-hub
