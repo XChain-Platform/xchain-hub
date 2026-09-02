@@ -70,11 +70,22 @@
     },
     {
       "name": "getallconfigs",
-      "summary": "Service discovery: connection parameters for every platform service on this chain (mesh-internal: includes DB credentials, keyed like a write). since_updated_at returns only entries changed after that timestamp.",
+      "summary": "Service discovery: connection parameters for every platform service on this chain (mesh-internal, keyed like a write). Secret-bearing params (rpc/DB passwords) are REDACTED to the literal \"[redacted]\" unless include_secrets is set, which needs HUB_CONFIG_SECRETS_API_KEY when the hub configures one and the bulk key otherwise; the response reports secrets_redacted and redacted_params. since_updated_at returns only entries changed after that timestamp.",
       "paramStructure": "by-name",
       "params": [
         {
           "name": "since_updated_at",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "include_secrets",
           "required": false,
           "schema": {
             "type": [

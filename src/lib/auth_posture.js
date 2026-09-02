@@ -88,10 +88,15 @@ function evaluateAuthPosture(opts) {
 
     // The inverse hole is quieter and easier to miss: a keyed hub with the
     // sensitive-read escape hatch flipped serves getallconfigs (every service's
-    // DB user/pass) to ANY caller while writes look locked down (AU-4).
+    // connection map) to ANY caller while writes look locked down (AU-4). The
+    // passwords no longer ride along - they are redacted unless the call sets
+    // include_secrets, which is authorized separately and is NOT covered by this
+    // hatch (api.js credential tier) - but the host/port/user/db-name topology of
+    // the whole mesh still is, so the warning stands.
     if (apiKey && !sensitiveReadAuth) {
-        warnings.push('WARNING: HUB_SENSITIVE_READ_AUTH=0 with HUB_API_KEY set: getallconfigs (returns DB ' +
-            'credentials) is readable WITHOUT a key. This escape hatch is for staged rollout/rollback only; ' +
+        warnings.push('WARNING: HUB_SENSITIVE_READ_AUTH=0 with HUB_API_KEY set: getallconfigs (returns every ' +
+            'service\'s connection map) is readable WITHOUT a key. Credentials stay keyed (they are redacted ' +
+            'unless include_secrets is authorized), but this escape hatch is for staged rollout/rollback only; ' +
             'unset HUB_SENSITIVE_READ_AUTH to re-enforce.');
     }
 

@@ -92,7 +92,7 @@ const PING_RESULT = {
 const METHODS = [
     ['ping', 'Health check.', [], { result: PING_RESULT }],
     ['health', 'Detailed health: DB, oracle staleness, P2P state (503 when degraded).', []],
-    ['getallconfigs', 'Service discovery: connection parameters for every platform service on this chain (mesh-internal: includes DB credentials, keyed like a write). since_updated_at returns only entries changed after that timestamp.', ['since_updated_at'], { auth: true }],
+    ['getallconfigs', 'Service discovery: connection parameters for every platform service on this chain (mesh-internal, keyed like a write). Secret-bearing params (rpc/DB passwords) are REDACTED to the literal "[redacted]" unless include_secrets is set, which needs HUB_CONFIG_SECRETS_API_KEY when the hub configures one and the bulk key otherwise; the response reports secrets_redacted and redacted_params. since_updated_at returns only entries changed after that timestamp.', ['since_updated_at', 'include_secrets'], { auth: true }],
     ['updateconfig', 'Update a service config entry (PBFT-replicated in validator mode).', ['config'], { auth: true }],
     ['getoraclesubmissions', 'Raw per-validator oracle price submissions for recent rounds, plus round cadence, skipped/dropped-pair diagnostics and oracleMaxPriceAgeSeconds (the price-age bound getprice enforces). Carries active:true; a hub that runs no oracle round (standalone config-oracle deployment, no P2P_VALIDATOR_ADDR) answers {active:false} rather than an error, so a health consumer can tell an absent role from a failure.', []],
     ['getpricesnapshots', 'PBFT-finalized price snapshots (trimmed-median rounds). status=\'all\' also returns skipped/disputed rows; with_watermark wraps the rows as {watermark, oracleMaxPriceAgeSeconds, snapshots} with a hub-clock epoch-seconds watermark and the price-age bound getprice enforces.', ['limit', 'status', 'with_watermark'], { result: SNAPSHOTS_RESULT }],
@@ -137,6 +137,10 @@ const METHODS = [
     ['getswaps', 'List tracked swaps, optionally filtered by status.', ['status', 'limit']],
     ['pushchaintip', 'Indexer push: chain tip update.', ['coin', 'network', 'block_height', 'block_time'], { auth: true, internal: true }],
     ['pushpriceround', 'Indexer push: finalized price round for cross-validation.', ['source_chain', 'round', 'timestamp', 'btc_block_height', 'pairs', 'sigs', 'action_index', 'block_index', 'push_generation'], { auth: true, internal: true }],
+    // Present in the committed spec but missing from this list, so every
+    // regeneration silently DELETED it and the drift guard only noticed on the
+    // next run. Restored here so `node docs/openrpc.build.js` is idempotent.
+    ['pushpricebatch', 'Indexer push: a finalized PRICE v2 batch, carrying every round in one window under one signature set.', ['source_chain', 'first_round', 'last_round', 'btc_block_height', 'rounds', 'block_time', 'sigs', 'action_index', 'block_index', 'push_generation'], { auth: true, internal: true }],
     ['pushoracleprice', 'Indexer push: user-published PRICE v1 oracle row.', ['source_chain', 'source_address', 'coin', 'tick', 'fiat', 'value', 'fee', 'memo', 'block_time', 'action_index', 'push_generation'], { auth: true, internal: true }],
     ['pushpricereorg', 'Indexer push: price reorg rollback.', ['source_chain', 'from_action_index', 'to_action_index', 'retraction_generation'], { auth: true, internal: true }],
     ['pushxcallreorg', 'Indexer push: cross-chain call reorg rollback.', ['source_chain', 'from_action_index', 'to_action_index', 'retraction_generation'], { auth: true, internal: true }],

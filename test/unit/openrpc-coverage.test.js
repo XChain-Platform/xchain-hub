@@ -104,7 +104,7 @@ describe('openrpc.json method coverage', () => {
     it('extracts sane handler parameter lists', () => {
         assert.deepStrictEqual(handlerParams.getpricesnapshots, ['limit', 'status', 'with_watermark'],
             'handler-param extraction broken for getpricesnapshots');
-        assert.deepStrictEqual(handlerParams.getallconfigs, ['since_updated_at'],
+        assert.deepStrictEqual(handlerParams.getallconfigs, ['since_updated_at', 'include_secrets'],
             'handler-param extraction broken for the params-object form');
         assert.deepStrictEqual(handlerParams.ping, [], 'ping takes no named params');
     });

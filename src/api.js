@@ -185,12 +185,14 @@ const HUB_REORG_API_KEY   = process.env.HUB_REORG_API_KEY || '';
 
 // Read methods whose RESPONSE is mesh-internal, keyed like writes when
 // HUB_API_KEY is set: getallconfigs returns every service's connection
-// parameters including DB user/pass, so it must never be publicly readable.
-// This is the app-side half of retiring the hub.xchain.io Apache IP-allowlist
-// lockdown (2026-06-26): once every mesh caller sends x-api-key, the vhost can
-// proxy POST publicly and this tier carries the policy. Escape hatch for a
-// staged rollout or emergency rollback: HUB_SENSITIVE_READ_AUTH=0 disables
-// enforcement for these methods only (writes stay keyed).
+// parameters (hosts, ports, DB names, users), so it must never be publicly
+// readable. This is the app-side half of retiring the hub.xchain.io Apache
+// IP-allowlist lockdown (2026-06-26): once every mesh caller sends x-api-key,
+// the vhost can proxy POST publicly and this tier carries the policy. Escape
+// hatch for a staged rollout or emergency rollback: HUB_SENSITIVE_READ_AUTH=0
+// disables enforcement for these methods only (writes stay keyed). The escape
+// hatch does NOT reach the credential tier below: passwords stay keyed even
+// when the hatch is open.
 // getrollcallstatus is here for a different reason than getallconfigs: it carries
 // no credential, but it reports how many validators have answered a given ROLLCALL
 // epoch, and an epoch's signer count is a PRE-EVICTION TARGETING surface. A caller
@@ -198,8 +200,45 @@ const HUB_REORG_API_KEY   = process.env.HUB_REORG_API_KEY || '';
 // before the chain evicts them, which is a map of who to knock over. The ledger
 // facts themselves (last_rolled_epoch, absent_streak) are deliberately NOT served
 // here at all; they live on the BTC indexer, where they are authoritative.
-const SENSITIVE_READ_METHODS = new Set(['getallconfigs', 'getrollcallstatus']);
-const SENSITIVE_READ_AUTH = process.env.HUB_SENSITIVE_READ_AUTH !== '0';
+const SENSITIVE_READ_METHODS = new Set(['getallconfigs', 'getrollcallstatus']);const SENSITIVE_READ_AUTH = process.env.HUB_SENSITIVE_READ_AUTH !== '0';
+
+// CREDENTIAL TIER. Served verbatim, the configs table hands the coin node's rpc
+// pass and every service's DB password in plaintext to any caller holding the
+// bulk key. That is a much wider blast
+// radius than the read itself needs: the callers who want the config TREE (the
+// indexer's param overlay, the SDK's explorer discovery, the dashboard, every
+// operational `curl | jq`) are not the callers who want the CREDENTIALS, and
+// each of those ordinary reads copied plaintext passwords into logs, tickets
+// and transcripts nobody rotates afterwards.
+//
+// So secret-bearing params (src/lib/config_redaction.js keys on the param name)
+// are redacted by DEFAULT, and the real values require an explicit
+// `include_secrets: true` on the call. That request is authorized on its own:
+// with HUB_CONFIG_SECRETS_API_KEY set it answers to THAT key alone (the bulk
+// key no longer unlocks credentials, mirroring the HUB_REORG_API_KEY split);
+// unset, it falls back to the bulk HUB_API_KEY, which is the pre-existing
+// posture minus the accidental copies. A fully keyless hub (declared
+// HUB_ALLOW_UNAUTHENTICATED, i.e. regtest) serves them as before - nothing on
+// that hub is authenticated in the first place.
+//
+// The two callers that genuinely need credentials and pass the flag are
+// xchain-explorer (XChainHubConnector -> db.js builds its MariaDB pools from
+// db_host/user/pass) and xchain-sync (HubClient._extractDbConfigs -> its
+// replication sources). ROLLOUT ORDER: deploy those two before a hub carrying
+// this change, since an older consumer does not send the flag and would receive
+// a redacted password.
+const HUB_CONFIG_SECRETS_API_KEY = process.env.HUB_CONFIG_SECRETS_API_KEY || '';
+const configRedaction = require('./lib/config_redaction.js');
+
+// True when a JSON-RPC call object is a getallconfigs asking for the
+// unredacted tree. Shared by the auth middleware (which decides whether the
+// request is authorized to ask) and the handler (which decides what to serve),
+// so the two can never disagree about what "asking" means.
+function callWantsConfigSecrets(call) {
+    if (!call || typeof call.method !== 'string') return false;
+    if (call.method.toLowerCase() !== 'getallconfigs') return false;
+    return configRedaction.wantsSecrets(call.params && call.params.include_secrets);
+}
 
 function validateChain(chain) {
     if (!ALLOWED_CHAINS.has(chain))
@@ -475,7 +514,7 @@ async function startApi(){
     // above). Everything not in either set is the public read tier, protected
     // only by the per-IP rate limit.
     app.use((req, res, next) => {
-        if (!HUB_API_KEY && !HUB_REORG_API_KEY) return next();
+        if (!HUB_API_KEY && !HUB_REORG_API_KEY && !HUB_CONFIG_SECRETS_API_KEY) return next();
         // A JSON-RPC batch arrives as an array of call objects; a single call as
         // one object. express-json-rpc-router dispatches every element of an
         // array body, so the gate must inspect ALL of them: require a key if ANY
@@ -503,6 +542,18 @@ async function startApi(){
             });
             if (reorgGated && !timingEqual(provided, HUB_REORG_API_KEY)) return unauthorized();
         }
+        // Credential tier (see HUB_CONFIG_SECRETS_API_KEY above). A getallconfigs
+        // that asks for the unredacted tree must satisfy the config-secrets key
+        // when one is set, and the bulk key otherwise. Enforced here rather than
+        // in the handler so a refusal is the same 401 every other tier gives, and
+        // deliberately OUTSIDE the SENSITIVE_READ_AUTH switch: the escape hatch
+        // exists to un-key service discovery during a rollout, never to hand out
+        // passwords keylessly, which is a much larger decision.
+        let secretsRequested = calls.some(callWantsConfigSecrets);
+        if (secretsRequested) {
+            let expected = HUB_CONFIG_SECRETS_API_KEY || HUB_API_KEY;
+            if (expected && !timingEqual(provided, expected)) return unauthorized();
+        }
         if (HUB_API_KEY) {
             let gated = calls.some(call => {
                 let method = call && call.method;
@@ -512,6 +563,13 @@ async function startApi(){
                 // must not authorize anything else, and the bulk key must no
                 // longer authorize retractions.
                 if (HUB_REORG_API_KEY && REORG_WRITE_METHODS.has(m)) return false;
+                // Same split for the credential tier: with a dedicated
+                // config-secrets key, a getallconfigs asking for secrets was
+                // already checked against THAT key above and must not also be
+                // required to carry the bulk key, since one request carries one
+                // x-api-key header (xchain-explorer and xchain-sync send the
+                // secrets key and nothing else).
+                if (HUB_CONFIG_SECRETS_API_KEY && callWantsConfigSecrets(call)) return false;
                 return WRITE_METHODS.has(m) ||
                     (SENSITIVE_READ_AUTH && SENSITIVE_READ_METHODS.has(m));
             });
@@ -704,16 +762,32 @@ async function startApi(){
         // committed after them but stamped in the watermark's second - is
         // re-delivered, never skipped. Consumers must merge idempotently: rows in
         // the cursor second repeat on each poll until a newer write lands (#2265).
+        //
+        // Secret-bearing params (rpc/DB passwords) are REDACTED unless the call
+        // sets `include_secrets: true`, which the auth middleware has already
+        // authorized against HUB_CONFIG_SECRETS_API_KEY (or the bulk key when
+        // that is unset); see the credential-tier note above. The response says
+        // which it is: `secrets_redacted` is true whenever a value was withheld
+        // or would have been, so a consumer that needs credentials and forgot the
+        // flag can say so instead of failing later on a bad password.
         async getallconfigs(params) {
             try {
-                let since     = params && params.since_updated_at;
-                let seq       = await hub.getLastSeq();
-                let watermark = await hub.getConfigWatermark();
-                let configs   = await hub.getAllConfigs(since);
+                let since       = params && params.since_updated_at;
+                let wantSecrets = configRedaction.wantsSecrets(params && params.include_secrets);
+                let seq         = await hub.getLastSeq();
+                let watermark   = await hub.getConfigWatermark();
+                let configs     = await hub.getAllConfigs(since);
+                let redacted    = 0;
+                if (!wantSecrets) {
+                    let result = configRedaction.redactConfigTree(configs);
+                    configs  = result.configs;
+                    redacted = result.redacted;
+                }
                 configFetchCounters.served++;
                 // coin_consensus_hashes is additive: consumers that predate it ignore
                 // the field; new consumers cross-check it against their bundled pins.
-                return {configs, seq, watermark, coin_consensus_hashes: COIN_CONSENSUS_HASHES};
+                return {configs, seq, watermark, coin_consensus_hashes: COIN_CONSENSUS_HASHES,
+                        secrets_redacted: !wantSecrets, redacted_params: redacted};
             } catch (err) {
                 configFetchCounters.errors++;
                 return {error: "there was an error trying to get all configs"};
