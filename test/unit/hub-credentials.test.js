@@ -31,7 +31,14 @@ function _tmpDir(){
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hubcred-'));
     return dir;
 }
-function _populate(dir){ fs.writeFileSync(path.join(dir, '.credentials.json'), '{}'); return dir; }
+// Shape the CLI writes after `claude login`, with placeholder token strings.
+function _writeCreds(dir, body){
+    fs.writeFileSync(path.join(dir, '.credentials.json'), typeof body === 'string' ? body : JSON.stringify(body));
+    return dir;
+}
+function _populate(dir){
+    return _writeCreds(dir, { claudeAiOauth: { accessToken: 'placeholder-access', refreshToken: 'placeholder-refresh', expiresAt: 1 } });
+}
 
 describe('resolveHubLlmAuth: credential resolution chain', function () {
 
@@ -202,5 +209,95 @@ describe('resolveHubLlmAuth: credential resolution chain', function () {
         });
         expect(r.ok).to.equal(false);
         expect(r.reason).to.equal('no_credential_configured');
+    });
+
+    // A `.credentials.json` that exists but carries no token is what
+    // `claude logout` and a bare `claude` run leave behind. Accepting the
+    // file's mere existence lets that husk outrank a working token, so the
+    // transport reports READY while every spawn runs unauthenticated.
+    const tokenlessBodies = {
+        'an empty JSON object':          {},
+        'an empty claudeAiOauth envelope': { claudeAiOauth: {} },
+        'blank-string tokens':           { claudeAiOauth: { accessToken: '', refreshToken: '   ' } },
+        'non-token fields only':         { claudeAiOauth: { expiresAt: 1, scopes: ['user:inference'] } },
+        'a non-object body':             '"nope"',
+        'malformed JSON':                '{ not json',
+        'an empty file':                 ''
+    };
+
+    Object.keys(tokenlessBodies).forEach(function (label) {
+        it('falls through a config dir whose credentials.json holds ' + label, function () {
+            const dir = _writeCreds(_tmpDir(), tokenlessBodies[label]);
+            const r = resolveHubLlmAuth({
+                env: { HUB_CLAUDE_CONFIG_DIR: dir, HUB_CLAUDE_CODE_OAUTH_TOKEN: 'tok-working' },
+                defaultConfigDir: hermeticDefaultDir
+            });
+            expect(r.ok).to.equal(true);
+            expect(r.source).to.equal('hub_token');
+            expect(r.env.CLAUDE_CODE_OAUTH_TOKEN).to.equal('tok-working');
+        });
+
+        it('reports no credential when the only candidate holds ' + label, function () {
+            const dir = _writeCreds(_tmpDir(), tokenlessBodies[label]);
+            const r = resolveHubLlmAuth({
+                env: { HUB_CLAUDE_CONFIG_DIR: dir },
+                defaultConfigDir: hermeticDefaultDir
+            });
+            expect(r.ok).to.equal(false);
+            expect(r.reason).to.equal('no_credential_configured');
+        });
+    });
+
+    it('reports no credential when the default dir is a token-less stub and nothing is set', function () {
+        _writeCreds(hermeticDefaultDir, { claudeAiOauth: {} });
+        const r = resolveHubLlmAuth({ env: {}, defaultConfigDir: hermeticDefaultDir });
+        expect(r.ok).to.equal(false);
+        expect(r.reason).to.equal('no_credential_configured');
+    });
+
+    it('accepts a refresh token with no access token (the CLI redeems it on spawn)', function () {
+        const dir = _writeCreds(_tmpDir(), { claudeAiOauth: { refreshToken: 'placeholder-refresh' } });
+        const r = resolveHubLlmAuth({
+            env: { HUB_CLAUDE_CONFIG_DIR: dir, HUB_CLAUDE_CODE_OAUTH_TOKEN: 'tok-working' },
+            defaultConfigDir: hermeticDefaultDir
+        });
+        expect(r.ok).to.equal(true);
+        expect(r.source).to.equal('hub_config_dir');
+    });
+
+    it('accepts top-level accessToken (older / hand-assembled files)', function () {
+        const dir = _writeCreds(_tmpDir(), { accessToken: 'placeholder-access' });
+        const r = resolveHubLlmAuth({
+            env: { HUB_CLAUDE_CONFIG_DIR: dir },
+            defaultConfigDir: hermeticDefaultDir
+        });
+        expect(r.ok).to.equal(true);
+        expect(r.source).to.equal('hub_config_dir');
+    });
+
+    it('falls through a credentials.json too large to be one', function () {
+        const dir = _writeCreds(_tmpDir(),
+            JSON.stringify({ claudeAiOauth: { accessToken: 'x'.repeat(300 * 1024) } }));
+        const r = resolveHubLlmAuth({
+            env: { HUB_CLAUDE_CONFIG_DIR: dir, ANTHROPIC_API_KEY: 'sk-ant-test' },
+            defaultConfigDir: hermeticDefaultDir
+        });
+        expect(r.ok).to.equal(true);
+        expect(r.source).to.equal('api_key');
+    });
+
+    it('does not leak token material into the resolved result', function () {
+        const dir = _populate(_tmpDir());
+        const r = resolveHubLlmAuth({
+            env: { HUB_CLAUDE_CONFIG_DIR: dir },
+            defaultConfigDir: hermeticDefaultDir
+        });
+        expect(JSON.stringify(r)).to.not.match(/placeholder-(access|refresh)/);
+    });
+
+    it('the no_credential_configured detail states the setup-token TTL correctly', function () {
+        const r = resolveHubLlmAuth({ env: {}, defaultConfigDir: hermeticDefaultDir });
+        expect(r.detail).to.contain('one-year TTL');
+        expect(r.detail).to.not.match(/week/i);
     });
 });
