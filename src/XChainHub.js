@@ -1202,6 +1202,15 @@ class XChainHub {
     // CapabilitySnapshot sends the indexer, so a divergent capabilities.json forks the
     // qualified set and quorum N. mainnet/testnet throw MIN_STAKE_MISMATCH and boot
     // halts; regtest/standalone warn. A missing MIN_STAKE key counts as a mismatch.
+    //
+    // A canonical capability ABSENT from the file entirely is a different, worse class
+    // and is refused on EVERY network (CAPABILITY_UNCONFIGURED, #1988). A low floor is
+    // something a test venue chooses deliberately, which is why the mismatch above is
+    // non-strict off mainnet/testnet; a hole is never chosen, and its blast radius is
+    // total: CapabilitySnapshot fails closed on every round for that capability
+    // (min_stake_unconfigured) because omitting min_stake would let each indexer apply
+    // its OWN threshold and fork the qualified set. Warning once at boot and then
+    // failing every round forever is the behaviour this refusal replaces.
     _assertCanonicalMinStakes(caps){
         if(!caps || typeof caps !== 'object' || Array.isArray(caps)) return;
         if(process.env.XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT === '1'){
@@ -1239,6 +1248,36 @@ class XChainHub {
                     ((entry && entry.MIN_STAKE !== undefined) ? entry.MIN_STAKE : '(missing -> 0)') +
                     ' vs canonical ' + canonical.MIN_STAKE);
             }
+        }
+        // Capabilities the canonical registry knows about that this file never mentions.
+        // DISABLED_CAPABILITIES does NOT excuse one: that flag only stops THIS hub from
+        // serving the capability, while it still has to build the federation-wide
+        // snapshot for every round its peers run.
+        let unconfigured = Object.keys(canonicalCaps).filter(cap => !caps[cap]);
+        if(unconfigured.length > 0){
+            let missing = unconfigured.map(cap =>
+                cap + ' (canonical ' + canonicalCaps[cap].MIN_STAKE + ')').join('; ');
+            let err = new Error('CONSENSUS CANNOT RUN: capability ' +
+                (unconfigured.length === 1 ? '"' + unconfigured[0] + '" is' : unconfigured.join(', ') + ' are') +
+                ' missing from HUB_CAPABILITY_CONFIG entirely, so this hub has no qualifying ' +
+                'floor for ' + (unconfigured.length === 1 ? 'it' : 'them') + ' and CapabilitySnapshot ' +
+                'refuses to build a snapshot: EVERY consensus round for ' +
+                (unconfigured.length === 1 ? 'that capability' : 'those capabilities') +
+                ' fails closed with min_stake_unconfigured. Omitting min_stake would let each ' +
+                'indexer apply its OWN threshold, so two hubs could qualify different validator ' +
+                'sets for the same round and FORK. Add CAPABILITIES.<capability>.MIN_STAKE to ' +
+                'capabilities.json (equal to the indexer constant) for: ' + missing +
+                '. Refusing to start rather than warning once and then failing every round ' +
+                '(XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT=1 to bypass on a venue that deliberately ' +
+                'runs without these capabilities).');
+            err.code = 'CAPABILITY_UNCONFIGURED';
+            err.capabilities = unconfigured;
+            // Surface any threshold mismatches too, so one boot attempt shows the
+            // operator every edit the file needs rather than one per restart.
+            if(mismatches.length > 0){
+                console.warn('Capability MIN_STAKE mismatches in the same config: ' + mismatches.join('; '));
+            }
+            throw err;
         }
         if(mismatches.length === 0) return;
         let detail = 'capability MIN_STAKE diverges from the canonical coins registry ' +
@@ -1325,9 +1364,11 @@ class XChainHub {
                 this._loadCapabilityConfigFile(configFilePath);
             } catch(e){
                 // A canonical MIN_STAKE or FULLNODE mismatch is a consensus-fork
-                // misconfig, so halt boot. Read/parse problems keep the legacy
+                // misconfig, and an unconfigured capability fails every consensus
+                // round for it, so halt boot. Read/parse problems keep the legacy
                 // warn-and-degrade path, where self-tests fail "config missing".
-                if(e && (e.code === 'MIN_STAKE_MISMATCH' || e.code === 'FULLNODE_CONFIG_MISMATCH')) throw e;
+                if(e && (e.code === 'MIN_STAKE_MISMATCH' || e.code === 'FULLNODE_CONFIG_MISMATCH' ||
+                         e.code === 'CAPABILITY_UNCONFIGURED')) throw e;
                 console.warn('Could not load capability config from ' + configFilePath + ': ', e);
             }
         }

@@ -129,14 +129,21 @@ self-tests fail ("config missing"), and capabilities have no `MIN_STAKE` so they
 stay **inactive** (the hub now fails closed rather than qualifying at a 0 threshold).
 The file is hot-reloaded; edits apply without a restart.
 
+**Every capability in the canonical registry must appear here**, with the
+`MIN_STAKE` the pinned coin bundle carries (`src/coins/BTC.js`
+`STAKING.CAPABILITIES`). A capability left out has no qualifying floor, so the
+hub cannot build its snapshot and every consensus round for it fails closed;
+the hub therefore refuses to start on any network and names the capability.
+`XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT=1` bypasses the check loudly.
+
 ```json
 {
   "CAPABILITIES": {
     "price":          { "MIN_STAKE": "1000.00000000" },
-    "cross_chain":    { "MIN_STAKE": "1000.00000000" },
+    "cross_chain":    { "MIN_STAKE": "5000.00000000" },
     "oracle_publish": { "MIN_STAKE": "500.00000000"  },
     "attestation":    { "MIN_STAKE": "1000.00000000" },
-    "full_node":      { "MIN_STAKE": "1000.00000000" }
+    "full_node":      { "MIN_STAKE": "2000.00000000" }
   },
   "DISABLED_CAPABILITIES": [],
   "price":          { "sources": ["coingecko"], "fiats": ["USD"] },
