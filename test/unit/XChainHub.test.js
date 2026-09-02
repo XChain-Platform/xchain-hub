@@ -135,6 +135,41 @@ describe('XChainHub', function () {
             expect(rows).to.deep.include({ coin: 'BTC', network: 'mainnet', module: 'indexer', paramName: 'port', paramValue: '3309' });
         });
 
+        // The explorer's self-synced checkpoint mirror needs BOTH halves of the block
+        // xchain-node generates: self_sync says "you write this schema yourself" and
+        // hub_url says where to read the feed. They ship together for exactly that
+        // reason, so this path must not carry one and drop the other - an explorer
+        // told to self-sync with no endpoint writes nothing, and its hub-mirrored
+        // routes (price_snapshots, oracle_prices, state_checkpoints) serve a frozen
+        // mirror or fail loud per request.
+        it('keeps the hub endpoint that travels with a self-synced checkpoint block', async function () {
+            let hub = new XChainHub('host', 3306, 'db', 'user', 'pass', null);
+            hub.db = mockDb;
+
+            await hub.applyConfig({
+                BTC: {
+                    regtest: {
+                        checkpoint: {
+                            db_host:   'mariadb',
+                            db_port:   '3306',
+                            name:      'XChain_BTC_Regtest_Indexer_HubMirror',
+                            user:      'xchain_indexer',
+                            pass:      'secret',
+                            self_sync: 'true',
+                            hub_url:   'http://xchain-node-xchain-hub:10000'
+                        }
+                    }
+                }
+            });
+
+            let rows = mockDb.setParams.getCall(0).args[0];
+            let hubUrl = rows.find(r => r.paramName === 'hub_url');
+            expect(hubUrl).to.exist;
+            expect(hubUrl.paramValue).to.equal('http://xchain-node-xchain-hub:10000');
+            expect(hubUrl.module).to.equal('checkpoint');
+            expect(rows.map(r => r.paramName)).to.include('self_sync');
+        });
+
         it('skips keys outside the combined allowlist, accepts known operational params', async function () {
             let hub = new XChainHub('host', 3306, 'db', 'user', 'pass', null);
             hub.db = mockDb;

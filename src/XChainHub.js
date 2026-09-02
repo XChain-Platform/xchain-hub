@@ -67,7 +67,17 @@ const axios              = require('axios');
 // self-provisions and populates, rather than an externally-maintained hub
 // schema. Coerced to the string "true"/"false" like every other value here;
 // xchain-explorer's db.js reads it back with `=== true || === 'true'`.
-const PARAMETER_LIST     = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass", "self_sync"];
+//
+// hub_url travels WITH self_sync, in the same checkpoint block, and belongs on this
+// list for that reason: a self-syncing explorer needs the hub endpoint its mirror
+// writer follows, and xchain-node ships the two together precisely so they cannot
+// arrive by different paths. This list is the path, and while it named self_sync
+// alone it silently dropped the endpoint out of every pushed block - so an explorer
+// whose container env carried no HUB_API_URL was told to self-sync with nowhere to
+// sync from, and served a mirror nothing writes (or, once the explorer started
+// refusing that state, no mirror at all: the hub-mirrored routes then 500 per
+// request for that coin while its siblings answer normally).
+const PARAMETER_LIST     = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass", "self_sync", "hub_url"];
 const OPERATIONAL_PARAMS = new Set(["GAS_PRICE", "ACTIVATION_DELAY_BLOCKS", "EXPIRATION_FEE_PER_DAY"]);
 const JSON_BLOB_PARAMS   = new Set(["GAS_SCHEDULE", "STAKING"]);
 
