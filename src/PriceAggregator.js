@@ -42,6 +42,7 @@ const { PRICE_BATCH_MAX_ROUND_COUNT } = require('./price_batch_compression.js');
 const { bcgt }          = require('./bcmath.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { normalizeRetractionBounds } = require('./lib/retraction_bounds.js');
+const roundBandLib      = require('./lib/oracle_round_band.js');
 
 // Minimum gap between ingest-fence rejection warnings for the SAME source
 // chain. Sized so a stalled rail keeps re-announcing itself in any log tail while a
@@ -65,6 +66,47 @@ class PriceAggregator extends EventEmitter {
         // Per-source-chain state for the ingest pair-coverage check
         // ({ seen: Set, last: ms, suppressed: n, rounds: n }). See _checkIngestPairCoverage.
         this._missingPairWarnState = new Map();
+        // Out-of-band round rejections, surfaced through the oracle
+        // diagnostics RPC. Monotonic for the process, same posture as the other
+        // ingest counters here: the log carries the driver line, this is the read tier.
+        this.implausibleRoundRejections = 0;
+        this.lastImplausibleRound = null;
+    }
+
+    // The plausible round band for THIS hub, or null when the local oracle
+    // schedule is unresolvable (a mirror hub built without an OracleRound, a
+    // test double, a hub whose clock predates ORACLE_EPOCH_START).
+    //
+    // Null means "no opinion" and every caller must treat it that way. A hub
+    // that cannot resolve its own schedule must not start refusing its
+    // federation's consensus output on a guess; see lib/oracle_round_band.js.
+    _roundBand() {
+        let oracle = this.hub && this.hub.oracle;
+        if (!oracle) return null;
+        return roundBandLib.roundBand({
+            epochStartMs:    oracle.epochStart,
+            roundIntervalMs: oracle.roundInterval
+        });
+    }
+
+    // Write-time half of the defence: refuse a round number the schedule
+    // could not have produced. Returns null to accept, or the rejection reason.
+    //
+    // ONE-SIDED. Only the FUTURE side rejects, because only it is impossible:
+    // replaying indexers, catching-up chain-only nodes and hour-wide batch
+    // windows all legitimately push rounds that are hours or days old, and
+    // bounding the past would drop real consensus output.
+    _refuseOutOfBandRound(round, sourceChain, what) {
+        let band = this._roundBand();
+        if (!band || !roundBandLib.isRoundImplausible(round, band)) return null;
+        this.implausibleRoundRejections += 1;
+        this.lastImplausibleRound = Number(round);
+        // Never silent: an out-of-band round is either a corrupt row upstream or a
+        // peer with a broken clock, and both need naming rather than a quiet drop.
+        console.warn('PriceAggregator: refusing ' + what + ' from ' +
+                     (sourceChain || 'unknown') + ': ' +
+                     roundBandLib.describeImplausibleRound(round, band));
+        return 'implausible round';
     }
 
     // Name a pair that STOPPED arriving from a source chain. The PRODUCER path records a
@@ -256,6 +298,12 @@ class PriceAggregator extends EventEmitter {
         if (!Number.isFinite(round) || round < 0) {
             return { accepted: false, reason: 'invalid round' };
         }
+
+        // The round number must be one this hub's own schedule could have
+        // produced. Checked BEFORE any signature work, since an out-of-band round is
+        // refused whatever it is signed with.
+        let bandReason = this._refuseOutOfBandRound(round, sourceChain, 'PRICE v0 round');
+        if (bandReason) return { accepted: false, reason: bandReason };
 
         // timestamp is part of the signed payload; it must be present and sane
         let timestamp = parseInt(roundData.timestamp);
@@ -590,6 +638,13 @@ class PriceAggregator extends EventEmitter {
             !Number.isFinite(lastRound)  || lastRound  < 0 || firstRound > lastRound) {
             return refuse('invalid round window');
         }
+
+        // Batch twin. Judged on lastRound alone: the per-round loop below
+        // already refuses any round outside [firstRound, lastRound], so the window's
+        // top bounds every round the batch can carry. A signed batch is atomic, so an
+        // out-of-band round takes the whole batch down rather than being dropped from it.
+        let bandReason = this._refuseOutOfBandRound(lastRound, sourceChain, 'PRICE v0 batch');
+        if (bandReason) return refuse(bandReason);
 
         // The BATCH anchor: part of the signed canonical, and the height every oracle
         // flag day below resolves on (§5.5). Distinct from each round's own anchor.
