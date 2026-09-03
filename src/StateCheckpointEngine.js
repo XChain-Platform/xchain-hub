@@ -162,6 +162,46 @@ class StateCheckpointEngine extends EventEmitter {
         // at most once an hour and let the counter carry the true rate.
         this._cadenceStallLogMs = parseInt(process.env.CHECKPOINT_STALL_LOG_MS
             || cfg.CHECKPOINT_STALL_LOG_MS || String(60 * 60 * 1000));
+
+        // Frozen-tip livelock meter. The cadence leader is pubkeys[btcBlock % N], so
+        // "due, in the set, not my slot" is normal rotation ONLY while btcBlock keeps
+        // advancing. If the BTC tip freezes (indexer wedged, node stalled, regtest
+        // nobody mines) the slot pins to one constant and every hub whose rank is not
+        // that constant returns forever, for every chain, with cadence_stalls at 0.
+        // Proven live on a regtest venue 2026-08-19: BTC tip frozen four days at
+        // 14671, slot 31 vs rank 30, zero checkpoints in three weeks. Count the
+        // not-my-slot ticks that see the SAME btcBlock; past K consecutive ones the
+        // tick is metered as a stall naming the frozen block. K defaults to an hour of
+        // the default 60s poll, longer than any BTC inter-block gap that normal
+        // rotation would survive; a wedged tip stays wedged and crosses it.
+        this._frozenTipTicks = parseInt(process.env.CHECKPOINT_FROZEN_TIP_TICKS
+            || cfg.CHECKPOINT_FROZEN_TIP_TICKS || '60');
+        if(!(this._frozenTipTicks > 0)) this._frozenTipTicks = 60;
+        this._notMySlotBlock = null;     // btcBlock seen by the last not-my-slot tick
+        this._notMySlotTicks = 0;        // consecutive not-my-slot ticks at that block
+    }
+
+    // Record a due-but-not-my-slot tick at `btcBlock`. Returns true when the same
+    // block has now been seen for at least K consecutive such ticks (frozen tip).
+    // Compare NUMERICALLY: _resolveBtcLatestBlock serves the height from two
+    // sources (the pushed chain_tips row, then a getlatestblock RPC), so the same
+    // frozen height can arrive as 14671 on one tick and '14671' on the next. A
+    // strict === there would restart the counter every tick and leave the meter
+    // permanently at 1, which is precisely the silent failure it exists to catch.
+    _noteNotMySlot(btcBlock){
+        let block = Number(btcBlock);
+        if(this._notMySlotBlock === block){
+            this._notMySlotTicks++;
+        } else {
+            this._notMySlotBlock = block;
+            this._notMySlotTicks = 1;
+        }
+        return this._notMySlotTicks >= this._frozenTipTicks;
+    }
+
+    _clearNotMySlot(){
+        this._notMySlotBlock = null;
+        this._notMySlotTicks = 0;
     }
 
     // Record (and throttle-log) a cadence round this hub could not lead. `block` is
@@ -272,7 +312,14 @@ class StateCheckpointEngine extends EventEmitter {
             // validator set), the failure mode that produced 18 silent days on mainnet.
             cadence_stalls:          this._cadenceStalls,
             cadence_stall_reason:    this._cadenceStallReason,
-            cadence_stall_block:     this._cadenceStallBlock
+            cadence_stall_block:     this._cadenceStallBlock,
+            // Frozen-tip livelock meter: how many consecutive due-but-not-
+            // my-slot ticks have seen the same BTC snapshot block, and the K at which
+            // that becomes a metered stall. Non-zero and climbing with a moving tip is
+            // impossible; climbing past K means the BTC tip is not advancing.
+            frozen_tip_ticks:        this._notMySlotTicks,
+            frozen_tip_block:        this._notMySlotBlock,
+            frozen_tip_stall_ticks:  this._frozenTipTicks
         };
     }
 
@@ -310,6 +357,7 @@ class StateCheckpointEngine extends EventEmitter {
             if(this._lastCheckpointBtcBlock != null && btcBlock < this._lastCheckpointBtcBlock + this.intervalBlocks){
                 // On schedule: the cadence simply has not come round yet.
                 this._clearCadenceStall();
+                this._clearNotMySlot();
                 return;
             }
 
@@ -345,10 +393,26 @@ class StateCheckpointEngine extends EventEmitter {
                                                  pubkeys.length + ' member(s))');
                 return;
             }
-            // Not our slot: normal rotation in an N>1 federation, NOT a stall. A single-
-            // member set is always its own leader (btcBlock % 1 === 0 === rank), so this
-            // branch can never hide the lone-validator case the stall counter is for.
-            if(myRank !== (btcBlock % pubkeys.length)) return;
+            // Not our slot: normal rotation in an N>1 federation, NOT a stall, as long
+            // as btcBlock is still moving. A single-member set is always its own leader
+            // (btcBlock % 1 === 0 === rank), so this branch can never hide the
+            // lone-validator case. It CAN hide a frozen BTC tip (slot pinned to a
+            // constant that is not our rank, forever), so K consecutive not-my-slot
+            // ticks at the same btcBlock are metered as a stall.
+            if(myRank !== (btcBlock % pubkeys.length)){
+                if(this._noteNotMySlot(btcBlock)){
+                    this._noteCadenceStall(btcBlock, 'BTC snapshot block frozen at ' + btcBlock + ' for ' +
+                        this._notMySlotTicks + ' consecutive ticks while cadence slot ' + (btcBlock % pubkeys.length) +
+                        ' is not this hub\'s rank ' + myRank + ' of ' + pubkeys.length +
+                        ' (leader election cannot rotate until the BTC tip advances)');
+                } else {
+                    // A moving tip that merely rotated past us clears any earlier
+                    // frozen-tip reason so getcheckpointstats stays live.
+                    if(this._notMySlotTicks === 1) this._clearCadenceStall();
+                }
+                return;
+            }
+            this._clearNotMySlot();
 
             // We are the cadence leader (or a single-node set): one round per chain.
             // The latch advances even on per-chain failure; the next cadence retries.

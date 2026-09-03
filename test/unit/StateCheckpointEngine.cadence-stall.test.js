@@ -216,3 +216,141 @@ describe('StateCheckpointEngine cadence stall meter', function () {
         expect(stats.cadence_stalls, 'the historical count is retained').to.equal(1);
     });
 });
+
+// A frozen BTC tip pins the cadence slot to one constant. Without this meter a
+// hub whose rank is not that constant returns silently from the not-my-slot
+// branch on every tick, for every chain, with cadence_stalls reading 0. Seen
+// live on a regtest venue 2026-08-19: tip frozen four days at 14671, slot 31 vs
+// rank 30, no checkpoint cut in three weeks.
+describe('StateCheckpointEngine frozen-tip livelock meter', function () {
+
+    let engines = [];
+
+    afterEach(async function () {
+        for (let e of engines) await e.stop();
+        engines = [];
+    });
+
+    // Two-member federation where OUR rank is deliberately not the slot at the
+    // frozen block. Identities sort by pubkey hex, so pick the block parity from
+    // the sorted rank rather than assuming it.
+    function buildTwoMember(frozenTipTicks) {
+        const me    = new ValidatorIdentity('11'.repeat(32));
+        const other = new ValidatorIdentity('22'.repeat(32));
+        const pubkeys = [me.getPubkeyHex().toLowerCase(), other.getPubkeyHex().toLowerCase()].sort();
+        const myRank  = pubkeys.indexOf(me.getPubkeyHex().toLowerCase());
+        const state = {
+            btcBlock: 100 + (myRank === 0 ? 1 : 0),      // slot != myRank
+            validators: pubkeys.map(p => ({ pubkey: p, amount: '1' }))
+        };
+        const hub = {
+            db: { async doQuery() { return []; } },
+            network: 'regtest',
+            p2pConfig: {
+                CHECKPOINT_CHAINS: 'BTC', CHECKPOINT_CONFIRMATIONS: '0',
+                CHECKPOINT_INTERVAL_BLOCKS: '6', BTC_INDEXER_URL: 'http://stub',
+                CHECKPOINT_FROZEN_TIP_TICKS: String(frozenTipTicks)
+            },
+            hubDbBroadcaster: { rows: [], broadcastRow(ev) { this.rows.push(ev); } },
+            capabilitySnapshot: {
+                async getSnapshot() { return { validators: state.validators }; },
+                async getWeightSnapshot() {
+                    return { validators: state.validators.map(v => ({ pubkey: v.pubkey, source: 'src:' + v.pubkey, weight: v.amount })) };
+                }
+            },
+            getPeerManager: () => ({ on() {}, removeListener() {}, broadcast() {} }),
+            getIdentity: () => me,
+            _resolveBtcLatestBlock: async () => state.btcBlock
+        };
+        const engine = new StateCheckpointEngine(hub);
+        engine._indexerCall = async () => Object.assign({}, TIP);
+        engines.push(engine);
+        return { engine, state, myRank };
+    }
+
+    it('K consecutive not-my-slot ticks at the same btcBlock are metered as a stall', async function () {
+        const K = 3;
+        const { engine, state, myRank } = buildTwoMember(K);
+        expect(state.btcBlock % 2).to.not.equal(myRank);
+
+        await engine._tick();
+        await engine._tick();
+        let stats = await engine.getStats();
+        expect(stats.cadence_stalls, 'below K this is ordinary rotation').to.equal(0);
+        expect(stats.frozen_tip_ticks).to.equal(2);
+        expect(stats.frozen_tip_block).to.equal(state.btcBlock);
+
+        await engine._tick();                        // tick K
+        stats = await engine.getStats();
+        expect(stats.cadence_stalls, 'stall reported within K ticks').to.equal(1);
+        expect(stats.cadence_stall_reason).to.match(/frozen at \d+/);
+        expect(stats.cadence_stall_reason).to.match(/slot \d+ is not this hub's rank/);
+        expect(stats.cadence_stall_block).to.equal(state.btcBlock);
+
+        await engine._tick();                        // stays stalled, keeps counting
+        expect((await engine.getStats()).cadence_stalls).to.equal(2);
+    });
+
+    it('a moving tip that rotates past us is NOT a stall and resets the frozen counter', async function () {
+        const { engine, state, myRank } = buildTwoMember(3);
+        const notMine = state.btcBlock;
+
+        await engine._tick();
+        await engine._tick();
+        expect(engine._notMySlotTicks).to.equal(2);
+
+        state.btcBlock = notMine + 2;                // advanced, still not our slot
+        expect(state.btcBlock % 2).to.not.equal(myRank);
+        await engine._tick();
+        let stats = await engine.getStats();
+        expect(stats.cadence_stalls).to.equal(0);
+        expect(stats.frozen_tip_ticks, 'counter restarts at the new block').to.equal(1);
+        expect(stats.frozen_tip_block).to.equal(state.btcBlock);
+    });
+
+    it('the tip advancing to our slot clears the frozen-tip stall and leads the round', async function () {
+        const { engine, state, myRank } = buildTwoMember(2);
+
+        await engine._tick();
+        await engine._tick();
+        expect((await engine.getStats()).cadence_stall_reason).to.match(/frozen/);
+
+        state.btcBlock += 1;                         // slot now == myRank
+        expect(state.btcBlock % 2).to.equal(myRank);
+        await engine._tick();
+
+        const stats = await engine.getStats();
+        expect(engine._lastCheckpointBtcBlock, 'we led the round').to.equal(state.btcBlock);
+        expect(stats.cadence_stall_reason).to.equal(null);
+        expect(stats.frozen_tip_ticks).to.equal(0);
+        expect(stats.frozen_tip_block).to.equal(null);
+        expect(stats.cadence_stalls, 'history retained').to.equal(1);
+    });
+
+    it('defaults K to 60 ticks and rejects a non-positive override', async function () {
+        const { engine } = buildTwoMember(0);
+        expect(engine._frozenTipTicks).to.equal(60);
+        expect((await engine.getStats()).frozen_tip_stall_ticks).to.equal(60);
+    });
+
+    // _resolveBtcLatestBlock serves the height from the pushed chain_tips row OR
+    // from a getlatestblock RPC, so the SAME frozen height can arrive typed
+    // differently tick to tick. Comparing it strictly would restart the counter
+    // every tick and pin the meter at 1 forever: the exact silent failure this
+    // meter exists to catch, reintroduced inside the meter itself.
+    it('meters a frozen tip whose height alternates between number and string', async function () {
+        const K = 3;
+        const { engine, state } = buildTwoMember(K);
+        const frozen = state.btcBlock;
+
+        for (let i = 0; i < K; i++) {
+            state.btcBlock = (i % 2 === 0) ? frozen : String(frozen);
+            await engine._tick();
+        }
+
+        const stats = await engine.getStats();
+        expect(stats.frozen_tip_ticks, 'the counter never restarted').to.equal(K);
+        expect(stats.frozen_tip_block, 'the block is normalised to a number').to.equal(frozen);
+        expect(stats.cadence_stalls, 'the frozen tip is still metered').to.equal(1);
+    });
+});
