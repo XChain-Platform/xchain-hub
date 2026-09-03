@@ -24,7 +24,7 @@
 -- the same shape of problem: finalize over P2P, live in the hub DB, stream to
 -- indexers through this mirror, gate block processing through a barrier, and
 -- land on chain periodically in full-bodied batches. ATTEST responses take that
--- road (the ATTEST response mirror design).
+-- road (the ATTEST response-mirror design).
 --
 -- Hub-authored, INSERT-ONLY federation-state table mirrored to every indexer via
 -- hub_db_sync (HUB_STATE_TABLES). NO column is ever updated after insert, which

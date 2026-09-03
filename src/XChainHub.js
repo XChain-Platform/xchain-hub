@@ -57,6 +57,7 @@ const AttestationRelay       = require('./AttestationRelay.js');
 const FullNodeChallengeRound = require('./FullNodeChallengeRound.js');
 const RollcallRound          = require('./RollcallRound.js');
 const AttestationSpotChecker = require('./AttestationSpotChecker.js');
+const AttestationResponseMirror = require('./AttestationResponseMirror.js');
 const { bcmul, bcdiv }   = require('./bcmath.js');
 const mathjs             = require('mathjs');
 const fs                 = require('fs');
@@ -121,6 +122,7 @@ class XChainHub {
         this.attestationConsensus    = null;
         this.attestationPublisher    = null;
         this.attestationSpotChecker  = null;
+        this.attestationResponseMirror = null;
         this.attestationRelay        = null;
         this.fullNodeChallenge       = null;
         this.rollcallRound           = null;
@@ -400,6 +402,13 @@ class XChainHub {
         }
         this.attestationSpotChecker = new AttestationSpotChecker(this, this.providerRegistry);
 
+        // The mirror producer, and the publisher's counterpart above the ATTEST
+        // response mirror activation height: the publisher declines a mirror-era
+        // request and this writes its row instead, so exactly one of the two serves
+        // every finalized round. Needs no signer wiring at all, which is the point of
+        // the design: a mirrored response costs no validator a chain transaction.
+        this.attestationResponseMirror = new AttestationResponseMirror(this);
+
         // Cross-chain relay driver, opt-in via ATTEST_RELAY_ENABLED=1. Its v3 request leg
         // broadcasts on BTC and takes the publisher's signer; its v4 response leg
         // broadcasts on the ORIGIN chain, so it is wired separately per chain.
@@ -412,6 +421,7 @@ class XChainHub {
         await this.attestationRound.start();
         await this.attestationPublisher.start();
         await this.attestationSpotChecker.start();
+        await this.attestationResponseMirror.start();
         await this.attestationRelay.start();
 
         if(this.governance && typeof this.governance.on === 'function'){
@@ -478,6 +488,7 @@ class XChainHub {
     getAttestationConsensus(){   return this.attestationConsensus; }
     getAttestationPublisher(){   return this.attestationPublisher; }
     getAttestationSpotChecker(){ return this.attestationSpotChecker; }
+    getAttestationResponseMirror(){ return this.attestationResponseMirror; }
     getAttestationRelay(){       return this.attestationRelay; }
     getProviderRegistry(){       return this.providerRegistry; }
 
@@ -1947,6 +1958,10 @@ class XChainHub {
         if(this.governance)       await this.governance.stop();
         if(this.reorgHandler)     await this.reorgHandler.stop();
         if(this.rollcallRound)    await this.rollcallRound.stop();
+        // Detached BEFORE db.close() below: the listener's only side effect is a DB
+        // write, so leaving it attached past the close turns a late-finalizing round
+        // into an error on a dead pool instead of a no-op.
+        if(this.attestationResponseMirror) await this.attestationResponseMirror.stop();
         if(this.stateAnchorPublisher) await this.stateAnchorPublisher.stop();
         if(this.retractionConsensus) this.retractionConsensus.stop();
         if(this.stateCheckpoints) await this.stateCheckpoints.stop();

@@ -52,6 +52,10 @@ const { buildResponseCanonicalRaw, isCanonicalIntSpelling } = require('./attest_
 // Era selection, keyed on the REQUEST's own block (never the response's).
 const { isResponseMirrorActive } = require('./attest_response_mirror_activation.js');
 const { resolveAttestResponseForwardS } = require('./lib/attest_response_timing.js');
+// Body-size ceiling every proposed/signed response must clear, leader and
+// follower alike (spec §5.3, D40/D41, row 9). Applies in both canonical eras.
+const { ATTEST_RESPONSE_BODY_MAX_BYTES, bodyByteLength, assertBodyWithinCap } =
+    require('./lib/attest_response_body_cap.js');
 // 2 minutes per request lifecycle. Lives in constants.js because
 // AttestationRound floors its `seen` window on the same default; see there.
 const { DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS } = require('./constants.js');
@@ -211,6 +215,14 @@ class AttestationConsensus extends EventEmitter {
         // landing in the same tick as an eviction would net out flat and be
         // swallowed by the consumer's rising-count comparison.
         this.roundTimeoutCount = 0;
+
+        // Process-lifetime count of bodies refused for exceeding
+        // ATTEST_RESPONSE_BODY_MAX_BYTES, across all three surfaces the cap
+        // is enforced at: this hub declining to propose its own oversize
+        // body, a peer's oversize PROPOSE, and a peer's oversize PREPARE.
+        // Monotonic and process-scoped, same reading convention as
+        // roundTimeoutCount: alert on a rise, not on a raw nonzero snapshot.
+        this.bodyOverCapRejectCount = 0;
 
         // Early-arrival buffer. With staggered hub polls, the first proposer's
         // PROPOSE often reaches peers before they start their own round.
@@ -568,6 +580,21 @@ class AttestationConsensus extends EventEmitter {
         let myEffective   = mirrorEra ? this._chooseEffectiveTime() : null;
         let mySig     = this._signCanonical(rid, roundState.providerId, myBody, myStatus, myMeta, requestBlock, myEffective);
 
+        // LEADER gate (spec §5.3, D40/D41, row 9): refuse to propose a body over
+        // ATTEST_RESPONSE_BODY_MAX_BYTES rather than let it finalize and die at the
+        // publisher's post-finalization wire check (AttestationPublisher.js:319-324).
+        // Scoped to THIS hub's own candidate only, not the whole round: a peer's body
+        // may still be within cap, so this hub still opens the round below and can
+        // sign for a peer's in-cap proposal even though it has none of its own to
+        // offer.
+        let myBodyOverCap = !!myBody && !assertBodyWithinCap(myBody);
+        if(myBodyOverCap){
+            this.bodyOverCapRejectCount++;
+            console.warn('AttestationConsensus: refusing to propose ' + rid.substring(0,16) +
+                '... (own body is ' + bodyByteLength(myBody) + ' bytes, over ATTEST_RESPONSE_BODY_MAX_BYTES=' +
+                ATTEST_RESPONSE_BODY_MAX_BYTES + '; request is not proposable by this hub)');
+        }
+
         let pending = {
             requestId:    rid,
             request:      roundState.request,
@@ -630,7 +657,7 @@ class AttestationConsensus extends EventEmitter {
             timer:        null
         };
 
-        if(myPubkey && myBody && mySig){
+        if(myPubkey && myBody && mySig && !myBodyOverCap){
             pending.proposals.set(myPubkey, { body: myBody, meta: myMeta, sig: mySig, status: myStatus, effectiveTime: myEffective });
         }
 
@@ -656,7 +683,7 @@ class AttestationConsensus extends EventEmitter {
         this.tornDown.delete(rid);
         this.pending.set(rid, pending);
 
-        if(this.peerManager){
+        if(this.peerManager && !myBodyOverCap){
             this.peerManager.broadcast(ATTEST_PROPOSE, {
                 requestId:  rid,
                 providerId: pending.providerId,
@@ -783,6 +810,19 @@ class AttestationConsensus extends EventEmitter {
         // resolver would have to re-screen.
         if(wireEffective !== null && !this._effectiveTimeWithinFollowerWindow(wireEffective)){
             console.warn('AttestationConsensus: PROPOSE effective_time ' + wireEffective + ' out of window from ' +
+                senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
+            return;
+        }
+
+        // FOLLOWER gate (spec §5.3, D40/D41, row 9). Measured on the DECODED body,
+        // not the base64 wire form the pre-decode length check above bounds: a
+        // proposal that never enters `pending.proposals` can never be selected as
+        // the round's winner and therefore can never be co-signed in a PREPARE, so
+        // this is the point that keeps this hub from ever signing for it.
+        if(!assertBodyWithinCap(body)){
+            this.bodyOverCapRejectCount++;
+            console.warn('AttestationConsensus: oversized PROPOSE body (decoded ' + bodyByteLength(body) +
+                ' bytes, over ATTEST_RESPONSE_BODY_MAX_BYTES=' + ATTEST_RESPONSE_BODY_MAX_BYTES + ') from ' +
                 senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
             return;
         }
@@ -1191,6 +1231,23 @@ class AttestationConsensus extends EventEmitter {
         catch (_) { return; }
         let meta = String(d.meta || '');
         let status = String(d.status || 'ok');
+
+        // FOLLOWER gate (spec §5.3, D40/D41, row 9), run before this hub can adopt
+        // or co-sign ANY PREPARE-carried body. A PREPARE can be the very first place
+        // a Byzantine leader (or, in byte_equality, a corroborating peer) introduces
+        // a body: the A-F4 corroboration path below signs over a peer's PREPARE
+        // directly and never re-derives it from a stored proposal, so the
+        // _handlePropose gate alone does not cover every path into a signature.
+        // Once a winner is already established this hub signs over
+        // `pending.winner.body` (already gated at establishment), never over this
+        // wire `body`, so a late echo's own decoded length is harmless either way.
+        if(!assertBodyWithinCap(body)){
+            this.bodyOverCapRejectCount++;
+            console.warn('AttestationConsensus: oversized PREPARE body (decoded ' + bodyByteLength(body) +
+                ' bytes, over ATTEST_RESPONSE_BODY_MAX_BYTES=' + ATTEST_RESPONSE_BODY_MAX_BYTES + ') from ' +
+                senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
+            return;
+        }
 
         if(!pending.winner && status !== 'ok'){
             // NON-OK adoption (Phase 4). A non-ok outcome is DETERMINISTIC

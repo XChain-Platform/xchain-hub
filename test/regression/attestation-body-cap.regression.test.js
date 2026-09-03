@@ -33,6 +33,12 @@ describe('Regression: Attestation body_b64 size cap', function () {
     const PROVIDER_ID  = 'http_get';
     const MAX_RESP     = 32768;
     const MAX_B64      = Math.ceil(MAX_RESP * 1.4);   // 45876
+    // A body that clears BOTH gates: the wire-side base64 ceiling above and the
+    // protocol body cap (ATTEST_RESPONSE_BODY_MAX_BYTES, 8189 decoded bytes)
+    // that every follower applies before it will sign. 10916 base64 chars
+    // decode to 8187 bytes; MAX_B64 decodes to 34407 and is wire-legal but
+    // over the body cap, so it can no longer stand in for "legitimate".
+    const LEGIT_B64    = 10916;
     const SENDER_PK    = 'cd'.repeat(32);
 
     let hub, consensus;
@@ -101,7 +107,7 @@ describe('Regression: Attestation body_b64 size cap', function () {
 
         it('lets a legitimately-sized body through to verification @regression-p0', function () {
             let verify = sinon.stub(ValidatorIdentity, 'verify').returns(false);
-            consensus._handlePropose(envelope('ATTEST_PROPOSE', MAX_B64));
+            consensus._handlePropose(envelope('ATTEST_PROPOSE', LEGIT_B64));
             // Size gate passed → signature verification was reached.
             expect(verify.calledOnce).to.equal(true);
         });
@@ -117,8 +123,14 @@ describe('Regression: Attestation body_b64 size cap', function () {
 
         it('lets a legitimately-sized body through to verification @regression-p0', function () {
             let verify = sinon.stub(ValidatorIdentity, 'verify').returns(false);
-            consensus._handlePrepare(envelope('ATTEST_PREPARE', MAX_B64));
+            consensus._handlePrepare(envelope('ATTEST_PREPARE', LEGIT_B64));
             expect(verify.calledOnce).to.equal(true);
+        });
+
+        it('refuses a wire-legal body whose decoded bytes exceed the body cap before signing @regression-p0', function () {
+            let verify = sinon.stub(ValidatorIdentity, 'verify').returns(true);
+            consensus._handlePrepare(envelope('ATTEST_PREPARE', MAX_B64));
+            expect(consensus.pending.get('rid').prepares.has(SENDER_PK)).to.equal(false);
         });
     });
 });
