@@ -44,6 +44,7 @@ const PriceAggregator    = require('./PriceAggregator.js');
 const OraclePublisher    = require('./OraclePublisher.js');
 const { loadSignerHooks, applySignerHooks } = require('./lib/signer-loader.js');
 const fullnodeActivation = require('./lib/fullnode_activation.js');
+const presence           = require('./lib/oracle_round_presence.js');
 const HubDbBroadcaster   = require('./HubDbBroadcaster.js');
 const CapabilityRegistry = require('./CapabilityRegistry.js');
 const CapabilitySnapshot = require('./CapabilitySnapshot.js');
@@ -914,6 +915,44 @@ class XChainHub {
         }
         let query = "SELECT * FROM price_snapshots WHERE status = 'finalized' ORDER BY round_number DESC, coin_pair ASC LIMIT ?";
         return await this.db.doQuery(query, [limit || 50]);
+    }
+
+    // Per-round PRESENCE over a range of oracle rounds: for each round,
+    // did this hub record it at all, and with what outcome class. getpricesnapshots
+    // returns the rows a hub HAS, so a hub holding nothing for a round is
+    // indistinguishable there from a hub asked about a round that never happened;
+    // this answers over an explicit range, so absence is a reported value.
+    //
+    // Range resolution: an omitted to_round anchors on this hub's highest recorded
+    // round (deliberately NOT the current wall-clock round: the anchor is then a
+    // fact about stored data, and a hub whose newest rounds are all missing reports
+    // a lower to_round, which is itself the divergence signal). Callers comparing
+    // hubs should pass both bounds so every hub answers about the same rounds.
+    async getOracleRoundPresence(fromRound, toRound, limit) {
+        let lim = parseInt(limit, 10);
+        if (!Number.isFinite(lim) || lim <= 0) lim = presence.DEFAULT_RANGE;
+        if (lim > presence.MAX_RANGE) lim = presence.MAX_RANGE;
+
+        let to = parseInt(toRound, 10);
+        if (!Number.isFinite(to)) {
+            let top = await this.db.doQuery('SELECT MAX(round_number) AS max_round FROM price_snapshots', []);
+            to = (top && top[0] && top[0].max_round != null) ? Number(top[0].max_round) : null;
+            // No price_snapshots rows at all: an empty range, not a fabricated one.
+            if (to === null) return { from_round: null, to_round: null, rounds: [], missing: [], digest: null };
+        }
+        let from = parseInt(fromRound, 10);
+        if (!Number.isFinite(from)) from = to - (lim - 1);
+        if (from < 0) from = 0;
+        if (to < from) to = from;
+        // Clamp the span the caller asked for, never the caller's own bounds
+        // silently: from wins, so an explicit from_round is always honoured.
+        if (to - from + 1 > presence.MAX_RANGE) to = from + presence.MAX_RANGE - 1;
+
+        let rows = await this.db.doQuery(
+            'SELECT round_number, coin_pair, status, reference_block, block_timestamp ' +
+            'FROM price_snapshots WHERE round_number BETWEEN ? AND ?', [from, to]);
+        let summary = presence.summarizeRoundPresence(rows, from, to);
+        return { from_round: from, to_round: to, ...summary };
     }
 
     // Oracle price staleness bound in seconds, mirroring the indexer's

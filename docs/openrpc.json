@@ -295,6 +295,50 @@
       }
     },
     {
+      "name": "getoracleroundpresence",
+      "summary": "Per-round oracle PRESENCE over a range: for every round in [from_round, to_round], whether this hub recorded it at all and how it ended (finalized / skipped / disputed / missing), plus the explicit `missing` list and a `digest` over the (round, status) sequence. Poll several hubs over the same range and compare digests to detect federation divergence about which rounds happened. Omitted bounds anchor on this hub's highest recorded round and the last `limit` rounds (default 50, max 1000).",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "from_round",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "to_round",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      }
+    },
+    {
       "name": "getprice",
       "summary": "Latest finalized price for a pair (e.g. BTC/USD).",
       "paramStructure": "by-name",

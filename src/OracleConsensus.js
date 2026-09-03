@@ -57,6 +57,21 @@ const FALLBACK_GRACE_MS = 3000;  // brief grace before fallback proposer takes o
 // window); receivers apply the same grace before accepting such a fallback PROPOSE.
 const DEFAULT_LEADER_TIMEOUT_MS = 30000;  // 30 seconds (< finalization window)
 
+// Slack the round-abandonment watchdog adds on top of the round's own
+// timer ladder before it declares the round lost and writes the durable skipped
+// record. Wide enough that a round finishing at the very edge of its finalization
+// window (or one re-opened by a PROPOSE that landed late) still wins the race and
+// disarms the watchdog, narrow enough that the record lands long before the next
+// round's boundary (rounds are ~10 minutes apart).
+const DEFAULT_ROUND_ABANDON_GRACE_MS = 15000;
+// How many times the watchdog defers to a still-live pending round before writing
+// the skipped record anyway. Each deferral is one more finalization window, so a
+// round stuck behind the _armFinalizeRetry DB-outage self-heal gets a bounded
+// chance to land its snapshot first. Bounded, because the point of the watchdog is
+// that SOMETHING durable is written: an unbounded deferral is the silence it exists
+// to end (a later quorum still upgrades the skipped rows to finalized).
+const ROUND_ABANDON_MAX_REARMS = 3;
+
 // Backoff for the self-heal re-drive of a committed round whose snapshot store keeps
 // failing (item 4281, see _armFinalizeRetry). Starts fast because most DB stalls are
 // brief, caps low enough that a recovered DB is picked up within half a minute.
@@ -116,6 +131,15 @@ class OracleConsensus extends EventEmitter {
         this._singleSourceRounds    = 0;
         this._lastSingleSourceRound = null;
 
+        // Rounds this hub watched open and then recorded as abandoned,
+        // same counter convention as _roundTimeouts. Distinct from it: a timeout
+        // counts only the two PBFT seats that held a pending round, while the
+        // follower seat that never got a PROPOSE at all left no trace anywhere.
+        // Surfaced as abandoned_rounds through OracleRound.getSubmissionsInfo, so
+        // "this hub keeps losing rounds" is legible without a DB query.
+        this._abandonedRounds    = 0;
+        this._lastAbandonedRound = null;
+
         // When each round became ready to finalize (Date.now() at finalizeRound's
         // follower path). The receiver-side leader-timeout grace in _handlePropose
         // is measured from here so every honest hub applies the same window before
@@ -127,6 +151,19 @@ class OracleConsensus extends EventEmitter {
         // stop() or once the round is taken. Only the elected fallback proposer
         // arms one. Map<round, Timeout>.
         this.leaderTimers = new Map();
+
+        // Armed round-abandonment watchdogs, keyed by round.
+        // Map<round, { timer, btcBlockHeight, btcBlockTime, rearms }>.
+        //
+        // EVERY seat that observes a round open arms one, so a round that dies
+        // between opening and finalizing still becomes a durable 'skipped' record
+        // HERE rather than only on whichever hub happened to take one of the
+        // early store-skipped branches in finalizeRound. Before this, the
+        // follower seats (leader submitted, someone else is the elected fallback)
+        // and both PBFT timeout seats returned in silence, so testnet rounds
+        // 25-27 finalized nowhere and left a row on exactly one of five
+        // validators: the federation could not even agree the rounds happened.
+        this.roundWatchdogs = new Map();
 
         // Already finalized rounds (prevents double-store), bounded FIFO (L1):
         // this set only ever grew (~1 entry per round), leaking for the process
@@ -208,6 +245,13 @@ class OracleConsensus extends EventEmitter {
                 'Intended only for a deliberate single-host deployment.');
         }
         this.leaderTimeout       = parseInt(process.env.ORACLE_LEADER_TIMEOUT_MS) || DEFAULT_LEADER_TIMEOUT_MS;
+        // Extra slack on top of the round's own timer ladder before the
+        // abandonment watchdog declares the round lost. Additive only:
+        // _roundAbandonMs() derives the window from the ladder, so a deployment
+        // that widens ORACLE_FINALIZATION_TIMEOUT widens the watchdog with it and
+        // this knob never has to be retuned alongside it.
+        this.roundAbandonGraceMs = positiveIntConfig(process.env.ORACLE_ROUND_ABANDON_GRACE_MS,
+            DEFAULT_ROUND_ABANDON_GRACE_MS, 'ORACLE_ROUND_ABANDON_GRACE_MS');
         // A proposed pair this follower can verify against NOTHING (no live
         // local aggregate AND no finalized history) used to fall through with only
         // the (0, PRICE_MAX) clamp, letting a Byzantine leader who is the sole
@@ -337,6 +381,8 @@ class OracleConsensus extends EventEmitter {
         }
         for (let [, t] of this.leaderTimers) clearTimeout(t);
         this.leaderTimers.clear();
+        for (let [, w] of this.roundWatchdogs) { if (w && w.timer) clearTimeout(w.timer); }
+        this.roundWatchdogs.clear();
         this.pendingRounds.clear();
         this.roundReadyAt.clear();
         this.earlyMessages.clear();
@@ -412,6 +458,11 @@ class OracleConsensus extends EventEmitter {
             if (i !== -1) this._locallySkippedOrder.splice(i, 1);
         }
         if (this.finalized.has(round)) return;
+        // The round reached a durable outcome, so the abandonment watchdog has
+        // nothing left to record. Disarmed here as well as in
+        // _clearRoundTracking, because the single-node finalize path never calls
+        // that.
+        this._disarmRoundWatchdog(round);
         this.finalized.add(round);
         this._finalizedOrder.push(round);
         if (this._finalizedOrder.length > this.finalizedMax) {
@@ -653,6 +704,14 @@ class OracleConsensus extends EventEmitter {
             });
             return;
         }
+
+        // Past every early-skip branch: this hub has a usable submission set and a
+        // quorum for the round, so from here the round is OPEN here whatever seat
+        // this hub takes (leader, elected fallback, or a follower that only waits).
+        // Arm the abandonment watchdog before the seat split so all three leave the
+        // same durable record when the round dies. Disarmed by
+        // _clearRoundTracking on finalize and on an immediate skip.
+        this._armRoundWatchdog(round, btcBlockHeight, btcBlockTime);
 
         let leader   = this._getLeader(round, memberPubkeys);
         let myAddr   = this.peerManager.validatorAddr;
@@ -1346,6 +1405,12 @@ class OracleConsensus extends EventEmitter {
                 }, this.finalizationTimeout)
             };
             this.pendingRounds.set(round, pending);
+            // A PROPOSE is the other way a round becomes OPEN on this hub: a seat
+            // whose own finalizeRound never ran for this round (its round scheduler
+            // missed the boundary, or it had no submissions of its own) still
+            // observed the round through gossip and must hold a record of it.
+            // Idempotent with the finalizeRound arming.
+            this._armRoundWatchdog(round, pending.btcBlockHeight, pending.btcBlockTime);
             // Replay any PREPARE/COMMIT that arrived while this handler was
             // awaiting the snapshot fetch above (finding F7).
             this._drainEarlyMessages(round);
@@ -2306,6 +2371,89 @@ class OracleConsensus extends EventEmitter {
             clearTimeout(t);
             this.leaderTimers.delete(round);
         }
+        this._disarmRoundWatchdog(round);
+    }
+
+    // --- Round-abandonment watchdog ---
+
+    // How long after a round opens here this hub waits before calling it lost.
+    // Derived from the round's own timer ladder (leader timeout -> fallback grace
+    // -> finalization window) plus slack, so it is always the LAST timer to fire
+    // and never pre-empts a round that is still legitimately in flight.
+    _roundAbandonMs() {
+        return this.leaderTimeout + FALLBACK_GRACE_MS + this.finalizationTimeout
+             + this.roundAbandonGraceMs;
+    }
+
+    // Arm the watchdog for a round this hub has observed OPEN: it saw a usable
+    // submission set at the block boundary, or a peer's PROPOSE opened the round
+    // here. Idempotent per round, and a no-op once the round already has a durable
+    // outcome (finalized, or a skipped row already stored).
+    //
+    // btcBlockHeight/btcBlockTime are the round's real BTC anchor, carried so the
+    // skipped row this may eventually write names the SAME (round, reference_block,
+    // block_timestamp) every other hub writes. Re-deriving them at fire time would
+    // stamp each hub's rows with its own wall clock and make the per-round presence
+    // digests differ for a round every hub actually agreed on.
+    _armRoundWatchdog(round, btcBlockHeight, btcBlockTime) {
+        if (this.finalized.has(round) || this.locallySkipped.has(round)) return;
+        if (this.roundWatchdogs.has(round)) return;
+        let entry = {
+            timer:          null,
+            btcBlockHeight: btcBlockHeight,
+            btcBlockTime:   btcBlockTime,
+            rearms:         0
+        };
+        this.roundWatchdogs.set(round, entry);
+        this._scheduleRoundWatchdog(round, entry, this._roundAbandonMs());
+    }
+
+    _scheduleRoundWatchdog(round, entry, delay) {
+        entry.timer = setTimeout(() => this._onRoundAbandoned(round), delay);
+        // A watchdog must never be the reason the process stays alive; stop() is
+        // what tears it down on a clean shutdown, matching the leader timers.
+        if (entry.timer && typeof entry.timer.unref === 'function') entry.timer.unref();
+    }
+
+    _disarmRoundWatchdog(round) {
+        let entry = this.roundWatchdogs.get(round);
+        if (!entry) return;
+        if (entry.timer) clearTimeout(entry.timer);
+        this.roundWatchdogs.delete(round);
+    }
+
+    // The round opened here and never reached a durable outcome. Write the skipped
+    // record so this hub's absence of a snapshot is a stated fact rather than a
+    // hole, and so hub-to-hub presence comparison (getoracleroundpresence) can tell
+    // "we all lost this round" apart from "this hub never saw it".
+    _onRoundAbandoned(round) {
+        let entry = this.roundWatchdogs.get(round);
+        if (!entry) return;
+        if (this.finalized.has(round) || this.locallySkipped.has(round)) {
+            this.roundWatchdogs.delete(round);
+            return;
+        }
+        // Still in flight (a late PROPOSE re-opened it, or _armFinalizeRetry is
+        // re-driving a quorum-signed round behind a DB stall). Give it another
+        // finalization window, bounded, then record regardless.
+        let pending = this.pendingRounds.get(round);
+        if (pending && entry.rearms < ROUND_ABANDON_MAX_REARMS) {
+            entry.rearms++;
+            this._scheduleRoundWatchdog(round, entry,
+                this.finalizationTimeout + this.roundAbandonGraceMs);
+            return;
+        }
+        this.roundWatchdogs.delete(round);
+        this._abandonedRounds++;
+        this._lastAbandonedRound = round;
+        console.warn('Oracle: Round ' + round + ' opened here but never finalized; ' +
+            'recording it as abandoned so this hub holds a durable record of the round.');
+        // NOT _markFinalized: the skip is local and reprocessable, so a late
+        // federation quorum still upgrades these rows to 'finalized' (#7).
+        this._storeSkippedRound(round, entry.btcBlockHeight, entry.btcBlockTime,
+            'round abandoned before finalization').catch(err =>
+                console.error('Oracle: Error storing abandoned round ' + round + ':',
+                    err && err.message ? err.message : err));
     }
 
     // Hub F3: when the round has a block-locked snapshot, the leader

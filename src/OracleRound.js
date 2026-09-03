@@ -484,6 +484,18 @@ class OracleRound {
             round_timeouts:           this.oracleConsensus
                 ? (this.oracleConsensus._roundTimeouts || 0)
                 : 0,
+            // Rounds that opened on this hub and were recorded as abandoned before
+            // finalizing. Broader than round_timeouts, which only sees the
+            // two PBFT seats that held a pending round: the follower seat waiting on
+            // a PROPOSE that never came moved no counter at all, which is how a lost
+            // round left four of five validators with nothing to show for it.
+            abandoned_rounds:         this.oracleConsensus
+                ? (this.oracleConsensus._abandonedRounds || 0)
+                : 0,
+            lastAbandonedRound:       this.oracleConsensus
+                ? (this.oracleConsensus._lastAbandonedRound != null
+                    ? this.oracleConsensus._lastAbandonedRound : null)
+                : null,
             // Rounds finalized with only one uncorrelated upstream behind a
             // normally-multi-source pair. A different failure from round_timeouts above:
             // the round reached quorum and was signed normally, so nothing else in this

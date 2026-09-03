@@ -192,8 +192,19 @@ handler, governance, and attestation subsystems are **all enabled only when
 | `ORACLE_REWARD_PER_ROUND` | No | `10.00000000` | Reward per round. |
 | `ORACLE_FINALIZATION_TIMEOUT` | No | `120000` | Finalization timeout (ms). |
 | `ORACLE_MIN_SUBMISSIONS` | No | `1` | Minimum submissions to finalize a round. |
+| `ORACLE_ROUND_ABANDON_GRACE_MS` | No | `15000` | Slack added to the round timer ladder before a round that opened here but never finalized is recorded as skipped. Rarely set: the watchdog window already tracks `ORACLE_FINALIZATION_TIMEOUT` and the leader timeout. |
 | `SLASH_DEVIATION_THRESHOLD` | No | `0.05` | Price-deviation slashing threshold (fraction). |
 | `SLASH_MISSED_ROUNDS_THRESHOLD` | No | `30` | Missed-rounds slashing threshold. |
+
+## PRICE batch rail (`OraclePublisher`)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `ORACLE_BATCH_WINDOW_ROUNDS` | No | derived | Rounds per published batch. Derived from the fee-price staleness bound rather than chosen, and an operator value above that ceiling is clamped with a warning: a window too wide leaves the newest snapshot older than `ORACLE_MAX_PRICE_AGE_SECONDS` for most of every window, and native-coin fees stop being priceable. `getStats()` reports the ceiling, the cadence and the worst-case snapshot age. |
+| `ORACLE_BATCH_GRACE_MS` | No | `300000` | How long after a window closes the leader waits before assembling it, so late rounds still land in the buffer. |
+| `ORACLE_BATCH_BUFFER_MAX_ROUNDS` | No | `4032` | Age bound on the durable buffer, so a hub whose batches never land does not grow it without limit. |
+| `ORACLE_BATCH_LANDING_RESERVE_MS` | No | see `src/lib/price_batch_cadence.js` | Time budgeted for a batch to broadcast, confirm and index, counted against the staleness bound when the window ceiling is derived. |
+| `ORACLE_BATCH_CATCHUP_INTERVAL_MS` | No | `3600000` (1h) | How often a closed window that is still buffered and unpublished is re-proposed. A window whose signing round misses quorum publishes nothing and is deliberately left re-proposable; this sweep is what re-proposes it, at most four windows per pass, oldest first. `batchWindowsAwaitingRetry` in `getStats()` is the backlog, and a count that does not fall across sweeps means the federation cannot agree on the content, not that the rail is idle. |
 
 ## Price feeds
 
@@ -382,6 +393,7 @@ resolves from `p2pConfig`; the env var is the highest-precedence override.
 | `CHECKPOINT_ROUND_TIMEOUT_MS` | No | `60000` | Signing-round timeout (ms) before a checkpoint round is abandoned. |
 | `CHECKPOINT_COSIGN_TOLERANCE_BLOCKS` | No | `144` | How many blocks behind a checkpoint's `snapshot_block` a follower's own indexer may lag and still co-sign. |
 | `CHECKPOINT_STALL_LOG_MS` | No | `3600000` (1h) | Throttle window (ms) for the "checkpoint cadence STALLED" warning. The poll runs far faster than the cadence, so the reason is logged at most once per window; the `cadence_stalls` counter carries the true rate. |
+| `CHECKPOINT_FROZEN_TIP_TICKS` | No | `60` | Frozen-tip livelock meter. The cadence leader is `pubkeys[btcBlock % N]`, so a hub that is due, in the set, but not in the slot is normal rotation only while the BTC tip moves; after this many consecutive polls at the SAME BTC snapshot block the tick is counted in `cadence_stalls` with a reason naming the frozen block (`frozen_tip_ticks` / `frozen_tip_block` in `getcheckpointstats` show the live count). At the default 60s poll this is one hour. Non-positive values fall back to 60. |
 
 ## State-anchor publisher (`StateAnchorPublisher`)
 

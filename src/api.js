@@ -82,6 +82,7 @@ const { parseCorsOrigin } = require('./lib/corsOrigin.js');
 // The per-IP cap answers in JSON-RPC and stands down for the hub's own
 // stack, so chain-only price recovery works at shipped defaults.
 const { buildRateLimitOptions, parseExemptLocal } = require('./lib/rate_limit_policy.js');
+const roundPresence  = require('./lib/oracle_round_presence.js');   // oracle round presence/divergence
 const { resolveMaxBatch, makeRpcBatchGuard } = require('./rpcBatchGuard.js');   // JSON-RPC batch cardinality cap
 // #1299: single source of truth for the co-sign/slash deviation band (no re-declared 0.05 literal).
 // #2653: oracle round-interval/submission-window defaults shared with OracleRound.js and XChainHub.js.
@@ -788,6 +789,27 @@ async function startApi(){
                 return snapshots;
             } catch (err) {
                 return {error: "error fetching price snapshots"};
+            }
+        },
+
+        // Per-round PRESENCE over an explicit range, so "this hub has no
+        // record of round 26" is a REPORTED value rather than an empty result set.
+        // Poll every hub over the same from_round/to_round and compare `digest`:
+        // equal digests mean the federation agrees on which rounds happened and how
+        // they ended; unequal ones are localised by `missing` and the per-round
+        // statuses. bin/oracle-round-presence.js does exactly that across a fleet.
+        async getoracleroundpresence({from_round, to_round, limit}){
+            for (let [name, v] of [['from_round', from_round], ['to_round', to_round], ['limit', limit]]) {
+                if (v !== undefined && v !== null && !Number.isFinite(Number(v)))
+                    return {error: name + ' must be a number'};
+            }
+            let limNum = Number(limit);
+            if (limit !== undefined && limit !== null && (limNum <= 0 || limNum > roundPresence.MAX_RANGE))
+                return {error: 'limit must be between 1 and ' + roundPresence.MAX_RANGE};
+            try {
+                return await hub.getOracleRoundPresence(from_round, to_round, limit);
+            } catch (err) {
+                return {error: "error fetching oracle round presence"};
             }
         },
 
