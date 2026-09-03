@@ -79,6 +79,9 @@ const { HUB_SCHEMA_VERSION } = require('./hub-schema-version');   // stamped on 
 const { buildOraclePricesSnapshotQuery } = require('./oraclePricesSnapshotQuery');   // page (indexer bootstrap) vs latest-per-feed (dashboard) query selection
 const { evaluateAuthPosture } = require('./lib/auth_posture.js');   // boot refuses on an undeclared unauthenticated write surface
 const { parseCorsOrigin } = require('./lib/corsOrigin.js');
+// The per-IP cap answers in JSON-RPC and stands down for the hub's own
+// stack, so chain-only price recovery works at shipped defaults.
+const { buildRateLimitOptions, parseExemptLocal } = require('./lib/rate_limit_policy.js');
 const { resolveMaxBatch, makeRpcBatchGuard } = require('./rpcBatchGuard.js');   // JSON-RPC batch cardinality cap
 // #1299: single source of truth for the co-sign/slash deviation band (no re-declared 0.05 literal).
 // #2653: oracle round-interval/submission-window defaults shared with OracleRound.js and XChainHub.js.
@@ -102,6 +105,14 @@ const HUB_API_KEY        = process.env.HUB_API_KEY || '';
 // env, so keyless stays possible but is always a stated choice, never a default.
 const HUB_ALLOW_UNAUTHENTICATED = (process.env.HUB_ALLOW_UNAUTHENTICATED || '').toLowerCase() === 'true';
 const HUB_RATE_LIMIT_RPM = parseInt(process.env.HUB_RATE_LIMIT_RPM) || 100;
+// Loopback and private-range callers skip the per-IP cap by default. The
+// caller this protects is the node's OWN indexer replaying a batch-bearing chain: it
+// pushes one pushpricebatch per batch block as fast as it reads blocks, blows 100/min
+// in seconds, and without this exemption needs HUB_RATE_LIMIT_RPM=60000 set by hand before
+// recovery runs at all. Keyed on req.ip (post-trust-proxy), so a public client arriving through a
+// private-IP reverse proxy is still throttled; see src/lib/rate_limit_policy.js.
+// Set HUB_RATE_LIMIT_EXEMPT_LOCAL=false to cap every caller including those.
+const HUB_RATE_LIMIT_EXEMPT_LOCAL = parseExemptLocal(process.env.HUB_RATE_LIMIT_EXEMPT_LOCAL);
 // A comma-separated ALLOWLIST, not a single origin: the hub is called
 // cross-origin by several wallet shells at once. parseCorsOrigin is what makes
 // that work - handing `cors` the raw string echoes it verbatim to every caller
@@ -410,12 +421,28 @@ async function startApi(){
     app.use(helmet());
     app.use(express.json());
     app.use(cors({ origin: CORS_ORIGIN }));
-    app.use(rateLimit({
-        windowMs: 60 * 1000,
-        limit: HUB_RATE_LIMIT_RPM,
-        standardHeaders: true,
-        legacyHeaders: false
-    }));
+    // Per-IP cap. The options (JSON-RPC 429 body, loopback/private exemption) live in
+    // src/lib/rate_limit_policy.js so they are unit-testable; api.js self-starts on
+    // require, so nothing declared inline here could ever be asserted against.
+    let rateLimitedLogged = 0;
+    app.use(rateLimit(buildRateLimitOptions({
+        rpm:         HUB_RATE_LIMIT_RPM,
+        windowMs:    60 * 1000,
+        exemptLocal: HUB_RATE_LIMIT_EXEMPT_LOCAL,
+        // One line per minute at most: a throttled client retries hard by definition, and
+        // logging every rejection turns a burst into its own outage.
+        onLimited: (facts) => {
+            let now = Date.now();
+            if(now - rateLimitedLogged < facts.windowMs) return;
+            rateLimitedLogged = now;
+            console.warn('Hub API rate limit: a caller exceeded ' + facts.limit +
+                ' req/' + Math.round(facts.windowMs / 1000) + 's; raise HUB_RATE_LIMIT_RPM if this is legitimate traffic');
+        }
+    })));
+    console.log('Hub API rate limit: ' + HUB_RATE_LIMIT_RPM + ' req/min per IP' +
+        (HUB_RATE_LIMIT_EXEMPT_LOCAL
+            ? ' (loopback and private-range callers exempt; HUB_RATE_LIMIT_EXEMPT_LOCAL=false to enforce)'
+            : ' (enforced for every caller, including loopback and private-range)'));
 
     // Prometheus /metrics plus a structured log shim, both DEFAULT OFF.
     // Nothing is registered and no timer starts unless METRICS_ENABLED (and, for
