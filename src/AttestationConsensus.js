@@ -46,6 +46,12 @@ const ValidatorIdentity = require('./ValidatorIdentity.js');
 const eq                = require('./equivocation_header.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { positiveIntConfig } = require('./lib/config_int.js');
+// The response canonical in both eras, and the spelling rule the appended field
+// must obey. Byte-twinned with the indexer's copy; never reimplement either here.
+const { buildResponseCanonicalRaw, isCanonicalIntSpelling } = require('./attest_response_canonical.js');
+// Era selection, keyed on the REQUEST's own block (never the response's).
+const { isResponseMirrorActive } = require('./attest_response_mirror_activation.js');
+const { resolveAttestResponseForwardS } = require('./lib/attest_response_timing.js');
 // 2 minutes per request lifecycle. Lives in constants.js because
 // AttestationRound floors its `seen` window on the same default; see there.
 const { DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS } = require('./constants.js');
@@ -74,6 +80,30 @@ const NONOK_THROUGHPUT_PER_BLOCK = DEFAULT_NONOK_PUBLISHED_MAX / 100;
 // be stored, hashed into the canonical, and re-broadcast unbounded.
 const ATTEST_META_MAX_LENGTH   = 256;
 const PENDING_EVICT_MS         = 10000;   // hold finalized state ~10s for late-arriving duplicates, then evict
+
+// Follower acceptance window for a leader-chosen mirror-era `effective_time`,
+// expressed as slack either side of the value this hub itself would have picked
+// (`now + ATTEST_RESPONSE_FORWARD_S`).
+//
+// CENTRED ON THE EXPECTATION, which is a tighter shape than the cross-chain
+// relay's `now + RELAY_MIN_FUTURE_S .. now + 3600` (CrossChainCallEngine.js:604-607),
+// and deliberately so. There the producer margin is per-chain and operator-tunable
+// (XCALL_RELAY_MARGIN_BLOCKS), so a follower genuinely cannot predict an honest
+// leader's value and can only bound the range it must not leave. Here the margin
+// is a FROZEN protocol constant every hub resolves from the same source, so an
+// honest leader's stamp differs from this hub's expectation only by clock skew
+// and one gossip hop. A proposal far from it is a misconfigured or hostile
+// leader, not a slow one, and refusing it costs an honest round nothing.
+//
+// The window is asymmetric for the relay's reasons, adapted: the LOW guard is a
+// propagation floor (a value at or behind the fleet's clocks makes the row
+// eligible the instant it lands, so an indexer already holding it applies a
+// block earlier than one still receiving it, and their action-index counters
+// fork for good), while the HIGH guard is a griefing bound (a far-future row
+// pins the callback out past the request's deadline and the response is never
+// applied at all).
+const ATTEST_RESPONSE_EFFECTIVE_TIME_SLACK_BEHIND_S = 60;
+const ATTEST_RESPONSE_EFFECTIVE_TIME_SLACK_AHEAD_S  = 3600;
 
 class AttestationConsensus extends EventEmitter {
 
@@ -523,11 +553,28 @@ class AttestationConsensus extends EventEmitter {
         // (see AttestationRound); the canonical binds the status, so the sig
         // is only ever valid for the outcome the proposer actually observed.
         let myStatus  = roundState.myProposal.status || 'ok';
-        let mySig     = this._signCanonical(rid, roundState.providerId, myBody, myStatus, myMeta, Number(roundState.request.block_index));
+
+        // Era selection for the WHOLE round, decided once from the request's own
+        // block. Every canonical below reads these two fields rather than
+        // re-evaluating the activation, so a round cannot straddle the height even
+        // if the fleet crosses it mid-round.
+        let requestBlock  = Number(roundState.request.block_index);
+        let mirrorEra     = this._isMirrorEra(requestBlock);
+        // This hub's candidate stamp, picked here at proposal time. It is the
+        // ROUND's effective time only if this hub is the elected leader; every hub
+        // settles on the leader's in _resolveRoundEffectiveTime. Picking one
+        // regardless is what lets any responsible hub lead without a second round
+        // trip, and it is the value this hub's own PROPOSE signature covers.
+        let myEffective   = mirrorEra ? this._chooseEffectiveTime() : null;
+        let mySig     = this._signCanonical(rid, roundState.providerId, myBody, myStatus, myMeta, requestBlock, myEffective);
 
         let pending = {
             requestId:    rid,
             request:      roundState.request,
+            // Mirror-era gate and the round's currently-settled effective_time.
+            // Held on `pending` so every handler for this rid reads one decision.
+            mirrorEra:    mirrorEra,
+            effectiveTime: myEffective,
             providerId:   roundState.providerId,
             redundancy:   roundState.redundancy,
             snapshot:     snapshot,
@@ -584,7 +631,7 @@ class AttestationConsensus extends EventEmitter {
         };
 
         if(myPubkey && myBody && mySig){
-            pending.proposals.set(myPubkey, { body: myBody, meta: myMeta, sig: mySig, status: myStatus });
+            pending.proposals.set(myPubkey, { body: myBody, meta: myMeta, sig: mySig, status: myStatus, effectiveTime: myEffective });
         }
 
         pending.timer = setTimeout(() => {
@@ -617,7 +664,8 @@ class AttestationConsensus extends EventEmitter {
                 meta:       String(myMeta || ''),
                 status:     myStatus,
                 sig_pubkey: myPubkey,
-                sig:        mySig
+                sig:        mySig,
+                ...this._effectiveTimeWireFields(pending)
             });
         }
 
@@ -715,16 +763,34 @@ class AttestationConsensus extends EventEmitter {
             body = Buffer.from(String(d.body_b64 || ''), 'base64');
         } catch (_) { return; }
         let meta = String(d.meta || '');
-        let canonical = this._buildCanonical(rid, pending.providerId, body, String(d.status || 'ok'), meta, Number(pending.request.block_index));
+        // Mirror era: the proposer signed over ITS OWN stamp, so the canonical that
+        // verifies its signature is built from the wire value, not from this hub's.
+        // Spelling guard first (see _readWireEffectiveTime).
+        let wireEffective = this._readWireEffectiveTime(pending, d, 'PROPOSE', senderPubkey, rid);
+        if(wireEffective === undefined) return;
+        let canonical = this._buildCanonical(rid, pending.providerId, body, String(d.status || 'ok'), meta, Number(pending.request.block_index), wireEffective);
         if(!ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig || ''), senderPubkey)){
             console.warn('AttestationConsensus: bad PROPOSE sig from ' + senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '...');
+            return;
+        }
+        // Bound it here as well as at the PREPARE adoption sites, because the
+        // ELECTED LEADER's proposal is where _resolveRoundEffectiveTime takes the
+        // round's stamp from: an unbounded value reaching that resolver would be a
+        // leader-chosen field adopted without ever having been checked. An honest
+        // proposal is inside the window by construction, so this refuses only a
+        // misconfigured or hostile proposer, and refusing the whole proposal (rather
+        // than just the field) keeps `proposals` free of entries whose stamp the
+        // resolver would have to re-screen.
+        if(wireEffective !== null && !this._effectiveTimeWithinFollowerWindow(wireEffective)){
+            console.warn('AttestationConsensus: PROPOSE effective_time ' + wireEffective + ' out of window from ' +
+                senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
             return;
         }
 
         // Store (idempotent; dedup by sender pubkey). Status is trusted only
         // because the sig was just verified over a canonical that binds it.
         if(!pending.proposals.has(senderPubkey)){
-            pending.proposals.set(senderPubkey, { body: body, meta: meta, sig: String(d.sig), status: String(d.status || 'ok') });
+            pending.proposals.set(senderPubkey, { body: body, meta: meta, sig: String(d.sig), status: String(d.status || 'ok'), effectiveTime: wireEffective });
             // A-F1 liveness: a judge_model leader PREPARE that arrived before this
             // follower had collected `need` proposals was buffered (see
             // _handlePrepare) so it could be hash-checked against real proposals
@@ -862,6 +928,11 @@ class AttestationConsensus extends EventEmitter {
         pending.winner = winner;
         pending.status = 'ok';
 
+        // Settle the round's single effective_time on the leader's, before any
+        // canonical below is built from it. Every hub that reaches this line holds
+        // the same proposals, so every hub settles on the same bytes.
+        this._resolveRoundEffectiveTime(pending);
+
         // Walk back through the proposals and collect any sigs that match the winner.
         // Proposals that diverge from the winner are slash candidates for
         // byte_equality providers (e.g. http_get). For judge_model the
@@ -877,14 +948,23 @@ class AttestationConsensus extends EventEmitter {
         // does NOT verify over the winner canonical. Re-verify here before counting it,
         // mirroring _handlePrepare (614) and _handleCommit; an unverifiable sig inflates
         // signatures.size and the indexer would deterministically reject the response.
-        let winnerCanonical = this._buildCanonical(rid, pending.providerId, winner.body, pending.status, winner.meta, Number(pending.request.block_index)).toString('utf8');
+        let winnerCanonical = this._buildCanonical(rid, pending.providerId, winner.body, pending.status, winner.meta, Number(pending.request.block_index), pending.effectiveTime).toString('utf8');
         for(let [pubkey, p] of pending.proposals){
             let pHash = crypto.createHash('sha256').update(p.body).digest();
             let matchesWinner = (Buffer.compare(pHash, winnerHash) === 0 && p.meta === winner.meta);
             if(matchesWinner && ValidatorIdentity.verify(winnerCanonical, String(p.sig), pubkey)){
                 pending.signatures.set(pubkey, p.sig);
             } else if(matchesWinner){
-                console.warn('AttestationConsensus: PROPOSE sig not over winner canonical from ' + String(pubkey).substring(0,16) + '... (not counted)');
+                // In the mirror era a body-matching proposer whose own stamp is not
+                // the round's simply signed a different canonical, which is the
+                // normal case for every hub except the leader. That is expected
+                // arithmetic, not an anomaly, and it is repaired by the re-sign
+                // below (self) or by the peer's own PREPARE (everyone else), so it
+                // must not be logged as one: at redundancy 3 it would print twice
+                // per round forever and bury the genuine status-mismatch case this
+                // warning exists for.
+                if(!(pending.mirrorEra && p.effectiveTime !== pending.effectiveTime))
+                    console.warn('AttestationConsensus: PROPOSE sig not over winner canonical from ' + String(pubkey).substring(0,16) + '... (not counted)');
             } else if(strategy === 'byte_equality' && (p.status || 'ok') === 'ok' && this.hub.slashDetector){
                 // Diverged OK proposal under byte_equality; record as slash
                 // candidate. An honest status='provider_error' report is a
@@ -919,11 +999,34 @@ class AttestationConsensus extends EventEmitter {
             let myP = pending.proposals.get(pending.myPubkey);
             let myBodyOk = myP && myP.body && myP.body.length > 0 && (myP.status || 'ok') === 'ok';
             if(myBodyOk){
-                let reSig = this._signCanonical(rid, pending.providerId, winner.body, pending.status, winner.meta, Number(pending.request.block_index));
+                let reSig = this._signCanonical(rid, pending.providerId, winner.body, pending.status, winner.meta, Number(pending.request.block_index), pending.effectiveTime);
                 if(reSig) pending.signatures.set(pending.myPubkey, reSig);
             } else {
                 console.warn('AttestationConsensus: leader abstaining from judge_model re-sign for ' + rid +
                     ' (no own non-empty ok body fetched; will not vouch for a winner it never evaluated)');
+            }
+        }
+
+        // MIRROR ERA, byte_equality: the same repair the judge_model block above
+        // performs, for the reason that only exists in this era. Our own PROPOSE
+        // signature covered OUR candidate stamp, and the round settled on the
+        // leader's, so the sweep could not transfer it even though our body is
+        // byte-identical to the winner. Without a re-sign this hub broadcasts a
+        // PREPARE carrying no signature of its own and contributes nothing to a
+        // round it fully agrees with, and a three-hub round tops out one signature
+        // short of redundancy and expires.
+        //
+        // The gate is byte_equality's own safety rule, unchanged: sign only if our
+        // independently-fetched body IS the winner. A divergence still abstains.
+        // Legacy-era rounds never enter here, so their signature sets are untouched.
+        if(pending.mirrorEra && strategy !== 'judge_model' && pending.myPubkey
+           && !pending.signatures.has(pending.myPubkey) && pending.proposals.has(pending.myPubkey)){
+            let myP = pending.proposals.get(pending.myPubkey);
+            let myMatches = myP && (myP.status || 'ok') === 'ok' && myP.meta === winner.meta
+                && Buffer.compare(crypto.createHash('sha256').update(myP.body).digest(), winnerHash) === 0;
+            if(myMatches){
+                let reSig = this._signCanonical(rid, pending.providerId, winner.body, pending.status, winner.meta, Number(pending.request.block_index), pending.effectiveTime);
+                if(reSig) pending.signatures.set(pending.myPubkey, reSig);
             }
         }
 
@@ -937,7 +1040,8 @@ class AttestationConsensus extends EventEmitter {
                 meta:       String(winner.meta || ''),
                 status:     pending.status,
                 sig_pubkey: pending.myPubkey,
-                sig:        mySig || null
+                sig:        mySig || null,
+                ...this._effectiveTimeWireFields(pending)
             });
         }
         if(pending.myPubkey) pending.prepares.add(pending.myPubkey);
@@ -974,17 +1078,25 @@ class AttestationConsensus extends EventEmitter {
         pending.winner = { body: Buffer.alloc(0), meta: '' };
         pending.status = status;
 
+        // Same leader-settling as the ok path, for the same reason. A non-ok
+        // outcome is derivable by every hub independently, so every hub reaches
+        // this line on its own and would otherwise stamp its own clock.
+        this._resolveRoundEffectiveTime(pending);
+
         // Error PROPOSEs were signed over this exact canonical (empty body,
-        // empty meta, same status), so their sigs transfer directly. Anything
-        // else (e.g. this hub's own OK proposal ahead of a no_quorum verdict)
-        // needs a fresh signature over the non-ok canonical.
-        let winnerCanonical = this._buildCanonical(rid, pending.providerId, pending.winner.body, status, pending.winner.meta, Number(pending.request.block_index)).toString('utf8');
+        // empty meta, same status), so their sigs transfer directly - in the LEGACY
+        // era. In the mirror era they carried the proposer's own stamp, so only the
+        // leader's transfers and everyone else contributes through its own PREPARE,
+        // exactly as on the ok path. Anything else (e.g. this hub's own OK proposal
+        // ahead of a no_quorum verdict) needs a fresh signature over the non-ok
+        // canonical.
+        let winnerCanonical = this._buildCanonical(rid, pending.providerId, pending.winner.body, status, pending.winner.meta, Number(pending.request.block_index), pending.effectiveTime).toString('utf8');
         for(let [pubkey, p] of pending.proposals){
             if(ValidatorIdentity.verify(winnerCanonical, String(p.sig), pubkey))
                 pending.signatures.set(pubkey, String(p.sig));
         }
         if(pending.myPubkey && pending.proposals.has(pending.myPubkey) && !pending.signatures.has(pending.myPubkey)){
-            let reSig = this._signCanonical(rid, pending.providerId, pending.winner.body, status, pending.winner.meta, Number(pending.request.block_index));
+            let reSig = this._signCanonical(rid, pending.providerId, pending.winner.body, status, pending.winner.meta, Number(pending.request.block_index), pending.effectiveTime);
             if(reSig) pending.signatures.set(pending.myPubkey, reSig);
         }
 
@@ -1000,7 +1112,8 @@ class AttestationConsensus extends EventEmitter {
                 meta:       '',
                 status:     status,
                 sig_pubkey: pending.myPubkey,
-                sig:        mySig
+                sig:        mySig,
+                ...this._effectiveTimeWireFields(pending)
             });
         }
         if(pending.myPubkey) pending.prepares.add(pending.myPubkey);
@@ -1108,11 +1221,25 @@ class AttestationConsensus extends EventEmitter {
                 console.warn('AttestationConsensus: unsigned non-ok PREPARE rejected from ' + senderPubkey.substring(0,16) + '...');
                 return;
             }
-            let canonical = this._buildCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index));
+            // WINNER-ESTABLISHING BLOCK: this hub is about to adopt a field it did
+            // not choose, so this is where the two guards belong. Spelling first
+            // (D59, and buildResponseCanonicalRaw throws on a bad one), bounds
+            // immediately after the signature verify.
+            let wireEffective = this._readWireEffectiveTime(pending, d, 'non-ok PREPARE', senderPubkey, rid);
+            if(wireEffective === undefined) return;
+            let canonical = this._buildCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index), wireEffective);
             if(!ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
                 console.warn('AttestationConsensus: bad non-ok PREPARE sig from ' + senderPubkey.substring(0,16) + '...');
                 return;
             }
+            if(wireEffective !== null && !this._effectiveTimeWithinFollowerWindow(wireEffective)){
+                console.warn('AttestationConsensus: non-ok PREPARE effective_time ' + wireEffective + ' out of window from ' +
+                    senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
+                return;
+            }
+            // Adopt: from here the round's canonical is the establisher's, and the
+            // co-sign below signs those exact bytes.
+            pending.effectiveTime = wireEffective;
             // Self-derivation gate (items 2641, 2579). For byte_equality a
             // no_quorum verdict is LOCALLY DERIVABLE: agree() is a deterministic
             // byte tally over collected proposals, so this hub must not adopt or
@@ -1194,7 +1321,7 @@ class AttestationConsensus extends EventEmitter {
             if(mayCoSign && !pending.signatures.has(pending.myPubkey)){
                 let reSig = ValidatorIdentity.verify(canonical.toString('utf8'), String(myProposal.sig || ''), pending.myPubkey)
                     ? String(myProposal.sig)
-                    : this._signCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index));
+                    : this._signCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index), pending.effectiveTime);
                 if(reSig){
                     pending.signatures.set(pending.myPubkey, reSig);
                     // Echo our endorsing PREPARE exactly once (this !winner
@@ -1208,7 +1335,8 @@ class AttestationConsensus extends EventEmitter {
                             meta:       '',
                             status:     status,
                             sig_pubkey: pending.myPubkey,
-                            sig:        reSig
+                            sig:        reSig,
+                            ...this._effectiveTimeWireFields(pending)
                         });
                         pending.prepares.add(pending.myPubkey);
                     }
@@ -1239,11 +1367,26 @@ class AttestationConsensus extends EventEmitter {
                 console.warn('AttestationConsensus: unsigned PREPARE rejected from ' + senderPubkey.substring(0,16) + '...');
                 return;
             }
-            let canonical = this._buildCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index));
+            // WINNER-ESTABLISHING BLOCK (ok path). Same two guards, same order, same
+            // reasons as the non-ok block above: this is the first point at which a
+            // follower adopts a leader-chosen field.
+            let wireEffective = this._readWireEffectiveTime(pending, d, 'PREPARE', senderPubkey, rid);
+            if(wireEffective === undefined) return;
+            let canonical = this._buildCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index), wireEffective);
             if(!ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
                 console.warn('AttestationConsensus: bad PREPARE sig from ' + senderPubkey.substring(0,16) + '...');
                 return;
             }
+            if(wireEffective !== null && !this._effectiveTimeWithinFollowerWindow(wireEffective)){
+                console.warn('AttestationConsensus: PREPARE effective_time ' + wireEffective + ' out of window from ' +
+                    senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
+                return;
+            }
+            // Adoption itself is deferred to the point the winner is actually set,
+            // below: the A-F1 and A-F4 body checks can still refuse this PREPARE,
+            // and a refused one must leave the round's bytes exactly as it found
+            // them or a leader could shift this hub's stamp with a body it never
+            // proves.
             let prepBodyHash = crypto.createHash('sha256').update(body).digest('hex');
             if(pending.pinnedConsensusStrategy === 'judge_model'){
                 // A-F1: the leader's signature proves authorship, not honesty. agree()
@@ -1294,7 +1437,17 @@ class AttestationConsensus extends EventEmitter {
                 }
                 if(!ownMatches){
                     if(!pending.prepareCandidates) pending.prepareCandidates = new Map();
-                    let key = prepBodyHash + '|' + meta + '|' + status;
+                    // The key is the CANONICAL's identity, not the body's. In the
+                    // mirror era two corroborators that stamped different
+                    // effective_times signed two different canonicals, so counting
+                    // them as one corroboration would adopt a winner and carry a
+                    // signature into its set that does not verify over the round's
+                    // bytes - the exact inflation of signatures.size this handler
+                    // re-verifies everywhere else to prevent. `wireEffective` is null
+                    // for every legacy-era sender, so the suffix is constant there
+                    // and the grouping is exactly the pre-mirror one; the key is a
+                    // process-local map key and is not observable anywhere else.
+                    let key = prepBodyHash + '|' + meta + '|' + status + '|' + String(wireEffective);
                     // One live candidate per sender (AF4-R1): a re-announce replaces the
                     // sender's previous body rather than accumulating. Without this a
                     // Byzantine responsible peer streaming distinct self-signed bodies
@@ -1318,6 +1471,9 @@ class AttestationConsensus extends EventEmitter {
                     for(let [pk, sg] of cand) pending.signatures.set(pk, sg);
                 }
             }
+            // Every check has passed: adopt the establisher's bytes, stamp included,
+            // and only now.
+            pending.effectiveTime = wireEffective;
             pending.signatures.set(senderPubkey, String(d.sig));
             pending.winner = { body: body, meta: meta };
             pending.status = status;
@@ -1343,7 +1499,7 @@ class AttestationConsensus extends EventEmitter {
                     // judge-selected winner even though both are valid. Re-sign
                     // the canonical winner so our vote carries a verifying
                     // signature over the agreed bytes (see _maybeAdvanceFromProposals).
-                    let reSig = this._signCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index));
+                    let reSig = this._signCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index), pending.effectiveTime);
                     if(reSig) pending.signatures.set(pending.myPubkey, reSig);
                     // judge_model elects ONE leader to run agree() + PREPARE; followers
                     // only adopt that winner here and never run agree(), so without
@@ -1362,7 +1518,8 @@ class AttestationConsensus extends EventEmitter {
                             meta:       String(pending.winner.meta || ''),
                             status:     pending.status,
                             sig_pubkey: pending.myPubkey,
-                            sig:        reSig
+                            sig:        reSig,
+                            ...this._effectiveTimeWireFields(pending)
                         });
                         pending.prepares.add(pending.myPubkey);
                     }
@@ -1379,7 +1536,7 @@ class AttestationConsensus extends EventEmitter {
                         // otherwise re-sign the winner canonical.
                         let mySig = ValidatorIdentity.verify(canonical.toString('utf8'), String(myProposal.sig || ''), pending.myPubkey)
                             ? String(myProposal.sig)
-                            : this._signCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index));
+                            : this._signCanonical(rid, pending.providerId, body, status, meta, Number(pending.request.block_index), pending.effectiveTime);
                         if(mySig) pending.signatures.set(pending.myPubkey, mySig);
                         // Prepare-quorum liveness (mirrors the judge_model echo above):
                         // we adopted the winner from a peer's PREPARE BEFORE running our
@@ -1400,7 +1557,8 @@ class AttestationConsensus extends EventEmitter {
                                 meta:       String(pending.winner.meta || ''),
                                 status:     pending.status,
                                 sig_pubkey: pending.myPubkey,
-                                sig:        mySig
+                                sig:        mySig,
+                                ...this._effectiveTimeWireFields(pending)
                             });
                             pending.prepares.add(pending.myPubkey);
                         }
@@ -1415,7 +1573,11 @@ class AttestationConsensus extends EventEmitter {
             // _checkCommitQuorum finalizes on, so the emitted on-chain response
             // could carry signatures that don't all verify over the winner (and
             // be deterministically rejected by the indexer).
-            let canonical = this._buildCanonical(rid, pending.providerId, pending.winner.body, pending.status, pending.winner.meta, Number(pending.request.block_index));
+            // Winner (and, in the mirror era, its stamp) already settled: the sender
+            // must have signed OUR round's bytes. A peer that settled on a different
+            // stamp is not counted here for the same reason a peer that settled on a
+            // different body is not - the emitted response carries one canonical.
+            let canonical = this._buildCanonical(rid, pending.providerId, pending.winner.body, pending.status, pending.winner.meta, Number(pending.request.block_index), pending.effectiveTime);
             if(ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
                 pending.signatures.set(senderPubkey, String(d.sig));
             } else {
@@ -1477,7 +1639,8 @@ class AttestationConsensus extends EventEmitter {
                     meta:       String(pending.winner.meta || ''),
                     status:     pending.status,
                     sig_pubkey: pending.myPubkey,
-                    sig:        mySig
+                    sig:        mySig,
+                    ...this._effectiveTimeWireFields(pending)
                 });
             }
             this._checkCommitQuorum(rid);
@@ -1514,7 +1677,9 @@ class AttestationConsensus extends EventEmitter {
         if(!pending.responsible.some(v => v.pubkey === senderPubkey)) return;
 
         if(d.sig && d.sig_pubkey){
-            let canonical = this._buildCanonical(rid, pending.providerId, pending.winner.body, pending.status, pending.winner.meta, Number(pending.request.block_index));
+            // Over the round's settled canonical, stamp included (see the matching
+            // note in the later-PREPARE branch of _handlePrepare).
+            let canonical = this._buildCanonical(rid, pending.providerId, pending.winner.body, pending.status, pending.winner.meta, Number(pending.request.block_index), pending.effectiveTime);
             if(ValidatorIdentity.verify(canonical.toString('utf8'), String(d.sig), senderPubkey)){
                 pending.signatures.set(senderPubkey, String(d.sig));
             }
@@ -1582,6 +1747,11 @@ class AttestationConsensus extends EventEmitter {
             signatures:   sigsArray,
             leaderPubkey: pending.leaderPubkey,
             role:         pending.role,
+            // The stamp the signatures above actually cover, or null in the legacy
+            // era. The mirror row is not re-derivable without it: a consumer that
+            // recomputed `now + margin` at write time would store a value no
+            // signature covers, and every indexer would skip the row.
+            effectiveTime: pending.effectiveTime == null ? null : pending.effectiveTime,
             // Extra responsible slots the liveness ladder granted this round
             // (attest_responsible_widening_activation.js). Derived from the set consensus actually
             // ran, not recomputed, so the publisher's failover rank is ordered over the
@@ -1621,33 +1791,188 @@ class AttestationConsensus extends EventEmitter {
             this._finalizedEvicted.delete(this._finalizedEvictedOrder.shift());
     }
 
-    // Build the indexer-canonical signing message (returned as UTF-8 Buffer):
-    //   request_id || provider_id || sha256(response_payload) || status || meta
-    // At/above the EQUIV flag-day (WI-2 bump 2) the raw STRING is wrapped in the uniform
-    // header (TAG=XATTEST, ROUND_ID=request_id, VIEW=0; attestation has no view change)
-    // before the Buffer conversion. The gate keys on the REQUEST's block (deterministic
-    // from request_id; the indexer derives the same via request.block_index) + the hub's
-    // network, so the hub and the on-chain verifier flip identically. `requestBlock`
-    // undefined (no request in scope) -> gate OFF -> bare bytes (safe).
-    _buildCanonical(requestId, providerId, body, status, meta, requestBlock){
+    // Build the indexer-canonical signing message (returned as UTF-8 Buffer).
+    //
+    // LEGACY ERA:  request_id || provider_id || sha256(response_payload) || status || meta
+    // MIRROR ERA:  the same five fields, then '|' then the signed effective_time
+    //              (the ATTEST response mirror design, §3.1).
+    //
+    // The field concatenation itself lives in attest_response_canonical.js, which is
+    // byte-twinned with the indexer's copy and carries the argument for why the
+    // separator and the canonical integer spelling are both load-bearing. Nothing
+    // about the string shape is decided here.
+    //
+    // ERA SELECTION IS AN ASSERTION, NOT A BRANCH. The two eras never share a
+    // signature, so a canonical built in the wrong era does not degrade, it makes
+    // every signature over it fail to verify. That symptom is indistinguishable
+    // from a dead federation, a bad identity, a corrupted body or a peer running
+    // the wrong build, so the one thing this must never do is pick an era quietly:
+    // a mirror-era request handed no effective time, or a legacy-era request handed
+    // one, throws here where the caller that got it wrong is still on the stack.
+    //
+    // `effectiveTime` undefined means the CALLER IS NOT ERA-AWARE, which is the
+    // pre-mirror six-argument form kept for the canonical-shape tests and for
+    // hand-built round states. It yields the legacy bytes and skips the assertion.
+    // Every in-round call site passes the seventh argument explicitly (null for the
+    // legacy era, an integer for the mirror era), which is pinned by
+    // test/unit/attestResponseCanonicalEra.test.js so a new call site cannot
+    // reintroduce a per-code-path era.
+    //
+    // The EQUIV header wrapper (WI-2 bump 2) is applied after, exactly where it was:
+    // TAG=XATTEST, ROUND_ID=request_id, VIEW=0 (attestation has no view change). Its
+    // gate keys on the REQUEST's block plus the hub's network, so the hub and the
+    // on-chain verifier flip identically. `requestBlock` undefined (no request in
+    // scope) -> both gates OFF -> bare legacy bytes (safe).
+    _buildCanonical(requestId, providerId, body, status, meta, requestBlock, effectiveTime){
         let responseHash = crypto.createHash('sha256').update(body, 'utf8').digest('hex');
-        let raw = String(requestId) + String(providerId) + responseHash + String(status) + String(meta || '');
+        let et = (effectiveTime === undefined) ? null : effectiveTime;
+        if(effectiveTime !== undefined){
+            let mirrorEra = this._isMirrorEra(requestBlock);
+            if(mirrorEra && et === null)
+                throw new Error('AttestationConsensus: mirror-era request ' + String(requestId).substring(0,16) +
+                    '... (block ' + String(requestBlock) + ') has no effective_time; refusing to build a legacy canonical');
+            if(!mirrorEra && et !== null)
+                throw new Error('AttestationConsensus: legacy-era request ' + String(requestId).substring(0,16) +
+                    '... (block ' + String(requestBlock) + ') was handed effective_time ' + JSON.stringify(et) +
+                    '; refusing to build a mirror-era canonical');
+        }
+        let raw = buildResponseCanonicalRaw({
+            requestId:     requestId,
+            providerId:    providerId,
+            responseHash:  responseHash,
+            status:        status,
+            meta:          meta,
+            effectiveTime: et
+        });
         if(eq.isEquivHeaderActive(requestBlock, this.hub && this.hub.network))
             raw = eq.buildEquivCanonical(eq.ENGINE_TAGS.ATTEST, requestId, 0, raw);
         return Buffer.from(raw, 'utf8');
     }
 
     // Sign the canonical bytes with this validator's identity. Returns
-    // 128-hex-char sig or null when no identity is available.
-    _signCanonical(requestId, providerId, body, status, meta, requestBlock){
+    // 128-hex-char sig or null when no identity is available. Forwards the
+    // era-aware / era-unaware distinction of _buildCanonical by arity, so a
+    // six-argument caller keeps signing exactly the bytes it signed before.
+    _signCanonical(requestId, providerId, body, status, meta, requestBlock, effectiveTime){
         if(!this.identity) return null;
         try {
-            let canonical = this._buildCanonical(requestId, providerId, body, status, meta, requestBlock);
+            let canonical = (arguments.length >= 7)
+                ? this._buildCanonical(requestId, providerId, body, status, meta, requestBlock, effectiveTime)
+                : this._buildCanonical(requestId, providerId, body, status, meta, requestBlock);
             return this.identity.sign(canonical.toString('utf8'));
         } catch (e) {
             console.warn('AttestationConsensus: sign failed:', e);
             return null;
         }
+    }
+
+    // ---- mirror-era effective_time (spec §3.1, §4.2; rows 6 and 8) ----------
+
+    // Seam for tests; every clock read on this path goes through it.
+    _nowSeconds(){
+        return Math.floor(Date.now() / 1000);
+    }
+
+    // True when the response to a request admitted at `requestBlock` is served by
+    // the mirror. Keyed on the request's own block, so the rule for a given request
+    // is fixed the moment it is admitted and cannot move under it mid-round.
+    _isMirrorEra(requestBlock){
+        return isResponseMirrorActive(requestBlock, this.hub && this.hub.network);
+    }
+
+    // The forward margin this hub stamps and bounds against. Resolved per call
+    // rather than cached so a regtest harness can move the seam between rounds;
+    // off regtest it is a constant read and cannot move at all.
+    _forwardSeconds(){
+        return resolveAttestResponseForwardS(this.hub && this.hub.network, this.config);
+    }
+
+    // The LEADER's pick, made once at proposal time: the same shape as the relay's
+    // CrossChainCallEngine._relayEffectiveTime, differing only in which margin it
+    // adds (see lib/attest_response_timing.js for why 120 and not 2400).
+    _chooseEffectiveTime(){
+        return this._nowSeconds() + this._forwardSeconds();
+    }
+
+    // Read a peer-supplied effective_time off a PROPOSE/PREPARE envelope.
+    //
+    // Returns null in the legacy era (nothing on the wire can move those bytes),
+    // an integer when the wire value is usable, and UNDEFINED to mean "reject this
+    // envelope" - a distinct value from the legal null, so a caller cannot confuse
+    // "no field, correctly" with "bad field".
+    //
+    // THE SPELLING GUARD RUNS BEFORE ANY NUMERIC WORK, and before the canonical is
+    // built, for two reasons. First, decision D59: a leader proposing '0120'
+    // survives every Number()-based check, collects an honest quorum, and produces
+    // a row whose canonical no verifier can rebuild, permanently stranding the
+    // request - the same trap the relay pairs its bounds with `allCanonicalInts`
+    // to close (CrossChainCallEngine.js:585-586). Second, mechanically:
+    // buildResponseCanonicalRaw THROWS on a non-canonical spelling by contract, so
+    // the guard cannot be moved after the signature verify without the build
+    // throwing first.
+    _readWireEffectiveTime(pending, d, phase, senderPubkey, rid){
+        if(!pending.mirrorEra) return null;
+        let raw = (d && d.effective_time !== undefined && d.effective_time !== null) ? d.effective_time : null;
+        if(raw === null){
+            console.warn('AttestationConsensus: mirror-era ' + phase + ' with no effective_time from ' +
+                String(senderPubkey).substring(0,16) + '... for ' + String(rid).substring(0,16) + '... (rejected)');
+            return undefined;
+        }
+        if(!isCanonicalIntSpelling(raw)){
+            console.warn('AttestationConsensus: mirror-era ' + phase + ' with non-canonical effective_time ' +
+                JSON.stringify(raw) + ' from ' + String(senderPubkey).substring(0,16) + '... for ' +
+                String(rid).substring(0,16) + '... (rejected, D59)');
+            return undefined;
+        }
+        return Number(raw);
+    }
+
+    // Follower bound on an adopted leader-chosen effective_time. See the slack
+    // constants for why the window is centred on this hub's own expectation rather
+    // than on its bare clock. Also the backstop that closes isCanonicalIntSpelling's
+    // one soft edge: a NUMBER like 1e21 spells as an integer to that guard but
+    // stringifies to '1e+21', and it cannot survive the upper bound here.
+    _effectiveTimeWithinFollowerWindow(effectiveTime){
+        let expected = this._nowSeconds() + this._forwardSeconds();
+        return Number.isSafeInteger(effectiveTime)
+            && effectiveTime >= expected - ATTEST_RESPONSE_EFFECTIVE_TIME_SLACK_BEHIND_S
+            && effectiveTime <= expected + ATTEST_RESPONSE_EFFECTIVE_TIME_SLACK_AHEAD_S;
+    }
+
+    // Settle the round's single effective_time at the moment a winner is
+    // established locally, preferring the ELECTED LEADER's proposed value over this
+    // hub's own candidate.
+    //
+    // WITHOUT THIS A byte_equality ROUND CANNOT CONVERGE IN THE MIRROR ERA. Every
+    // responsible hub runs its own agree() and establishes its own winner there, so
+    // if each kept its own stamp, every hub's PREPARE would carry a signature over
+    // a canonical no peer could rebuild, `signatures` would stall at one per hub,
+    // and the round would run to timeout with all honest hubs agreeing on the body.
+    // Reading the leader's proposal instead gives every hub the same bytes from
+    // data it already holds: the leader is a member of the responsible set
+    // (AttestationRound.js:460), and a hub only reaches a winner after collecting
+    // `need` proposals, so in a healthy round the leader's is among them.
+    //
+    // Falls back to this hub's own candidate when the leader's proposal is absent
+    // (a failed leader fetch, or gossip loss). That round then reaches quorum only
+    // if the peers that matter fell back identically, and otherwise times out and
+    // retries - the same liveness profile a missing leader already has for
+    // judge_model, and a stall rather than a divergence.
+    _resolveRoundEffectiveTime(pending){
+        if(!pending.mirrorEra) return null;
+        let leader = pending.leaderPubkey ? String(pending.leaderPubkey).toLowerCase() : null;
+        let leaderProposal = leader ? pending.proposals.get(leader) : null;
+        if(leaderProposal && leaderProposal.effectiveTime != null)
+            pending.effectiveTime = leaderProposal.effectiveTime;
+        return pending.effectiveTime;
+    }
+
+    // Outbound wire fields carrying the round's effective_time. Empty in the legacy
+    // era so a legacy envelope is byte-identical to the one this engine sent before
+    // the mirror existed, which is what keeps a mixed-version federation working
+    // for every request below the height.
+    _effectiveTimeWireFields(pending){
+        return pending.effectiveTime == null ? {} : { effective_time: pending.effectiveTime };
     }
 }
 
