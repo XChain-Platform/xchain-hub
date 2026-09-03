@@ -67,6 +67,30 @@ const MAPS = [
 ];
 const SCALARS = ['ROLLCALL_EVICT_MISSES', 'ROLLCALL_STREAK_LOOKBACK', 'ROLLCALL_REWARD_AMOUNT'];
 
+// ROLLCALL_ACTIVATION.regtest is resolved at REQUIRE time from
+// XC_ROLLCALL_REGTEST_ACTIVATION, so the only honest way to exercise an armed
+// venue is a fresh copy of the module under that environment.
+//
+// The EXACT original cache entry goes back afterwards, not a fresh require of
+// the same path. Sibling suites (RollcallRound) hold their own reference to the
+// module object and arm regtest by mutating it, so leaving a different instance
+// in the cache strands that mutation and the engine reads an inert map.
+function loadWithEnv(value){
+    const id     = require.resolve(LOCAL_PATH);
+    const cached = require.cache[id];
+    const saved  = process.env[local.ROLLCALL_REGTEST_ENV];
+    if (value === undefined) delete process.env[local.ROLLCALL_REGTEST_ENV];
+    else process.env[local.ROLLCALL_REGTEST_ENV] = value;
+    delete require.cache[id];
+    try { return require(LOCAL_PATH); }
+    finally {
+        if (saved === undefined) delete process.env[local.ROLLCALL_REGTEST_ENV];
+        else process.env[local.ROLLCALL_REGTEST_ENV] = saved;
+        if (cached) require.cache[id] = cached;
+        else delete require.cache[id];
+    }
+}
+
 describe('ROLLCALL activation: hub copy @regression', function () {
 
     // ------------------------------------------------------------------
@@ -75,14 +99,34 @@ describe('ROLLCALL activation: hub copy @regression', function () {
     // ------------------------------------------------------------------
     describe('the eight consensus values this hub will sign against', function () {
 
-        it('pins the per-network activation heights, mainnet INERT', function () {
+        it('pins the per-network activation heights, mainnet and regtest INERT by default', function () {
             // null, not 0 and not a height: the operator owns the mainnet flag day.
-            // regtest is pinned to what the twins currently ship. The record
-            // (xchain-documentation protocol/constants.js) already reads null; see the
-            // note at the foot of this file before changing either number.
+            // regtest is null until the VENUE opts in; arming it by default
+            // wedges every single-coin BTC venue at its first close, because the epoch
+            // close has no DOGE peer to ask and defers rather than reading silence as
+            // absence. All three copies, including the record in
+            // xchain-documentation/protocol/constants.js, resolve it the same way.
             expect(local.ROLLCALL_ACTIVATION.mainnet).to.equal(null);
             expect(local.ROLLCALL_ACTIVATION.testnet).to.equal(151200);
-            expect(local.ROLLCALL_ACTIVATION.regtest).to.equal(0);
+            expect(local.ROLLCALL_ACTIVATION.regtest).to.equal(null);
+        });
+
+        it('names the regtest arming height, and puts it on a real epoch boundary', function () {
+            expect(local.ROLLCALL_REGTEST_ARMED_HEIGHT).to.equal(0);
+            expect(local.ROLLCALL_REGTEST_ARMED_HEIGHT % local.ROLLCALL_INTERVAL_BLOCKS.regtest).to.equal(0);
+            expect(local.ROLLCALL_REGTEST_ENV).to.equal('XC_ROLLCALL_REGTEST_ACTIVATION');
+        });
+
+        it('arms this hub only when the venue opts in, and never a shared-ledger network', function () {
+            const armed = loadWithEnv('armed');
+            expect(armed.ROLLCALL_ACTIVATION.regtest).to.equal(0);
+            expect(armed.isRollcallActive(0, 'regtest')).to.equal(true);
+            // The 2026-09-01 ruling scopes the no-tunable-input rule to networks with a
+            // shared ledger. These two must stay unreachable from the environment.
+            expect(armed.ROLLCALL_ACTIVATION.mainnet).to.equal(null);
+            expect(armed.ROLLCALL_ACTIVATION.testnet).to.equal(151200);
+            expect(loadWithEnv('off').ROLLCALL_ACTIVATION.regtest).to.equal(null);
+            expect(loadWithEnv('nonsense').ROLLCALL_ACTIVATION.regtest).to.equal(null);
         });
 
         it('pins the epoch cadence, accept window, proof delay and DOGE maturity', function () {
@@ -149,8 +193,13 @@ describe('ROLLCALL activation: hub copy @regression', function () {
             expect(local.isRollcallActive(151201, 'testnet')).to.equal(true);
         });
 
-        it('is active from genesis on regtest, epoch 0 included', function () {
-            expect(local.isRollcallActive(0, 'regtest')).to.equal(true);
+        it('is active from genesis on an ARMED regtest venue, epoch 0 included', function () {
+            expect(loadWithEnv('armed').isRollcallActive(0, 'regtest')).to.equal(true);
+        });
+
+        it('arms nothing on regtest while the venue has not opted in', function () {
+            expect(local.isRollcallActive(0, 'regtest')).to.equal(false);
+            expect(local.isRollcallActive(30, 'regtest')).to.equal(false);
         });
 
         it('fails closed on an unknown network or an unparseable height', function () {
@@ -191,15 +240,17 @@ describe('ROLLCALL activation: hub copy @regression', function () {
         });
 
         it('round-trips a close block back to its epoch on an ARMED network', function () {
+            const armed = loadWithEnv('armed');
             for (const [E, net] of [[30, 'regtest'], [60, 'regtest'], [151200, 'testnet']]) {
-                const C = local.rollcallCloseHeight(E, net);
-                expect(local.rollcallEpochClosingAt(C, net), net + ' close ' + C).to.equal(E);
+                const C = armed.rollcallCloseHeight(E, net);
+                expect(armed.rollcallEpochClosingAt(C, net), net + ' close ' + C).to.equal(E);
             }
         });
 
         it('returns null for a block where no epoch closes', function () {
-            expect(local.rollcallEpochClosingAt(43, 'regtest')).to.equal(null);
-            expect(local.rollcallEpochClosingAt(12345, 'regtest')).to.equal(null);
+            const armed = loadWithEnv('armed');
+            expect(armed.rollcallEpochClosingAt(43, 'regtest')).to.equal(null);
+            expect(armed.rollcallEpochClosingAt(12345, 'regtest')).to.equal(null);
         });
 
         it('never closes an epoch on an inert mainnet', function () {
@@ -279,9 +330,10 @@ describe('ROLLCALL activation: hub copy @regression', function () {
     // The third copy, xchain-documentation/protocol/constants.js, is the map of
     // record. The hub is NOT the repo that diffs against it: rollcallActivation
     // .test.js in xchain-indexer already owns that assertion, and duplicating it
-    // here would report one open drift as two. That check is RED at HEAD, on
-    // ROLLCALL_ACTIVATION.regtest: docs de1bb30 ruled regtest INERT (null) on
-    // 2026-08-31 because a single-coin BTC regtest venue has no DOGE peer to prove
-    // an epoch close, and neither vendored twin was propagated. Whoever propagates
-    // it edits three files and the regtest literals pinned above, in one change.
+    // here would report one open drift as two. That check was RED on
+    // ROLLCALL_ACTIVATION.regtest from 2026-08-31, when docs de1bb30 ruled regtest
+    // INERT (null) and neither vendored twin was propagated. It is closed in
+    // all three copies at once: regtest resolves from XC_ROLLCALL_REGTEST_ACTIVATION,
+    // ships inert, and arms at ROLLCALL_REGTEST_ARMED_HEIGHT when a two-chain venue
+    // opts in. Whoever changes that edits three files and the pins above together.
 });
