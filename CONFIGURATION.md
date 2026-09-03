@@ -216,6 +216,33 @@ handler, governance, and attestation subsystems are **all enabled only when
 |---|---|---|---|
 | `HUB_CAPABILITY_CONFIG` | No | `null` | Path to the capability/self-test JSON config (MIN_STAKE thresholds, per-capability self-test blocks). |
 
+## Stake-share monitor (`StakeShareWatcher`)
+
+Watches this operator's own share of active stake against the `STAKE_WEIGHTED_QUORUM`
+commit gate (`3*tally > 2*S`) and warns while rounds are still finalizing.
+
+The gate counts community stake in its denominator whether or not that stake ever
+signs, so a federation whose share has drifted to two thirds halts the moment one more
+staker appears, and the round before gives no warning at all. On 2026-09-01 that cost
+testnet 18 hours of dead price rounds, found by a tester rather than by a monitor.
+
+Without `HUB_OPERATOR_STAKE_SOURCES` (or its per-chain form) the hub cannot tell its own
+stake from anyone else's and the monitor **stays off**, saying so loudly at boot. Read
+the result on `/health` (`stake_share`), from the `getstakeshare` RPC, or from the
+`xchain_stake_share_*` gauges. Alert on `xchain_stake_share_stakes_to_halt <= 1` or
+`xchain_stake_share_meets_gate == 0`; it never flips `/health` to 503, because it is a
+forecast about the federation rather than a sickness of this process.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `HUB_OPERATOR_STAKE_SOURCES_<COIN>` | No | `` | Comma-separated staking addresses this operator controls **on that chain** (`_BTC`, `_LTC`, `_DOGE`). The correct form: staking addresses are chain-specific. |
+| `HUB_OPERATOR_STAKE_SOURCES` | No | `` | Union fallback applied to every watched chain, for a single-chain deployment. |
+| `HUB_STAKE_SHARE_CHAINS` | No | every registered coin | Chains to watch, comma-separated ticks. |
+| `HUB_STAKE_SHARE_CAPABILITIES` | No | `price,oracle_publish` | Capabilities to watch. These two gate the price rail: one the round's commit quorum, the other the publisher election that puts the result on chain. |
+| `HUB_STAKE_SHARE_POLL_MS` | No | `300000` | Poll cadence. Stake moves at block cadence and the warning has hours of lead time. |
+| `HUB_STAKE_SHARE_CRITICAL_STAKES` | No | `1` | Margin, in new stakes, that counts as CRITICAL (alerting). `1` means "the next community staker halts rounds". One stake is sized as the largest third-party stake already on that chain, floored at the capability MIN_STAKE. |
+| `HUB_STAKE_SHARE_WARN_STAKES` | No | `2` | Margin, in new stakes, that counts as WARNING (logged, not alerting). |
+
 ## BTC attestation publisher
 
 Wallet and encoder the hub uses to publish ATTEST responses on Bitcoin.

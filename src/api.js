@@ -136,7 +136,7 @@ const TELEMETRY_ADMIN_KEY      = process.env.TELEMETRY_ADMIN_KEY || '';
 const coins          = require('./coins');
 const SpendGuard     = require('./lib/spend_guard.js');   // per-capability effector-spend pause registry
 const { installObservability } = require('./observability');   // default-off /metrics + structured log shim
-const { installHubOracleMetrics } = require('./hubMetrics');   // item a98d6746: oracle-round heartbeat gauges
+const { installHubOracleMetrics, installHubStakeShareMetrics } = require('./hubMetrics');   // item a98d6746: oracle-round heartbeat gauges; stake-share margin gauges
 const ALLOWED_CHAINS = new Set(coins.ALLOWED_COINS);
 
 // Per-network { coin -> consensusHash } of the bundled canonical coin files,
@@ -463,6 +463,12 @@ async function startApi(){
     // lazily at scrape time (startOracle runs later; a config-only hub has none).
     installHubOracleMetrics(observability, hub);
 
+    // Stake share vs the weighted commit gate. The oracle series above
+    // fire once rounds are ALREADY failing; these are the ones that move first,
+    // because a federation drifting toward the two-thirds gate finalizes perfectly
+    // normal rounds right up to the staker that ends them.
+    installHubStakeShareMetrics(observability, hub);
+
     // API key enforcement for write methods and sensitive reads (only when a
     // key is configured; see the HUB_API_KEY and SENSITIVE_READ_METHODS notes
     // above). Everything not in either set is the public read tier, protected
@@ -660,6 +666,15 @@ async function startApi(){
             // rather than a sick hub, and 503-ing the config oracle over it would
             // take the federation's config rail down with it.
             if (relayStats) healthResult.attest_relay = relayStats;
+            // Operator stake share vs the STAKE_WEIGHTED_QUORUM commit gate.
+            // Telemetry only, never a 503, for the same reason as the relay above and a
+            // stronger one: this is a forecast about the FEDERATION's stake distribution,
+            // not a sickness of this process. No restart fixes it, and 503-ing every hub
+            // over it would take the config rail down alongside the price rail it warns
+            // about. The alert channel is the loud log, the `alerting` flag here, and the
+            // xchain_stake_share_* gauges built from the same numbers.
+            if (hub.stakeShareWatcher && typeof hub.stakeShareWatcher.getStats === 'function')
+                healthResult.stake_share = hub.stakeShareWatcher.getStats();
             // Hub DB stream heartbeat. Consumers gate their price-sync
             // barriers on this watermark, and until now the cadence was only ever
             // visible from the consumer's own timeout logs. Body-only telemetry,
@@ -1160,6 +1175,20 @@ async function startApi(){
         async getoraclepublisherstatus(){
             if(!hub.oraclePublisher) return { active: false };
             return { active: true, ...hub.oraclePublisher.getStats() };
+        },
+
+        // Operator stake share vs the weighted commit gate (read, no auth). Per chain
+        // and capability: total active stake, our share of it, whether it clears
+        // 3*tally > 2*S, and how much further third-party stake fits before it stops
+        // clearing. Mirrors getanchorstatus: always 200, so an operator (or the drill
+        // that adds a competing stake on regtest) can read the margin without waiting
+        // for a round to fail. Aggregates only, no address list: the numbers are what
+        // is acted on, and a mismatched address is named in the hub's own log.
+        // {active:false} when no watcher is running (config-only hub, or no operator
+        // staking sources configured).
+        async getstakeshare(){
+            if(!hub.stakeShareWatcher) return { active: false };
+            return { active: true, ...hub.stakeShareWatcher.getStats() };
         },
 
         // Effector-spend control surface. Read: every registered SpendGuard

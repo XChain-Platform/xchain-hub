@@ -700,6 +700,16 @@
       }
     },
     {
+      "name": "getstakeshare",
+      "summary": "Operator stake share against the STAKE_WEIGHTED_QUORUM commit gate, per chain and capability: total active stake, our share of it, whether it clears 3*tally > 2*S, and how much further third-party stake fits before it stops clearing.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      }
+    },
+    {
       "name": "geteffectorspendstatus",
       "summary": "Effector-spend policy status: each on-chain effector (oracle-publish, attest, anchor, full-node) with its runtime pause state, balance floor, and rolling per-window spend ceiling clamped at the $2000 AML admission ceiling.",
       "paramStructure": "by-name",

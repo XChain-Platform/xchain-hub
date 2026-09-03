@@ -47,6 +47,7 @@ const fullnodeActivation = require('./lib/fullnode_activation.js');
 const HubDbBroadcaster   = require('./HubDbBroadcaster.js');
 const CapabilityRegistry = require('./CapabilityRegistry.js');
 const CapabilitySnapshot = require('./CapabilitySnapshot.js');
+const StakeShareWatcher  = require('./StakeShareWatcher.js');
 const ProviderRegistry      = require('./ProviderRegistry.js');
 const AttestationRound       = require('./AttestationRound.js');
 const AttestationConsensus   = require('./AttestationConsensus.js');
@@ -103,6 +104,7 @@ class XChainHub {
         this.hubDbBroadcaster = null;
         this.capabilityRegistry      = null;
         this.capabilitySnapshot      = new CapabilitySnapshot(this);  // available pre-startCapabilities so consensus engines can use it from start()
+        this.stakeShareWatcher       = null;  // minted in startCapabilities(); watches our own stake share vs the weighted quorum gate
         this.providerRegistry        = null;
         this.attestationRound        = null;
         this.attestationConsensus    = null;
@@ -1370,6 +1372,17 @@ class XChainHub {
             console.log('Capability MIN_STAKE (genesis, pinned #4352): ' + genesis +
                 ' (must equal the indexer configs/<COIN>.js constants)');
         } catch (e) { /* best-effort operator log */ }
+
+        // Watch our OWN share of active stake against the STAKE_WEIGHTED_QUORUM
+        // two-thirds commit gate. Nothing else does: the gate counts
+        // community stake in the denominator whether or not it ever signs, so a
+        // share that drifts to 2/3 halts every round the moment one more staker
+        // appears, and the previous round gives no warning at all (a prior halt was
+        // 18 hours of dead price rounds found by a tester). Started here rather
+        // than with the stake poll above because it needs no identity: a
+        // read-only hub can watch the federation just as well.
+        this.stakeShareWatcher = new StakeShareWatcher(this);
+        this.stakeShareWatcher.start();
     }
 
     // In-flight guard: _stakePollTimer fires on a bare setInterval while the pass awaits
@@ -1838,6 +1851,7 @@ class XChainHub {
         if(this._capabilityRecheckTimer){ clearInterval(this._capabilityRecheckTimer); this._capabilityRecheckTimer = null; }
         if(this._stakePollTimer){ clearInterval(this._stakePollTimer); this._stakePollTimer = null; }
         if(this._transportSetTimer){ clearInterval(this._transportSetTimer); this._transportSetTimer = null; }
+        if(this.stakeShareWatcher){ this.stakeShareWatcher.stop(); }
         if(this._capabilityConfigDebounce){ clearTimeout(this._capabilityConfigDebounce); this._capabilityConfigDebounce = null; }
         if(this._capabilityConfigWatcher){ try { this._capabilityConfigWatcher.close(); } catch(e){} this._capabilityConfigWatcher = null; }
         if(this.governance)       await this.governance.stop();

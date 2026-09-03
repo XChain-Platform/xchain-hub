@@ -109,4 +109,86 @@ function installHubOracleMetrics(observability, hub){
     return true;
 }
 
-module.exports = { installHubOracleMetrics };
+// A real, finite reading. Null / undefined / '' are MISSING readings, and
+// Number() maps every one of them to 0, so they have to be rejected first.
+function isNum(v){
+    return v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v));
+}
+
+/**
+ * Register the operator's stake share against the STAKE_WEIGHTED_QUORUM commit
+ * gate on an installed registry.
+ *
+ * The oracle series above detect a halt that is ALREADY happening (rounds
+ * timing out, the skip streak climbing). These detect the halt that has not
+ * happened yet: the two-thirds weighted gate counts community stake in its
+ * denominator whether or not that stake ever signs, so the last round before an
+ * outage looks exactly like the first round after it stops finalizing. The
+ * margin is the only thing that moves in advance, and `stakes_to_halt` is it in
+ * the unit that matters - how many more community stakers the size of the
+ * biggest one already staked the federation can absorb (a prior outage saw
+ * five of eight equal stakes, so the answer was zero and nothing said so).
+ *
+ * Alert on stakes_to_halt <= 1 or meets_gate == 0. Values are read from the
+ * watcher's in-memory monitor at scrape time and touch neither DB nor network,
+ * because Registry.render() is synchronous.
+ *
+ * @param {{registry: ?object}} observability  installObservability() handle.
+ * @param {{stakeShareWatcher: ?object}} hub   resolved LAZILY at scrape time; the
+ *                                             watcher is minted in startCapabilities().
+ * @returns {boolean} true when the metrics were registered.
+ */
+function installHubStakeShareMetrics(observability, hub){
+    const registry = observability && observability.registry;
+    if(!registry || !hub) return false;
+
+    const labelNames = ['chain', 'capability'];
+    const shareRatio = registry.gauge({
+        name: 'xchain_stake_share_ratio',
+        help: 'Operator share of source-deduped active stake for a capability (0-1); the weighted commit gate needs the SIGNING share above 2/3',
+        labelNames
+    });
+    const headroom = registry.gauge({
+        name: 'xchain_stake_share_headroom',
+        help: 'Additional third-party stake this chain/capability can absorb while the two-thirds commit gate stays reachable; negative means it is already lost',
+        labelNames
+    });
+    const stakesToHalt = registry.gauge({
+        name: 'xchain_stake_share_stakes_to_halt',
+        help: 'New community stakes (each the size of the largest third-party stake already present, floored at MIN_STAKE) needed to push the federation under the weighted commit gate; 1 means the next staker halts rounds, 0 means it already happened',
+        labelNames
+    });
+    const meetsGate = registry.gauge({
+        name: 'xchain_stake_share_meets_gate',
+        help: '1 when operator stake alone can still clear the two-thirds weighted commit gate for this chain/capability, 0 when it cannot',
+        labelNames
+    });
+    const alerting = registry.gauge({
+        name: 'xchain_stake_share_alerting',
+        help: '1 when any watched chain/capability sits within one new stake of the weighted commit gate, or under it'
+    });
+
+    registry.addCollector(() => {
+        const watcher = hub.stakeShareWatcher;
+        // No watcher (config-only hub) or no operator sources configured: emit no
+        // series at all rather than a zero, which would read as a lost gate and page.
+        if(!watcher || !watcher.monitor) return;
+        alerting.set({}, watcher.monitor.isAlerting() ? 1 : 0);
+        for(const e of watcher.monitor.entries.values()){
+            const labels = { chain: e.chain, capability: e.capability };
+            // An entry with nothing measured (unavailable / unconfigured) carries
+            // nulls. Leave those series ABSENT: a gap is honest about a missing
+            // reading, a zero is a false claim that the share collapsed.
+            // Null-checked BEFORE Number(), which turns both null and '' into a
+            // perfectly finite 0 - the exact false zero this guard exists to avoid.
+            if(isNum(e.shareRatio))   shareRatio.set(labels, Number(e.shareRatio));
+            if(isNum(e.headroom))     headroom.set(labels, Number(e.headroom));
+            if(isNum(e.stakesToHalt)) stakesToHalt.set(labels, Number(e.stakesToHalt));
+            if(typeof e.meetsGate === 'boolean') meetsGate.set(labels, e.meetsGate ? 1 : 0);
+        }
+    });
+
+    return true;
+}
+
+module.exports = { installHubOracleMetrics, installHubStakeShareMetrics };

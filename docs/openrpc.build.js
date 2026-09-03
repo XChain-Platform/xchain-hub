@@ -114,6 +114,7 @@ const METHODS = [
     ['anchorflush', 'Trigger an immediate ANCHOR checkpoint publish (election still applies).', [], { auth: true }],
     ['getanchorstatus', 'ANCHOR publisher status: cumulative publish counts plus the last-observed DOGE publisher wallet balance and low-balance threshold.', []],
     ['getoraclepublisherstatus', 'ORACLE (PRICE v0) publisher status: queue depth, lifetime published/abandoned (dead-letter) counts, last-published round + txid, and the last-observed DOGE publisher wallet balance for runway monitoring.', []],
+    ['getstakeshare', 'Operator stake share against the STAKE_WEIGHTED_QUORUM commit gate, per chain and capability: total active stake, our share of it, whether it clears 3*tally > 2*S, and how much further third-party stake fits before it stops clearing.', []],
     ['geteffectorspendstatus', 'Effector-spend policy status: each on-chain effector (oracle-publish, attest, anchor, full-node) with its runtime pause state, balance floor, and rolling per-window spend ceiling clamped at the $2000 AML admission ceiling.', []],
     ['pauseeffectorspend', 'Runtime pause of one effector\'s on-chain spend by capability label (halts its primary/leader path immediately, no restart).', ['label', 'reason'], { auth: true }],
     ['resumeeffectorspend', 'Resume a paused effector\'s on-chain spend by capability label.', ['label'], { auth: true }],

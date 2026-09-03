@@ -16,7 +16,8 @@
 
 const { expect } = require('chai');
 
-const { installHubOracleMetrics } = require('../../src/hubMetrics');
+const { installHubOracleMetrics, installHubStakeShareMetrics } = require('../../src/hubMetrics');
+const { StakeShareMonitor, evaluateStakeShare } = require('../../src/lib/stake_share_monitor.js');
 const { installObservability }    = require('../../src/observability');
 
 // Real registry from the observability module, not a stub: the claim under test
@@ -177,5 +178,87 @@ describe('hub oracle-round heartbeat metrics (item a98d6746)', function () {
 
     it('refuses to register without a registry at all', function () {
         expect(installHubOracleMetrics({ registry: null }, { getOracle: () => ({}) })).to.equal(false);
+    });
+});
+
+describe('hub stake-share metrics', function () {
+
+    afterEach(function () { require('../../src/observability')._resetObservability(); });
+
+    // The monitor is fed directly here: the point of these cases is the scrape
+    // surface, and StakeShareWatcher's own suite covers how entries get there.
+    function hubWithShare(entries){
+        const monitor = new StakeShareMonitor({ log: () => {} });
+        for (const e of entries) monitor.record(e.chain, e.capability, evaluateStakeShare(e.input));
+        return { hub: { stakeShareWatcher: { monitor } }, monitor };
+    }
+
+    const rows = (spec) => spec.map((s, i) => ({ pubkey: 'pk' + i, source: s[0], weight: String(s[1]) }));
+
+    it('renders the share, the headroom and the stakes-to-halt per chain and capability', function () {
+        const observability = realObservability();
+        const { hub } = hubWithShare([{
+            chain: 'BTC', capability: 'price', input: {
+                // The prior-outage precursor: 125000 of 175000, one stake from a halt.
+                validators: rows([['ours1', 25000], ['ours2', 25000], ['ours3', 25000], ['ours4', 25000],
+                                  ['ours5', 25000], ['c1', 25000], ['c2', 25000]]),
+                operatorSources: ['ours1', 'ours2', 'ours3', 'ours4', 'ours5'], minStake: '25000'
+            }
+        }]);
+        expect(installHubStakeShareMetrics(observability, hub)).to.equal(true);
+
+        const out = observability.registry.render();
+        expect(out).to.match(/xchain_stake_share_stakes_to_halt\{chain="BTC",capability="price"\} 1\b/);
+        expect(out).to.match(/xchain_stake_share_meets_gate\{chain="BTC",capability="price"\} 1\b/);
+        expect(out).to.match(/xchain_stake_share_headroom\{chain="BTC",capability="price"\} 12500\b/);
+        expect(out).to.match(/xchain_stake_share_ratio\{chain="BTC",capability="price"\} 0\.71/);
+        expect(out).to.match(/xchain_stake_share_alerting 1\b/);
+    });
+
+    it('drops meets_gate to 0 once the federation is under the two-thirds bar', function () {
+        const observability = realObservability();
+        const { hub } = hubWithShare([{
+            chain: 'DOGE', capability: 'price', input: {
+                validators: rows([['ours1', 25000], ['c1', 25000]]),
+                operatorSources: ['ours1'], minStake: '25000'
+            }
+        }]);
+        installHubStakeShareMetrics(observability, hub);
+        const out = observability.registry.render();
+        expect(out).to.match(/xchain_stake_share_meets_gate\{chain="DOGE",capability="price"\} 0\b/);
+        expect(out).to.match(/xchain_stake_share_stakes_to_halt\{chain="DOGE",capability="price"\} 0\b/);
+        expect(out).to.match(/xchain_stake_share_headroom\{chain="DOGE",capability="price"\} -12500\b/);
+    });
+
+    it('leaves an unmeasured chain ABSENT rather than reporting a zero share', function () {
+        // A zero on these series is indistinguishable from a collapsed share and
+        // would page over an unreachable indexer the consensus-input monitor
+        // already owns.
+        const observability = realObservability();
+        const monitor = new StakeShareMonitor({ log: () => {} });
+        monitor.recordUnavailable('LTC', 'price', 'no LTC indexer URL');
+        installHubStakeShareMetrics(observability, { stakeShareWatcher: { monitor } });
+        const out = observability.registry.render();
+        expect(out).to.not.match(/xchain_stake_share_ratio\{[^}]*chain="LTC"/);
+        expect(out).to.not.match(/xchain_stake_share_meets_gate\{[^}]*chain="LTC"/);
+        expect(out).to.match(/xchain_stake_share_alerting 0\b/);
+    });
+
+    it('resolves the watcher at scrape time, and emits nothing on a config-only hub', function () {
+        const observability = realObservability();
+        const hub = { stakeShareWatcher: null };
+        expect(installHubStakeShareMetrics(observability, hub)).to.equal(true);
+        expect(observability.registry.render()).to.not.match(/xchain_stake_share_alerting \d/);
+
+        const monitor = new StakeShareMonitor({ log: () => {} });
+        monitor.record('BTC', 'price', evaluateStakeShare({
+            validators: rows([['ours1', 100], ['c1', 10]]), operatorSources: ['ours1'], minStake: '10'
+        }));
+        hub.stakeShareWatcher = { monitor };
+        expect(observability.registry.render()).to.match(/xchain_stake_share_alerting 0\b/);
+    });
+
+    it('refuses to register without a registry at all', function () {
+        expect(installHubStakeShareMetrics({ registry: null }, {})).to.equal(false);
     });
 });
