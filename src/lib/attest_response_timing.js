@@ -90,9 +90,17 @@ function isNonNegativeIntegerSpelling(raw){
 // header gives: an unratified network is the one place a stray env var is most
 // likely to be inherited from someone else's shell.
 function resolveAttestResponseForwardS(network, p2pConfig){
+    // The env read is spelled OUT, not indexed through the constant above, even
+    // though the constant holds that exact string. A computed `process.env[name]`
+    // is invisible to bin/check-env-var-doc-coverage.js, which scans for literal
+    // reads: the variable would exist, be operator-settable, and appear in no
+    // configuration table, and the gate would only ever see the anonymous
+    // computed-read count rise. The indirection bought nothing here, since the
+    // constant is its own name. It stays in use for the config-table lookup and
+    // for the messages below, where it is a real deduplication.
     let raw = (p2pConfig && p2pConfig[ATTEST_RESPONSE_FORWARD_S_OVERRIDE] != null)
         ? p2pConfig[ATTEST_RESPONSE_FORWARD_S_OVERRIDE]
-        : process.env[ATTEST_RESPONSE_FORWARD_S_OVERRIDE];
+        : process.env.ATTEST_RESPONSE_FORWARD_S_OVERRIDE;
 
     if(raw === null || raw === undefined || String(raw).trim() === '')
         return ATTEST_RESPONSE_FORWARD_S;
