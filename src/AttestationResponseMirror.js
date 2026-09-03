@@ -95,7 +95,8 @@ const { ATTEST_RESPONSE_BODY_MAX_BYTES, bodyByteLength } = require('./lib/attest
 const MIRROR_COLUMNS = [
     'network', 'request_id', 'request_action_index', 'request_block_index',
     'provider_id', 'status', 'response_payload', 'response_hash', 'meta',
-    'effective_time', 'signer_pubkeys', 'signatures', 'widen', 'finalized_at'
+    'effective_time', 'signer_pubkeys', 'signatures', 'widen', 'batch_action_index',
+    'finalized_at'
 ];
 
 // The statuses the mirror carries. Terminal only: a retryable round leaves the
@@ -117,8 +118,11 @@ const ATTEST_RESULT = 'ATTEST_RESULT';
 // property of the artifact: the column's contract is explicitly that two hubs'
 // copies of one logical row may disagree on it, and the on-chain batch (§6.1)
 // excludes it for the same reason. Leaving it off the wire also means there is no
-// wire-supplied clock value to sanitize or to abuse.
-const GOSSIP_COLUMNS = MIRROR_COLUMNS.filter(c => c !== 'finalized_at');
+// wire-supplied clock value to sanitize or to abuse. `batch_action_index` is off the
+// wire for the same reason: it is set by the DOGE batch landing, hours after the
+// gossip, and reaches every hub through the chain-to-hub push rather than through a
+// peer's claim.
+const GOSSIP_COLUMNS = MIRROR_COLUMNS.filter(c => c !== 'finalized_at' && c !== 'batch_action_index');
 
 // The park set's ceiling. A row whose request this hub cannot resolve yet is held
 // for one retry cycle, and a peer that gossips rows for requests that will never
@@ -391,7 +395,9 @@ class AttestationResponseMirror {
         let res = await db.doQuery(
             'INSERT IGNORE INTO attestation_responses (' + MIRROR_COLUMNS.join(', ') + ') ' +
             'VALUES (' + MIRROR_COLUMNS.map(() => '?').join(', ') + ')',
-            MIRROR_COLUMNS.map(c => row[c]));
+            // A column the writer never sets (batch_action_index at finalization) binds
+            // NULL explicitly rather than riding the driver's treatment of undefined.
+            MIRROR_COLUMNS.map(c => (row[c] === undefined ? null : row[c])));
         let inserted = !!(res && Number(res.affectedRows) > 0);
         if(inserted) this.stats.written++;
         else         this.stats.duplicates++;

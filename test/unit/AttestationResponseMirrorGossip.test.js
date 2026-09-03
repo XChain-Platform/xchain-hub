@@ -268,9 +268,12 @@ describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () {
             let data = hub.peerManager.broadcast.getCall(0).args[1];
             expect(Object.keys(data).sort()).to.deep.equal(GOSSIP_COLUMNS.slice().sort());
             expect(GOSSIP_COLUMNS).to.not.include('finalized_at');
-            // The derived wire set must stay the mirrored set minus that one column,
+            // batch_action_index is the other non-artifact column: the DOGE batch landing
+            // sets it hours later, and it reaches hubs through the chain-to-hub push.
+            expect(GOSSIP_COLUMNS).to.not.include('batch_action_index');
+            // The derived wire set must stay the mirrored set minus those two columns,
             // or a schema addition would silently stop travelling.
-            expect(GOSSIP_COLUMNS.length).to.equal(MIRROR_COLUMNS.length - 1);
+            expect(GOSSIP_COLUMNS.length).to.equal(MIRROR_COLUMNS.length - 2);
             expect(data.request_id).to.equal(RID);
             expect(data.effective_time).to.equal(EFFECTIVE_TIME);
         });

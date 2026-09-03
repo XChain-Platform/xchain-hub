@@ -1805,7 +1805,7 @@ async function startApi(){
             let rows = await hub.db.doQuery(
                 'SELECT id, network, request_id, request_action_index, request_block_index, ' +
                 'provider_id, status, response_payload, response_hash, meta, effective_time, ' +
-                'signer_pubkeys, signatures, widen, finalized_at ' +
+                'signer_pubkeys, signatures, widen, batch_action_index, finalized_at ' +
                 'FROM attestation_responses WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
