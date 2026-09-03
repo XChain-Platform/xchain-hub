@@ -243,6 +243,19 @@ class HubDbBroadcaster {
                 let cc = await this.db.doQuery("SELECT MAX(id) AS max_id FROM cross_chain_calls WHERE status <> 'retracted'");
                 maxIds.cross_chain_calls = (cc.length > 0 && cc[0].max_id != null) ? Number(cc[0].max_id) : 0;
             } catch (e) { /* table may not exist yet */ }
+            try {
+                // Third member of the hub-state mirror set (see anchor_reward_attestations
+                // above; this list must move in lockstep with HUB_STATE_TABLES). The catch
+                // below is empty by design and therefore silent, so a table name that does
+                // not exist leaves the key absent with no log line, and an absent key gates
+                // the consumer's gap catch-up for the table OFF entirely.
+                // Unfiltered MAX(id), like anchor_reward_attestations and unlike the two
+                // cross_chain_* entries: attestation_responses is insert-only and never
+                // retracted, so a status filter would advertise a ceiling BELOW what the
+                // snapshot feed serves and strand the catch-up.
+                let ar = await this.db.doQuery('SELECT MAX(id) AS max_id FROM attestation_responses');
+                maxIds.attestation_responses = (ar.length > 0 && ar[0].max_id != null) ? Number(ar[0].max_id) : 0;
+            } catch (e) { /* table may not exist yet */ }
         }
 
         try {

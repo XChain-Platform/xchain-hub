@@ -1779,6 +1779,43 @@ async function startApi(){
         }
     });
 
+    // GET /hub-db/snapshot/attestation_responses: full snapshot of the finalized
+    // ATTEST responses the mirror carries instead of a validator-paid on-chain
+    // transaction (the ATTEST response mirror design).
+    //
+    // Explicit column list, for the reason spelled out on state_checkpoints above:
+    // this feed and the WS stream must deliver the SAME column set, and `SELECT *`
+    // drifts them apart the moment the hub table gains a column the broadcaster does
+    // not send. Every column below is mirror-consumed - the indexer re-verifies
+    // `signatures` over a canonical rebuilt from `effective_time`/`response_hash`/
+    // `status` and applies the row on `request_id` - so nothing here is hub-side
+    // audit metadata that could be trimmed. `id` is the paging cursor only: the
+    // consumer strips it on apply, because two hubs carry different ids for the
+    // same logical row (natural-key mirror on `network` + `request_id`).
+    //
+    // No status filter, unlike cross_chain_matches and cross_chain_calls: this table
+    // is insert-only and never retracted, so the stream deletes nothing a
+    // bootstrapping mirror would have to skip.
+    app.get('/hub-db/snapshot/attestation_responses', async (req, res) => {
+        try {
+            if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
+            let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
+            if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
+            let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
+            let rows = await hub.db.doQuery(
+                'SELECT id, network, request_id, request_action_index, request_block_index, ' +
+                'provider_id, status, response_payload, response_hash, meta, effective_time, ' +
+                'signer_pubkeys, signatures, widen, finalized_at ' +
+                'FROM attestation_responses WHERE id > ? ORDER BY id ASC LIMIT ?',
+                [since, limit]
+            );
+            res.json({ table: 'attestation_responses', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
+        } catch (err) {
+            console.error('hub snapshot endpoint error:', err);
+            res.status(500).json({ error: 'snapshot error' });
+        }
+    });
+
     // POST /telemetry: anonymous usage ping receiver for xchain-node operators.
     // The connecting IP is NEVER stored. At ingest we derive a coarse country/region and a
     // keyed one-way hash from it, then discard the IP. The body is never trusted for IP.
