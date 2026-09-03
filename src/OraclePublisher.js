@@ -38,6 +38,14 @@
  * "not on chain" and "on chain but I was not told" are the same observation,
  * and guessing wrong pays DOGE twice for a duplicate on-chain batch.
  *
+ * "On chain" is a MINED view, so it has a second blind spot: a leader whose tx was
+ * accepted by the DOGE node but has not been mined looks exactly like a leader that
+ * never sent. An armed follower therefore also honours an ambiguity cooldown before it
+ * steps in, started by either its own ambiguous send for the window or the
+ * co-signature it handed that window's leader, and defers until the cooldown has
+ * elapsed with the window still absent - the point at which the in-flight tx is
+ * provably gone. This is AttestationPublisher's _ambiguousSends deferral, on this rail.
+ *
  * The off-hub control still applies and is not replaced: the dashboard's
  * publish-coverage rail detects a gap from the chain side, backed by the
  * _lastRankState / _leaderRounds / _followerRounds counters below.
@@ -91,6 +99,10 @@ const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
 // AttestationPublisher does for its own failover.
 const APPROX_BTC_BLOCK_MS = 600000;
 const { positiveIntConfig } = require('./lib/config_int.js');
+const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('./constants.js');
+const { worstCaseSnapshotAgeMs, maxBatchWindowRounds, pinnedMaxPriceAgeMs,
+        DEFAULT_BATCH_LANDING_RESERVE_MS,
+        LEGACY_BATCH_WINDOW_ROUNDS } = require('./lib/price_batch_cadence.js');
 const { compressPriceBatchBody, PRICE_BATCH_COMPRESSION_MARKER,
         PRICE_BATCH_MAX_ROUND_COUNT } = require('./price_batch_compression.js');
 
@@ -106,6 +118,18 @@ const PRICE_WIRE_MAX_BYTES = 8189;
 // own horizon and nothing more; the durable per-round markers are the real
 // at-most-once guard.
 const ASSEMBLED_WINDOW_MEMO_MAX = 4096;
+// Bound on the ambiguous-send memo. Each entry only has to outlive one
+// takeoverAmbiguousCooldownMs, so this is generous by orders of magnitude.
+const AMBIGUOUS_WINDOW_MEMO_MAX = 256;
+// Windows re-proposed per catch-up sweep. Assemblies are serialized on
+// _windowChain and each one can hold it for a whole ORACLE_BATCH_SIGN_TIMEOUT_MS, so a
+// backlog of a hundred windows must not be attempted in one pass: the live window
+// queued behind it would wait out every one of them.
+const CATCHUP_WINDOWS_PER_SWEEP = 4;
+// How often that sweep runs. An hour at the shipped defaults: the refusals it recovers
+// from are either transient or content drift that reconciliation repairs, and neither
+// gets better by asking again sooner. See _startBufferCatchupSweep.
+const DEFAULT_BATCH_CATCHUP_INTERVAL_MS = 3600000;
 
 // Confirmation depth at which the watchdog calls a broadcast landed. One block is
 // the whole question here: the failure being watched for is a transaction that never
@@ -252,6 +276,24 @@ class OraclePublisher {
         this._takeoverDarkWarned = false;
         this.takeoverAttempts  = 0;
         this.takeoverPublished = 0;
+        this.takeoverDeferred  = 0;
+        // How long an armed follower waits, once something says a batch for
+        // the window may ALREADY be on the wire, before it treats that tx as gone and
+        // publishes its own. Mirrors AttestationPublisher's
+        // ATTESTATION_AMBIGUOUS_COOLDOWN_MS, down to the default: one full failover
+        // window, which is the same horizon the rank stagger is denominated in. A DOGE
+        // tx that has not reached this hub's observed-on-chain view in that long did
+        // not land, so re-publishing then costs nothing that was not already lost.
+        this.takeoverAmbiguousCooldownMs = parseInt(
+            process.env.ORACLE_TAKEOVER_AMBIGUOUS_COOLDOWN_MS ||
+            cfg.ORACLE_TAKEOVER_AMBIGUOUS_COOLDOWN_MS ||
+            String(this.failoverWindowBlocks * this.approxBlockMs), 10);
+        if (!Number.isFinite(this.takeoverAmbiguousCooldownMs) || this.takeoverAmbiguousCooldownMs < 0) {
+            this.takeoverAmbiguousCooldownMs = this.failoverWindowBlocks * this.approxBlockMs;
+        }
+        // windowIndex -> ms timestamp of this hub's OWN ambiguous send for that window
+        // (the dead-letter branch in _processQueue). Insertion-ordered and bounded.
+        this._ambiguousWindows = new Map();
 
         // Whether a publish may spend this address's own unconfirmed change. Default
         // FALSE: chaining is what lets one underpaid batch strand every later one,
@@ -295,15 +337,76 @@ class OraclePublisher {
         // reads (pair widening, sig tally, stake-weighted quorum).
         this.network = (hub && hub.network) ? String(hub.network) : '';
 
-        this.batchWindowRounds    = positiveIntConfig(
-            process.env.ORACLE_BATCH_WINDOW_ROUNDS || cfg.ORACLE_BATCH_WINDOW_ROUNDS,
-            6, 'ORACLE_BATCH_WINDOW_ROUNDS');
+        // Read BEFORE the window size: the window ceiling is derived from the grace,
+        // the round cadence and the pinned staleness bound (see below).
         this.batchGraceMs         = positiveIntConfig(
             process.env.ORACLE_BATCH_GRACE_MS || cfg.ORACLE_BATCH_GRACE_MS,
             300000, 'ORACLE_BATCH_GRACE_MS');
         this.batchBufferMaxRounds = positiveIntConfig(
             process.env.ORACLE_BATCH_BUFFER_MAX_ROUNDS || cfg.ORACLE_BATCH_BUFFER_MAX_ROUNDS,
             4032, 'ORACLE_BATCH_BUFFER_MAX_ROUNDS');
+        this.batchCatchupIntervalMs = positiveIntConfig(
+            process.env.ORACLE_BATCH_CATCHUP_INTERVAL_MS || cfg.ORACLE_BATCH_CATCHUP_INTERVAL_MS,
+            DEFAULT_BATCH_CATCHUP_INTERVAL_MS, 'ORACLE_BATCH_CATCHUP_INTERVAL_MS');
+
+        // ---- The window ceiling, and why the window is not just a number
+        //
+        // A window's rounds are invisible to the chain until the batch lands, so the
+        // freshest snapshot a fee-paying action can be priced against is the LAST round
+        // of the most recently landed batch. Its age therefore sawtooths, resetting on
+        // each landing and climbing a whole window before the next one, and the peak is
+        // what the indexer's ORACLE_MAX_PRICE_AGE_SECONDS gate judges.
+        //
+        // Sized at the shipped 6 rounds that peak is 4200s against a 1800s bound, so
+        // for the majority of every window NOTHING on LTC or DOGE can pay a native fee.
+        // Measured exactly that way on public testnet 2026-09-01: TDOGE PRICE landed on
+        // a steady 3600s cadence and fee-bearing actions failed about half the time,
+        // with no fault anywhere in the publisher, the aggregator or the wire.
+        //
+        // So the window is DERIVED, not chosen: the largest that still fits the bound.
+        // An operator value above the ceiling is clamped rather than honoured, because
+        // honouring it does not give the operator a cheaper rail, it gives them a chain
+        // whose fees cannot be priced.
+        this.roundIntervalMs      = positiveIntConfig(
+            process.env.ORACLE_ROUND_INTERVAL || cfg.ORACLE_ROUND_INTERVAL,
+            DEFAULT_ORACLE_ROUND_INTERVAL_MS, 'ORACLE_ROUND_INTERVAL');
+        this.batchLandingReserveMs = nonNegativeIntConfig(
+            process.env.ORACLE_BATCH_LANDING_RESERVE_MS || cfg.ORACLE_BATCH_LANDING_RESERVE_MS,
+            DEFAULT_BATCH_LANDING_RESERVE_MS, 'ORACLE_BATCH_LANDING_RESERVE_MS');
+        this.oracleMaxPriceAgeMs  = pinnedMaxPriceAgeMs(this.network);
+
+        let cadence = maxBatchWindowRounds({
+            maxPriceAgeMs:    this.oracleMaxPriceAgeMs,
+            roundIntervalMs:  this.roundIntervalMs,
+            graceMs:          this.batchGraceMs,
+            landingReserveMs: this.batchLandingReserveMs
+        });
+        this.batchWindowRoundsCeiling = cadence.ceiling;
+
+        this.batchWindowRounds    = positiveIntConfig(
+            process.env.ORACLE_BATCH_WINDOW_ROUNDS || cfg.ORACLE_BATCH_WINDOW_ROUNDS,
+            cadence.ceiling === null ? LEGACY_BATCH_WINDOW_ROUNDS : cadence.ceiling,
+            'ORACLE_BATCH_WINDOW_ROUNDS');
+        if (cadence.ceiling !== null && this.batchWindowRounds > cadence.ceiling) {
+            console.warn('config: ORACLE_BATCH_WINDOW_ROUNDS=' + this.batchWindowRounds +
+                ' would leave the newest price snapshot up to ' +
+                Math.round(worstCaseSnapshotAgeMs(this.batchWindowRounds, {
+                    roundIntervalMs: this.roundIntervalMs, graceMs: this.batchGraceMs,
+                    landingReserveMs: this.batchLandingReserveMs }) / 1000) +
+                's old against a ' + Math.round(this.oracleMaxPriceAgeMs / 1000) +
+                's fee-price staleness bound; clamping to ' + cadence.ceiling +
+                ' round(s) per batch so native-coin fees stay priceable.');
+            this.batchWindowRounds = cadence.ceiling;
+        }
+        if (cadence.ceiling !== null && !cadence.satisfiable) {
+            console.warn('OraclePublisher: no batch window fits the ' +
+                Math.round(this.oracleMaxPriceAgeMs / 1000) + 's fee-price staleness bound at a ' +
+                Math.round(this.roundIntervalMs / 1000) + 's round interval with a ' +
+                Math.round(this.batchGraceMs / 1000) + 's grace and a ' +
+                Math.round(this.batchLandingReserveMs / 1000) + 's landing reserve. ' +
+                'Publishing one round per batch anyway; native-coin fees will still go ' +
+                'unpriceable between batches until the round interval or the grace comes down.');
+        }
 
         // In-memory mirror of bufferPath, round -> the canonical builder's input shape
         // { round, timestamp, btcBlockHeight, pairs }. The file is the durable copy;
@@ -322,6 +425,9 @@ class OraclePublisher {
         // _signRound slot supports exactly one.
         this._windowChain  = Promise.resolve();
         this._catchupTimer = null;
+        // The recurring re-proposal sweep, armed in start() and released in
+        // stop(). Separate from _catchupTimer, which is the one-shot restart pass.
+        this._catchupSweepTimer = null;
         // A signer this instance created because the hub wired none. Owned means
         // started and stopped here; a hub-wired signer is neither.
         this._ownedBatchSigner = null;
@@ -333,6 +439,7 @@ class OraclePublisher {
         this.lastPublishedWindow     = null;
         this.batchSplitCount         = 0;
         this.batchUnpublishableCount = 0;
+        this.batchCatchupSweeps      = 0;
 
         // ---------------- Landing, not just sending (confirmed-UTXO reserve + watchdog) ----------------
         //
@@ -669,6 +776,10 @@ class OraclePublisher {
         // hour of price data that has not reached a chain yet.
         this._hydrateBuffer();
 
+        // ...and re-register the window those rounds belong to, because the grace timers
+        // themselves did not survive the restart.
+        this._rearmBufferedWindows();
+
         // Hydrate the durable at-most-once guard before subscribing to new rounds:
         // load confirmed rounds into the in-process guard and quarantine any
         // intent-only rounds so a restart can never re-broadcast an already-published
@@ -692,17 +803,45 @@ class OraclePublisher {
         }
 
         // Catch-up for windows that closed while this hub was down. Every buffered
-        // window except the newest is closed by definition (a higher round exists), so
-        // one delayed sweep re-arms exactly what the restart dropped. Delayed by the
+        // window except the newest is closed by definition (a higher round exists), and
+        // the newest joins them when the buffer holds its last slot, so one
+        // delayed sweep re-arms exactly what the restart dropped. Delayed by the
         // grace so a hub restarting mid-window still gives its peers time to come up
         // before it proposes a batch they cannot yet co-sign.
+        //
+        // Bounded, rather than queuing every closed window at once. A hub coming
+        // back to a long backlog therefore drains it over several sweeps rather than in
+        // one pass; that is the trade the bound buys, and it is the right way round,
+        // because assemblies are serialized and a failing one holds the chain for a
+        // whole sign timeout, so the unbounded form put the LIVE window behind every
+        // stale one.
         this._scheduleBufferCatchup();
+
+        // ...and the recurring pass, because a window that fails its signing round is
+        // left un-memoized precisely so it can be re-proposed, and until now nothing
+        // ever did.
+        this._startBufferCatchupSweep();
 
         // Watch broadcasts through to a block. Without it a wire that never mines
         // leaves the rail reporting a healthy lastPublishedTxid indefinitely.
         this._startConfirmationWatchdog();
 
         console.log('OraclePublisher started (queue: ' + this.queuePath + ', address: ' + (this.dogeAddress || '<unset>') + ')');
+        // The publish cadence next to the bound it has to fit inside, because a rail
+        // that is publishing perfectly on a cadence too slow for the fee gate looks
+        // healthy in every other line this class logs.
+        let peakMs = worstCaseSnapshotAgeMs(this.batchWindowRounds, {
+            roundIntervalMs:  this.roundIntervalMs,
+            graceMs:          this.batchGraceMs,
+            landingReserveMs: this.batchLandingReserveMs });
+        console.log('OraclePublisher PRICE batch cadence: ' + this.batchWindowRounds +
+            ' round(s)/batch = one wire per ' +
+            Math.round((this.batchWindowRounds * this.roundIntervalMs) / 1000) + 's' +
+            (this.batchWindowRoundsCeiling === null
+                ? ' (no staleness bound resolved; window not capped)'
+                : ', ceiling ' + this.batchWindowRoundsCeiling + '; newest snapshot peaks at ' +
+                  (peakMs === null ? '?' : Math.round(peakMs / 1000)) + 's against a ' +
+                  Math.round(this.oracleMaxPriceAgeMs / 1000) + 's fee-price staleness bound'));
     }
 
     // Release every timer this class owns, plus a batch signer it created itself.
@@ -715,6 +854,7 @@ class OraclePublisher {
         for (let timer of this._takeoverTimers.values()) clearTimeout(timer);
         this._takeoverTimers.clear();
         if (this._catchupTimer) { clearTimeout(this._catchupTimer); this._catchupTimer = null; }
+        if (this._catchupSweepTimer) { clearInterval(this._catchupSweepTimer); this._catchupSweepTimer = null; }
         if (this._confirmTimer) { clearInterval(this._confirmTimer); this._confirmTimer = null; }
         if (this._ownedBatchSigner) {
             try { this._ownedBatchSigner.stop(); } catch (e) { /* stopping is best-effort */ }
@@ -974,7 +1114,25 @@ class OraclePublisher {
     async _bufferFinalizedRound(event) {
         let entry = this._bufferEntryFromEvent(event);
         if (!Number.isFinite(entry.round)) return;
-        if (this._buffer.has(entry.round)) return;   // re-finalization of a buffered round
+
+        // A re-finalization must land here whenever it CHANGED the round.
+        // _storeSnapshot's ON DUPLICATE KEY UPDATE is last-write-wins, so a round that
+        // finalizes twice leaves price_snapshots holding the second version. A
+        // first-write-wins buffer would put the two stores permanently out
+        // of step: the batch rail proposes from the BUFFER and every co-signer
+        // re-derives from price_snapshots, so one diverged round makes the whole window
+        // unsignable forever. Observed on testnet round 107, where the buffer held
+        // timestamp 1787939400 with one price set and every hub's DB held 1787940000
+        // with another, and window [102,107] was refused by three peers on every
+        // re-proposal. An IDENTICAL re-finalization stays a no-op, so the common
+        // replay/retry case still costs no disk.
+        let prior = this._buffer.get(entry.round);
+        if (prior && this._sameBufferedRound(prior, entry)) return;
+        if (prior) {
+            console.warn('OraclePublisher: round ' + entry.round + ' re-finalized with different ' +
+                'content; replacing the buffered copy so the batch rail proposes what ' +
+                'price_snapshots actually holds');
+        }
         entry.bufferedAt = Date.now();
         let line = JSON.stringify(entry) + '\n';
         try {
@@ -987,7 +1145,30 @@ class OraclePublisher {
             throw e;
         }
         this._buffer.set(entry.round, entry);
+        // The append above is the durable write (a crash between it and here recovers
+        // the new copy, because _hydrateBuffer replays the file in order and the LAST
+        // line for a round wins). Compact only after that, so the truncating rewrite is
+        // never the thing standing between a finalized round and disk.
+        if (prior) this._rewriteBufferFile(this._bufferedRange(-Infinity, Infinity));
         this._enforceBufferBound();
+    }
+
+    // Do two buffer entries carry the same signable content? Compares exactly the
+    // fields _buildPriceBatchPayload reads, pair order included only through a sorted
+    // key, since the builder normalizes ordering itself. bufferedAt is metadata and is
+    // deliberately excluded: re-stamping it would rewrite the file on every replay.
+    _sameBufferedRound(a, b) {
+        if (parseInt(a.round) !== parseInt(b.round)) return false;
+        if (parseInt(a.timestamp) !== parseInt(b.timestamp)) return false;
+        if (parseInt(a.btcBlockHeight) !== parseInt(b.btcBlockHeight)) return false;
+        return this._pairKey(a.pairs) === this._pairKey(b.pairs);
+    }
+
+    _pairKey(pairs) {
+        return (pairs || [])
+            .map(p => String(p.coinPair || p.pair) + '=' + String(p.price))
+            .sort()
+            .join('|');
     }
 
     _readBufferFile() {
@@ -1019,6 +1200,10 @@ class OraclePublisher {
         }
     }
 
+    // Replays the file in order and lets the LAST line for a round win. That is load
+    // bearing, not incidental: _bufferFinalizedRound appends a replacement line when a
+    // round re-finalizes with different content, and a first-wins reload would restore
+    // the stale copy the batch rail can no longer get co-signed.
     _hydrateBuffer() {
         this._buffer = new Map();
         for (let e of this._readBufferFile()) {
@@ -1058,6 +1243,22 @@ class OraclePublisher {
         return out.sort((a, b) => parseInt(a.round) - parseInt(b.round));
     }
 
+    // The [first_round, last_round] a batch-sourced consensus_proof claims, or null
+    // when the value is not one (a v0 proof is a bare signature ARRAY) or is malformed.
+    // Only ever applied to shed BUFFERED rounds, so a wrong answer costs a re-proposal or
+    // a stale buffer entry, never a wire; parse defensively and fall back to nothing.
+    _batchProofRange(proofJson) {
+        if (typeof proofJson !== 'string') return null;
+        let parsed;
+        try { parsed = JSON.parse(proofJson); } catch (e) { return null; }
+        let b = parsed && parsed.batch;
+        if (!b) return null;
+        let first = parseInt(b.first_round);
+        let last  = parseInt(b.last_round);
+        if (!Number.isFinite(first) || !Number.isFinite(last) || last < first) return null;
+        return { first, last };
+    }
+
     // D29's first half: shed the rounds of a window whose batch this hub can already
     // see in its OWN price_snapshots. Batch-sourced rows are the ones whose
     // consensus_proof is the {"batch":...} object of D23; a v0-sourced row's proof is
@@ -1069,7 +1270,7 @@ class OraclePublisher {
         let rows;
         try {
             rows = await this.db.doQuery(
-                'SELECT DISTINCT round_number FROM price_snapshots WHERE round_number >= ? ' +
+                'SELECT DISTINCT round_number, consensus_proof FROM price_snapshots WHERE round_number >= ? ' +
                 'AND round_number <= ? AND consensus_proof LIKE \'{"batch":%\'',
                 [first, last]);
         } catch (e) {
@@ -1077,10 +1278,23 @@ class OraclePublisher {
                 first + '..' + last + '; leaving them buffered: ', e && e.message);
             return 0;
         }
+        // Prune the whole range each observed batch CLAIMS, not just the rows that
+        // carry its proof. receiveBatch dedupes per round: a round already
+        // finalized from the v0 rail is counted a duplicate and keeps its v0 proof, so
+        // a landed six-round batch typically stamps only the one round this hub was
+        // missing. Keying the prune on the stamped rows alone therefore left five of
+        // six rounds buffered after a window had demonstrably published, and every
+        // later leader re-proposed that published window forever. The proof's own
+        // header names the range it covers, so use it.
         let pruned = 0;
         for (let row of (rows || [])) {
             let r = parseInt(row.round_number);
             if (Number.isFinite(r) && this._buffer.delete(r)) pruned++;
+            let covered = this._batchProofRange(row.consensus_proof);
+            if (!covered) continue;
+            for (let n of Array.from(this._buffer.keys())) {
+                if (n >= covered.first && n <= covered.last && this._buffer.delete(n)) pruned++;
+            }
         }
         if (pruned > 0) {
             this._rewriteBufferFile(this._bufferedRange(-Infinity, Infinity));
@@ -1113,8 +1327,9 @@ class OraclePublisher {
         this._takeoverTimers.set(windowIndex, timer);
     }
 
-    // Step in for a silent leader, or decline. Declines for three distinct reasons,
-    // each of which must stay distinguishable in the log from "took over".
+    // Step in for a silent leader, or decline. Declines for four distinct reasons,
+    // each of which must stay distinguishable in the log from "took over". Only one of
+    // them is temporary: the ambiguity cooldown re-arms itself and comes back.
     async _attemptTakeover(windowIndex) {
         if (!this.enabled) return false;
         let first = windowIndex * this.batchWindowRounds;
@@ -1141,13 +1356,101 @@ class OraclePublisher {
             return false;
         }
 
-        // 3. Nothing published it and we can prove we would have seen it. Re-assemble
+        // 3. AMBIGUOUS IN-FLIGHT BATCH. "Not on chain" cannot tell a leader
+        // that never broadcast from one whose tx is sitting unmined in the DOGE
+        // mempool, and re-publishing over the second pays the fee twice for a window
+        // that is already in flight. Two local facts make the send ambiguous: a
+        // co-signature this hub HANDED the leader (the last thing it needed before
+        // broadcasting) and an ambiguous send of this hub's own for the same window.
+        // Either starts the cooldown. When the cooldown elapses and the window is
+        // STILL absent from the observed-on-chain view above, the tx demonstrably
+        // never mined and takeover is safe. Same shape as AttestationPublisher's
+        // _ambiguousSends deferral, which this rail was missing.
+        let ambiguousAt = this._takeoverAmbiguityAt(windowIndex, first, last);
+        if (ambiguousAt !== null && this.takeoverAmbiguousCooldownMs > 0) {
+            let waited = Date.now() - ambiguousAt;
+            if (waited < this.takeoverAmbiguousCooldownMs) {
+                this.takeoverDeferred++;
+                let remaining = this.takeoverAmbiguousCooldownMs - waited;
+                console.warn('OraclePublisher: deferring takeover of window ' + windowIndex +
+                    ' for ~' + Math.ceil(remaining / 1000) + 's: a batch covering rounds ' + first +
+                    '..' + last + ' may already be in flight (evidence ~' + Math.round(waited / 1000) +
+                    's ago), and re-publishing over an unmined leader tx pays the DOGE fee twice');
+                // Re-arm, or the deferral is a CANCELLATION: the timer that brought us
+                // here is already gone, so a leader that turns out to have been dark
+                // after all would never be covered by this hub.
+                this._rearmTakeover(windowIndex, remaining);
+                return false;
+            }
+            // Cooldown spent with the window still off chain: whatever was in flight
+            // never mined. Drop the mark so a later pass does not re-derive it.
+            this._ambiguousWindows.delete(windowIndex);
+        }
+
+        // 4. Nothing published it and we can prove we would have seen it. Re-assemble
         // the identical window, bypassing the leader check but nothing else: quorum
         // signing, coverage, the spend guard and the at-most-once markers all still
         // apply, and the queue's own guards stop a second wire for rounds already sent.
         this._assembledWindows.delete(windowIndex);
         await this._assembleWindow(windowIndex, { takeover: true });
         return true;
+    }
+
+    // The most recent local evidence that a batch covering [first,last] may ALREADY be
+    // on the wire, or null when there is none. Two sources, both of which mean "a tx
+    // may exist that this hub cannot see yet":
+    //
+    //   - this hub's own ambiguous send for the window (_processQueue dead-letters it
+    //     rather than retrying, precisely because the DOGE node may have taken it);
+    //   - the co-signature this hub gave the window's leader, which is the last thing
+    //     the leader was waiting on. A leader that never asked cannot have broadcast,
+    //     so a window with no co-signature is genuine silence and takes over at once.
+    //
+    // The signer is read through the hub, never through _getBatchSigner(): that
+    // accessor CONSTRUCTS and starts a signer as a side effect, which a read-only
+    // question must not do (same pattern as _batchSignTimeouts).
+    _takeoverAmbiguityAt(windowIndex, first, last) {
+        let newest = this._ambiguousWindows.has(windowIndex)
+            ? this._ambiguousWindows.get(windowIndex)
+            : null;
+        let signer = (this.hub && this.hub.oracleBatchSigner) || this._ownedBatchSigner;
+        if (signer && typeof signer.coSignedAt === 'function') {
+            let ts = null;
+            try {
+                ts = signer.coSignedAt(first, last);
+            } catch (e) {
+                console.warn('OraclePublisher: cannot read the batch signer\'s co-signature memo ' +
+                    'for rounds ' + first + '..' + last + ': ', e && e.message);
+                ts = null;
+            }
+            if (Number.isFinite(ts) && (newest === null || ts > newest)) newest = ts;
+        }
+        return newest;
+    }
+
+    // Remember that a batch wire for this window left the process AMBIGUOUSLY, so a
+    // takeover armed against the same window defers instead of duplicating the spend.
+    _noteAmbiguousWindow(windowIndex) {
+        if (!Number.isFinite(windowIndex)) return;
+        this._ambiguousWindows.delete(windowIndex);
+        this._ambiguousWindows.set(windowIndex, Date.now());
+        while (this._ambiguousWindows.size > AMBIGUOUS_WINDOW_MEMO_MAX) {
+            this._ambiguousWindows.delete(this._ambiguousWindows.keys().next().value);
+        }
+    }
+
+    // Put the deferred takeover back on the clock. Deliberately not _scheduleTakeover:
+    // that one computes the rank stagger from scratch, and this window's stagger has
+    // already been served; what is left to wait out is only the cooldown remainder.
+    _rearmTakeover(windowIndex, delay) {
+        if (this._takeoverTimers.has(windowIndex)) return;
+        let timer = setTimeout(() => {
+            this._takeoverTimers.delete(windowIndex);
+            this._attemptTakeover(windowIndex).catch(err =>
+                console.error('OraclePublisher: deferred takeover attempt for window ' + windowIndex + ' failed:', err));
+        }, Math.max(1, delay));
+        if (timer.unref) timer.unref();
+        this._takeoverTimers.set(windowIndex, timer);
     }
 
     // Is any round in [first,last] already carried by a batch this hub has seen land
@@ -1239,15 +1542,115 @@ class OraclePublisher {
         if (this._buffer.size === 0) return;
         this._catchupTimer = setTimeout(() => {
             this._catchupTimer = null;
-            // The highest buffered window may still be open, so leave it to the normal
-            // scheduler; every window below it is closed by construction.
-            let windows = Array.from(new Set(
-                Array.from(this._buffer.keys()).map(r => this._windowIndexOf(r)))).sort((a, b) => a - b);
-            for (let w of windows.slice(0, Math.max(0, windows.length - 1))) {
-                this._queueWindowAssembly(w);
-            }
+            this._sweepBufferCatchup();
         }, this.batchGraceMs);
         if (this._catchupTimer.unref) this._catchupTimer.unref();
+    }
+
+    // Is this window's LAST slot in the buffer? That round is the one whose arrival
+    // closes the window live, so holding it is proof the window is closed even when no
+    // higher round exists yet and no timer survived to say so.
+    _windowLastSlotBuffered(windowIndex) {
+        return this._buffer.has(windowIndex * this.batchWindowRounds + this.batchWindowRounds - 1);
+    }
+
+    // Every closed window this hub still holds buffered rounds for, has not already
+    // assembled in this process, and has no grace timer of its own already pending.
+    //
+    // Every window below the highest is closed by construction, because a higher round
+    // exists. Excluding the highest outright, on the theory that it may still
+    // be open, is true only while its last slot is missing. A window whose last
+    // round is buffered has closed, and excluding it meant a restart inside its grace
+    // orphaned it: the timer died with the process, and nothing re-proposed the window
+    // until some later round happened to open a higher one. So the highest
+    // is included exactly when the buffer proves it closed.
+    //
+    // A window whose grace timer is still pending is skipped, because that timer owns
+    // it: assembling early would publish a wire without the straggler rounds the grace
+    // exists to collect.
+    //
+    // _assembledWindows is what keeps this cheap on the second and later sweeps: a
+    // window this hub followed, published, or found empty is memoized there, so what
+    // survives the filter is exactly the windows that ATTEMPTED and produced no wire.
+    _pendingCatchupWindows() {
+        if (this._buffer.size === 0) return [];
+        let windows = Array.from(new Set(
+            Array.from(this._buffer.keys()).map(r => this._windowIndexOf(r)))).sort((a, b) => a - b);
+        let highest = windows[windows.length - 1];
+        return windows.filter(w => {
+            if (this._assembledWindows.has(w)) return false;
+            let state = this._windows.get(w);
+            if (state && state.timer) return false;
+            return w < highest || this._windowLastSlotBuffered(w);
+        });
+    }
+
+    // Put back what a restart dropped. _windows is memory-only, so after a restart the
+    // scheduler knows nothing about the rounds _hydrateBuffer just reloaded, and the
+    // "a higher window's round arrived, so close the lower ones" path (_noteWindowRound)
+    // walks exactly that map: a window whose last slot was SKIPPED before the restart
+    // would never be closed by the round that proves it can receive nothing more.
+    //
+    // Only the highest buffered window is re-registered, and deliberately unarmed. Every
+    // window below it is already closed and belongs to the bounded catch-up sweep;
+    // registering those here would let one higher round arm them all at once and put the
+    // live window behind a queue of stale assemblies, which is the starvation the
+    // per-sweep bound exists to prevent. The highest is the one window the sweep cannot
+    // reach while it is still open, so it is the one the scheduler must remember.
+    _rearmBufferedWindows() {
+        if (this._buffer.size === 0) return;
+        let highest = -Infinity;
+        for (let r of this._buffer.keys()) {
+            let w = this._windowIndexOf(r);
+            if (Number.isFinite(w) && w > highest) highest = w;
+        }
+        if (!Number.isFinite(highest)) return;
+        if (this._assembledWindows.has(highest)) return;
+        if (!this._windows.has(highest)) this._windows.set(highest, { timer: null });
+    }
+
+    // One catch-up pass, oldest window first. Bounded, because each attempt can run a
+    // signing round that costs up to ORACLE_BATCH_SIGN_TIMEOUT_MS and they are
+    // serialized on _windowChain: an unbounded sweep over a long backlog would occupy
+    // that chain for hours and starve the live window queued behind it.
+    _sweepBufferCatchup() {
+        let pending = this._pendingCatchupWindows();
+        if (pending.length === 0) return 0;
+        let take = pending.slice(0, CATCHUP_WINDOWS_PER_SWEEP);
+        this.batchCatchupSweeps++;
+        if (pending.length > take.length) {
+            console.warn('OraclePublisher: ' + pending.length + ' closed window(s) are still ' +
+                'buffered and unpublished; re-proposing ' + take.length + ' of them this sweep ' +
+                '(oldest first, from window ' + take[0] + ')');
+        }
+        for (let w of take) this._queueWindowAssembly(w);
+        return take.length;
+    }
+
+    // The recurring half of the catch-up, and the half that was missing.
+    //
+    // A window whose signing round times out below quorum is deliberately NOT memoized,
+    // so that it can be re-proposed (spec section 7). Nothing re-proposed it: the
+    // sweep ran exactly once per process, ORACLE_BATCH_GRACE_MS after start(). A window
+    // that failed once therefore stayed unpublished until an operator happened to
+    // restart the hub, and its rounds stayed buffered until the ORACLE_BATCH_BUFFER_MAX_ROUNDS
+    // bound eventually shed them unpublished. Measured on public testnet 2026-09-02:
+    // window [102,107] refused by three peers at the 2026-09-01 boot and never
+    // attempted again in the 11 hours since, with 744 rounds back to round 21 still
+    // sitting in the leader's buffer.
+    //
+    // Deliberately a slow loop, not a tight retry. The refusal it recovers from is
+    // either transient (a peer down) or content drift that _reconcileBufferedWindow
+    // repairs from price_snapshots, and neither is fixed by asking again sooner; what
+    // a fast retry WOULD buy is a signing round per window per interval across the
+    // whole federation, plus a refusal line per peer per attempt in every log.
+    _startBufferCatchupSweep() {
+        if (this._catchupSweepTimer) return;
+        this._catchupSweepTimer = setInterval(() => {
+            try { this._sweepBufferCatchup(); }
+            catch (e) { console.error('OraclePublisher: buffer catch-up sweep failed:', e); }
+        }, this.batchCatchupIntervalMs);
+        if (this._catchupSweepTimer.unref) this._catchupSweepTimer.unref();
     }
 
     _noteAssembled(windowIndex) {
@@ -1272,6 +1675,12 @@ class OraclePublisher {
 
         let first  = windowIndex * this.batchWindowRounds;
         let last   = first + this.batchWindowRounds - 1;
+        // Before anything is read off the buffer, make it agree with price_snapshots.
+        // Every co-signer re-derives this window from ITS price_snapshots,
+        // so a buffered round that has drifted from this hub's own rows is a proposal
+        // no honest peer can ever reproduce. Reconciling here is also what unsticks a
+        // window that drifted before the buffer learned to track a re-finalization.
+        await this._reconcileBufferedWindow(first, last);
         let rounds = this._bufferedRange(first, last);
         if (rounds.length === 0) { this._noteAssembled(windowIndex); return; }
 
@@ -1380,6 +1789,103 @@ class OraclePublisher {
 
         await this._processQueue();
         await this._pruneObservedWindow(first, last);
+    }
+
+    // Make the buffered copy of a window agree with price_snapshots, which is the ONE
+    // store both sides of the signing round can see: the leader proposes from the
+    // buffer and every co-signer re-derives from its own price_snapshots, so anything
+    // the buffer holds that its own DB contradicts is a proposal that cannot reach
+    // quorum however honest the leader is.
+    //
+    // Replaces drifted rounds and sheds already-landed ones. It never ADDS a round:
+    // a finalized round with no buffered copy is _windowCoverageComplete's case, and
+    // that path deliberately withholds the window rather than inventing content.
+    //
+    // Best effort by design. A DB error leaves the buffer as it was and assembly
+    // proceeds exactly as before, because the signing round is the real gate: the
+    // worst a stale proposal can do is fail to reach quorum, which is where this
+    // window already was.
+    async _reconcileBufferedWindow(first, last) {
+        if (!this.db) return 0;
+        let rows;
+        try {
+            rows = await this.db.doQuery(
+                'SELECT round_number, coin_pair, price, reference_block, block_timestamp, ' +
+                'LEFT(consensus_proof, 8) AS proof_head ' +
+                'FROM price_snapshots WHERE round_number >= ? AND round_number <= ? AND status = ? ' +
+                'ORDER BY round_number ASC, coin_pair ASC',
+                [first, last, 'finalized']);
+        } catch (e) {
+            console.warn('OraclePublisher: cannot reconcile the buffered copy of window [' + first +
+                ',' + last + '] against price_snapshots; proposing the buffer as-is: ', e && e.message);
+            return 0;
+        }
+
+        let derived = new Map();
+        for (let row of (rows || [])) {
+            let r = parseInt(row.round_number);
+            if (!Number.isFinite(r)) continue;
+            let entry = derived.get(r);
+            if (!entry) {
+                entry = { round: r, timestamp: parseInt(row.block_timestamp),
+                          btcBlockHeight: parseInt(row.reference_block), pairs: [],
+                          // A batch-sourced row's reference_block is the LANDING chain's
+                          // height, not this round's BTC anchor, so its content can no
+                          // longer be rebuilt here. It is also, by definition, already on
+                          // chain. See OracleBatchSigner._deriveWindow.
+                          batchSourced: String(row.proof_head || '').indexOf('{"batch"') === 0 };
+                derived.set(r, entry);
+            }
+            entry.pairs.push({ pair: String(row.coin_pair), price: String(row.price) });
+        }
+
+        let changed = 0;
+        for (let [r, entry] of derived) {
+            let buffered = this._buffer.get(r);
+            if (!buffered) continue;
+            if (entry.batchSourced) {
+                this._buffer.delete(r);
+                changed++;
+                console.warn('OraclePublisher: dropping buffered round ' + r + ' from window [' + first +
+                    ',' + last + ']: it came from a batch that already landed on chain, so it needs ' +
+                    'no re-publishing and its own BTC anchor is no longer recoverable here');
+                continue;
+            }
+            // Fail CLOSED on a derived round that is not well formed. The buffer is the
+            // only copy of a finalized round this hub holds once its rows age out, so a
+            // half-read row (a NULL anchor, an unpriced pair) must leave it alone rather
+            // than overwrite good content with a header the canonical builder would
+            // turn into NaN.
+            if (!this._wellFormedRound(entry)) {
+                console.warn('OraclePublisher: skipping reconcile of buffered round ' + r +
+                    ': its price_snapshots rows did not read back as a complete round');
+                continue;
+            }
+            if (this._sameBufferedRound(buffered, entry)) continue;
+            entry.bufferedAt = Date.now();
+            this._buffer.set(r, entry);
+            changed++;
+            console.warn('OraclePublisher: buffered round ' + r + ' disagreed with this hub\'s own ' +
+                'price_snapshots; refreshed it from the DB so the batch proposal is something ' +
+                'peers can reproduce');
+        }
+        if (changed > 0) this._rewriteBufferFile(this._bufferedRange(-Infinity, Infinity));
+        return changed;
+    }
+
+    // Is a round read back from price_snapshots complete enough to sign? Every field
+    // the canonical builder reads has to be a real value, or the bytes it produces
+    // carry a NaN and no verifier on any chain accepts them.
+    _wellFormedRound(entry) {
+        if (!entry || !Number.isFinite(entry.round)) return false;
+        if (!Number.isFinite(entry.timestamp) || !Number.isFinite(entry.btcBlockHeight)) return false;
+        if (!Array.isArray(entry.pairs) || entry.pairs.length === 0) return false;
+        for (let p of entry.pairs) {
+            if (!p.pair || p.pair === 'undefined') return false;
+            if (p.price === undefined || p.price === null ||
+                p.price === '' || p.price === 'null' || p.price === 'undefined') return false;
+        }
+        return true;
     }
 
     // Refuse the window if any round it should carry finalized locally but is not in
@@ -2105,6 +2611,9 @@ class OraclePublisher {
                         ' (tx may have reached the DOGE node); NOT re-broadcasting to avoid a double spend. ' +
                         'Moving to dead-letter file ' + this.deadLetterPath + ' for manual verify/replay: ', err);
                     this._deadLetter(entry, 'ambiguous send failure (possible double-spend risk); verify on-chain before replay');
+                    // The same tx that must not be auto-retried here must not
+                    // be re-published by this hub's own takeover of the window either.
+                    if (entry.batch) this._noteAmbiguousWindow(parseInt(entry.batch.windowIndex));
                     continue;   // do not push to remaining; no auto re-broadcast
                 }
                 // Definitive pre-send failure: nothing left the process and the round is
@@ -2229,6 +2738,12 @@ class OraclePublisher {
             takeoverPending:              this._takeoverTimers.size,
             takeoverAttempts:             this.takeoverAttempts,
             takeoverPublished:            this.takeoverPublished,
+            // takeoverDeferred climbing means armed followers are correctly
+            // holding off a window whose leader may have a tx in flight; a value that
+            // climbs without takeoverPublished ever moving means leaders are broadcasting
+            // batches that never mine, which is a fee/mempool problem, not a hub one.
+            takeoverDeferred:             this.takeoverDeferred,
+            takeoverAmbiguousCooldownMs:  this.takeoverAmbiguousCooldownMs,
             // Leader-rotation view (item 3218): last finalized round's rank state
             // plus lifetime leader/follower-window counts, so a monitor can tell a
             // healthy-but-never-leader hub from a genuinely idle one and spot a dark
@@ -2255,6 +2770,28 @@ class OraclePublisher {
             batchBufferDepth:        this._buffer.size,
             batchBufferPath:         this.bufferPath,
             batchWindowRounds:       this.batchWindowRounds,
+            // The stuck-backlog reading. A closed window still buffered and
+            // not yet assembled in this process is a window that attempted and produced
+            // no wire; a count that does not fall across sweeps is a federation that
+            // cannot agree on content, which no other field here shows.
+            batchWindowsAwaitingRetry: this._pendingCatchupWindows().length,
+            batchCatchupSweeps:        this.batchCatchupSweeps,
+            batchCatchupIntervalMs:    this.batchCatchupIntervalMs,
+            // The cadence contract with the fee gate, in one place.
+            // batchWorstCaseSnapshotAgeSeconds ABOVE oracleMaxPriceAgeSeconds means
+            // native-coin fees go unpriceable between batches, which is invisible in
+            // every other field here: the rail reports perfect health while it happens.
+            batchWindowRoundsCeiling:         this.batchWindowRoundsCeiling,
+            batchCadenceSeconds:              Math.round((this.batchWindowRounds * this.roundIntervalMs) / 1000),
+            batchWorstCaseSnapshotAgeSeconds: (() => {
+                let ms = worstCaseSnapshotAgeMs(this.batchWindowRounds, {
+                    roundIntervalMs:  this.roundIntervalMs,
+                    graceMs:          this.batchGraceMs,
+                    landingReserveMs: this.batchLandingReserveMs });
+                return ms === null ? null : Math.round(ms / 1000);
+            })(),
+            oracleMaxPriceAgeSeconds: this.oracleMaxPriceAgeMs === null
+                ? null : Math.round(this.oracleMaxPriceAgeMs / 1000),
             spendGuard:          this.spendGuard.stats()
         };
     }
