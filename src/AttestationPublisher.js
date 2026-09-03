@@ -70,6 +70,7 @@ const SpendGuard    = require('./lib/spend_guard.js');
 const { AtMostOnce, isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
 const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
 const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
+const { isResponseMirrorActive } = require('./attest_response_mirror_activation.js');
 
 const APPROX_BTC_BLOCK_MS  = 600000;  // ~10 min; used to translate the failover
                                       // window from blocks to a wall-clock silence
@@ -292,6 +293,27 @@ class AttestationPublisher {
         if (!this.enabled){
             console.log('AttestationPublisher: disabled (ATTEST_ENABLED=false); skipping finalized response for ' +
                         String(event.requestId).substring(0,16) + '...');
+            return;
+        }
+        // ATTEST response mirror activation (the ATTEST response mirror design,
+        // decision D58). Above the activation height a finalized
+        // request's response rides the hub mirror (AttestationResponseMirror /
+        // ATTEST_RESULT gossip) instead of an on-chain ATTEST v1, so this publisher
+        // must stay out of it entirely: no queue append, no broadcast, no spend
+        // reservation, no durable publish intent. The 'request:finalized' listener
+        // is process-global, attached once in start(), so a per-request "detach" (the
+        // spec's own phrasing) is not implementable; a per-request early return here,
+        // before any of those four side effects branch off, is the one place that
+        // covers all of them. Gated on the REQUEST's own BTC block_index (never the
+        // response's, never the current chain tip), matching every other request-plane
+        // gate in this file. `null` in the activation map reads as unratified/off, so
+        // on every network but regtest this branch is dead code until the operator
+        // arms a height (mainnet and testnet are both null as of this writing). The
+        // failover sweep (_processQueue) replays from the on-disk queue file
+        // independently of this event, so a legacy-era entry queued before a future
+        // flag day still drains untouched; skipping the enqueue here needs no sweep
+        // change.
+        if (isResponseMirrorActive(Number(event.request && event.request.block_index), this.hub.network)){
             return;
         }
         let myPubkey = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
