@@ -46,6 +46,12 @@ const { PRICE_BATCH_MAX_ROUND_COUNT } = require('./price_batch_compression.js');
 const XPRICEB_SIGN_REQ = 'XPRICEB_SIGN_REQ';
 const XPRICEB_SIGN     = 'XPRICEB_SIGN';
 
+// Bound on the co-signed-window memo below. It exists only so OraclePublisher's
+// takeover cooldown can ask "did we hand this window's leader the last thing it
+// needed before broadcasting, and how long ago"; anything older than a couple of
+// failover windows can no longer change that answer.
+const CO_SIGNED_WINDOW_MEMO_MAX = 256;
+
 class OracleBatchSigner {
 
     constructor(hub){
@@ -70,6 +76,16 @@ class OracleBatchSigner {
         // case to support.
         this._signRound      = null;
         this._messageHandler = null;
+
+        // 'first:last' -> ms timestamp of the co-signature this hub GAVE for that
+        // proposed batch. A co-signature is the last thing a leader is waiting on
+        // before it broadcasts, so this is the only local evidence a FOLLOWER has that
+        // a leader's DOGE tx may already be in flight and merely unmined.
+        // OraclePublisher._attemptTakeover reads it through coSignedAt() to defer a
+        // takeover that would otherwise re-publish over a live transaction, the way
+        // AttestationPublisher defers on its own ambiguous sends. Insertion-ordered
+        // and bounded; oldest evicted first.
+        this._coSigned = new Map();
 
         this.stats = {
             batchSignRounds:         0,   // rounds this hub has led
@@ -105,8 +121,41 @@ class OracleBatchSigner {
     getStats(){
         return Object.assign({}, this.stats, {
             batchSignTimeoutMs: this.signTimeoutMs,
-            batchSignRoundActive: !!(this._signRound && !this._signRound.done)
+            batchSignRoundActive: !!(this._signRound && !this._signRound.done),
+            batchWindowsCoSigned: this._coSigned.size
         });
+    }
+
+    // ------------------------------------------------- the co-signature memo
+
+    _noteCoSigned(first, last){
+        let key = first + ':' + last;
+        this._coSigned.delete(key);          // re-insert so the memo stays LRU-ordered
+        this._coSigned.set(key, Date.now());
+        while(this._coSigned.size > CO_SIGNED_WINDOW_MEMO_MAX){
+            this._coSigned.delete(this._coSigned.keys().next().value);
+        }
+    }
+
+    // When did this hub last co-sign a proposed batch OVERLAPPING the round range
+    // [first,last]? Null when it never did, which is the honest reading of "the leader
+    // never got as far as asking, so it cannot have a tx in flight".
+    //
+    // Overlap, not equality: a leader splits an oversized window into several wires and
+    // asks for a signature over each sub-range, so an exact-key lookup would report a
+    // window nobody signed while its own sub-ranges were signed moments earlier.
+    coSignedAt(first, last){
+        let lo = parseInt(first), hi = parseInt(last);
+        if(!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+        let newest = null;
+        for(let [key, ts] of this._coSigned){
+            let parts = String(key).split(':');
+            let f = parseInt(parts[0]), l = parseInt(parts[1]);
+            if(!Number.isFinite(f) || !Number.isFinite(l)) continue;
+            if(l < lo || f > hi) continue;                       // disjoint from the window
+            if(newest === null || ts > newest) newest = ts;
+        }
+        return newest;
     }
 
     // ---------------------------------------------------------------- leader
@@ -297,6 +346,24 @@ class OracleBatchSigner {
         // This is the honest "the whole window is skipped here" case as well.
         if(mine.length === 0){ this._refuse(first, last, 'no finalized rounds in the window locally'); return; }
 
+        // A round this hub ingested from a batch that ALREADY LANDED cannot be
+        // re-derived here. PriceAggregator.receiveBatch pins
+        // price_snapshots.reference_block to the LANDING chain's block_index (spec
+        // §5.7 / D8), not to the round's own BTC anchor, so the row simply no longer
+        // carries the height the canonical needs; on testnet round 116 was stored at
+        // DOGE height 67856096 where its BTC anchor was 150176. Comparing that as if
+        // it were a BTC anchor produced a bare "does not match" refusal on every
+        // re-proposal of window [114,119] - a window that had in fact already
+        // published. Say so instead: an already-landed round is not signable content.
+        let landed = mine.filter(r => r.batchSourced).map(r => r.round);
+        if(landed.length){
+            this._refuse(first, last, 'round(s) ' + landed.join(',') + ' here came from a batch that ' +
+                'already landed on chain, so their own BTC anchor is no longer recoverable from ' +
+                'price_snapshots (reference_block holds the landing block); this window has ' +
+                'already published and there is nothing left to co-sign');
+            return;
+        }
+
         // The batch anchor is the LAST included round's own anchor (spec section 4).
         // Deriving it rather than trusting d.btc_block_height is what keeps a lying
         // header from steering which capability set and which flag-day verdict this
@@ -345,11 +412,23 @@ class OracleBatchSigner {
             return;
         }
         if(ours !== theirs){
-            this._refuse(first, last, 'proposal does not match this hub\'s own finalized rounds');
+            // Name WHAT diverged. The bare form of this line was the whole
+            // diagnostic an operator got for a window that never published, and it
+            // cannot be reproduced after the fact: the leader's proposal is not
+            // persisted anywhere. One bounded clause naming the first differing round
+            // and field is the difference between "the federation disagrees" and a
+            // fix. Never dump the pair lists themselves - a 37-pair round would put
+            // kilobytes per refusal into the log.
+            this._refuse(first, last, 'proposal does not match this hub\'s own finalized rounds (' +
+                         this._describeMismatch(d, mine, myAnchor) + ')');
             return;
         }
 
         this.stats.batchSignaturesProvided++;
+        // Note the co-signature BEFORE it goes out: from here on the leader can
+        // broadcast at any moment, and a takeover armed against this window must
+        // treat "not on chain" as ambiguous rather than as leader silence.
+        this._noteCoSigned(first, last);
         this.peerManager.broadcast(XPRICEB_SIGN, {
             first_round: first,
             last_round:  last,
@@ -377,6 +456,67 @@ class OracleBatchSigner {
         console.warn('OracleBatchSigner: refusing to co-sign batch [' + first + ',' + last + ']: ' + why);
     }
 
+    // One bounded clause naming the FIRST real difference between a proposal and this
+    // hub's own rows. Diagnostic only: the refusal is already decided by the canonical
+    // byte comparison, and nothing here may change that verdict.
+    //
+    // Deliberately shallow. It reports the first differing round and the first
+    // differing field within it, never a full diff, so a hub refusing an entire window
+    // every ten minutes cannot flood its own log.
+    _describeMismatch(proposal, mine, myAnchor){
+        let parts = [];
+        let theirAnchor = parseInt(proposal.btc_block_height);
+        if(Number.isFinite(theirAnchor) && theirAnchor !== myAnchor)
+            parts.push('batch anchor proposed ' + theirAnchor + ', derived ' + myAnchor);
+
+        let theirRounds = Array.isArray(proposal.rounds) ? proposal.rounds : [];
+        let theirByRound = new Map();
+        for(let r of theirRounds){
+            let n = parseInt(r && r.round);
+            if(Number.isFinite(n)) theirByRound.set(n, r);
+        }
+        let mineByRound = new Map(mine.map(r => [r.round, r]));
+
+        let onlyProposed = Array.from(theirByRound.keys()).filter(n => !mineByRound.has(n)).sort((a,b) => a-b);
+        let onlyMine     = Array.from(mineByRound.keys()).filter(n => !theirByRound.has(n)).sort((a,b) => a-b);
+        if(onlyProposed.length) parts.push('round(s) ' + onlyProposed.join(',') + ' proposed but not finalized here');
+        if(onlyMine.length)     parts.push('round(s) ' + onlyMine.join(',') + ' finalized here but not proposed');
+
+        for(let n of Array.from(mineByRound.keys()).sort((a,b) => a-b)){
+            let t = theirByRound.get(n);
+            if(!t) continue;
+            let m    = mineByRound.get(n);
+            let diff = this._firstRoundFieldDiff(n, t, m);
+            if(diff){ parts.push(diff); break; }
+        }
+        return parts.length ? parts.join('; ') : 'no field-level difference found, so the two sides ' +
+               'disagree on the canonical ENCODING rather than its content';
+    }
+
+    // The first differing field of one round, or null when the two agree. Pair sets
+    // are compared by name and price; only the first offending pair is named.
+    _firstRoundFieldDiff(round, theirs, mine){
+        let at = 'round ' + round + ' ';
+        if(parseInt(theirs.btcBlockHeight != null ? theirs.btcBlockHeight : theirs.btc_block_height) !== mine.btcBlockHeight)
+            return at + 'anchor proposed ' +
+                   parseInt(theirs.btcBlockHeight != null ? theirs.btcBlockHeight : theirs.btc_block_height) +
+                   ', derived ' + mine.btcBlockHeight;
+        if(parseInt(theirs.timestamp) !== mine.timestamp)
+            return at + 'timestamp proposed ' + parseInt(theirs.timestamp) + ', derived ' + mine.timestamp;
+
+        let theirPairs = new Map((Array.isArray(theirs.pairs) ? theirs.pairs : [])
+            .map(p => [String(p.coinPair || p.pair), String(p.price)]));
+        let minePairs  = new Map(mine.pairs.map(p => [String(p.pair), String(p.price)]));
+        for(let [name, price] of theirPairs){
+            if(!minePairs.has(name)) return at + 'pair ' + name + ' proposed but not finalized here';
+            if(minePairs.get(name) !== price)
+                return at + 'pair ' + name + ' price proposed ' + price + ', derived ' + minePairs.get(name);
+        }
+        for(let name of minePairs.keys())
+            if(!theirPairs.has(name)) return at + 'pair ' + name + ' finalized here but not proposed';
+        return null;
+    }
+
     // The ONE canonical builder. Deliberately delegated to the live OracleConsensus
     // instance rather than reimplemented: a second copy of the v2 JSON in this file
     // is exactly the drift that would make the bytes this hub signs differ from the
@@ -399,9 +539,17 @@ class OracleBatchSigner {
     // markers _storeSnapshot writes for pairs absent from an otherwise-finalized
     // round, which is what keeps a round's pair list identical to the one the v0
     // canonical for that round carried.
+    // proof_head is the first characters of consensus_proof, which is the ONE field
+    // that tells a batch-sourced row from a locally-finalized one: a v0 row's proof is
+    // a bare signature ARRAY, a batch-sourced row's is the {"batch":...} object of D23
+    // (the same prefix test OraclePublisher._pruneObservedWindow and
+    // PriceAggregator.retractFromActionIndex use). It matters here because a
+    // batch-sourced row's reference_block is the LANDING chain's height, not the
+    // round's BTC anchor, so reading it as an anchor invents a number.
     async _deriveWindow(firstRound, lastRound){
         let rows = await this.db.doQuery(
-            'SELECT round_number, coin_pair, price, reference_block, block_timestamp ' +
+            'SELECT round_number, coin_pair, price, reference_block, block_timestamp, ' +
+            'LEFT(consensus_proof, 8) AS proof_head ' +
             'FROM price_snapshots WHERE round_number >= ? AND round_number <= ? AND status = ? ' +
             'ORDER BY round_number ASC, coin_pair ASC',
             [firstRound, lastRound, 'finalized']);
@@ -413,7 +561,8 @@ class OracleBatchSigner {
             let entry = byRound.get(key);
             if(!entry){
                 entry = { round: key, timestamp: parseInt(r.block_timestamp),
-                          btcBlockHeight: parseInt(r.reference_block), pairs: [] };
+                          btcBlockHeight: parseInt(r.reference_block), pairs: [],
+                          batchSourced: String(r.proof_head || '').indexOf('{"batch"') === 0 };
                 byRound.set(key, entry);
             } else if(parseInt(r.block_timestamp) !== entry.timestamp ||
                       parseInt(r.reference_block) !== entry.btcBlockHeight){
