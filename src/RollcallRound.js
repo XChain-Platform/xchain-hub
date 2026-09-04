@@ -90,6 +90,9 @@ const { CANONICAL_REORG_BUFFER } = require('./snapshot_reorg_buffer.js');
 // The one gossip type this engine adds. PeerManager.broadcast has no type
 // registry, so a new type is this constant plus one `case` in _handleMessage.
 const XROLLCALL_SIGN = 'XROLLCALL_SIGN';
+// How many not-yet-opened epochs' gossip a hub holds. One is the normal case
+// (peers a poll ahead); a few more covers a hub catching up after a stall.
+const EARLY_SIG_EPOCHS = 4;
 
 // Wire chunking bound, from the frozen test vector's size budget: a 7-digit
 // epoch header costs 152 bytes and each (PUBKEY, SIG) pair 194, against the
@@ -194,6 +197,11 @@ class RollcallRound {
 
         this.rounds       = new Map();   // epoch -> round state
         this._signatures  = new Map();   // epoch -> { ledgerHash, sig } recovered from disk
+        // Gossip that arrived for an epoch this hub has not opened yet. A peer
+        // broadcasts its signature ONCE, when it signs, and never again; a hub
+        // that ticks later would otherwise lose every earlier signer for good
+        // and lead with a partial set. Drained into the round when it opens.
+        this._earlySigs   = new Map();   // epoch -> Map(pubkey -> sig)
         // Epochs whose publish fee a PRIOR process already committed, and the
         // separate self-publish commitments. The rounds map is empty after a
         // restart, so it cannot answer either question.
@@ -472,6 +480,13 @@ class RollcallRound {
             if(this.peerManager) this.peerManager.broadcast(XROLLCALL_SIGN, { epoch, pubkey: myPubkey, sig });
         }
 
+        // Peers that signed before this hub opened the round: judged now, by the
+        // same rule as a live message, and dropped from the holding area either way.
+        let early = this._earlySigs.get(epoch);
+        this._earlySigs.delete(epoch);
+        for(let e of this._earlySigs.keys()) if(e < epoch) this._earlySigs.delete(e);
+        if(early) for(let [pk, sig] of early) this._onSign({ epoch, pubkey: pk, sig });
+
         console.log('RollcallRound: epoch=' + epoch + ' ledger_hash=' + ledgerHash.substring(0, 16) +
                     '... members=' + members.size + ' signed=' + (state.signed ? 'yes' : 'no identity'));
     }
@@ -486,12 +501,26 @@ class RollcallRound {
     }
 
     _onSign(d){
-        let state = this.rounds.get(Number(d.epoch));
-        if(!state) return;
+        let epoch = Number(d.epoch);
         let pk  = String(d.pubkey || '').toLowerCase();
         let sig = String(d.sig || '').toLowerCase();
+        if(!Number.isFinite(epoch))      return;
         if(!/^[0-9a-f]{64}$/.test(pk))  return;
         if(!/^[0-9a-f]{128}$/.test(sig)) return;
+        let state = this.rounds.get(epoch);
+        if(!state){
+            // Not opened here yet: hold it, unverified, for the round to judge.
+            // Only epochs ahead of every open round are worth holding (an older
+            // one can never open), and the holding area stays small.
+            let newest = Math.max(-1, ...this.rounds.keys());
+            if(epoch <= newest) return;
+            let held = this._earlySigs.get(epoch) || new Map();
+            if(!held.has(pk)) held.set(pk, sig);
+            this._earlySigs.set(epoch, held);
+            while(this._earlySigs.size > EARLY_SIG_EPOCHS)
+                this._earlySigs.delete(Math.min(...this._earlySigs.keys()));
+            return;
+        }
         // Deduped by pubkey, and the key is only ever recorded once its signature
         // has verified: admitting a key on first sight would let a garbage pair
         // arriving before the real one suppress it, which reads downstream as an

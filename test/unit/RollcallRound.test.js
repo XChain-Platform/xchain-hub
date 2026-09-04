@@ -376,6 +376,32 @@ describe('RollcallRound', function () {
             assert.strictEqual(eng.rounds.get(EPOCH).sigs.has(PKS[1]), true);
         });
 
+        it('keeps a peer signature that arrived BEFORE this hub opened the epoch', async function () {
+            // A peer broadcasts once, when it signs, and never again. On the
+            // acceptance venue (epoch 4980, 2026-09-04) the elected leader was the
+            // hub that signed last, so it dropped the earlier signer's gossip on
+            // "no such round" and led with a partial set for the whole window.
+            wireRpc({ tip: 36 });
+            const eng = makeEngine({});
+            eng._handleMessage({ type: 'XROLLCALL_SIGN',
+                                 data: { epoch: EPOCH, pubkey: PKS[1], sig: signOf(eng, 1) } });
+            assert.strictEqual(eng.rounds.has(EPOCH), false, 'the round is not open yet');
+            await eng._tick();
+            assert.strictEqual(eng.rounds.get(EPOCH).sigs.has(PKS[1]), true,
+                'the early signature must be applied when the round opens');
+            assert.strictEqual(eng._earlySigs.size, 0, 'the holding area is drained');
+        });
+
+        it('judges an early signature by the same rule as a live one', async function () {
+            wireRpc({ tip: 36 });
+            const eng = makeEngine({});
+            eng._handleMessage({ type: 'XROLLCALL_SIGN',
+                                 data: { epoch: EPOCH, pubkey: PKS[1], sig: IDS[1].sign(eng._canonical(60, LEDGER_HASH)) } });
+            await eng._tick();
+            assert.strictEqual(eng.rounds.get(EPOCH).sigs.has(PKS[1]), false,
+                'a held signature that does not verify is dropped at the drain, never admitted unverified');
+        });
+
         it('drops a signature that does not verify over OUR canonical', async function () {
             const eng = await collecting();
             // A real signature by the right key over a DIFFERENT epoch: correct
