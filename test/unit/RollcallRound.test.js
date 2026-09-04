@@ -307,6 +307,51 @@ describe('RollcallRound', function () {
             assert.strictEqual(signSpy.callCount, 1,
                 'a stored signature over a superseded ledger_hash must not be re-emitted');
         });
+
+        it('ignores a stored signature another identity wrote and signs fresh under its own key', async function () {
+            wireRpc({ tip: 36 });
+            const first = makeEngine({});
+            await first._tick();
+            const foreign = first.hub._pm.broadcast.getCalls()
+                .filter(c => c.args[0] === 'XROLLCALL_SIGN')[0].args[1];
+
+            // Same log file, DIFFERENT identity: the line on disk is somebody
+            // else's. Re-emitting it would broadcast a signature no peer can
+            // verify under this pubkey, and this hub would then read as absent.
+            const id2 = new ValidatorIdentity(SEEDS[1]);
+            const signSpy = sinon.spy(id2, 'sign');
+            const second = makeEngine({ identity: id2 });
+            second._loadSignLog();
+            await second._tick();
+            assert.strictEqual(signSpy.callCount, 1, 'a foreign line must not stand in for this hub\'s own signature');
+            const own = second.hub._pm.broadcast.getCalls()
+                .filter(c => c.args[0] === 'XROLLCALL_SIGN')[0].args[1];
+            assert.strictEqual(own.pubkey, id2.getPubkeyHex().toLowerCase());
+            assert.notStrictEqual(own.sig, foreign.sig, 'the broadcast signature must be this identity\'s, not the stored one');
+            const state = Array.from(second.rounds.values())[0];
+            assert.ok(ValidatorIdentity.verify(state.canonical, own.sig, own.pubkey),
+                'what this hub broadcasts must verify under its own pubkey');
+        });
+
+        it('keeps only its own spend records, treating a record that names no pubkey as its own', function () {
+            const eng   = makeEngine({});
+            const mine  = eng._ownPubkey();
+            const other = new ValidatorIdentity(SEEDS[1]).getPubkeyHex().toLowerCase();
+            assert.ok(mine && mine !== other);
+            fs.writeFileSync(process.env.ROLLCALL_SPEND_LOG_PATH,
+                JSON.stringify({ phase: 'sent', epoch: 30, kind: 'sweep', pubkey: other }) + '\n' +
+                JSON.stringify({ phase: 'sent', epoch: 60, kind: 'sweep' }) + '\n' +
+                JSON.stringify({ phase: 'sent', epoch: 90, kind: 'self',  pubkey: mine }) + '\n');
+            eng._loadSpendLog();
+            assert.ok(!eng._committed.has('30'), 'another identity\'s spend is not this hub\'s commitment');
+            assert.ok(eng._committed.has('60'), 'a record predating the pubkey field is this hub\'s own');
+            assert.ok(eng._committed.has('90:self'));
+
+            // And what this hub writes from now on names it.
+            eng._recordSpend({ phase: 'intent', epoch: 120, kind: 'sweep' });
+            const last = fs.readFileSync(process.env.ROLLCALL_SPEND_LOG_PATH, 'utf8').trim().split('\n').pop();
+            assert.strictEqual(JSON.parse(last).pubkey, mine);
+        });
     });
 
     // ── collect ──────────────────────────────────────────────────────────────

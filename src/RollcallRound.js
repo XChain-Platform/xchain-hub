@@ -851,8 +851,16 @@ class RollcallRound {
         }
     }
 
+    // Every durable record names the identity that wrote it, so a log that
+    // holds another hub's lines (a copied config dir, a shared audit path) can
+    // be told apart from this hub's own on the next boot.
+    _ownPubkey(){
+        return this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
+    }
+
     _recordSpend(entry){
-        return this._appendLine(this.spendLogPath, Object.assign({ ts: Date.now(), effector: 'ROLLCALL_PUBLISH' }, entry));
+        return this._appendLine(this.spendLogPath,
+            Object.assign({ ts: Date.now(), effector: 'ROLLCALL_PUBLISH', pubkey: this._ownPubkey() || undefined }, entry));
     }
 
     // A signature costs nothing on chain, so an unwritable path must not stop the
@@ -874,6 +882,7 @@ class RollcallRound {
         let text;
         try { text = fs.readFileSync(this.spendLogPath, 'utf8'); }
         catch(e){ return; }
+        let mine = this._ownPubkey();
         let outcome = new Map();
         for(let line of text.split('\n')){
             if(!line.trim()) continue;
@@ -881,6 +890,9 @@ class RollcallRound {
             try { rec = JSON.parse(line); } catch(_){ continue; }   // a torn tail line
             let epoch = Number(rec.epoch);
             if(!Number.isFinite(epoch)) continue;
+            // Another identity's spend is not this hub's commitment. A record
+            // naming no pubkey predates the field and is kept as this hub's own.
+            if(mine && rec.pubkey && String(rec.pubkey).toLowerCase() !== mine) continue;
             let key   = rec.kind === 'self' ? (epoch + ':self') : String(epoch);
             let prior = outcome.get(key);
             if(rec.phase === 'sent' || rec.phase === 'ambiguous') outcome.set(key, 'sent');
@@ -893,10 +905,19 @@ class RollcallRound {
 
     // Last write wins: a re-signature for the same epoch (a reorg changed the
     // ledger_hash under us) supersedes the earlier one.
+    //
+    // ONLY THIS HUB'S OWN LINES. A restored signature is re-emitted under this
+    // hub's pubkey without re-signing, so a line another identity wrote would be
+    // broadcast as ours: every peer drops it at verification, this hub records
+    // nothing of its own for the epoch, and it reads as ABSENT while believing
+    // it signed. Measured on the regtest acceptance venue on 2026-09-04, where
+    // three in-process hubs shared one log and the restarted hub carried a
+    // peer's signature on its own self-publish.
     _loadSignLog(){
         let text;
         try { text = fs.readFileSync(this.signLogPath, 'utf8'); }
         catch(e){ return; }
+        let mine = this._ownPubkey();
         for(let line of text.split('\n')){
             if(!line.trim()) continue;
             let rec;
@@ -906,6 +927,7 @@ class RollcallRound {
             let sig   = String(rec.sig || '').toLowerCase();
             if(!Number.isFinite(epoch)) continue;
             if(!/^[0-9a-f]{64}$/.test(lh) || !/^[0-9a-f]{128}$/.test(sig)) continue;
+            if(mine && String(rec.pubkey || '').toLowerCase() !== mine) continue;
             this._signatures.set(epoch, { ledgerHash: lh, sig });
         }
     }
