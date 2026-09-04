@@ -17,13 +17,19 @@
  * effective_time is a BIGINT that feeds a signed canonical and a block predicate,
  * where a string-versus-number swap is a fork rather than a display bug.
  *
- * THIS FILE HAS NO REQUIRES, AND THAT IS THE POINT. The rule previously lived on
- * the broadcaster class and was imported from there, which put it behind that
- * module's own load order: reached through a cycle, the import resolved before the
- * property was attached, the routes stringified with an undefined replacer, and
- * every snapshot route threw "Do not know how to serialize a BigInt" at runtime
- * while passing in isolation. A leaf module cannot be partially initialized, so
- * both consumers get the function no matter who loads first.
+ * The rule previously lived as a module-local const inside the broadcaster, which
+ * exported only its class. The snapshot routes destructured bigIntReplacer off that
+ * module and so read a property nobody had ever attached: it was undefined
+ * deterministically, in every environment, and every snapshot route threw
+ * "Do not know how to serialize a BigInt" the first time a column arrived as a real
+ * BigInt. It looked environment-specific only because the pool sets bigIntAsNumber,
+ * so nothing outside a test ever handed those routes a BigInt to trip over.
+ *
+ * A leaf module is the fix because it cannot be half-initialized. Keeping the rule
+ * beside a class invites re-publishing it as a property of that class, which is both
+ * easy to omit (what happened) and, once a cycle joins the graph, orderable ahead of
+ * its own assignment. This module imports nothing, so neither consumer has a load
+ * order left to lose, and the suite pins that.
  *
  ********************************************************************/
 

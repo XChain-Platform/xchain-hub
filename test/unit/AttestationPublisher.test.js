@@ -912,13 +912,24 @@ describe('AttestationPublisher: _fetchPendingRequestIds', function () {
     });
 
     it('returns null when the indexer call throws a non-Error value (e.message falsy branch)', async function () {
-        // Line 418: `e && e.message ? e.message : e` (the `e` branch when message is absent)
-        const pub = makePublisher(MY_PUB);
-        const axios = require('axios');
-        sinon.stub(axios, 'post').rejects({ code: 'ECONNREFUSED' });  // plain object, no .message
+        // Exercises the `e` arm of `e && e.message ? e.message : e` in the fetch catch.
+        //
+        // The throw is injected through the hub's header hook rather than by stubbing
+        // axios.post, because the header hook is evaluated INSIDE the same try block and
+        // a module-level axios stub cannot be trusted to be the instance under test.
+        // Any suite that proxyquires a module which transitively requires axios (src/api
+        // does) purges the axios require-cache entry, so a later require('axios') hands
+        // back a NEW object while AttestationPublisher keeps the one it captured at load.
+        // Stubbing the new object left the real post() in the call path, which then made
+        // a live request to the fake indexer host and returned only when axios hit its own
+        // 5000ms timeout: the same 5000ms mocha allows the test, so it failed in a full
+        // tier run and passed in isolation. Injecting at a seam the test owns keeps this
+        // case deterministic and off the network.
+        const pub = makePublisher(MY_PUB, {
+            _btcIndexerHeaders: () => { throw { code: 'ECONNREFUSED' }; }   // plain object, no .message
+        });
         const ids = await pub._fetchPendingRequestIds();
         expect(ids).to.be.null;
-        sinon.restore();
     });
 
     it('handles result without requests field (result.requests || [] fallback)', async function () {
