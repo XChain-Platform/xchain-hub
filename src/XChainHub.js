@@ -1989,6 +1989,10 @@ class XChainHub {
         if(this.attestationRound)       await this.attestationRound.stop();
         if(this.fullNodeChallenge)      await this.fullNodeChallenge.stop();
         if(this.attestationRelay)       await this.attestationRelay.stop();
+        // Stopped LAST among the attestation family: attestationRound proposes INTO
+        // consensus (consensus.propose()), so stopping consensus before round would
+        // let a poll already in flight fire into a consensus whose state is cleared.
+        if(this.attestationConsensus)   await this.attestationConsensus.stop();
         if(this.stateAnchorPublisher) await this.stateAnchorPublisher.stop();
         if(this.retractionConsensus) this.retractionConsensus.stop();
         if(this.stateCheckpoints) await this.stateCheckpoints.stop();

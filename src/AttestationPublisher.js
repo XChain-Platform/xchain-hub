@@ -287,7 +287,10 @@ class AttestationPublisher {
         }
         // Detach before returning: stop() is what close() calls, and a subscription that
         // outlives the engine is the leak close() exists to prevent.
-        if(this.hub.attestationConsensus && this._finalizedHandler){
+        // The typeof guard matches AttestationSpotChecker.stop(): a test double may carry
+        // `on` without `removeListener`, and throwing here would abort close() partway.
+        if(this.hub.attestationConsensus && this._finalizedHandler
+           && typeof this.hub.attestationConsensus.removeListener === 'function'){
             this.hub.attestationConsensus.removeListener('request:finalized', this._finalizedHandler);
             this._finalizedHandler = null;
         }

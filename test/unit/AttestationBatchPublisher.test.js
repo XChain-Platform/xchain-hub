@@ -658,6 +658,9 @@ describe('AttestationBatchPublisher', function () {
             await p._handleSignReq(proposal([]));
             expect(sent.length, 'every refusal must be silent on the wire').to.equal(0);
             expect(p.stats.signRefusals).to.equal(3);
+            // None of these three is the missing-chain-tip shape, so the dedicated
+            // class must stay at zero rather than absorbing unrelated refusals.
+            expect(p.stats.signRefusalsNoChainTip).to.equal(0);
 
             // The honest proposal is co-signed.
             await p._handleSignReq(proposal([wireRow(mine)]));
@@ -687,6 +690,26 @@ describe('AttestationBatchPublisher', function () {
             expect(await at(ANCHOR - AttestationBatchPublisher.ANCHOR_MAX_LAG_BLOCKS), 'the oldest admissible anchor').to.equal(true);
             expect(await at(ANCHOR + 1), 'an anchor above this hub\'s tip is refused').to.equal(false);
             expect(await at(ANCHOR - AttestationBatchPublisher.ANCHOR_MAX_LAG_BLOCKS - 1), 'too far back').to.equal(false);
+        });
+
+        it('counts a missing chain tip as its own refusal class, not the generic bound', async function () {
+            let hub = makeHub({ dir: dir });
+            let sent = [];
+            hub.peerManager = { on(){}, removeListener(){}, broadcast(type, data){ sent.push({ type, data }); } };
+            let p = makePublisher(hub);
+            let start = 200 * WINDOW_S;
+            hub.db.setTip(null);   // no chain_tips row for this network at all
+
+            await p._handleSignReq({
+                type: AttestationBatchPublisher.XATTESTB_SIGN_REQ,
+                sig_pubkey: 'ff'.repeat(32),
+                data: { network: 'regtest', window_start: start, window_end: start + WINDOW_S,
+                        row_count: 0, btc_block_height: ANCHOR, rows: [] }
+            });
+
+            expect(sent.length, 'a refusal is silent on the wire').to.equal(0);
+            expect(p.stats.signRefusals).to.equal(1);
+            expect(p.stats.signRefusalsNoChainTip).to.equal(1);
         });
     });
 

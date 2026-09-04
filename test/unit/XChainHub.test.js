@@ -14,6 +14,7 @@ const sinon        = require('sinon');
 const { expect }   = require('chai');
 const proxyquire   = require('proxyquire');
 const { EventEmitter } = require('events');
+const AttestationConsensus = require('../../src/AttestationConsensus.js');
 
 describe('XChainHub', function () {
 
@@ -1031,6 +1032,7 @@ describe('XChainHub', function () {
 
             for (let cycle = 0; cycle < 2; cycle++) {
                 let consensus = new EventEmitter();
+                consensus.stop = sinon.stub().resolves();
                 hub.attestationConsensus      = consensus;
                 hub.attestationPublisher      = attach(consensus);
                 hub.attestationSpotChecker    = attach(consensus);
@@ -1046,6 +1048,30 @@ describe('XChainHub', function () {
                 await hub.close();   // double-close must not throw or double-detach
 
                 expect(consensus.listenerCount('request:finalized'), 'cycle ' + cycle + ' after close').to.equal(0);
+            }
+        });
+
+        // Row: attestationConsensus keeps its own peer-manager 'message' listener
+        // across close(), the leak class row above closed for the other five
+        // engines. A mirror venue stops and restarts a hub per cycle, so a
+        // rising listener count here corrupts exactly that run.
+        it('close() stops attestationConsensus, leaving no peer-manager listener across repeated close/reopen cycles', async function () {
+            hub.db = { close: sinon.stub().resolves() };
+            let peerManager = new EventEmitter();
+            peerManager.stop = sinon.stub().resolves();
+            hub.peerManager = peerManager;
+
+            for (let cycle = 0; cycle < 3; cycle++) {
+                let consensus = new AttestationConsensus(hub, null);
+                await consensus.start();
+                hub.attestationConsensus = consensus;
+
+                expect(peerManager.listenerCount('message'), 'cycle ' + cycle + ' before close').to.equal(1);
+
+                await hub.close();
+                await hub.close();   // double-close must not throw or double-detach
+
+                expect(peerManager.listenerCount('message'), 'cycle ' + cycle + ' after close').to.equal(0);
             }
         });
     });

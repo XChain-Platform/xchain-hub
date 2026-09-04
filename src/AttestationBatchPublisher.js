@@ -200,7 +200,7 @@ class AttestationBatchPublisher {
             windowsDeadLettered: 0, windowsQuarantined: 0,
             wiresBroadcast: 0, rowsPublished: 0,
             signRounds: 0, signQuorums: 0, signTimeouts: 0,
-            signaturesProvided: 0, signRefusals: 0,
+            signaturesProvided: 0, signRefusals: 0, signRefusalsNoChainTip: 0,
             landedRecorded: 0, lastPublishedWindow: null, lastPublishedTxid: null
         };
     }
@@ -815,7 +815,8 @@ class AttestationBatchPublisher {
            anchor > myTip || anchor < myTip - ANCHOR_MAX_LAG_BLOCKS){
             this._refuse(windowStart, 'proposed anchor ' + anchor + ' is outside this hub\'s bounds (tip ' +
                          (myTip === null ? 'unresolved: ' + this._anchorFailure : myTip) +
-                         ', max lag ' + ANCHOR_MAX_LAG_BLOCKS + ')');
+                         ', max lag ' + ANCHOR_MAX_LAG_BLOCKS + ')',
+                         myTip === null ? 'no_chain_tip' : null);
             return;
         }
 
@@ -909,8 +910,12 @@ class AttestationBatchPublisher {
         this._checkSignQuorum();
     }
 
-    _refuse(windowStart, why){
+    // reasonClass separates a distinct, actionable shape (no chain tip resolved at
+    // all, so this hub refuses every proposal it is ever handed) from the generic
+    // total, which mixes it with ordinary content and cadence disagreements.
+    _refuse(windowStart, why, reasonClass){
         this.stats.signRefusals++;
+        if(reasonClass === 'no_chain_tip') this.stats.signRefusalsNoChainTip++;
         console.warn('AttestationBatchPublisher: refusing to co-sign the batch for window ' +
                      windowStart + ': ' + why);
     }
