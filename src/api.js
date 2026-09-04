@@ -149,7 +149,8 @@ for(const net of coins.NETWORKS) COIN_CONSENSUS_HASHES[net] = coins.consensusHas
 const WRITE_METHODS  = new Set([
     'updateconfig', 'registervalidator', 'rotatevalidator', 'deregistervalidator', 'syncvalidators',
     'propose', 'proposeslashpenalty', 'vote', 'requestattestation', 'reportreorg', 'initiateswap',
-    'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushoracleprice', 'pushpricereorg', 'pushxcallreorg',
+    'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushattestbatch', 'pushoracleprice',
+    'pushpricereorg', 'pushxcallreorg',
     'pushdexreorg', 'anchorflush', 'pauseeffectorspend', 'resumeeffectorspend'
 ]);
 
@@ -178,7 +179,7 @@ const REORG_WRITE_METHODS = new Set(['pushpricereorg', 'pushxcallreorg', 'pushde
 // Adding to it widens a public attack surface: a method belongs here only if an
 // indexer must call it and it is signature- or content-validated hub-side.
 const FEED_RPC_METHODS = new Set([
-    'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushoracleprice',
+    'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushattestbatch', 'pushoracleprice',
     'pushpricereorg', 'pushxcallreorg', 'pushdexreorg'
 ]);
 const HUB_REORG_API_KEY   = process.env.HUB_REORG_API_KEY || '';
@@ -989,6 +990,47 @@ async function startApi(){
                 return result;
             } catch (err) {
                 return {error: err.message || "error processing price batch"};
+            }
+        },
+
+        // The ATTEST response batch counterpart to pushpricebatch (the ATTEST
+        // response-mirror design, §6.3 / decisions D72 and D78). One signed ATTEST v5
+        // action carries every terminal response of a window; the DOGE indexer that
+        // parsed it pushes the reassembled body here, and this hub turns it back into
+        // mirror rows every BTC indexer then verifies for itself. That is the whole
+        // chain-only rebuild road: without it a node with no mirror connection could
+        // never reach the rows the chain already carries.
+        //
+        // The parameter list IS the interface, and the indexer's own push builder pins
+        // exactly these names. `rows` and `sigs` are the reassembled body verbatim, so
+        // the hub re-verifies the same bytes the indexer verified rather than a
+        // re-serialization of them; `block_time` rides along for the reason the price
+        // batch carries it (batching widens the hub/chain clock skew).
+        async pushattestbatch({source_chain, network, window_start, window_end, row_count, btc_block_height, rows, sigs, action_index, block_index, block_time, push_generation}){
+            if(!source_chain) return {error: "source_chain is required"};
+            let chainErr = validateChain(source_chain);
+            if (chainErr) return chainErr;
+            if(!Array.isArray(rows)) return {error: "rows must be an array"};
+            if(!hub.attestationResponseMirror) return {error: "attestation response mirror not ready"};
+            try {
+                return await hub.attestationResponseMirror.receiveValidatedBatch(source_chain, {
+                    network:          network,
+                    window_start:     window_start,
+                    window_end:       window_end,
+                    row_count:        row_count,
+                    btc_block_height: btc_block_height,
+                    rows:             rows,
+                    sigs:             sigs,
+                    action_index:     action_index,
+                    block_index:      block_index,
+                    block_time:       block_time,
+                    // Forwarded for parity with the price pushes even though nothing on
+                    // this path deletes: every effect here is idempotent, so a stale
+                    // generation is absorbed rather than fenced.
+                    push_generation:  push_generation
+                });
+            } catch (err) {
+                return {error: err.message || "error processing attestation batch"};
             }
         },
 

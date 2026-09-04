@@ -38,6 +38,14 @@
  * already recorded for the price-barrier grace, and it gets the same answer:
  * a network-gated seam, not a lowered constant.
  *
+ * THE BATCH WINDOW RIDES HERE FOR THE SAME REASON. The periodic on-chain batch
+ * that keeps the response history reconstructible from chain parse closes on the
+ * wall-clock hour, and a regtest venue cannot wait an hour per acceptance test, so
+ * it gets the identical network-gated seam. The window is deliberately NOT coupled
+ * to the PRICE batch window, which counts ROUNDS rather than seconds and is resized
+ * against the fee-staleness bound: coupling attestation coverage to a number that
+ * moves for unrelated reasons would move a chain-only node's coverage proof with it.
+ *
  * WHY THE SEAM IS REGTEST-ONLY AND FAILS LOUD THERE. The resolved value goes
  * straight into bytes the responsible set signs, and every honest hub bounds an
  * incoming proposal against its OWN expectation computed from this same number.
@@ -66,11 +74,22 @@ const ATTEST_RESPONSE_FORWARD_S = 120;
 // precedence order as every other network-gated hub seam.
 const ATTEST_RESPONSE_FORWARD_S_OVERRIDE = 'ATTEST_RESPONSE_FORWARD_S_OVERRIDE';
 
+// Seconds per on-chain batch window, aligned to the unix hour. FROZEN PROTOCOL
+// CONSTANT for the same reason the margin above is one: the window bounds are what
+// the batch key is derived from and what the batch quorum signs, so two hubs on two
+// cadences do not publish two schedules, they propose batches no peer can co-sign.
+const ATTEST_BATCH_WINDOW_S = 3600;
+
+// The regtest-only seam's key for the window above, resolved with the same
+// precedence (p2pConfig first for an in-process federation, then the environment).
+const ATTEST_BATCH_WINDOW_S_OVERRIDE = 'ATTEST_BATCH_WINDOW_S_OVERRIDE';
+
 // Latched so the ignored-override warning prints once per process rather than
 // once per attestation round. A per-round line would bury the log on a busy hub,
 // and the condition it reports is a static misconfiguration that cannot change
 // without a restart.
 let warnedOverrideIgnored = false;
+let warnedWindowOverrideIgnored = false;
 
 // True when `raw` spells a non-negative integer number of seconds. Deliberately
 // a string test rather than parseInt: parseInt('12abc') is 12 and parseInt('')
@@ -131,8 +150,46 @@ function resolveAttestResponseForwardS(network, p2pConfig){
     return ATTEST_RESPONSE_FORWARD_S;
 }
 
+// The batch window this hub closes on, in seconds. Same seam and same rules as the
+// forward margin above, with one difference: a window of zero seconds is not a
+// shorter cadence, it is a division by zero in the alignment arithmetic, so the
+// regtest spelling test demands a POSITIVE integer rather than a non-negative one.
+function resolveAttestBatchWindowS(network, p2pConfig){
+    // Spelled out rather than indexed through the constant, for the reason
+    // resolveAttestResponseForwardS records above: a computed process.env read is
+    // invisible to the env-var documentation sweep.
+    let raw = (p2pConfig && p2pConfig[ATTEST_BATCH_WINDOW_S_OVERRIDE] != null)
+        ? p2pConfig[ATTEST_BATCH_WINDOW_S_OVERRIDE]
+        : process.env.ATTEST_BATCH_WINDOW_S_OVERRIDE;
+
+    if(raw === null || raw === undefined || String(raw).trim() === '')
+        return ATTEST_BATCH_WINDOW_S;
+
+    if(String(network) === 'regtest'){
+        if(!isNonNegativeIntegerSpelling(raw) || Number(String(raw).trim()) <= 0)
+            throw new Error(ATTEST_BATCH_WINDOW_S_OVERRIDE + '=' + JSON.stringify(String(raw)) +
+                ' is not a positive integer number of seconds. Set it to a whole number of ' +
+                'seconds (e.g. 10) or unset it to use the protocol window of ' + ATTEST_BATCH_WINDOW_S + '.');
+        return Number(String(raw).trim());
+    }
+
+    let requested = isNonNegativeIntegerSpelling(raw) ? Number(String(raw).trim()) : null;
+    if(requested !== ATTEST_BATCH_WINDOW_S && !warnedWindowOverrideIgnored){
+        warnedWindowOverrideIgnored = true;
+        console.log('WARNING: ' + ATTEST_BATCH_WINDOW_S_OVERRIDE + '=' + String(raw) +
+            ' is set but IGNORED on ' + (network || '<unset>') + '; using the protocol batch window (' +
+            ATTEST_BATCH_WINDOW_S + 's). This seam is regtest-only: the window bounds are inside the ' +
+            'batch key and the signed batch canonical, so a hub on its own cadence proposes batches ' +
+            'no peer can co-sign.');
+    }
+    return ATTEST_BATCH_WINDOW_S;
+}
+
 module.exports = Object.freeze({
     ATTEST_RESPONSE_FORWARD_S,
     ATTEST_RESPONSE_FORWARD_S_OVERRIDE,
-    resolveAttestResponseForwardS
+    resolveAttestResponseForwardS,
+    ATTEST_BATCH_WINDOW_S,
+    ATTEST_BATCH_WINDOW_S_OVERRIDE,
+    resolveAttestBatchWindowS
 });

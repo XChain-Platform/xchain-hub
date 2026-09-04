@@ -58,6 +58,7 @@ const FullNodeChallengeRound = require('./FullNodeChallengeRound.js');
 const RollcallRound          = require('./RollcallRound.js');
 const AttestationSpotChecker = require('./AttestationSpotChecker.js');
 const AttestationResponseMirror = require('./AttestationResponseMirror.js');
+const AttestationBatchPublisher = require('./AttestationBatchPublisher.js');
 const { bcmul, bcdiv }   = require('./bcmath.js');
 const mathjs             = require('mathjs');
 const fs                 = require('fs');
@@ -123,6 +124,7 @@ class XChainHub {
         this.attestationPublisher    = null;
         this.attestationSpotChecker  = null;
         this.attestationResponseMirror = null;
+        this.attestationBatchPublisher = null;
         this.attestationRelay        = null;
         this.fullNodeChallenge       = null;
         this.rollcallRound           = null;
@@ -409,6 +411,17 @@ class XChainHub {
         // the design: a mirrored response costs no validator a chain transaction.
         this.attestationResponseMirror = new AttestationResponseMirror(this);
 
+        // The mirror's chain-side counterpart: one ATTEST v5 head (plus v6
+        // continuations) per window on the DOGE rail, so the response history stays
+        // reconstructible from chain parse even though no response is its own
+        // transaction. Third consumer of the one operator signer and wallet, with its
+        // own buffer, dead-letter, spend budget and marker table; it schedules nothing
+        // on a network whose mirror activation entry is null.
+        this.attestationBatchPublisher = new AttestationBatchPublisher(this);
+        if(attestationSignerHooks){
+            applySignerHooks(this.attestationBatchPublisher, attestationSignerHooks);
+        }
+
         // Cross-chain relay driver, opt-in via ATTEST_RELAY_ENABLED=1. Its v3 request leg
         // broadcasts on BTC and takes the publisher's signer; its v4 response leg
         // broadcasts on the ORIGIN chain, so it is wired separately per chain.
@@ -422,6 +435,7 @@ class XChainHub {
         await this.attestationPublisher.start();
         await this.attestationSpotChecker.start();
         await this.attestationResponseMirror.start();
+        await this.attestationBatchPublisher.start();
         await this.attestationRelay.start();
 
         if(this.governance && typeof this.governance.on === 'function'){
@@ -1962,6 +1976,10 @@ class XChainHub {
         // write, so leaving it attached past the close turns a late-finalizing round
         // into an error on a dead pool instead of a no-op.
         if(this.attestationResponseMirror) await this.attestationResponseMirror.stop();
+        // Stopped beside the mirror and for the same reason: its window timer's only
+        // side effect is a DB read followed by a spend, so leaving it armed past the
+        // close would run a publish pass against a dead pool.
+        if(this.attestationBatchPublisher) this.attestationBatchPublisher.stop();
         if(this.stateAnchorPublisher) await this.stateAnchorPublisher.stop();
         if(this.retractionConsensus) this.retractionConsensus.stop();
         if(this.stateCheckpoints) await this.stateCheckpoints.stop();
