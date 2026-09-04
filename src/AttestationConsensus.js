@@ -358,10 +358,10 @@ class AttestationConsensus extends EventEmitter {
     // finalization) so _bufferEarlyMessage drops rather than parks its late
     // envelopes. Ring-bounded FIFO, mirroring _markFinalized (item 2640).
     _markTornDown(rid){
-        if(this.tornDown.has(rid)){
-            noteDrop({ reason: 'round_torn_down', phase: 'attest_buffer', round: rid, sender: envelope && envelope.sender, envelope });
-            return;
-        }
+        // Already marked; return without a drop event (noteDrop counts dropped
+        // MESSAGES and this path drops none, and it read an `envelope` this
+        // method never takes, throwing from the round-timeout timer).
+        if(this.tornDown.has(rid)) return;
         this.tornDown.add(rid);
         this._tornDownOrder.push(rid);
         if(this._tornDownOrder.length > this.tornDownMax){
@@ -523,27 +523,33 @@ class AttestationConsensus extends EventEmitter {
         // would make the threshold unreachable whenever N > REDUNDANCY and
         // deadlock every round until timeout. The 2f+1 form is floored at a
         // simple majority (bare 2f+1 degenerates to quorum=1 at size 3).
-        // INVARIANT: quorum <= redundancy by construction. AttestationRound builds
-        // the responsible set as slice(0, max(1, redundancy)), so
-        // responsible.length <= redundancy, and both 2f+1 and ceil((R+1)/2) are
-        // <= responsible.length for all R >= 1. The finalization gates therefore
-        // compute max(quorum, redundancy), which always resolves to redundancy:
-        // redundancy is the binding finalization threshold, not this PBFT quorum.
+        // INVARIANT (item 6490): quorum <= redundancy, held by measuring the
+        // PRE-WIDENING set size rather than responsible.length. AttestationRound
+        // now builds the set as slice(0, max(1, redundancy) + widen) with widen up
+        // to ATTEST_RESPONSIBLE_WIDENING.maxSlots, so bftQuorum over the widened
+        // length exceeds redundancy for small redundancies (redundancy 1, widen 1
+        // -> bftQuorum(2) = 2), which would raise the finalization bar in exactly
+        // the rounds the liveness ladder fires for and make it tip-dependent per
+        // hub. Clamping to max(1, redundancy) keeps max(quorum, redundancy) at
+        // redundancy, which is the bar the indexer verifies against
+        // (xchain-indexer/src/attest_response_verify.js) and the contract the
+        // ladder states (attest_responsible_widening_activation.js: widening grows
+        // the pool permitted to sign, never the count required to finalize).
         // `quorum` is retained as PBFT scaffolding (and to document intent) but
         // never sets the gate today. Do NOT wire it into a new path expecting it
         // to bind without first re-checking this invariant.
         let responsible = roundState.responsible || [];
-        // Majority-floored BFT quorum over the responsible set (0 when
-        // size <= 1). Same threshold as the full-count engines, computed over
-        // responsible.length rather than N per the invariant documented above.
-        let quorum      = bftQuorumOrSingle(responsible.length, 0);
+        // Measure the quorum over the unwidened set size (0 when size <= 1), so
+        // extra liveness-ladder slots cannot move the finalization threshold.
+        let baseSize    = Math.min(responsible.length, Math.max(1, Number(roundState.redundancy) || 0));
+        let quorum      = bftQuorumOrSingle(baseSize, 0);
 
         // Unfinalizable-round guard. The finalization gates require
         // max(quorum, redundancy) VALID signatures, and signatures can only ever
         // come from responsible-set members (_handleCommit rejects non-members).
         // When the block-anchored snapshot or weighted source-dedup shrinks the
         // responsible set below that threshold (AttestationRound._computeResponsibleSet
-        // slices to max(1, redundancy) and can return fewer), signatures.size can
+        // slices to max(1, redundancy) + widen and can return fewer), signatures.size can
         // never reach `needed`: every PROPOSE/PREPARE/COMMIT cycle stalls to
         // timeout, including the non-ok outcome paths. Do NOT lower the gates to
         // responsible.length here: the indexer deterministically rejects any
@@ -1294,9 +1300,10 @@ class AttestationConsensus extends EventEmitter {
                     senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
                 return;
             }
-            // Adopt: from here the round's canonical is the establisher's, and the
-            // co-sign below signs those exact bytes.
-            pending.effectiveTime = wireEffective;
+            // Adoption is deferred to the commit point below (item 6491), as on the
+            // ok path: the self-derivation gate can still refuse this PREPARE, and a
+            // refused one must leave the round's bytes exactly as it found them or a
+            // sender this hub declines to co-sign could still shift its stamp.
             // Self-derivation gate (items 2641, 2579). For byte_equality a
             // no_quorum verdict is LOCALLY DERIVABLE: agree() is a deterministic
             // byte tally over collected proposals, so this hub must not adopt or
@@ -1352,6 +1359,10 @@ class AttestationConsensus extends EventEmitter {
                 // derivedWinner === null: this hub independently derives no_quorum,
                 // so adopting and co-signing below is self-evidenced.
             }
+            // Every check has passed: adopt the establisher's stamp, and only now.
+            // The co-sign below signs those exact bytes (`canonical` was built over
+            // wireEffective, so this leaves the two in step).
+            pending.effectiveTime = wireEffective;
             pending.signatures.set(senderPubkey, String(d.sig));
             pending.winner = { body: body, meta: meta };
             pending.status = status;
@@ -1673,11 +1684,11 @@ class AttestationConsensus extends EventEmitter {
         if(pending._commitSent) return;
 
         let quorum = pending.quorum;
-        // `pending.quorum` is the PBFT quorum computed INLINE in propose() over
-        // responsible.length (the redundancy-sized responsible set), NOT
+        // `pending.quorum` is the PBFT quorum computed INLINE in propose() over the
+        // PRE-WIDENING responsible-set size (item 6490), NOT
         // CapabilitySnapshot.getQuorum() (which is scoped to the full snapshot
         // count and is deliberately not the source here). For very small
-        // federations (e.g. responsible.length <= 1) that inline value is 0;
+        // federations (e.g. a set of size <= 1) that inline value is 0;
         // collapse to REDUNDANCY in that case. Given the quorum <= redundancy
         // invariant documented in propose(), this max() always resolves to
         // redundancy: the effective gate is redundancy-of-redundancy.

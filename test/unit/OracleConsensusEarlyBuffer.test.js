@@ -56,6 +56,9 @@ describe('OracleConsensus: early-message buffer for F7', function () {
 
     beforeEach(function () {
         hub = createMockHub({ validatorAddr: VALSET[1].addr }); // we are val-b (follower)
+        // The follower bounds the leader-stamped btcBlockHeight against its own BTC
+        // tip, which a real federated hub always has. Same height the PROPOSE carries.
+        hub._resolveBtcLatestBlock = sinon.stub().resolves(1000);
         pm  = hub._peerManager;
         oracleRound = { getSubmissions: sinon.stub().returns(new Map()) };
         oc = new OracleConsensus(hub, oracleRound);

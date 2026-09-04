@@ -56,6 +56,9 @@ const swq               = require('./stake_weighted_quorum.js');
 const eq                = require('./equivocation_header.js');
 const ckpt              = require('./checkpoint_commitment_activation.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
+const { positiveIntConfig } = require('./lib/config_int.js');
+const { resolveCheckpointIntervalBlocks } = require('./lib/checkpoint_cadence.js');
+const snapWrite         = require('./lib/capability_snapshot_write.js');
 const coins             = require('./coins');
 const { noteCheckpointStalled } = require('./consensusDiagnostics');
 
@@ -88,10 +91,20 @@ class StateCheckpointEngine extends EventEmitter {
 
         let cfg = hub.p2pConfig || {};
         this.enabled        = String(process.env.CHECKPOINT_ENABLED || cfg.CHECKPOINT_ENABLED || 'true') !== 'false';
-        this.intervalBlocks = parseInt(process.env.CHECKPOINT_INTERVAL_BLOCKS || cfg.CHECKPOINT_INTERVAL_BLOCKS || '6');
+        // Resolve the cadence knobs through the house guards, not bare parseInt: a NaN
+        // pollMs makes setInterval clamp to ~1ms and storm, and a NaN or zero
+        // intervalBlocks makes the cadence latch never hold, anchoring 3 chains every poll.
+        // intervalBlocks goes through the shared resolver the anchor publisher also calls,
+        // so the two readers of CHECKPOINT_INTERVAL_BLOCKS cannot drift.
+        this.intervalBlocks = resolveCheckpointIntervalBlocks(cfg);
+        this.pollMs         = positiveIntConfig(process.env.CHECKPOINT_POLL_MS || cfg.CHECKPOINT_POLL_MS,
+                                                60000, 'CHECKPOINT_POLL_MS');
+        this.roundTimeoutMs = positiveIntConfig(process.env.CHECKPOINT_ROUND_TIMEOUT_MS || cfg.CHECKPOINT_ROUND_TIMEOUT_MS,
+                                                60000, 'CHECKPOINT_ROUND_TIMEOUT_MS');
+        // Confirmations is the one knob where 0 is meaningful (checkpoint the tip itself,
+        // the regtest venue setting), so it takes a non-negative guard rather than positiveIntConfig.
         this.confirmations  = parseInt(process.env.CHECKPOINT_CONFIRMATIONS  || cfg.CHECKPOINT_CONFIRMATIONS  || '6');
-        this.pollMs         = parseInt(process.env.CHECKPOINT_POLL_MS        || cfg.CHECKPOINT_POLL_MS        || '60000');
-        this.roundTimeoutMs = parseInt(process.env.CHECKPOINT_ROUND_TIMEOUT_MS || cfg.CHECKPOINT_ROUND_TIMEOUT_MS || '60000');
+        if(!(this.confirmations >= 0)) this.confirmations = 6;
 
         // Follower co-sign freshness bound on the leader-supplied snapshot_block.
         // DEDICATED and separate from StateAnchorPublisher.electionToleranceBlocks
@@ -216,7 +229,11 @@ class StateCheckpointEngine extends EventEmitter {
         // The throttle exists so a persistent stall does not flood an operator's
         // tail; a collector counting stalled ticks needs every one, and dropping
         // 59 of every 60 is how a worsening cadence reads as a steady one.
-        noteCheckpointStalled({ chain: this.coin || 'BTC', seq: this._cadenceStallBlock, reason, stalls: this._cadenceStalls });
+        // Name the round's chain LIST, not one chain: a cadence round spans every
+        // chain in `this.chains`, so no single chain can own the stall.
+        // Records emitted before this carry `chain=BTC seq=<block>` from a `this.coin`
+        // this class never assigns; read those as an undetermined chain and a block.
+        noteCheckpointStalled({ chains: this.chains, block: this._cadenceStallBlock, reason, stalls: this._cadenceStalls });
 
         let now = Date.now();
         if(now - this._cadenceStallLoggedAt < this._cadenceStallLogMs) return;
@@ -415,10 +432,20 @@ class StateCheckpointEngine extends EventEmitter {
             this._clearNotMySlot();
 
             // We are the cadence leader (or a single-node set): one round per chain.
+            // Mirror the capability snapshot BEFORE the latch moves. This call sits
+            // outside the per-chain guard below, so a throw here aborts every chain's
+            // round; with the latch already advanced the whole interval was dropped
+            // and getcheckpointstats still read clean, which is the silent-cadence
+            // shape that cost 18 days on mainnet. Meter it and leave the round retryable.
+            try {
+                await this._persistCapabilitySnapshot('oracle_publish', btcBlock);
+            } catch(e){
+                this._noteCadenceStall(btcBlock, 'capability snapshot mirror failed: ' + (e && e.message));
+                return;
+            }
             // The latch advances even on per-chain failure; the next cadence retries.
             this._clearCadenceStall();
             this._lastCheckpointBtcBlock = btcBlock;
-            await this._persistCapabilitySnapshot('oracle_publish', btcBlock);
             for(let chain of this.chains){
                 if(!this.indexers[chain].url) continue;
                 try { await this._runRound(chain, btcBlock, validators); }
@@ -1005,13 +1032,13 @@ class StateCheckpointEngine extends EventEmitter {
                          ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
             return;
         }
-        for(let v of validators){
-            let pubkey = String(v.pubkey).toLowerCase();
-            let amount = String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0'));
-            let source = String(v.source != null ? v.source : '');
-            await this.db.doQuery(
-                'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?)',
-                [block, capability, pubkey, amount, source]);
+        // Write the whole set in ONE statement. A per-row loop left the mirror PARTIAL
+        // whenever any single INSERT threw, and a partial set carries no completeness
+        // marker, so it reads back as COMPLETE and under-counts S exactly the way the
+        // truncated set above would. Rationale and the "do not chunk" rule live in
+        // lib/capability_snapshot_write.js; broadcast stays here, per writer.
+        let rows = await snapWrite.writeCapabilitySnapshotRows(this.db, capability, block, validators);
+        for(let row of rows){
             // Select the row back by (block, capability, pubkey, SOURCE),
             // matching the widened uq_cap_snap. A pubkey-only select-back returned
             // just ONE of a multi-source key's rows (LIMIT 1), so the mirror stream
@@ -1020,7 +1047,7 @@ class StateCheckpointEngine extends EventEmitter {
             await this._broadcastRowOrResync(
                 'capability_snapshots',
                 'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
-                [block, capability, pubkey, source],
+                [block, capability, row.signing_pubkey, row.source],
                 'capability-snapshot broadcast gap');
         }
     }

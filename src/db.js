@@ -37,6 +37,7 @@ if (NODE_MAJOR < 22 || (NODE_MAJOR === 22 && NODE_MINOR < 12)) {
 const mariadb = require('mariadb');
 const fs      = require('fs');
 const path    = require('path');
+const ark     = require('./anchor_reward_key.js');
 
 const DB_NAME_REGEX = /^[A-Za-z0-9_]+$/;
 
@@ -256,11 +257,24 @@ class Database {
             '(round_number, coin_pair, validator_pubkey)',
             ['round_number', 'coin_pair', 'validator_pubkey']
         );
+        // The reward key carries round_qualifier: snapshot_block for the anchor_archive
+        // leg, 0 for every other type, so non-archive keys are exactly what they were.
+        // The archive leg keys on MATCH_BATCH_SEQ, which a wipe-and-replay rebase
+        // reissues, so the four-column key collapsed two genuinely distinct archive
+        // anchors into one row. Backfill BEFORE widening: a pre-column archive row left
+        // at the DEFAULT 0 falls out of every qualified predicate and reads as absent.
         await this._migrateUniqueKey(
             'validator_rewards',
             'uq_reward',
-            '(validator_pubkey, round_number, reward_type)',
-            ['validator_pubkey', 'round_number', 'reward_type']
+            '(validator_pubkey, round_number, reward_type, round_qualifier)',
+            ['validator_pubkey', 'round_number', 'reward_type', 'round_qualifier']
+        );
+        await this._backfillArchiveRoundQualifier();
+        await this._widenUniqueKey(
+            'validator_rewards',
+            'uq_reward',
+            'round_qualifier',
+            '(validator_pubkey, round_number, reward_type, round_qualifier)'
         );
         // Plain (non-unique) indexes declared in a table's SQL source AFTER the
         // table first shipped. alterTableForDrift back-fills missing columns but
@@ -436,6 +450,27 @@ class Database {
             console.log('Migration: widened UNIQUE KEY ' + indexName + ' on ' + table + ' to include ' + requiredColumn);
         } catch(e){
             console.error('Migration error widening ' + indexName + ' on ' + table + ':', e);
+        } finally {
+            await db.release();
+        }
+    }
+
+    // Stamp the archive-leg round qualifier onto reward rows written before the column
+    // existed. block_index IS the archive leg's snapshot_block at both writers, so the
+    // value is recoverable in place. Scoped to anchor_archive, so no other reward type's
+    // key can move, and idempotent (a stamped row no longer matches round_qualifier = 0).
+    async _backfillArchiveRoundQualifier(){
+        let db = await this.getConnection();
+        try {
+            let result = await db.query(
+                'UPDATE validator_rewards SET round_qualifier = block_index ' +
+                'WHERE reward_type = ? AND round_qualifier = 0 AND block_index IS NOT NULL AND block_index > 0',
+                [ark.ARCHIVE_REWARD_TYPE]);
+            let changed = (result && result.affectedRows) ? Number(result.affectedRows) : 0;
+            if(changed > 0)
+                console.log('Migration: qualified ' + changed + ' archive reward row(s) by snapshot block');
+        } catch(e){
+            console.error('Migration error qualifying archive rewards:', e);
         } finally {
             await db.release();
         }

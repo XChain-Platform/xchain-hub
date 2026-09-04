@@ -221,6 +221,8 @@ handler, governance, and attestation subsystems are **all enabled only when
 |---|---|---|---|
 | `PBFT_TIMEOUT` | No | `30000` | PBFT phase timeout (ms). |
 | `MIN_VALIDATORS` | No | `1` | Minimum validators for consensus. |
+| `PBFT_SNAPSHOT_TOLERANCE_BLOCKS` | No | `144` | How far a config-PBFT `PRE_PREPARE`'s leader-stamped `btcBlockHeight` may deviate from this hub's own BTC tip before a federated follower declines to PREPARE. |
+| `ORACLE_SNAPSHOT_TOLERANCE_BLOCKS` | No | `144` | How far a price-round `PROPOSE`'s leader-supplied `btcBlockHeight` may deviate from this hub's own BTC tip before a federated follower drops the round. |
 
 ## Capabilities
 
@@ -398,7 +400,7 @@ precedence override.
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `XCHAIN_CONFIRMATIONS_<COIN>` | No | per-coin | Cross-chain attestation/swap confirmation depth for `<COIN>` (e.g. `XCHAIN_CONFIRMATIONS_BTC`). Consensus-affecting: read by `CrossChainEngine`, `CrossChainCallEngine`, `AttestationRelay` and `StateAnchorPublisher`. **May only RAISE the depth on mainnet and testnet**: a below-default value is clamped back up to the per-coin default, because a validator co-signing at a shallower depth accepts source actions the rest of the federation still considers reorg-able. Only regtest, the single-operator drill network, honours a lowered value. |
-| `CHECKPOINT_CONFIRMATIONS` | No | `6` | State-checkpoint confirmation depth (`StateCheckpointEngine`). Consensus-affecting. |
+| `CHECKPOINT_CONFIRMATIONS` | No | `6` | State-checkpoint confirmation depth (`StateCheckpointEngine`). Consensus-affecting. `0` is meaningful (checkpoint the tip itself, the regtest venue setting); a negative or unparseable value falls back to `6`. |
 
 ## Cross-chain attestation persistence (`CrossChainEngine`)
 
@@ -435,10 +437,10 @@ resolves from `p2pConfig`; the env var is the highest-precedence override.
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `CHECKPOINT_ENABLED` | No | `true` | Enable the checkpoint engine. Set `false` to disable. |
-| `CHECKPOINT_INTERVAL_BLOCKS` | No | `6` | BTC blocks between checkpoint cycles. |
+| `CHECKPOINT_INTERVAL_BLOCKS` | No | `6` | BTC blocks between checkpoint cycles. Read by `StateCheckpointEngine`'s cadence latch and by `StateAnchorPublisher`'s anchor-eligibility divisor through one shared resolver, so the two cannot resolve different steps; any non-positive or unparseable value falls back to `6` with a warning. |
 | `CHECKPOINT_CHAINS` | No | all coins | Comma-separated chains to checkpoint (subset of the bundled coin list, e.g. `BTC,LTC`). Unknown chains are dropped. |
-| `CHECKPOINT_POLL_MS` | No | `60000` | Poll interval (ms) for the checkpoint cycle timer. |
-| `CHECKPOINT_ROUND_TIMEOUT_MS` | No | `60000` | Signing-round timeout (ms) before a checkpoint round is abandoned. |
+| `CHECKPOINT_POLL_MS` | No | `60000` | Poll interval (ms) for the checkpoint cycle timer. Non-positive or unparseable values fall back to the default: a `NaN` here makes `setInterval` clamp to ~1ms and storm. |
+| `CHECKPOINT_ROUND_TIMEOUT_MS` | No | `60000` | Signing-round timeout (ms) before a checkpoint round is abandoned. Non-positive or unparseable values fall back to the default. |
 | `CHECKPOINT_COSIGN_TOLERANCE_BLOCKS` | No | `144` | How many blocks behind a checkpoint's `snapshot_block` a follower's own indexer may lag and still co-sign. |
 | `CHECKPOINT_STALL_LOG_MS` | No | `3600000` (1h) | Throttle window (ms) for the "checkpoint cadence STALLED" warning. The poll runs far faster than the cadence, so the reason is logged at most once per window; the `cadence_stalls` counter carries the true rate. |
 | `CHECKPOINT_FROZEN_TIP_TICKS` | No | `60` | Frozen-tip livelock meter. The cadence leader is `pubkeys[btcBlock % N]`, so a hub that is due, in the set, but not in the slot is normal rotation only while the BTC tip moves; after this many consecutive polls at the SAME BTC snapshot block the tick is counted in `cadence_stalls` with a reason naming the frozen block (`frozen_tip_ticks` / `frozen_tip_block` in `getcheckpointstats` show the live count). At the default 60s poll this is one hour. Non-positive values fall back to 60. |
@@ -576,8 +578,8 @@ offer/call is eligible for matching). Each variable also resolves from
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `XDEX_POLL_MS` | No | `15000` | Poll interval (ms) for match/relay discovery. |
-| `XDEX_MIN_CONFIRMATIONS` | No | per-coin | Flat confirmation-depth override applied to every coin. Consensus-affecting. |
-| `XDEX_MIN_CONFIRMATIONS_<COIN>` | No | per-coin (BTC `6`, LTC `12`, DOGE `60`) | Per-coin confirmation depth (e.g. `XDEX_MIN_CONFIRMATIONS_DOGE`). Takes precedence over the flat variable. Consensus-affecting. |
+| `XDEX_MIN_CONFIRMATIONS` | No | per-coin | Flat confirmation-depth override applied to every coin. Consensus-affecting. **May only RAISE the depth on mainnet and testnet**, the same clamp `XCHAIN_CONFIRMATIONS_<COIN>` carries; only regtest honours a lowered value. |
+| `XDEX_MIN_CONFIRMATIONS_<COIN>` | No | per-coin (BTC `6`, LTC `12`, DOGE `60`) | Per-coin confirmation depth (e.g. `XDEX_MIN_CONFIRMATIONS_DOGE`). Takes precedence over the flat variable. Consensus-affecting, and clamped up to the per-coin default on mainnet and testnet exactly as the flat knob is. |
 | `XDEX_SEED_LOCAL_VALIDATOR` | Regtest only | `false` | `1`/`true` seeds `capability_snapshots` with this hub's own identity so single-node regtest stacks can finalize without an indexer-backed snapshot. Ignored off regtest. |
 | `XDEX_SNAPSHOT_BLOCK` | Regtest only | _unset_ | Fixed deterministic snapshot-block anchor for regtest drills (also read by `StateCheckpointEngine` / `CrossChainCallEngine`). Ignored off regtest. |
 

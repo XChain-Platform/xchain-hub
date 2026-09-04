@@ -1591,16 +1591,24 @@ async function startApi(){
                 return {error: "chain, reorg_height, and timestamp are required"};
             let chainErr = validateChain(chain);
             if (chainErr) return chainErr;
-            let rh = parseInt(reorg_height);
-            if (!Number.isInteger(rh) || rh < 0)
+            // strictInt, not parseInt, the same band every sibling write method enforces:
+            // parseInt takes an integer PREFIX, so '850000junk' passed as 850000 and
+            // '8.5e5' as 8, and the coerced height is what _canonicalReorgId builds the
+            // federation-wide round identity from. timestamp had no API guard at all, so
+            // parseInt('abc') forwarded NaN into hub.reportReorg.
+            let rh = strictInt(reorg_height);
+            if (rh === null || rh < 0)
                 return {error: "reorg_height must be a non-negative integer"};
+            let ts = strictInt(timestamp);
+            if (ts === null || ts < 0)
+                return {error: "timestamp must be a non-negative integer"};
             // The reporter must supply its observed hash pair at reorg_height; the
             // hub (and every co-signing peer) re-verifies new_hash against its own
             // indexer before any rollback round can start.
             if(!old_hash || !new_hash)
                 return {error: "old_hash and new_hash (the block hash observed at reorg_height before and after the reorg) are required"};
             try {
-                await hub.reportReorg(chain, rh, parseInt(timestamp), String(old_hash), String(new_hash));
+                await hub.reportReorg(chain, rh, ts, String(old_hash), String(new_hash));
                 return {status: "success"};
             } catch (err) {
                 return {error: err.message || "error reporting reorg"};

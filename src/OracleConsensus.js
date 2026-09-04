@@ -39,6 +39,7 @@ const bcmath            = require('./bcmath.js');
 const devband           = require('./lib/deviation_band.js');
 const { isAdmissibleSigner, provenPubkey } = require('./lib/chain_signer_admission.js');
 const { canonicalValidatorOrder } = require('./validator_order.js');
+const snapWrite         = require('./lib/capability_snapshot_write.js');
 const { noteDrop } = require('./consensusDiagnostics');
 
 const ORACLE_PROPOSE = 'ORACLE_PROPOSE';
@@ -64,6 +65,10 @@ const DEFAULT_LEADER_TIMEOUT_MS = 30000;  // 30 seconds (< finalization window)
 // disarms the watchdog, narrow enough that the record lands long before the next
 // round's boundary (rounds are ~10 minutes apart).
 const DEFAULT_ROUND_ABANDON_GRACE_MS = 15000;
+// Follower freshness bound on the leader-supplied btcBlockHeight in a PROPOSE.
+// Same family and default as StateCheckpointEngine.cosignToleranceBlocks and
+// CrossChainCallEngine's snapshot_block bound: about a day of BTC blocks.
+const DEFAULT_SNAPSHOT_TOLERANCE_BLOCKS = 144;
 // How many times the watchdog defers to a still-live pending round before writing
 // the skipped record anyway. Each deferral is one more finalization window, so a
 // round stuck behind the _armFinalizeRetry DB-outage self-heal gets a bounded
@@ -245,6 +250,18 @@ class OracleConsensus extends EventEmitter {
                 'Intended only for a deliberate single-host deployment.');
         }
         this.leaderTimeout       = parseInt(process.env.ORACLE_LEADER_TIMEOUT_MS) || DEFAULT_LEADER_TIMEOUT_MS;
+        // Follower freshness bound on the leader-supplied btcBlockHeight in a
+        // PROPOSE. That height selects the price snapshot (quorum N), the member set
+        // the round's leader is elected from, and the STAKE_WEIGHTED_QUORUM
+        // activation outcome, and it is a wire field the proposer chose. Same family
+        // and default as StateCheckpointEngine.cosignToleranceBlocks and
+        // CrossChainCallEngine's snapshot_block bound: about a day of BTC blocks, so
+        // honest tip skew between hubs costs a round nothing. 0 is meaningful (pin to
+        // our own tip exactly), hence the non-negative guard rather than `|| default`.
+        this.snapshotToleranceBlocks = parseInt(process.env.ORACLE_SNAPSHOT_TOLERANCE_BLOCKS
+            || String(DEFAULT_SNAPSHOT_TOLERANCE_BLOCKS));
+        if (!(this.snapshotToleranceBlocks >= 0))
+            this.snapshotToleranceBlocks = DEFAULT_SNAPSHOT_TOLERANCE_BLOCKS;
         // Extra slack on top of the round's own timer ladder before the
         // abandonment watchdog declares the round lost. Additive only:
         // _roundAbandonMs() derives the window from the ladder, so a deployment
@@ -1036,6 +1053,40 @@ class OracleConsensus extends EventEmitter {
                         return;
                     }
                     blockHeight = round;
+                }
+                // Freshness bound (fail closed), the missing half of the guard above,
+                // which closes only the ABSENT-height case. A present but ancient
+                // height is refused by nothing downstream: CapabilitySnapshot's echo
+                // check rejects a MISMATCHED echo, and the indexer fail-closes only
+                // above its own tip, so an old-but-indexed block resolves a perfectly
+                // valid snapshot. That hands the proposer three choices at once: the
+                // quorum denominator (getQuorum(snap)), the member set that
+                // _getLeader elects from (so it can pick a height where it is the
+                // round's leader and the legitimacy check then validates it against
+                // its own choice), and the weighted-vs-count mode the guard below
+                // calls a federation-split hazard. Bound the wire height against our
+                // own resolved BTC tip before any of the three read it, and decline
+                // when we cannot resolve a tip of our own. Same shape and tolerance as
+                // StateCheckpointEngine's co-sign guard. Federated hubs only, like
+                // every other fail-closed guard on this path.
+                if (this._getQuorum() > 0) {
+                    let myTip = this.hub && this.hub._resolveBtcLatestBlock
+                        ? await this.hub._resolveBtcLatestBlock()
+                        : null;
+                    if (!Number.isFinite(Number(myTip))) {
+                        console.warn('Oracle: dropping PROPOSE for round ' + round + ': cannot resolve ' +
+                            'our own BTC tip to bound the leader-supplied snapshot height ' +
+                            '(federated hub).');
+                        return;
+                    }
+                    if (Math.abs(Number(myTip) - Number(blockHeight)) > this.snapshotToleranceBlocks) {
+                        console.warn('Oracle: dropping PROPOSE for round ' + round + ': block height ' +
+                            blockHeight + ' deviates from our own BTC tip ' + myTip + ' by more than ' +
+                            this.snapshotToleranceBlocks + ' blocks (federated hub); a stale height would ' +
+                            'let the proposer select the price snapshot, the round leader and the ' +
+                            'quorum mode.');
+                        return;
+                    }
                 }
                 // Same activation gate + weight snapshot the leader locked in finalizeRound,
                 // so this follower tallies the round identically (weighted on stake or legacy
@@ -2071,17 +2122,16 @@ class OracleConsensus extends EventEmitter {
                 ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
             return 0;
         }
-        for (let v of validators) {
-            let pubkey = String(v.pubkey).toLowerCase();
-            let amount = String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0'));
-            let source = String(v.source != null ? v.source : '');
-            await this.db.doQuery(
-                'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?)',
-                [block, capability, pubkey, amount, source]);
+        // One statement for the whole set: a per-row loop left the mirror PARTIAL on any
+        // single INSERT throw, and a partial set has no completeness marker so a verifier
+        // reads it as COMPLETE. Rationale in lib/capability_snapshot_write.js. Parity with
+        // StateCheckpointEngine and the other four writers.
+        let rows = await snapWrite.writeCapabilitySnapshotRows(this.db, capability, block, validators);
+        for (let row of rows) {
             if (this.hub && this.hub.hubDbBroadcaster) {
                 let r = await this.db.doQuery(
                     'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
-                    [block, capability, pubkey, source]);
+                    [block, capability, row.signing_pubkey, row.source]);
                 if (r.length) this.hub.hubDbBroadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
             }
         }

@@ -65,6 +65,7 @@ const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
 const { XCALL_MAX_HOPS }     = require('./constants.js');
 const coins                  = require('./coins');
 const { normalizeRetractionBounds } = require('./lib/retraction_bounds.js');
+const snapWrite              = require('./lib/capability_snapshot_write.js');
 
 const ALLOWED_CHAINS  = [...coins.ALLOWED_COINS];
 const DEFAULT_POLL_MS = 15000;
@@ -794,13 +795,12 @@ class CrossChainCallEngine extends EventEmitter {
                          ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
             return 0;
         }
-        for(let v of validators){
-            let pubkey = String(v.pubkey).toLowerCase();
-            let amount = String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0'));
-            let source = String(v.source != null ? v.source : '');
-            await this.db.doQuery(
-                'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?)',
-                [block, capability, pubkey, amount, source]);
+        // One statement for the whole set: a per-row loop left the mirror PARTIAL on any
+        // single INSERT throw, and a partial set has no completeness marker so a verifier
+        // reads it as COMPLETE. Rationale in lib/capability_snapshot_write.js. Parity with
+        // StateCheckpointEngine and the other four writers.
+        let rows = await snapWrite.writeCapabilitySnapshotRows(this.db, capability, block, validators);
+        for(let row of rows){
             if(this.broadcaster){
                 // Select back on the full widened uq_cap_snap
                 // (snapshot_block, capability, signing_pubkey, source). A pubkey-only
@@ -810,7 +810,7 @@ class CrossChainCallEngine extends EventEmitter {
                 // source='' and there is one row per key. Parity with StateCheckpointEngine.
                 let r = await this.db.doQuery(
                     'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
-                    [block, capability, pubkey, source]);
+                    [block, capability, row.signing_pubkey, row.source]);
                 if(r.length) this.broadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
             }
         }

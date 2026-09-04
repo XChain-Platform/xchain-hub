@@ -523,6 +523,32 @@ describe('AttestationConsensus: propose() guards', function () {
         expect(propose).to.exist;
     });
 
+    // item 6490: the liveness ladder widens the responsible set to
+    // max(1, redundancy) + widen, and computing the PBFT quorum over that widened
+    // length raised `needed` above redundancy for small redundancies, stalling the
+    // very rounds the ladder fires for. Pin the threshold to redundancy at every
+    // widening level the ladder can produce (maxSlots = 2).
+    [
+        { redundancy: 1, widen: 0 },
+        { redundancy: 1, widen: 1 },
+        { redundancy: 1, widen: 2 },
+        { redundancy: 3, widen: 1 },
+        { redundancy: 3, widen: 2 },
+        { redundancy: 5, widen: 2 }
+    ].forEach(({ redundancy, widen }) => {
+        it('keeps needed == redundancy ' + redundancy + ' at widen ' + widen + ' (6490)', async function () {
+            let members = [me];
+            while(members.length < redundancy + widen) members.push(mkIdentity());
+            await c.propose(RID, roundState(me, members, Buffer.from('b'), 'http_get', redundancy));
+            let pending = c.pending.get(RID);
+            expect(pending, 'round admitted').to.exist;
+            expect(pending.responsible.length).to.equal(redundancy + widen);
+            // The gate both quorum checks read is max(quorum, redundancy); widening
+            // must not move it off redundancy.
+            expect(Math.max(pending.quorum, pending.redundancy)).to.equal(redundancy);
+        });
+    });
+
     it('drops a stalled (never-finalized) round when its timeout fires', async function () {
         let clock = sinon.useFakeTimers();
         c.roundTimeoutMs = 1000;
@@ -2252,6 +2278,16 @@ describe('AttestationConsensus: byte_equality no_quorum + replay hardening', fun
         expect(c.finalized.has(RID)).to.equal(false);   // stays retryable
         expect(c.tornDown.has(RID)).to.equal(true);
         expect(c.earlyMessages.has(RID)).to.equal(false);
+    });
+
+    // item 6489: the already-marked branch must not build a drop event from an
+    // `envelope` this method never takes, so a second teardown for one rid threw
+    // ReferenceError out of the bare round-timeout timer (an uncaught hub fault).
+    it('_markTornDown is idempotent and does not throw when the rid is already marked (6489)', function () {
+        c._markTornDown(RID);
+        expect(() => c._markTornDown(RID)).to.not.throw();
+        expect(c.tornDown.has(RID)).to.equal(true);
+        expect(c._tornDownOrder.filter(r => r === RID).length).to.equal(1);
     });
 });
 

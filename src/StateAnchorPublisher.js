@@ -89,6 +89,7 @@ const { isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
 const { sumUtxosCoins, summarizeUtxoConfirmations } = require('./lib/utxo_balance.js');
 const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
 const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
+const { resolveCheckpointIntervalBlocks } = require('./lib/checkpoint_cadence.js');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const StateCheckpointEngine = require('./StateCheckpointEngine.js');
 const swq                   = require('./stake_weighted_quorum.js');
@@ -96,6 +97,7 @@ const eq                    = require('./equivocation_header.js');
 const ckpt                  = require('./checkpoint_commitment_activation.js');
 const ccr                   = require('./cross_chain_royalty_activation.js');
 const ar                    = require('./anchor_reward_activation.js');
+const ark                   = require('./anchor_reward_key.js');
 
 const XANC_SIGN_REQ  = 'XANC_SIGN_REQ';
 const XANC_SIGN      = 'XANC_SIGN';
@@ -388,11 +390,10 @@ class StateAnchorPublisher {
         // default N=1 (MOD(anything,1)=0) it is a no-op, exactly as before.
         this.anchorEveryNCheckpoints = Math.max(1,
             parseInt(process.env.ANCHOR_CHECKPOINT_EVERY_N || cfg.ANCHOR_CHECKPOINT_EVERY_N || '1') || 1);
-        // The engine's own cadence step (StateCheckpointEngine.js), read the same way so
-        // the two cannot drift. Floored at 1: a zero divisor makes the SQL MOD NULL,
-        // which would silently select nothing.
-        this.checkpointIntervalBlocks = Math.max(1,
-            parseInt(process.env.CHECKPOINT_INTERVAL_BLOCKS || cfg.CHECKPOINT_INTERVAL_BLOCKS || '6') || 6);
+        // The engine's own cadence step (StateCheckpointEngine.js), resolved through the
+        // one shared function it also calls so the two cannot drift. Always positive: a
+        // zero divisor makes the SQL MOD NULL, which would silently select nothing.
+        this.checkpointIntervalBlocks = resolveCheckpointIntervalBlocks(cfg);
 
         this.dogeAddress   = process.env.DOGE_ADDRESS    || cfg.DOGE_ADDRESS    || '';
         this.dogePubkeyHex = process.env.DOGE_PUBKEY_HEX || cfg.DOGE_PUBKEY_HEX || '';
@@ -2423,7 +2424,7 @@ class StateAnchorPublisher {
             count:      archive.count,
             matchIds:   matches.map(m => ({ match_id: m.match_id, status: m.status })),
             callIds:    calls.map(c => ({ call_id: c.call_id, phase: c.phase, status: c.status })),
-            rewardIds:  rewardRows.map(({row}) => ({ reward_type: String(row.reward_type), round_number: Number(row.round_number), validator_pubkey: String(row.validator_pubkey).toLowerCase() })),
+            rewardIds:  rewardRows.map(({row}) => ({ reward_type: String(row.reward_type), round_number: Number(row.round_number), validator_pubkey: String(row.validator_pubkey).toLowerCase(), round_qualifier: Number(row.round_qualifier || 0) })),
             validators: roundValidators,
             signatures: signatures,
             done:       false,
@@ -3293,10 +3294,14 @@ class StateAnchorPublisher {
                 return false;
             }
             // Cross-check against ALL our own local rows for this (reward_type,
-            // round_number). Reward rows are written independently by every hub
+            // round_number, round_qualifier). The qualifier is the archive leg's
+            // snapshot block: round_number is a reissuable MATCH_BATCH_SEQ, so without
+            // it a rebase-reissued seq matched an OLDER archive's rows and this guard
+            // refused to co-sign a perfectly valid archive.
+            // Reward rows are written independently by every hub
             // from the same on-chain anchor-publish events, so an honest hub that
             // saw this round derives the SAME winner set. The table's UNIQUE key
-            // is (validator_pubkey, round_number, reward_type), so two pubkeys can
+            // is (validator_pubkey, round_number, reward_type, round_qualifier), so two pubkeys can
             // legitimately co-exist for one (reward_type, round_number) under a
             // transient failover double-publish: querying ALL rows tolerates that
             // window (the archived pubkey's own row is matched and verified) while
@@ -3310,8 +3315,9 @@ class StateAnchorPublisher {
             //   - no rows at all                  -> late joiner; re-derivation
             //                                        above already bounds it
             let local = await this.db.doQuery(
-                'SELECT validator_pubkey, amount, block_index FROM validator_rewards WHERE reward_type = ? AND round_number = ?',
-                [String(rr.reward_type), Number(rr.round_number)]);
+                'SELECT validator_pubkey, amount, block_index FROM validator_rewards WHERE reward_type = ? AND round_number = ? AND round_qualifier = ?',
+                [String(rr.reward_type), Number(rr.round_number),
+                 ark.rewardRoundQualifier(rr.reward_type, rr.block_index)]);
             if(local && local.length > 0){
                 let mine = local.find(r => String(r.validator_pubkey).toLowerCase() === pubkey);
                 if(!mine){
@@ -4211,11 +4217,18 @@ class StateAnchorPublisher {
                 [batchSeq, c.status, txid, c.call_id, c.phase]);
         }
         for(let r of (rewardIds || [])){
-            // Rows are immutable; batch_seq is the only archive bookkeeping.
+            // Rows are immutable; batch_seq is the only archive bookkeeping. Qualify the
+            // stamp so a rebase-reissued archive seq cannot mark its twin archived and
+            // strand it (the archive selector only picks up batch_seq IS NULL). A
+            // FINALIZED from a peer predating the qualifier carries none, so fall back to
+            // the unqualified stamp rather than matching nothing during a rolling deploy.
+            let qualified = (r.round_qualifier !== undefined && r.round_qualifier !== null);
+            let args = [batchSeq, String(r.reward_type), Number(r.round_number), String(r.validator_pubkey).toLowerCase()];
+            if(qualified) args.push(Number(r.round_qualifier));
             await this.db.doQuery(
                 'UPDATE validator_rewards SET batch_seq = ? WHERE reward_type = ? AND round_number = ? AND validator_pubkey = ? ' +
-                'AND batch_seq IS NULL',
-                [batchSeq, String(r.reward_type), Number(r.round_number), String(r.validator_pubkey).toLowerCase()]);
+                (qualified ? 'AND round_qualifier = ? ' : '') + 'AND batch_seq IS NULL',
+                args);
         }
     }
 

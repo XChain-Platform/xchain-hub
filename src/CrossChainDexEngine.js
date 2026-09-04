@@ -53,6 +53,7 @@ const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
 const { normalizeRetractionBounds } = require('./lib/retraction_bounds.js');
 const { RELAY_MIN_FUTURE_S, relayMarginFloorS } = require('./lib/relay_margin.js');
 const { allCanonicalInts }   = require('./lib/canonical_int.js');
+const snapWrite              = require('./lib/capability_snapshot_write.js');
 const coins                  = require('./coins');
 
 // The INT-backed fields _canonicalMatch signs VERBATIM while the indexer's
@@ -132,12 +133,25 @@ class CrossChainDexEngine extends EventEmitter {
         // (legacy knob, e.g. regtest venues pinning 1) > coins.DEFAULT_CONFIRMATIONS[coin].
         // A signing gate only, not signed content: no canonical/flag-day impact.
         let flatMinConf = parseInt(process.env.XDEX_MIN_CONFIRMATIONS || cfg.XDEX_MIN_CONFIRMATIONS);
+        // Clamp an override back up to the per-coin default on mainnet and testnet, the
+        // same raise-only rule coins.resolveConfirmations enforces for XCHAIN_CONFIRMATIONS_<COIN>
+        // (CF-1): a lowered depth here lets this hub co-sign a match against an escrow the rest
+        // of the federation still treats as reorg-able. Regtest keeps the full override.
+        let _confFloored = (this.network === 'mainnet' || this.network === 'testnet');
         this.minConfirmations = {};
         for(const tick of ALLOWED_CHAINS){
             let perCoin = parseInt(process.env['XDEX_MIN_CONFIRMATIONS_' + tick] || cfg['XDEX_MIN_CONFIRMATIONS_' + tick]);
+            let def = coins.DEFAULT_CONFIRMATIONS[tick] || DEFAULT_MIN_CONFIRMATIONS;
             let val = Number.isFinite(perCoin) && perCoin > 0 ? perCoin
                     : (Number.isFinite(flatMinConf) && flatMinConf > 0 ? flatMinConf
-                    : (coins.DEFAULT_CONFIRMATIONS[tick] || DEFAULT_MIN_CONFIRMATIONS));
+                    : def);
+            if(_confFloored && val < def){
+                console.warn('[CrossChainDex] XDEX_MIN_CONFIRMATIONS' + (Number.isFinite(perCoin) && perCoin > 0 ? '_' + tick : '') +
+                    '=' + val + ' is below the ' + this.network + ' floor ' + def + '; clamping to ' + def +
+                    ' (confirmation overrides may only raise the depth on mainnet and testnet; ' +
+                    'regtest keeps the full override)');
+                val = def;
+            }
             this.minConfirmations[tick] = val;
         }
 
@@ -883,13 +897,12 @@ class CrossChainDexEngine extends EventEmitter {
                          ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
             return 0;
         }
-        for(let v of validators){
-            let pubkey = String(v.pubkey).toLowerCase();
-            let amount = String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0'));
-            let source = String(v.source != null ? v.source : '');
-            await this.db.doQuery(
-                'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?)',
-                [block, capability, pubkey, amount, source]);
+        // One statement for the whole set: a per-row loop left the mirror PARTIAL on any
+        // single INSERT throw, and a partial set has no completeness marker so a verifier
+        // reads it as COMPLETE. Rationale in lib/capability_snapshot_write.js. Parity with
+        // StateCheckpointEngine and the other four writers.
+        let rows = await snapWrite.writeCapabilitySnapshotRows(this.db, capability, block, validators);
+        for(let row of rows){
             if(this.broadcaster){
                 // Select back on the full widened uq_cap_snap
                 // (snapshot_block, capability, signing_pubkey, source). A pubkey-only
@@ -899,7 +912,7 @@ class CrossChainDexEngine extends EventEmitter {
                 // where source='' and there is one row per key.
                 let r = await this.db.doQuery(
                     'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
-                    [block, capability, pubkey, source]);
+                    [block, capability, row.signing_pubkey, row.source]);
                 if(r.length) this.broadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
             }
         }

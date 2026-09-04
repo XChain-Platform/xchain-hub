@@ -1154,6 +1154,42 @@ describe('CrossChainDexEngine', function () {
             expect(eng.minConfirmations.DOGE).to.equal(30);
             expect(eng.minConfirmations.BTC).to.equal(1);
         });
+
+        // XDEX-CONF-1 / CF-1: an override may only RAISE the depth on mainnet and testnet,
+        // because a lowered one lets this hub co-sign an escrow the federation calls reorg-able.
+        for (const net of ['mainnet', 'testnet']) {
+            it('clamps a lowered override back up to the per-coin floor on ' + net, function () {
+                const coins = require('../../src/coins');
+                process.env.XDEX_MIN_CONFIRMATIONS = '1';
+                process.env.XDEX_MIN_CONFIRMATIONS_DOGE = '2';
+                let hub = makeDexHub();
+                hub.network = net;
+                let warn = sinon.stub(console, 'warn');
+                let eng;
+                try { eng = new CrossChainDexEngine(hub); } finally { warn.restore(); }
+                expect(eng.minConfirmations.BTC).to.equal(coins.DEFAULT_CONFIRMATIONS.BTC);
+                expect(eng.minConfirmations.LTC).to.equal(coins.DEFAULT_CONFIRMATIONS.LTC);
+                expect(eng.minConfirmations.DOGE).to.equal(coins.DEFAULT_CONFIRMATIONS.DOGE);
+                expect(warn.callCount).to.equal(3);
+            });
+
+            it('still honours an override that RAISES the depth on ' + net, function () {
+                const coins = require('../../src/coins');
+                process.env.XDEX_MIN_CONFIRMATIONS_BTC = String(coins.DEFAULT_CONFIRMATIONS.BTC + 5);
+                let hub = makeDexHub();
+                hub.network = net;
+                let eng = new CrossChainDexEngine(hub);
+                expect(eng.minConfirmations.BTC).to.equal(coins.DEFAULT_CONFIRMATIONS.BTC + 5);
+            });
+        }
+
+        it('leaves the regtest venue pin of 1 untouched', function () {
+            process.env.XDEX_MIN_CONFIRMATIONS = '1';
+            let hub = makeDexHub();
+            hub.network = 'regtest';
+            let eng = new CrossChainDexEngine(hub);
+            expect(eng.minConfirmations).to.deep.equal({ BTC: 1, LTC: 1, DOGE: 1 });
+        });
     });
 
     // ── XDEX-REFORM-STRAND-1: a crossing retracted then re-formed at the same snapshot_block

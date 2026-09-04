@@ -41,11 +41,16 @@ function memDb() {
         snapshots,
         async doQuery(sql, params) {
             if (/^INSERT IGNORE INTO capability_snapshots/.test(sql)) {
-                let [snapshot_block, capability, signing_pubkey, amount, source] = params;
-                source = source != null ? source : '';
-                if (!snapshots.some(r => r.snapshot_block === snapshot_block && r.capability === capability &&
-                                         r.signing_pubkey === signing_pubkey && r.source === source))
-                    snapshots.push({ id: snapshots.length + 1, snapshot_block, capability, signing_pubkey, amount, source });
+                // The whole set arrives as ONE multi-row statement (that is what makes the
+                // mirror write all-or-nothing), so walk the flattened params in groups of
+                // five instead of destructuring a single row.
+                for (let i = 0; i + 4 < params.length; i += 5) {
+                    let [snapshot_block, capability, signing_pubkey, amount, source] = params.slice(i, i + 5);
+                    source = source != null ? source : '';
+                    if (!snapshots.some(r => r.snapshot_block === snapshot_block && r.capability === capability &&
+                                             r.signing_pubkey === signing_pubkey && r.source === source))
+                        snapshots.push({ id: snapshots.length + 1, snapshot_block, capability, signing_pubkey, amount, source });
+                }
                 return [];
             }
             if (/^SELECT \* FROM capability_snapshots/.test(sql)) {

@@ -41,6 +41,11 @@ const PBFT_NEW_VIEW    = 'PBFT_NEW_VIEW';
 
 const DEFAULT_TIMEOUT = 30000; // 30 seconds
 
+// Follower freshness bound on the leader-stamped btcBlockHeight in a PRE_PREPARE.
+// Same family and default as StateCheckpointEngine.cosignToleranceBlocks and
+// CrossChainCallEngine's snapshot_block bound: about a day of BTC blocks.
+const DEFAULT_SNAPSHOT_TOLERANCE_BLOCKS = 144;
+
 // Max views ahead of the local view that an inbound VIEW_CHANGE may name. Bounds
 // pendingViewChanges to at most this many live buckets so a Byzantine validator
 // cannot seed unbounded entries with ever-increasing view numbers. Leader failover
@@ -128,6 +133,12 @@ class Consensus {
 
         this.timeout       = parseInt(process.env.PBFT_TIMEOUT) || DEFAULT_TIMEOUT;
         this.minValidators = parseInt(process.env.MIN_VALIDATORS) || 1;
+        // See DEFAULT_SNAPSHOT_TOLERANCE_BLOCKS. 0 is meaningful (pin to our own
+        // tip exactly), so this takes a non-negative guard rather than `|| default`.
+        this.snapshotToleranceBlocks = parseInt(process.env.PBFT_SNAPSHOT_TOLERANCE_BLOCKS
+            || String(DEFAULT_SNAPSHOT_TOLERANCE_BLOCKS));
+        if(!(this.snapshotToleranceBlocks >= 0))
+            this.snapshotToleranceBlocks = DEFAULT_SNAPSHOT_TOLERANCE_BLOCKS;
     }
 
     // Canonicalize the set's ORDER on the way in. Leader election is
@@ -522,6 +533,41 @@ class Consensus {
                     '(federated hub); refusing to pin the validator snapshot at the local BTC tip, ' +
                     'which would diverge from the leader\'s snapshot for this seq.');
                 return;
+            }
+            // Freshness bound (fail closed), the missing half of the guard above.
+            // The comment there says a truthy garbage height is caught downstream by
+            // CapabilitySnapshot._blockEchoOk, and that holds only for heights the
+            // indexer REFUSES: _blockEchoOk rejects a mismatched echo, and the indexer
+            // fail-closes only above its own tip, so an ancient but INDEXED height
+            // echoes back clean and yields a perfectly valid snapshot. That lets a
+            // Byzantine leader grind the height until it finds a block where the
+            // active set was small (quorum N), where it is itself the
+            // (seq + view) % N leader that _leaderIdentityOk then validates against
+            // its OWN choice, or where STAKE_WEIGHTED_QUORUM had not yet activated
+            // (a silent downgrade to count quorum). Bound the raw wire height against
+            // our own resolved tip before any of those three consume it, and decline
+            // when we cannot resolve a tip of our own. Same shape and tolerance as
+            // StateCheckpointEngine's co-sign guard and CrossChainCallEngine's
+            // snapshot_block bound. The reorg buffer needs no adjustment: it is
+            // applied identically on both sides, so the bound belongs on the wire value.
+            if (this._isFederated()) {
+                let myTip = this.hub && this.hub._resolveBtcLatestBlock
+                    ? await this.hub._resolveBtcLatestBlock()
+                    : null;
+                if (!Number.isFinite(Number(myTip))) {
+                    console.warn('Consensus: declining to PREPARE for seq ' + seq +
+                        ' from ' + envelope.sender + ': cannot resolve our own BTC tip to bound the ' +
+                        'leader-stamped snapshot height (federated hub).');
+                    return;
+                }
+                if (Math.abs(Number(myTip) - Number(btcBlockHeight)) > this.snapshotToleranceBlocks) {
+                    console.warn('Consensus: declining to PREPARE for seq ' + seq +
+                        ' from ' + envelope.sender + ': PRE_PREPARE btcBlockHeight ' + btcBlockHeight +
+                        ' deviates from our own BTC tip ' + myTip + ' by more than ' +
+                        this.snapshotToleranceBlocks + ' blocks (federated hub); a stale height would ' +
+                        'let the proposer select the validator set, the leader and the quorum mode.');
+                    return;
+                }
             }
             // Lock the federation validator-set snapshot at the SAME block
             // the leader snapshotted at (stamped into the PRE_PREPARE

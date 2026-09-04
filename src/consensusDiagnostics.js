@@ -213,11 +213,16 @@ function installCrashHandlers({ exitOnUncaught = true, service = 'xchain-hub' } 
  * derives no cadence of its own, the encoder and tracker have no checkpoint
  * concept, and sync's checkpoint module is a client-side verifier that returns a
  * verdict rather than stalling. The hub is the only place a cadence can stall.
+ *
+ * `chains` is the round's chain list (a round spans all of them) and `block` is the
+ * BTC snapshot block it would have used, never a checkpoint seq.
  */
-function noteCheckpointStalled({ chain, seq, reason, stalls } = {}) {
+function noteCheckpointStalled({ chains, block, reason, stalls } = {}) {
     try {
-        const fields = { chain: chain || 'unknown', reason: reason || 'unknown' };
-        if (seq !== undefined && seq !== null) fields.seq = seq;
+        // Render the list as one slash-joined token so the text line stays scannable.
+        const list = Array.isArray(chains) ? chains.filter(Boolean).join('/') : (chains ? String(chains) : '');
+        const fields = { chains: list || 'unknown', reason: reason || 'unknown' };
+        if (block !== undefined && block !== null) fields.block = block;
         if (stalls !== undefined) fields.stalls = stalls;
         return getLogger().warn('CHECKPOINT_STALLED', fields);
     } catch { return null; }

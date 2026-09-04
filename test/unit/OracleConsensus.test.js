@@ -26,6 +26,11 @@ describe('OracleConsensus', function () {
 
     beforeEach(function () {
         hub = createMockHub();
+        // A real federated hub always resolves a BTC tip of its own, and the follower
+        // now bounds the leader-supplied btcBlockHeight against it before that height
+        // can pick the snapshot, the leader or the quorum mode. Same height the honest
+        // PROPOSEs in this file carry, so an in-lockstep round is modelled.
+        hub._resolveBtcLatestBlock = sinon.stub().resolves(900000);
         pm  = hub._peerManager;
         oracleRound = {
             getSubmissions: sinon.stub().returns(new Map())
@@ -933,6 +938,61 @@ describe('OracleConsensus', function () {
             // a count quorum this hub's peers are not using.
             await oc._handlePropose(goodEnvelope(0, { btcBlockHeight: 900000 }));
             expect(oc.pendingRounds.has(0)).to.equal(false);
+        });
+
+        // Freshness bound on the leader-supplied height. #1225 closes only the
+        // ABSENT-height case; an ancient but INDEXED height passes the snapshot echo
+        // check and resolves a valid snapshot, so without this the proposer picks the
+        // quorum denominator, the member set it is elected from, and the
+        // stake-weighted-vs-count mode.
+        it('drops a PROPOSE whose height sits far below our own BTC tip', async function () {
+            hub.capabilitySnapshot = {
+                getSnapshot:       sinon.stub().resolves({ validators: VALIDATORS_3 }),
+                getWeightSnapshot: sinon.stub().resolves({ validators: VALIDATORS_3 }),
+                getQuorum:         sinon.stub().returns(2)
+            };
+            await oc._handlePropose(goodEnvelope(0, { btcBlockHeight: 700000 }));
+            expect(oc.pendingRounds.has(0)).to.equal(false);
+            // The attacker-chosen block never reaches the snapshot resolve, so it can
+            // size no quorum and elect no leader.
+            expect(hub.capabilitySnapshot.getSnapshot.called).to.equal(false);
+            expect(hub.capabilitySnapshot.getWeightSnapshot.called).to.equal(false);
+        });
+
+        it('drops a PROPOSE whose height sits far above our own BTC tip', async function () {
+            await oc._handlePropose(goodEnvelope(0, {
+                btcBlockHeight: 900000 + oc.snapshotToleranceBlocks + 1
+            }));
+            expect(oc.pendingRounds.has(0)).to.equal(false);
+        });
+
+        it('accepts a height at the edge of the tolerance in both directions', async function () {
+            await oc._handlePropose(goodEnvelope(0, { btcBlockHeight: 900000 - oc.snapshotToleranceBlocks }));
+            expect(oc.pendingRounds.has(0)).to.equal(true);
+            let p = oc.pendingRounds.get(0);
+            if (p && p.timer) clearTimeout(p.timer);
+            oc.pendingRounds.delete(0);
+
+            await oc._handlePropose(goodEnvelope(0, { btcBlockHeight: 900000 + oc.snapshotToleranceBlocks }));
+            expect(oc.pendingRounds.has(0)).to.equal(true);
+            p = oc.pendingRounds.get(0);
+            if (p && p.timer) clearTimeout(p.timer);
+        });
+
+        it('fails closed when this hub cannot resolve a BTC tip of its own', async function () {
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(null);
+            await oc._handlePropose(goodEnvelope(0, { btcBlockHeight: 900000 }));
+            expect(oc.pendingRounds.has(0)).to.equal(false);
+        });
+
+        it('leaves a single-node hub (_getQuorum() === 0) off the bound entirely', async function () {
+            // Gated exactly like the #1225 guard beside it: a hub with no peers has
+            // nothing to split from, so it keeps the bootstrap path and never pays a
+            // tip resolve. Asserted on the resolver, which is the whole cost.
+            sinon.stub(oc, '_getQuorum').returns(0);
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(null);
+            await oc._handlePropose(goodEnvelope(0, { btcBlockHeight: 700000 }));
+            expect(hub._resolveBtcLatestBlock.called).to.equal(false);
         });
     });
 

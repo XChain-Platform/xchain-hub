@@ -200,6 +200,33 @@ describe('follower bounds on a leader-chosen effective_time', function () {
         if (pending.timer) clearTimeout(pending.timer);
     });
 
+    // item 6491: the non-ok winner-establishing block adopted the sender's stamp
+    // BEFORE the byte_equality no_quorum self-derivation gate (items 2641/2579)
+    // could refuse the message, so a PREPARE this hub declines to co-sign still
+    // moved the round's bytes. The ok path already defers adoption to its commit
+    // point; this pins the non-ok path to the same rule.
+    it('REJECTS a no_quorum PREPARE it cannot derive, leaving its own stamp in place', async function () {
+        let f = makeFollower();
+        let pending = await openRound(f);
+        let ownStamp = pending.effectiveTime;
+        expect(ownStamp, 'the follower stamped its own candidate at propose()').to.equal(EXPECTED);
+        // In-window, so the bounds guard passes and only the derivation gate refuses.
+        let wireEt = EXPECTED + 900;
+        let canonical = f.engine._buildCanonical(RID, PROVIDER, Buffer.alloc(0), 'no_quorum', '', BLK, wireEt).toString('utf8');
+        f.engine._handlePrepare({
+            type: 'ATTEST_PREPARE',
+            data: { requestId: RID, providerId: PROVIDER, body_b64: '', meta: '', status: 'no_quorum',
+                    sig_pubkey: f.leaderKey, sig: f.leader.sign(canonical), effective_time: wireEt }
+        });
+        // Only this hub's own proposal is in hand, so the verdict is not yet
+        // locally derivable: the message is held, not adopted on faith.
+        expect(pending.winner, 'a no_quorum PREPARE is not adopted on faith').to.equal(null);
+        expect(pending.signatures.has(f.leaderKey)).to.equal(false);
+        expect(f.engine.earlyMessages.has(RID), 'held for local derivation').to.equal(true);
+        expect(pending.effectiveTime, 'a refused PREPARE leaves the round stamp alone').to.equal(ownStamp);
+        if (pending.timer) clearTimeout(pending.timer);
+    });
+
     it('drops an out-of-window PROPOSE, so the leader-stamp resolver never sees one', async function () {
         // The resolver takes the round's stamp from the leader's PROPOSE, so that
         // envelope is a leader-chosen field too and gets the same treatment.

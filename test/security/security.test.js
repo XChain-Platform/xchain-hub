@@ -1393,6 +1393,29 @@ describe('Security Hardening', function () {
             expect(result.error).to.include('non-negative integer');
         });
 
+        // parseInt took an integer PREFIX, so these reached hub.reportReorg as
+        // 850000, 8 and 100 instead of an input error naming the bad field.
+        it('reportreorg rejects a prefix-coerced reorg_height rather than truncating it', async function () {
+            for (let bad of ['850000junk', '8.5e5', '100.9']) {
+                let result = await controller.reportreorg({
+                    chain: 'BTC', reorg_height: bad, timestamp: String(Date.now()),
+                    old_hash: 'a'.repeat(64), new_hash: 'b'.repeat(64)
+                });
+                expect(result.error, bad).to.include('reorg_height must be a non-negative integer');
+            }
+        });
+
+        // timestamp had no API-layer guard at all: parseInt('abc') is NaN, forwarded straight in.
+        it('reportreorg rejects a non-integer timestamp instead of forwarding NaN', async function () {
+            for (let bad of ['abc', '1756900000junk', 1756900000.5]) {
+                let result = await controller.reportreorg({
+                    chain: 'BTC', reorg_height: '100', timestamp: bad,
+                    old_hash: 'a'.repeat(64), new_hash: 'b'.repeat(64)
+                });
+                expect(result.error, String(bad)).to.include('timestamp must be a non-negative integer');
+            }
+        });
+
         it('getreorghistory rejects limit over the cap', async function () {
             let result = await controller.getreorghistory({ limit: 10001 });
             expect(result.error).to.include('limit');

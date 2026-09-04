@@ -215,6 +215,34 @@ describe('StateCheckpointEngine cadence stall meter', function () {
         expect(stats.cadence_stall_block).to.equal(null);
         expect(stats.cadence_stalls, 'the historical count is retained').to.equal(1);
     });
+
+    it('a failed capability-snapshot mirror is metered and leaves the interval retryable', async function () {
+        // The mirror write sits outside the per-chain guard, so a throw aborts every
+        // chain's round. Running it AFTER the latch advance is the hazard: the interval was
+        // consumed, no checkpoint was cut, and getcheckpointstats still read clean.
+        const { engine, state, db } = buildEngine({});
+        const realQuery = db.doQuery.bind(db);
+        let failing = true;
+        db.doQuery = async function (sql, params) {
+            if (failing && sql.startsWith('INSERT IGNORE INTO capability_snapshots')) throw new Error('db down');
+            return realQuery(sql, params);
+        };
+
+        await engine._tick();
+
+        expect(db.checkpoints.length, 'no checkpoint was produced').to.equal(0);
+        expect(engine._lastCheckpointBtcBlock, 'the latch did not consume the interval').to.equal(null);
+        const stats = await engine.getStats();
+        expect(stats.cadence_stalls, 'the skipped interval is metered').to.equal(1);
+        expect(stats.cadence_stall_reason).to.match(/capability snapshot mirror failed: db down/);
+        expect(stats.cadence_stall_block).to.equal(state.btcBlock);
+
+        // The next poll re-enters the same round rather than waiting a whole interval.
+        failing = false;
+        await engine._tick();
+        expect(db.checkpoints.length, 'the retried round finalizes').to.equal(1);
+        expect((await engine.getStats()).cadence_stall_reason, 'reason clears on success').to.equal(null);
+    });
 });
 
 // A frozen BTC tip pins the cadence slot to one constant. Without this meter a

@@ -444,7 +444,10 @@ describe('Consensus (PBFT)', function () {
                 getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 800000, validators: VALIDATORS_4 }),
                 getQuorum: sinon.stub().returns(3)
             };
-            hub._resolveBtcLatestBlock = sinon.stub().resolves(999);
+            // Our own tip, which BOUNDS the stamped height (freshness guard) and
+            // never to substitute for it; deliberately a few blocks off the leader's
+            // so the assertion below distinguishes the two.
+            hub._resolveBtcLatestBlock = sinon.stub().resolves(800004);
             let config = { x: 1 };
             let digest = consensus._digest(config);
             await consensus._handlePrePrepare({
@@ -454,9 +457,75 @@ describe('Consensus (PBFT)', function () {
             });
             expect(consensus.pendingProposals.has(5)).to.be.true;
             // Snapshot was locked at the leader-stamped height, not the local tip.
-            expect(hub._resolveBtcLatestBlock.called).to.be.false;
+            expect(hub.capabilitySnapshot.getActiveValidatorSnapshot.calledWith(800000)).to.be.true;
+            expect(consensus.pendingProposals.get(5).btcBlockHeight).to.equal(800000);
             let proposal = consensus.pendingProposals.get(5);
             if (proposal.timer) clearTimeout(proposal.timer);
+        });
+
+        // Freshness bound on the leader-stamped height. An ancient but INDEXED height
+        // passes _blockEchoOk and yields a valid snapshot, so without this bound a
+        // Byzantine leader grinds the height to size quorum N, to elect itself under
+        // (seq + view) % N, and to land below the STAKE_WEIGHTED_QUORUM activation.
+        describe('leader-stamped btcBlockHeight freshness bound', function () {
+
+            function wire(tip) {
+                consensus.minValidators = 2;
+                hub.capabilitySnapshot = {
+                    getActiveValidatorSnapshot: sinon.stub().returns({ blockIndex: 700000, validators: VALIDATORS_4 }),
+                    getActiveWeightSnapshot:    sinon.stub().returns({ blockIndex: 700000, validators: VALIDATORS_4 }),
+                    getQuorum: sinon.stub().returns(3)
+                };
+                hub._resolveBtcLatestBlock = sinon.stub().resolves(tip);
+            }
+
+            async function send(height) {
+                let config = { x: 1 };
+                let digest = consensus._digest(config);
+                await consensus._handlePrePrepare({
+                    sender: VALIDATORS_4[1].addr,                   // leader for (seq 5, view 0)
+                    sig_pubkey: VALIDATORS_4[1].pubkey,
+                    data: { seq: 5, view: 0, configDigest: digest, config, btcBlockHeight: height }
+                });
+                let p = consensus.pendingProposals.get(5);
+                if (p && p.timer) clearTimeout(p.timer);
+                return p;
+            }
+
+            it('declines an ancient height the indexer would happily serve', async function () {
+                wire(800000);
+                expect(await send(700000)).to.equal(undefined);
+                expect(pm.broadcast.called).to.be.false;
+                // The snapshot resolve is never reached, so the attacker-chosen block
+                // never sizes quorum or elects the leader.
+                expect(hub.capabilitySnapshot.getActiveValidatorSnapshot.called).to.be.false;
+            });
+
+            it('declines a future height beyond the tolerance too', async function () {
+                wire(800000);
+                expect(await send(800000 + consensus.snapshotToleranceBlocks + 1)).to.equal(undefined);
+            });
+
+            it('accepts a height inside the tolerance in both directions', async function () {
+                wire(800000);
+                expect(await send(800000 - consensus.snapshotToleranceBlocks)).to.not.equal(undefined);
+                consensus.pendingProposals.delete(5);
+                expect(await send(800000 + consensus.snapshotToleranceBlocks)).to.not.equal(undefined);
+            });
+
+            it('fails closed when this hub cannot resolve a tip of its own', async function () {
+                wire(null);
+                expect(await send(800000)).to.equal(undefined);
+                expect(hub.capabilitySnapshot.getActiveValidatorSnapshot.called).to.be.false;
+            });
+
+            it('leaves a single-node hub on its legacy path', async function () {
+                wire(null);
+                consensus.minValidators = 1;
+                consensus.validatorSet  = [];
+                expect(consensus._isFederated()).to.be.false;
+                expect(await send(700000)).to.not.equal(undefined);
+            });
         });
 
         it('second PRE_PREPARE for an already-pending seq with a conflicting digest is dropped (no PREPARE)', async function () {
