@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-09-04
+
+### Added
+- ATTEST responses are written to a hub mirror table, gossiped to every hub, verified before they are stored, and served over the snapshot route and stream; inert until the response-mirror activation height, which is armed on regtest only.
+- Each hour's finalized responses are published as a signed ATTEST batch on Dogecoin, keyed on the signed effective time, and landed batches are accepted back.
+- The response's effective time is inside the signed canonical and the body is capped before anyone signs it.
+- `getattestationresponsibleset` answers which validators a request drew.
+- A lost-round watchdog per seat, oracle round presence over RPC, and a stake-share watcher that warns before the weighted commit gate halts rounds.
+- A frozen bitcoin tip that pins the checkpoint cadence slot is metered and reported.
+- A regtest venue can arm ROLLCALL from its environment.
+- SWEEP and CALLBACK are priced on the unified fee schedule.
+
+### Fixed
+- A price window that closed while the hub was down is published on restart.
+- Oracle takeover holds off while a co-signed batch may still be in flight.
+- Local callers are exempt from the per-IP cap and a 429 is answered as JSON-RPC.
+- `getallconfigs` redacts secret-bearing params; `include_secrets` needs its own key tier.
+- Out-of-band oracle round numbers are refused at ingest and stored ones are reported through diagnostics.
+- The hub refuses to start when a canonical capability has no configured stake floor.
+- The LLM credential gate reports ready only once a real token is present.
+- `hub_url` stays on the pushed checkpoint block instead of being dropped with `self_sync`.
+- The derive block is carried through the anchor reward activation copy.
+- The attestation forward-margin override is read by its documented name.
+- Closing the hub stops its attestation and consensus engines and unsubscribes them.
+- The snapshot routes and the WS stream serialize BIGINT the same way.
+- mariadb moved off the cleartext-credential advisory range with the floor pinned in the dependency gate.
+
 ## [0.12.0] - 2026-08-30
 
 ### Added
