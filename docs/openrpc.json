@@ -583,6 +583,24 @@
       }
     },
     {
+      "name": "getattestationresponsibleset",
+      "summary": "The responsible validator set for one pending attestation request, resolved from the capability snapshot at its buried block.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "request_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      }
+    },
+    {
       "name": "getcrosschaincallstats",
       "summary": "Cross-chain call relay backlog depth and lifetime failure counters.",
       "paramStructure": "by-name",

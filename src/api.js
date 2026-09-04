@@ -74,8 +74,16 @@ const WebSocket = require('ws');
 const crypto    = require('crypto');
 const fs        = require('fs');
 const path      = require('path');
+const axios     = require('axios');   // hub-to-indexer RPC (attestation request lookups)
 const geoip     = require('geoip-lite');   // self-contained country/region DB; we read only country + region
+const swq       = require('./stake_weighted_quorum.js');
+const wid       = require('./attest_responsible_widening_activation.js');
 const { HUB_SCHEMA_VERSION } = require('./hub-schema-version');   // stamped on every mirror snapshot so a stale indexer rejects a mismatch
+// The SAME replacer HubDbBroadcaster.js signs its WS frames with, imported rather than
+// copied: a bootstrap REST read and a streamed WS row must serialize a BIGINT column
+// identically, or a consumer that switches between the two feeds sees the same value
+// change JS type mid-stream. Importing is what makes that identity structural.
+const { bigIntReplacer } = require('./HubDbBroadcaster');
 const { buildOraclePricesSnapshotQuery } = require('./oraclePricesSnapshotQuery');   // page (indexer bootstrap) vs latest-per-feed (dashboard) query selection
 const { evaluateAuthPosture } = require('./lib/auth_posture.js');   // boot refuses on an undeclared unauthenticated write surface
 const { parseCorsOrigin } = require('./lib/corsOrigin.js');
@@ -388,6 +396,12 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     // Same class as P2P_SIGNER_SET_REFRESH_MS above: without this line the env knob
     // never reached p2pConfig and retention was permanently pinned to the default.
     ORACLE_SUBMISSIONS_RETENTION_ROUNDS: process.env.ORACLE_SUBMISSIONS_RETENTION_ROUNDS,
+    // Attestation round cadence (AttestationRound.js:100, AttestationConsensus.js:295).
+    // Same dead-knob class as P2P_SIGNER_SET_REFRESH_MS above: without these two lines
+    // the env vars never reached p2pConfig and a real api.js child stayed pinned to the
+    // 15s poll / 120s round-timeout defaults regardless of what the operator set.
+    ATTESTATION_POLL_MS:            process.env.ATTESTATION_POLL_MS,
+    ATTESTATION_ROUND_TIMEOUT_MS:   process.env.ATTESTATION_ROUND_TIMEOUT_MS,
     ORACLE_REWARD_PER_ROUND: process.env.ORACLE_REWARD_PER_ROUND || '10.00000000',
     SLASH_DEVIATION_THRESHOLD: process.env.SLASH_DEVIATION_THRESHOLD || String(ORACLE_DEVIATION_THRESHOLD),
     SLASH_MISSED_ROUNDS_THRESHOLD: process.env.SLASH_MISSED_ROUNDS_THRESHOLD || '30',
@@ -614,6 +628,43 @@ async function startApi(){
         }
         next();
     });
+
+    // Bounded page walk over the BTC indexer's pending-attestation queue, oldest
+    // first: getpendingattestation_requests exposes no lookup by request_id, only a
+    // keyset cursor over the backlog (xchain-indexer/src/api.js), so finding one
+    // request costs a scan. Capped rather than unbounded, matching every other
+    // hub->indexer poll's failure posture: an exhausted scan reads as "not found",
+    // same as a request that was never admitted.
+    const RESPONSIBLE_SET_LOOKUP_LIMIT = 500;
+    const RESPONSIBLE_SET_LOOKUP_PAGES = 20;
+    async function findPendingAttestationRequest(rid){
+        let url = await hub._resolveBtcIndexerUrl();
+        if(!url) return null;
+        let cursor = null;
+        let latestBlock = 0;
+        for(let page = 0; page < RESPONSIBLE_SET_LOOKUP_PAGES; page++){
+            let params = { limit: RESPONSIBLE_SET_LOOKUP_LIMIT };
+            if(cursor){ params.after_block_index = cursor.block_index; params.after_action_index = cursor.action_index; }
+            let res;
+            try {
+                res = await axios.post(url, {
+                    jsonrpc: '2.0', id: Date.now(),
+                    method:  'getpendingattestation_requests',
+                    params:  params
+                }, { headers: hub._btcIndexerHeaders(), timeout: 5000 });
+            } catch (e){ return null; }
+            let result = res && res.data && res.data.result;
+            if(!result || result.error) return null;
+            latestBlock = Number(result.latest_block_index) || 0;
+            let requests = Array.isArray(result.requests) ? result.requests : [];
+            let found = requests.find(r => String((r && r.request_id) || '').toLowerCase() === rid);
+            if(found) return { request: found, latestBlock: latestBlock };
+            if(requests.length < RESPONSIBLE_SET_LOOKUP_LIMIT) return null;   // tail of the queue reached
+            let last = requests[requests.length - 1];
+            cursor = { block_index: last.block_index, action_index: last.action_index };
+        }
+        return null;
+    }
 
     const jsonRpcController = {
 
@@ -1637,6 +1688,67 @@ async function startApi(){
             } catch (err) {
                 return {error: "error fetching attestation"};
             }
+        },
+
+        // Read-only mirror of the ranking AttestationRound._computeResponsibleSet applies
+        // when it decides whether THIS hub must serve a request. Exists so a caller (the
+        // e2e venue, an operator) can ask who is responsible without re-deriving the rule:
+        // every input below is resolved through the hub's own engines, never recomputed
+        // here, so a change to the ranking cannot drift between this answer and a live round.
+        //
+        // No state changes and no signing; this differs from a live round only in that it
+        // runs for ANY request id, not only ones this hub happens to be responsible for.
+        async getattestationresponsibleset({request_id}){
+            if(!request_id || typeof request_id !== 'string')
+                return {error: "request_id is required"};
+            let rid = request_id.trim().toLowerCase();
+            if(!/^[0-9a-f]{64}$/.test(rid))
+                return {error: "request_id must be a 64-character hex string"};
+            let round = hub.getAttestationRound();
+            if(!round || typeof round._computeResponsibleSet !== 'function')
+                return {error: "attestation round engine not active"};
+            try {
+                let found = await findPendingAttestationRequest(rid);
+                if(!found) return {error: "attestation request not found"};
+                let request       = found.request;
+                let declaredBlock = Number(request.block_index);
+                let redundancy    = Math.max(1, Number(request.redundancy) || 1);
+                let weighted      = swq.isStakeWeightedQuorumActive(declaredBlock, hub.network);
+
+                // Buried inside CapabilitySnapshot itself (_buriedBlockIndex), same as the
+                // gossip verifier at AttestationResponseMirror.js: pass the DECLARED height,
+                // never bury it again here.
+                let cs = hub.capabilitySnapshot;
+                let snapshot = cs
+                    ? (weighted ? await cs.getWeightSnapshot('attestation', declaredBlock)
+                                : await cs.getSnapshot('attestation', declaredBlock))
+                    : null;
+                if(!snapshot || !Array.isArray(snapshot.validators) || snapshot.validators.length === 0)
+                    return {error: "no capability snapshot at block " + declaredBlock};
+
+                let reg = hub.getProviderRegistry();
+                let providerFloor = (reg && typeof reg.getMinStake === 'function')
+                    ? reg.getMinStake(String(request.provider_id), declaredBlock) : null;
+                if(weighted && providerFloor === null)
+                    return {error: "provider \"" + request.provider_id + "\" has no min_stake floor at block " + declaredBlock};
+
+                let widen = (Number.isFinite(found.latestBlock) && found.latestBlock > 0)
+                    ? wid.widenSlots(found.latestBlock, declaredBlock, Number(request.deadline_block), hub.network)
+                    : 0;
+                let responsible = round._computeResponsibleSet(
+                    snapshot.validators, rid, redundancy, weighted, providerFloor, widen
+                ).map(v => v.pubkey);
+
+                return {
+                    request_id:  rid,
+                    block_index: declaredBlock,
+                    redundancy:  redundancy,
+                    widen:       widen,
+                    responsible: responsible
+                };
+            } catch (err) {
+                return {error: "error resolving attestation responsible set"};
+            }
         }
     };
 
@@ -1672,7 +1784,7 @@ async function startApi(){
                 'SELECT * FROM price_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.json({ table: 'price_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
+            res.type('json').send(JSON.stringify({ table: 'price_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -1693,7 +1805,7 @@ async function startApi(){
                 limit: req.query.limit ? parseInt(req.query.limit) : undefined,
             });
             let rows = await hub.db.doQuery(sql, params);
-            res.json({ table: 'oracle_prices', rows: rows, count: rows.length, mode: mode, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
+            res.type('json').send(JSON.stringify({ table: 'oracle_prices', rows: rows, count: rows.length, mode: mode, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -1716,7 +1828,7 @@ async function startApi(){
                 "SELECT * FROM cross_chain_matches WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?",
                 [since, limit]
             );
-            res.json({ table: 'cross_chain_matches', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
+            res.type('json').send(JSON.stringify({ table: 'cross_chain_matches', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -1733,7 +1845,7 @@ async function startApi(){
                 'SELECT * FROM capability_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.json({ table: 'capability_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
+            res.type('json').send(JSON.stringify({ table: 'capability_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -1763,7 +1875,7 @@ async function startApi(){
                 "FROM cross_chain_calls WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?",
                 [since, limit]
             );
-            res.json({ table: 'cross_chain_calls', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
+            res.type('json').send(JSON.stringify({ table: 'cross_chain_calls', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -1791,7 +1903,7 @@ async function startApi(){
                 'FROM state_checkpoints WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.json({ table: 'state_checkpoints', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
+            res.type('json').send(JSON.stringify({ table: 'state_checkpoints', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -1814,7 +1926,7 @@ async function startApi(){
                 'FROM anchor_reward_attestations WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.json({ table: 'anchor_reward_attestations', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
+            res.type('json').send(JSON.stringify({ table: 'anchor_reward_attestations', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -1851,7 +1963,7 @@ async function startApi(){
                 'FROM attestation_responses WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.json({ table: 'attestation_responses', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
+            res.type('json').send(JSON.stringify({ table: 'attestation_responses', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
