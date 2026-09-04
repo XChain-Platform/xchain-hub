@@ -56,9 +56,12 @@ function makeDb(){
         async getChainTip(){ return tip; },
         async doQuery(sql, args){
             if(/FROM attestation_responses/i.test(sql)){
+                // Membership is read off the column the statement actually names, so a
+                // publisher that went back to the audit column selects nothing here.
+                let column  = /WHERE network = \? AND ([a-z_]+) >= \?/i.exec(sql)[1];
                 let [network, from, to, limit] = args;
                 return responses
-                    .filter(r => r.network === network && r.finalized_at >= from && r.finalized_at < to)
+                    .filter(r => r.network === network && r[column] >= from && r[column] < to)
                     .sort((a, b) => (a.request_block_index - b.request_block_index) ||
                                     (a.request_action_index - b.request_action_index) ||
                                     (a.request_id < b.request_id ? -1 : 1))
@@ -108,6 +111,10 @@ function makeDb(){
     };
 }
 
+// `effective_time` is what places a row in a window, so every case sets it. The
+// default `finalized_at` is deliberately absurd: it belongs to no window any test
+// publishes, so a publisher that partitioned on the audit column would find an empty
+// window everywhere in this file rather than a subtly different one.
 function makeRow(overrides){
     let rid = crypto.randomBytes(32).toString('hex');
     return Object.assign({
@@ -124,7 +131,7 @@ function makeRow(overrides){
         signer_pubkeys:       '[]',
         signatures:           '[]',
         widen:                0,
-        finalized_at:         0
+        finalized_at:         7
     }, overrides || {});
 }
 
@@ -286,9 +293,9 @@ describe('AttestationBatchPublisher', function () {
             let now = 200 * WINDOW_S;
             let start = now - WINDOW_S;
             hub.db.responses.push(
-                makeRow({ finalized_at: start + 5, request_block_index: 121, request_action_index: 2 }),
-                makeRow({ finalized_at: start + 1, request_block_index: 120, request_action_index: 9 }),
-                makeRow({ finalized_at: start - 1 })                       // the PREVIOUS window's row
+                makeRow({ effective_time: start + 5, request_block_index: 121, request_action_index: 2 }),
+                makeRow({ effective_time: start + 1, request_block_index: 120, request_action_index: 9 }),
+                makeRow({ effective_time: start - 1 })                       // the PREVIOUS window's row
             );
             let p = makePublisher(hub);
             p._floorWindow = start;
@@ -310,7 +317,7 @@ describe('AttestationBatchPublisher', function () {
             let now = 200 * WINDOW_S;
             let start = now - WINDOW_S;
             for (let i = 0; i <= abw.ATTEST_BATCH_MAX_ROWS; i++)
-                hub.db.responses.push(makeRow({ finalized_at: start + 1, request_action_index: i }));
+                hub.db.responses.push(makeRow({ effective_time: start + 1, request_action_index: i }));
             let p = makePublisher(hub);
             p._floorWindow = start;
 
@@ -329,7 +336,7 @@ describe('AttestationBatchPublisher', function () {
             let hub = makeHub({ dir: dir });
             let now = 200 * WINDOW_S;
             let start = now - WINDOW_S;
-            hub.db.responses.push(makeRow({ finalized_at: start + 1 }));
+            hub.db.responses.push(makeRow({ effective_time: start + 1 }));
 
             let first = makePublisher(hub);
             first._floorWindow = start;
@@ -375,6 +382,138 @@ describe('AttestationBatchPublisher', function () {
             expect(p.wires.length).to.equal(0);
             expect(hub.db.marker(now - WINDOW_S), 'a deferred window leaves NO marker').to.equal(null);
             expect(p.stats.windowsDeferred).to.equal(1);
+        });
+
+        // A hub whose Bitcoin indexer never called pushchaintip publishes nothing, ever.
+        // That is a one-line configuration gap presenting as total silence, so the defer
+        // has to name the missing thing; and it has to name it ONCE, because the sweep
+        // runs every window and a regtest window is seconds long.
+        it('names the missing BTC chain tip when it defers, once per cause', async function () {
+            let hub = makeHub({ dir: dir });
+            hub.db.setTip(null);
+            let p = makePublisher(hub);
+            let now = 200 * WINDOW_S;
+            p._floorWindow = now - WINDOW_S;
+
+            let warned = [];
+            let realWarn = console.warn;
+            console.warn = (msg) => warned.push(String(msg));
+            try {
+                await p.sweep(now);
+                await p.sweep(now + WINDOW_S);
+            } finally {
+                console.warn = realWarn;
+            }
+
+            let anchorWarnings = warned.filter(w => /no BTC anchor/.test(w));
+            expect(anchorWarnings.length, 'one line per cause, not one per window').to.equal(1);
+            expect(anchorWarnings[0]).to.match(/chain_tips/);
+            expect(anchorWarnings[0], 'the operator has to be told which call is missing')
+                .to.match(/pushchaintip/);
+            expect(p.getStats().anchorFailure).to.match(/chain_tips/);
+
+            // A DIFFERENT cause speaks again: the latch is on the reason, not on the fact
+            // that something once failed.
+            hub.db.getChainTip = async () => { throw new Error('connection lost'); };
+            warned.length = 0;
+            console.warn = (msg) => warned.push(String(msg));
+            try { await p.sweep(now + 2 * WINDOW_S); } finally { console.warn = realWarn; }
+            expect(warned.filter(w => /connection lost/.test(w)).length).to.equal(1);
+
+            // And it clears once the tip resolves, so a LATER outage of the same cause is
+            // a new episode rather than a swallowed one.
+            hub.db.getChainTip = async () => ({ blockHeight: ANCHOR, blockTime: 1 });
+            await p.sweep(now + 3 * WINDOW_S);
+            expect(p.getStats().anchorFailure).to.equal(null);
+
+            hub.db.getChainTip = async () => { throw new Error('connection lost'); };
+            warned.length = 0;
+            console.warn = (msg) => warned.push(String(msg));
+            try { await p.sweep(now + 4 * WINDOW_S); } finally { console.warn = realWarn; }
+            expect(warned.filter(w => /connection lost/.test(w)).length,
+                'a recovered rail that fails again must warn again').to.equal(1);
+        });
+    });
+
+    // ------------------------------------------------------------ membership
+
+    // Which rows a window holds is decided by the SIGNED effective time, never by the
+    // per-hub `finalized_at` wall clock the schema allows two hubs to disagree on. The
+    // cases below are the two a reading cannot settle: that two hubs stamping one row
+    // hours apart still agree on its window, and that the bounds are half-open.
+    describe('window membership', function () {
+
+        it('puts one row in the same window on two hubs whose finalized_at disagree', async function () {
+            let ids  = [ValidatorIdentity.generate(), ValidatorIdentity.generate(), ValidatorIdentity.generate()];
+            let now   = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+
+            // One logical row, a second before the boundary, stamped by two hubs on
+            // opposite sides of it: hub A finalized it inside the window, hub B's clock
+            // put its copy in the NEXT one. Its signed effective time is identical.
+            let base = makeRow({ effective_time: now - 1 });
+            let hubA = makeHub({ dir: dir, identities: ids });
+            let hubB = makeHub({ dir: dir, identities: [ids[1], ids[0], ids[2]] });
+            hubA.db.responses.push(Object.assign({}, base, { finalized_at: start + 2 }));
+            hubB.db.responses.push(Object.assign({}, base, { finalized_at: now + 3 }));
+
+            let proposals = [];
+            hubA.peerManager = { on(){}, removeListener(){},
+                broadcast(type, data){ if(type === AttestationBatchPublisher.XATTESTB_SIGN_REQ) proposals.push(data); } };
+            let sentByB = [];
+            hubB.peerManager = { on(){}, removeListener(){}, broadcast(type, data){ sentByB.push({ type, data }); } };
+
+            let pA = makePublisher(hubA), pB = makePublisher(hubB);
+            let rowsA = await pA._selectWindowRows(start, now);
+            let rowsB = await pB._selectWindowRows(start, now);
+            expect(rowsA.length, 'hub A must hold the boundary row for this window').to.equal(1);
+            expect(rowsB.length, 'hub B must hold the SAME row for the SAME window').to.equal(1);
+            expect(rowsA).to.deep.equal(rowsB);
+
+            // The same rows means the same batch key, which is what two hubs have to
+            // agree on before either can co-sign the other's proposal.
+            let windowOf = (rows) => ({ network: 'regtest', window_start: start, window_end: now,
+                                        row_count: rows.length, btc_block_height: ANCHOR, rows: rows });
+            expect(abw.computeBatchKey(windowOf(rowsA))).to.equal(abw.computeBatchKey(windowOf(rowsB)));
+
+            // And the agreement is real, not arithmetic: B co-signs A's actual proposal.
+            pA._floorWindow = start;
+            await pA._publishWindow(start, 4);
+            expect(proposals.length, 'hub A must have proposed the window').to.equal(1);
+            await pB._handleSignReq({
+                type: AttestationBatchPublisher.XATTESTB_SIGN_REQ,
+                sig_pubkey: hubA._identity.getPubkeyHex().toLowerCase(),
+                data: proposals[0]
+            });
+            expect(pB.stats.signRefusals, 'hub B must not refuse a window it holds the same rows for').to.equal(0);
+            expect(sentByB.length).to.equal(1);
+            expect(sentByB[0].type).to.equal(AttestationBatchPublisher.XATTESTB_SIGN);
+        });
+
+        it('takes a row at window_start and leaves one at exactly window_end to the next window', async function () {
+            let hub = makeHub({ dir: dir });
+            let now   = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+            let first = makeRow({ effective_time: start });          // the inclusive lower bound
+            let edge  = makeRow({ effective_time: now });            // the EXCLUSIVE upper bound
+            hub.db.responses.push(first, edge);
+
+            let p = makePublisher(hub);
+            p._floorWindow = start;
+            await p.sweep(now);
+
+            let head = decodeHead(p.wires[0]);
+            expect(head.windowEnd).to.equal(now);
+            expect(head.rowCount, 'window_end is exclusive').to.equal(1);
+            let body = abw.reassembleAttestBatch(head, []);
+            expect(body.batch.rows[0].request_id).to.equal(first.request_id);
+
+            // The boundary row is not dropped: it rides the NEXT window, exactly once.
+            await p.sweep(now + WINDOW_S);
+            let next = decodeHead(p.wires[1]);
+            expect(next.windowStart).to.equal(now);
+            expect(next.rowCount).to.equal(1);
+            expect(abw.reassembleAttestBatch(next, []).batch.rows[0].request_id).to.equal(edge.request_id);
         });
     });
 
@@ -423,7 +562,7 @@ describe('AttestationBatchPublisher', function () {
             state.publisher = p;
             let now = 200 * WINDOW_S;
             let start = now - WINDOW_S;
-            hub.db.responses.push(makeRow({ finalized_at: start + 1 }));
+            hub.db.responses.push(makeRow({ effective_time: start + 1 }));
             p._floorWindow = start;
 
             // Driven at an age past every rank so the election is not what decides this
@@ -470,7 +609,7 @@ describe('AttestationBatchPublisher', function () {
             state.publisher = p;
             let now = 200 * WINDOW_S;
             p._floorWindow = now - WINDOW_S;
-            hub.db.responses.push(makeRow({ finalized_at: now - WINDOW_S + 1 }));
+            hub.db.responses.push(makeRow({ effective_time: now - WINDOW_S + 1 }));
 
             await p._publishWindow(now - WINDOW_S, 4);
 
@@ -498,10 +637,7 @@ describe('AttestationBatchPublisher', function () {
             hub.peerManager = { on(){}, removeListener(){}, broadcast(type, data){ sent.push({ type, data }); } };
             let p = makePublisher(hub);
             let start = 200 * WINDOW_S;
-            // Mid-window on purpose: a row inside the boundary-skew band is exempt from
-            // the completeness half of the check, so a dropped-row case has to use a row
-            // the band does not cover.
-            let mine  = makeRow({ finalized_at: start + 5 });
+            let mine  = makeRow({ effective_time: start + 5 });
             hub.db.responses.push(mine);
 
             let proposal = (rows) => ({
@@ -517,7 +653,7 @@ describe('AttestationBatchPublisher', function () {
             };
 
             // An invented row, an altered row, and a row silently dropped from the window.
-            await p._handleSignReq(proposal([wireRow(makeRow({ finalized_at: start + 1 }))]));
+            await p._handleSignReq(proposal([wireRow(makeRow({ effective_time: start + 1 }))]));
             await p._handleSignReq(proposal([Object.assign(wireRow(mine), { response_payload: 'tampered' })]));
             await p._handleSignReq(proposal([]));
             expect(sent.length, 'every refusal must be silent on the wire').to.equal(0);

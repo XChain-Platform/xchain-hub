@@ -42,6 +42,15 @@
  * would move a chain-only node's coverage proof with it. The regtest-only override
  * seam lives beside the response forward margin's, in lib/attest_response_timing.js.
  *
+ * MEMBERSHIP IS KEYED ON THE SIGNED effective_time, never on finalized_at. The
+ * effective time is inside the bytes the responsible set signed, so every hub holding
+ * a row reads the same value and partitions the boundary identically; finalized_at is
+ * per-hub wall clock the schema explicitly allows two hubs to disagree on, and two
+ * hubs disagreeing about which side of a boundary one row falls on costs the window
+ * its quorum. The signed key also carries its own completeness deadline: a row's
+ * effective time is its leader's clock plus the forward margin, so the row is written
+ * a whole forward margin before the window containing it can close.
+ *
  * THE SIGNATURES ARE THE BATCH'S OWN. A batch carries ONE quorum signature set over
  * the batch canonical, collected here through a leader/follower round modelled on
  * the XPRICEB round in OracleBatchSigner: the leader assembles bytes, and every
@@ -104,18 +113,6 @@ const MAX_CATCHUP_WINDOWS = 4;
 // still co-signs, short enough that a proposer cannot reach back to a height whose
 // capability set it once controlled.
 const ANCHOR_MAX_LAG_BLOCKS = 144;
-
-// Rows whose finalized_at sits within this many seconds of a window boundary are
-// exempt from the follower's completeness check. `finalized_at` is hub wall clock
-// and explicitly allowed to differ between two hubs' copies of one logical row, so
-// a row two hubs stamped either side of the boundary would otherwise cost an honest
-// window its quorum. Content is unaffected: every proposed row still has to exist
-// locally and match field for field.
-//
-// CLAMPED TO A QUARTER OF THE WINDOW, which binds only under a regtest override: at
-// a five-second band a ten-second window would be almost entirely boundary and the
-// completeness half of the check would stop discriminating at all.
-const BOUNDARY_SKEW_S = 5;
 
 class AttestationBatchPublisher {
 
@@ -193,6 +190,10 @@ class AttestationBatchPublisher {
         // their durable marker is intent-only. Logged once each rather than once per
         // sweep, which on a short regtest window is once every few seconds.
         this._quarantined = new Set();
+        // Why the last anchor read came back null, and which reason has already been
+        // logged. Both null while the anchor resolves.
+        this._anchorFailure = null;
+        this._anchorWarned  = null;
 
         this.stats = {
             windowsPublished: 0, windowsEmpty: 0, windowsDeferred: 0,
@@ -434,8 +435,7 @@ class AttestationBatchPublisher {
 
         let anchor = await this._resolveAnchor();
         if(anchor === null){
-            console.warn('AttestationBatchPublisher: no usable BTC anchor for window ' + windowStart +
-                         '; deferring (the window is retried with byte-identical content)');
+            this._warnNoAnchor(windowStart);
             this.stats.windowsDeferred++;
             return false;
         }
@@ -501,6 +501,12 @@ class AttestationBatchPublisher {
     // selected by name from the codec's own list, so a field added to the wire cannot
     // be silently absent here.
     //
+    // MEMBERSHIP IS THE SIGNED effective_time. It is the only column of this table two
+    // hubs are guaranteed to read identically: it rides inside the canonical the
+    // responsible set signed, so a boundary row falls on the same side of the same
+    // instant on every hub that holds it. The idx_effective_time index is what makes
+    // this range read a seek rather than a scan.
+    //
     // NORMALIZED ON READ. The driver may hand a BIGINT back as a number, a string or a
     // BigInt depending on how the pool is configured, and the row goes straight into
     // JSON.stringify inside the signed canonical, where '120' and 120 are different
@@ -510,9 +516,9 @@ class AttestationBatchPublisher {
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') throw new Error('no hub DB');
         let rows = await db.doQuery(
-            'SELECT ' + abw.ATTEST_BATCH_ROW_FIELDS.join(', ') + ', finalized_at ' +
+            'SELECT ' + abw.ATTEST_BATCH_ROW_FIELDS.join(', ') + ' ' +
             'FROM attestation_responses ' +
-            'WHERE network = ? AND finalized_at >= ? AND finalized_at < ? ' +
+            'WHERE network = ? AND effective_time >= ? AND effective_time < ? ' +
             'ORDER BY request_block_index ASC, request_action_index ASC, request_id ASC ' +
             'LIMIT ?',
             [this.network, windowStart, windowEnd, abw.ATTEST_BATCH_MAX_ROWS + 1]);
@@ -538,15 +544,13 @@ class AttestationBatchPublisher {
             effective_time:       intOrNull(r.effective_time),
             signer_pubkeys:       String(r.signer_pubkeys == null ? '[]' : r.signer_pubkeys),
             signatures:           String(r.signatures == null ? '[]' : r.signatures),
-            widen:                intOrNull(r.widen) || 0,
-            // Kept off the canonical (the codec's field list excludes it) but carried
-            // through the read so the follower can apply its boundary-skew band.
-            finalized_at:         intOrNull(r.finalized_at)
+            widen:                intOrNull(r.widen) || 0
         };
     }
 
-    // Strip the audit column the wire does not carry. Called on the way into every
-    // canonical so the publisher and the verifier serialize the same object.
+    // Project onto the codec's field list, in the codec's order. Called on the way into
+    // every canonical so the publisher and the verifier serialize the same object even
+    // if a read ever hands back a column the wire does not carry.
     _wireRows(rows){
         return rows.map(r => {
             let out = {};
@@ -561,17 +565,57 @@ class AttestationBatchPublisher {
     // the Bitcoin tip and buried by nothing here: CapabilitySnapshot applies the reorg
     // buffer to every height it is handed, so burying twice would resolve a set from
     // twelve blocks back rather than six.
+    //
+    // A null answer records WHY in _anchorFailure. The commonest cause is a hub whose
+    // Bitcoin indexer has never called `pushchaintip`, which is a one-line
+    // configuration gap that otherwise presents as every window deferring forever with
+    // nothing on chain and no coverage.
     async _resolveAnchor(){
         let db = this._db();
-        if(!db) return null;
+        if(!db){
+            this._anchorFailure = 'this hub has no database handle';
+            return null;
+        }
         let tip = null;
         try {
-            if(typeof db.getChainTip === 'function') tip = await db.getChainTip('BTC', this.network);
+            if(typeof db.getChainTip !== 'function'){
+                this._anchorFailure = 'the database layer exposes no getChainTip()';
+                return null;
+            }
+            tip = await db.getChainTip('BTC', this.network);
         } catch(e){
+            this._anchorFailure = 'reading the BTC chain tip failed (' + (e && e.message) + ')';
             return null;
         }
         let n = Number(tip && tip.blockHeight);
-        return (Number.isFinite(n) && n > 0) ? Math.trunc(n) : null;
+        if(!Number.isFinite(n) || n <= 0){
+            this._anchorFailure = tip
+                ? 'the BTC chain_tips row holds no usable block_height (' + JSON.stringify(tip.blockHeight) + ')'
+                : 'no BTC chain_tips row exists for network ' + (this.network || '<unset>') +
+                  '; the Bitcoin indexer has not called pushchaintip on this hub';
+            return null;
+        }
+        // Both latches clear together: an outage that returns after the tip came back is
+        // a NEW episode and has to say so, even when its cause reads the same.
+        this._anchorFailure = null;
+        this._anchorWarned  = null;
+        return Math.trunc(n);
+    }
+
+    // One line per distinct cause, not one per window. The sweep runs every window, so
+    // on a regtest cadence an unconditional warning is a line every few seconds for a
+    // condition that cannot change without an operator; latching keeps the reason
+    // visible without burying the log, and clearing it on a new cause lets a changed
+    // failure speak.
+    _warnNoAnchor(windowStart){
+        let why = this._anchorFailure || 'the BTC chain tip is unavailable';
+        if(this._anchorWarned === why) return;
+        this._anchorWarned = why;
+        console.warn('AttestationBatchPublisher: deferring window ' + windowStart +
+            ' because the batch has no BTC anchor: ' + why + '. The anchor is the height ' +
+            'the batch quorum is sized at, so no window can publish until it resolves and ' +
+            'chain coverage is missing for every window deferred this way. Each deferred ' +
+            'window keeps its rows and republishes byte-identical content once it does.');
     }
 
     // ------------------------------------------------------------ the signer set
@@ -770,7 +814,8 @@ class AttestationBatchPublisher {
         if(!Number.isInteger(anchor) || anchor <= 0 || myTip === null ||
            anchor > myTip || anchor < myTip - ANCHOR_MAX_LAG_BLOCKS){
             this._refuse(windowStart, 'proposed anchor ' + anchor + ' is outside this hub\'s bounds (tip ' +
-                         myTip + ', max lag ' + ANCHOR_MAX_LAG_BLOCKS + ')');
+                         (myTip === null ? 'unresolved: ' + this._anchorFailure : myTip) +
+                         ', max lag ' + ANCHOR_MAX_LAG_BLOCKS + ')');
             return;
         }
 
@@ -790,7 +835,7 @@ class AttestationBatchPublisher {
             this._refuse(windowStart, 'local attestation_responses unreadable (' + (e && e.message) + ')');
             return;
         }
-        let verdict = this._matchesLocalWindow(d.rows, mine, windowStart, windowEnd);
+        let verdict = this._matchesLocalWindow(d.rows, mine);
         if(!verdict.ok){
             this._refuse(windowStart, verdict.why);
             return;
@@ -814,18 +859,17 @@ class AttestationBatchPublisher {
         this.stats.signaturesProvided++;
     }
 
-    // THE SAFETY PROPERTY, and the one place the mirror's own audit column is allowed
-    // to matter. Every proposed row must exist locally and match field for field, so a
-    // fabricated, altered or injected row is refused; and every local row of the window
-    // must be proposed, so a leader cannot quietly drop coverage.
+    // THE SAFETY PROPERTY. Every proposed row must exist locally and match field for
+    // field, so a fabricated, altered or injected row is refused; and every local row of
+    // the window must be proposed, so a leader cannot quietly drop coverage.
     //
-    // The completeness half carries ONE exemption: `finalized_at` is hub wall clock and
-    // two hubs are explicitly allowed to disagree on it, so a row stamped within
-    // BOUNDARY_SKEW_S of either boundary may honestly sit in this window on one hub and
-    // the next on another. Such a row is not required to be present. Its content is
-    // still checked if it IS present, and the publisher's own partition of its own rows
-    // is total, so no row loses coverage: it rides whichever window its own hub put it in.
-    _matchesLocalWindow(proposed, mine, windowStart, windowEnd){
+    // The completeness half carries NO exemption, because the window is partitioned by
+    // the signed effective time: two honest hubs holding one row put it in the same
+    // window, so a difference here is a real disagreement about content and refusing it
+    // is the point. A row a follower holds and the leader has not received yet is the
+    // one benign case, and the forward margin already covers it: the row was written a
+    // whole margin before this window could close.
+    _matchesLocalWindow(proposed, mine){
         let byId = new Map(mine.map(r => [r.request_id, r]));
         let seen = new Set();
         for(let p of proposed){
@@ -843,11 +887,6 @@ class AttestationBatchPublisher {
         }
         for(let local of mine){
             if(seen.has(local.request_id)) continue;
-            let ts   = Number(local.finalized_at);
-            let band = Math.min(BOUNDARY_SKEW_S, Math.floor(this.windowS / 4));
-            let nearBoundary = Number.isFinite(ts) &&
-                (ts - windowStart < band || windowEnd - ts <= band);
-            if(nearBoundary) continue;
             return { ok: false, why: 'request ' + local.request_id.substring(0, 16) +
                      '... is held here for this window but was not proposed' };
         }
@@ -1147,7 +1186,10 @@ class AttestationBatchPublisher {
             windowSeconds: this.windowS,
             enabled:       this.enabled,
             armed:         this.isArmedNetwork(),
-            quarantinedWindows: this._quarantined.size
+            quarantinedWindows: this._quarantined.size,
+            // Null unless the last anchor read failed. A rising windowsDeferred with a
+            // reason here is a configuration gap, not a busy federation.
+            anchorFailure: this._anchorFailure || null
         });
     }
 }
@@ -1157,4 +1199,3 @@ module.exports.XATTESTB_SIGN_REQ = XATTESTB_SIGN_REQ;
 module.exports.XATTESTB_SIGN     = XATTESTB_SIGN;
 module.exports.MAX_CATCHUP_WINDOWS = MAX_CATCHUP_WINDOWS;
 module.exports.ANCHOR_MAX_LAG_BLOCKS = ANCHOR_MAX_LAG_BLOCKS;
-module.exports.BOUNDARY_SKEW_S = BOUNDARY_SKEW_S;

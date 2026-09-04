@@ -270,7 +270,11 @@ Wallet and encoder the hub uses to publish ATTEST responses on Bitcoin.
 | `ATTESTATION_LEADER_RETRY_MS` | No | `60000` | Grace (ms) before the sweep retries the leader's own un-broadcast entry. |
 | `ATTESTATION_BLOCK_MS` | No | `600000` | Approx block time (ms) used to translate the failover window into a wall-clock silence threshold. |
 | `ATTEST_PUBLISHED_REQUESTS_RETENTION_MS` | No | `7776000000` (90d) | Retention window for the durable `attest_published_requests` marker table, swept after any sweep pass that follows a publish; `0` disables. Only CONFIRMED rows are ever deleted: a `sent_at IS NULL` row is the quarantine marker for a request whose on-chain state is unknown after a crash, and it is kept forever for an operator to reconcile. The window is floored at the longest live provider `deadline_window_blocks` (past which no path can surface the request again) and never touches a request still on the WAL, so lowering it below that floor changes nothing. |
+| `ATTESTATION_AMBIGUOUS_COOLDOWN_MS` | No | one failover window (`ATTESTATION_FAILOVER_WINDOW_BLOCKS` x `ATTESTATION_BLOCK_MS`) | How long after a send whose outcome is unknown the sweep waits before re-broadcasting, so a transaction that was in fact accepted has time to reach the indexer's mined view. Lowering it risks paying a second fee for a response that already landed. |
 | `ATTESTATION_TIMEOUT` | No | `60000` | Attestation timeout (ms). |
+| `ATTESTATION_POLL_MS` | No | `15000` | How often the attestation round polls the indexer for new pending requests. The floor on how long a request waits before any validator starts work on it. |
+| `ATTESTATION_ROUND_TIMEOUT_MS` | No | `120000` | How long a round may run before it is abandoned. Keep it comfortably above `ATTESTATION_POLL_MS` plus the slowest provider fetch, since the round timer is the terminal backstop. |
+| `ATTEST_ENABLED` | No | `true` | Operator-local kill switch for the on-chain ATTEST response publisher (the `*_ENABLED` publisher idiom). `false` skips both finalized-response publishing and queue sweeps. Above the response-mirror activation height responses ride the hub mirror instead, so this switch governs the legacy on-chain leg only. |
 | `ATTESTATION_ROUND_TTL_MS` | No | `3600000` (1h) | Time-to-live for in-memory attestation round entries before lazy eviction. |
 | `REORG_TIMEOUT` | No | `60000` | Reorg-handler timeout (ms). |
 | `REORG_ALLOW_UNRECORDED_OLDHASH` | No | unset (fail closed) | Escape hatch. When a reorg IS recorded at the claimed height but its orphaned hash was never recorded, this hub abstains rather than co-sign, because it cannot verify the claimed `oldHash`. Set to `1` to restore the previous behaviour and accept such claims; it logs loudly every time it does. Leaving it unset costs abstention only at heights whose orphaned hash is missing (measured 2026-07-29: 3 of 171 recorded orphaned blocks on mainnet, DOGE 6280198 and 6279100, LTC 3137602). |
@@ -316,6 +320,49 @@ configured for one chain would put an LTC payload on BTC, where it is rejected
 outright after burning a real BTC fee. Spend limits come from the shared
 `SpendGuard` under the `ATTEST` prefix (see **Effector spend policy**), and
 confirmation depths from `XCHAIN_CONFIRMATIONS_<COIN>`.
+
+## ATTEST response batch rail (`AttestationBatchPublisher`)
+
+Above the response-mirror activation height a finalized ATTEST response is not an
+on-chain transaction: it is written to the hub's `attestation_responses` table,
+gossiped to the federation and streamed to every indexer. So that the history
+stays reconstructible from chain parse alone, every response body is also
+published on Dogecoin once per window, as an ATTEST v5 head plus v6
+continuations. Every window publishes, including an empty one: a `row_count 0`
+head is what proves a quiet hour carried nothing rather than leaving a reader to
+assume it.
+
+The rail spends from the same Dogecoin wallet and encoder as the oracle price
+publisher (`DOGE_ADDRESS`, `DOGE_PUBKEY_HEX`, `DOGE_ENCODER_URL`,
+`DOGE_ENCODER_API_KEY`, `DOGE_LOW_BALANCE_THRESHOLD` in **DOGE oracle
+publisher**), but nothing else is shared: its own buffer file, its own
+dead-letter file, its own durable marker table and its own spend budget under the
+`ATTEST_BATCH` prefix, so a stuck price batch can never hold up attestation
+coverage.
+
+**It needs a BTC chain tip and defers every window without one.** The batch names
+the Bitcoin height its signer quorum is sized at, read from this hub's
+`chain_tips` config rows, which the Bitcoin indexer keeps current by calling
+`pushchaintip`. A hub whose indexer never pushes a tip publishes nothing at all,
+and the log says so once per distinct cause; `anchorFailure` in the publisher's
+stats carries the same reason.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `ATTEST_BATCH_PUBLISH_ENABLED` | No | `true` | Operator-local kill switch for this rail, mirroring `ORACLE_PUBLISH_ENABLED`. `false` skips windows rather than buffering them, so re-enabling it does not flood the rail; the windows skipped are unpublished coverage. Also resolves from `p2pConfig`; the env var wins. |
+| `ATTEST_BATCH_BUFFER_PATH` | No | `./data/attest-batch-buffer.jsonl` | Durable record of what each window was built from at the moment it published, so an operator replaying a dead-lettered or quarantined window has the content after the table has moved on. The dead-letter file is this path with `.deadletter.jsonl` in place of `.jsonl`. |
+| `ATTEST_BATCH_WINDOW_S_OVERRIDE` | No | unset (3600s) | **Regtest only.** Seconds per batch window. The window bounds are inside the batch key and the signed batch canonical, so a hub on its own cadence proposes batches no peer can co-sign: off regtest a differing value is ignored with one warning, and on regtest a value that is not a positive integer throws at startup rather than aligning every boundary to `NaN`. Resolves from `p2pConfig` first, then the environment. |
+| `ORACLE_BATCH_SIGN_TIMEOUT_MS` | No | `15000` | How long the leader waits for co-signatures on a batch canonical before giving up on the window. Shared with the PRICE batch signer deliberately: the two rounds have the same shape and the same failure mode, and a second family of timeout names would be a second thing to drift. A window that reaches no quorum stays unpublished, keeps its rows and is retried with byte-identical content. |
+
+Window membership is keyed on each row's signed `effective_time`, never on the
+per-hub `finalized_at` audit column, so two hubs put a boundary row in the same
+window and can co-sign each other's batches. That also means the response
+forward margin below is what guarantees a window is complete when it closes: a
+row is written a whole margin before the window holding it can end.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `ATTEST_RESPONSE_FORWARD_S_OVERRIDE` | No | unset (120s) | **Regtest only.** Seconds ahead of the round leader's clock that a mirrored response becomes effective, which is the field the leader stamps into the signed canonical and every follower bounds a proposal against. Off regtest a differing value is ignored with one warning (a hub on its own margin has every proposal refused by its peers and refuses every one of theirs); on regtest a non-integer throws. Lower it on an acceptance run, where waiting 120 real seconds per callback makes the ladder undrivable. Resolves from `p2pConfig` first, then the environment. |
 
 ## DOGE oracle publisher
 
@@ -498,9 +545,9 @@ constructor comment and pinned by
 Every hub effector that spends real coin on-chain runs behind a shared
 `SpendGuard`: a balance floor, a rolling per-window spend ceiling (hard-clamped
 at the $2000 AML admission ceiling), and a per-capability runtime pause. The
-knobs below take a per-effector `<PREFIX>`; the four prefixes are
-`ORACLE_PUBLISH`, `ATTEST`, `ANCHOR`, and `FULLNODE`. Each variable also
-resolves from `p2pConfig`; the env var wins. The spend ceiling is
+knobs below take a per-effector `<PREFIX>`; the five prefixes are
+`ORACLE_PUBLISH`, `ATTEST`, `ATTEST_BATCH`, `ANCHOR`, and `FULLNODE`. Each
+variable also resolves from `p2pConfig`; the env var wins. The spend ceiling is
 default-enabled: unset config yields the $2000 clamp, never "off".
 
 | Variable | Required | Default | Description |
@@ -653,6 +700,12 @@ BTC indexer's `getrollcallabsences`, where they are authoritative.
 |---|---|---|---|
 | `GOV_VOTING_PERIOD` | No | `604800000` (7 days) | Proposal voting period (ms). |
 | `GOVERNANCE_TALLY_INTERVAL` | No | `60000` | Vote tally interval (ms). |
+
+## HTTP attestation provider (`http_get`)
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `ATTESTATION_HTTP_GET_ALLOW_PRIVATE` | No | unset (guard on) | `1` drops the SSRF guard so the provider may attest a private or loopback endpoint. **Network-gated to regtest**: set anywhere else it is ignored, with one warning, because a hub that could reach an internal address its peers cannot would fetch a different answer and diverge the round. |
 
 ## LLM attestation provider
 
