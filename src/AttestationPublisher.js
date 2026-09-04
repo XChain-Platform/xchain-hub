@@ -240,11 +240,17 @@ class AttestationPublisher {
         }
 
         if (this.hub.attestationConsensus){
-            this.hub.attestationConsensus.on('request:finalized', (event) => {
+            // The handler is STORED so stop() can detach it. An anonymous closure here
+            // cannot be removed, so a hub closed and reopened in one process keeps every
+            // previous lifetime's publisher subscribed and one finalized response fans out
+            // to all of them; the spot checker keeps its handler the same way for the same
+            // reason.
+            this._finalizedHandler = (event) => {
                 this.onRequestFinalized(event).catch(err => {
                     console.error('AttestationPublisher: onRequestFinalized error: ' + (err && err.message ? err.message : err));
                 });
-            });
+            };
+            this.hub.attestationConsensus.on('request:finalized', this._finalizedHandler);
         }
 
         // Load the durable at-most-once markers BEFORE the crash-replay
@@ -278,6 +284,12 @@ class AttestationPublisher {
         if(this._sweepTimer){
             clearInterval(this._sweepTimer);
             this._sweepTimer = null;
+        }
+        // Detach before returning: stop() is what close() calls, and a subscription that
+        // outlives the engine is the leak close() exists to prevent.
+        if(this.hub.attestationConsensus && this._finalizedHandler){
+            this.hub.attestationConsensus.removeListener('request:finalized', this._finalizedHandler);
+            this._finalizedHandler = null;
         }
     }
 

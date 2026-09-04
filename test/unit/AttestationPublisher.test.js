@@ -2178,3 +2178,44 @@ describe('AttestationPublisher: attest_published_requests retention (#4869)', fu
         expect(stats.publishedRequestsPruned).to.equal(7);
     });
 });
+
+describe('AttestationPublisher: the finalized subscription is detachable', function () {
+    // A hub can be closed and reopened inside one process (every multi-hub test venue
+    // does it). The publisher subscribes to 'request:finalized' in start(), so if that
+    // subscription cannot be removed, each cycle leaves the previous lifetime's
+    // publisher listening and one finalized response fans out to all of them, every
+    // copy racing for the same spend reservation.
+    const { EventEmitter } = require('events');
+
+    function hubWithConsensus() {
+        const consensus = new EventEmitter();
+        return { hub: makeHub(MY_PUB, { attestationConsensus: consensus }), consensus };
+    }
+
+    it('start subscribes once and stop removes exactly that subscription', async function () {
+        const { hub, consensus } = hubWithConsensus();
+        const pub = new AttestationPublisher(hub);
+        pub.queuePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'attest-pub-')), 'queue.jsonl');
+
+        expect(consensus.listenerCount('request:finalized')).to.equal(0);
+        await pub.start();
+        expect(consensus.listenerCount('request:finalized')).to.equal(1);
+        await pub.stop();
+        expect(consensus.listenerCount('request:finalized')).to.equal(0);
+    });
+
+    it('leaves no subscription behind across repeated start and stop cycles', async function () {
+        const { hub, consensus } = hubWithConsensus();
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'attest-pub-'));
+
+        for (let i = 0; i < 3; i++) {
+            const pub = new AttestationPublisher(hub);
+            pub.queuePath = path.join(dir, 'queue-' + i + '.jsonl');
+            await pub.start();
+            await pub.stop();
+        }
+        // A leak shows as a rising count, which is why this loops rather than
+        // asserting one cycle: the first cycle passes even when stop() detaches nothing.
+        expect(consensus.listenerCount('request:finalized')).to.equal(0);
+    });
+});

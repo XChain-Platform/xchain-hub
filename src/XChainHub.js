@@ -1980,6 +1980,15 @@ class XChainHub {
         // side effect is a DB read followed by a spend, so leaving it armed past the
         // close would run a publish pass against a dead pool.
         if(this.attestationBatchPublisher) this.attestationBatchPublisher.stop();
+        // The rest of the attestation family started in startAttestation(): each of
+        // these detaches its own request:finalized, peerManager or reorgHandler
+        // listener, so skipping one leaves it firing into a hub the caller believes
+        // is fully closed, and a same-process restart doubles that listener again.
+        if(this.attestationPublisher)   await this.attestationPublisher.stop();
+        if(this.attestationSpotChecker) await this.attestationSpotChecker.stop();
+        if(this.attestationRound)       await this.attestationRound.stop();
+        if(this.fullNodeChallenge)      await this.fullNodeChallenge.stop();
+        if(this.attestationRelay)       await this.attestationRelay.stop();
         if(this.stateAnchorPublisher) await this.stateAnchorPublisher.stop();
         if(this.retractionConsensus) this.retractionConsensus.stop();
         if(this.stateCheckpoints) await this.stateCheckpoints.stop();

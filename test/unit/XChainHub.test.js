@@ -13,6 +13,7 @@
 const sinon        = require('sinon');
 const { expect }   = require('chai');
 const proxyquire   = require('proxyquire');
+const { EventEmitter } = require('events');
 
 describe('XChainHub', function () {
 
@@ -986,6 +987,66 @@ describe('XChainHub', function () {
             expect(hub.governance.stop.calledOnce).to.be.true;
             expect(hub.peerManager.stop.calledOnce).to.be.true;
             expect(hub.db.close.calledOnce).to.be.true;
+        });
+
+        // Row: close() stops every attestation engine it started. Before this,
+        // close() only detached the mirror and the batch publisher (their own
+        // rows), leaving the publisher, spot checker, round, full-node challenge
+        // and relay listening past a close. A same-process restart then leaves the
+        // request:finalized listener from the PRIOR cycle's (now orphaned) consensus
+        // instance still attached, which is the leak this guards against.
+        it('close() stops the publisher, spot checker, round, full-node challenge and relay', async function () {
+            hub.db = { close: sinon.stub().resolves() };
+            hub.attestationPublisher   = { stop: sinon.stub().resolves() };
+            hub.attestationSpotChecker = { stop: sinon.stub().resolves() };
+            hub.attestationRound       = { stop: sinon.stub().resolves() };
+            hub.fullNodeChallenge      = { stop: sinon.stub().resolves() };
+            hub.attestationRelay       = { stop: sinon.stub().resolves() };
+
+            await hub.close();
+
+            expect(hub.attestationPublisher.stop.calledOnce).to.be.true;
+            expect(hub.attestationSpotChecker.stop.calledOnce).to.be.true;
+            expect(hub.attestationRound.stop.calledOnce).to.be.true;
+            expect(hub.fullNodeChallenge.stop.calledOnce).to.be.true;
+            expect(hub.attestationRelay.stop.calledOnce).to.be.true;
+        });
+
+        // A restart within one process reuses the hub instance: close() must be
+        // safe to call more than once (an operator retry, or a caller that awaits
+        // close() from two paths), and a fresh startAttestation() must not find any
+        // request:finalized listener still attached to the PRIOR cycle's consensus.
+        it('close() is safe to call twice, and a close-then-reopen cycle leaves no extra request:finalized listener', async function () {
+            hub.db = { close: sinon.stub().resolves() };
+
+            // A minimal stand-in for an engine that behaves the way the real
+            // publisher/spot-checker/mirror do: it attaches on "start" and its
+            // stop() detaches the SAME handler, which is exactly what close()
+            // is responsible for invoking.
+            function attach(consensus) {
+                let handler = () => {};
+                consensus.on('request:finalized', handler);
+                return { stop: sinon.stub().callsFake(async () => consensus.removeListener('request:finalized', handler)) };
+            }
+
+            for (let cycle = 0; cycle < 2; cycle++) {
+                let consensus = new EventEmitter();
+                hub.attestationConsensus      = consensus;
+                hub.attestationPublisher      = attach(consensus);
+                hub.attestationSpotChecker    = attach(consensus);
+                hub.attestationResponseMirror = attach(consensus);
+                hub.attestationBatchPublisher = { stop: sinon.stub().resolves() };
+                hub.attestationRound          = { stop: sinon.stub().resolves() };
+                hub.fullNodeChallenge         = { stop: sinon.stub().resolves() };
+                hub.attestationRelay          = { stop: sinon.stub().resolves() };
+
+                expect(consensus.listenerCount('request:finalized'), 'cycle ' + cycle + ' before close').to.equal(3);
+
+                await hub.close();
+                await hub.close();   // double-close must not throw or double-detach
+
+                expect(consensus.listenerCount('request:finalized'), 'cycle ' + cycle + ' after close').to.equal(0);
+            }
         });
     });
 
