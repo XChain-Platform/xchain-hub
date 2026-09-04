@@ -1505,10 +1505,17 @@ describe('Security Hardening', function () {
 
         describe('since_id on the snapshot routes', function () {
             let route;
+            // Mirrors the slice of the express response the snapshot routes actually
+            // use. The success path serializes itself and ships the string through
+            // type().send() so a BIGINT column can go out as a string, which json()
+            // cannot do, so a double carrying only status()/json() sends the route
+            // into its own catch and reports a 500 that the route never chose.
             let fakeRes = () => {
-                let out = { code: null, body: null };
+                let out = { code: null, body: null, contentType: null };
                 out.status = (c) => { out.code = c; return out; };
                 out.json = (b) => { out.body = b; return out; };
+                out.type = (t) => { out.contentType = t; return out; };
+                out.send = (b) => { out.body = b; return out; };
                 return out;
             };
 
