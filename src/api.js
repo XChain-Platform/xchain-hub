@@ -454,9 +454,13 @@ async function startApi(){
 
     const app = express();
 
-    // The hub sits behind Apache on the same host (Cloudflare proxy is OFF for
-    // it), so honour X-Forwarded-For to recover the real client IP, but only
-    // from a trusted proxy. `true` would trust ANY client-supplied XFF, letting
+    // The hub sits behind Apache on the same host, and the public hub host IS
+    // Cloudflare-proxied, with the vhost origin-locked to Cloudflare's ranges;
+    // once that host loads mod_remoteip, the entry Apache appends to
+    // X-Forwarded-For is the real visitor rather than the edge address, and the
+    // setting below already recovers it. So honour X-Forwarded-For to recover
+    // the real client IP, but only from a trusted proxy.
+    // `true` would trust ANY client-supplied XFF, letting
     // callers spoof their IP past the per-IP rate limiter (express-rate-limit's
     // ERR_ERL_PERMISSIVE_TRUST_PROXY warning). The default trusts loopback plus
     // private-range peers: a containerized hub sees the host reverse proxy as
