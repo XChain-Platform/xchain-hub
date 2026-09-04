@@ -877,7 +877,7 @@ class AttestationResponseMirror {
     //
     // WHY AN UNTRUSTED CURSOR HINT IS SAFE. The pending queue is keyset-paged on
     // (block_index, action_index) and can be longer than one page, so the row's own
-    // claimed position is used to seek. That value is wire content, but it can only
+    // claimed position drives the seek. That value is wire content, but it can only
     // steer a READ: the returned row is matched on request_id, and every field the
     // verification consumes is taken from that returned row. A lie therefore costs
     // the liar its own delivery (we look in the wrong page, find nothing, park and

@@ -189,7 +189,7 @@ class AttestationBatchPublisher {
         // The oldest window a sweep will consider, resolved at start(). Null until then,
         // which means "no floor" and is what a directly driven sweep sees.
         this._floorWindow = null;
-        // Windows this hub has already refused to touch this process lifetime because
+        // Windows this hub has already declined this process lifetime because
         // their durable marker is intent-only. Logged once each rather than once per
         // sweep, which on a short regtest window is once every few seconds.
         this._quarantined = new Set();
