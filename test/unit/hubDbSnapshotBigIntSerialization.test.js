@@ -212,6 +212,15 @@ describe('hub-db snapshots: REST and WS share ONE replacer, not two copies', fun
         expect(JSON.stringify({ v: 10n }, HubDbBroadcaster.bigIntReplacer)).to.equal('{"v":"10"}');
     });
 
+    it('keeps the definition in a module with NO requires, so a cycle cannot half-load it', function () {
+        // Sourcing it from the broadcaster put the rule behind that module's load order:
+        // reached through a cycle the import resolved before the property was attached and
+        // every snapshot route threw on a real BIGINT while passing in isolation.
+        const fs  = require('fs');
+        const src = fs.readFileSync(require.resolve('../../src/lib/bigint_replacer.js'), 'utf8');
+        expect(src).to.not.match(/\brequire\s*\(/);
+    });
+
     it('api.js holds no second copy of it', function () {
         const fs  = require('fs');
         const src = fs.readFileSync(require.resolve('../../src/api.js'), 'utf8');

@@ -30,7 +30,7 @@ const { HUB_SCHEMA_VERSION } = require('./hub-schema-version');
 const { positiveIntConfig } = require('./lib/config_int.js');
 
 // JSON replacer that converts BigInt to string (mariadb returns BigInt for BIGINT columns)
-const bigIntReplacer = (k, v) => typeof v === 'bigint' ? v.toString() : v;
+const { bigIntReplacer } = require('./lib/bigint_replacer.js');
 
 class HubDbBroadcaster {
 
@@ -393,3 +393,6 @@ class HubDbBroadcaster {
 }
 
 module.exports = HubDbBroadcaster;
+// Re-exported for callers that already hold this class; the definition itself lives in
+// lib/bigint_replacer.js, which has no requires and so cannot be half-loaded by a cycle.
+module.exports.bigIntReplacer = bigIntReplacer;
