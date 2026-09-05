@@ -22,12 +22,51 @@
 
 const axios = require('axios');
 
+// Outer HTTP budget for one hub -> encoder JSON-RPC round trip. It must stay STRICTLY
+// GREATER than the encoder's worst-case INNER budget, and the previous 30000 was exactly
+// equal to it, which is a real failure and not a rounding concern.
+//
+// The encoder's per-node-RPC budget is NODE_RPC_TIMEOUT (xchain-encoder
+// BlockchainConnector.js, default 30000), and the encoder cannot answer before its own
+// RPC finishes. The longest sequential chain one broadcast_tx can run is three of those:
+// _sendRaw, then an uncached chainName() for the isRegtest gate on the fee-cap recovery
+// path, then the retry _sendRaw. So the encoder's worst case is 90000 and this budget is
+// 4x the single hop, leaving a hop of margin for the hub -> encoder network leg and the
+// encoder's own work.
+//
+// Equality is what made this load-bearing rather than cosmetic: an axios abort carries no
+// HTTP response and none of the never-sent error codes, so isAmbiguousSendError
+// (lib/idempotent_broadcast.js) correctly reads it as a POSSIBLY-LANDED broadcast, and the
+// publishers then commit the spend reservation and dead-letter the round for manual
+// on-chain verification. A client that cannot outlast the server it calls converts a
+// healthy broadcast into operator work.
+//
+// The cost of erring long is bounded and the cost of erring short is not: every publisher
+// that awaits this call already carries a sweep re-entrancy guard (OraclePublisher and
+// AttestationPublisher `_sweeping`, the FullNodeChallengeRound._tick house convention), so
+// a slow pass skips ticks rather than stacking overlapping money-path passes, and the
+// round deadlines these effectors honour are counted in BLOCKS, not in this many ms.
+//
+// An operator who raises NODE_RPC_TIMEOUT past 40000 re-inverts this. There is
+// deliberately no env override here: an env-only read would be a dead knob in an api.js
+// child, where the house pattern is `process.env.X || cfg.X` and every one of the eight
+// construction sites passes only (url, key). Making it configurable means threading it
+// from those call sites, which is its own change.
+const DEFAULT_ENCODER_TIMEOUT_MS = 120000;
+
 class EncoderClient {
 
     constructor(encoderUrl, apiKey, timeout) {
         this.encoderUrl = encoderUrl || '';
         this.apiKey     = apiKey || '';
-        this.timeout    = timeout || 30000;
+        // Validated rather than bare-truthy, but a non-positive value deliberately falls
+        // BACK rather than being honoured: axios reads timeout 0 as no timeout at all, so
+        // an explicit 0 would disarm the budget entirely and wedge a publisher pass on a
+        // hung encoder. This is the opposite call from a plain numeric knob, and for the
+        // reason that only applies to timeouts.
+        let requested = Number(timeout);
+        this.timeout    = (Number.isFinite(requested) && requested > 0)
+            ? requested : DEFAULT_ENCODER_TIMEOUT_MS;
         this._rpcId     = 0;
     }
 

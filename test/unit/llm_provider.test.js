@@ -308,6 +308,85 @@ describe('llm provider, _setConfig', function () {
         llm._setConfig(null);
         llm._setConfig(undefined);
     });
+
+    // A key nobody reads is the one failure the warn-and-keep validations above miss:
+    // a malformed value at least says so, an unread key is silent. Governance can put
+    // arbitrary keys in this payload, so the honesty guarantee has to be enforced here.
+    describe('unconsumed additional_config keys', function () {
+
+        afterEach(function () { sinon.restore(); });
+
+        it('warns once, and still applies the known sibling keys', function () {
+            const llm = _reloadProvider();
+            llm._resetUnconsumedWarnState();
+            let warn = sinon.stub(console, 'warn');
+            llm._setConfig({ additional_config: {
+                judge_model: 'claude-haiku-4-5',
+                prompt_envelope_version: 2,
+                judge_equivalence_threshold: 0.85
+            } });
+            let hits = warn.getCalls().filter(c => /not consumed by this build/.test(String(c.args[0])));
+            expect(hits.length).to.equal(1);
+            expect(hits[0].args[0]).to.match(/judge_equivalence_threshold/);
+            // The unknown key must not abort the install of the rest. Asserted through
+            // the one observable a sibling key has (there is no public getter), the same
+            // envelope_version ceiling the suite above uses. The assertion is on the
+            // CEILING the message reports, not merely on being rejected: a rejection
+            // alone is not discriminating, since the default ceiling of 1 also rejects
+            // version 3, so `max 2` is the only part that can tell an install that
+            // happened from one the unrecognised key aborted.
+            return llm.fetch(JSON.stringify({ prompt: 'hi', envelope_version: 3 }), {})
+                .then(() => { throw new Error('expected envelope_version reject'); })
+                .catch((e) => { expect(e.message).to.match(/unsupported envelope_version \(got 3, max 2\)/); });
+        });
+
+        it('does not repeat the warning for the same unknown-key set', function () {
+            const llm = _reloadProvider();
+            llm._resetUnconsumedWarnState();
+            let warn = sinon.stub(console, 'warn');
+            let ac = { judge_model: 'claude-haiku-4-5', judge_equivalence_threshold: 0.85 };
+            llm._setConfig({ additional_config: ac });
+            llm._setConfig({ additional_config: ac });
+            let hits = warn.getCalls().filter(c => /not consumed by this build/.test(String(c.args[0])));
+            expect(hits.length).to.equal(1);
+        });
+
+        it('warns again when a further unknown key appears', function () {
+            const llm = _reloadProvider();
+            llm._resetUnconsumedWarnState();
+            let warn = sinon.stub(console, 'warn');
+            llm._setConfig({ additional_config: { judge_equivalence_threshold: 0.85 } });
+            llm._setConfig({ additional_config: { judge_equivalence_threshold: 0.85, some_future_key: 1 } });
+            let hits = warn.getCalls().filter(c => /not consumed by this build/.test(String(c.args[0])));
+            expect(hits.length).to.equal(2);
+            expect(hits[1].args[0]).to.match(/some_future_key/);
+        });
+
+        it('says nothing when every key is one this build consumes', function () {
+            const llm = _reloadProvider();
+            llm._resetUnconsumedWarnState();
+            let warn = sinon.stub(console, 'warn');
+            llm._setConfig({ additional_config: {
+                approved_models: ['claude-opus-4-7'], judge_model: 'claude-haiku-4-5',
+                judge_fallback_models: [], model_vendors: {}, require_all_vendors: false,
+                max_completion_tokens: 1024, default_temperature: 0,
+                prompt_envelope_version: 1, enabled: true, max_budget_usd: 5
+            } });
+            let hits = warn.getCalls().filter(c => /not consumed by this build/.test(String(c.args[0])));
+            expect(hits.length).to.equal(0);
+        });
+
+        // The knob this warning was built for is gone from the shipped defaults, so a
+        // fresh hub no longer advertises a governance value the runtime cannot read.
+        it('no longer ships judge_equivalence_threshold in the llm provider defaults', function () {
+            const { DEFAULTS } = require('../../src/ProviderRegistry');
+            let ac = DEFAULTS && DEFAULTS.llm && DEFAULTS.llm.additional_config;
+            expect(ac).to.be.an('object');
+            expect(ac).to.not.have.property('judge_equivalence_threshold');
+            // Guard the guard: the fixture must still be the real defaults object.
+            expect(ac).to.have.property('judge_model');
+        });
+    });
 });
 
 // The envelope-version ceiling is read at exactly one place, the fetch() boundary, so

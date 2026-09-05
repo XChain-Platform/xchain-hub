@@ -76,7 +76,13 @@ const DEFAULTS = {
             // every vendor on the chains above (validators skip llm rounds and
             // accrue missed_count until they provision fallback keys).
             require_all_vendors:         false,
-            judge_equivalence_threshold: 0.85,
+            // No judge_equivalence_threshold here: the judge verdict is a strict
+            // boolean (`judgement.equivalent === true` plus a canonical_index in
+            // providers/llm.js agree()), never a similarity score, so a numeric
+            // threshold has nothing to tune. Shipping one told operators the
+            // governance proposal knob did something it never did. The unknown-key
+            // warning in llm.js _setConfig catches it when an already-passed
+            // proposal replays the key that deletion here cannot reach.
             max_completion_tokens:       1024,
             default_temperature:         0,
             prompt_envelope_version:     1

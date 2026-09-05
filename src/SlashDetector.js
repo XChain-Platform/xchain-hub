@@ -94,7 +94,29 @@ class SlashDetector {
         //    would slash" invariant), so it fails fast at construction;
         //  - LOOSER only lets some co-sign-rejected deviations go unslashed
         //    (a leniency/liveness asymmetry, not wrongful slashing), so it warns.
-        this.deviationThreshold = parseFloat(hub.p2pConfig.SLASH_DEVIATION_THRESHOLD) || ORACLE_DEVIATION_THRESHOLD;
+        // Read on PRESENCE, never on truthiness. `parseFloat(x) || DEFAULT` ate the two
+        // values the guards below exist to catch: an explicit 0 is the TIGHTEST band an
+        // operator can express and therefore the exact inversion the throw is for, but it
+        // is falsy, so it silently became the default and neither the throw nor the warn
+        // ever fired. Dropping the `||` makes the finiteness check load-bearing rather
+        // than cosmetic: a typo'd value now parses to NaN, which passes both guards below
+        // (`NaN < x` is false, `NaN !== x` is true) and would reach _checkDeviations.
+        // The band is not compared with a JS `>` there but handed to
+        // deviation_band.exceedsBand, and that was executed rather than reasoned about:
+        // with a NaN band it returns TRUE for any deviation at all (0.1% off the
+        // published price included), so a NaN band does not disable slashing, it slashes
+        // the whole honest federation. That is a direct breach of the never-slash-inside-
+        // the-co-signed-band invariant stated above, which is why a non-finite override
+        // must throw at construction and not fall back. Same dead-knob class the
+        // ORACLE_SUBMISSIONS_RETENTION_ROUNDS passthrough already guards at api.js:395.
+        let rawBand = hub.p2pConfig.SLASH_DEVIATION_THRESHOLD;
+        let hasBand = rawBand !== undefined && rawBand !== null && String(rawBand).trim() !== '';
+        this.deviationThreshold = hasBand ? parseFloat(rawBand) : ORACLE_DEVIATION_THRESHOLD;
+        if (hasBand && !Number.isFinite(this.deviationThreshold)) {
+            throw new Error('SLASH_DEVIATION_THRESHOLD (' + rawBand + ') is not a valid number: ' +
+                'remove the override or set it to a finite value >= the federation-uniform ' +
+                'ORACLE_DEVIATION_THRESHOLD (' + ORACLE_DEVIATION_THRESHOLD + ').');
+        }
         if (this.deviationThreshold < ORACLE_DEVIATION_THRESHOLD) {
             throw new Error('SLASH_DEVIATION_THRESHOLD (' + this.deviationThreshold +
                 ') is below the federation-uniform ORACLE_DEVIATION_THRESHOLD (' +

@@ -459,7 +459,42 @@ exports._setConfig = (def) => {
         let b = parseFloat(ac.max_budget_usd);
         MAX_BUDGET_USD_CONFIG = (Number.isFinite(b) && b > 0) ? b : null;
     }
+    // Every OTHER key in the governance payload is silently discarded, which is the
+    // one failure mode the warn-and-keep validations above do not cover: a malformed
+    // value at least says so, an unread key says nothing at all. judge_equivalence_threshold
+    // shipped in DEFAULTS for months and round-tripped through config history and
+    // hotReload with no signal that no runtime read it. Log-only and never throwing,
+    // so one unrecognised key cannot abort the rest of the install: a hub deliberately
+    // running older code against newer governance keys must still apply what it knows.
+    _warnUnconsumedKeys(ac);
 };
+
+// Keys _setConfig above actually reads. Kept adjacent to it so a new key added there
+// without a line here warns on its own first install, which is the cheap direction to
+// fail in.
+const CONSUMED_CONFIG_KEYS = new Set([
+    'approved_models', 'judge_model', 'judge_fallback_models', 'model_vendors',
+    'require_all_vendors', 'max_completion_tokens', 'default_temperature',
+    'prompt_envelope_version', 'enabled', 'max_budget_usd'
+]);
+// hotReload runs _setConfig on EVERY finalized governance proposal, whatever it
+// changed, so an undeduped warning would reprint the same line for the life of the
+// hub. Keyed on the unknown-key set itself, not on a boolean, so a config that later
+// adds a second unknown key still reports it.
+let LAST_UNCONSUMED_WARNED = null;
+function _warnUnconsumedKeys(ac) {
+    let unknown = Object.keys(ac).filter(k => !CONSUMED_CONFIG_KEYS.has(k)).sort();
+    let signature = unknown.join(',');
+    if (signature === LAST_UNCONSUMED_WARNED) return;
+    LAST_UNCONSUMED_WARNED = signature;
+    if (unknown.length === 0) return;
+    console.warn('llm: additional_config key(s) not consumed by this build (ignored): ' +
+        unknown.join(', '));
+}
+exports._CONSUMED_CONFIG_KEYS = CONSUMED_CONFIG_KEYS;
+// Test seam: the dedupe is module-level state, so a suite exercising the warning
+// twice needs to clear it between cases the way it would be cleared by a restart.
+exports._resetUnconsumedWarnState = () => { LAST_UNCONSUMED_WARNED = null; };
 
 // Issue an LLM call against the user-supplied prompt envelope.
 // Returns { body: Buffer(response_text_utf8), meta: <model_used> }.
