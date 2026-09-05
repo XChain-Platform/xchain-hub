@@ -301,6 +301,19 @@ class AttestationResponseMirror {
         }
 
         let sigs = Array.isArray(event.signatures) ? event.signatures : [];
+        // CANONICAL ORDER, by pubkey. AttestationConsensus hands these over in the order
+        // the signatures ARRIVED at this hub (a Map walked in insertion order), and that
+        // order differs hub to hub for the same quorum. Everything downstream that
+        // compares rows across hubs compares these two JSON columns byte for byte: the
+        // batch co-sign (`_matchesLocalWindow`, ATTEST_BATCH_ROW_FIELDS) refused every
+        // window carrying a real response on the regtest ladder with `differs on
+        // signer_pubkeys` while all four responsible hubs held the same three signers
+        // (2026-09-05, AT5). Sorting here keeps the pubkey-at-index-i-signed-signature-
+        // at-index-i pairing intact, and the indexer verifies the pairs as a set.
+        sigs = sigs.slice().sort((a, b) => {
+            let pa = String(a && a.pubkey).toLowerCase(), pb = String(b && b.pubkey).toLowerCase();
+            return pa < pb ? -1 : (pa > pb ? 1 : 0);
+        });
         if(sigs.length === 0){
             // A row with no signatures is inert on every indexer (the verifier
             // resolves no quorum), so writing it would only put an unappliable row

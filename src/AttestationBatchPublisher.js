@@ -93,6 +93,7 @@ const { forwardableUtxos }  = require('./lib/encoder_utxo_forward.js');
 const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
 const { isAmbiguousSendError }   = require('./lib/idempotent_broadcast.js');
 const { ATTEST_RESPONSE_MIRROR_ACTIVATION } = require('./attest_response_mirror_activation.js');
+const snapWrite = require('./lib/capability_snapshot_write.js');
 const { resolveAttestBatchWindowS, ATTEST_BATCH_WINDOW_S } = require('./lib/attest_response_timing.js');
 const abw = require('./lib/attest_batch_wire.js');
 
@@ -461,6 +462,10 @@ class AttestationBatchPublisher {
             this.stats.windowsDeferred++;
             return false;
         }
+        // The set this batch is judged against goes into the mirror NOW, before any
+        // rank decision: a follower that never becomes leader still mirrors it, and an
+        // off-BTC verifier reads whichever hub it follows.
+        await this._persistAttestationSnapshot(anchor);
         if(election.rank > age){
             // Not this hub's turn yet. A window nobody lands is picked up by the next
             // rank one window later, so a dark leader costs a window's coverage a delay
@@ -651,6 +656,50 @@ class AttestationBatchPublisher {
         return set;
     }
 
+    // Mirror the attestation capability set at `anchor` into capability_snapshots, the
+    // table an off-BTC verifier reads. The DOGE indexer judges a v5 head by
+    // `getStakeWeightsByCapability('attestation', anchor)`, which on a chain with no
+    // local stakes is `capability_snapshots WHERE capability='attestation' AND
+    // snapshot_block = anchor`, mirrored from the hub it follows; with nobody writing
+    // those rows every v5 head on DOGE read `invalid: insufficient signer stake`
+    // (regtest ladder, AT5, 2026-09-05). Same contract as the PRICE batch
+    // (OracleConsensus._persistCapabilitySnapshot): every signing hub writes, not just
+    // the leader; the natural-key INSERT IGNORE makes the rows identical and a re-write
+    // free; a TRUNCATED set is never mirrored (SWQ-TRUNC-MIRROR). Once per anchor per
+    // process, because the same anchor recurs every window while the tip sits still.
+    async _persistAttestationSnapshot(anchor, set){
+        let a = Number(anchor);
+        if(!Number.isInteger(a) || a <= 0) return 0;
+        if(!this._persistedAnchors) this._persistedAnchors = new Set();
+        if(this._persistedAnchors.has(a)) return 0;
+        if(!set) set = await this._resolveAttestationSet(a);
+        if(!set || set.length === 0) return 0;          // unresolved / truncated: nothing to mirror
+        let db = this._db();
+        if(!db) return 0;
+        let rows;
+        try {
+            rows = await snapWrite.writeCapabilitySnapshotRows(db, 'attestation', a, set);
+        } catch(e){
+            console.warn('AttestationBatchPublisher: could not mirror the attestation capability snapshot at anchor ' +
+                         a + ': ' + (e && e.message));
+            return 0;
+        }
+        this._persistedAnchors.add(a);
+        if(this._persistedAnchors.size > 256){
+            let oldest = this._persistedAnchors.values().next().value;
+            this._persistedAnchors.delete(oldest);
+        }
+        if(this.hub && this.hub.hubDbBroadcaster){
+            for(let row of rows){
+                let r = await db.doQuery(
+                    'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
+                    [a, 'attestation', row.signing_pubkey, row.source]);
+                if(r.length) this.hub.hubDbBroadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
+            }
+        }
+        return rows.length;
+    }
+
     // This hub's rank in the publisher election for one batch, or null when the set
     // cannot be resolved. Hash order over sha256(batchKey || pubkey), the ANCHOR
     // publisher election's rule: deterministic, unpredictable per window, and it needs
@@ -828,6 +877,9 @@ class AttestationBatchPublisher {
             this._refuse(windowStart, 'this hub holds no attestation capability at anchor ' + anchor);
             return;
         }
+        // Same rows the leader wrote, from this hub's own resolution (deterministic,
+        // INSERT IGNORE), so an indexer following THIS hub verifies the batch too.
+        await this._persistAttestationSnapshot(anchor, set);
 
         let mine;
         try {
