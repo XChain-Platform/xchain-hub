@@ -1778,7 +1778,9 @@ describe('AttestationPublisher: effector-safety guards', function () {
 
     // ── The at-most-once guard must survive a restart ──
 
-    // Minimal hub DB double over the attest_published_requests marker table.
+    // Minimal hub DB double over the attest_published_requests marker table. Models the
+    // per-outcome columns the real statements maintain: `sent_statuses` accumulates one
+    // entry per completed publication and `intent_status` names the armed one.
     function makeMarkerDb(rows, failOn) {
         const calls = [];
         return {
@@ -1792,13 +1794,30 @@ describe('AttestationPublisher: effector-safety guards', function () {
                         : rows.slice();
                 }
                 if (/^INSERT/.test(sql)) {
-                    // ON DUPLICATE KEY UPDATE request_id = request_id: an existing row stands.
-                    if (!rows.find(r => r.request_id === params[0])) rows.push({ request_id: params[0], txid: null, sent_at: null });
+                    // ON DUPLICATE KEY UPDATE intent_status: arms the intent either way.
+                    const row = rows.find(r => r.request_id === params[0]);
+                    if (row) row.intent_status = params[1];
+                    else rows.push({ request_id: params[0], txid: null, sent_at: null,
+                                     sent_statuses: null, intent_status: params[1] });
+                    return {};
+                }
+                if (/SET intent_status = NULL/.test(sql)) {
+                    // The disarm, scoped to the status this caller armed.
+                    const row = rows.find(r => r.request_id === params[0] && r.intent_status === params[1]);
+                    if (row) row.intent_status = null;
                     return {};
                 }
                 if (/^UPDATE/.test(sql)) {
-                    const row = rows.find(r => r.request_id === params[1]);
-                    if (row) { row.txid = params[0]; row.sent_at = new Date(); }
+                    // The confirmation: params are [txid, status, status, request_id].
+                    const row = rows.find(r => r.request_id === params[3]);
+                    if (row) {
+                        row.txid = params[0];
+                        row.sent_at = new Date();
+                        row.intent_status = null;
+                        const listed = String(row.sent_statuses || '').split(',').filter(s => s);
+                        if (!listed.includes(params[1])) listed.push(params[1]);
+                        row.sent_statuses = listed.join(',');
+                    }
                     return {};
                 }
                 if (/^DELETE/.test(sql)) {
@@ -1959,6 +1978,112 @@ describe('AttestationPublisher: effector-safety guards', function () {
         });
         expect(rows.length).to.equal(1);
         expect(rows[0].sent_at, 'an ambiguous send stays intent-only, which is what quarantines it').to.equal(null);
+    });
+
+    // ── The marker identifies a PUBLICATION, not a request ──
+    //
+    // A non-ok response is advisory and leaves the request PENDING and retryable on
+    // the indexer, so the very next round can finalize the same request as ok. A
+    // marker keyed by request id alone reads that ok as a duplicate and drops it, and
+    // the requester's paid-for attestation never reaches the chain.
+
+    it('a published non-ok response does not suppress the later ok response', async function () {
+        const rid = 'f1'.repeat(32);
+        const rows = [];
+        const db = makeMarkerDb(rows);
+        const pub = makePublisher(MY_PUB, { db });
+        fs.writeFileSync(pub.queuePath, '');
+        const bcast = sinon.stub().resolves({ txid: 'tx' });
+        pub.setBroadcastHook(bcast);
+        const finalize = (status) => pub.onRequestFinalized({
+            requestId: rid, providerId: 'http_get', responseBody: Buffer.from('x'),
+            status: status, meta: '', signatures: [{ pubkey: MY_PUB, sig: 'ee'.repeat(64) }], leaderPubkey: MY_PUB
+        });
+        await finalize('provider_error');
+        await finalize('ok');
+        expect(bcast.callCount, 'the paid-for ok response must publish after an advisory failure row').to.equal(2);
+        expect(rows.length, 'both publications share one marker row').to.equal(1);
+    });
+
+    it('a restart does not re-publish a non-ok status already broadcast', async function () {
+        // The other direction: the per-outcome marker must keep the protection it
+        // replaces. A retry round that finalizes the SAME failure status again spends
+        // a second BTC fee for no new information.
+        const rid = 'f2'.repeat(32);
+        const db = makeMarkerDb([{ request_id: rid, txid: 'tx-pre-crash', sent_at: new Date(),
+                                   sent_statuses: 'no_quorum', intent_status: null }]);
+        const pub = makePublisher(MY_PUB, { db });
+        fs.writeFileSync(pub.queuePath, '');
+        const bcast = sinon.stub().resolves({ txid: 'tx' });
+        pub.setBroadcastHook(bcast);
+        await pub.onRequestFinalized({
+            requestId: rid, providerId: 'http_get', responseBody: Buffer.from('x'),
+            status: 'no_quorum', meta: '', signatures: [{ pubkey: MY_PUB, sig: 'ee'.repeat(64) }], leaderPubkey: MY_PUB
+        });
+        expect(bcast.called, 'a second fee for an audit row already on chain').to.equal(false);
+    });
+
+    it('a marker row written before the per-outcome columns stays terminal', async function () {
+        // Upgrade safety: a row carrying no recorded statuses is a pre-upgrade marker
+        // whose outcome is unknown, so it must suppress every status exactly as it did
+        // before, never be read as "no status published yet".
+        const rid = 'f3'.repeat(32);
+        const db = makeMarkerDb([{ request_id: rid, txid: 'tx-legacy', sent_at: new Date(),
+                                   sent_statuses: null, intent_status: null }]);
+        const pub = makePublisher(MY_PUB, { db });
+        fs.writeFileSync(pub.queuePath, '');
+        const bcast = sinon.stub().resolves({ txid: 'tx' });
+        pub.setBroadcastHook(bcast);
+        await pub.onRequestFinalized({
+            requestId: rid, providerId: 'http_get', responseBody: Buffer.from('x'),
+            status: 'ok', meta: '', signatures: [{ pubkey: MY_PUB, sig: 'ee'.repeat(64) }], leaderPubkey: MY_PUB
+        });
+        expect(bcast.called, 'an unattributed marker must not be re-opened by an upgrade').to.equal(false);
+    });
+
+    it('an ok publication is terminal for every later status', async function () {
+        const rid = 'f4'.repeat(32);
+        const db = makeMarkerDb([{ request_id: rid, txid: 'tx-ok', sent_at: new Date(),
+                                   sent_statuses: 'ok', intent_status: null }]);
+        const pub = makePublisher(MY_PUB, { db });
+        fs.writeFileSync(pub.queuePath, '');
+        const bcast = sinon.stub().resolves({ txid: 'tx' });
+        pub.setBroadcastHook(bcast);
+        await pub.onRequestFinalized({
+            requestId: rid, providerId: 'http_get', responseBody: Buffer.from('x'),
+            status: 'no_quorum', meta: '', signatures: [{ pubkey: MY_PUB, sig: 'ee'.repeat(64) }], leaderPubkey: MY_PUB
+        });
+        expect(bcast.called, 'the request is answered; nothing further is publishable').to.equal(false);
+    });
+
+    it('a crash between the ok intent and its confirmation quarantines only the ok', async function () {
+        // The armed intent for a SECOND publication needs its own durable record, or a
+        // crash mid-send leaves the sweep free to pay for the same ok response twice.
+        const rid = 'f5'.repeat(32);
+        const rows = [];
+        const db = makeMarkerDb(rows);
+        const pub = makePublisher(MY_PUB, { db });
+        fs.writeFileSync(pub.queuePath, '');
+        pub.setBroadcastHook(sinon.stub().resolves({ txid: 'tx-nonok' }));
+        await pub.onRequestFinalized({
+            requestId: rid, providerId: 'http_get', responseBody: Buffer.from('x'),
+            status: 'provider_error', meta: '', signatures: [{ pubkey: MY_PUB, sig: 'ee'.repeat(64) }], leaderPubkey: MY_PUB
+        });
+        const ambiguous = new Error('socket hang up');
+        ambiguous.attestAmbiguousSend = true;
+        pub.setBroadcastHook(sinon.stub().rejects(ambiguous));
+        await pub.onRequestFinalized({
+            requestId: rid, providerId: 'http_get', responseBody: Buffer.from('x'),
+            status: 'ok', meta: '', signatures: [{ pubkey: MY_PUB, sig: 'ee'.repeat(64) }], leaderPubkey: MY_PUB
+        });
+        expect(rows[0].intent_status, 'the unconfirmed ok send must survive as an intent').to.equal('ok');
+
+        const pub2 = makePublisher(MY_PUB, { db });
+        await pub2._hydratePublishedMarkers();
+        expect(pub2._quarantinedRequests.has(rid + '|ok'),
+               'the ok send may have reached the node; it awaits an operator').to.equal(true);
+        expect(pub2._quarantinedRequests.has(rid),
+               'the whole request must not be held for one unresolved outcome').to.equal(false);
     });
 
     it('a send that never went out releases its reservation', async function () {
