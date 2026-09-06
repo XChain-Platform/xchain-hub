@@ -209,6 +209,49 @@ describe('AttestationBatchPublisher', function () {
 
     // ------------------------------------------------------------ window math
 
+    // Row identity in the co-sign compare is (request_id, effective_time), the table's
+    // own key. A round that finalized under two leader slots leaves two honest rows for
+    // one request that differ only in the stamp; keying on request_id alone read that
+    // as "appears twice" on the hub holding both and as a field mismatch on a hub
+    // holding one, so no such window could be co-signed (AT5 pass 19).
+    describe('_matchesLocalWindow row identity', function () {
+        function variants(){
+            let rid = crypto.randomBytes(32).toString('hex');
+            let a = makeRow({ request_id: rid, effective_time: 1780000120 });
+            let b = makeRow({ request_id: rid, effective_time: 1780000127 });
+            return { a, b };
+        }
+
+        it('accepts two honest variants of one request that differ only in effective_time', function () {
+            let hub = makeHub({ dir: dir });
+            let p   = new AttestationBatchPublisher(hub);
+            let { a, b } = variants();
+            expect(p._matchesLocalWindow([a, b], [a, b])).to.deep.equal({ ok: true, why: null });
+            expect(p._matchesLocalWindow([b, a], [a, b]).ok).to.equal(true);
+        });
+
+        it('still refuses the same variant twice', function () {
+            let hub = makeHub({ dir: dir });
+            let p   = new AttestationBatchPublisher(hub);
+            let { a } = variants();
+            let v = p._matchesLocalWindow([a, Object.assign({}, a)], [a]);
+            expect(v.ok).to.equal(false);
+            expect(v.why).to.match(/appears twice/);
+        });
+
+        it('refuses a variant this hub does not hold, and one it holds that was not proposed', function () {
+            let hub = makeHub({ dir: dir });
+            let p   = new AttestationBatchPublisher(hub);
+            let { a, b } = variants();
+            let notHeld = p._matchesLocalWindow([a, b], [a]);
+            expect(notHeld.ok).to.equal(false);
+            expect(notHeld.why).to.match(/effective_time 1780000127 is proposed but not held here/);
+            let notProposed = p._matchesLocalWindow([a], [a, b]);
+            expect(notProposed.ok).to.equal(false);
+            expect(notProposed.why).to.match(/effective_time 1780000127 is held here for this window but was not proposed/);
+        });
+    });
+
     describe('the window', function () {
 
         it('aligns to the unix hour at the protocol value, not to process start', function () {

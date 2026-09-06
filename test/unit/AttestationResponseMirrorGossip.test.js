@@ -127,14 +127,20 @@ function makeDb(){
                 let cols = sql.substring(sql.indexOf('(') + 1, sql.indexOf(')')).split(',').map(s => s.trim());
                 let row  = {};
                 cols.forEach((c, i) => { row[c] = args[i]; });
-                if(table.find(r => r.network === row.network && r.request_id === row.request_id))
+                // The key is (network, request_id, effective_time): a second honest
+                // variant of a request (another leader slot's stamp) is a fresh row.
+                if(table.find(r => r.network === row.network && r.request_id === row.request_id &&
+                                   String(r.effective_time) === String(row.effective_time)))
                     return { affectedRows: 0, insertId: 0 };
                 row.id = nextId++;
                 table.push(row);
                 return { affectedRows: 1, insertId: row.id };
             }
             if(/^SELECT id(,| ).*FROM attestation_responses/i.test(sql)){
-                let found = table.find(r => r.network === args[0] && r.request_id === args[1]);
+                if(!/effective_time = \?/.test(sql))
+                    throw new Error('a keyed mirror read must name the whole key: ' + sql);
+                let found = table.find(r => r.network === args[0] && r.request_id === args[1] &&
+                                            String(r.effective_time) === String(args[2]));
                 return found ? [Object.assign({}, found)] : [];
             }
             throw new Error('unexpected statement: ' + sql);
@@ -466,6 +472,40 @@ describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () {
             expect(hub.hubDbBroadcaster.broadcastRow.callCount).to.equal(1);
             expect(hub.peerManager.broadcast.callCount).to.equal(0);
             expect(post.callCount).to.equal(lookupsAfterFirst);
+            expect(mirror.stats.duplicates).to.equal(1);
+        });
+
+        // A round that finalizes under two leader slots (the slot follows the chain tip
+        // each hub polled) produces two honestly quorum-signed rows for one request that
+        // differ only in the signed effective_time. Both are real: each verifies over its
+        // own canonical. The second is NOT a duplicate of the first; it takes the full
+        // verification and is stored beside it, so every hub ends up holding every
+        // variant and the batch windows agree (AT5 pass 19 could never co-sign one).
+        it('keeps a second honest variant of a held request that differs only in effective_time', async function () {
+            let hub    = makeHub();
+            let mirror = new AttestationResponseMirror(hub);
+            stubRequestLookup([localRequest()]);
+            await mirror.start();
+
+            await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload() });
+            expect(hub.db.table).to.have.length(1);
+
+            let later = EFFECTIVE_TIME + 7;
+            await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload({
+                effectiveTime: later, signCanonical: canonicalFor({ effectiveTime: later })
+            }) });
+
+            expect(hub.db.table).to.have.length(2);
+            expect(hub.db.inserts()).to.have.length(2);
+            expect(hub.db.table.map(r => Number(r.effective_time)).sort()).to.deep.equal([EFFECTIVE_TIME, later]);
+            expect(hub.hubDbBroadcaster.broadcastRow.callCount).to.equal(2);
+            expect(mirror.stats.duplicates).to.equal(0);
+
+            // And the SAME variant again is still the ordinary duplicate.
+            await mirror._handleResult({ type: ATTEST_RESULT, data: gossipPayload({
+                effectiveTime: later, signCanonical: canonicalFor({ effectiveTime: later })
+            }) });
+            expect(hub.db.table).to.have.length(2);
             expect(mirror.stats.duplicates).to.equal(1);
         });
 

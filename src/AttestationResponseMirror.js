@@ -406,11 +406,17 @@ class AttestationResponseMirror {
             return false;
         }
 
-        // INSERT IGNORE against the UNIQUE (network, request_id). A duplicate is
-        // ordinary traffic rather than an error: two hubs in the responsible set both
-        // finalize, each gossips, and a parked envelope retries a cycle later, so the
-        // same logical row can arrive several ways. Insert-only means the existing row
-        // is already correct, so absorbing the duplicate is the whole conflict policy.
+        // INSERT IGNORE against the UNIQUE (network, request_id, effective_time). A
+        // duplicate is ordinary traffic rather than an error: two hubs in the responsible
+        // set both finalize, each gossips, and a parked envelope retries a cycle later,
+        // so the same logical row can arrive several ways. Insert-only means the existing
+        // row is already correct, so absorbing the duplicate is the whole conflict policy.
+        //
+        // A row for a request this hub already holds under a DIFFERENT effective_time is
+        // not a duplicate: it is the second honest finalization of a round that ran
+        // under two leader slots (the slot follows the chain tip each hub polled), and
+        // it is kept so every hub ends up holding every variant. The indexer binds the
+        // smaller stamp on every node; see the table's SQL for the full argument.
         let res = await db.doQuery(
             'INSERT IGNORE INTO attestation_responses (' + MIRROR_COLUMNS.join(', ') + ') ' +
             'VALUES (' + MIRROR_COLUMNS.map(() => '?').join(', ') + ')',
@@ -432,8 +438,8 @@ class AttestationResponseMirror {
         // ignored insert, so the id can only come from the table.
         let rows = await db.doQuery(
             'SELECT id, ' + MIRROR_COLUMNS.join(', ') + ' ' +
-            'FROM attestation_responses WHERE network = ? AND request_id = ? LIMIT 1',
-            [row.network, row.request_id]);
+            'FROM attestation_responses WHERE network = ? AND request_id = ? AND effective_time = ? LIMIT 1',
+            [row.network, row.request_id, row.effective_time]);
         let stored = (rows && rows.length) ? rows[0] : null;
         if(!stored){
             this.stats.errors++;
@@ -654,8 +660,8 @@ class AttestationResponseMirror {
         if(!db || typeof db.doQuery !== 'function') return false;
         let res = await db.doQuery(
             'UPDATE attestation_responses SET batch_action_index = ? ' +
-            'WHERE network = ? AND request_id = ? AND batch_action_index IS NULL',
-            [actionIndex, row.network, row.request_id]);
+            'WHERE network = ? AND request_id = ? AND effective_time = ? AND batch_action_index IS NULL',
+            [actionIndex, row.network, row.request_id, row.effective_time]);
         return !!(res && Number(res.affectedRows) > 0);
     }
 
@@ -667,8 +673,8 @@ class AttestationResponseMirror {
         if(!db || typeof db.doQuery !== 'function') return;
         let rows = await db.doQuery(
             'SELECT id, ' + MIRROR_COLUMNS.join(', ') + ' ' +
-            'FROM attestation_responses WHERE network = ? AND request_id = ? LIMIT 1',
-            [row.network, row.request_id]);
+            'FROM attestation_responses WHERE network = ? AND request_id = ? AND effective_time = ? LIMIT 1',
+            [row.network, row.request_id, row.effective_time]);
         let stored = (rows && rows.length) ? rows[0] : null;
         if(!stored) return;
         let b = this._broadcaster();
@@ -807,9 +813,12 @@ class AttestationResponseMirror {
         // Cheapest gate first, and it is the one that carries the storm. Five hubs
         // finalize and gossip the same artifact, so most deliveries are of a row this
         // hub already holds. The table is insert-only and unique on (network,
-        // request_id), so a row we hold is a row we already verified and nothing about
-        // it can have changed: answering from the index costs one keyed read and
-        // spends no capability snapshot, no indexer round-trip and no signature math.
+        // request_id, effective_time), so a row we hold is a row we already verified and
+        // nothing about it can have changed: answering from the index costs one keyed
+        // read and spends no capability snapshot, no indexer round-trip and no signature
+        // math. A second variant of a request this hub holds (a different signed stamp,
+        // from a round that finalized under another leader slot) is NOT held, and takes
+        // the full verification below like any first delivery.
         if(await this._alreadyHeld(row)){
             this.stats.duplicates++;
             return false;
@@ -877,8 +886,8 @@ class AttestationResponseMirror {
         let db = this._db();
         if(!db || typeof db.doQuery !== 'function') return false;
         let rows = await db.doQuery(
-            'SELECT id FROM attestation_responses WHERE network = ? AND request_id = ? LIMIT 1',
-            [row.network, row.request_id]);
+            'SELECT id FROM attestation_responses WHERE network = ? AND request_id = ? AND effective_time = ? LIMIT 1',
+            [row.network, row.request_id, row.effective_time]);
         return !!(rows && rows.length);
     }
 

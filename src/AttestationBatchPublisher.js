@@ -524,7 +524,10 @@ class AttestationBatchPublisher {
             'SELECT ' + abw.ATTEST_BATCH_ROW_FIELDS.join(', ') + ' ' +
             'FROM attestation_responses ' +
             'WHERE network = ? AND effective_time >= ? AND effective_time < ? ' +
-            'ORDER BY request_block_index ASC, request_action_index ASC, request_id ASC ' +
+            // effective_time last: one request can hold two honest rows (a round that
+            // finalized under two leader slots), and the window has to order them the
+            // same way on every hub or the signed bytes differ.
+            'ORDER BY request_block_index ASC, request_action_index ASC, request_id ASC, effective_time ASC ' +
             'LIMIT ?',
             [this.network, windowStart, windowEnd, abw.ATTEST_BATCH_MAX_ROWS + 1]);
         return (rows || []).map(r => this._normalizeRow(r));
@@ -922,26 +925,39 @@ class AttestationBatchPublisher {
     // is the point. A row a follower holds and the leader has not received yet is the
     // one benign case, and the forward margin already covers it: the row was written a
     // whole margin before this window could close.
+    //
+    // ROW IDENTITY IS (request_id, effective_time), the table's own key. A request can
+    // hold two honest rows when its round finalized under two leader slots, and the
+    // stamp is the only signed field that tells them apart; keying on request_id alone
+    // read the second variant as "appears twice" on the hub that held both and as a
+    // field mismatch on a hub that held one, so no such window could ever be co-signed
+    // (regtest ladder, AT5 pass 19). The same request with the same stamp twice is
+    // still a malformed window and is still refused.
     _matchesLocalWindow(proposed, mine){
-        let byId = new Map(mine.map(r => [r.request_id, r]));
-        let seen = new Set();
+        const keyOf = (r) => String((r && r.request_id) || '').toLowerCase() + '@' +
+                             String(r && r.effective_time == null ? '' : r.effective_time);
+        let byKey = new Map(mine.map(r => [keyOf(r), r]));
+        let seen  = new Set();
         for(let p of proposed){
             let rid = String((p && p.request_id) || '').toLowerCase();
             if(!rid) return { ok: false, why: 'a proposed row carries no request_id' };
-            if(seen.has(rid)) return { ok: false, why: 'request ' + rid.substring(0, 16) + '... appears twice' };
-            seen.add(rid);
-            let local = byId.get(rid);
+            let key = keyOf(p);
+            if(seen.has(key)) return { ok: false, why: 'request ' + rid.substring(0, 16) + '... appears twice' };
+            seen.add(key);
+            let local = byKey.get(key);
             if(!local)
-                return { ok: false, why: 'request ' + rid.substring(0, 16) + '... is proposed but not held here' };
+                return { ok: false, why: 'request ' + rid.substring(0, 16) + '... at effective_time ' +
+                         String(p.effective_time) + ' is proposed but not held here' };
             for(let f of abw.ATTEST_BATCH_ROW_FIELDS){
                 if(String(p[f] == null ? '' : p[f]) !== String(local[f] == null ? '' : local[f]))
                     return { ok: false, why: 'request ' + rid.substring(0, 16) + '... differs on ' + f };
             }
         }
         for(let local of mine){
-            if(seen.has(local.request_id)) continue;
-            return { ok: false, why: 'request ' + local.request_id.substring(0, 16) +
-                     '... is held here for this window but was not proposed' };
+            if(seen.has(keyOf(local))) continue;
+            return { ok: false, why: 'request ' + String(local.request_id).substring(0, 16) +
+                     '... at effective_time ' + String(local.effective_time) +
+                     ' is held here for this window but was not proposed' };
         }
         return { ok: true, why: null };
     }

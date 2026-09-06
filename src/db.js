@@ -328,6 +328,17 @@ class Database {
             'source',
             '(snapshot_block, capability, signing_pubkey, source)'
         );
+        // attestation_responses: one request can finalize under two leader slots and
+        // yield two honestly signed rows that differ only in effective_time; the old
+        // (network, request_id) key absorbed the second as a duplicate on some hubs and
+        // kept it on others, so no window carrying such a request could reach batch
+        // quorum. The stamp joins the key (see the table's SQL); same widen semantics.
+        await this._widenUniqueKey(
+            'attestation_responses',
+            'uq_attest_response',
+            'effective_time',
+            '(network, request_id, effective_time)'
+        );
         // #4315: governance_proposals.voting_start/voting_end shipped as TIMESTAMP, which
         // MariaDB bounds to the signed 32-bit epoch (2038-01-19 03:14:07 UTC). Both hold a
         // FUTURE instant (voting_end is NOW() + GOV_VOTING_PERIOD), so they run out of range
