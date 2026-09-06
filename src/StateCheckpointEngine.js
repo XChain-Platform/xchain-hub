@@ -74,6 +74,13 @@ const ALLOWED_CHAINS = [...coins.ALLOWED_COINS];
 // this.cosignToleranceBlocks for why this is deliberately NOT electionToleranceBlocks.
 const CHECKPOINT_COSIGN_TOLERANCE_BLOCKS = 144;
 
+// How many (chain, network, checkpoint_seq) signing commitments the engine holds. One
+// entry per chain per cadence round, so a few hundred spans many cadences on every
+// configured chain. Evicting the oldest is safe: the co-sign replay guard refuses a
+// sequence at or below the highest one already seated, so an evicted sequence is fenced
+// by the DB as soon as any later checkpoint finalizes.
+const CHECKPOINT_SIGNED_SEQ_MEMORY = 512;
+
 class StateCheckpointEngine extends EventEmitter {
 
     constructor(hub){
@@ -165,6 +172,20 @@ class StateCheckpointEngine extends EventEmitter {
         // at one sequence and the fleet may already hold divergent rows: read the
         // CONFLICTING lines in this hub's log and compare the seq across hubs.
         this._seqConflicts        = 0;
+
+        // The canonical this hub signed at each sequence: Map<'chain|network|seq',
+        // canonical>. Every co-sign guard keys on snapshot_block, and seq is a pure
+        // function of it, so a cadence leader proposing two DIFFERENT block_index values
+        // at one snapshot_block clears all of them twice; signing one payload per
+        // sequence is what keeps the second quorum from forming. Held for this process
+        // only: a signer that restarts inside a cadence window can still answer a second
+        // payload, which a durable commitment would close at the price of a DB write on
+        // the signing path.
+        this._signedAtSeq = new Map();
+        // Signature requests refused because this hub already signed a different payload
+        // at that sequence. Nothing honest puts two payloads on the wire at one sequence;
+        // the SECOND PAYLOAD log lines name the blocks.
+        this._seqDoubleSignRefusals = 0;
 
         // Cadence stalls. Every pre-leadership bail in _tick used to return
         // silently, so a hub whose oracle_publish capability had gone unqualified
@@ -334,6 +355,11 @@ class StateCheckpointEngine extends EventEmitter {
             // Never a tuning knob: it is an equivocation report and the fleet may hold
             // divergent checkpoints at that sequence.
             seq_conflicts:           this._seqConflicts,
+            // Non-zero means a proposer asked this hub to sign a second, different
+            // payload at a sequence it had already signed. The signature was refused, so
+            // this is the fence holding rather than damage; it still reports a proposer
+            // that put two payloads on the wire at one sequence.
+            seq_double_sign_refusals: this._seqDoubleSignRefusals,
             // Non-zero with a reason means the engine is alive but structurally
             // unable to checkpoint (unqualified capability, missing identity, not in the
             // validator set), the failure mode that produced 18 silent days on mainnet.
@@ -514,10 +540,13 @@ class StateCheckpointEngine extends EventEmitter {
         if(!this.identity) throw new Error('no validator identity (cannot sign checkpoints)');
 
         let myPubkey = this.identity.getPubkeyHex().toLowerCase();
-        let mySig    = this.identity.sign(canonical);
         // The SWQ gate below resolves on this.network; refuse before signing if
         // the checkpoint we just built disagrees (a mis-set indexer network).
         this._assertCheckpointNetwork(cp, 'propose');
+        // One payload per sequence (first of the two call sites, with co-sign), ahead of
+        // the signature so a refused proposal never produces one.
+        if(!this._claimSeqSignature(cp, canonical)) return;
+        let mySig    = this.identity.sign(canonical);
         let snapCount = validators.length;   // raw row count (matches _handleFinalized + anchor.js:336)
         // STAKE_WEIGHTED_QUORUM: weighted (source-deduped) at/above activation, else count.
         let weighted  = swq.isStakeWeightedQuorumActive(cp.snapshot_block, this.network);
@@ -666,6 +695,13 @@ class StateCheckpointEngine extends EventEmitter {
                 ' is checkpoint-commitment active but carries no light-client roots, NOT signing');
             return;
         }
+
+        // One payload per sequence. The leader is free to choose block_index at a given
+        // snapshot_block, so this is the guard that stops a proposer collecting quorum on
+        // two payloads at one sequence; every check above has already passed for BOTH of
+        // them. Last thing before the co-signature leaves the hub, so a proposal this hub
+        // would have declined anyway never claims the sequence.
+        if(!this._claimSeqSignature(cp, canonical)) return;
 
         this.peerManager.broadcast(XCHK_SIGN, {
             id: this._roundId(cp), sig_pubkey: myPubkey, sig: this.identity.sign(canonical)
@@ -907,6 +943,38 @@ class StateCheckpointEngine extends EventEmitter {
     }
 
     _roundId(cp){ return cp.chain + '|' + cp.network + '|' + cp.block_index + '|' + cp.checkpoint_seq; }
+
+    // Claim the right to sign `canonical` at this checkpoint's sequence: true for an
+    // unsigned sequence and for a re-delivery of the payload already signed there (a
+    // repeated canonical creates no second checkpoint), false for a DIFFERENT payload,
+    // which is the double-signature that lets one sequence carry two quorum-signed
+    // checkpoints. Call it wherever a signature leaves this hub; false means do not sign.
+    //
+    // The refusal is unconditional, including for an honest leader that lost a round in
+    // flight and re-proposes a new block at the same snapshot_block, and for a reorg that
+    // moves the block under one: both are indistinguishable from equivocation to every
+    // peer, and the signatures already collected on the first payload can still be
+    // assembled by anyone. The cost is that one round; the cadence latch has already
+    // advanced, so the next snapshot_block checkpoints normally.
+    _claimSeqSignature(cp, canonical){
+        let key  = cp.chain + '|' + cp.network + '|' + Number(cp.checkpoint_seq);
+        let held = this._signedAtSeq.get(key);
+        if(held !== undefined && held !== canonical){
+            this._seqDoubleSignRefusals++;
+            console.error('StateCheckpointEngine: SECOND PAYLOAD at ' + cp.chain + '/' + cp.network +
+                          ' seq ' + cp.checkpoint_seq + ': this hub signed a different payload at that ' +
+                          'sequence and refuses block ' + Number(cp.block_index) + ' (' +
+                          String(cp.block_hash) + '). One signature per sequence is what keeps two ' +
+                          'quorum-signed checkpoints from existing there; the proposer put two on the wire.');
+            return false;
+        }
+        if(held === undefined){
+            this._signedAtSeq.set(key, canonical);
+            while(this._signedAtSeq.size > CHECKPOINT_SIGNED_SEQ_MEMORY)
+                this._signedAtSeq.delete(this._signedAtSeq.keys().next().value);
+        }
+        return true;
+    }
 
     _normalizeCheckpoint(raw){
         if(!raw || !raw.chain || !raw.network || raw.block_index == null) return null;
