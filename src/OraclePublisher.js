@@ -516,6 +516,43 @@ class OraclePublisher {
     // a PRICE v0 transaction to the DOGE chain. Returns { txid } on success.
     // This is used automatically when no custom broadcastFn is set but encoder + walletSignFn are configured.
     async _defaultBroadcast(payload) {
+        // Everything down to step 4 builds and signs: no money has moved and nothing has
+        // left this process, so every failure here is DEFINITIVELY never-sent whatever it
+        // looks like on the socket. Tag them, because the shared classifier answers
+        // "ambiguous" for any error it does not recognise (isAmbiguousSendError's final
+        // `return true`), which is the right default for a broadcaster this module knows
+        // nothing about and the wrong one for a stage it knows cannot send. Untagged, a
+        // get_utxos timeout dead-lettered a round that was never broadcast, permanently
+        // removing it from automatic retry. Same convention and same reason as
+        // AttestationRelay's _relayPreSend.
+        return await this._runDefaultBroadcast(payload);
+    }
+
+    async _runDefaultBroadcast(payload) {
+        let txHex;
+        try {
+            txHex = await this._buildSignedTx(payload);
+        } catch (e) {
+            if (e) e.oraclePreSend = true;
+            throw e;
+        }
+
+        // 4. Broadcast the signed transaction. Only this call has a side effect, so only
+        // ITS failures are classified for ambiguity (item 2675): a timeout / mid-flight
+        // reset / 5xx AFTER the request left the wire may mean the DOGE node actually
+        // accepted the tx, so a blind retry would spend a second fee and double-anchor
+        // the round.
+        try {
+            let broadcastResult = await this.encoder.broadcastTx(txHex);
+            return broadcastResult || { txid: null };
+        } catch (e) {
+            if (this._isAmbiguousSendError(e)) e.oracleAmbiguousSend = true;
+            throw e;
+        }
+    }
+
+    // Steps 1-3 of the default pipeline: fetch, build, sign. Returns the signed tx hex.
+    async _buildSignedTx(payload) {
         if (!this.encoder)         throw new Error('no encoder configured (set DOGE_ENCODER_URL)');
         if (!this.walletSignFn)    throw new Error('no wallet sign hook configured (call setWalletSignHook)');
         if (!this.dogeAddress)     throw new Error('no DOGE_ADDRESS configured');
@@ -569,20 +606,7 @@ class OraclePublisher {
         if (!txHex || typeof txHex !== 'string') {
             throw new Error('wallet sign hook returned invalid tx hex');
         }
-
-        // 4. Broadcast the signed transaction.
-        // Everything above is pre-send (build/sign; no money has moved). Only
-        // broadcast_tx has a side effect, so only ITS failures are classified for
-        // ambiguity (item 2675): a timeout / mid-flight reset / 5xx AFTER the
-        // request left the wire may mean the DOGE node actually accepted the tx,
-        // so a blind retry would spend a second fee and double-anchor the round.
-        try {
-            let broadcastResult = await this.encoder.broadcastTx(txHex);
-            return broadcastResult || { txid: null };
-        } catch (e) {
-            if (this._isAmbiguousSendError(e)) e.oracleAmbiguousSend = true;
-            throw e;
-        }
+        return txHex;
     }
 
     // Classify a broadcast failure (delegates to the shared classifier so
@@ -2600,7 +2624,15 @@ class OraclePublisher {
                 // move the round to the durable, recoverable dead-letter file (counted,
                 // never silently dropped) for manual inspection/replay. Only definitive
                 // pre-send errors keep the existing attempts-and-requeue retry.
-                if (this._isAmbiguousSendError(err) || (err && err.oracleAmbiguousSend)) {
+                // `oraclePreSend` is the default pipeline's own report that the failure
+                // came from a stage that CANNOT have sent anything (get_utxos, create_tx,
+                // the sign hook). Without this exclusion the classifier below - which
+                // answers "ambiguous" for any error it does not recognise - dead-lettered
+                // a get_utxos timeout, permanently removing a never-broadcast round from
+                // automatic retry. A custom broadcastFn sets no tag, so an unknown
+                // broadcaster keeps the conservative default it has today.
+                if (!(err && err.oraclePreSend)
+                    && (this._isAmbiguousSendError(err) || (err && err.oracleAmbiguousSend))) {
                     // COMMIT, not release: this branch has already decided the tx may be
                     // on-chain and dead-letters the round rather than retrying, so the fee
                     // may well have been paid. Keeping the reservation charges the window
