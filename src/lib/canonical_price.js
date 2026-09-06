@@ -30,9 +30,15 @@
  * XchainPriceSource._entry), which this accepts unchanged, so an honest round
  * never sees it fire.
  *
- * The predicate is the one PriceAggregator.js:351/712 already applies at the
- * batch-ingest door; this is that rule made shareable, plus the scalar-type and
- * column-width checks a `String(value)` test cannot make.
+ * The predicate is the one PriceAggregator's two v0 ingest doors apply below
+ * their price-value flag day; this is that rule made shareable, plus the
+ * scalar-type and column-width checks a `String(value)` test cannot make.
+ *
+ * It deliberately does NOT follow that gate up. price_scale_activation.js grades
+ * a value the CHAIN finalized, on the chain's own key; this door grades a peer's
+ * live submission, which carries no block time to resolve a gate against, and the
+ * band and median that read it downstream are hub-local. The width cap below is
+ * what closes the truncation seam on this plane.
  *
  **********************************************************************/
 

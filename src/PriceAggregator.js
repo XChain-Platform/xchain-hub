@@ -34,6 +34,7 @@ const EventEmitter      = require('events');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const eq                = require('./equivocation_header.js');
 const pricePair         = require('./price_pair_activation.js');
+const priceScale        = require('./price_scale_activation.js');
 const priceSigTally     = require('./price_sig_tally_activation.js');
 const swq               = require('./stake_weighted_quorum.js');
 const { PRICE_MAX, PRICE_V1_COINS, PRICE_V1_FIATS,
@@ -346,9 +347,17 @@ class PriceAggregator extends EventEmitter {
         // will reject. If even that blip is unacceptable at arming time, the clean
         // fix is to add block_time to the hub-push payload and key on it here.
         let pairPattern = pricePair.pricePairPattern(timestamp, this.hub && this.hub.network);
+
+        // The price-value flag day (price_scale_activation.js, vendored byte-identically
+        // from the indexer) rides the SAME key as the pair bound above, so the hub can
+        // never grade a price under a rule the chain is not yet applying. At/above it a
+        // price is canonical: no leading zeros, at most 8 decimals, which is what every
+        // producer already emits and what bounds the stored string to 19 characters,
+        // inside the price column. UNARMED on mainnet today.
+        let pricePattern = priceScale.priceValuePattern(timestamp, this.hub && this.hub.network);
         for (let p of roundData.pairs) {
             if (!p || typeof p.pair !== 'string' || !pairPattern.test(p.pair) ||
-                p.price === undefined || p.price === null || !/^[0-9]+(\.[0-9]+)?$/.test(String(p.price)) ||
+                p.price === undefined || p.price === null || !pricePattern.test(String(p.price)) ||
                 // Enforce the consensus PRICE_MAX ceiling at ingest, as constants.js mandates
                 // ("the ingestion layer must reject anything at or above it"); every other
                 // price entry point already does, so the ingest/aggregate bounds cannot drift
@@ -686,6 +695,11 @@ class PriceAggregator extends EventEmitter {
         // batch, because every round in it landed in the same block.
         let pairPattern = pricePair.pricePairPattern(blockTime, this.hub && this.hub.network);
 
+        // The price-value flag day, keyed on the batch's block_time for the same reason
+        // the pair bound is: one pattern for the whole batch, because every round in it
+        // landed in the same block, and no window can straddle this gate.
+        let pricePattern = priceScale.priceValuePattern(blockTime, this.hub && this.hub.network);
+
         // Per-round structure. Rounds must be strictly ascending, unique and inside the
         // declared window (D16); the window is validated for shape, deliberately NOT
         // against the publisher's window-size knob, so validation stays range-agnostic.
@@ -709,7 +723,7 @@ class PriceAggregator extends EventEmitter {
             // single-round push would be refused for.
             for (let p of r.pairs) {
                 if (!p || typeof p.pair !== 'string' || !pairPattern.test(p.pair) ||
-                    p.price === undefined || p.price === null || !/^[0-9]+(\.[0-9]+)?$/.test(String(p.price)) ||
+                    p.price === undefined || p.price === null || !pricePattern.test(String(p.price)) ||
                     !(parseFloat(String(p.price)) > 0) ||
                     !(parseFloat(String(p.price)) < PRICE_MAX)) {
                     return refuse('invalid pairs');
