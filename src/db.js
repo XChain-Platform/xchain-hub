@@ -335,6 +335,56 @@ class Database {
         // never MODIFYs a type, so the DDL edit alone would fix only fresh installs.
         await this._migrateColumnType('governance_proposals', 'voting_start', 'datetime', 'DATETIME NOT NULL');
         await this._migrateColumnType('governance_proposals', 'voting_end', 'datetime', 'DATETIME NOT NULL');
+        // attestation_responses.response_payload / meta hold PROVIDER bytes, and the on-chain
+        // twins they stand in for (attests.response_payload, attests.meta on the indexer) are
+        // utf8mb4. On the table's utf8mb3 tail a 4-byte character fails the mirror INSERT with
+        // errno 1366 under STRICT_TRANS_TABLES, so a body the ATTEST v1 path would have carried
+        // never reaches any indexer and the request it answers expires unresolved.
+        // alterTableForDrift adds a missing column and never restates an existing one, so the
+        // DDL edit in src/sql/attestation_responses.sql alone reaches only fresh installs.
+        await this._migrateColumnCharset('attestation_responses', 'response_payload', 'utf8mb4',
+            'MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci');
+        await this._migrateColumnCharset('attestation_responses', 'meta', 'utf8mb4',
+            'TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci');
+    }
+
+    // Widen a column's character set in place. Idempotent: reads the live
+    // CHARACTER_SET_NAME from information_schema and no-ops once it matches, so a fresh
+    // install (which gets the charset from the CREATE TABLE) and an already-migrated node
+    // both skip it. It reads the positive case rather than comparing against a legacy
+    // spelling because MariaDB 10.6 renamed utf8 to utf8mb3.
+    //
+    // WIDENING ONLY. `columnDef` restates the whole column, so it must name the same type
+    // and nullability the definition file declares; a narrowing here would fail on stored
+    // rows rather than converting them. A widen rewrites no stored value: utf8mb3 is a
+    // strict subset of utf8mb4, and utf8mb4_general_ci orders BMP characters exactly as
+    // utf8_general_ci does.
+    async _migrateColumnCharset(table, column, targetCharset, columnDef){
+        let db = await this.getConnection();
+        try {
+            let rows = await db.query(
+                "SELECT CHARACTER_SET_NAME FROM information_schema.columns " +
+                "WHERE table_schema = ? AND table_name = ? AND column_name = ?",
+                [this.dbName, table, column]
+            );
+            if(!rows[0]) return; // table/column not present yet; CREATE TABLE covers it
+            let liveCharset = String(rows[0].CHARACTER_SET_NAME || '').toLowerCase();
+            if(liveCharset === String(targetCharset).toLowerCase()) return; // already widened
+            await db.query('ALTER TABLE `' + table + '` MODIFY `' + column + '` ' + columnDef);
+            console.log('Migration: widened ' + table + '.' + column + ' ' + liveCharset + ' -> ' + targetCharset);
+        } catch(e){
+            // Swallowed loudly, as _migrateColumnType is and for the same reason: runMigrations
+            // is one sequential pass at startup, and a throw takes the remaining migrations and
+            // the hub boot with it. A narrow column stores every BMP body exactly as it does
+            // now, so booting is the better trade - but the line has to name what stays broken
+            // and the statement that finishes the job.
+            console.error('MIGRATION FAILED: ' + table + '.' + column + ' is still ' + targetCharset +
+                '-incapable. Until it is widened, a provider body carrying a 4-byte character ' +
+                'cannot be stored and the response never reaches an indexer. Run by hand: ' +
+                'ALTER TABLE `' + table + '` MODIFY `' + column + '` ' + columnDef, e);
+        } finally {
+            await db.release();
+        }
     }
 
     // Convert a column to a new type in place. Idempotent: reads the live DATA_TYPE from
