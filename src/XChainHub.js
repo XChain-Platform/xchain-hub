@@ -1549,19 +1549,24 @@ class XChainHub {
 
     // Resolve the latest BTC block index: first hub.db.getChainTip (populated by the
     // indexer's pushChainTip on the network _resolveBtcIndexerUrl picks), then a direct
-    // getlatestblock call for stacks with no tip push. Null when both paths fail.
+    // getlatestblock call for stacks with no tip push. Null when both paths fail, and
+    // null when the direct path only re-serves a height _btcDirectTipAcceptable dates
+    // as frozen.
     async _resolveBtcLatestBlock(){
         // A cross-network configs tree makes this throw. Degrade to the documented null
         // rather than crashing the scheduler tick that called it.
         let network;
         try { network = await this._resolveBtcNetwork(); }
         catch (err) { console.error('XChainHub: cannot resolve BTC latest block:', err.message); return null; }
+        // Held past the block below: a rejected tip is still the only block_time the hub
+        // has, and the direct path is dated against it.
+        let pushedTip = null;
         try {
-            let tip = await this.db.getChainTip('BTC', network);
+            pushedTip = await this.db.getChainTip('BTC', network);
             // Freshness bound on the pushed tip. If the co-located indexer halts,
             // getChainTip serves the same frozen row forever, so rounds would anchor to a
             // stale height. Fall through when the tip is stale or unverifiable.
-            if(tip && tip.blockHeight && this._btcPushedTipFresh(tip)) return tip.blockHeight;
+            if(pushedTip && pushedTip.blockHeight && this._btcPushedTipFresh(pushedTip)) return pushedTip.blockHeight;
         } catch (_) { /* hub db down? fall through */ }
         let url = await this._resolveBtcIndexerUrl();
         if(!url) return null;
@@ -1583,11 +1588,37 @@ class XChainHub {
                     ' exceeds MAX_INDEXER_LAG_BLOCKS (' + maxLag + '); ignoring stale tip');
                 return null;
             }
-            return Number(result.block_index) || null;
+            let directHeight = Number(result.block_index) || null;
+            if(directHeight && !this._btcDirectTipAcceptable(directHeight, pushedTip)) return null;
+            return directHeight;
         } catch (err) {
             console.error('XChainHub: failed to resolve BTC latest block from indexer:', err);
             return null;
         }
+    }
+
+    // Age gate for the DIRECT path, dated against the pushed tip the gate above rejected.
+    // `lag` cannot see a halted chain: a stopped bitcoind freezes the decoder and the
+    // committed tip together, so lag reads 0 while the height never moves.
+    //
+    // The bound is deliberately NOT MAX_TIP_AGE_S. A rejected pushed tip costs one HTTP
+    // call, a rejected direct height returns null and stalls anchoring, so the two gates
+    // price a false reject differently. Bitcoin block gaps are exponential with a 600s
+    // mean, which refuses a live mainnet tip ~13.5% of the time at 1200s and ~6e-6 at
+    // 7200s. A height that BEATS the pushed tip proves the chain moved and is always
+    // taken, so only a height that has not moved can be dated as frozen.
+    _btcDirectTipAcceptable(directHeight, tip){
+        if(!tip || !tip.blockHeight) return true;
+        let blockTime = Number(tip.blockTime);
+        if(!Number.isFinite(blockTime) || blockTime <= 0) return true;
+        if(Number(directHeight) > Number(tip.blockHeight)) return true;
+        let maxAge = Number(process.env.MAX_DIRECT_TIP_AGE_S);
+        if(!Number.isFinite(maxAge) || maxAge <= 0) maxAge = 7200;
+        let ageS = Math.floor(Date.now() / 1000) - blockTime;
+        if(ageS <= maxAge) return true;
+        console.warn('XChainHub: direct BTC tip (height ' + directHeight + ') has not advanced past a tip ' +
+            ageS + 's old, exceeding MAX_DIRECT_TIP_AGE_S (' + maxAge + '); treating the BTC stack as halted');
+        return false;
     }
 
     // Freshness gate for the pushed BTC tip used by path 1 above. setChainTip stores
