@@ -322,17 +322,29 @@ class SpendGuard {
     }
 
     // Fold the saved window back in. Rules, all fail-closed:
-    //   absent file        -> first run; start empty.
-    //   unreadable/corrupt -> assume the window may already be spent (seed CONSUMED),
-    //                         because a broken store must never read as a green light.
-    //   valid              -> prune to the live window and rebuild BOTH ceilings.
+    //   absent, store writable   -> first run; start empty.
+    //   absent, store unwritable -> the file could never have been written, so an
+    //                               empty read is not evidence of a first run.
+    //   unreadable/corrupt       -> assume the window may already be spent (seed
+    //                               CONSUMED), because a broken store must never
+    //                               read as a green light.
+    //   valid                    -> prune to the live window and rebuild BOTH ceilings.
     // A persisted RESERVATION is loaded as a plain spend: the process that could have
     // released it is gone, and over-counting blocks rather than overspends.
     _loadState(){
         let text;
         try { text = fs.readFileSync(this._statePath, 'utf8'); }
         catch(e){
-            if (e && e.code === 'ENOENT') return;             // first run
+            if (e && e.code === 'ENOENT'){
+                // A first run and a store that was never writable raise the same
+                // ENOENT, and only the first has earned a fresh allowance. On a
+                // read-only disk _persist() lands no byte, so without this the
+                // window resets on every restart and the ceiling is unbounded
+                // across them, which is the one shape this file exists to stop.
+                if (this._storeIsWritable()) return;
+                this._seedConsumed('absent, and its directory does not accept writes');
+                return;
+            }
             this._seedConsumed('unreadable (' + (e && e.code ? e.code : 'error') + ')');
             return;
         }
@@ -355,6 +367,29 @@ class SpendGuard {
             console.log(this.label + ': restored ' + this._spends.length + ' spend(s) totalling $' +
                         (this.spentInWindow(now) / 100).toFixed(2) + ' from ' + this._statePath +
                         '; the per-window ceiling survives this restart');
+    }
+
+    // Could _persist() land a byte here? Permission probe only: it creates nothing
+    // and writes nothing, so the write path keeps its single call site and this
+    // stays safe to run during construction.
+    //
+    // Walks to the nearest existing ancestor because _persist() mkdirs the tree it
+    // needs, so an absent directory under a writable parent is still a store this
+    // hub can write. Anything else (no permission, no reachable parent) is not.
+    _storeIsWritable(){
+        let dir = path.dirname(this._statePath);
+        for (let hops = 0; hops < 64; hops++){
+            try {
+                fs.accessSync(dir, fs.constants.W_OK);
+                return true;
+            } catch(e){
+                if (!e || e.code !== 'ENOENT') return false;   // present but refused
+                let parent = path.dirname(dir);
+                if (parent === dir) return false;              // reached the root
+                dir = parent;
+            }
+        }
+        return false;
     }
 
     // Assume the window is spent. Costs at most one window of liveness on a broken
