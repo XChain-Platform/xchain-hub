@@ -525,6 +525,13 @@ class StateAnchorPublisher {
         // flag-day; derived on-chain from the ANCHOR v1 tail at/above it). Identity only,
         // re-SELECTed against our own rows, and evicted in lockstep with the leader map.
         this._observedArchiveCheckpoints = new Map();
+        // Archive MEMBERSHIP observed per (batch_seq, proposer), from a SIGN_REQ body
+        // this hub decompressed, CRC-checked and byte-verified against its own rows for
+        // the co-sign decision. The XANCFIN canonical commits to (batch_seq, txid, match
+        // COUNT) and never to WHICH rows, so _handleFinalized holds the announced id
+        // lists to this set before anything is stamped. Recorded ONLY where the body was
+        // already parsed, so no hub decompresses an extra archive on the p2p path.
+        this._observedArchiveContents = new Map();
 
         // Per-coin indexer JSON-RPC clients (same env -> p2pConfig surface as
         // ReorgHandler / CrossChainCallEngine). Used ONLY for on-chain ANCHOR
@@ -3244,6 +3251,11 @@ class StateAnchorPublisher {
             console.warn('StateAnchorPublisher: proposed archive (batch ' + d.batch_seq + ') diverges from our DB; NOT signing');
             return;
         }
+        // The body byte-matches our own rows, so its membership is the authority on which
+        // rows this batch may later mark archived. Record it BEFORE co-signing: the
+        // signature about to go out is part of what carries this exact archive to DOGE,
+        // and the FINALIZED that closes the round is checked against it.
+        this._recordObservedArchiveContent(Number(d.batch_seq), sender, archive);
 
         this.peerManager.broadcast(XANC_SIGN, {
             batch_seq: Number(d.batch_seq), sig_pubkey: myPubkey, sig: this.identity.sign(canonical)
@@ -3860,6 +3872,32 @@ class StateAnchorPublisher {
                          'diverging from our DB; ignoring back-fill (rows re-archive under a fresh seq)');
             return;
         }
+        // XANC-FINALIZED-MEMBER-1. The check above asks only that each announced row
+        // exist locally at the announced status, and the XANCFIN canonical commits to the
+        // match COUNT, never to WHICH rows. An elected leader can therefore archive a
+        // handful of rows and announce hundreds of other real, correctly-statused ones:
+        // the back-fill stamps archived_status = status on every one, and the pending
+        // selectors (`batch_seq IS NULL OR archived_status <> status`) then skip a
+        // TERMINAL row forever, so rows no archive on DOGE ever carried are suppressed
+        // and unreachable to full-parse recovery. Hold the announcement to the archive
+        // body this hub decompressed and byte-verified for its co-sign. An honest leader
+        // announces exactly round.matchIds, the same array _buildArchive serialized, so
+        // this costs no liveness; a stray row leaves the WHOLE back-fill unstamped and
+        // the rows re-archive under a fresh seq.
+        //
+        // A hub that never parsed a body for this (batch_seq, proposer) abstains, so the
+        // gate binds the co-signers rather than every listener. Closing the residual (the
+        // co-signed body is the one that reached DOGE) needs the archive head's crc32 and
+        // match_count read back from an author-agnostic getarchiveanchor, which today
+        // scopes its lookup to the CALLER's own DOGE address and so cannot answer for a
+        // peer's head.
+        let stray = this._finalizedOutsideObservedArchive(Number(d.batch_seq), sender, d.matches, calls, rewards);
+        if(stray){
+            console.warn('StateAnchorPublisher: FINALIZED (batch ' + d.batch_seq + ') announces ' + stray +
+                         ', which the archive we co-signed for this batch does not carry; ignoring the ' +
+                         'back-fill (rows stay pending and re-archive under a fresh seq)');
+            return;
+        }
         // XANC-FINALIZED-NULLTXID-1. The back-fill below is
         // state-changing and runs before ANY on-chain check: it stamps
         // archived_status = status, and the pending selectors
@@ -4165,12 +4203,74 @@ class StateAnchorPublisher {
             if(oldest === null) break;
             this._observedArchiveLeaders.delete(oldest);
             this._observedArchiveCheckpoints.delete(oldest);
+            this._observedArchiveContents.delete(oldest);
         }
     }
 
     _isObservedArchiveLeader(batchSeq, pubkey){
         let set = this._observedArchiveLeaders.get(batchSeq);
         return !!set && set.has(String(pubkey || '').toLowerCase());
+    }
+
+    // Reward identity shared by the archive body and the FINALIZED reward list. The
+    // archived record carries no round_qualifier, so the key stops at the three fields
+    // both shapes hold.
+    static _archiveRewardKey(r){
+        return String(r.reward_type) + '|' + String(Number(r.round_number)) + '|' +
+               String(r.validator_pubkey).toLowerCase();
+    }
+
+    // Record the member ids of an archive body this hub verified against its own rows
+    // (called from _handleSignReq once _verifyArchiveAgainstLocal passes, so the parse
+    // is already paid for). Keyed by PROPOSER, because the failover ladder legitimately
+    // unlocks several ranks for one batch_seq and each proposes its own body. UNIONED
+    // across proposals from the same proposer: a round that times out stamps nothing, so
+    // _getNextBatchSeq hands the retry the same seq with the rows that accumulated
+    // since, and the FINALIZED that follows names the later set.
+    _recordObservedArchiveContent(batchSeq, pubkey, archive){
+        if(!Number.isFinite(batchSeq) || !pubkey || !archive) return;
+        let byProposer = this._observedArchiveContents.get(batchSeq);
+        if(!byProposer){ byProposer = new Map(); this._observedArchiveContents.set(batchSeq, byProposer); }
+        let key = String(pubkey).toLowerCase();
+        let entry = byProposer.get(key);
+        if(!entry){ entry = { matches: new Set(), calls: new Set(), rewards: new Set() }; byProposer.set(key, entry); }
+        for(let m of (archive.matches || []))
+            if(m && m.match_id != null) entry.matches.add(String(m.match_id));
+        for(let c of (archive.calls || []))
+            if(c && c.call_id != null) entry.calls.add(String(c.call_id) + '|' + String(c.phase));
+        for(let r of (archive.rewards || []))
+            if(r && r.reward_type != null) entry.rewards.add(StateAnchorPublisher._archiveRewardKey(r));
+        // Bounded on its own terms as well as through the leader map's lockstep evict,
+        // so a body recorded for a seq whose leader entry is already gone cannot pin
+        // memory.
+        while(this._observedArchiveContents.size > this._observedArchiveLeadersCap){
+            let oldest = null;
+            for(let k of this._observedArchiveContents.keys()) if(oldest === null || k < oldest) oldest = k;
+            if(oldest === null) break;
+            this._observedArchiveContents.delete(oldest);
+        }
+    }
+
+    // Name the first row a FINALIZED announces that the archive body we co-signed for
+    // this (batch_seq, proposer) does not carry, or null when every announced row is a
+    // member. ABSTAINS (null) when we hold no body for that pair: a hub outside the
+    // snapshot_block signing set never decompresses one, and decompressing on its behalf
+    // would hand every p2p peer a per-message gzip and CPU amplifier for the sake of
+    // local bookkeeping.
+    _finalizedOutsideObservedArchive(batchSeq, sender, matches, calls, rewards){
+        let byProposer = this._observedArchiveContents.get(Number(batchSeq));
+        let entry = byProposer && byProposer.get(String(sender || '').toLowerCase());
+        if(!entry) return null;
+        for(let m of (matches || []))
+            if(m && m.match_id != null && !entry.matches.has(String(m.match_id)))
+                return 'match ' + String(m.match_id).substring(0, 16) + '...';
+        for(let c of (calls || []))
+            if(c && c.call_id != null && !entry.calls.has(String(c.call_id) + '|' + String(c.phase)))
+                return 'call ' + String(c.call_id).substring(0, 16) + '... (' + c.phase + ')';
+        for(let r of (rewards || []))
+            if(r && r.reward_type != null && !entry.rewards.has(StateAnchorPublisher._archiveRewardKey(r)))
+                return 'reward ' + String(r.reward_type) + '/#' + String(r.round_number);
+        return null;
     }
 
     // The checkpoint identity we stashed for this batch_seq's archive round (from
