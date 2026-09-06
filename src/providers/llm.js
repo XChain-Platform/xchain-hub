@@ -56,6 +56,7 @@
 const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { resolveLlmVendorAuth } = require('../lib/hub-credentials');
 const { runClaudePrint } = require('../lib/claude-spawn');
@@ -72,35 +73,83 @@ const _tokenUsage = { inputTokens: 0, outputTokens: 0, calls: 0 };
 
 // Durable spend audit
 //
-// Every billed dispatch used to leave nothing on disk: usage accrued to the
-// in-memory _tokenUsage AFTER a successful response, and the claude_spawn
-// branch recorded nothing at all, so a crash mid-call erased every local trace
-// that a vendor charge had been initiated. This is the same append-only,
-// fsync'd audit AttestationPublisher._recordSpend keeps for BTC
-// fees, applied to the other money path: an `intent` line lands BEFORE the
-// vendor is dialed and a `settle` line after, so an intent with no settle is
-// exactly the operator's post-crash reconciliation list.
+// Every billed dispatch leaves a record on disk, the same append-only, fsync'd
+// audit AttestationPublisher._recordSpend keeps for BTC fees, applied to the
+// other money path: an `intent` line lands BEFORE the vendor is dialed and a
+// `settle` line after, so an intent with no settle is exactly the operator's
+// post-crash reconciliation list. The in-memory _tokenUsage cannot serve as
+// that record: it accrues only AFTER a successful response, and the
+// claude_spawn branch feeds it nothing, so a crash mid-call erases every local
+// trace that a vendor charge was initiated.
 //
 // Best-effort by design, and deliberately NOT fail-closed like the publisher's
 // WAL: an unwritable log there defers a broadcast that stays queued, whereas
 // refusing to dispatch here would turn an audit-sink fault into a federation-
 // wide provider_error, i.e. a wrong on-chain outcome. The write is still
 // ordered before the call, which is what the audit needs.
+//
+// What "best-effort" must NOT mean is "silently nothing": an unwritable primary
+// sink that swallows the dispatch identity outright leaves the aggregate
+// spend-state file, which records a rolling cost window and no per-call id, as
+// the only survivor. So the record falls through two more sinks (tmpdir, then
+// stderr under a stable prefix) and the fault is counted into spendStats().
 const _spendLogPath = () =>
     process.env.LLM_SPEND_LOG_PATH || './data/llm-spend.jsonl';
 
-function _appendSpendRecord(record) {
+// Fallback sink for a primary path that cannot be written. Dispatch stays
+// unconditional (see the block above: refusing to call would turn an audit fault
+// into a wrong on-chain outcome), so the answer to an unwritable log is to keep
+// the record somewhere else rather than to keep it nowhere. The aggregate spend
+// state file cannot stand in: it carries a rolling window of costs and no
+// per-dispatch identity, so an operator reconciling a vendor invoice against it
+// cannot tell which call was which.
+const _fallbackSpendLogPath = () =>
+    process.env.LLM_SPEND_LOG_FALLBACK_PATH || path.join(os.tmpdir(), 'llm-spend.jsonl');
+
+// Counters for the operator surface. A per-call console.warn is invisible once
+// stdout rotates, so a degraded sink needs a standing signal of its own: these
+// ride spendStats(), which /health already reads.
+const _auditFaults = { consecutive: 0, total: 0, toFallback: 0, toStderr: 0, lastError: null };
+
+function _appendLine(file, line) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    let fd = fs.openSync(file, 'a');
     try {
-        fs.mkdirSync(path.dirname(_spendLogPath()), { recursive: true });
-        let fd = fs.openSync(_spendLogPath(), 'a');
-        try {
-            fs.writeSync(fd, JSON.stringify(record) + '\n');
-            fs.fsyncSync(fd);
-        } finally { fs.closeSync(fd); }
+        fs.writeSync(fd, line);
+        fs.fsyncSync(fd);
+    } finally { fs.closeSync(fd); }
+}
+
+function _appendSpendRecord(record) {
+    let line = JSON.stringify(record) + '\n';
+    try {
+        _appendLine(_spendLogPath(), line);
+        _auditFaults.consecutive = 0;
+        return;
     } catch (e) {
+        _auditFaults.consecutive++;
+        _auditFaults.total++;
+        _auditFaults.lastError = e && e.message ? String(e.message) : String(e);
         console.warn('llm: spend-audit write failed (' + _spendLogPath() + '); ' +
-                     'a crash during this call will leave no local record:', e && e.message ? e.message : e);
+                     'falling back to ' + _fallbackSpendLogPath() + ':', _auditFaults.lastError);
     }
+    // Second sink: a different filesystem in most deployments, so the common
+    // faults (missing dir, read-only mount, wrong owner on ./data) do not take
+    // both. The record carries the primary path it could not reach, so a later
+    // reconciliation can tell a fallback line from a native one.
+    try {
+        _appendLine(_fallbackSpendLogPath(), JSON.stringify(
+            Object.assign({}, record, { auditFallbackFrom: _spendLogPath() })) + '\n');
+        _auditFaults.toFallback++;
+        return;
+    } catch (e2) {
+        console.warn('llm: fallback spend-audit write failed (' + _fallbackSpendLogPath() + '):',
+                     e2 && e2.message ? e2.message : e2);
+    }
+    // Last resort: stderr under a stable, greppable prefix, so a log collector
+    // still holds the dispatch identity even with no writable filesystem at all.
+    _auditFaults.toStderr++;
+    console.error('LLM-SPEND-AUDIT ' + line.trim());
 }
 
 // Record the intent to spend, BEFORE dispatch. Returns the record (whose id
@@ -197,8 +246,15 @@ exports.armSpendGuard = (cfg, persist) => {
     return persist ? g.persistTo() : g;
 };
 // Operator/health surface: the live window without reaching into the registry.
-exports.spendStats = (now) => _spendGuard().stats(now);
-exports._resetSpendGuardForTest = () => { _guard = null; _guardCfg = {}; SpendGuard.unregister('llm'); };
+// `audit` rides along so a degraded spend-audit sink is a standing, pollable
+// state rather than a console.warn that scrolls away.
+exports.spendStats = (now) => Object.assign(_spendGuard().stats(now),
+                                            { audit: Object.assign({}, _auditFaults) });
+exports._resetSpendGuardForTest = () => {
+    _guard = null; _guardCfg = {}; SpendGuard.unregister('llm');
+    _auditFaults.consecutive = 0; _auditFaults.total = 0;
+    _auditFaults.toFallback = 0; _auditFaults.toStderr = 0; _auditFaults.lastError = null;
+};
 
 // A refusal to spend, not a vendor failure. Marked distinctly (and NOT as `paused`,
 // which means the operator/governance kill switch) so health and callers can tell a
@@ -368,10 +424,12 @@ function _resolveMaxBudgetUsd() {
 exports._DEFAULT_MAX_BUDGET_USD = DEFAULT_MAX_BUDGET_USD;
 exports._resolveMaxBudgetUsd = _resolveMaxBudgetUsd;
 
-// Map a model id to its vendor. A BLOCK-ANCHORED per-call map wins, then the
-// module-level MODEL_VENDORS overrides, then id-prefix inference. Unknown ids
-// throw at call time (never guess a vendor: sending a prompt to the wrong API
-// leaks it to an unintended third party).
+// Map a model id to its vendor. A BLOCK-ANCHORED per-call map is EXCLUSIVE where
+// one is supplied: resolution reads that map and then id-prefix inference, never
+// the module-level MODEL_VENDORS. An unpinned call keeps the live order
+// (MODEL_VENDORS, then prefix inference). Unknown ids throw at call time (never
+// guess a vendor: sending a prompt to the wrong API leaks it to an unintended
+// third party).
 //
 // `pinned` is the model_vendors map read from the SAME block-anchored
 // additional_config that produced pinnedModel/pinnedJudgeModel. Without it the
@@ -380,13 +438,27 @@ exports._resolveMaxBudgetUsd = _resolveMaxBudgetUsd;
 // plus its model_vendors entry in one block split the round: hubs that had
 // reloaded resolved the vendor, laggards threw and recorded provider_error.
 // Same anchoring rationale as the pinnedModel clamp-avoidance in fetch().
+//
+// The fallthrough to MODEL_VENDORS split the round the OTHER way and had to go:
+// the two maps are the same governance field read at two different anchors, since
+// _setConfig rewrites MODEL_VENDORS on every hotReload. A pinned map that merely
+// lacked the id therefore sent a reloaded hub and a laggard to different vendor
+// endpoints, with different credentials, over one block-anchored request.
+// Exclusivity buys DETERMINISM, not success: an id the anchored map cannot resolve
+// now throws on every hub, which is a uniform provider_error rather than a fork.
 function vendorOfModel(model, pinned) {
     let id = String(model || '');
-    if (pinned && typeof pinned[id] === 'string') return pinned[id];
-    if (MODEL_VENDORS && typeof MODEL_VENDORS[id] === 'string') return MODEL_VENDORS[id];
+    let anchored = !!pinned && typeof pinned === 'object';
+    if (anchored) {
+        if (typeof pinned[id] === 'string') return pinned[id];
+    } else if (MODEL_VENDORS && typeof MODEL_VENDORS[id] === 'string') {
+        return MODEL_VENDORS[id];
+    }
     if (/^claude-/.test(id))                 return 'anthropic';
     if (/^(gpt-|chatgpt-|o[0-9])/.test(id))  return 'openai';
-    throw new Error('llm: cannot infer vendor for model "' + id + '" (add it to additional_config.model_vendors)');
+    throw new Error('llm: cannot infer vendor for model "' + id + '"' + (anchored
+        ? ' from the block-anchored additional_config.model_vendors map'
+        : ' (add it to additional_config.model_vendors)'));
 }
 exports._vendorOfModel = vendorOfModel;
 
@@ -1351,6 +1423,31 @@ function _isTransientStatus(status) {
     return s === 429 || (s >= 500 && s <= 599);
 }
 
+// The HTTP status decides whether a response is a completion at all; the body's
+// SHAPE only says which vendor wrote the error. Both transports must ask the status
+// question, because asking the shape question alone (`json.type === 'error' ||
+// json.error`, or `json.error`) lets a non-2xx carrying neither key through: a
+// gateway's `{"message":"Service unavailable"}` or an infrastructure JSON error page
+// parses clean, resolves as SUCCESS, and degrades downstream to empty text. That is
+// worse than a loud failure on the agree() path, where an empty judge verdict records
+// as `empty_verdict`, which AttestationSpotChecker's TRANSIENT_INCONCLUSIVE does not
+// hold: the outage discards the spot-check with no evidence and never re-judges, while
+// the SAME 503 carrying a vendor error envelope correctly fails over.
+//
+// Returns an error to reject with, or null when the status is a real 2xx. 3xx counts
+// as failure too: https.request does not follow redirects, so a 3xx body is not a
+// completion either.
+function _httpStatusError(res, vendorLabel, json, str) {
+    if (res.statusCode >= 200 && res.statusCode < 300) return null;
+    let detail = (json && json.error && json.error.message) ? json.error.message
+               : (json && typeof json.message === 'string') ? json.message
+               : 'HTTP ' + res.statusCode + ': ' + String(str).substring(0, 200);
+    let err = new Error('llm: ' + vendorLabel + ': ' + detail);
+    err.httpStatus = res.statusCode;
+    err.transient  = _isTransientStatus(res.statusCode);
+    return err;
+}
+
 // Node's https `timeout` option arms an IDLE-socket timer only: it resets on
 // every byte received, so a vendor endpoint (or proxy) that drips bytes
 // slower than the idle window can hold a request open far past the caller's
@@ -1394,6 +1491,11 @@ async function _callAnthropic(apiPath, body, apiKey, options) {
                 let str = Buffer.concat(chunks).toString('utf8');
                 try {
                     let json = JSON.parse(str);
+                    // Status first, body shape second: see _httpStatusError. The
+                    // shape check below still runs for a 2xx carrying an error
+                    // envelope, which vendors do return.
+                    let statusErr = _httpStatusError(res, 'Anthropic API', json, str);
+                    if (statusErr) { safeReject(statusErr); return; }
                     if (json.type === 'error' || json.error) {
                         let msg = (json.error && json.error.message) ? json.error.message : JSON.stringify(json);
                         let err = new Error('llm: Anthropic API: ' + msg);
@@ -1458,6 +1560,11 @@ async function _callOpenAi(apiPath, body, apiKey, options) {
                 let str = Buffer.concat(chunks).toString('utf8');
                 try {
                     let json = JSON.parse(str);
+                    // Status first, body shape second: see _httpStatusError. Same
+                    // rule as the Anthropic branch, since this was the same mistake
+                    // written twice.
+                    let statusErr = _httpStatusError(res, 'OpenAI API', json, str);
+                    if (statusErr) { safeReject(statusErr); return; }
                     if (json.error) {
                         let msg = (json.error && json.error.message) ? json.error.message : JSON.stringify(json);
                         let err = new Error('llm: OpenAI API: ' + msg);

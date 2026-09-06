@@ -452,6 +452,11 @@ class RollcallRound {
             published:    false,       // this hub has spent its per-epoch sweep publish
             selfPublished:false,
             ownSigOnWire: false,       // our own signature rode one of OUR broadcasts
+            // Pubkeys this hub has actually put on the wire for this epoch, marked
+            // per CHUNK rather than per batch. A multi-action publish that fails
+            // half way releases its slot, and without this the retry rebuilds the
+            // whole set and pays a second fee for signatures already broadcast.
+            sent:         new Set(),
             onChainCount: null,        // last observed count from the DOGE read
             txids:        [],
             startedAt:    Date.now(),
@@ -628,6 +633,10 @@ class RollcallRound {
         if(!this._requireBroadcast()) return;
 
         let onChain = await this._onChainSigners(state);
+        // Both branches below also exclude state.sent. Already on the wire from this
+        // hub's own earlier chunks is the same answer as already on chain: the DOGE
+        // read lags indexing by longer than a tick, so without it the retry after a
+        // partial failure re-broadcasts, and re-pays for, every chunk that went out.
         let pairs;
         if(onChain === null){
             // The DOGE read is undecidable. The LEADER publishes anyway: its job
@@ -636,23 +645,22 @@ class RollcallRound {
             // that cannot see the gaps has nothing to add, so it defers to a later
             // tick rather than paying to re-publish what the leader already landed.
             if(state.myRank !== 0) return;
-            pairs = Array.from(state.sigs, ([pubkey, sig]) => ({ pubkey, sig }));
+            pairs = Array.from(state.sigs, ([pubkey, sig]) => ({ pubkey, sig }))
+                        .filter(p => !state.sent.has(p.pubkey));
         } else {
             pairs = Array.from(state.sigs, ([pubkey, sig]) => ({ pubkey, sig }))
-                        .filter(p => !onChain.has(p.pubkey));
+                        .filter(p => !onChain.has(p.pubkey) && !state.sent.has(p.pubkey));
         }
         if(pairs.length === 0) return;
 
         state.published = true;   // one sweep publish per epoch per hub; see below
         let ok = await this._publishPairs(state, myPubkey, pairs, 'sweep');
-        // A definitive pre-send failure releases the slot so a later tick can
-        // retry inside the window. An ambiguous send does NOT: the DOGE node may
-        // have accepted the transaction, and re-broadcasting would burn the fee
-        // twice for a roll call that is already landing.
+        // A definitive failure releases the slot so a later tick can retry inside
+        // the window, and the retry now rebuilds only the pairs that were never
+        // broadcast. An ambiguous send does NOT release: the DOGE node may have
+        // accepted the transaction, and re-broadcasting would burn the fee twice
+        // for a roll call that is already landing.
         if(ok === 'retry') state.published = false;
-        if(ok === 'sent'){
-            for(let p of pairs) if(p.pubkey === myPubkey) state.ownSigOnWire = true;
-        }
     }
 
     async _maybeSelfPublish(state, myPubkey, since){
@@ -676,8 +684,9 @@ class RollcallRound {
     }
 
     // Broadcast one or more ROLLCALL actions carrying `pairs`. Returns 'sent',
-    // 'retry' (a definitive pre-send failure; the caller may release its slot) or
-    // 'held' (blocked or ambiguous; the slot stays claimed).
+    // 'retry' (a definitive failure; the caller may release its slot, and every
+    // chunk that DID go out is recorded in state.sent so the retry rebuilds only
+    // the undelivered tail) or 'held' (ambiguous; the slot stays claimed).
     async _publishPairs(state, myPubkey, pairs, kind){
         let key = kind === 'self' ? (state.epoch + ':self') : String(state.epoch);
         if(this._committed.has(key)){
@@ -707,10 +716,37 @@ class RollcallRound {
 
         let chunks = RollcallRound.chunkPairs(pairs, MAX_PAIRS_PER_ACTION);
 
-        // Durable intent BEFORE the money moves, and the broadcast is GATED on it:
-        // an unwritable audit path must not let a real DOGE fee be spent with no
-        // recoverable trace.
+        // RESERVE one token per chunk, because one chunk is one transaction and one
+        // fee. check() above is a PURE predicate read once for the whole batch, so on
+        // its own an N-chunk roll call spends N fees against a single pre-send answer
+        // and walks straight past the per-window ceiling by N-1. Reservation consumes
+        // the budget in the same synchronous turn, which is the shape spend_guard.js
+        // documents for an awaited send and the one AttestationBatchPublisher
+        // ._broadcastWindow() already uses. check() STAYS: reserve() takes no balance
+        // argument, so dropping it would silently retire the ROLLCALL_MIN_BALANCE
+        // wallet floor.
+        let tokens = [];
+        for(let i = 0; i < chunks.length; i++){
+            let token = this.spendGuard.reserve();
+            if(!token){
+                // Read the reason BEFORE releasing: giving the slots back first
+                // re-opens the very gate that tripped, and the line then names a
+                // ceiling that was never the one in the way.
+                let why = this.spendGuard.noteBlocked();
+                for(let t of tokens) this.spendGuard.release(t);
+                console.warn('RollcallRound: ' + why + ' (epoch ' + state.epoch +
+                             ', ' + kind + ', ' + chunks.length + ' chunk(s)); deferring publish');
+                return 'retry';
+            }
+            tokens.push(token);
+        }
+
+        // Durable intent BEFORE the money moves and AFTER the reservation, and the
+        // broadcast is GATED on it: an unwritable audit path must not let a real DOGE
+        // fee be spent with no recoverable trace, and a batch the ceiling declined
+        // must leave no orphan intent line behind.
         if(!this._recordSpend({ phase: 'intent', epoch: state.epoch, kind, pairs: pairs.length, chunks: chunks.length })){
+            for(let t of tokens) this.spendGuard.release(t);
             console.error('RollcallRound: spend-audit path unwritable at ' + this.spendLogPath +
                           '; deferring the publish for epoch ' + state.epoch +
                           ' rather than spending a DOGE fee with no durable record');
@@ -719,13 +755,45 @@ class RollcallRound {
         this._committed.add(key);
 
         let result = 'sent';
-        for(let chunk of chunks){
+        for(let i = 0; i < chunks.length; i++){
+            // Re-read the operator pause before EVERY chunk. Each chunk is its own
+            // awaited transaction and its own fee, and the pause is an out-of-band
+            // runtime toggle (SpendGuard.pauseCapability from the control RPC), so a
+            // pause landing while chunk i-1 is in flight has to stop the chunks that
+            // have not gone out yet. Neither the pre-loop check() nor the reservations
+            // can see it: both were taken in one earlier synchronous turn. Every
+            // delivered chunk stays in state.sent, so the publish after a resume
+            // rebuilds only the undelivered tail rather than paying twice.
+            if(this.spendGuard.isPaused()){
+                for(let j = i; j < tokens.length; j++) this.spendGuard.release(tokens[j]);
+                // Phase 'failed', not a new 'paused' phase: _loadSpendLog decides
+                // after a restart from these phases, and only 'failed' un-commits an
+                // epoch whose chunks never went out. A phase the loader does not know
+                // leaves the bare 'intent' standing, which would quarantine the epoch
+                // permanently for a hub the operator merely paused and resumed.
+                this._recordSpend({ phase: 'failed', epoch: state.epoch, kind,
+                                    delivered: state.sent.size, remaining: chunks.length - i,
+                                    error: 'operator pause: ' + this.spendGuard.noteBlocked() });
+                console.warn(this.spendGuard.noteBlocked() + ' (epoch ' + state.epoch +
+                             ', ' + kind + '); ' + (chunks.length - i) + ' of ' + chunks.length +
+                             ' chunk(s) not broadcast');
+                this._committed.delete(key);
+                return 'retry';
+            }
+            let chunk = chunks[i];
             let wire = this._buildWire(state.epoch, state.ledgerHash, myPubkey, chunk);
             try {
                 let res = await this._broadcast(wire);
-                this.spendGuard.record();
+                // The reservation IS the spend; record() here would count it twice.
+                this.spendGuard.commit(tokens[i]);
                 let txid = (res && res.txid) ? String(res.txid) : null;
                 if(txid) state.txids.push(txid);
+                // Mark delivery per chunk, not per batch: a later chunk's failure
+                // must not un-send the ones already on the wire.
+                for(let p of chunk){
+                    state.sent.add(p.pubkey);
+                    if(p.pubkey === myPubkey) state.ownSigOnWire = true;
+                }
                 this._recordSpend({ phase: 'sent', epoch: state.epoch, kind, txid, pairs: chunk.length,
                                     rank: state.myRank });
                 console.log('RollcallRound: published epoch=' + state.epoch + ' ' + kind + ' pairs=' + chunk.length +
@@ -734,16 +802,23 @@ class RollcallRound {
                                                 '; the elected leader left these signatures off chain]' : ''));
             } catch(e){
                 if(isAmbiguousSendError(e)){
-                    // The send may have been accepted. Keep the epoch committed
-                    // and say so on disk, so an operator reconciling on chain has
-                    // the epoch without stdout retention.
+                    // The send may have been accepted, so this chunk's reservation is
+                    // a real spend and only the untried chunks give their budget back.
+                    this.spendGuard.commit(tokens[i]);
+                    for(let j = i + 1; j < tokens.length; j++) this.spendGuard.release(tokens[j]);
+                    // Keep the epoch committed and say so on disk, so an operator
+                    // reconciling on chain has the epoch without stdout retention.
                     this._recordSpend({ phase: 'ambiguous', epoch: state.epoch, kind,
                                         error: e && e.message ? String(e.message).slice(0, 200) : String(e) });
                     console.warn('RollcallRound: AMBIGUOUS publish send (epoch ' + state.epoch + ', ' + kind +
                                  '); NOT re-broadcasting to avoid a double spend:', e && e.message ? e.message : e);
                     return 'held';
                 }
-                this._recordSpend({ phase: 'failed', epoch: state.epoch, kind,
+                // Definitive: nothing left this chunk, so it consumes no budget, and
+                // neither do the chunks after it. Keeping them reserved would make a
+                // failed send cost the window an allowance it never spent.
+                for(let j = i; j < tokens.length; j++) this.spendGuard.release(tokens[j]);
+                this._recordSpend({ phase: 'failed', epoch: state.epoch, kind, delivered: state.sent.size,
                                     error: e && e.message ? String(e.message).slice(0, 200) : String(e) });
                 console.warn('RollcallRound: publish failed (epoch ' + state.epoch + ', ' + kind + '):',
                              e && e.message ? e.message : e);

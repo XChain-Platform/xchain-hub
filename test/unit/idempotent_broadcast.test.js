@@ -68,6 +68,30 @@ describe('idempotent-broadcast helper', function () {
             expect(isAmbiguousSendError(Object.assign(
                 new Error('Transaction broadcast failed'), { code: 'ECONNREFUSED' }))).to.equal(false);
         });
+
+        // A multi-phase HUB_SIGNER_MODULE broadcasts its funding tx first and can then be
+        // rejected DEFINITIVELY on the reveal. Every rule above would call that safe to
+        // retry, and the retry re-enters the hook, funds fresh UTXOs and pays twice. The
+        // hook tags the error; the tag outranks every other rule.
+        it('treats a post-funding failure as AMBIGUOUS whatever shape the rejection has', function () {
+            expect(isAmbiguousSendError(Object.assign(
+                new Error('Encoder RPC error: bad-txns-inputs-missingorspent'),
+                { fundsCommitted: true, phase1Txid: 'a'.repeat(64) }))).to.equal(true);
+            expect(isAmbiguousSendError(Object.assign(
+                new Error('Encoder RPC error: no UTXOs available'),
+                { fundsCommitted: true, response: { status: 400 } }))).to.equal(true);
+            expect(isAmbiguousSendError(Object.assign(
+                new Error('connect ECONNREFUSED'),
+                { fundsCommitted: true, code: 'ECONNREFUSED' }))).to.equal(true);
+        });
+        it('leaves an UNTAGGED definitive rejection retryable, so single-phase rails keep their behaviour', function () {
+            expect(isAmbiguousSendError(Object.assign(
+                new Error('Encoder RPC error: bad-txns-inputs-missingorspent'),
+                { fundsCommitted: false }))).to.equal(false);
+            expect(isAmbiguousSendError(
+                new Error('Encoder RPC error: bad-txns-inputs-missingorspent'))).to.equal(false);
+            expect(isAmbiguousSendError({ code: 'ECONNREFUSED' })).to.equal(false);
+        });
     });
 
     describe('AtMostOnce', function () {
@@ -121,20 +145,23 @@ describe('idempotent-broadcast helper', function () {
             expect(guard.spentInWindow()).to.equal(250);
         });
 
-        it('tags an ambiguous send error and does NOT mark the key or record spend', async function () {
+        // An AMBIGUOUS send may already be on the wire with its fee paid, so the window
+        // is CHARGED for it. Releasing would hand the ceiling back an allowance a real
+        // spend consumed, and the next caller would spend past the ceiling.
+        it('tags an ambiguous send error, does NOT mark the key, and CHARGES the window', async function () {
             const guard   = new SpendGuard('BO', {});
             const tracker = new AtMostOnce();
             let err;
             try {
                 await broadcastOnce({
-                    key: 'r1', tracker, guard, ambiguousTag: 'anchorAmbiguousSend',
+                    key: 'r1', tracker, guard, cost: 250, ambiguousTag: 'anchorAmbiguousSend',
                     send: async () => { let e = new Error('socket hang up'); throw e; }
                 });
             } catch (e){ err = e; }
             expect(err).to.be.an('error');
             expect(err.anchorAmbiguousSend).to.equal(true);
             expect(tracker.has('r1')).to.equal(false);   // not marked => a later existence-checked replay may proceed
-            expect(guard.spentInWindow()).to.equal(0);   // no budget consumed by a failed send
+            expect(guard.spentInWindow()).to.equal(250); // the fee may have been paid: fail closed
         });
 
         // The send is AWAITED, so a check()/record() composition lets every concurrent
@@ -157,10 +184,15 @@ describe('idempotent-broadcast helper', function () {
             expect(guard.spentInWindow()).to.equal(100);
         });
 
-        it('hands the reserved budget back when the send throws', async function () {
+        // Only a DEFINITIVE failure frees budget. 'nope' will not do here: the shared
+        // classifier defaults an unrecognised error to ambiguous, so an opaque message
+        // now keeps its reservation and this case has to name a rejection the encoder
+        // is known to have refused before the node saw it.
+        it('hands the reserved budget back when the send fails definitively', async function () {
             const guard = new SpendGuard('BO', { BO_MAX_SPEND_USD_CENTS_PER_WINDOW: 100 });
             try {
-                await broadcastOnce({ key: 'r1', guard, cost: 100, send: async () => { throw new Error('nope'); } });
+                await broadcastOnce({ key: 'r1', guard, cost: 100,
+                    send: async () => { throw new Error('Encoder RPC error: bad-txns-inputs-missingorspent'); } });
             } catch (e){ /* expected */ }
             expect(guard.spentInWindow()).to.equal(0);
             // The freed budget is usable again: a leaked reservation would block this.

@@ -609,6 +609,21 @@ class FullNodeChallengeRound {
         let g = this.spendGuard.check();
         if(!g.ok){ console.warn('FullNodeChallengeRound: ' + g.reason + ' (epoch ' + epoch + '); deferring verdict broadcast'); return; }
 
+        // RESERVE on top of that check: _broadcastVerdict is AWAITED, and the pure
+        // predicate pair check()/record() leaves a window in which every epoch that
+        // crosses quorum inside it reads the same pre-send budget and all of them
+        // spend. The reservation consumes the budget in this synchronous turn, and it
+        // IS the recorded spend, so record() must never also run for it. check() stays
+        // above because reserve() takes no balance argument, so dropping it would
+        // silently retire the wallet floor. Same shape RollcallRound._publishPairs and
+        // lib/idempotent_broadcast.broadcastOnce use.
+        let spendToken = this.spendGuard.reserve();
+        if(!spendToken){
+            console.warn('FullNodeChallengeRound: ' + this.spendGuard.noteBlocked() +
+                         ' (epoch ' + epoch + '); deferring verdict broadcast');
+            return;
+        }
+
         // Optimistic finalize lock: _maybeFinalize runs on EVERY incoming XNODE_SIGN
         // (and from _closeCollection), so without claiming the round BEFORE the async
         // broadcast, two sigs that cross quorum within the broadcast's await window both
@@ -626,6 +641,9 @@ class FullNodeChallengeRound {
         if(!this._recordSpend({ phase: 'intent', epoch, challengeId: state.challengeId,
                                 pass: state.passList.length, sigs: state.sigs.size, quorum })){
             state.finalized = false;
+            // Nothing was broadcast, so the reservation goes back; keeping it would
+            // charge the window for a verdict this tick deliberately did not send.
+            this.spendGuard.release(spendToken);
             console.error('FullNodeChallengeRound: spend-audit path unwritable at ' + this.spendLogPath +
                           '; deferring the verdict broadcast for epoch ' + epoch +
                           ' rather than spending a BTC fee with no durable record');
@@ -634,7 +652,7 @@ class FullNodeChallengeRound {
 
         try {
             let res = await this._broadcastVerdict(wire);
-            this.spendGuard.record();   // a fresh verdict tx spent a BTC fee
+            this.spendGuard.commit(spendToken);   // the reservation IS the BTC fee charged
             state.txid = res && res.txid ? res.txid : null;
             // Mirror the reload rule in-process, so a spend is gated identically
             // whether the log was read at start() or written this run.
@@ -668,11 +686,19 @@ class FullNodeChallengeRound {
                 // a fee, and the round is deliberately left claimed. Say so on disk, so
                 // the operator reconciling on-chain has the challenge_id without stdout.
                 this._committedEpochs.add(epoch);   // a fee may have been paid
+                // COMMIT, not release: the round is left claimed precisely because the
+                // verdict may be on the wire, so its fee must be charged to the window.
+                // Releasing here is what let a later epoch spend an allowance this
+                // possibly-paid fee had already consumed.
+                this.spendGuard.commit(spendToken);
                 this._recordSpend({ phase: 'ambiguous', epoch, challengeId: state.challengeId,
                                     error: e && e.message ? String(e.message).slice(0, 200) : String(e) });
                 console.warn('FullNodeChallengeRound: AMBIGUOUS verdict send (epoch ' + epoch +
                              '); NOT re-broadcasting to avoid a double spend:', e && e.message ? e.message : e);
             } else {
+                // Definitive: nothing left this process, so the budget goes back and a
+                // later tick can retry inside the same window.
+                this.spendGuard.release(spendToken);
                 this._recordSpend({ phase: 'failed', epoch, challengeId: state.challengeId,
                                     error: e && e.message ? String(e.message).slice(0, 200) : String(e) });
                 state.finalized = false;   // definitive failure; unlock so a later sig/tick retries

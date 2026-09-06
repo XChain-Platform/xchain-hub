@@ -166,11 +166,63 @@ describe('CrossChainDexEngine', function () {
             expect(eng.committed.get('LTC:1')).to.deep.equal({ give: '40', get: '20' });
         });
 
-        it('handles DB error without throwing (table may not exist)', async function () {
+        // A missing table is the ONE benign rebuild failure: the schema has not been
+        // created, so an empty ledger is genuinely correct and the hub may match.
+        it('treats a missing table as an empty ledger and stays ready', async function () {
             let hub = makeDexHub();
-            hub.db.doQuery = sinon.stub().rejects(new Error('no such table'));
+            hub.db.doQuery = sinon.stub().rejects(
+                Object.assign(new Error("Table 'xchain.cross_chain_matches' doesn't exist"),
+                              { errno: 1146, code: 'ER_NO_SUCH_TABLE' }));
             let eng = new CrossChainDexEngine(hub);
-            await eng._rebuildCommitted(); // must not throw
+            expect(await eng._rebuildCommitted()).to.equal(true);
+            expect(eng.committed.size).to.equal(0);
+            expect(eng._committedReady).to.equal(true);
+        });
+
+        // Every other failure must NOT resolve with ZERO reservations: start() would then
+        // match against an empty ledger and re-offer escrow that finalized matches hold.
+        it('keeps the previous ledger and goes NOT ready on any other DB failure', async function () {
+            let hub = makeDexHub();
+            hub.db.doQuery = sinon.stub().rejects(
+                Object.assign(new Error('Lock wait timeout exceeded'), { errno: 1205, code: 'ER_LOCK_WAIT_TIMEOUT' }));
+            let eng = new CrossChainDexEngine(hub);
+            eng.committed.set('LTC:1', { give: '40', get: '20' });
+
+            expect(await eng._rebuildCommitted()).to.equal(false);
+            expect(eng._committedReady, 'a failed rebuild must not leave the hub matching').to.equal(false);
+            expect(eng.committed.get('LTC:1'), 'the prior reservations must survive').to.deep.equal({ give: '40', get: '20' });
+        });
+
+        it('proposes nothing and refuses to co-sign while the ledger is not ready', async function () {
+            let hub = makeDexHub();
+            hub.db.doQuery = sinon.stub().rejects(Object.assign(new Error('gone'), { errno: 1205 }));
+            let eng = new CrossChainDexEngine(hub);
+            eng.indexers.BTC.url = 'http://btc';        // without this the fetch is unreachable anyway
+            let fetch = sinon.stub(eng, '_fetchOpenOffers').resolves({ network: 'regtest', orders: [] });
+            await eng._rebuildCommitted();
+
+            await eng._discoverAndMatch();
+            expect(fetch.called, 'a not-ready tick must not even read the books').to.equal(false);
+            expect(await eng.validateProposedMatch({ a_chain: 'LTC', b_chain: 'DOGE' })).to.equal(false);
+        });
+
+        it('resumes matching once a later rebuild succeeds', async function () {
+            let hub = makeDexHub();
+            let q = sinon.stub();
+            q.onFirstCall().rejects(Object.assign(new Error('gone'), { errno: 1205 }));
+            q.resolves([{ a_chain: 'DOGE', a_action_index: 7, a_amount: '20', b_chain: 'LTC', b_action_index: 1, b_amount: '40' }]);
+            hub.db.doQuery = q;
+            let eng = new CrossChainDexEngine(hub);
+            eng.indexers.BTC.url = 'http://btc';        // same reachability guard as above
+            let fetch = sinon.stub(eng, '_fetchOpenOffers').resolves({ network: 'regtest', orders: [] });
+
+            await eng._rebuildCommitted();
+            expect(eng._committedReady).to.equal(false);
+
+            await eng._discoverAndMatch();          // retries the rebuild on the poll tick
+            expect(eng._committedReady).to.equal(true);
+            expect(eng.committed.get('DOGE:7')).to.deep.equal({ give: '20', get: '40' });
+            expect(fetch.called, 'the recovered tick goes on to read the books').to.equal(true);
         });
     });
 
@@ -1009,6 +1061,70 @@ describe('CrossChainDexEngine', function () {
 
             expect(insert.calledOnce, 'must insert the match row').to.be.true;
             expect(commit.calledWith(row, +1), 'must apply the committed-ledger fill').to.be.true;
+        });
+
+        // The durable fill must be accounted BEFORE any fallible delivery step. A mirror
+        // living inside _insertMatchRow, between the INSERT and its return, lets a failed
+        // re-read throw past `if(inserted) this._applyCommit(row, +1)` and leaves the DB
+        // holding a finalized fill the in-memory reservation ledger does not know about.
+        it('credits the ledger and releases the round even when the mirror read fails', async function () {
+            let broadcaster = { broadcastRow: sinon.stub(), dropAllForResync: sinon.stub() };
+            let hub = makeDexHub({ hubDbBroadcaster: broadcaster });
+            let q = sinon.stub();
+            q.onFirstCall().resolves({ affectedRows: 1 });          // the INSERT: durable
+            q.rejects(new Error('connection lost'));                // the mirror re-read
+            hub.db.doQuery = q;
+            let eng = new CrossChainDexEngine(hub);
+            eng.broadcaster = broadcaster;
+            sinon.stub(eng, '_persistCapabilitySnapshot').resolves(3);
+            let commit = sinon.stub(eng, '_applyCommit');
+            let row = finalizeRow();
+            eng._inflight.add(row.match_id);
+
+            await eng._writeFinalizedMatch({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
+
+            expect(commit.calledWith(row, +1), 'the durable fill must still reach the ledger').to.be.true;
+            expect(eng._inflight.has(row.match_id), 'the in-flight slot must be released').to.be.false;
+            expect(broadcaster.dropAllForResync.calledOnce, 'an undeliverable row must force a resync').to.be.true;
+        });
+
+        it('mirrors the committed row on the happy path', async function () {
+            let broadcaster = { broadcastRow: sinon.stub(), dropAllForResync: sinon.stub() };
+            let hub = makeDexHub({ hubDbBroadcaster: broadcaster });
+            let q = sinon.stub();
+            q.onFirstCall().resolves({ affectedRows: 1 });
+            q.resolves([{ id: 9, match_id: 'f'.repeat(64) }]);
+            hub.db.doQuery = q;
+            let eng = new CrossChainDexEngine(hub);
+            eng.broadcaster = broadcaster;
+            sinon.stub(eng, '_persistCapabilitySnapshot').resolves(3);
+            sinon.stub(eng, '_applyCommit');
+
+            await eng._writeFinalizedMatch({ row: finalizeRow(), signatures: [] });
+
+            expect(broadcaster.broadcastRow.calledOnce).to.be.true;
+            expect(broadcaster.broadcastRow.firstCall.args[0].table).to.equal('cross_chain_matches');
+            expect(broadcaster.dropAllForResync.called).to.be.false;
+        });
+
+        // A write that throws means nothing was committed here, so the round must be
+        // released for re-propose rather than staying in-flight and retired in consensus.
+        it('defers the match when the row write itself throws', async function () {
+            let hub = makeDexHub();
+            hub.db.doQuery = sinon.stub().resolves({ affectedRows: 1 });
+            let eng = new CrossChainDexEngine(hub);
+            sinon.stub(eng, '_persistCapabilitySnapshot').resolves(3);
+            sinon.stub(eng, '_insertMatchRow').rejects(new Error('deadlock'));
+            let commit = sinon.stub(eng, '_applyCommit');
+            let forget = sinon.stub(eng.consensus, 'forgetFinalized');
+            let row = finalizeRow();
+            eng._inflight.add(row.match_id);
+
+            await eng._writeFinalizedMatch({ row, signatures: [] });
+
+            expect(commit.called, 'nothing was written, so nothing may be committed').to.be.false;
+            expect(eng._inflight.has(row.match_id)).to.be.false;
+            expect(forget.calledWith(row.match_id), 'the match must be re-proposable').to.be.true;
         });
     });
 

@@ -30,6 +30,7 @@ const XchainPriceSource = require('./XchainPriceSource.js');
 const { isXchainPriceActive, roundStartSeconds } = require('./xchain_price_activation.js');
 const { isAdmissibleSigner, provenPubkey } = require('./lib/chain_signer_admission.js');
 const { roundBand, describeImplausibleRound } = require('./lib/oracle_round_band.js');
+const { canonicalPrice } = require('./lib/canonical_price.js');
 const { PRICE_MAX, DEFAULT_ORACLE_ROUND_INTERVAL_MS,
         DEFAULT_ORACLE_SUBMISSION_WINDOW_MS, DERIVED_PAIRS } = require('./constants.js');
 
@@ -975,11 +976,24 @@ class OracleRound {
 
         // Validate individual prices: filter to positive finite values within bounds
         // AND to the canonical pair whitelist (reject fabricated/novel coin pairs).
-        let validPrices = prices.filter(p => {
-            if (!p || !this.canonicalPairs.has(p.coinPair)) return false;
-            let val = parseFloat(p.price);
-            return Number.isFinite(val) && val > 0 && val < this.priceMax;
-        });
+        //
+        // The spelling is checked before the bounds, and the CANONICAL spelling is
+        // what the entry carries onward. parseFloat alone is prefix-tolerant, so a
+        // peer's '100junk' admitted as 100 and was then kept verbatim: it reached
+        // the round's submission map, the trimmed median, and the oracle_submissions
+        // audit row, where bcmath reads it as 0 (bcnum coerces a non-numeric). Same
+        // value, two readings. lib/canonical_price.js carries the full argument.
+        let validPrices = [];
+        for (let p of prices) {
+            if (!p || !this.canonicalPairs.has(p.coinPair)) continue;
+            let canon = canonicalPrice(p.price);
+            if (canon === null) continue;
+            let val = parseFloat(canon);
+            if (!(Number.isFinite(val) && val > 0 && val < this.priceMax)) continue;
+            // Rebuild only when the spelling actually differed, so an honest
+            // submission's entry stays the object every other field came from.
+            validPrices.push(canon === p.price ? p : Object.assign({}, p, { price: canon }));
+        }
         // Surface both drop paths (item ce5a2d5d): the sibling drops at lines 531/545
         // already log, this filter was the one silent gap. A partial drop masks a peer
         // degrading pair coverage; a zero-valid drop masks the true cause of a

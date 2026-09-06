@@ -139,8 +139,8 @@ const MAX_ACTION_DATA_LENGTH = 8192;
 // (xchain-encoder/src/validator.js), so compiled size IS raw text + 3.
 const OP_RETURN_PUSH_OVERHEAD = 3;
 // The byte budget a v0 bundle's raw text must stay within (D10). Overflow is SPLIT
-// chain-ascending, never dropped; a single section that cannot fit even with a
-// zero-signature tail is refused loudly and counted (bundlesOversize).
+// chain-ascending, never dropped; a single section that cannot fit with the attestation
+// tail its bundle will carry is refused loudly and counted (bundlesOversize).
 const ANCHOR_BUNDLE_MAX_BYTES = MAX_ACTION_DATA_LENGTH - OP_RETURN_PUSH_OVERHEAD;   // 8189
 // Wire cost of one (PUBKEY, SIG) pair: '|' + 64-hex pubkey + '|' + 128-hex Ed25519
 // signature. Fixed width, which is what lets the split arithmetic size an attestation
@@ -183,6 +183,21 @@ const CALL_KEYS = ['id', 'call_id', 'phase', 'snapshot_block', 'network',
     'target_chain', 'target_contract_index', 'method', 'params_json',
     'gas_limit', 'cross_hops', 'effective_time', 'finalizing_view', 'result_status',
     'return_payload_b64', 'validator_signatures', 'status'];
+
+// Parse an RFC 7231 Retry-After value to milliseconds, or null when absent or
+// unparseable. Both forms are in play: the encoder's per-IP limiter sends
+// delta-seconds and a proxy in front of it may rewrite that to an HTTP-date.
+// A past date yields 0 (retry now), never a negative wait.
+function parseRetryAfterMs(raw){
+    if(raw === null || raw === undefined) return null;
+    let value = Array.isArray(raw) ? raw[0] : raw;
+    let text = String(value).trim();
+    if(text === '') return null;
+    if(/^\d+$/.test(text)) return Number(text) * 1000;
+    let at = Date.parse(text);
+    if(Number.isNaN(at)) return null;
+    return Math.max(0, at - Date.now());
+}
 
 class StateAnchorPublisher {
 
@@ -239,6 +254,17 @@ class StateAnchorPublisher {
         this.chunkMaxBytes = parseInt(process.env.ANCHOR_CHUNK_MAX_BYTES  || cfg.ANCHOR_CHUNK_MAX_BYTES  || '6000');
         this.roundTimeoutMs = parseInt(process.env.ANCHOR_ROUND_TIMEOUT_MS || cfg.ANCHOR_ROUND_TIMEOUT_MS || '120000');
         this.chunkRetryDelayMs = parseInt(process.env.ANCHOR_CHUNK_RETRY_MS || cfg.ANCHOR_CHUNK_RETRY_MS || '2500');
+        // Encoder rate-limit (429) waits, which are NOT the transient-failure retry
+        // above. The encoder sheds two different ways and both answer 429 + a
+        // Retry-After the caller should obey rather than guess: the per-IP limiter
+        // (xchain-encoder api.js, 60s window) sends a window-length Retry-After, and
+        // the concurrency gate sends Retry-After: 1. A flat chunkRetryDelayMs spends
+        // the whole 5-attempt budget in ~10s inside a 60s window while adding load to
+        // an already-shedding replica. rateLimitMaxWaitMs caps one honoured wait;
+        // rateLimitMaxWaits caps how many a single broadcast may take before the
+        // anchor defers to a later flush instead of stalling this one.
+        this.rateLimitMaxWaitMs = parseInt(process.env.ANCHOR_RATELIMIT_MAX_WAIT_MS || cfg.ANCHOR_RATELIMIT_MAX_WAIT_MS || '60000');
+        this.rateLimitMaxWaits  = parseInt(process.env.ANCHOR_RATELIMIT_MAX_WAITS   || cfg.ANCHOR_RATELIMIT_MAX_WAITS   || '3');
         // Ambiguous-send existence poll: how long to wait for a maybe-
         // accepted anchor to reach the indexer's mined view before deferring.
         this.ambiguousPollAttempts = parseInt(process.env.ANCHOR_AMBIGUOUS_POLL_ATTEMPTS || cfg.ANCHOR_AMBIGUOUS_POLL_ATTEMPTS || '3');
@@ -407,6 +433,14 @@ class StateAnchorPublisher {
         this.getBalanceFn = null;
 
         this._archiveRound     = null;  // leader-side archive signing round (one at a time)
+        // The round whose _publishArchive is IN FLIGHT. _archiveRound covers only the
+        // signature-collection phase and is cleared the moment quorum is met, which leaves
+        // the whole publish unguarded: quorum can arrive on a peer message (_handleSign),
+        // outside flush()'s _flushing mutex, and _publishArchive does not arm its durable
+        // dedupe marker (_recordArchiveIntent) until AFTER the publisher-attestation round,
+        // so a timer flush in that window rebuilds the same still-pending rows and spends
+        // DOGE a second time. This field covers quorum-to-return.
+        this._archivePublishing = null;
         this._attestRound        = null;  // leader-side publisher-attestation round (one at a time)
         this._archiveAttestRound = null;  // leader-side ARCHIVE publisher-attestation round (one at a time)
         this._pendingMatches   = 0;     // size trigger; DB is the source of truth
@@ -738,6 +772,9 @@ class StateAnchorPublisher {
         }
         if(this._archiveRound && this._archiveRound.timer) clearTimeout(this._archiveRound.timer);
         this._archiveRound = null;
+        // A publish in flight at teardown cannot be waited on here, but leaving the guard
+        // set would refuse every round after a restart of the publisher on this instance.
+        this._archivePublishing = null;
         if(this._attestRound && this._attestRound.timer) clearTimeout(this._attestRound.timer);
         if(this._attestRound && !this._attestRound.done && this._attestRound.resolve)
             this._attestRound.resolve({ met: false, sigs: [] });   // unblock any awaiting publish
@@ -1043,20 +1080,27 @@ class StateAnchorPublisher {
             }
             let me = this.identity ? this.identity.getPubkeyHex().toLowerCase() : null;
             // Split BEFORE electing, so each bundle the split produces runs its own
-            // election at its own SNAPSHOT_BLOCK. Sizing uses the FULL oracle_publish
-            // set as the attestation tail, which is the upper bound on what the round
-            // can return, so a bundle sized here can never overflow once signed.
-            let split = this._splitBundle(sections, me, eligible.length);
+            // election at its own SNAPSHOT_BLOCK (_publishBundle re-resolves the set there).
+            // Sizing uses the max-height oracle_publish set as the attestation tail: exact
+            // for an unsplit bundle, whose block IS this one, and a close estimate for a
+            // split group at an older block, where the set of that height sizes the round.
+            // Size the tail the bundle will ACTUALLY carry. Below the anchor-reward
+            // flag-day _publishBundle attaches none at all, so charging a tail there would
+            // refuse sections that anchor fine today; at/above it an unmet attestation
+            // quorum DEFERS rather than degrading to a count-0 wire, so the tail is real.
+            let attestTail = ar.isAnchorRewardActive(snapshotBlock, network) ? eligible.length : 0;
+            let split = this._splitBundle(sections, me, attestTail);
             for(let refused of split.oversize){
                 this._bundlesOversize++;
                 console.error('StateAnchorPublisher: REFUSING to anchor ' + refused.chain + '/' + network +
                               ' @ ' + refused.block_index + ': the section alone is ' + refused.bytes +
-                              ' bytes, past the ' + ANCHOR_BUNDLE_MAX_BYTES + '-byte budget even with a ' +
-                              'zero-signature tail. The decoder DROPS an oversize action silently, so this ' +
-                              'checkpoint stays off chain until the federation signer count comes down');
+                              ' bytes at ' + attestTail + ' attesting signer(s), past the ' +
+                              ANCHOR_BUNDLE_MAX_BYTES + '-byte budget. The decoder DROPS an oversize ' +
+                              'action silently, so this checkpoint stays off chain until the federation ' +
+                              'signer count comes down');
             }
             for(let group of split.bundles)
-                await this._publishBundle(signer, network, group, btcBlock, failoverOnly, eligible, anchored, skipped);
+                await this._publishBundle(signer, network, group, btcBlock, failoverOnly, anchored, skipped);
         }
 
         // One line per LEADER flush (daily, startup, size-trigger, anchorflush) when
@@ -1075,10 +1119,31 @@ class StateAnchorPublisher {
     // budget can hand it several bundles for one network in one flush, each electing
     // independently. Never throws past a mid-flush deferral; every other failure is
     // logged and leaves the sections pending for the next flush.
-    async _publishBundle(signer, network, group, btcBlock, failoverOnly, eligible, anchored, skipped){
+    async _publishBundle(signer, network, group, btcBlock, failoverOnly, anchored, skipped){
         let chains = group.map(s => String(s.chain)).join(',');
         try {
             let snapshotBlock = group.reduce((m, s) => Math.max(m, Number(s.snapshot_block)), 0);
+            // Elect over the oracle_publish set at THIS bundle's own snapshot block, never
+            // the caller's network-wide MAX. A byte-budget split can leave a lagging chain's
+            // sections in a group whose MAX is older, and BOTH follower verifiers resolve the
+            // set at the group's own block (_handleAttestSignReq, the BUNDLE_DONE gate), as
+            // does the indexer when it verifies the anchor. Ranking the leader over a
+            // different population than every verifier is a divergence, not a preference:
+            // the attest round refuses to co-sign, BUNDLE_DONE is rejected, and an anchor
+            // that does land names a PUBLISHER outside the set the reward derives over. The
+            // caller's max-height set keeps its two jobs (the pre-split fail-closed gate and
+            // the split's attestation-tail sizing) and is deliberately not passed down here.
+            let eligible;
+            try { eligible = await this._getActiveOraclePublishPubkeys(snapshotBlock); }
+            catch(_e){ eligible = []; }
+            // Fail closed per bundle, the twin of the caller's gate: an unresolved set is no
+            // licence for every hub to anchor independently. Defer rather than borrow a set
+            // resolved at another height.
+            if(!eligible || eligible.length === 0){
+                console.warn('StateAnchorPublisher: bundle ' + chains + '/' + network + ' @ ' + snapshotBlock +
+                             ' deferred: empty oracle_publish set at the bundle\'s own snapshot block (fail closed)');
+                return;
+            }
             let order = StateAnchorPublisher.hashOrder(
                 this._bundleElectionKey({ network: network, snapshot_block: snapshotBlock }), eligible);
             // Bounded by CHECKPOINT_INTERVAL_BLOCKS * ANCHOR_CHECKPOINT_EVERY_N (6 at the
@@ -1168,6 +1233,23 @@ class StateAnchorPublisher {
                 }
             }
             let payload = this._buildV7Payload(group, me, attestSigs);
+            // Last byte-budget gate, on the payload that will actually be signed and sent.
+            // _splitBundle sizes an ESTIMATED tail before the attestation round runs, and
+            // after a split it estimates at the caller's network-wide oracle_publish set
+            // rather than this group's own block, so the estimate can come in low.
+            // Downstream the encoder answers an oversize action with a RangeError that
+            // _broadcastWithRetry burns its whole retry budget on, after the anchor
+            // intents are already recorded and then withdrawn. Refuse here instead:
+            // counted, loud, and ahead of the intent loop, with the rows left pending.
+            let payloadBytes = Buffer.byteLength(payload, 'utf8');
+            if(payloadBytes > ANCHOR_BUNDLE_MAX_BYTES){
+                this._bundlesOversize++;
+                console.error('StateAnchorPublisher: v0 bundle ' + chains + '/' + network + ' @ ' + snapshotBlock +
+                              ' builds to ' + payloadBytes + ' bytes with ' + attestSigs.length +
+                              ' attesting signer(s), past the ' + ANCHOR_BUNDLE_MAX_BYTES + '-byte budget; ' +
+                              'NOT broadcasting (nothing recorded, the rows stay pending for the next cycle)');
+                return;
+            }
 
             let broadcaster = signer && signer.broadcastFn
                 ? signer.broadcastFn : ((p) => this._defaultBroadcast(p, signer));
@@ -1709,12 +1791,18 @@ class StateAnchorPublisher {
     // checkpoint is invisible fleet-wide. Returns { bundles, oversize }:
     //   bundles  - section groups, each of which fits with `attestSigCount` attesting
     //              signers, in chain order;
-    //   oversize - sections REFUSED because one alone exceeds the budget even with a
-    //              zero-signature tail. The caller counts them (bundlesOversize) and says
-    //              so loudly; nothing is sent.
-    // A section that fits alone with a zero-signature tail but not with the full
-    // attestation tail rides as its own bundle and takes the degraded ATTEST_SIG_COUNT 0
-    // path §2.5 already provides, because a failed attestation must never block an anchor.
+    //   oversize - sections REFUSED because one alone exceeds the budget with that SAME
+    //              tail. The caller counts them (bundlesOversize) and says so loudly;
+    //              nothing is sent.
+    // Both checks size the same tail deliberately. Sizing the lone-section refusal at a
+    // zero tail admitted a section that only fits empty-tailed: the splitter passed it,
+    // the attestation round filled the tail, and the oversize payload died at the
+    // encoder's RangeError instead of being refused here - a checkpoint silently off
+    // chain, with bundlesOversize still reading 0. That asymmetry rode on a degraded
+    // ATTEST_SIG_COUNT 0 fallback that no longer exists: _publishBundle DEFERS an unmet
+    // publisher-attestation quorum, because the indexer's v0 parser rejects a count-0
+    // bundle outright. The caller passes 0 only below the anchor-reward flag-day, where
+    // the payload genuinely carries no tail.
     _splitBundle(sections, publisher, attestSigCount){
         let ordered = (sections || []).slice().sort((a, b) => {
             let x = String(a.chain), y = String(b.chain);
@@ -1722,7 +1810,7 @@ class StateAnchorPublisher {
         });
         let bundles = [], oversize = [], current = [];
         for(let s of ordered){
-            let alone = this._v7Bytes([s], publisher, 0);
+            let alone = this._v7Bytes([s], publisher, attestSigCount);
             if(alone > ANCHOR_BUNDLE_MAX_BYTES){
                 oversize.push({ chain: String(s.chain), block_index: Number(s.block_index), bytes: alone });
                 continue;
@@ -2059,11 +2147,29 @@ class StateAnchorPublisher {
                 validators: roundValidators,
                 signatures, done: false, timer: null
             };
+            // Settle whatever this round displaces. The timer below is guarded on
+            // `this._archiveAttestRound === round`, so a displaced round's timer no-ops
+            // and _checkArchiveAttestQuorum only ever looks at the live field: without
+            // this, the _publishArchive awaiting the displaced round waits forever. Same
+            // shape as the stop() teardown. The archive leg is the reachable one: the v0
+            // twin's caller runs only inside flush(), which _flushing serializes.
+            let displaced = this._archiveAttestRound;
+            if(displaced && !displaced.done){
+                displaced.done = true;
+                if(displaced.timer) clearTimeout(displaced.timer);
+                console.warn('StateAnchorPublisher: archive publisher-attestation round (batch ' +
+                             displaced.batchSeq + ') displaced by batch ' + batchSeq +
+                             '; settling it unattested so its publish is not stranded');
+                if(displaced.resolve) displaced.resolve({ met: false, sigs: [] });
+            }
             this._archiveAttestRound = round;
             round.timer = setTimeout(() => {
-                if(this._archiveAttestRound === round && !round.done){
+                // Fire on !round.done alone. A round that has been displaced is already
+                // marked done above, so the identity check only ever cost the round that
+                // still needed settling.
+                if(!round.done){
                     round.done = true;
-                    this._archiveAttestRound = null;
+                    if(this._archiveAttestRound === round) this._archiveAttestRound = null;
                     console.warn('StateAnchorPublisher: archive publisher-attestation round (batch ' + batchSeq +
                                  ') timed out at ' + round.signatures.size + '/' + quorum +
                                  ' sigs; ATTEST_SIG_COUNT 0 fallback');
@@ -2157,7 +2263,9 @@ class StateAnchorPublisher {
     // publish; on a static regtest tip the same leader won forever). Returns
     // the flush summary's archive status.
     async _startArchiveRound(signer, electionBlock, failoverOnly){
-        if(this._archiveRound) return 'round_pending';                       // one at a time
+        // One at a time across BOTH phases: a round collecting signatures, and a round
+        // whose publish is already in flight (see _archivePublishing).
+        if(this._archiveRound || this._archivePublishing) return 'round_pending';
 
         // Fail closed on an unresolved BTC tip. flush() passes whatever
         // hub._resolveBtcLatestBlock() returned, and that is null whenever the pushed tip
@@ -2434,7 +2542,14 @@ class StateAnchorPublisher {
         if(snapCount <= 1){                                                   // single-node: self-sign suffices
             // A held publish never archived anything, so the pending counter must NOT be
             // cleared: the rows really are still pending and the next flush re-checks.
-            if((await this._publishArchive(round)) === 'intent_held') return 'intent_held';
+            let result;
+            this._archivePublishing = round;
+            try {
+                result = await this._publishArchive(round);
+            } finally {
+                this._archivePublishing = null;
+            }
+            if(result === 'intent_held') return 'intent_held';
             this._pendingMatches = 0;
             return 'published';
         }
@@ -3433,10 +3548,21 @@ class StateAnchorPublisher {
         if(!met) return;
         round.done = true;
         if(round.timer){ clearTimeout(round.timer); round.timer = null; }
+        // Hand the guard over BEFORE releasing _archiveRound, so no window exists in
+        // which neither field is set. This runs from _handleSign, outside flush()'s
+        // mutex, and the publish below awaits a peer round wide enough for several
+        // flush ticks to fire inside it.
+        this._archivePublishing = round;
         this._archiveRound = null;
         // Same rule as the single-node path: a round held by a surviving broadcast
         // intent published nothing, so the pending counter stays as it was.
-        if((await this._publishArchive(round)) !== 'intent_held') this._pendingMatches = 0;
+        let result;
+        try {
+            result = await this._publishArchive(round);
+        } finally {
+            this._archivePublishing = null;
+        }
+        if(result !== 'intent_held') this._pendingMatches = 0;
     }
 
     async _publishArchive(round){
@@ -4432,8 +4558,16 @@ class StateAnchorPublisher {
             throw err;
         }
         let lastErr = null;
-        for(let attempt = 0; attempt < attempts; attempt++){
-            if(attempt > 0) await new Promise(r => setTimeout(r, this.chunkRetryDelayMs));
+        // Explicit attempt counter rather than a `for` step: a rate-limit wait below
+        // retries WITHOUT consuming an attempt (the encoder is telling us when to come
+        // back, which is not a transient send failure), and `delayMs` carries the wait
+        // that branch chose so the loop top never double-sleeps it with the flat delay.
+        let attempt = 0;
+        let delayMs = 0;
+        let rateLimitWaits = 0;
+        while(attempt < attempts){
+            if(delayMs > 0) await this._sleep(delayMs);
+            delayMs = this.chunkRetryDelayMs;
             if(existsCheck){
                 let found;
                 try { found = await existsCheck(); }
@@ -4477,9 +4611,52 @@ class StateAnchorPublisher {
                     }
                     throw e;   // defer to a later flush; never rebuild+re-broadcast
                 }
+                // Encoder rate limiting. Safe to retry by the shared classifier's own
+                // rule: a sub-500 response is a definitive refusal, so nothing reached
+                // the coin node and no double spend is possible. The spend guard was
+                // consumed once at method entry and record() only fires on a successful
+                // fresh send, so a free retry here re-charges neither.
+                let rlWaitMs = this._rateLimitWaitMs(e);
+                if(rlWaitMs !== null){
+                    if(rateLimitWaits >= this.rateLimitMaxWaits) throw e;
+                    rateLimitWaits++;
+                    delayMs = rlWaitMs;
+                    console.warn('StateAnchorPublisher: encoder rate-limited the anchor broadcast; ' +
+                                 'waiting ' + rlWaitMs + 'ms (Retry-After honoured, capped at ' +
+                                 this.rateLimitMaxWaitMs + 'ms), ' +
+                                 (this.rateLimitMaxWaits - rateLimitWaits) + ' rate-limit wait(s) left ' +
+                                 'before this anchor defers to a later flush');
+                    continue;   // deliberately does NOT consume an attempt
+                }
+                attempt++;
             }
         }
         throw lastErr || new Error('broadcast failed');
+    }
+
+    // Sleep indirection so the retry paths above are testable without real waits
+    // (the test tree's blind-sleep gate rejects fixed waits in tests).
+    async _sleep(ms){
+        return new Promise(r => setTimeout(r, ms));
+    }
+
+    // Rate-limit wait for a failed encoder call, or null when the error is not a
+    // rate limit. Reads the encoder's own signal rather than guessing a curve: the
+    // per-IP limiter and the concurrency gate both answer 429/-32029 but want waits
+    // ~60x apart. A missing or unparseable header falls back to the flat retry delay
+    // (still a wait, never an unbounded one), and every result is clamped.
+    _rateLimitWaitMs(e){
+        if(!e) return null;
+        let status = e.response ? Number(e.response.status) : NaN;
+        if(status !== 429 && Number(e.rpcCode) !== -32029) return null;
+        let headers = (e.response && e.response.headers) || {};
+        let raw = headers['retry-after'];
+        if(raw === undefined) raw = headers['Retry-After'];
+        let ms = parseRetryAfterMs(raw);
+        if(ms === null) ms = this.chunkRetryDelayMs;
+        let cap = Number(this.rateLimitMaxWaitMs);
+        if(!Number.isFinite(cap) || cap < 0) cap = 60000;
+        return Math.min(Math.max(ms, 0), cap);
     }
 
     // ----- Landing: confirmation watchdog over our own broadcasts -----

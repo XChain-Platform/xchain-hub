@@ -589,6 +589,38 @@ describe('FullNodeChallengeRound', function () {
             expect(st.finalized).to.equal(true);
         });
 
+        // The other half of that branch: a fee the round has permanently claimed must
+        // also be CHARGED to the spend window. record() therefore runs on the ambiguous
+        // verdict too, not only after a successful broadcast; charging on success alone
+        // leaves the window untouched and lets a later epoch spend an allowance this
+        // possibly-paid fee has already consumed.
+        it('charges the spend window for an AMBIGUOUS verdict, not just for a clean one', async function () {
+            const hub = makeHub();
+            const eng = await startEpoch(hub);
+            const st  = eng.rounds.get(288);
+            eng._recordSpend = () => true;
+            eng.broadcastFn = () => Promise.reject(Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }));
+            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+            await eng._closeCollection(288);
+            expect(eng.spendGuard.spentInWindow(),
+                   'a possibly-paid BTC fee consumes the window').to.equal(eng.spendGuard.estSpendUsdCents);
+        });
+
+        // The mirror: a DEFINITIVE rejection left nothing on the wire, so the budget
+        // goes back and a later tick can retry inside the same window.
+        it('hands the window back when the verdict is definitively rejected', async function () {
+            const hub = makeHub();
+            const eng = await startEpoch(hub);
+            const st  = eng.rounds.get(288);
+            eng._recordSpend = () => true;
+            eng.broadcastFn = () => Promise.reject(new Error('Encoder RPC error: bad-txns-inputs-missingorspent'));
+            eng._onAnswer({ epoch: 288, challengeId: st.challengeId, answer_digest: eng._answerDigest(st.challengeId, P1, ANSWER), sig_pubkey: P1, sig: 's' });
+            await eng._closeCollection(288);
+            expect(eng.spendGuard.spentInWindow(),
+                   'nothing left the process, so nothing is charged').to.equal(0);
+            expect(st.finalized, 'and the round unlocks for a later retry').to.equal(false);
+        });
+
         // A failover verdict (state.leadRank > 0, the _tick ladder promoting the next
         // rank after the elected leader landed nothing) was otherwise byte-identical to a
         // healthy rank-0 verdict in every observable signal, so a dead elected leader

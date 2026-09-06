@@ -1093,6 +1093,106 @@ describe('OraclePublisher', function () {
             let rewritten = fsMock.writeSync.getCall(fsMock.writeSync.callCount - 1).args[1];
             expect(rewritten).to.include('"round":9');
         });
+
+        // A two-phase HUB_SIGNER_MODULE broadcasts its funding tx and can then be
+        // rejected DEFINITIVELY on the reveal. Requeuing re-enters the hook, which runs
+        // createTx over fresh UTXOs and funds the SAME payload a second time. The pair
+        // below is the whole contract: identical error, and only the signer's
+        // fundsCommitted tag separates a dead letter from a re-fund.
+        it('dead-letters a DEFINITIVE rejection the signer tagged as post-funding', async function () {
+            let entry = { round: 9, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
+            fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');
+            let pub = new OraclePublisher(makeHub());
+            let rejected = new Error('Encoder RPC error: bad-txns-inputs-missingorspent');
+            rejected.fundsCommitted = true;
+            rejected.phase1Txid     = 'f'.repeat(64);
+            pub.broadcastFn  = sinon.stub().rejects(rejected);
+            pub.getBalanceFn = sinon.stub().resolves(50);
+            let dead = sinon.stub(pub, '_deadLetter');
+            await pub._processQueue();
+            expect(dead.calledOnce, 'a funded payload must never be rebuilt').to.be.true;
+            let rewritten = fsMock.writeSync.getCall(fsMock.writeSync.callCount - 1).args[1];
+            expect(rewritten).to.not.include('"round":9');
+        });
+
+        it('still requeues the SAME rejection when no funding was committed', async function () {
+            let entry = { round: 9, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
+            fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');
+            let pub = new OraclePublisher(makeHub());
+            pub.broadcastFn  = sinon.stub().rejects(
+                new Error('Encoder RPC error: bad-txns-inputs-missingorspent'));
+            pub.getBalanceFn = sinon.stub().resolves(50);
+            let dead = sinon.stub(pub, '_deadLetter');
+            await pub._processQueue();
+            expect(dead.called, 'an untagged pre-send rejection keeps its retry').to.be.false;
+            let rewritten = fsMock.writeSync.getCall(fsMock.writeSync.callCount - 1).args[1];
+            expect(rewritten).to.include('"round":9');
+        });
+
+        // Only broadcast_tx can leave a transaction on the wire. get_utxos, create_tx
+        // and the wallet sign hook all run before anything is sent, so their failures
+        // are definitively never-sent however they look on the socket, and must requeue
+        // rather than dead-letter. The shared classifier answers "ambiguous" for an
+        // unrecognised error, which is the right default for a broadcaster this module
+        // knows nothing about and the wrong one for a stage it knows never sends.
+        function defaultPipelinePub() {
+            let pub = new OraclePublisher(makeHub());
+            pub.encoder = {
+                getUtxos:    sinon.stub().resolves([{ txid: 'a', vout: 0, value: 100000, confirmations: 10 }]),
+                createTx:    sinon.stub().resolves({ psbt: 'psbthex' }),
+                broadcastTx: sinon.stub().resolves({ txid: 'TXID' })
+            };
+            pub.walletSignFn  = sinon.stub().resolves('signedtxhex');
+            pub.dogeAddress   = 'DwhateverAddress';
+            pub.dogePubkeyHex = '02' + 'a'.repeat(64);
+            pub.getBalanceFn  = sinon.stub().resolves(50);
+            return pub;
+        }
+
+        async function runQueueWith(pub) {
+            let entry = { round: 9, btcBlockTime: 0, prices: [], sigs: [], attempts: 0 };
+            fsMock.readFileSync.returns(JSON.stringify(entry) + '\n');
+            let dead = sinon.stub(pub, '_deadLetter');
+            await pub._processQueue();
+            let rewritten = fsMock.writeSync.getCall(fsMock.writeSync.callCount - 1).args[1];
+            return { dead, rewritten };
+        }
+
+        it('requeues a get_utxos timeout instead of dead-lettering it', async function () {
+            let pub = defaultPipelinePub();
+            let aborted = new Error('timeout of 10000ms exceeded'); aborted.code = 'ECONNABORTED';
+            pub.encoder.getUtxos = sinon.stub().rejects(aborted);
+            let { dead, rewritten } = await runQueueWith(pub);
+            expect(pub.encoder.broadcastTx.called, 'nothing was broadcast').to.be.false;
+            expect(dead.called, 'a pre-send timeout must not dead-letter').to.be.false;
+            expect(rewritten).to.include('"round":9');
+        });
+
+        it('requeues an empty UTXO set instead of dead-lettering it', async function () {
+            let pub = defaultPipelinePub();
+            pub.encoder.getUtxos = sinon.stub().resolves([]);
+            let { dead, rewritten } = await runQueueWith(pub);
+            expect(dead.called, 'an empty UTXO read must not dead-letter').to.be.false;
+            expect(rewritten).to.include('"round":9');
+        });
+
+        it('requeues a wallet sign-hook failure instead of dead-lettering it', async function () {
+            let pub = defaultPipelinePub();
+            pub.walletSignFn = sinon.stub().rejects(new Error('signer unavailable'));
+            let { dead, rewritten } = await runQueueWith(pub);
+            expect(pub.encoder.broadcastTx.called, 'nothing was broadcast').to.be.false;
+            expect(dead.called, 'a sign-hook failure must not dead-letter').to.be.false;
+            expect(rewritten).to.include('"round":9');
+        });
+
+        it('still dead-letters a timeout raised by broadcast_tx itself', async function () {
+            let pub = defaultPipelinePub();
+            let aborted = new Error('timeout of 10000ms exceeded'); aborted.code = 'ECONNABORTED';
+            pub.encoder.broadcastTx = sinon.stub().rejects(aborted);
+            let { dead, rewritten } = await runQueueWith(pub);
+            expect(dead.calledOnce, 'a send that may have landed must dead-letter').to.be.true;
+            expect(rewritten).to.not.include('"round":9');
+        });
     });
 
     // ── snapshot dark-path logging (item 2391) ─────────────────────────────────

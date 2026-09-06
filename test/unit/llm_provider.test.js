@@ -839,6 +839,38 @@ describe('llm provider, fetch via claude_spawn', function () {
             expect(out.body.toString('utf8')).to.equal('still served');
         });
 
+        // Best-effort must not mean "silently nothing". Dispatch stays unconditional
+        // (refusing to call would turn an audit fault into a wrong on-chain outcome),
+        // so an unwritable primary sink has to leave the per-dispatch identity
+        // somewhere else. The aggregate spend-state file cannot stand in: it holds a
+        // rolling cost window and no call id.
+        it('keeps the dispatch identity in a fallback sink when the primary is unwritable', async function () {
+            const fallback = path.join(os.tmpdir(),
+                'llm-spend-fb-' + process.pid + '-' + Math.random().toString(36).slice(2) + '.jsonl');
+            process.env.LLM_SPEND_LOG_PATH = '/dev/null/not-a-dir/spend.jsonl';
+            process.env.LLM_SPEND_LOG_FALLBACK_PATH = fallback;
+            try {
+                const { llm } = reloadWithSpawnStub({ result: 'still served' });
+                await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {}));
+
+                const lines = fsSync.readFileSync(fallback, 'utf8')
+                                    .split('\n').filter(Boolean).map(l => JSON.parse(l));
+                expect(lines.map(l => l.phase)).to.deep.equal(['intent', 'settle']);
+                expect(lines[1].id, 'the settle still ties back to its intent').to.equal(lines[0].id);
+                expect(lines[0].auditFallbackFrom, 'a fallback line names the sink it could not reach')
+                    .to.equal('/dev/null/not-a-dir/spend.jsonl');
+
+                const audit = llm.spendStats().audit;
+                expect(audit.total, 'the fault is a standing counter, not a scrolled-away warning')
+                    .to.equal(2);
+                expect(audit.toFallback).to.equal(2);
+                expect(audit.toStderr, 'the fallback took them, so stderr was not needed').to.equal(0);
+            } finally {
+                delete process.env.LLM_SPEND_LOG_FALLBACK_PATH;
+                try { fsSync.unlinkSync(fallback); } catch { /* never written */ }
+            }
+        });
+
         // ---- the aggregate budget the per-call caps never bounded ----
         //
         // The per-call ceilings bound ONE call each, so N cheap calls cost N times a
@@ -1901,8 +1933,27 @@ describe('llm provider, vendor inference', function () {
         const llm = _reloadProvider();
         llm._setConfig({ additional_config: { model_vendors: { 'llama-3-70b': 'anthropic' } } });
         expect(llm._vendorOfModel('llama-3-70b', { 'llama-3-70b': 'openai' })).to.equal('openai');
-        // A pinned map that says nothing about this id falls through, not throws.
-        expect(llm._vendorOfModel('llama-3-70b', { 'other-model': 'openai' })).to.equal('anthropic');
+        // A pinned map that says nothing about this id no longer falls through to the
+        // live map: the two are the same governance field at two different anchors, so
+        // consulting the local one would resolve an anchored round against whatever
+        // config this hub happens to hold. Deterministic throw on every hub instead.
+        expect(() => llm._vendorOfModel('llama-3-70b', { 'other-model': 'openai' }))
+            .to.throw(/cannot infer vendor/);
+    });
+
+    // #7167: the divergence the exclusivity rule exists to stop. Same block-anchored
+    // request, two hubs at different hotReload states; without exclusivity the reloaded
+    // one routes claude-sonnet-4-6 to OpenAI and the laggard to Anthropic, prompting two
+    // different third parties over one round.
+    it('ignores a live model_vendors override when a block-anchored map is supplied', function () {
+        const llm = _reloadProvider();
+        llm._setConfig({ additional_config: { model_vendors: { 'claude-sonnet-4-6': 'openai' } } });
+        expect(llm._vendorOfModel('claude-sonnet-4-6', {}),
+            'anchored: the live override is not consulted, prefix inference answers')
+            .to.equal('anthropic');
+        expect(llm._vendorOfModel('claude-sonnet-4-6'),
+            'unpinned: the live override still wins, unchanged')
+            .to.equal('openai');
     });
 
     it('routes fetch through options.pinnedVendors for an unmapped model family', async function () {
@@ -2111,6 +2162,74 @@ describe('llm provider, fetch via openai_api', function () {
                 .reply(200, { choices: [{ message: { content: 'world' } }] });
             const res = await llm.fetch(JSON.stringify({ prompt: 'q' }), { pinnedModel: 'gpt-5-mini', maxResponseBytes: 64 });
             expect(res.body.toString('utf8')).to.equal('world');
+        });
+    });
+});
+
+// #7168: the HTTP status decides whether a response is a completion; the body's
+// shape only says which vendor wrote the error. Both transports asked the second
+// question alone, so a gateway 503 carrying neither `error` nor `type` parsed
+// clean, resolved as SUCCESS, and degraded to empty text -- on agree() that is
+// `empty_verdict`, which the spot-checker does not hold for re-judge, so the
+// outage discarded the check with no evidence while the SAME 503 with a vendor
+// error envelope failed over correctly.
+describe('llm provider, HTTP status-first error classification (#7168)', function () {
+
+    afterEach(function () { nock.cleanAll(); sinon.restore(); });
+
+    it('rejects an Anthropic 503 whose body carries no error envelope', async function () {
+        await _withEnv({ ANTHROPIC_API_KEY: 'sk-ant-test' }, async () => {
+            const llm = _reloadProvider();
+            nock('https://api.anthropic.com')
+                .post('/v1/messages')
+                .reply(503, { message: 'Service unavailable' });
+            let err;
+            try { await llm.fetch(JSON.stringify({ prompt: 'q' }), { pinnedModel: 'claude-sonnet-4-6' }); }
+            catch (e) { err = e; }
+            expect(err, 'a 503 must not resolve as a completion').to.exist;
+            expect(err.httpStatus).to.equal(503);
+            expect(err.transient, 'a 5xx earns a same-round judge fallback').to.equal(true);
+        });
+    });
+
+    it('rejects an OpenAI 503 whose body carries no error envelope', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            nock('https://api.openai.com')
+                .post('/v1/chat/completions')
+                .reply(503, { message: 'Service unavailable' });
+            let err;
+            try { await llm.fetch(JSON.stringify({ prompt: 'q' }), { pinnedModel: 'gpt-5-mini' }); }
+            catch (e) { err = e; }
+            expect(err).to.exist;
+            expect(err.httpStatus).to.equal(503);
+            expect(err.transient).to.equal(true);
+        });
+    });
+
+    it('classifies an envelope-less 4xx as hard, so the judge chain stops honestly', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            nock('https://api.openai.com')
+                .post('/v1/chat/completions')
+                .reply(400, { detail: 'bad request' });
+            let err;
+            try { await llm.fetch(JSON.stringify({ prompt: 'q' }), { pinnedModel: 'gpt-5-mini' }); }
+            catch (e) { err = e; }
+            expect(err).to.exist;
+            expect(err.httpStatus).to.equal(400);
+            expect(err.transient).to.equal(false);
+        });
+    });
+
+    it('still serves a normal 200 completion', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            nock('https://api.openai.com')
+                .post('/v1/chat/completions')
+                .reply(200, { choices: [{ message: { content: 'served' } }], usage: {} });
+            const res = await llm.fetch(JSON.stringify({ prompt: 'q' }), { pinnedModel: 'gpt-5-mini' });
+            expect(res.body.toString('utf8')).to.equal('served');
         });
     });
 });

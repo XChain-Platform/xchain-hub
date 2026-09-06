@@ -159,6 +159,12 @@ class StateCheckpointEngine extends EventEmitter {
         // every incoming FINALIZED fails here, not only via the indirect tip-stall.
         this._malformedFinalized  = 0;
         this._subQuorumFinalized  = 0;
+        // Quorum-signed FINALIZED broadcasts refused because a DIFFERENT payload is
+        // already seated at that (chain, network, checkpoint_seq). Nothing honest
+        // produces this shape, so any non-zero value is a federation-level equivocation
+        // at one sequence and the fleet may already hold divergent rows: read the
+        // CONFLICTING lines in this hub's log and compare the seq across hubs.
+        this._seqConflicts        = 0;
 
         // Cadence stalls. Every pre-leadership bail in _tick used to return
         // silently, so a hub whose oracle_publish capability had gone unqualified
@@ -324,6 +330,10 @@ class StateCheckpointEngine extends EventEmitter {
             round_timeouts:          this._roundTimeouts,
             malformed_finalized:     this._malformedFinalized,
             sub_quorum_finalized:    this._subQuorumFinalized,
+            // Non-zero means two quorum-signed payloads arrived at one checkpoint_seq.
+            // Never a tuning knob: it is an equivocation report and the fleet may hold
+            // divergent checkpoints at that sequence.
+            seq_conflicts:           this._seqConflicts,
             // Non-zero with a reason means the engine is alive but structurally
             // unable to checkpoint (unqualified capability, missing identity, not in the
             // validator set), the failure mode that produced 18 silent days on mainnet.
@@ -785,6 +795,38 @@ class StateCheckpointEngine extends EventEmitter {
                 ': checkpoint-commitment is active for snapshot_block ' + cp.snapshot_block +
                 ' but the light-client roots are absent');
 
+        // Same-seq conflict fence. uq_chain_seq admits exactly ONE row per
+        // (chain, network, checkpoint_seq), so a second, DIFFERENT payload at a seated
+        // sequence is dropped by the INSERT IGNORE below with no trace of why: the
+        // read-back then finds nothing, dumps every mirror subscriber for a resync that
+        // cannot repair it, advances the cadence latch and emits a checkpoint this hub
+        // does not hold. Two hubs that received the two FINALIZED broadcasts in opposite
+        // orders keep DIFFERENT checkpoints at that sequence, permanently and silently.
+        // Refuse and say so instead. This is DETECTION, not prevention: nothing here
+        // stops a Byzantine cadence leader collecting quorum on two payloads at one
+        // sequence (co-sign bounds every field derived from snapshot_block but leaves
+        // block_index free, and _roundId's block_index puts the two proposals in
+        // different rounds), so a divergence can still form across hubs. It becomes
+        // diagnosable rather than invisible.
+        //
+        // Compared FIELD-WISE and not by rebuilding a canonical from the seated row:
+        // _cpFromRow deliberately carries no light-client roots, so a canonical rebuilt
+        // through it is rootless on one side only and would read every ordinary
+        // post-flag-day re-delivery as a conflict. The roots are themselves derived from
+        // the block, so the four chained hashes plus block_index settle identity.
+        let seated = await this._seatedCheckpointAtSeq(cp);
+        if(seated && StateCheckpointEngine._checkpointRowDiffers(seated, cp)){
+            this._seqConflicts++;
+            console.error('StateCheckpointEngine: CONFLICTING checkpoint at ' + cp.chain + '/' + cp.network +
+                          ' seq ' + cp.checkpoint_seq + ': we hold block ' + Number(seated.block_index) +
+                          ' (' + String(seated.block_hash) + '), this FINALIZED carries block ' +
+                          Number(cp.block_index) + ' (' + String(cp.block_hash) + '). Both were quorum-signed, ' +
+                          'so the federation equivocated at one sequence; persisting nothing, streaming ' +
+                          'nothing and emitting nothing on this hub. Held signature set: ' +
+                          JSON.stringify(sigs));
+            return;
+        }
+
         await this._persistCapabilitySnapshot('oracle_publish', Number(cp.snapshot_block));
         await this.db.doQuery(
             'INSERT IGNORE INTO state_checkpoints (chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures) ' +
@@ -974,6 +1016,48 @@ class StateCheckpointEngine extends EventEmitter {
             'SELECT MAX(checkpoint_seq) AS max_seq FROM state_checkpoints WHERE chain = ? AND network = ?',
             [chain, network]);
         return (r.length > 0 && r[0].max_seq != null) ? Number(r[0].max_seq) : null;
+    }
+
+    // The one row uq_chain_seq already admitted at this (chain, network, seq), or null.
+    // Keyed on the UNIQUE index and NOT on block_index, unlike the mirror read-back:
+    // the whole point is to see the row a different block_index seated.
+    // Fails OPEN on a read error, deliberately. uq_chain_seq is the safety property and
+    // it holds with or without this read; the fence only decides whether the loser is
+    // DIAGNOSED or dropped silently. Throwing here would turn a transient DB blip into a
+    // refusal to persist quorum-signed checkpoints, which is strictly worse than the
+    // divergence it is watching for (StateCheckpointEngine.broadcast-gap pins that a DB
+    // fault on this table must still leave the commit, the latch and the emit intact).
+    async _seatedCheckpointAtSeq(cp){
+        let r;
+        try {
+            r = await this.db.doQuery(
+                'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND checkpoint_seq = ? LIMIT 1',
+                [cp.chain, cp.network, Number(cp.checkpoint_seq)]);
+        } catch(e){
+            console.warn('StateCheckpointEngine: same-seq conflict check could not read ' + cp.chain + '/' +
+                         cp.network + ' seq ' + cp.checkpoint_seq + ' (' + (e && e.message) +
+                         '); the unique key still admits one row, but a conflict would go unreported');
+            return null;
+        }
+        return (r && r.length > 0) ? r[0] : null;
+    }
+
+    // Does a seated row name a DIFFERENT payload than `cp`? Identity is block_index plus
+    // the four chained hashes, which every checkpoint version carries; the light-client
+    // roots are derived from that same block and are deliberately left out, so a NULL/''
+    // normalization difference can never read a re-delivery as an equivocation. Hashes
+    // compare case-insensitively (the driver's serialization need not match ours).
+    static _checkpointRowDiffers(row, cp){
+        // Not comparable is not a conflict. Every identity column is NOT NULL in
+        // state_checkpoints, so a row missing one did not come from the table and reading
+        // its absence as an equivocation would refuse a legitimate checkpoint.
+        if(!row || row.block_index == null || row.block_hash == null) return false;
+        let hx = (a, b) => String(a == null ? '' : a).toLowerCase() !== String(b == null ? '' : b).toLowerCase();
+        return Number(row.block_index) !== Number(cp.block_index) ||
+               hx(row.block_hash,    cp.block_hash)    ||
+               hx(row.ledger_hash,   cp.ledger_hash)   ||
+               hx(row.actions_hash,  cp.actions_hash)  ||
+               hx(row.contract_hash, cp.contract_hash);
     }
 
     // Mirror CrossChainDexEngine._resolveCapabilityValidators (incl. regtest seam).

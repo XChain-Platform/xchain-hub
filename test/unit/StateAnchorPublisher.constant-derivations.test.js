@@ -238,8 +238,8 @@ describe('StateAnchorPublisher: ANCHOR constant derivations', function () {
 
         it('AT8: a single section wider than the budget is refused and counted, never sent', function () {
             const pub  = mkPub();
-            // 45 signers on one section puts it past the budget with a zero-signature tail,
-            // which is the refusal criterion: no split can rescue it.
+            // 45 signers on one section puts it past the budget even before the tail is
+            // added, which is the refusal criterion at its most extreme: no split rescues it.
             const huge = section('AAAA', 45);
             expect(pub._v7Bytes([huge], hex(64), 0)).to.be.above(BUNDLE_BUDGET);
             const split = pub._splitBundle([huge, section('BBBB', 4)], hex(64), 4);
@@ -247,6 +247,24 @@ describe('StateAnchorPublisher: ANCHOR constant derivations', function () {
             expect(split.oversize[0].bytes).to.be.above(BUNDLE_BUDGET);
             expect(split.bundles.map(b => b.map(x => x.chain)),
                 'the rest of the cycle still anchors').to.deep.equal([['BBBB']]);
+        });
+
+        // The lone-section refusal sizes the REAL attestation tail, the same one the
+        // packing check below it sizes. Sizing a ZERO tail here admits a section that only
+        // fits empty-tailed, which then builds oversize once the attestation round fills
+        // the tail and dies at the encoder instead of being refused and counted here.
+        it('AT8: a lone section that fits empty-tailed but not with its attestation tail is refused', function () {
+            const pub = mkPub();
+            // 20 section signatures and a 23-signer attestation tail: the section alone
+            // clears the budget with no tail and blows past it with one.
+            const lone = section('AAAA', 20);
+            expect(pub._v7Bytes([lone], hex(64), 0), 'fits with an empty tail').to.be.at.most(BUNDLE_BUDGET);
+            expect(pub._v7Bytes([lone], hex(64), 23), 'does not fit with the real tail').to.be.above(BUNDLE_BUDGET);
+            const split = pub._splitBundle([lone], hex(64), 23);
+            expect(split.bundles, 'nothing is handed to the publisher').to.deep.equal([]);
+            expect(split.oversize.map(x => x.chain), 'the section is refused').to.deep.equal(['AAAA']);
+            expect(split.oversize[0].bytes, 'the refusal reports the tail-inclusive size')
+                .to.equal(pub._v7Bytes([lone], hex(64), 23));
         });
 
         it('a bundle that already fits is never split', function () {

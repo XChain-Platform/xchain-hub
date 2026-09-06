@@ -1215,6 +1215,32 @@ class PriceAggregator extends EventEmitter {
             }
         }
 
+        // HUB-RETRACT-4: durably record this retraction's generation + orphaned-range lower bound
+        // so a stale price push (a fire-and-forget or in-flight PRICE arriving AFTER the delete, or
+        // a retried push carrying the pre-reorg generation) is rejected at ingest instead of
+        // re-inserting the orphan. Only when the source carried a generation to fence on; without
+        // it we cannot tell stale from fresh, so we leave the fence untouched (pre-fix behaviour).
+        // Runs even on a 0-row delete: the stale push may not have arrived yet.
+        //
+        // Written BEFORE the deletes, and a failed write aborts the retraction rather than being
+        // logged and forgotten. The caller drops its durable outbox row on a success return
+        // (xchain-indexer hub_push_queue.js markHubPushDelivered), so a swallowed failure left the
+        // rows deleted, the fence unpersisted and no retry anywhere in the fleet. Early is safe
+        // because the fence is monotonic (GREATEST generation, LEAST from in db.js
+        // bumpPriceIngestWatermark), so it can only reject pushes this retraction is about to
+        // delete; there is no hub-side transaction spanning both, so this is fail-closed, not
+        // atomic. Keep the error wording clear of the indexer's TERMINAL_HUB_REJECTIONS patterns
+        // (xchain-indexer/src/hub_client.js) or the retained retry becomes a silent drop.
+        if (fenced) {
+            try {
+                await this.db.bumpPriceIngestWatermark(sourceChain, gen, from);
+            } catch (e) {
+                console.error('PriceAggregator: ingest-watermark bump failed for ' + sourceChain + ':', e && e.message);
+                return { error: 'ingest fence not persisted for ' + sourceChain
+                    + ' (' + ((e && e.message) || 'unknown error') + ')' };
+            }
+        }
+
         let snapResult = await this.db.doQuery('DELETE FROM price_snapshots WHERE ' + snapQ.where, snapQ.args);
         // oracle_prices tracks the PRICE v1 oracle action via action_index
         let oracleQ = buildArgs('action_index');
@@ -1238,20 +1264,6 @@ class PriceAggregator extends EventEmitter {
             if (bounded) evt.to_action_index = to;
             if (fenced) evt.retraction_generation = gen;
             this.emit('row:deleted', evt);
-        }
-
-        // HUB-RETRACT-4: durably record this retraction's generation + orphaned-range lower bound
-        // so a stale price push (a fire-and-forget or in-flight PRICE arriving AFTER the delete, or
-        // a retried push carrying the pre-reorg generation) is rejected at ingest instead of
-        // re-inserting the orphan. Only when the source carried a generation to fence on; without
-        // it we cannot tell stale from fresh, so we leave the fence untouched (pre-fix behaviour).
-        // Runs even on a 0-row delete: the stale push may not have arrived yet.
-        if (fenced) {
-            try {
-                await this.db.bumpPriceIngestWatermark(sourceChain, gen, from);
-            } catch (e) {
-                console.error('PriceAggregator: ingest-watermark bump failed for ' + sourceChain + ':', e && e.message);
-            }
         }
 
         // D28: clear the publisher's durable at-most-once marker for every round the

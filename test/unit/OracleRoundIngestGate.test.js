@@ -97,6 +97,49 @@ describe('OracleRound ingest gate (stress-sweep 2026-07-08)', function () {
         expect(or.submissions.get(round).has('ws://peer:10001')).to.equal(false);
     });
 
+    it('drops a price whose spelling parseFloat would admit as a prefix', async function () {
+        await or._executeRound();
+        let round = or.currentRound;
+        pm.validatorPubkeys = new Map();   // bootstrap: isolate the price gate
+        // parseFloat('100junk') is 100 and clears every bound, while bcmath.bcnum
+        // reads the same string as 0: admitting it puts two numbers in the round.
+        submit('ws://peer:10001', [{ coinPair: 'BTC/USD', price: '100junk' }], round);
+        expect(or.submissions.get(round).has('ws://peer:10001')).to.equal(false);
+    });
+
+    it('never lets a malformed price reach the persisted audit row', async function () {
+        await or._executeRound();
+        let round = or.currentRound;
+        pm.validatorPubkeys = new Map([['ws://peer:10001', 'bb'.repeat(32)]]);
+        let persist = sinon.spy(or, '_persistSubmissions');
+        submit('ws://peer:10001', [
+            { coinPair: 'BTC/USD', price: '100junk' },
+            { coinPair: 'LTC/USD', price: '90' }
+        ], round, 'bb'.repeat(32));
+        expect(persist.calledOnce).to.equal(true);
+        let persisted = persist.firstCall.args[2].map(p => p.price);
+        expect(persisted).to.deep.equal(['90']);
+    });
+
+    it('drops a non-scalar price a coercing gate would admit', async function () {
+        await or._executeRound();
+        let round = or.currentRound;
+        pm.validatorPubkeys = new Map();
+        // parseFloat(['100']) is 100, so an array-valued price cleared the old gate.
+        submit('ws://peer:10001', [{ coinPair: 'BTC/USD', price: ['100'] }], round);
+        expect(or.submissions.get(round).has('ws://peer:10001')).to.equal(false);
+    });
+
+    it('keeps an honest bcformat price spelling byte-identical', async function () {
+        await or._executeRound();
+        let round = or.currentRound;
+        pm.validatorPubkeys = new Map();
+        submit('ws://peer:10001', [{ coinPair: 'BTC/USD', price: '100000.00000000' }], round);
+        let sub = or.submissions.get(round).get('ws://peer:10001');
+        expect(sub).to.exist;
+        expect(sub.prices[0].price).to.equal('100000.00000000');
+    });
+
     it('keeps canonical pairs and strips only the bogus ones from a mixed submission', async function () {
         await or._executeRound();
         let round = or.currentRound;

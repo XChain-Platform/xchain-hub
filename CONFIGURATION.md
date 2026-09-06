@@ -245,7 +245,13 @@ stake from anyone else's and the monitor **stays off**, saying so loudly at boot
 the result on `/health` (`stake_share`), from the `getstakeshare` RPC, or from the
 `xchain_stake_share_*` gauges. Alert on `xchain_stake_share_stakes_to_halt <= 1` or
 `xchain_stake_share_meets_gate == 0`; it never flips `/health` to 503, because it is a
-forecast about the federation rather than a sickness of this process.
+forecast about the federation rather than a sickness of this process. These gauges are
+rebuilt from scratch on every scrape, so an unreadable snapshot renders the affected
+chain/capability series **absent** rather than repeating the last healthy number. Both
+rules above therefore go quiet on a gap: pair them with an
+`absent(xchain_stake_share_meets_gate{...})` clause if a missing measurement should also
+be visible, and note that the underlying indexer outage is `ConsensusInputMonitor`'s
+alarm, deliberately not paged twice here.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
@@ -476,6 +482,8 @@ continuation chunks) is unchanged.
 | `ANCHOR_MAX_BATCH` | No | `1000` | Max rows per archive (v1) anchor batch. |
 | `ANCHOR_CHUNK_MAX_BYTES` | No | `6000` | Max payload bytes per on-chain anchor chunk. |
 | `ANCHOR_CHUNK_RETRY_MS` | No | `2500` | Delay (ms) between chunk broadcast retries. |
+| `ANCHOR_RATELIMIT_MAX_WAIT_MS` | No | `60000` | Ceiling (ms) on one honoured encoder `Retry-After` wait after a 429 / `-32029`. |
+| `ANCHOR_RATELIMIT_MAX_WAITS` | No | `3` | Rate-limit waits one anchor broadcast may take before deferring to a later flush. These waits do not consume the broadcast attempt budget. |
 | `ANCHOR_ROUND_TIMEOUT_MS` | No | `120000` | Quorum signing-round timeout (ms). |
 | `ANCHOR_AMBIGUOUS_POLL_ATTEMPTS` | No | `3` | Ambiguous-send existence poll: attempts to find a maybe-accepted anchor in the indexer's mined view before deferring. |
 | `ANCHOR_AMBIGUOUS_POLL_MS` | No | `5000` | Delay (ms) between ambiguous-send poll attempts. |
@@ -516,9 +524,11 @@ constructor comment and pinned by
   attesting signer. Measured capacity: **6 chains at 4 signers, 5 at 5, 3 at 7.**
   Past it the publisher SPLITS the cycle chain-ascending into as many bundles as
   fit, each electing at its own snapshot block, and logs one line per split. A
-  single section that cannot fit even with a zero-signature tail is refused
-  loudly and counted in `getanchorstatus.bundlesOversize`; it is never sent,
-  because the decoder drops an oversize action silently rather than rejecting it.
+  single section that cannot fit alongside the attestation tail its bundle will
+  carry is refused loudly and counted in `getanchorstatus.bundlesOversize`, as is
+  an assembled payload measured over the budget just before broadcast; neither is
+  ever sent, because the decoder drops an oversize action silently rather than
+  rejecting it.
 - **`ANCHOR_MATCH_BATCH_SIZE` = 200** is an early-flush latency trigger, and
   **`ANCHOR_MAX_BATCH` = 1000** is the per-cycle DOGE spend bound. Archive rows
   are signature-dominated and do not compress (~0.55 KB of gzip+base64 per

@@ -87,6 +87,13 @@ describe('StateCheckpointEngine', function () {
                         checkpoints.push({ id: checkpoints.length + 1, chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures });
                     return [];
                 }
+                // The same-seq conflict fence reads on the UNIQUE key (chain, network,
+                // seq) and NOT on block_index, precisely so it can see the row a rival
+                // block_index seated. Answering it with the four-column form below would
+                // return nothing and leave the fence inert in every test here.
+                if (sql.startsWith('SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND checkpoint_seq = ?')) {
+                    return checkpoints.filter(r => r.chain === params[0] && r.network === params[1] && r.checkpoint_seq === params[2]).slice(0, 1);
+                }
                 if (sql.startsWith('SELECT * FROM state_checkpoints')) {
                     return checkpoints.filter(r => r.chain === params[0] && r.network === params[1] && r.block_index === params[2] && r.checkpoint_seq === params[3]).slice(0, 1);
                 }
@@ -588,6 +595,10 @@ describe('StateCheckpointEngine', function () {
             let atSeq = nd.db.checkpoints.filter(r => r.chain === 'BTC' && r.network === 'regtest' && r.checkpoint_seq === 200);
             expect(atSeq.length, 'exactly one row survives per seq').to.equal(1);
             expect(atSeq[0].block_index, 'first writer wins').to.equal(10);
+            // The unique key collapsing the loser is the safety property; saying so is the
+            // difference between a diagnosable equivocation and a silent permanent fork.
+            expect(nd.engine._seqConflicts, 'and the loser is reported, not dropped silently').to.equal(1);
+            expect((await nd.engine.getStats()).seq_conflicts).to.equal(1);
         });
     });
 

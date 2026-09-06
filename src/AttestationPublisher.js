@@ -489,21 +489,27 @@ class AttestationPublisher {
             await this._markPublished(rid, result && result.txid);   // restart-surviving marker
             this._removeFromQueue(new Set([rid]));
         } catch (e) {
-            // The send did not go out, so it consumes no budget (the invariant the
-            // old post-send record() gave us for free).
-            this.spendGuard.release(spendToken);
             this._broadcastFailed++;
-            // An ambiguous send may have reached the BTC node. Mark it so
+            // Classify BEFORE settling the reservation: "the send failed" and "the send
+            // did not go out" are not the same answer, and only the second one frees
+            // budget. An ambiguous send may have reached the BTC node. Mark it so
             // the sweep defers re-broadcast (see _processQueue) instead of blindly
             // spending a second fee. Definitive pre-send errors leave no mark and retry
             // normally.
             if (this._isAmbiguousSendError(e) || (e && e.attestAmbiguousSend)){
+                // COMMIT, not release: a fee may have been paid, so the window must be
+                // charged for it. Releasing here hands the ceiling back an allowance a
+                // real spend already consumed, and the next request spends past it.
+                // Same rule AttestationRelay states at its own ambiguous branch.
+                this.spendGuard.commit(spendToken);
                 this._ambiguousSends.set(rid, Date.now());
                 console.error('AttestationPublisher: AMBIGUOUS broadcast failure for %s... (tx may have reached the BTC node); sweep will defer re-broadcast for ~%ds before retrying:',
                               rid.substring(0,16), Math.ceil(this.ambiguousCooldownMs / 1000), e);
             } else {
-                // Definitively no send, so withdraw the intent: leaving it
-                // would quarantine an ordinary RPC rejection at the next restart.
+                // Definitively no send, so it consumes no budget and the intent is
+                // withdrawn: leaving it would quarantine an ordinary RPC rejection at
+                // the next restart.
+                this.spendGuard.release(spendToken);
                 await this._clearPublishIntent(rid);
                 console.error('AttestationPublisher: broadcast failed for %s... (will retry via sweep):', rid.substring(0,16), e);
             }
@@ -1181,17 +1187,22 @@ class AttestationPublisher {
                 console.log('AttestationPublisher: ' + (rank === 0 ? 're-broadcast leader' : 'stepped in (rank ' + rank + ')') +
                             ' for ' + rid.substring(0,16) + '... txid=' + (result && result.txid ? result.txid : '?'));
             } catch (e) {
-                // The send did not go out, so it consumes no budget.
-                this.spendGuard.release(spendToken);
+                // Classify BEFORE settling the reservation, exactly as the live path
+                // does: only a definitively-unsent broadcast frees budget.
                 // Mark an ambiguous replay failure so the NEXT sweep defers
                 // rather than immediately re-broadcasting a possibly-landed tx.
                 if (this._isAmbiguousSendError(e) || (e && e.attestAmbiguousSend)){
+                    // COMMIT: the replay may have paid a fee, so the window is charged
+                    // for it rather than handed the allowance back.
+                    this.spendGuard.commit(spendToken);
                     this._ambiguousSends.set(rid, Date.now());
                     console.error('AttestationPublisher: AMBIGUOUS replay failure for ' + rid.substring(0,16) +
                                   '... (tx may have reached the BTC node); deferring re-broadcast: ', e);
                 } else {
-                    // Definitively no send; withdraw the intent so the retry
-                    // this line promises is not cancelled by a quarantine after a restart.
+                    // Definitively no send, so it consumes no budget; withdraw the intent
+                    // so the retry this line promises is not cancelled by a quarantine
+                    // after a restart.
+                    this.spendGuard.release(spendToken);
                     await this._clearPublishIntent(rid);
                     console.error('AttestationPublisher: replay broadcast failed for ' + rid.substring(0,16) + '... (will retry): ', e);
                 }

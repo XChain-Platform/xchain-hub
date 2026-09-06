@@ -340,6 +340,153 @@ describe('claude-spawn runClaudePrint()', function () {
         expect(err.transient).to.equal(true);
     });
 
+    // ── only the RESOLVED credential reaches the child ────────────────────────
+    // resolveHubLlmAuth picks exactly one source and reports it, so the spawn must not
+    // merge the ambient env underneath it: a shell-exported credential the resolver has
+    // already REJECTED would ride along and let the CLI, not the resolver, decide which
+    // account pays. hub-credentials' own note says an ambient CLAUDE_CODE_OAUTH_TOKEN is
+    // honoured whatever the config dir holds, so that precedence is documented behavior.
+
+    function withAmbientCreds(vars, fn) {
+        const saved = {};
+        for (const k of Object.keys(vars)) saved[k] = process.env[k];
+        Object.assign(process.env, vars);
+        try { return fn(); }
+        finally {
+            for (const [k, v] of Object.entries(saved)) {
+                if (v === undefined) delete process.env[k];
+                else                 process.env[k] = v;
+            }
+        }
+    }
+
+    it('scrubs ambient credentials so a config-dir source is the only live one', async function () {
+        await withAmbientCreds({
+            ANTHROPIC_API_KEY:       'sk-ambient',
+            ANTHROPIC_AUTH_TOKEN:    'gw-ambient',
+            CLAUDE_CODE_OAUTH_TOKEN: 'tok-ambient',
+            CLAUDE_CONFIG_DIR:       '/tmp/operator-dir'
+        }, async () => {
+            let jsonOut = JSON.stringify({ result: 'ok' });
+            let { runClaudePrint, spawnStub } = loadClaudeSpawn(
+                { exitCode: 0, stdout: jsonOut },
+                { ok: true, transport: 'claude_spawn', source: 'hub_config_dir',
+                  env: { CLAUDE_CONFIG_DIR: '/tmp/hub-dir' } });
+            await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' });
+            let env = spawnStub.firstCall.args[2].env;
+            expect(env).to.not.have.property('ANTHROPIC_API_KEY');
+            expect(env).to.not.have.property('ANTHROPIC_AUTH_TOKEN');
+            expect(env).to.not.have.property('CLAUDE_CODE_OAUTH_TOKEN');
+            expect(env.CLAUDE_CONFIG_DIR, 'the resolver, not the shell, names the dir')
+                .to.equal('/tmp/hub-dir');
+        });
+    });
+
+    it('scrubs an ambient API key that would outrank the resolved OAuth token', async function () {
+        await withAmbientCreds({ ANTHROPIC_API_KEY: 'sk-ambient' }, async () => {
+            let jsonOut = JSON.stringify({ result: 'ok' });
+            let { runClaudePrint, spawnStub } = loadClaudeSpawn(
+                { exitCode: 0, stdout: jsonOut },
+                { ok: true, transport: 'claude_spawn', source: 'hub_token',
+                  env: { CLAUDE_CODE_OAUTH_TOKEN: 'hub-tok', CLAUDE_CONFIG_DIR: '/tmp/iso' } });
+            await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' });
+            let env = spawnStub.firstCall.args[2].env;
+            expect(env).to.not.have.property('ANTHROPIC_API_KEY');
+            expect(env.CLAUDE_CODE_OAUTH_TOKEN).to.equal('hub-tok');
+        });
+    });
+
+    it('leaves every non-credential var inherited', async function () {
+        await withAmbientCreds({ XCHAIN_SPAWN_PROBE: 'kept' }, async () => {
+            let jsonOut = JSON.stringify({ result: 'ok' });
+            let { runClaudePrint, spawnStub } = loadClaudeSpawn({ exitCode: 0, stdout: jsonOut });
+            await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' });
+            let env = spawnStub.firstCall.args[2].env;
+            expect(env.XCHAIN_SPAWN_PROBE).to.equal('kept');
+            expect(env.PATH, 'PATH still resolves the binary').to.equal(process.env.PATH);
+        });
+    });
+
+    // ── a vendor outage on this transport is not a model verdict ──────────────
+    // agree() stops the judge fallback chain on transient===false, so a non-zero exit
+    // must not land there unconditionally: a 529 seen through the CLI would kill the
+    // round while the identical outage over HTTPS fails over to the next judge. The
+    // boundary is the HTTP transports' own (_isTransientStatus: 429 plus any 5xx).
+
+    it('classifies a CLI-reported 529 overload as transient', async function () {
+        let stdout = JSON.stringify({
+            type: 'error', status: 529,
+            error: { type: 'overloaded_error', message: 'Overloaded' }
+        });
+        let { runClaudePrint } = loadClaudeSpawn({ exitCode: 1, stdout });
+        let err;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.transient).to.equal(true);
+    });
+
+    it('classifies a CLI-reported rate limit on stderr as transient', async function () {
+        let { runClaudePrint } = loadClaudeSpawn({
+            exitCode: 1, stderr: 'API Error: 429 {"type":"rate_limit_error"}' });
+        let err;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.transient).to.equal(true);
+        expect(err.message).to.include('exit 1');
+    });
+
+    // The Max-plan wording carries no numeric status at all; captured live on the
+    // Prometheus compute pool as "You've hit your session limit, resets 8:20pm (UTC)".
+    it('classifies a session-limit exit with no status token as transient', async function () {
+        let { runClaudePrint } = loadClaudeSpawn({
+            exitCode: 1, stderr: "You've hit your session limit" });
+        let err;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.transient).to.equal(true);
+    });
+
+    // A deterministic refusal never heals, so it outranks an availability match:
+    // advancing the chain would re-ask a different model for an answer the first one
+    // already gave. Wording captured live (Prometheus item #2476).
+    it('keeps a content refusal hard even when it carries an availability token', async function () {
+        let { runClaudePrint } = loadClaudeSpawn({
+            exitCode: 1,
+            stderr: "API Error: 529 Opus 4.8's safeguards flagged this message." });
+        let err;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.transient, 'a refusal must not advance the judge chain').to.equal(false);
+    });
+
+    // A bare status token is matched by word boundary, so the scan must not read the
+    // whole stdout blob: a usage or cost figure would otherwise stand in for a 5xx.
+    it('does not read a usage figure in stdout as a status token', async function () {
+        let stdout = JSON.stringify({
+            is_error: true, subtype: 'error_during_execution', result: '',
+            usage: { input_tokens: 500, output_tokens: 429 }
+        });
+        let { runClaudePrint } = loadClaudeSpawn({ exitCode: 1, stdout });
+        let err;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.transient).to.equal(false);
+    });
+
+    it('keeps an unrecognised non-zero exit hard', async function () {
+        let { runClaudePrint } = loadClaudeSpawn({ exitCode: 2, stderr: 'exceeded --max-budget-usd' });
+        let err;
+        try { await runClaudePrint({ prompt: 'hi', model: 'claude-sonnet-4-6' }); }
+        catch (e) { err = e; }
+        expect(err).to.exist;
+        expect(err.transient).to.equal(false);
+    });
+
     // ── CLAUDE_BIN export ────────────────────────────────────────────────────
 
     it('exports CLAUDE_BIN constant (defaults to "claude")', function () {

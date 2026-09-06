@@ -1973,6 +1973,27 @@ describe('AttestationPublisher: effector-safety guards', function () {
         expect(pub.spendGuard.stats().count.inWindow, 'a failed send consumes no budget').to.equal(0);
         expect(pub.spendGuard.allow()).to.equal(true);
     });
+
+    // The mirror of the test above, and the rule AttestationRelay already states at
+    // its own ambiguous branch: an ambiguous send MAY have reached the BTC node and
+    // paid its fee, so the window is CHARGED for it. Releasing hands the ceiling back
+    // an allowance a real spend consumed, and the next finalized request spends past
+    // the ceiling.
+    it('an AMBIGUOUS send KEEPS its reservation, charging the window for a fee that may have been paid', async function () {
+        process.env.ATTEST_MAX_PUBLISHES_PER_WINDOW = '1';
+        const pub = makePublisher(MY_PUB);
+        fs.writeFileSync(pub.queuePath, '');
+        const ambiguous = new Error('socket hang up');
+        ambiguous.attestAmbiguousSend = true;
+        pub.setBroadcastHook(sinon.stub().rejects(ambiguous));
+        await pub.onRequestFinalized({
+            requestId: 'c4'.repeat(32), providerId: 'http_get', responseBody: Buffer.from('ok'),
+            status: 'ok', meta: '', signatures: [{ pubkey: MY_PUB, sig: 'ee'.repeat(64) }], leaderPubkey: MY_PUB
+        });
+        expect(pub.spendGuard.stats().count.inWindow,
+               'a possibly-paid fee consumes budget').to.equal(1);
+        expect(pub.spendGuard.allow(), 'the one-send window is now spent').to.equal(false);
+    });
 });
 
 // ── attest_published_requests retention (#4869) ────────────────────────────────

@@ -581,6 +581,33 @@ describe('StateAnchorPublisher', function () {
             expect(nd.pub.getAnchorStats()).to.include({ anchorsPublished: 1, sectionsAnchored: 1, bundlesOversize: 0 });
         });
 
+        // _splitBundle sizes an ESTIMATED attestation tail before the round that fills it
+        // has run, and after a split it estimates at the network-wide oracle_publish set
+        // rather than the group's own block, so the estimate can come in low. An oversize
+        // payload then reached the encoder as a RangeError, after the anchor intents were
+        // recorded and withdrawn, with bundlesOversize still reading 0.
+        it('refuses a bundle whose BUILT payload overflows the budget, before any intent is recorded', async function () {
+            let bus = buildMesh(1, { stakeWeighted: true });
+            let nd  = bus.nodes[0];
+            // Only the final build carries a non-empty attestation tail (_v7Bytes always
+            // measures with an empty one), so inflating on that condition leaves the
+            // splitter's estimate untouched: exactly the low-estimate shape.
+            let realBuild = nd.pub._buildV7Payload.bind(nd.pub);
+            nd.pub._buildV7Payload = function (secs, publisher, attestSigs) {
+                let p = realBuild(secs, publisher, attestSigs);
+                return (attestSigs && attestSigs.length > 0) ? p + 'x'.repeat(9000) : p;
+            };
+            let intents = 0;
+            let realIntent = nd.pub._recordAnchorIntent.bind(nd.pub);
+            nd.pub._recordAnchorIntent = async function (row) { intents++; return realIntent(row); };
+            await startAll(bus);
+            await nd.pub.flush();
+            expect(nd.published.filter(p => p.split('|')[1] === '0'), 'nothing was broadcast').to.deep.equal([]);
+            expect(intents, 'no anchor intent was recorded').to.equal(0);
+            expect(nd.pub.getAnchorStats()).to.include({ anchorsPublished: 0, bundlesOversize: 1 });
+            expect(nd.db.checkpoints[0].anchor_txid, 'the checkpoint row stays pending').to.equal(null);
+        });
+
         // item 2676: the balance check is a hard pre-send gate, not an advisory WARN.
         it('skips the flush when a wired DOGE balance is below the floor (item 2676)', async function () {
             let bus = buildMesh(1);

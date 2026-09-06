@@ -19,10 +19,12 @@
  *                                     [--limit N] [--json]
  *   HUB_RPC_URLS=http://h1:4000,http://h2:4000 node bin/oracle-round-presence.js
  *
- * The range is resolved ONCE, from the first reachable hub, and every hub is then
- * asked about exactly that range: letting each hub pick its own bounds is how the
- * comparison silently stops comparing (a hub missing the newest rounds would
- * answer about an older window and agree with everyone by never overlapping).
+ * The range is resolved ONCE, from the first hub that reports a USABLE range, and
+ * every hub is then asked about exactly that range: letting each hub pick its own
+ * bounds is how the comparison silently stops comparing (a hub missing the newest
+ * rounds would answer about an older window and agree with everyone by never
+ * overlapping). "Usable" is not "reachable": an empty hub answers successfully with
+ * a null range, and stopping there would abort the check the fleet needs.
  *
  * Read-only: it broadcasts nothing and writes nothing.
  *
@@ -33,17 +35,33 @@
 const axios = require('axios');
 const { comparePresence } = require('../src/lib/oracle_round_presence.js');
 
-function arg(name, fallback) {
-    const i = process.argv.indexOf('--' + name);
-    return i === -1 || i === process.argv.length - 1 ? fallback : process.argv[i + 1];
+// Argv and env are read here and nowhere else, so the orchestration below can be
+// driven from a test. The range-pinning property this tool exists for lives only in
+// this file, and a script that parses argv at import time cannot be required at all.
+function parseArgs(argv, env) {
+    const list = Array.isArray(argv) ? argv : [];
+    const arg = (name, fallback) => {
+        const i = list.indexOf('--' + name);
+        return i === -1 || i === list.length - 1 ? fallback : list[i + 1];
+    };
+    return {
+        hubs: String(arg('hubs', (env && env.HUB_RPC_URLS) || ''))
+            .split(',').map(s => s.trim()).filter(Boolean),
+        from: arg('from', null),
+        to: arg('to', null),
+        limit: arg('limit', null),
+        json: list.includes('--json')
+    };
 }
 
-const HUBS = String(arg('hubs', process.env.HUB_RPC_URLS || ''))
-    .split(',').map(s => s.trim()).filter(Boolean);
-const FROM  = arg('from', null);
-const TO    = arg('to', null);
-const LIMIT = arg('limit', null);
-const JSON_OUT = process.argv.includes('--json');
+// A hub whose price_snapshots table is empty answers SUCCESSFULLY with a null range
+// (XChainHub.getOracleRoundPresence: "an empty range, not a fabricated one"), so an
+// answer is not automatically an anchor. Both bounds must be present: a half-null
+// range would pin `to_round: null` on every other hub.
+function usableRange(presence) {
+    return !!presence && presence.from_round !== null && presence.from_round !== undefined
+                      && presence.to_round   !== null && presence.to_round   !== undefined;
+}
 
 async function ask(hub, params) {
     const res = await axios.post(hub,
@@ -54,24 +72,40 @@ async function ask(hub, params) {
     return result;
 }
 
-async function main() {
+// Returns the exit code rather than exiting, so a test can drive the whole run and
+// assert the outcome. Exit codes: 0 agreed, 1 divergent, 2 could not compare.
+async function main(opts) {
+    const { hubs: HUBS, from: FROM, to: TO, limit: LIMIT, json: JSON_OUT } = opts;
     if (HUBS.length < 2) {
         console.error('Name at least two hubs: --hubs http://h1:4000,http://h2:4000 ' +
             '(or set HUB_RPC_URLS). Comparing one hub to itself proves nothing.');
-        process.exit(2);
+        return 2;
     }
 
-    // Resolve the range from the first hub that answers, then pin it for everyone.
+    // Resolve the range from the first hub that reports a usable one, then pin it for
+    // everyone. Advancing past an empty answer is the point: a freshly resynced or
+    // wiped hub listed first would otherwise abort every run of the check.
     let range = { from_round: FROM, to_round: TO, limit: LIMIT };
     if (range.from_round === null || range.to_round === null) {
         let anchor = null;
+        let empty = 0;
+        let unreached = 0;
         for (const hub of HUBS) {
-            try { anchor = await ask(hub, { from_round: FROM, to_round: TO, limit: LIMIT }); break; }
-            catch (err) { console.error('warn: ' + hub + ' did not answer: ' + ((err && err.message) || err)); }
+            let presence = null;
+            try { presence = await ask(hub, { from_round: FROM, to_round: TO, limit: LIMIT }); }
+            catch (err) {
+                unreached++;
+                console.error('warn: ' + hub + ' did not answer: ' + ((err && err.message) || err));
+                continue;
+            }
+            if (usableRange(presence)) { anchor = presence; break; }
+            empty++;
+            console.error('warn: ' + hub + ' answered with no recorded rounds; trying the next hub.');
         }
-        if (!anchor || anchor.from_round === null) {
-            console.error('No hub answered with a usable round range.');
-            process.exit(2);
+        if (!anchor) {
+            console.error('No hub returned a usable round range (' + empty +
+                ' answered empty, ' + unreached + ' unreachable).');
+            return 2;
         }
         range = { from_round: anchor.from_round, to_round: anchor.to_round };
     } else {
@@ -86,7 +120,7 @@ async function main() {
     }
     if (answers.length < 2) {
         console.error('Reached ' + answers.length + ' hub(s); need at least two to compare.');
-        process.exit(2);
+        return 2;
     }
 
     const comparison = comparePresence(answers);
@@ -94,7 +128,7 @@ async function main() {
         console.log(JSON.stringify({ range, unreachable, comparison,
             digests: answers.map(a => ({ hub: a.hub, digest: a.presence.digest,
                                          missing: a.presence.missing })) }, null, 2));
-        process.exit(comparison.agreed ? 0 : 1);
+        return comparison.agreed ? 0 : 1;
     }
 
     console.log('Rounds ' + range.from_round + '-' + range.to_round +
@@ -107,17 +141,23 @@ async function main() {
 
     if (comparison.agreed) {
         console.log('\nAgreed: every hub reports the same outcome for every round in range.');
-        process.exit(0);
+        return 0;
     }
     console.log('\nDIVERGENT on ' + comparison.divergent.length + ' round(s):');
     for (const d of comparison.divergent) {
         const parts = Object.keys(d.statuses).map(h => h + '=' + d.statuses[h]);
         console.log('  round ' + d.round + ': ' + parts.join('  '));
     }
-    process.exit(1);
+    return 1;
 }
 
-main().catch(err => {
-    console.error('oracle-round-presence failed: ' + ((err && err.message) || err));
-    process.exit(2);
-});
+module.exports = { parseArgs, usableRange, ask, main };
+
+if (require.main === module) {
+    main(parseArgs(process.argv, process.env))
+        .then(code => process.exit(code))
+        .catch(err => {
+            console.error('oracle-round-presence failed: ' + ((err && err.message) || err));
+            process.exit(2);
+        });
+}
