@@ -646,6 +646,29 @@ class OracleConsensus extends EventEmitter {
                 : null;
         }
 
+        // No deterministic snapshot on a FEDERATED hub: skip, in both quorum modes. A
+        // null snapshot (indexer down / timeout / 401-403 / malformed) otherwise falls
+        // through to _getQuorum(), which reads this hub's own validatorSet or open-peer
+        // count, so the finalization THRESHOLD becomes a function of local reachability:
+        // at one height a hub holding a seven-member snapshot needs five votes while a
+        // hub whose fetch failed needs three over its live four. The same null also
+        // unfilters the member tally (_countDistinctMembers) and reverts leader election
+        // to live-set rotation. The under-quorum hub then publishes a PRICE v0 the
+        // indexer rejects at its own gate (actions/price.js re-derives the count over
+        // getValidatorsByCapability at the same height), so the degradation buys no
+        // liveness and spends a fee to say so. Consensus.js takes exactly this posture
+        // for config rounds and CrossChainEngine for cross-chain ones; this is that gate,
+        // not a new one. Genuine single-node / regtest bootstrap (_getQuorum() === 0)
+        // keeps the self-finalize path, same federation test as the empty-set guard below.
+        if (!this._hasDeterministicSnapshot(snapshot) && this._getQuorum() > 0) {
+            console.warn('Oracle: Round ' + round + ' has no deterministic price capability snapshot at block ' +
+                btcBlockHeight + ' while this hub is federated; skipping rather than sizing quorum from this ' +
+                'hub\'s live validator set, which peers do not share.');
+            await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime,
+                'no deterministic capability snapshot');
+            return;
+        }
+
         // A federation whose price-qualifying set is empty at this block must skip
         // the round, not self-finalize it: getQuorum(empty)=0 would otherwise take
         // the single-node bypass below and publish a one-signature PRICE v0 the
@@ -842,9 +865,7 @@ class OracleConsensus extends EventEmitter {
             // _checkPrepareQuorum/_checkCommitQuorum can tally signer stake (the count
             // quorum above is ignored when weighted).
             weighted:       !!weighted,
-            validators:     (weighted && snapshot && Array.isArray(snapshot.validators))
-                ? snapshot.validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), source: String(v.source != null ? v.source : ''), weight: String(v.weight != null ? v.weight : '0') }))
-                : [],
+            validators:     this._normalizeValidators(snapshot, weighted),
             // Snapshot member pubkeys for the count-mode vote tally (Oracle M1).
             // Null (no usable snapshot) keeps the legacy raw-sender count.
             memberPubkeys:  memberPubkeys || null
@@ -943,6 +964,27 @@ class OracleConsensus extends EventEmitter {
     _addVote(voteSet, envelope) {
         let pk = provenPubkey(envelope);
         if (pk) voteSet.add(pk);
+    }
+
+    // Normalize a locked snapshot's validators into the source-keyed shape the
+    // weighted predicate needs ([{pubkey:lower, source, weight}]); [] in count mode.
+    // Mirrors Consensus._normalizeValidators, including the truncation carry.
+    //
+    // SWQ-TRUNC parity: the marker is a plain array property CapabilitySnapshot sets on
+    // the SNAPSHOT, so the .map below drops it while meetsStakeThreshold reads it off the
+    // array it is handed. Without the carry a round locked over a capped snapshot loses
+    // its fail-closed guard and an under-counted S lets a minority of stake clear the 2/3
+    // bar. Same one-liner as the sibling rebuilds in this file (:2083) and in
+    // CrossChainDexEngine.js / StakeShareWatcher.js.
+    _normalizeValidators(snapshot, weighted) {
+        if (!weighted || !snapshot || !Array.isArray(snapshot.validators)) return [];
+        let out = snapshot.validators.map(v => ({
+            pubkey: String(v.pubkey).toLowerCase(),
+            source: String(v.source != null ? v.source : ''),
+            weight: String(v.weight != null ? v.weight : '0')
+        }));
+        if (snapshot.truncated === true) out.truncated = true;
+        return out;
     }
 
     // Pubkey set of a locked capability snapshot, or null when there is no usable
@@ -1119,6 +1161,20 @@ class OracleConsensus extends EventEmitter {
                     snap = this.hub.capabilitySnapshot
                         ? await this.hub.capabilitySnapshot.getSnapshot('price', blockHeight)
                         : null;
+                }
+                // Follower twin of the leader-side deterministic-snapshot gate in
+                // finalizeRound, in BOTH quorum modes and in the same position relative to
+                // the empty-snapshot check, so a leader and a follower refuse exactly the
+                // same rounds. Without it this follower opens a pending round sized from
+                // its own live set (quorumForRound falls through to _getQuorum below) with
+                // memberPubkeys null, so its vote tally is unfiltered and its leader
+                // election is live-set rotation: three ways to disagree with every peer at
+                // the same height on nothing but its own indexer reachability.
+                if (!this._hasDeterministicSnapshot(snap) && this._getQuorum() > 0) {
+                    console.warn('Oracle: dropping PROPOSE for round ' + round + ': no deterministic price ' +
+                        'capability snapshot at block ' + blockHeight + ' while federated; refusing to open a ' +
+                        'pending round sized from this hub\'s live validator set.');
+                    return;
                 }
                 quorumForRound = snap
                     ? this.hub.capabilitySnapshot.getQuorum(snap)
@@ -1435,9 +1491,7 @@ class OracleConsensus extends EventEmitter {
                 snapshot:       snap || null,
                 quorum:         quorum,
                 weighted:       !!wt,
-                validators:     (wt && snap && Array.isArray(snap.validators))
-                    ? snap.validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), source: String(v.source != null ? v.source : ''), weight: String(v.weight != null ? v.weight : '0') }))
-                    : [],
+                validators:     this._normalizeValidators(snap, wt),
                 // Snapshot member pubkeys for the count-mode vote tally (Oracle M1).
                 memberPubkeys:  memberPubkeys || null,
                 timer:          setTimeout(() => {
@@ -1870,22 +1924,67 @@ class OracleConsensus extends EventEmitter {
         // withhold or slash. Uses the hardcoded constant (not an env value) and bignumber
         // math so every hub gates identically.
         // CONSENSUS-CRITICAL: deploy fleet-wide atomically.
-        if (values.length % 2 === 0) {
-            let lo = values[mid - 1].s, hi = values[mid].s; // sorted ascending, both > 0
-            if (devband.twoSourceSpreadExceeds(lo, hi, ORACLE_DEVIATION_THRESHOLD, 18)) {
-                console.warn('Oracle: dropping ' + coinPair + ' this round: the two middle values '
-                    + 'disagree beyond the ' + (ORACLE_DEVIATION_THRESHOLD * 100) + '% mean-deviation gate ('
-                    + lo + ' vs ' + hi + '), so the published mean would put every submitter outside the band');
-                return null;
-            }
-        }
-
+        //
+        // The gate measures the ROUNDED median, not the exact midpoint (item 7067). The
+        // exact-midpoint form ((hi-lo)/(hi+lo)) answered a question no other gate asks:
+        // the price a co-signer receives is the 8-decimal median computed below, and
+        // rounding moves it off the midpoint by up to half an ulp, which is enough to
+        // straddle the band. Measured, not reasoned: 0.09500010 and 0.10500011 spread
+        // 0.049999997500002625 (inside), median 0.10000011, and the low submission then
+        // sits 0.0500000449999505 from THAT (outside). A follower re-deriving over the
+        // proposer-excluded set lands on 0.09500010, trips the identical band in
+        // _handlePropose, and rejects the WHOLE proposal, so one boundary pair wedges the
+        // round in a finalization timeout. Both middles are checked because rounding moves
+        // the reference toward one of them and away from the other, so either can be the
+        // far side; with 8-decimal submissions (what every producer emits) that is the
+        // only difference from the midpoint form, and it is strictly the safe direction.
+        // Both SIDES are quantized to 8 decimals first, because that is the comparison
+        // _handlePropose actually performs: the follower's local aggregate is itself an
+        // 8-decimal median, so measuring a raw sub-8-decimal submission against a rounded
+        // reference would score quantization error as feed disagreement and drop a pair
+        // every submitter agreed on exactly (found by the fuzz property, at 1.05e-8: one
+        // 8-decimal ulp is 5% of a price that small).
+        //
         // Compute median in bignumber (no float midpoint average / .toFixed artifact)
         let median;
         if (values.length % 2 === 0) {
             median = bcmath.bcformat(bcmath.bcdiv(bcmath.bcadd(values[mid - 1].s, values[mid].s, 8), '2', 8), 8);
         } else {
             median = bcmath.bcformat(values[mid].s, 8);
+        }
+
+        // deviation_band's stated precondition: a zero reference makes bcdiv's guard
+        // return deviation 0, so every gate below it would pass vacuously. A median that
+        // rounds to zero is also not a price anything can be denominated in, so drop the
+        // pair rather than federation-sign a 0.00000000. Unreachable from an 8-decimal
+        // producer, which already refuses a value that formats to zero.
+        if (!bcmath.bcgt(median, '0')) {
+            console.warn('Oracle: dropping ' + coinPair + ' this round: the aggregate rounds to '
+                + median + ' at 8 decimals, which is not a publishable price');
+            return null;
+        }
+
+        if (values.length % 2 === 0) {
+            // sorted ascending, both > 0; quantized to the published scale (see above)
+            let lo = bcmath.bcformat(values[mid - 1].s, 8), hi = bcmath.bcformat(values[mid].s, 8);
+            // Only a DISAGREEMENT is gated. When both middles quantize to the same price
+            // there is one camp, not two, and the mean is that camp's own value: this gate
+            // has nothing to say. It is scoped that way deliberately rather than by
+            // accident, because the median is computed by rounding the SUM to 8 decimals
+            // and then rounding the quotient again, and at magnitudes near the 8-decimal
+            // ulp that double rounding can land a unanimous set one ulp off its own value
+            // (1.425e-7 -> 0.00000015). That is a defect in the median arithmetic, which
+            // is federation-uniform and out of scope here; leave its behaviour exactly as
+            // it is rather than change it silently under a gate change.
+            if (lo !== hi &&
+                (devband.exceedsBand(lo, median, ORACLE_DEVIATION_THRESHOLD, 18) ||
+                 devband.exceedsBand(hi, median, ORACLE_DEVIATION_THRESHOLD, 18))) {
+                console.warn('Oracle: dropping ' + coinPair + ' this round: the two middle values '
+                    + 'disagree beyond the ' + (ORACLE_DEVIATION_THRESHOLD * 100) + '% mean-deviation gate ('
+                    + lo + ' vs ' + hi + '), so the published price ' + median
+                    + ' would put every submitter outside the band');
+                return null;
+            }
         }
         return this._clampToLastFinalized(coinPair, median);
     }
@@ -2597,13 +2696,24 @@ class OracleConsensus extends EventEmitter {
     // federation test is `_getQuorum() > 0` (validatorSet has >=2 registered
     // members, or a live peer is connected); a genuine single-node / regtest
     // bootstrap has `_getQuorum() === 0`, so it keeps the self-finalize path. A
-    // null snapshot (indexer unreachable) is NOT this case: that is the separate
-    // graceful-degradation-to-live-count path and is left untouched.
+    // null snapshot (indexer unreachable) is a DIFFERENT case, handled one guard
+    // earlier on both round paths by _hasDeterministicSnapshot.
     _isEmptyFederationSnapshot(snapshot) {
         if (!snapshot) return false;
         let vals = snapshot.validators;
         let empty = !Array.isArray(vals) || vals.length === 0;
         return empty && this._getQuorum() > 0;
+    }
+
+    // Fail-closed gate for a federated hub: a block-anchored snapshot is what makes the
+    // round's N the SAME number on every hub. Null (indexer down / timeout / 401-403 /
+    // malformed) is not a smaller federation, it is an unknown one, and sizing quorum
+    // from local live state at that point makes the finalization threshold a function of
+    // this hub's reachability. Present-but-EMPTY is a different case (a real, agreed-upon
+    // zero-qualifier set) and is handled by _isEmptyFederationSnapshot.
+    // Mirrors Consensus._hasDeterministicSnapshot.
+    _hasDeterministicSnapshot(snapshot) {
+        return !!(snapshot && Array.isArray(snapshot.validators));
     }
 
     // Canonicalize the digest PREIMAGE, not just hash whatever array

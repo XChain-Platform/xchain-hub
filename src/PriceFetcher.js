@@ -72,7 +72,14 @@ function krakenResultCandidates(altname) {
     return [altname, canonAsset + 'Z' + fiat, canonAsset + fiat, asset + 'Z' + fiat];
 }
 
-// Supported coins (from the canonical registry) and fiat currencies (12)
+// Supported coins (from the canonical registry) and fiat currencies (12).
+// THE V0 HALF OF A TWO-LANE FENCE: the product below becomes OracleRound's
+// canonicalPairs, which gates v0 ingest and PROPOSE co-signing, while the v1 push lane
+// gates on constants.PRICE_V1_COINS / PRICE_V1_FIATS. Those are separate literals, so a
+// fiat added here alone is fetched and co-signed but rejected on push, and a coin added
+// to coins/ alone is picked up here automatically while v1 ingest still calls it an
+// invalid coin. Pinned to the v1 fence and to the indexer config by
+// test/unit/constants-conformance.test.js (#7215).
 const coins = require('./coins');
 const COINS = [...coins.ALLOWED_COINS];
 const FIATS = ['USD', 'CAD', 'AUD', 'MXN', 'GBP', 'JPY', 'CNY', 'CHF', 'BRL', 'INR', 'EUR', 'KRW'];
@@ -89,6 +96,27 @@ for (let coin of COINS) {
         COIN_PAIRS.push(coin + '/' + fiat);
     }
 }
+
+// The price-source lineup, declared ONCE as data: which fetcher, whether it needs a
+// key, and which pairs it can price. multiSourceCapablePairs() derives the
+// multi-source-capable set from this instead of restating the lineup, which is how
+// nineteen pairs sat outside the single-source health signal for the whole life of the
+// keyless Coinbase source (item 7068). test/unit/PriceFetcher.test.js pins it against
+// the fetchers fetchPrices() actually dispatches, so adding or dropping a source on one
+// side reddens rather than silently re-opening the gap.
+//
+// `covers` is a function, not an array, because KRAKEN_PAIRS is the coverage fact for
+// Kraken and reading it lazily keeps the two from being copied apart.
+const PRICE_SOURCES = [
+    { key: 'coingecko',     method: 'fetchFromCoinGecko',     requiresKey: null,
+      covers: () => COIN_PAIRS },
+    { key: 'kraken',        method: 'fetchFromKraken',        requiresKey: null,
+      covers: () => Object.keys(KRAKEN_PAIRS) },
+    { key: 'coinbase',      method: 'fetchFromCoinbase',      requiresKey: null,
+      covers: () => COIN_PAIRS },
+    { key: 'coinmarketcap', method: 'fetchFromCoinMarketCap', requiresKey: 'coinmarketcapApiKey',
+      covers: () => COIN_PAIRS }
+];
 
 class PriceFetcher {
 
@@ -161,19 +189,35 @@ class PriceFetcher {
     }
 
     // The coin pairs at least two configured providers can supply this round. Used by
-    // the federation single-source health signal so it does not cry wolf on pairs that
-    // are CoinGecko-only by design: Kraken lists no MXN/CNY/BRL/INR/KRW markets (plus
-    // per-coin gaps like LTC/CAD, DOGE/JPY), so those pairs always report sources=1 in
-    // a healthy keyless round. CoinGecko is the always-on baseline for all 36 pairs;
-    // the second source is Kraken (keyless, KRAKEN_PAIRS only) or CoinMarketCap (all 36,
-    // only when a key is configured). A pair absent from this set can never reach two
-    // sources, so a sources=1 reading for it is expected, not a degradation.
+    // the federation single-source health signal (OracleConsensus.finalizeRound) so it
+    // does not cry wolf on a pair only one upstream can ever price: such a pair reports
+    // sources=1 in every healthy round, and without the filter the global minimum is
+    // ~always 1 and the warn trains operators to ignore it. Counting only, never gating.
+    //
+    // DERIVED from PRICE_SOURCES rather than restated (item 7068). The set was seeded
+    // from KRAKEN_PAIRS alone, which was true when Kraken was the only companion to
+    // CoinGecko, and stayed a hand-written second statement of the lineup when the
+    // keyless Coinbase source landed covering all 36 pairs. Nineteen pairs were
+    // therefore excluded from the signal on every keyless hub: BTC/MXN could fall to
+    // CoinGecko alone and the degradation counter would not move.
     multiSourceCapablePairs() {
-        let capable = new Set(Object.keys(KRAKEN_PAIRS));
-        if (this.coinmarketcapApiKey) {
-            for (let pair of COIN_PAIRS) capable.add(pair);
+        let counts = new Map();
+        for (let source of PRICE_SOURCES) {
+            if (source.requiresKey && !this[source.requiresKey]) continue;
+            for (let pair of source.covers()) counts.set(pair, (counts.get(pair) || 0) + 1);
         }
+        let capable = new Set();
+        for (let [pair, n] of counts) if (n >= 2) capable.add(pair);
         return capable;
+    }
+
+    // The lineup as data, so a test can pin it against the fetchers fetchPrices()
+    // actually dispatches. Returns copies; `covers` is re-read per call because
+    // KRAKEN_PAIRS and COIN_PAIRS are module state a test may not mutate safely.
+    static priceSources() {
+        return PRICE_SOURCES.map(s => ({
+            key: s.key, method: s.method, requiresKey: s.requiresKey, covers: s.covers().slice()
+        }));
     }
 
     // Fetch prices from all configured sources and return the local median per coin pair

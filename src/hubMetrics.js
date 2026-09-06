@@ -169,6 +169,21 @@ function installHubStakeShareMetrics(observability, hub){
     });
 
     registry.addCollector(() => {
+        // Rebuild every series from scratch each pass. Skipping set() on an unmeasured
+        // reading leaves the PREVIOUS sample registered, so the absent-on-unavailable
+        // rule below degraded silently into "keep serving the last healthy number":
+        // after a failed indexer read every later scrape still rendered meets_gate 1
+        // as a current measurement. This collector is the sole writer of these five
+        // gauges and re-derives all of them from the watcher's entry set immediately
+        // below, inside this same synchronous pass, so a reset can never drop a
+        // still-valid reading; it drops only readings nothing re-measured. Reset
+        // BEFORE the watcher guard so a hub that LOSES its watcher goes quiet too,
+        // which is what that guard already intends for a hub that never had one.
+        shareRatio.reset();
+        headroom.reset();
+        stakesToHalt.reset();
+        meetsGate.reset();
+        alerting.reset();
         const watcher = hub.stakeShareWatcher;
         // No watcher (config-only hub) or no operator sources configured: emit no
         // series at all rather than a zero, which would read as a lost gate and page.

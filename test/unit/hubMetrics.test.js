@@ -244,6 +244,56 @@ describe('hub stake-share metrics', function () {
         expect(out).to.match(/xchain_stake_share_alerting 0\b/);
     });
 
+    it('drops a healthy reading once the snapshot becomes unreadable, instead of repeating it', function () {
+        // The absent-on-unavailable rule only held for a chain that had NEVER been
+        // measured. A registered series survives a skipped set(), so after a failed
+        // indexer read every later scrape kept rendering the last healthy sample as
+        // a current measurement, meets_gate 1 included.
+        const observability = realObservability();
+        const { hub, monitor } = hubWithShare([{
+            chain: 'BTC', capability: 'price', input: {
+                validators: rows([['ours1', 100], ['c1', 10]]),
+                operatorSources: ['ours1'], minStake: '10'
+            }
+        }]);
+        installHubStakeShareMetrics(observability, hub);
+        const healthy = observability.registry.render();
+        expect(healthy).to.match(/xchain_stake_share_meets_gate\{chain="BTC",capability="price"\} 1\b/);
+        expect(healthy).to.match(/xchain_stake_share_ratio\{chain="BTC",capability="price"\}/);
+
+        monitor.recordUnavailable('BTC', 'price', 'indexer unreachable');
+        const stale = observability.registry.render();
+        expect(stale).to.not.match(/xchain_stake_share_meets_gate\{[^}]*chain="BTC"/);
+        expect(stale).to.not.match(/xchain_stake_share_ratio\{[^}]*chain="BTC"/);
+        expect(stale).to.not.match(/xchain_stake_share_headroom\{[^}]*chain="BTC"/);
+        expect(stale).to.not.match(/xchain_stake_share_stakes_to_halt\{[^}]*chain="BTC"/);
+
+        // A chain that IS still measurable keeps rendering across the same scrape,
+        // which is what makes the reset a gap rather than a blackout.
+        monitor.record('DOGE', 'price', evaluateStakeShare({
+            validators: rows([['ours1', 100], ['c1', 10]]), operatorSources: ['ours1'], minStake: '10'
+        }));
+        const mixed = observability.registry.render();
+        expect(mixed).to.match(/xchain_stake_share_meets_gate\{chain="DOGE",capability="price"\} 1\b/);
+        expect(mixed).to.not.match(/xchain_stake_share_meets_gate\{[^}]*chain="BTC"/);
+    });
+
+    it('stops rendering stake-share series once the hub loses its watcher', function () {
+        const observability = realObservability();
+        const { hub } = hubWithShare([{
+            chain: 'BTC', capability: 'price', input: {
+                validators: rows([['ours1', 100], ['c1', 10]]),
+                operatorSources: ['ours1'], minStake: '10'
+            }
+        }]);
+        installHubStakeShareMetrics(observability, hub);
+        expect(observability.registry.render()).to.match(/xchain_stake_share_alerting 0\b/);
+        hub.stakeShareWatcher = null;
+        const out = observability.registry.render();
+        expect(out).to.not.match(/xchain_stake_share_alerting \d/);
+        expect(out).to.not.match(/xchain_stake_share_meets_gate\{/);
+    });
+
     it('resolves the watcher at scrape time, and emits nothing on a config-only hub', function () {
         const observability = realObservability();
         const hub = { stakeShareWatcher: null };

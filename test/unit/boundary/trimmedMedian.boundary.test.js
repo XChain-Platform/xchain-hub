@@ -262,6 +262,65 @@ describe('Boundary: Trimmed Median Aggregation', function () {
     });
 
     // -----------------------------------------------------------------
+    // Item 7067: the even-split gate measures the PUBLISHED price
+    // -----------------------------------------------------------------
+
+    describe('even-split gate measures the rounded median, not the exact midpoint', function () {
+
+        // The exact-midpoint form of this gate answered a question no co-signer asks.
+        // These two submissions spread 0.049999997500002625 (inside the 5% band), but
+        // the 8-decimal median they produce is 0.10000011, and the low submission sits
+        // 0.0500000449999505 from THAT. A follower re-deriving over the proposer-excluded
+        // set lands on 0.09500010, trips the identical band in _handlePropose, and
+        // rejects the whole proposal, so one boundary pair wedged the entire round.
+        it('drops the pair whose rounded median puts a middle submission outside the band', function () {
+            const devband = require('../../../src/lib/deviation_band.js');
+            const lo = '0.09500010', hi = '0.10500011';
+            // The premise, executed rather than asserted: the OLD gate passed this pair.
+            expect(devband.twoSourceSpreadExceeds(lo, hi, 0.05, 18)).to.be.false;
+            expect(devband.exceedsBand(lo, '0.10000011', 0.05, 18)).to.be.true;
+
+            let subs = submissionsForPair([lo, hi], 'XCHAIN/USD');
+            expect(oc._aggregate(subs, 'XCHAIN/USD')).to.be.null;
+        });
+
+        it('still publishes a pair whose rounded median keeps both middles inside the band', function () {
+            // Same neighbourhood, one ulp tighter: median 0.10000010, both middles inside.
+            let subs = submissionsForPair(['0.09500011', '0.10500009'], 'XCHAIN/USD');
+            expect(oc._aggregate(subs, 'XCHAIN/USD')).to.equal('0.10000010');
+        });
+
+        it('is never looser than the exact-midpoint form it replaced', function () {
+            // A spread the OLD gate rejected must still be rejected.
+            let subs = submissionsForPair(['100', '110.6'], 'BTC/USD');
+            expect(oc._aggregate(subs, 'BTC/USD')).to.be.null;
+        });
+
+        // deviation_band divides by the reference, and bcdiv's zero guard returns 0, so a
+        // zero median would make every band check pass vacuously and federation-sign a
+        // 0.00000000 price. Reachable only from a sub-8-decimal ingest value.
+        it('drops a pair whose aggregate rounds to zero at 8 decimals', function () {
+            // Two IDENTICAL sub-8-decimal values: spread 0, so the even-split gate has
+            // nothing to object to and the pair reaches the median unchallenged. Before
+            // this guard the aggregate published was the string '0.00000000'.
+            const devband = require('../../../src/lib/deviation_band.js');
+            expect(devband.twoSourceSpreadExceeds('0.000000002', '0.000000002', 0.05, 18)).to.be.false;
+            let subs = submissionsForPair(['0.000000002', '0.000000002'], 'BTC/USD');
+            expect(oc._aggregate(subs, 'BTC/USD')).to.be.null;
+        });
+
+        it('drops an odd-length set whose only value rounds to zero at 8 decimals', function () {
+            let subs = submissionsForPair(['0.000000001'], 'BTC/USD');
+            expect(oc._aggregate(subs, 'BTC/USD')).to.be.null;
+        });
+
+        it('leaves odd-length sets on the plain median path', function () {
+            let subs = submissionsForPair(['0.09500010', '0.10000011', '0.10500011'], 'BTC/USD');
+            expect(oc._aggregate(subs, 'BTC/USD')).to.equal('0.10000011');
+        });
+    });
+
+    // -----------------------------------------------------------------
     // _aggregateAll boundary
     // -----------------------------------------------------------------
 

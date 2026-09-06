@@ -22,7 +22,7 @@ const sinon            = require('sinon');
 const { expect }       = require('chai');
 const OracleConsensus  = require('../../src/OracleConsensus');
 const { createMockHub } = require('../helpers/mockHub');
-const { pubkeyForTestSender } = require('../helpers/fixtures');
+const { pubkeyForTestSender, makeCapabilitySnapshotStub } = require('../helpers/fixtures');
 
 describe('OracleConsensus: early-message buffer for F7', function () {
 
@@ -61,6 +61,10 @@ describe('OracleConsensus: early-message buffer for F7', function () {
         hub._resolveBtcLatestBlock = sinon.stub().resolves(1000);
         pm  = hub._peerManager;
         oracleRound = { getSubmissions: sinon.stub().returns(new Map()) };
+        // A federated hub refuses a round with no deterministic capability snapshot, so the
+        // harness models one over the same validators: these cases are about something else,
+        // not about the snapshot being unreachable.
+        hub.capabilitySnapshot = makeCapabilitySnapshotStub(VALSET);
         oc = new OracleConsensus(hub, oracleRound);
         oc.setValidatorSet(VALSET);
         // Finalized history for the proposed pair so the unverifiable-pair

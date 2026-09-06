@@ -955,8 +955,24 @@ class AttestationConsensus extends EventEmitter {
         }
         pending._agreeing = false;
 
-        // Round could have been pruned/finalized while we awaited (rare but possible)
-        if(!this.pending.has(rid) || pending.finalized) return;
+        // Round could have been pruned/finalized while we awaited (rare but possible).
+        // Re-assert the SAME preconditions this function checked before the await, on
+        // the object the map holds NOW. agree() is an API call on the judge_model path,
+        // so PBFT messages are delivered while it runs:
+        //   - a responsible peer's signed no_quorum PREPARE can establish a winner and
+        //     leave signatures in the map over THAT canonical. Assigning the judge's ok
+        //     winner below would not clear them, and _checkCommitQuorum gates on
+        //     signatures.size, so the round finalizes carrying a signature that does not
+        //     verify over the emitted canonical and the indexer rejects the response
+        //     below redundancy. First writer wins: the raced outcome stands, and the
+        //     request stays retryable because a non-ok outcome is not terminal.
+        //   - a retry round can replace the pending object entirely while this closure
+        //     still holds the old one; mutating that would broadcast a dead round's
+        //     PREPARE. Identity, not presence, is the check that catches it.
+        // The judge spend is lost in both cases, which is the correct trade against
+        // emitting an unfulfillable response. _establishNonOkWinner is already guarded
+        // this way, which is why only this ok path could overwrite.
+        if(this.pending.get(rid) !== pending || pending.finalized || pending.winner) return;
 
         if(!winner){
             if(judgeOutcome.inconclusive)

@@ -795,11 +795,19 @@ class Consensus {
     // weighted predicate needs ([{pubkey:lower, source, weight}]); [] in count mode.
     _normalizeValidators(snapshot, weighted) {
         if (!weighted || !snapshot || !Array.isArray(snapshot.validators)) return [];
-        return snapshot.validators.map(v => ({
+        let out = snapshot.validators.map(v => ({
             pubkey: String(v.pubkey).toLowerCase(),
             source: String(v.source != null ? v.source : ''),
             weight: String(v.weight != null ? v.weight : '0')
         }));
+        // SWQ-TRUNC parity: carry the truncation marker onto the rebuilt array. It is a
+        // plain array property that CapabilitySnapshot sets on the SNAPSHOT, so the .map
+        // above drops it, and meetsStakeThreshold reads it off the array it is handed;
+        // without this the round's weighted tally silently loses its fail-closed guard and
+        // an under-counted S lets a minority of stake clear the 2/3 bar. Same one-liner as
+        // CrossChainDexEngine.js, OracleConsensus.js and StakeShareWatcher.js.
+        if (snapshot.truncated === true) out.truncated = true;
+        return out;
     }
 
     // Leader-election population. The lowercased signing pubkeys of the

@@ -824,6 +824,18 @@ class Database {
         return config;
     }
 
+    // Every row of one module on one network, across coins, ordered so two hubs
+    // reading the same table see the same sequence. getConfig() above needs a coin,
+    // and a hub has none: it federates several chains and p2pConfig carries only
+    // HUB_NETWORK. Used for chain-agnostic modules whose param_name is the whole
+    // identity (ATTESTATION_PROVIDER rows are one definition per provider_id), where
+    // a coin-keyed read would have to invent a coin to ask for.
+    async getConfigRowsByModule(network, module){
+        let query = "SELECT coin, param_name, param_value FROM configs WHERE network = ? AND module = ? "
+                  + "ORDER BY coin, param_name";
+        return await this.doQuery(query, [network, module]);
+    }
+
     // Network defaults to 'mainnet' for back-compat with older indexers.
     async setChainTip(coin, network, blockHeight, blockTime){
         let net = network || 'mainnet';

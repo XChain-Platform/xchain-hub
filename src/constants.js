@@ -83,7 +83,14 @@ const DEFAULT_ORACLE_SUBMISSION_WINDOW_MS = 180000;
 // parse_v1: the indexer rejects these on-chain, so any push carrying a value
 // outside them is malformed or Byzantine and must not reach oracle_prices
 // (getLatestPrice / fee validation / the hub-db mirror stream read it).
-// Keep in lockstep with the indexer when new coins or fiats are added.
+// Keep in lockstep with the indexer when new coins or fiats are added, AND with the v0
+// lane in this same package: PriceFetcher.js builds the v0 fetch product from
+// coins.ALLOWED_COINS and its own FIATS literal, and OracleRound turns that product
+// into the v0 ingest / PROPOSE co-sign fence. Those are separate literals from these,
+// so a coin or fiat added to one lane alone is accepted there and rejected on the
+// other. All three sources are pinned against each other by
+// test/unit/constants-conformance.test.js (#7215). DERIVED_PAIRS below is the one
+// deliberate asymmetry and must NOT join this fence.
 const PRICE_V1_COINS  = ['BTC', 'LTC', 'DOGE'];
 const PRICE_V1_FIATS  = ['USD', 'CAD', 'AUD', 'MXN', 'GBP', 'JPY', 'CNY', 'CHF', 'BRL', 'INR', 'EUR', 'KRW'];
 const MAX_TICK_LENGTH = 250;

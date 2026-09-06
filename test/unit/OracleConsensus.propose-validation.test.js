@@ -17,7 +17,7 @@ const { expect }       = require('chai');
 const OracleConsensus  = require('../../src/OracleConsensus');
 const PriceFetcher     = require('../../src/PriceFetcher');
 const { createMockHub }       = require('../helpers/mockHub');
-const { VALIDATORS_3, buildSubmissions } = require('../helpers/fixtures');
+const { VALIDATORS_3, buildSubmissions, makeCapabilitySnapshotStub } = require('../helpers/fixtures');
 
 describe('OracleConsensus: follower price validation / minSubmissions / broadcast', function () {
     let hub, pm, oc, oracleRound, leader;
@@ -28,6 +28,10 @@ describe('OracleConsensus: follower price validation / minSubmissions / broadcas
         pm  = hub._peerManager;
         pm.validatorPubkeys = new Set();          // size 0 → _isKnownSender accepts any sender
         oracleRound = { getSubmissions: sinon.stub().returns(new Map()) };
+        // A federated hub refuses a round with no deterministic capability snapshot, so the
+        // harness models one over the same validators. These cases are about price content,
+        // not about the snapshot being unreachable.
+        hub.capabilitySnapshot = makeCapabilitySnapshotStub(VALIDATORS_3);
         oc = new OracleConsensus(hub, oracleRound);
         oc.setValidatorSet(VALIDATORS_3);
         leader = oc._getLeader(ROUND);             // this round's deterministic leader

@@ -1117,13 +1117,28 @@ class XChainHub {
         };
     }
 
+    // One line per (coin, network, param) that disagrees with the pinned bundle.
+    // getFeeQuote is a polled public endpoint, so an un-deduped warning would be a
+    // log flood rather than a signal an operator can act on.
+    _warnFeeConfigInert(coin, network, param, rowValue, pinnedValue) {
+        if (!this._feeConfigInertWarned) this._feeConfigInertWarned = new Set();
+        let key = coin + '/' + network + '/' + param;
+        if (this._feeConfigInertWarned.has(key)) return;
+        this._feeConfigInertWarned.add(key);
+        console.warn('XChainHub.getFeeQuote: configs row ' + key + ' = ' + rowValue
+            + ' disagrees with the pinned bundle (' + pinnedValue + ') and is IGNORED. '
+            + 'Indexers meter fees from their own pinned bundle and never from a hub '
+            + 'overlay, so honouring this row would quote a fee no indexer accepts. '
+            + 'Change the value by repinning the per-chain bundle on both sides.');
+    }
+
     async getFeeQuote(action, chain) {
         // The hub's own network, so a testnet or regtest hub reads its own config rows.
         let network = this.network || 'mainnet';
 
-        // Defaults come from the canonical per-chain bundle, never an inline literal, so
-        // a repin cannot diverge from what the indexer meters. The prior inline copy had
-        // already drifted. GAS_SCHEDULE / GAS_PRICE config rows still override per hub.
+        // Values come from the canonical per-chain bundle, never an inline literal and
+        // never a config row, so a quote cannot diverge from what the indexer meters.
+        // The prior inline copy had already drifted.
         let gasSchedule = {};
         let gasPrice    = '0.00001';
         try {
@@ -1132,22 +1147,34 @@ class XChainHub {
             if (bundle && bundle.GAS_PRICE)    gasPrice    = String(bundle.GAS_PRICE);
         } catch (_) { /* unknown chain (the public path is gated by validateChain); serve no schedule */ }
 
-        // Operator override layer. The configs tree keys coins by FULL name and
-        // db.getConfig does not normalize, so the ticker must be mapped or nothing matches.
+        // Chain-row divergence check, NOT an override layer. The indexer excludes
+        // GAS_PRICE and GAS_SCHEDULE from its hub overlay by a consensus rule
+        // (XChainIndexer._mergeHubParams: both lists are empty on every network, because
+        // these feed block-hashed state and a live-polled consensus param forks the
+        // federation), so a row applied here would move the QUOTE and never the fee the
+        // indexer accepts. A wallet pre-flighting the quote would then broadcast an
+        // underpaid action whose native-coin fee output is not refundable. Read the row
+        // only to tell the operator it is inert. The configs tree keys coins by FULL
+        // name and db.getConfig does not normalize, so the ticker must be mapped.
         let overrideKey = coins.COIN_FULL_NAME[chain] || chain;
         try {
             let chainCfg = await this.db.getConfig(overrideKey, network, 'chain');
-            if (chainCfg && chainCfg.GAS_PRICE) {
-                let parsed = parseFloat(chainCfg.GAS_PRICE);
-                if (parsed > 0) gasPrice = chainCfg.GAS_PRICE;
+            if (chainCfg && chainCfg.GAS_PRICE && String(chainCfg.GAS_PRICE) !== gasPrice) {
+                this._warnFeeConfigInert(overrideKey, network, 'GAS_PRICE',
+                    String(chainCfg.GAS_PRICE), gasPrice);
             }
             if (chainCfg && chainCfg.GAS_SCHEDULE) {
-                try {
-                    let sched = JSON.parse(chainCfg.GAS_SCHEDULE);
-                    if (sched && typeof sched === 'object') gasSchedule = Object.assign(gasSchedule, sched);
-                } catch (_) { /* malformed blob; keep defaults */ }
+                let sched = null;
+                try { sched = JSON.parse(chainCfg.GAS_SCHEDULE); } catch (_) { /* malformed blob */ }
+                // Any key that differs from the pinned schedule diverges, and so does a key
+                // the pinned schedule does not carry at all (it would have invented an action).
+                if (sched && typeof sched === 'object'
+                    && Object.keys(sched).some((k) => String(sched[k]) !== String(gasSchedule[k]))) {
+                    this._warnFeeConfigInert(overrideKey, network, 'GAS_SCHEDULE',
+                        chainCfg.GAS_SCHEDULE, 'the pinned per-chain schedule');
+                }
             }
-        } catch (_) { /* config store unavailable; keep protocol defaults */ }
+        } catch (_) { /* config store unavailable; the pinned bundle is the answer anyway */ }
 
         if (!Object.prototype.hasOwnProperty.call(gasSchedule, action)) return { error: 'unknown action: ' + action };
         let gasCost = gasSchedule[action];

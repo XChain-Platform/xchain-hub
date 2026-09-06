@@ -19,7 +19,7 @@ const sinon             = require('sinon');
 const { expect }        = require('chai');
 const OracleConsensus   = require('../../src/OracleConsensus');
 const { createMockHub } = require('../helpers/mockHub');
-const { pubkeyForTestSender } = require('../helpers/fixtures');
+const { pubkeyForTestSender, makeCapabilitySnapshotStub } = require('../helpers/fixtures');
 const diagnostics       = require('../../src/consensusDiagnostics');
 const observability     = require('../../src/observability');
 
@@ -75,6 +75,10 @@ describe('consensus diagnostics: silent PBFT drops become records (AT2)', functi
         // to model one. Same height the PROPOSE carries: an honest round in lockstep.
         hub._resolveBtcLatestBlock = sinon.stub().resolves(1000);
         oracleRound = { getSubmissions: sinon.stub().returns(new Map()) };
+        // A federated hub refuses a round with no deterministic capability snapshot, so the
+        // harness models one over the same validators: these cases are about something else,
+        // not about the snapshot being unreachable.
+        hub.capabilitySnapshot = makeCapabilitySnapshotStub(VALSET);
         oc = new OracleConsensus(hub, oracleRound);
         oc.setValidatorSet(VALSET);
         oc._lastFinalizedPrices = new Map([['BTC/USD', '100.00000000']]);
