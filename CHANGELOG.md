@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- The PRICE batch publisher sheds buffered rounds once their batch lands (on every push, and by asking the landing chain's indexer before each catch-up sweep), so a hub restarted onto a full buffer no longer re-publishes windows the chain already carries.
 - Attestation requests are served the block they are mined in, with one headroom slot in the responsible set from the start, above a new zero-confirmation activation height; the hub refuses to boot if that height is armed below the mirror or widening heights.
 - ROLLCALL v1 carries the consensus gates the publisher's build knows, published for epochs at or above a new gates activation height, with the pair cap per action sized to the list.
 

@@ -643,6 +643,50 @@ describe('PriceAggregator.receiveValidatedBatch()', function () {
         expect(buriedAsked).to.deep.equal([BATCH_ANCHOR - CANONICAL_REORG_BUFFER]);
         expect(inserts.length).to.equal(6);
     });
+
+    // ---- a landed batch is handed to the publisher even when nothing was stored ----
+
+    describe('handing a landed batch to the publisher', function () {
+        it('tells the publisher the range landed when EVERY round is a duplicate, which is the validator case', async function () {
+            stubDb([100, 101, 102, 103, 104, 105]);        // this hub finalized them all itself
+            let publisher = { noteBatchLanded: sinon.stub().returns(6) };
+            hub.oraclePublisher = publisher;
+
+            let result = await agg.receiveValidatedBatch('DOGE', makeBatch());
+
+            expect(result).to.deep.equal({ accepted: true, stored: 0, duplicates: 6, rejected: 0 });
+            expect(publisher.noteBatchLanded.calledOnce).to.equal(true);
+            expect(publisher.noteBatchLanded.firstCall.args).to.deep.equal(
+                [FIRST_ROUND, LAST_ROUND, { sourceChain: 'DOGE', actionIndex: ACTION_INDEX }]);
+        });
+
+        it('hands over a batch that stored rows too, and never one it refused', async function () {
+            stubDb([]);
+            let publisher = { noteBatchLanded: sinon.stub().returns(6) };
+            hub.oraclePublisher = publisher;
+
+            let ok = await agg.receiveValidatedBatch('DOGE', makeBatch());
+            expect(ok.accepted).to.equal(true);
+            expect(publisher.noteBatchLanded.calledOnce).to.equal(true);
+
+            let refused = await agg.receiveValidatedBatch('DOGE', makeBatch({ signers: V.slice(0, 2) }));
+            expect(refused.accepted).to.equal(false);
+            expect(publisher.noteBatchLanded.calledOnce, 'a refused batch is not on chain as far as this hub can prove').to.equal(true);
+        });
+
+        it('a publisher failure or a publisher without the seam never turns an accepted batch into a refusal', async function () {
+            stubDb([100, 101, 102, 103, 104, 105]);
+            sinon.stub(console, 'warn');
+            hub.oraclePublisher = { noteBatchLanded: sinon.stub().throws(new Error('buffer file unwritable')) };
+            expect((await agg.receiveValidatedBatch('DOGE', makeBatch())).accepted).to.equal(true);
+            expect(console.warn.calledOnce).to.equal(true);
+
+            hub.oraclePublisher = {};
+            expect((await agg.receiveValidatedBatch('DOGE', makeBatch())).accepted).to.equal(true);
+            delete hub.oraclePublisher;
+            expect((await agg.receiveValidatedBatch('DOGE', makeBatch())).accepted).to.equal(true);
+        });
+    });
 });
 
 describe('PriceAggregator.retractFromActionIndex() batch marker clear (D28)', function () {

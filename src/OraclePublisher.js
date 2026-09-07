@@ -100,6 +100,17 @@ const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
 const APPROX_BTC_BLOCK_MS = 600000;
 const { positiveIntConfig } = require('./lib/config_int.js');
 const { DEFAULT_ORACLE_ROUND_INTERVAL_MS } = require('./constants.js');
+const axios         = require('axios');
+
+// The chain every PRICE batch lands on, and therefore the indexer the backlog
+// reconcile asks. Same constant the encoder wiring below assumes (DOGE_ENCODER_URL).
+const PRICE_LANDING_COIN = 'DOGE';
+
+// Rows asked of the landing chain's indexer per reconcile. A 2-round window
+// publishes three wires an hour, so one page is about a week of windows; a
+// truncated page is followed up on the next sweep, from the first round still
+// buffered, so a longer backlog drains a page per sweep without a second call.
+const LANDED_BATCH_PAGE = 500;
 const { worstCaseSnapshotAgeMs, maxBatchWindowRounds, pinnedMaxPriceAgeMs,
         DEFAULT_BATCH_LANDING_RESERVE_MS,
         LEGACY_BATCH_WINDOW_ROUNDS } = require('./lib/price_batch_cadence.js');
@@ -440,6 +451,16 @@ class OraclePublisher {
         this.batchSplitCount         = 0;
         this.batchUnpublishableCount = 0;
         this.batchCatchupSweeps      = 0;
+        // Rounds shed from the buffer because a batch carrying them was seen to land:
+        // via the indexer's push into PriceAggregator (landedBatchPrunedRounds) or via
+        // the pre-sweep read of the landing chain's indexer (chainReconcilePrunedRounds).
+        // A backlog that climbs while both stay flat is a hub that hears no pushes and
+        // cannot reach its indexer, which is the condition that re-publishes duplicates.
+        this.landedBatchPrunedRounds   = 0;
+        this.chainReconcileRuns        = 0;
+        this.chainReconcilePrunedRounds = 0;
+        this.chainReconcileFailures    = 0;
+        this._chainReconcileWarned     = null;   // last failure reason logged, to log each once
 
         // ---------------- Landing, not just sending (confirmed-UTXO reserve + watchdog) ----------------
         //
@@ -1566,9 +1587,210 @@ class OraclePublisher {
         if (this._buffer.size === 0) return;
         this._catchupTimer = setTimeout(() => {
             this._catchupTimer = null;
-            this._sweepBufferCatchup();
+            this._reconcileThenSweep();
         }, this.batchGraceMs);
         if (this._catchupTimer.unref) this._catchupTimer.unref();
+    }
+
+    // One catch-up pass: first shed every buffered window the landing chain already
+    // carries, THEN re-propose what is left. Never throws: the sweep must run even
+    // when the reconcile cannot, or a hub with no indexer would never catch up.
+    async _reconcileThenSweep() {
+        try { await this._reconcileBacklogAgainstChain(); }
+        catch (e) { console.error('OraclePublisher: backlog reconcile against the chain failed:', e); }
+        try { return this._sweepBufferCatchup(); }
+        catch (e) { console.error('OraclePublisher: buffer catch-up sweep failed:', e); return 0; }
+    }
+
+    // ----- Landed-batch pruning -----
+
+    // A batch covering [first,last] is on chain: shed those rounds from the buffer so
+    // no catch-up sweep re-proposes them. Called from PriceAggregator when the indexer
+    // pushes a landed batch (every hub, every batch) and from the pre-sweep chain read.
+    //
+    // This is the seam the observation prune above could not be. That prune keys on
+    // price_snapshots rows stamped with a batch proof, and a validator that finalized
+    // the round itself never gets one (the aggregator counts the pushed round a
+    // duplicate and keeps the v0 proof), so on the fleet it fired for 2 rounds in
+    // 1446 and every hub carried its whole history buffered. Measured 2026-09-07:
+    // 704 closed windows per hub at boot, 4 re-published an hour, ~80% of them
+    // duplicates of batches already valid on chain.
+    //
+    // Windows left with nothing buffered are memoized as assembled and lose any
+    // takeover timer: there is nothing to propose and nothing to take over. A window
+    // only PARTLY covered keeps its remaining rounds and stays re-proposable, which
+    // is how a landed [49,49] still lets round 48 publish.
+    noteBatchLanded(first, last, info) {
+        let f = parseInt(first), l = parseInt(last);
+        if (!Number.isFinite(f) || !Number.isFinite(l) || l < f) return 0;
+        let pruned = 0;
+        for (let r of Array.from(this._buffer.keys())) {
+            if (r >= f && r <= l && this._buffer.delete(r)) pruned++;
+        }
+        for (let w = this._windowIndexOf(f); w <= this._windowIndexOf(l); w++) {
+            if (this._bufferedRange(w * this.batchWindowRounds, w * this.batchWindowRounds + this.batchWindowRounds - 1).length > 0) continue;
+            this._noteAssembled(w);
+            let state = this._windows.get(w);
+            if (state && state.timer) clearTimeout(state.timer);
+            this._windows.delete(w);
+            let takeover = this._takeoverTimers.get(w);
+            if (takeover) { clearTimeout(takeover); this._takeoverTimers.delete(w); }
+        }
+        if (pruned > 0) {
+            this.landedBatchPrunedRounds += pruned;
+            this._rewriteBufferFile(this._bufferedRange(-Infinity, Infinity));
+            let via = info && info.sourceChain ? ' pushed from ' + info.sourceChain +
+                (info.actionIndex !== undefined && info.actionIndex !== null ? ' action ' + info.actionIndex : '') : '';
+            console.log('OraclePublisher: shed ' + pruned + ' buffered round(s) in [' + f + ',' + l +
+                '] after their batch landed on chain' + via);
+        }
+        return pruned;
+    }
+
+    // Ask the landing chain's indexer which pending windows already carry a valid
+    // batch, and shed those before the sweep re-proposes anything. This is what
+    // handles a buffer that filled BEFORE noteBatchLanded existed (or while the push
+    // feed was dark): the pushes for those batches are long gone, and the indexer is
+    // the only chain-derived record every hub can reach.
+    //
+    // Fails OPEN, on purpose: with no indexer URL, an unreachable indexer, or an
+    // indexer too old to know getpricebatches, the sweep proceeds exactly as before.
+    // Failing closed would mean a hub that cannot reach its indexer never catches up
+    // at all, including the one window that closed while it was restarting, and the
+    // fee-gate cost of that is real while the cost of a duplicate is only a fee. The
+    // failure is logged once per distinct reason and counted, so a hub that is
+    // silently re-publishing duplicates is visible in getoraclepublisherstatus.
+    async _reconcileBacklogAgainstChain() {
+        let pending = this._pendingCatchupWindows();
+        if (pending.length === 0) return 0;
+        let first = pending[0] * this.batchWindowRounds;
+        let last  = pending[pending.length - 1] * this.batchWindowRounds + this.batchWindowRounds - 1;
+        let answer = await this._fetchLandedBatches(first, last);
+        if (!answer) return 0;
+        this.chainReconcileRuns++;
+        let pruned = 0, windowsBefore = pending.length;
+        for (let b of answer.batches) pruned += this.noteBatchLanded(b.first_round, b.last_round, null);
+        if (pruned > 0) {
+            this.chainReconcilePrunedRounds += pruned;
+            let remaining = this._pendingCatchupWindows().length;
+            console.log('OraclePublisher: ' + pruned + ' buffered round(s) in [' + first + ',' + last +
+                '] are already carried by ' + answer.batches.length + ' valid PRICE batch(es) on ' +
+                PRICE_LANDING_COIN + '; ' + (windowsBefore - remaining) + ' of ' + windowsBefore +
+                ' pending window(s) shed without re-publishing' +
+                (answer.truncated ? ' (page full; the rest is checked next sweep)' : ''));
+        }
+        return pruned;
+    }
+
+    // { batches: [{first_round,last_round}], truncated } from the landing chain's
+    // indexer, or null when it cannot be asked. The URL resolves the way every other
+    // per-coin indexer read on the hub does (env <COIN>_INDEXER_API_URL, then the hub's
+    // configs table via XChainHub._resolveIndexerUrl); the key is the same per-coin
+    // x-api-key the anchor publisher attaches, because getpricebatches is a
+    // federation read on the indexer.
+    async _fetchLandedBatches(first, last) {
+        let url = null;
+        try {
+            if (this.hub && typeof this.hub._resolveIndexerUrl === 'function') {
+                url = await this.hub._resolveIndexerUrl(PRICE_LANDING_COIN);
+            } else {
+                // Literal names, deliberately: a computed process.env[expr] read is
+                // invisible to the env-var documentation gate.
+                url = process.env.DOGE_INDEXER_API_URL || process.env.DOGE_INDEXER_URL || null;
+            }
+        } catch (e) {
+            return this._chainReconcileFailed('cannot resolve the ' + PRICE_LANDING_COIN + ' indexer URL: ' + (e && e.message));
+        }
+        if (!url) return this._chainReconcileFailed('no ' + PRICE_LANDING_COIN + ' indexer URL configured (set ' +
+            PRICE_LANDING_COIN + '_INDEXER_API_URL)');
+        let cfg = (this.hub && this.hub.p2pConfig) || {};
+        let key = process.env.DOGE_INDEXER_API_KEY || cfg.DOGE_INDEXER_API_KEY || '';
+        let result;
+        try {
+            result = await this._indexerRpc(url, key, 'getpricebatches',
+                { first_round: first, last_round: last, limit: LANDED_BATCH_PAGE });
+        } catch (e) {
+            return this._chainReconcileFailed('getpricebatches on ' + url + ' failed: ' + (e && e.message));
+        }
+        if (!result || result.error || !Array.isArray(result.batches)) {
+            return this._chainReconcileFailed('getpricebatches on ' + url + ' answered ' +
+                (result && result.error ? JSON.stringify(result.error) : 'without a batch list'));
+        }
+        let batches = [];
+        for (let b of result.batches) {
+            let f = parseInt(b && b.first_round), l = parseInt(b && b.last_round);
+            if (Number.isFinite(f) && Number.isFinite(l) && l >= f) batches.push({ first_round: f, last_round: l });
+        }
+        this._chainReconcileWarned = null;   // healthy again: the next failure logs again
+        return { batches: batches, truncated: !!result.truncated };
+    }
+
+    _chainReconcileFailed(reason) {
+        this.chainReconcileFailures++;
+        if (this._chainReconcileWarned !== reason) {
+            this._chainReconcileWarned = reason;
+            console.warn('OraclePublisher: cannot check the buffered backlog against the chain (' + reason +
+                '); the catch-up sweep will re-propose windows the chain may already carry');
+        }
+        return null;
+    }
+
+    // JSON-RPC to an indexer, separated so tests can stand in for the wire.
+    async _indexerRpc(url, key, method, params) {
+        let headers = { 'Content-Type': 'application/json' };
+        if (key) headers['x-api-key'] = key;
+        let resp = await axios.post(url, { jsonrpc: '2.0', method: method, params: params || {}, id: 1 },
+            { headers: headers, timeout: 15000 });
+        if (resp && resp.data && resp.data.error) throw new Error('indexer RPC error: ' + JSON.stringify(resp.data.error));
+        return resp && resp.data ? resp.data.result : null;
+    }
+
+    // Put rounds BACK into the buffer from this hub's own finalized price_snapshots
+    // rows, so a window whose batch was retracted by a reorg can be re-proposed. Once
+    // noteBatchLanded sheds a landed window there is no other copy of its content on
+    // a hub that did not lead it; before it existed the rounds were simply never shed.
+    // Only v0-proofed rows qualify: a batch-sourced row's reference_block is the
+    // landing height, not the round's BTC anchor, and it is being retracted anyway.
+    async _restoreBufferedRounds(rounds) {
+        if (!this.db) return 0;
+        let want = rounds.filter(r => !this._buffer.has(r));
+        if (want.length === 0) return 0;
+        let placeholders = want.map(() => '?').join(',');
+        let rows;
+        try {
+            rows = await this.db.doQuery(
+                'SELECT round_number, coin_pair, price, reference_block, block_timestamp ' +
+                'FROM price_snapshots WHERE round_number IN (' + placeholders + ') AND status = ? ' +
+                'AND consensus_proof NOT LIKE \'{"batch":%\' ORDER BY round_number ASC, coin_pair ASC',
+                want.concat(['finalized']));
+        } catch (e) {
+            console.warn('OraclePublisher: cannot restore retracted round(s) ' + want.join(',') +
+                ' to the buffer from price_snapshots; they cannot be re-published: ', e && e.message);
+            return 0;
+        }
+        let derived = new Map();
+        for (let row of (rows || [])) {
+            let r = parseInt(row.round_number);
+            let ts = parseInt(row.block_timestamp), anchor = parseInt(row.reference_block);
+            if (!Number.isFinite(r) || !Number.isFinite(ts) || !Number.isFinite(anchor)) continue;
+            if (row.coin_pair === null || row.coin_pair === undefined || row.price === null || row.price === undefined) continue;
+            let entry = derived.get(r);
+            if (!entry) { entry = { round: r, timestamp: ts, btcBlockHeight: anchor, pairs: [] }; derived.set(r, entry); }
+            entry.pairs.push({ pair: String(row.coin_pair), price: String(row.price) });
+        }
+        let restored = 0;
+        for (let [r, entry] of derived) {
+            if (entry.pairs.length === 0) continue;
+            this._buffer.set(r, entry);
+            this._noteWindowRound(r);
+            restored++;
+        }
+        if (restored > 0) {
+            this._rewriteBufferFile(this._bufferedRange(-Infinity, Infinity));
+            console.log('OraclePublisher: restored ' + restored + ' retracted round(s) to the buffer from ' +
+                'price_snapshots so their window can be re-published');
+        }
+        return restored;
     }
 
     // Is this window's LAST slot in the buffer? That round is the one whose arrival
@@ -1671,8 +1893,8 @@ class OraclePublisher {
     _startBufferCatchupSweep() {
         if (this._catchupSweepTimer) return;
         this._catchupSweepTimer = setInterval(() => {
-            try { this._sweepBufferCatchup(); }
-            catch (e) { console.error('OraclePublisher: buffer catch-up sweep failed:', e); }
+            this._reconcileThenSweep().catch(e =>
+                console.error('OraclePublisher: buffer catch-up sweep failed:', e));
         }, this.batchCatchupIntervalMs);
         if (this._catchupSweepTimer.unref) this._catchupSweepTimer.unref();
     }
@@ -2211,6 +2433,11 @@ class OraclePublisher {
             // re-assembled, so a retracted window would never be rebuilt without this.
             this._assembledWindows.delete(this._windowIndexOf(r));
         }
+        // The fourth: the buffer itself, which noteBatchLanded shed when the batch
+        // landed. Without the material back, an un-suppressed window has nothing to
+        // propose.
+        try { await this._restoreBufferedRounds(list); }
+        catch (e) { console.warn('OraclePublisher: restoring retracted rounds to the buffer failed:', e && e.message); }
 
         if (!this.db) return list.length;
         let placeholders = list.map(() => '?').join(',');
@@ -2808,6 +3035,14 @@ class OraclePublisher {
             // cannot agree on content, which no other field here shows.
             batchWindowsAwaitingRetry: this._pendingCatchupWindows().length,
             batchCatchupSweeps:        this.batchCatchupSweeps,
+            // Landed-batch pruning. bufferedWindowsPending climbing while
+            // both pruned counters stay flat is a hub that hears no batch pushes AND
+            // cannot reach its landing-chain indexer; chainReconcileFailures says which.
+            landedBatchPrunedRounds:   this.landedBatchPrunedRounds,
+            chainReconcileRuns:        this.chainReconcileRuns,
+            chainReconcilePrunedRounds: this.chainReconcilePrunedRounds,
+            chainReconcileFailures:    this.chainReconcileFailures,
+            bufferedWindowsPending:    this._pendingCatchupWindows().length,
             batchCatchupIntervalMs:    this.batchCatchupIntervalMs,
             // The cadence contract with the fee gate, in one place.
             // batchWorstCaseSnapshotAgeSeconds ABOVE oracleMaxPriceAgeSeconds means
