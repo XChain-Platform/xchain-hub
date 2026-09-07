@@ -23,14 +23,18 @@
  * proposed aggregate, the finalized round price, or the 2-source midpoint),
  * never a submitter-local value. Three call sites share this module:
  *
- *   1. Publish-side 2-source liveness gate (OracleConsensus._aggregate):
- *      each of two sorted submissions {lo, hi} deviates from their mean
- *      m = (lo+hi)/2 by |hi-m|/m = (hi-lo)/(hi+lo), so the gate is expressed
- *      as `twoSourceSpreadExceeds` WITHOUT computing a rounded intermediate
- *      mean. Rounds at scale 18 like sites 2 and 3: the pre-helper code used
- *      scale 8, which truncated a boundary spread back INSIDE the band the
- *      other two gates already read as outside it
- *      (CONSENSUS-CRITICAL: deploy fleet-wide atomically).
+ *   1. Publish-side even-split liveness gate (OracleConsensus._aggregate):
+ *      both middle submissions measured against the 8-decimal median that is
+ *      actually published, via `exceedsBand`. Rounds at scale 18 like sites 2
+ *      and 3: the pre-helper code used scale 8, which truncated a boundary
+ *      spread back INSIDE the band the other two gates already read as outside
+ *      it (CONSENSUS-CRITICAL: deploy fleet-wide atomically).
+ *      `twoSourceSpread` / `twoSourceSpreadExceeds` below are the earlier form
+ *      of this gate, measuring the EXACT midpoint m = (lo+hi)/2 instead. They
+ *      are kept and tested because the identity |hi-m|/m = (hi-lo)/(hi+lo) is
+ *      still the reason checking the two middles is sufficient, but no gate
+ *      calls them: the value a co-signer receives is the rounded median, and
+ *      rounding moves it off m by enough to straddle the band (item 7067).
  *   2. Co-sign admission gate (OracleConsensus._handlePropose): the
  *      follower's local aggregate measured against the PROPOSED price as
  *      reference. (Previously this divided by the local value, opening a

@@ -70,11 +70,22 @@
     },
     {
       "name": "getallconfigs",
-      "summary": "Service discovery: connection parameters for every platform service on this chain (mesh-internal: includes DB credentials, keyed like a write). since_updated_at returns only entries changed after that timestamp.",
+      "summary": "Service discovery: connection parameters for every platform service on this chain (mesh-internal, keyed like a write). Secret-bearing params (rpc/DB passwords) are REDACTED to the literal \"[redacted]\" unless include_secrets is set, which needs HUB_CONFIG_SECRETS_API_KEY when the hub configures one and the bulk key otherwise; the response reports secrets_redacted and redacted_params. since_updated_at returns only entries changed after that timestamp.",
       "paramStructure": "by-name",
       "params": [
         {
           "name": "since_updated_at",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "include_secrets",
           "required": false,
           "schema": {
             "type": [
@@ -292,6 +303,50 @@
             }
           ]
         }
+      }
+    },
+    {
+      "name": "getoracleroundpresence",
+      "summary": "Per-round oracle PRESENCE over a range: for every round in [from_round, to_round], whether this hub recorded it at all and how it ended (finalized / skipped / disputed / missing), plus the explicit `missing` list and a `digest` over the (round, status) sequence. Poll several hubs over the same range and compare digests to detect federation divergence about which rounds happened. Omitted bounds anchor on this hub's highest recorded round and the last `limit` rounds (default 50, max 1000).",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "from_round",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "to_round",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
       }
     },
     {
@@ -528,6 +583,24 @@
       }
     },
     {
+      "name": "getattestationresponsibleset",
+      "summary": "The responsible validator set for one pending attestation request, resolved from the capability snapshot at its buried block.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "request_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      }
+    },
+    {
       "name": "getcrosschaincallstats",
       "summary": "Cross-chain call relay backlog depth and lifetime failure counters.",
       "paramStructure": "by-name",
@@ -692,6 +765,16 @@
     {
       "name": "getoraclepublisherstatus",
       "summary": "ORACLE (PRICE v0) publisher status: queue depth, lifetime published/abandoned (dead-letter) counts, last-published round + txid, and the last-observed DOGE publisher wallet balance for runway monitoring.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      }
+    },
+    {
+      "name": "getstakeshare",
+      "summary": "Operator stake share against the STAKE_WEIGHTED_QUORUM commit gate, per chain and capability: total active stake, our share of it, whether it clears 3*tally > 2*S, and how much further third-party stake fits before it stops clearing.",
       "paramStructure": "by-name",
       "params": [],
       "result": {
@@ -1685,6 +1768,151 @@
         },
         {
           "name": "block_index",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "push_generation",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-auth": "x-api-key header, when HUB_API_KEY is configured",
+      "x-internal": true
+    },
+    {
+      "name": "pushattestbatch",
+      "summary": "Indexer push: an ATTEST v5 response batch parsed off the DOGE rail, carrying every terminal response of one window under one signature set.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "source_chain",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "network",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "window_start",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "window_end",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "row_count",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "btc_block_height",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "rows",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "sigs",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "action_index",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "block_index",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "block_time",
           "required": false,
           "schema": {
             "type": [

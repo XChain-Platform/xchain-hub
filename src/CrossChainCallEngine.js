@@ -65,6 +65,7 @@ const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
 const { XCALL_MAX_HOPS }     = require('./constants.js');
 const coins                  = require('./coins');
 const { normalizeRetractionBounds } = require('./lib/retraction_bounds.js');
+const snapWrite              = require('./lib/capability_snapshot_write.js');
 
 const ALLOWED_CHAINS  = [...coins.ALLOWED_COINS];
 const DEFAULT_POLL_MS = 15000;
@@ -743,18 +744,30 @@ class CrossChainCallEngine extends EventEmitter {
         // to overwrite a retracted row with the current quorum's content so the
         // re-mined call can proceed normally.
         let updateCols = cols.filter(c => c !== 'call_id' && c !== 'phase');
-        await this.db.doQuery(
-            'INSERT INTO cross_chain_calls (' + cols.join(', ') + ') VALUES (' + cols.map(() => '?').join(', ') + ')' +
-            ' ON DUPLICATE KEY UPDATE ' + updateCols.map(c => c + ' = VALUES(' + c + ')').join(', ') +
-            ", status = 'finalized'",
-            vals);
-        if(this.broadcaster){
-            let read = await this.db.doQuery(
-                'SELECT * FROM cross_chain_calls WHERE call_id = ? AND phase = ? LIMIT 1',
-                [row.call_id, row.phase]);
-            if(read.length) this.broadcaster.broadcastRow({ table: 'cross_chain_calls', row: read[0] });
+        // The row write sits OUTSIDE the recovery the snapshot persist above gets, and it
+        // is the same precondition: a throw here means this hub finalized nothing, yet the
+        // listener's bare .catch left _inflight set and the round retired in consensus.
+        // The round id is derived from phase + call_id alone, so every later dispatch poll
+        // returned at `if(this._inflight.has(roundId)) return` and no poll could ever
+        // recover the dispatch or the result, even after the DB came back. Defer instead:
+        // the upsert wrote nothing, so _rowExists still reports the call open and the next
+        // poll re-proposes cleanly.
+        try {
+            await this.db.doQuery(
+                'INSERT INTO cross_chain_calls (' + cols.join(', ') + ') VALUES (' + cols.map(() => '?').join(', ') + ')' +
+                ' ON DUPLICATE KEY UPDATE ' + updateCols.map(c => c + ' = VALUES(' + c + ')').join(', ') +
+                ", status = 'finalized'",
+                vals);
+        } catch(e){
+            console.error('CrossChainCall: finalized ' + row.phase + ' row write FAILED (fail-closed; deferring ' +
+                          String(row.call_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
+            this._deferFinalize(row);
+            return;
         }
+        // Release the in-flight slot BEFORE the mirror: the row is durable, so a delivery
+        // failure must not wedge the round. _mirrorCallRow cannot throw.
         this._inflight.delete(row.round_id);
+        await this._mirrorCallRow(row);
         console.log('CrossChainCall: finalized ' + row.phase + ' ' + String(row.call_id).substring(0, 16) + '... ' +
                     row.source_chain + ':' + row.source_action_index + ' -> ' + row.target_chain + ':' + row.target_contract_index +
                     (row.phase === 'result' ? (' [' + row.result_status + ']') : '') +
@@ -771,6 +784,37 @@ class CrossChainCallEngine extends EventEmitter {
         this._inflight.delete(row.round_id);
         if(this.consensus && typeof this.consensus.forgetFinalized === 'function')
             this.consensus.forgetFinalized(row.round_id);
+    }
+
+    // Stream a cross_chain_calls row this hub has ALREADY committed to hub-DB mirror
+    // subscribers. Never throws: the row is durable and the in-flight slot released, so a
+    // delivery failure must not wedge the round or skip the caller's tail. A throw from
+    // the re-read and a zero-row result are the same undeliverable-row event, and
+    // dropAllForResync is the sanctioned repair (StateCheckpointEngine
+    // ._broadcastRowOrResync and the OracleConsensus price-round path are the in-repo
+    // precedents), because the watermark heartbeat would otherwise certify completeness
+    // past a committed, quorum-signed call row until the socket happened to reconnect.
+    async _mirrorCallRow(row){
+        let b = this.broadcaster;
+        if(!b) return;
+        if(b.subscribers && b.subscribers.size === 0) return;   // nothing to gap
+        let failure = null;
+        try {
+            let read = await this.db.doQuery(
+                'SELECT * FROM cross_chain_calls WHERE call_id = ? AND phase = ? LIMIT 1',
+                [row.call_id, row.phase]);
+            if(read && read.length){
+                b.broadcastRow({ table: 'cross_chain_calls', row: read[0] });
+                return;
+            }
+            failure = 'the committed row read back empty';
+        } catch(e){
+            failure = (e && e.message) ? e.message : String(e);
+        }
+        console.error('CrossChainCall: could not stream a committed cross_chain_calls row to mirror ' +
+                      'subscribers (' + failure + '); forcing subscriber resync');
+        try { if(typeof b.dropAllForResync === 'function') b.dropAllForResync('cross_chain_calls mirror gap'); }
+        catch(_e){ /* the repair itself must never fail a committed call row */ }
     }
 
     // Persist + mirror the qualifying validator set (consensus leader path,
@@ -794,13 +838,12 @@ class CrossChainCallEngine extends EventEmitter {
                          ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
             return 0;
         }
-        for(let v of validators){
-            let pubkey = String(v.pubkey).toLowerCase();
-            let amount = String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0'));
-            let source = String(v.source != null ? v.source : '');
-            await this.db.doQuery(
-                'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?)',
-                [block, capability, pubkey, amount, source]);
+        // One statement for the whole set: a per-row loop left the mirror PARTIAL on any
+        // single INSERT throw, and a partial set has no completeness marker so a verifier
+        // reads it as COMPLETE. Rationale in lib/capability_snapshot_write.js. Parity with
+        // StateCheckpointEngine and the other four writers.
+        let rows = await snapWrite.writeCapabilitySnapshotRows(this.db, capability, block, validators);
+        for(let row of rows){
             if(this.broadcaster){
                 // Select back on the full widened uq_cap_snap
                 // (snapshot_block, capability, signing_pubkey, source). A pubkey-only
@@ -810,7 +853,7 @@ class CrossChainCallEngine extends EventEmitter {
                 // source='' and there is one row per key. Parity with StateCheckpointEngine.
                 let r = await this.db.doQuery(
                     'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
-                    [block, capability, pubkey, source]);
+                    [block, capability, row.signing_pubkey, row.source]);
                 if(r.length) this.broadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
             }
         }

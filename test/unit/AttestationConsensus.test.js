@@ -523,6 +523,32 @@ describe('AttestationConsensus: propose() guards', function () {
         expect(propose).to.exist;
     });
 
+    // item 6490: the liveness ladder widens the responsible set to
+    // max(1, redundancy) + widen, and computing the PBFT quorum over that widened
+    // length raised `needed` above redundancy for small redundancies, stalling the
+    // very rounds the ladder fires for. Pin the threshold to redundancy at every
+    // widening level the ladder can produce (maxSlots = 2).
+    [
+        { redundancy: 1, widen: 0 },
+        { redundancy: 1, widen: 1 },
+        { redundancy: 1, widen: 2 },
+        { redundancy: 3, widen: 1 },
+        { redundancy: 3, widen: 2 },
+        { redundancy: 5, widen: 2 }
+    ].forEach(({ redundancy, widen }) => {
+        it('keeps needed == redundancy ' + redundancy + ' at widen ' + widen + ' (6490)', async function () {
+            let members = [me];
+            while(members.length < redundancy + widen) members.push(mkIdentity());
+            await c.propose(RID, roundState(me, members, Buffer.from('b'), 'http_get', redundancy));
+            let pending = c.pending.get(RID);
+            expect(pending, 'round admitted').to.exist;
+            expect(pending.responsible.length).to.equal(redundancy + widen);
+            // The gate both quorum checks read is max(quorum, redundancy); widening
+            // must not move it off redundancy.
+            expect(Math.max(pending.quorum, pending.redundancy)).to.equal(redundancy);
+        });
+    });
+
     it('drops a stalled (never-finalized) round when its timeout fires', async function () {
         let clock = sinon.useFakeTimers();
         c.roundTimeoutMs = 1000;
@@ -1276,6 +1302,62 @@ describe('AttestationConsensus: _maybeAdvanceFromProposals consensus outcomes', 
         let reg = makeRealProviderRegistry(async (proposals) => proposals[0], 'judge_model');
         let pending = await seedThreeProposals(reg);
         expect(pending.winner).to.not.equal(null);
+    });
+
+    // A judge_model round is the only one with a real await window: agree() is an
+    // API call, and PBFT messages land on the event loop while it runs. If the
+    // resumed leader overwrote a winner established during that window, the
+    // signatures collected over the OLD canonical would stay in the map and be
+    // emitted alongside signatures over the new one, and the indexer rejects a
+    // response whose signature count over its own canonical is below redundancy.
+    // Every signature in the map must verify over the round's FINAL canonical.
+    describe('a winner established while the judge ran', function () {
+
+        async function raceRound() {
+            let release;
+            let reg = makeRealProviderRegistry(
+                () => new Promise((resolve) => { release = () => resolve({ body: BODY, meta: '' }); }),
+                'judge_model');
+            c = new AttestationConsensus(hub, reg);
+            await c.propose(RID, roundState(me, [me, p1, p2], BODY, 'llm', 3));
+            await flush();
+            // p1 fetched the same body; p2's own fetch failed, so its proposal is an
+            // error report. That is what makes the round advance on two ok bodies
+            // while p2 still has standing to send a signed no_quorum PREPARE.
+            c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p1, BODY));
+            await flush();
+            c._handleMessage(signEnv('ATTEST_PROPOSE', RID, 'llm', p2, Buffer.alloc(0), '', 'provider_error'));
+            await flush();
+            let pending = c.pending.get(RID);
+            expect(pending._agreeing).to.equal(true);   // judge call in flight
+            expect(pending.winner).to.equal(null);
+
+            // The race: a responsible peer's signed no_quorum PREPARE is adopted.
+            c._handleMessage(signEnv('ATTEST_PREPARE', RID, 'llm', p2, Buffer.alloc(0), '', 'no_quorum'));
+            await flush();
+            expect(pending.status).to.equal('no_quorum');
+
+            release();
+            await flush();
+            return pending;
+        }
+
+        it('lets the raced outcome stand rather than overwriting it', async function () {
+            let pending = await raceRound();
+            expect(pending.status).to.equal('no_quorum');
+            expect(pending.winner.body.length).to.equal(0);
+            expect(pending.winner.meta).to.equal('');
+        });
+
+        it('emits no signature that fails over the round canonical', async function () {
+            let pending = await raceRound();
+            let canonical = c._buildCanonical(RID, pending.providerId, pending.winner.body,
+                pending.status, pending.winner.meta,
+                Number(pending.request.block_index), pending.effectiveTime).toString('utf8');
+            let bad = [...pending.signatures].filter(
+                ([pubkey, sig]) => !ValidatorIdentity.verify(canonical, String(sig), pubkey));
+            expect(bad.map(([pubkey]) => pubkey)).to.deep.equal([]);
+        });
     });
 
     it('records a slash candidate for a byte_equality divergence', async function () {
@@ -2252,6 +2334,16 @@ describe('AttestationConsensus: byte_equality no_quorum + replay hardening', fun
         expect(c.finalized.has(RID)).to.equal(false);   // stays retryable
         expect(c.tornDown.has(RID)).to.equal(true);
         expect(c.earlyMessages.has(RID)).to.equal(false);
+    });
+
+    // item 6489: the already-marked branch must not build a drop event from an
+    // `envelope` this method never takes, so a second teardown for one rid threw
+    // ReferenceError out of the bare round-timeout timer (an uncaught hub fault).
+    it('_markTornDown is idempotent and does not throw when the rid is already marked (6489)', function () {
+        c._markTornDown(RID);
+        expect(() => c._markTornDown(RID)).to.not.throw();
+        expect(c.tornDown.has(RID)).to.equal(true);
+        expect(c._tornDownOrder.filter(r => r === RID).length).to.equal(1);
     });
 });
 

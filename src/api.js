@@ -74,11 +74,23 @@ const WebSocket = require('ws');
 const crypto    = require('crypto');
 const fs        = require('fs');
 const path      = require('path');
+const axios     = require('axios');   // hub-to-indexer RPC (attestation request lookups)
 const geoip     = require('geoip-lite');   // self-contained country/region DB; we read only country + region
+const swq       = require('./stake_weighted_quorum.js');
+const wid       = require('./attest_responsible_widening_activation.js');
 const { HUB_SCHEMA_VERSION } = require('./hub-schema-version');   // stamped on every mirror snapshot so a stale indexer rejects a mismatch
+// The SAME replacer HubDbBroadcaster.js signs its WS frames with, imported rather than
+// copied: a bootstrap REST read and a streamed WS row must serialize a BIGINT column
+// identically, or a consumer that switches between the two feeds sees the same value
+// change JS type mid-stream. Importing is what makes that identity structural.
+const { bigIntReplacer } = require('./lib/bigint_replacer.js');
 const { buildOraclePricesSnapshotQuery } = require('./oraclePricesSnapshotQuery');   // page (indexer bootstrap) vs latest-per-feed (dashboard) query selection
 const { evaluateAuthPosture } = require('./lib/auth_posture.js');   // boot refuses on an undeclared unauthenticated write surface
 const { parseCorsOrigin } = require('./lib/corsOrigin.js');
+// The per-IP cap answers in JSON-RPC and stands down for the hub's own
+// stack, so chain-only price recovery works at shipped defaults.
+const { buildRateLimitOptions, parseExemptLocal } = require('./lib/rate_limit_policy.js');
+const roundPresence  = require('./lib/oracle_round_presence.js');   // oracle round presence/divergence
 const { resolveMaxBatch, makeRpcBatchGuard } = require('./rpcBatchGuard.js');   // JSON-RPC batch cardinality cap
 // #1299: single source of truth for the co-sign/slash deviation band (no re-declared 0.05 literal).
 // #2653: oracle round-interval/submission-window defaults shared with OracleRound.js and XChainHub.js.
@@ -102,6 +114,14 @@ const HUB_API_KEY        = process.env.HUB_API_KEY || '';
 // env, so keyless stays possible but is always a stated choice, never a default.
 const HUB_ALLOW_UNAUTHENTICATED = (process.env.HUB_ALLOW_UNAUTHENTICATED || '').toLowerCase() === 'true';
 const HUB_RATE_LIMIT_RPM = parseInt(process.env.HUB_RATE_LIMIT_RPM) || 100;
+// Loopback and private-range callers skip the per-IP cap by default. The
+// caller this protects is the node's OWN indexer replaying a batch-bearing chain: it
+// pushes one pushpricebatch per batch block as fast as it reads blocks, blows 100/min
+// in seconds, and without this exemption needs HUB_RATE_LIMIT_RPM=60000 set by hand before
+// recovery runs at all. Keyed on req.ip (post-trust-proxy), so a public client arriving through a
+// private-IP reverse proxy is still throttled; see src/lib/rate_limit_policy.js.
+// Set HUB_RATE_LIMIT_EXEMPT_LOCAL=false to cap every caller including those.
+const HUB_RATE_LIMIT_EXEMPT_LOCAL = parseExemptLocal(process.env.HUB_RATE_LIMIT_EXEMPT_LOCAL);
 // A comma-separated ALLOWLIST, not a single origin: the hub is called
 // cross-origin by several wallet shells at once. parseCorsOrigin is what makes
 // that work - handing `cors` the raw string echoes it verbatim to every caller
@@ -125,7 +145,7 @@ const TELEMETRY_ADMIN_KEY      = process.env.TELEMETRY_ADMIN_KEY || '';
 const coins          = require('./coins');
 const SpendGuard     = require('./lib/spend_guard.js');   // per-capability effector-spend pause registry
 const { installObservability } = require('./observability');   // default-off /metrics + structured log shim
-const { installHubOracleMetrics } = require('./hubMetrics');   // item a98d6746: oracle-round heartbeat gauges
+const { installHubOracleMetrics, installHubStakeShareMetrics } = require('./hubMetrics');   // item a98d6746: oracle-round heartbeat gauges; stake-share margin gauges
 const ALLOWED_CHAINS = new Set(coins.ALLOWED_COINS);
 
 // Per-network { coin -> consensusHash } of the bundled canonical coin files,
@@ -137,7 +157,8 @@ for(const net of coins.NETWORKS) COIN_CONSENSUS_HASHES[net] = coins.consensusHas
 const WRITE_METHODS  = new Set([
     'updateconfig', 'registervalidator', 'rotatevalidator', 'deregistervalidator', 'syncvalidators',
     'propose', 'proposeslashpenalty', 'vote', 'requestattestation', 'reportreorg', 'initiateswap',
-    'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushoracleprice', 'pushpricereorg', 'pushxcallreorg',
+    'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushattestbatch', 'pushoracleprice',
+    'pushpricereorg', 'pushxcallreorg',
     'pushdexreorg', 'anchorflush', 'pauseeffectorspend', 'resumeeffectorspend'
 ]);
 
@@ -166,19 +187,21 @@ const REORG_WRITE_METHODS = new Set(['pushpricereorg', 'pushxcallreorg', 'pushde
 // Adding to it widens a public attack surface: a method belongs here only if an
 // indexer must call it and it is signature- or content-validated hub-side.
 const FEED_RPC_METHODS = new Set([
-    'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushoracleprice',
+    'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushattestbatch', 'pushoracleprice',
     'pushpricereorg', 'pushxcallreorg', 'pushdexreorg'
 ]);
 const HUB_REORG_API_KEY   = process.env.HUB_REORG_API_KEY || '';
 
 // Read methods whose RESPONSE is mesh-internal, keyed like writes when
 // HUB_API_KEY is set: getallconfigs returns every service's connection
-// parameters including DB user/pass, so it must never be publicly readable.
-// This is the app-side half of retiring the hub.xchain.io Apache IP-allowlist
-// lockdown (2026-06-26): once every mesh caller sends x-api-key, the vhost can
-// proxy POST publicly and this tier carries the policy. Escape hatch for a
-// staged rollout or emergency rollback: HUB_SENSITIVE_READ_AUTH=0 disables
-// enforcement for these methods only (writes stay keyed).
+// parameters (hosts, ports, DB names, users), so it must never be publicly
+// readable. This is the app-side half of retiring the hub.xchain.io Apache
+// IP-allowlist lockdown (2026-06-26): once every mesh caller sends x-api-key,
+// the vhost can proxy POST publicly and this tier carries the policy. Escape
+// hatch for a staged rollout or emergency rollback: HUB_SENSITIVE_READ_AUTH=0
+// disables enforcement for these methods only (writes stay keyed). The escape
+// hatch does NOT reach the credential tier below: passwords stay keyed even
+// when the hatch is open.
 // getrollcallstatus is here for a different reason than getallconfigs: it carries
 // no credential, but it reports how many validators have answered a given ROLLCALL
 // epoch, and an epoch's signer count is a PRE-EVICTION TARGETING surface. A caller
@@ -186,8 +209,45 @@ const HUB_REORG_API_KEY   = process.env.HUB_REORG_API_KEY || '';
 // before the chain evicts them, which is a map of who to knock over. The ledger
 // facts themselves (last_rolled_epoch, absent_streak) are deliberately NOT served
 // here at all; they live on the BTC indexer, where they are authoritative.
-const SENSITIVE_READ_METHODS = new Set(['getallconfigs', 'getrollcallstatus']);
-const SENSITIVE_READ_AUTH = process.env.HUB_SENSITIVE_READ_AUTH !== '0';
+const SENSITIVE_READ_METHODS = new Set(['getallconfigs', 'getrollcallstatus']);const SENSITIVE_READ_AUTH = process.env.HUB_SENSITIVE_READ_AUTH !== '0';
+
+// CREDENTIAL TIER. Served verbatim, the configs table hands the coin node's rpc
+// pass and every service's DB password in plaintext to any caller holding the
+// bulk key. That is a much wider blast
+// radius than the read itself needs: the callers who want the config TREE (the
+// indexer's param overlay, the SDK's explorer discovery, the dashboard, every
+// operational `curl | jq`) are not the callers who want the CREDENTIALS, and
+// each of those ordinary reads copied plaintext passwords into logs, tickets
+// and transcripts nobody rotates afterwards.
+//
+// So secret-bearing params (src/lib/config_redaction.js keys on the param name)
+// are redacted by DEFAULT, and the real values require an explicit
+// `include_secrets: true` on the call. That request is authorized on its own:
+// with HUB_CONFIG_SECRETS_API_KEY set it answers to THAT key alone (the bulk
+// key no longer unlocks credentials, mirroring the HUB_REORG_API_KEY split);
+// unset, it falls back to the bulk HUB_API_KEY, which is the pre-existing
+// posture minus the accidental copies. A fully keyless hub (declared
+// HUB_ALLOW_UNAUTHENTICATED, i.e. regtest) serves them as before - nothing on
+// that hub is authenticated in the first place.
+//
+// The two callers that genuinely need credentials and pass the flag are
+// xchain-explorer (XChainHubConnector -> db.js builds its MariaDB pools from
+// db_host/user/pass) and xchain-sync (HubClient._extractDbConfigs -> its
+// replication sources). ROLLOUT ORDER: deploy those two before a hub carrying
+// this change, since an older consumer does not send the flag and would receive
+// a redacted password.
+const HUB_CONFIG_SECRETS_API_KEY = process.env.HUB_CONFIG_SECRETS_API_KEY || '';
+const configRedaction = require('./lib/config_redaction.js');
+
+// True when a JSON-RPC call object is a getallconfigs asking for the
+// unredacted tree. Shared by the auth middleware (which decides whether the
+// request is authorized to ask) and the handler (which decides what to serve),
+// so the two can never disagree about what "asking" means.
+function callWantsConfigSecrets(call) {
+    if (!call || typeof call.method !== 'string') return false;
+    if (call.method.toLowerCase() !== 'getallconfigs') return false;
+    return configRedaction.wantsSecrets(call.params && call.params.include_secrets);
+}
 
 function validateChain(chain) {
     if (!ALLOWED_CHAINS.has(chain))
@@ -336,6 +396,12 @@ const p2pConfig = P2P_VALIDATOR_ADDR ? {
     // Same class as P2P_SIGNER_SET_REFRESH_MS above: without this line the env knob
     // never reached p2pConfig and retention was permanently pinned to the default.
     ORACLE_SUBMISSIONS_RETENTION_ROUNDS: process.env.ORACLE_SUBMISSIONS_RETENTION_ROUNDS,
+    // Attestation round cadence (AttestationRound.js:100, AttestationConsensus.js:295).
+    // Same dead-knob class as P2P_SIGNER_SET_REFRESH_MS above: without these two lines
+    // the env vars never reached p2pConfig and a real api.js child stayed pinned to the
+    // 15s poll / 120s round-timeout defaults regardless of what the operator set.
+    ATTESTATION_POLL_MS:            process.env.ATTESTATION_POLL_MS,
+    ATTESTATION_ROUND_TIMEOUT_MS:   process.env.ATTESTATION_ROUND_TIMEOUT_MS,
     ORACLE_REWARD_PER_ROUND: process.env.ORACLE_REWARD_PER_ROUND || '10.00000000',
     SLASH_DEVIATION_THRESHOLD: process.env.SLASH_DEVIATION_THRESHOLD || String(ORACLE_DEVIATION_THRESHOLD),
     SLASH_MISSED_ROUNDS_THRESHOLD: process.env.SLASH_MISSED_ROUNDS_THRESHOLD || '30',
@@ -388,9 +454,13 @@ async function startApi(){
 
     const app = express();
 
-    // The hub sits behind Apache on the same host (Cloudflare proxy is OFF for
-    // it), so honour X-Forwarded-For to recover the real client IP, but only
-    // from a trusted proxy. `true` would trust ANY client-supplied XFF, letting
+    // A deployed hub usually sits behind a reverse proxy on the same host, and
+    // may sit behind a CDN beyond it. The entry that proxy appends to
+    // X-Forwarded-For is the edge address where a CDN terminates the
+    // connection, or the real visitor where the proxy resolves it, and the
+    // setting below recovers whichever it is. So honour X-Forwarded-For to
+    // recover the real client IP, but only from a trusted proxy.
+    // `true` would trust ANY client-supplied XFF, letting
     // callers spoof their IP past the per-IP rate limiter (express-rate-limit's
     // ERR_ERL_PERMISSIVE_TRUST_PROXY warning). The default trusts loopback plus
     // private-range peers: a containerized hub sees the host reverse proxy as
@@ -410,12 +480,28 @@ async function startApi(){
     app.use(helmet());
     app.use(express.json());
     app.use(cors({ origin: CORS_ORIGIN }));
-    app.use(rateLimit({
-        windowMs: 60 * 1000,
-        limit: HUB_RATE_LIMIT_RPM,
-        standardHeaders: true,
-        legacyHeaders: false
-    }));
+    // Per-IP cap. The options (JSON-RPC 429 body, loopback/private exemption) live in
+    // src/lib/rate_limit_policy.js so they are unit-testable; api.js self-starts on
+    // require, so nothing declared inline here could ever be asserted against.
+    let rateLimitedLogged = 0;
+    app.use(rateLimit(buildRateLimitOptions({
+        rpm:         HUB_RATE_LIMIT_RPM,
+        windowMs:    60 * 1000,
+        exemptLocal: HUB_RATE_LIMIT_EXEMPT_LOCAL,
+        // One line per minute at most: a throttled client retries hard by definition, and
+        // logging every rejection turns a burst into its own outage.
+        onLimited: (facts) => {
+            let now = Date.now();
+            if(now - rateLimitedLogged < facts.windowMs) return;
+            rateLimitedLogged = now;
+            console.warn('Hub API rate limit: a caller exceeded ' + facts.limit +
+                ' req/' + Math.round(facts.windowMs / 1000) + 's; raise HUB_RATE_LIMIT_RPM if this is legitimate traffic');
+        }
+    })));
+    console.log('Hub API rate limit: ' + HUB_RATE_LIMIT_RPM + ' req/min per IP' +
+        (HUB_RATE_LIMIT_EXEMPT_LOCAL
+            ? ' (loopback and private-range callers exempt; HUB_RATE_LIMIT_EXEMPT_LOCAL=false to enforce)'
+            : ' (enforced for every caller, including loopback and private-range)'));
 
     // Prometheus /metrics plus a structured log shim, both DEFAULT OFF.
     // Nothing is registered and no timer starts unless METRICS_ENABLED (and, for
@@ -436,12 +522,18 @@ async function startApi(){
     // lazily at scrape time (startOracle runs later; a config-only hub has none).
     installHubOracleMetrics(observability, hub);
 
+    // Stake share vs the weighted commit gate. The oracle series above
+    // fire once rounds are ALREADY failing; these are the ones that move first,
+    // because a federation drifting toward the two-thirds gate finalizes perfectly
+    // normal rounds right up to the staker that ends them.
+    installHubStakeShareMetrics(observability, hub);
+
     // API key enforcement for write methods and sensitive reads (only when a
     // key is configured; see the HUB_API_KEY and SENSITIVE_READ_METHODS notes
     // above). Everything not in either set is the public read tier, protected
     // only by the per-IP rate limit.
     app.use((req, res, next) => {
-        if (!HUB_API_KEY && !HUB_REORG_API_KEY) return next();
+        if (!HUB_API_KEY && !HUB_REORG_API_KEY && !HUB_CONFIG_SECRETS_API_KEY) return next();
         // A JSON-RPC batch arrives as an array of call objects; a single call as
         // one object. express-json-rpc-router dispatches every element of an
         // array body, so the gate must inspect ALL of them: require a key if ANY
@@ -469,6 +561,18 @@ async function startApi(){
             });
             if (reorgGated && !timingEqual(provided, HUB_REORG_API_KEY)) return unauthorized();
         }
+        // Credential tier (see HUB_CONFIG_SECRETS_API_KEY above). A getallconfigs
+        // that asks for the unredacted tree must satisfy the config-secrets key
+        // when one is set, and the bulk key otherwise. Enforced here rather than
+        // in the handler so a refusal is the same 401 every other tier gives, and
+        // deliberately OUTSIDE the SENSITIVE_READ_AUTH switch: the escape hatch
+        // exists to un-key service discovery during a rollout, never to hand out
+        // passwords keylessly, which is a much larger decision.
+        let secretsRequested = calls.some(callWantsConfigSecrets);
+        if (secretsRequested) {
+            let expected = HUB_CONFIG_SECRETS_API_KEY || HUB_API_KEY;
+            if (expected && !timingEqual(provided, expected)) return unauthorized();
+        }
         if (HUB_API_KEY) {
             let gated = calls.some(call => {
                 let method = call && call.method;
@@ -478,6 +582,13 @@ async function startApi(){
                 // must not authorize anything else, and the bulk key must no
                 // longer authorize retractions.
                 if (HUB_REORG_API_KEY && REORG_WRITE_METHODS.has(m)) return false;
+                // Same split for the credential tier: with a dedicated
+                // config-secrets key, a getallconfigs asking for secrets was
+                // already checked against THAT key above and must not also be
+                // required to carry the bulk key, since one request carries one
+                // x-api-key header (xchain-explorer and xchain-sync send the
+                // secrets key and nothing else).
+                if (HUB_CONFIG_SECRETS_API_KEY && callWantsConfigSecrets(call)) return false;
                 return WRITE_METHODS.has(m) ||
                     (SENSITIVE_READ_AUTH && SENSITIVE_READ_METHODS.has(m));
             });
@@ -521,6 +632,43 @@ async function startApi(){
         }
         next();
     });
+
+    // Bounded page walk over the BTC indexer's pending-attestation queue, oldest
+    // first: getpendingattestation_requests exposes no lookup by request_id, only a
+    // keyset cursor over the backlog (xchain-indexer/src/api.js), so finding one
+    // request costs a scan. Capped rather than unbounded, matching every other
+    // hub->indexer poll's failure posture: an exhausted scan reads as "not found",
+    // same as a request that was never admitted.
+    const RESPONSIBLE_SET_LOOKUP_LIMIT = 500;
+    const RESPONSIBLE_SET_LOOKUP_PAGES = 20;
+    async function findPendingAttestationRequest(rid){
+        let url = await hub._resolveBtcIndexerUrl();
+        if(!url) return null;
+        let cursor = null;
+        let latestBlock = 0;
+        for(let page = 0; page < RESPONSIBLE_SET_LOOKUP_PAGES; page++){
+            let params = { limit: RESPONSIBLE_SET_LOOKUP_LIMIT };
+            if(cursor){ params.after_block_index = cursor.block_index; params.after_action_index = cursor.action_index; }
+            let res;
+            try {
+                res = await axios.post(url, {
+                    jsonrpc: '2.0', id: Date.now(),
+                    method:  'getpendingattestation_requests',
+                    params:  params
+                }, { headers: hub._btcIndexerHeaders(), timeout: 5000 });
+            } catch (e){ return null; }
+            let result = res && res.data && res.data.result;
+            if(!result || result.error) return null;
+            latestBlock = Number(result.latest_block_index) || 0;
+            let requests = Array.isArray(result.requests) ? result.requests : [];
+            let found = requests.find(r => String((r && r.request_id) || '').toLowerCase() === rid);
+            if(found) return { request: found, latestBlock: latestBlock };
+            if(requests.length < RESPONSIBLE_SET_LOOKUP_LIMIT) return null;   // tail of the queue reached
+            let last = requests[requests.length - 1];
+            cursor = { block_index: last.block_index, action_index: last.action_index };
+        }
+        return null;
+    }
 
     const jsonRpcController = {
 
@@ -633,6 +781,15 @@ async function startApi(){
             // rather than a sick hub, and 503-ing the config oracle over it would
             // take the federation's config rail down with it.
             if (relayStats) healthResult.attest_relay = relayStats;
+            // Operator stake share vs the STAKE_WEIGHTED_QUORUM commit gate.
+            // Telemetry only, never a 503, for the same reason as the relay above and a
+            // stronger one: this is a forecast about the FEDERATION's stake distribution,
+            // not a sickness of this process. No restart fixes it, and 503-ing every hub
+            // over it would take the config rail down alongside the price rail it warns
+            // about. The alert channel is the loud log, the `alerting` flag here, and the
+            // xchain_stake_share_* gauges built from the same numbers.
+            if (hub.stakeShareWatcher && typeof hub.stakeShareWatcher.getStats === 'function')
+                healthResult.stake_share = hub.stakeShareWatcher.getStats();
             // Hub DB stream heartbeat. Consumers gate their price-sync
             // barriers on this watermark, and until now the cadence was only ever
             // visible from the consumer's own timeout logs. Body-only telemetry,
@@ -661,16 +818,32 @@ async function startApi(){
         // committed after them but stamped in the watermark's second - is
         // re-delivered, never skipped. Consumers must merge idempotently: rows in
         // the cursor second repeat on each poll until a newer write lands (#2265).
+        //
+        // Secret-bearing params (rpc/DB passwords) are REDACTED unless the call
+        // sets `include_secrets: true`, which the auth middleware has already
+        // authorized against HUB_CONFIG_SECRETS_API_KEY (or the bulk key when
+        // that is unset); see the credential-tier note above. The response says
+        // which it is: `secrets_redacted` is true whenever a value was withheld
+        // or would have been, so a consumer that needs credentials and forgot the
+        // flag can say so instead of failing later on a bad password.
         async getallconfigs(params) {
             try {
-                let since     = params && params.since_updated_at;
-                let seq       = await hub.getLastSeq();
-                let watermark = await hub.getConfigWatermark();
-                let configs   = await hub.getAllConfigs(since);
+                let since       = params && params.since_updated_at;
+                let wantSecrets = configRedaction.wantsSecrets(params && params.include_secrets);
+                let seq         = await hub.getLastSeq();
+                let watermark   = await hub.getConfigWatermark();
+                let configs     = await hub.getAllConfigs(since);
+                let redacted    = 0;
+                if (!wantSecrets) {
+                    let result = configRedaction.redactConfigTree(configs);
+                    configs  = result.configs;
+                    redacted = result.redacted;
+                }
                 configFetchCounters.served++;
                 // coin_consensus_hashes is additive: consumers that predate it ignore
                 // the field; new consumers cross-check it against their bundled pins.
-                return {configs, seq, watermark, coin_consensus_hashes: COIN_CONSENSUS_HASHES};
+                return {configs, seq, watermark, coin_consensus_hashes: COIN_CONSENSUS_HASHES,
+                        secrets_redacted: !wantSecrets, redacted_params: redacted};
             } catch (err) {
                 configFetchCounters.errors++;
                 return {error: "there was an error trying to get all configs"};
@@ -746,6 +919,27 @@ async function startApi(){
                 return snapshots;
             } catch (err) {
                 return {error: "error fetching price snapshots"};
+            }
+        },
+
+        // Per-round PRESENCE over an explicit range, so "this hub has no
+        // record of round 26" is a REPORTED value rather than an empty result set.
+        // Poll every hub over the same from_round/to_round and compare `digest`:
+        // equal digests mean the federation agrees on which rounds happened and how
+        // they ended; unequal ones are localised by `missing` and the per-round
+        // statuses. bin/oracle-round-presence.js does exactly that across a fleet.
+        async getoracleroundpresence({from_round, to_round, limit}){
+            for (let [name, v] of [['from_round', from_round], ['to_round', to_round], ['limit', limit]]) {
+                if (v !== undefined && v !== null && !Number.isFinite(Number(v)))
+                    return {error: name + ' must be a number'};
+            }
+            let limNum = Number(limit);
+            if (limit !== undefined && limit !== null && (limNum <= 0 || limNum > roundPresence.MAX_RANGE))
+                return {error: 'limit must be between 1 and ' + roundPresence.MAX_RANGE};
+            try {
+                return await hub.getOracleRoundPresence(from_round, to_round, limit);
+            } catch (err) {
+                return {error: "error fetching oracle round presence"};
             }
         },
 
@@ -851,6 +1045,47 @@ async function startApi(){
                 return result;
             } catch (err) {
                 return {error: err.message || "error processing price batch"};
+            }
+        },
+
+        // The ATTEST response batch counterpart to pushpricebatch (the ATTEST
+        // response-mirror design, §6.3 / decisions D72 and D78). One signed ATTEST v5
+        // action carries every terminal response of a window; the DOGE indexer that
+        // parsed it pushes the reassembled body here, and this hub turns it back into
+        // mirror rows every BTC indexer then verifies for itself. That is the whole
+        // chain-only rebuild road: without it a node with no mirror connection could
+        // never reach the rows the chain already carries.
+        //
+        // The parameter list IS the interface, and the indexer's own push builder pins
+        // exactly these names. `rows` and `sigs` are the reassembled body verbatim, so
+        // the hub re-verifies the same bytes the indexer verified rather than a
+        // re-serialization of them; `block_time` rides along for the reason the price
+        // batch carries it (batching widens the hub/chain clock skew).
+        async pushattestbatch({source_chain, network, window_start, window_end, row_count, btc_block_height, rows, sigs, action_index, block_index, block_time, push_generation}){
+            if(!source_chain) return {error: "source_chain is required"};
+            let chainErr = validateChain(source_chain);
+            if (chainErr) return chainErr;
+            if(!Array.isArray(rows)) return {error: "rows must be an array"};
+            if(!hub.attestationResponseMirror) return {error: "attestation response mirror not ready"};
+            try {
+                return await hub.attestationResponseMirror.receiveValidatedBatch(source_chain, {
+                    network:          network,
+                    window_start:     window_start,
+                    window_end:       window_end,
+                    row_count:        row_count,
+                    btc_block_height: btc_block_height,
+                    rows:             rows,
+                    sigs:             sigs,
+                    action_index:     action_index,
+                    block_index:      block_index,
+                    block_time:       block_time,
+                    // Forwarded for parity with the price pushes even though nothing on
+                    // this path deletes: every effect here is idempotent, so a stale
+                    // generation is absorbed rather than fenced.
+                    push_generation:  push_generation
+                });
+            } catch (err) {
+                return {error: err.message || "error processing attestation batch"};
             }
         },
 
@@ -1135,6 +1370,20 @@ async function startApi(){
             return { active: true, ...hub.oraclePublisher.getStats() };
         },
 
+        // Operator stake share vs the weighted commit gate (read, no auth). Per chain
+        // and capability: total active stake, our share of it, whether it clears
+        // 3*tally > 2*S, and how much further third-party stake fits before it stops
+        // clearing. Mirrors getanchorstatus: always 200, so an operator (or the drill
+        // that adds a competing stake on regtest) can read the margin without waiting
+        // for a round to fail. Aggregates only, no address list: the numbers are what
+        // is acted on, and a mismatched address is named in the hub's own log.
+        // {active:false} when no watcher is running (config-only hub, or no operator
+        // staking sources configured).
+        async getstakeshare(){
+            if(!hub.stakeShareWatcher) return { active: false };
+            return { active: true, ...hub.stakeShareWatcher.getStats() };
+        },
+
         // Effector-spend control surface. Read: every registered SpendGuard
         // (one per on-chain effector: oracle-publish, attest, anchor, full-node) with
         // its pause state, balance floor, and rolling per-window spend ceiling (clamped
@@ -1346,16 +1595,24 @@ async function startApi(){
                 return {error: "chain, reorg_height, and timestamp are required"};
             let chainErr = validateChain(chain);
             if (chainErr) return chainErr;
-            let rh = parseInt(reorg_height);
-            if (!Number.isInteger(rh) || rh < 0)
+            // strictInt, not parseInt, the same band every sibling write method enforces:
+            // parseInt takes an integer PREFIX, so '850000junk' passed as 850000 and
+            // '8.5e5' as 8, and the coerced height is what _canonicalReorgId builds the
+            // federation-wide round identity from. timestamp had no API guard at all, so
+            // parseInt('abc') forwarded NaN into hub.reportReorg.
+            let rh = strictInt(reorg_height);
+            if (rh === null || rh < 0)
                 return {error: "reorg_height must be a non-negative integer"};
+            let ts = strictInt(timestamp);
+            if (ts === null || ts < 0)
+                return {error: "timestamp must be a non-negative integer"};
             // The reporter must supply its observed hash pair at reorg_height; the
             // hub (and every co-signing peer) re-verifies new_hash against its own
             // indexer before any rollback round can start.
             if(!old_hash || !new_hash)
                 return {error: "old_hash and new_hash (the block hash observed at reorg_height before and after the reorg) are required"};
             try {
-                await hub.reportReorg(chain, rh, parseInt(timestamp), String(old_hash), String(new_hash));
+                await hub.reportReorg(chain, rh, ts, String(old_hash), String(new_hash));
                 return {status: "success"};
             } catch (err) {
                 return {error: err.message || "error reporting reorg"};
@@ -1443,6 +1700,67 @@ async function startApi(){
             } catch (err) {
                 return {error: "error fetching attestation"};
             }
+        },
+
+        // Read-only mirror of the ranking AttestationRound._computeResponsibleSet applies
+        // when it decides whether THIS hub must serve a request. Exists so a caller (the
+        // e2e venue, an operator) can ask who is responsible without re-deriving the rule:
+        // every input below is resolved through the hub's own engines, never recomputed
+        // here, so a change to the ranking cannot drift between this answer and a live round.
+        //
+        // No state changes and no signing; this differs from a live round only in that it
+        // runs for ANY request id, not only ones this hub happens to be responsible for.
+        async getattestationresponsibleset({request_id}){
+            if(!request_id || typeof request_id !== 'string')
+                return {error: "request_id is required"};
+            let rid = request_id.trim().toLowerCase();
+            if(!/^[0-9a-f]{64}$/.test(rid))
+                return {error: "request_id must be a 64-character hex string"};
+            let round = hub.getAttestationRound();
+            if(!round || typeof round._computeResponsibleSet !== 'function')
+                return {error: "attestation round engine not active"};
+            try {
+                let found = await findPendingAttestationRequest(rid);
+                if(!found) return {error: "attestation request not found"};
+                let request       = found.request;
+                let declaredBlock = Number(request.block_index);
+                let redundancy    = Math.max(1, Number(request.redundancy) || 1);
+                let weighted      = swq.isStakeWeightedQuorumActive(declaredBlock, hub.network);
+
+                // Buried inside CapabilitySnapshot itself (_buriedBlockIndex), same as the
+                // gossip verifier at AttestationResponseMirror.js: pass the DECLARED height,
+                // never bury it again here.
+                let cs = hub.capabilitySnapshot;
+                let snapshot = cs
+                    ? (weighted ? await cs.getWeightSnapshot('attestation', declaredBlock)
+                                : await cs.getSnapshot('attestation', declaredBlock))
+                    : null;
+                if(!snapshot || !Array.isArray(snapshot.validators) || snapshot.validators.length === 0)
+                    return {error: "no capability snapshot at block " + declaredBlock};
+
+                let reg = hub.getProviderRegistry();
+                let providerFloor = (reg && typeof reg.getMinStake === 'function')
+                    ? reg.getMinStake(String(request.provider_id), declaredBlock) : null;
+                if(weighted && providerFloor === null)
+                    return {error: "provider \"" + request.provider_id + "\" has no min_stake floor at block " + declaredBlock};
+
+                let widen = (Number.isFinite(found.latestBlock) && found.latestBlock > 0)
+                    ? wid.widenSlots(found.latestBlock, declaredBlock, Number(request.deadline_block), hub.network)
+                    : 0;
+                let responsible = round._computeResponsibleSet(
+                    snapshot.validators, rid, redundancy, weighted, providerFloor, widen
+                ).map(v => v.pubkey);
+
+                return {
+                    request_id:  rid,
+                    block_index: declaredBlock,
+                    redundancy:  redundancy,
+                    widen:       widen,
+                    responsible: responsible
+                };
+            } catch (err) {
+                return {error: "error resolving attestation responsible set"};
+            }
         }
     };
 
@@ -1478,7 +1796,7 @@ async function startApi(){
                 'SELECT * FROM price_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.json({ table: 'price_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
+            res.type('json').send(JSON.stringify({ table: 'price_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -1499,7 +1817,7 @@ async function startApi(){
                 limit: req.query.limit ? parseInt(req.query.limit) : undefined,
             });
             let rows = await hub.db.doQuery(sql, params);
-            res.json({ table: 'oracle_prices', rows: rows, count: rows.length, mode: mode, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
+            res.type('json').send(JSON.stringify({ table: 'oracle_prices', rows: rows, count: rows.length, mode: mode, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -1522,7 +1840,7 @@ async function startApi(){
                 "SELECT * FROM cross_chain_matches WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?",
                 [since, limit]
             );
-            res.json({ table: 'cross_chain_matches', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
+            res.type('json').send(JSON.stringify({ table: 'cross_chain_matches', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -1539,7 +1857,7 @@ async function startApi(){
                 'SELECT * FROM capability_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.json({ table: 'capability_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
+            res.type('json').send(JSON.stringify({ table: 'capability_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -1569,7 +1887,7 @@ async function startApi(){
                 "FROM cross_chain_calls WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?",
                 [since, limit]
             );
-            res.json({ table: 'cross_chain_calls', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
+            res.type('json').send(JSON.stringify({ table: 'cross_chain_calls', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -1597,7 +1915,7 @@ async function startApi(){
                 'FROM state_checkpoints WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.json({ table: 'state_checkpoints', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
+            res.type('json').send(JSON.stringify({ table: 'state_checkpoints', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -1620,7 +1938,44 @@ async function startApi(){
                 'FROM anchor_reward_attestations WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.json({ table: 'anchor_reward_attestations', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION });
+            res.type('json').send(JSON.stringify({ table: 'anchor_reward_attestations', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
+        } catch (err) {
+            console.error('hub snapshot endpoint error:', err);
+            res.status(500).json({ error: 'snapshot error' });
+        }
+    });
+
+    // GET /hub-db/snapshot/attestation_responses: full snapshot of the finalized
+    // ATTEST responses the mirror carries instead of a validator-paid on-chain
+    // transaction (the ATTEST response mirror design).
+    //
+    // Explicit column list, for the reason spelled out on state_checkpoints above:
+    // this feed and the WS stream must deliver the SAME column set, and `SELECT *`
+    // drifts them apart the moment the hub table gains a column the broadcaster does
+    // not send. Every column below is mirror-consumed - the indexer re-verifies
+    // `signatures` over a canonical rebuilt from `effective_time`/`response_hash`/
+    // `status` and applies the row on `request_id` - so nothing here is hub-side
+    // audit metadata that could be trimmed. `id` is the paging cursor only: the
+    // consumer strips it on apply, because two hubs carry different ids for the
+    // same logical row (natural-key mirror on `network` + `request_id`).
+    //
+    // No status filter, unlike cross_chain_matches and cross_chain_calls: this table
+    // is insert-only and never retracted, so the stream deletes nothing a
+    // bootstrapping mirror would have to skip.
+    app.get('/hub-db/snapshot/attestation_responses', async (req, res) => {
+        try {
+            if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
+            let limit = req.query.limit ? Math.min(parseInt(req.query.limit), 10000) : 10000;
+            if (req.query.since_id) { let sinceErr = validateSince(req.query.since_id); if (sinceErr) return res.status(400).json(sinceErr); }
+            let since = req.query.since_id ? parseInt(req.query.since_id) : 0;
+            let rows = await hub.db.doQuery(
+                'SELECT id, network, request_id, request_action_index, request_block_index, ' +
+                'provider_id, status, response_payload, response_hash, meta, effective_time, ' +
+                'signer_pubkeys, signatures, widen, batch_action_index, finalized_at ' +
+                'FROM attestation_responses WHERE id > ? ORDER BY id ASC LIMIT ?',
+                [since, limit]
+            );
+            res.type('json').send(JSON.stringify({ table: 'attestation_responses', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });

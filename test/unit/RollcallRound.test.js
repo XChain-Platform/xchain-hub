@@ -43,6 +43,7 @@ const PKS   = IDS.map(i => i.getPubkeyHex().toLowerCase());
 const ENV_KEYS = ['ROLLCALL_ENABLED', 'ROLLCALL_POLL_MS', 'ROLLCALL_PUBLISH_DELAY_BLOCKS',
                   'ROLLCALL_ELECTION_TOLERANCE_BLOCKS', 'ROLLCALL_SELF_PUBLISH_BLOCKS',
                   'ROLLCALL_SPEND_LOG_PATH', 'ROLLCALL_SIGN_LOG_PATH',
+                  'ROLLCALL_MAX_PUBLISHES_PER_WINDOW',
                   'BTC_INDEXER_URL', 'DOGE_INDEXER_URL', 'DOGE_INDEXER_API_URL',
                   'DOGE_LOW_BALANCE_THRESHOLD', 'DOGE_ADDRESS', 'DOGE_ENCODER_URL',
                   'HUB_SIGNER_MODULE'];
@@ -307,6 +308,51 @@ describe('RollcallRound', function () {
             assert.strictEqual(signSpy.callCount, 1,
                 'a stored signature over a superseded ledger_hash must not be re-emitted');
         });
+
+        it('ignores a stored signature another identity wrote and signs fresh under its own key', async function () {
+            wireRpc({ tip: 36 });
+            const first = makeEngine({});
+            await first._tick();
+            const foreign = first.hub._pm.broadcast.getCalls()
+                .filter(c => c.args[0] === 'XROLLCALL_SIGN')[0].args[1];
+
+            // Same log file, DIFFERENT identity: the line on disk is somebody
+            // else's. Re-emitting it would broadcast a signature no peer can
+            // verify under this pubkey, and this hub would then read as absent.
+            const id2 = new ValidatorIdentity(SEEDS[1]);
+            const signSpy = sinon.spy(id2, 'sign');
+            const second = makeEngine({ identity: id2 });
+            second._loadSignLog();
+            await second._tick();
+            assert.strictEqual(signSpy.callCount, 1, 'a foreign line must not stand in for this hub\'s own signature');
+            const own = second.hub._pm.broadcast.getCalls()
+                .filter(c => c.args[0] === 'XROLLCALL_SIGN')[0].args[1];
+            assert.strictEqual(own.pubkey, id2.getPubkeyHex().toLowerCase());
+            assert.notStrictEqual(own.sig, foreign.sig, 'the broadcast signature must be this identity\'s, not the stored one');
+            const state = Array.from(second.rounds.values())[0];
+            assert.ok(ValidatorIdentity.verify(state.canonical, own.sig, own.pubkey),
+                'what this hub broadcasts must verify under its own pubkey');
+        });
+
+        it('keeps only its own spend records, treating a record that names no pubkey as its own', function () {
+            const eng   = makeEngine({});
+            const mine  = eng._ownPubkey();
+            const other = new ValidatorIdentity(SEEDS[1]).getPubkeyHex().toLowerCase();
+            assert.ok(mine && mine !== other);
+            fs.writeFileSync(process.env.ROLLCALL_SPEND_LOG_PATH,
+                JSON.stringify({ phase: 'sent', epoch: 30, kind: 'sweep', pubkey: other }) + '\n' +
+                JSON.stringify({ phase: 'sent', epoch: 60, kind: 'sweep' }) + '\n' +
+                JSON.stringify({ phase: 'sent', epoch: 90, kind: 'self',  pubkey: mine }) + '\n');
+            eng._loadSpendLog();
+            assert.ok(!eng._committed.has('30'), 'another identity\'s spend is not this hub\'s commitment');
+            assert.ok(eng._committed.has('60'), 'a record predating the pubkey field is this hub\'s own');
+            assert.ok(eng._committed.has('90:self'));
+
+            // And what this hub writes from now on names it.
+            eng._recordSpend({ phase: 'intent', epoch: 120, kind: 'sweep' });
+            const last = fs.readFileSync(process.env.ROLLCALL_SPEND_LOG_PATH, 'utf8').trim().split('\n').pop();
+            assert.strictEqual(JSON.parse(last).pubkey, mine);
+        });
     });
 
     // ── collect ──────────────────────────────────────────────────────────────
@@ -329,6 +375,32 @@ describe('RollcallRound', function () {
             eng._handleMessage({ type: 'XROLLCALL_SIGN',
                                  data: { epoch: EPOCH, pubkey: PKS[1], sig: signOf(eng, 1) } });
             assert.strictEqual(eng.rounds.get(EPOCH).sigs.has(PKS[1]), true);
+        });
+
+        it('keeps a peer signature that arrived BEFORE this hub opened the epoch', async function () {
+            // A peer broadcasts once, when it signs, and never again. On the
+            // acceptance venue (epoch 4980, 2026-09-04) the elected leader was the
+            // hub that signed last, so it dropped the earlier signer's gossip on
+            // "no such round" and led with a partial set for the whole window.
+            wireRpc({ tip: 36 });
+            const eng = makeEngine({});
+            eng._handleMessage({ type: 'XROLLCALL_SIGN',
+                                 data: { epoch: EPOCH, pubkey: PKS[1], sig: signOf(eng, 1) } });
+            assert.strictEqual(eng.rounds.has(EPOCH), false, 'the round is not open yet');
+            await eng._tick();
+            assert.strictEqual(eng.rounds.get(EPOCH).sigs.has(PKS[1]), true,
+                'the early signature must be applied when the round opens');
+            assert.strictEqual(eng._earlySigs.size, 0, 'the holding area is drained');
+        });
+
+        it('judges an early signature by the same rule as a live one', async function () {
+            wireRpc({ tip: 36 });
+            const eng = makeEngine({});
+            eng._handleMessage({ type: 'XROLLCALL_SIGN',
+                                 data: { epoch: EPOCH, pubkey: PKS[1], sig: IDS[1].sign(eng._canonical(60, LEDGER_HASH)) } });
+            await eng._tick();
+            assert.strictEqual(eng.rounds.get(EPOCH).sigs.has(PKS[1]), false,
+                'a held signature that does not verify is dropped at the drain, never admitted unverified');
         });
 
         it('drops a signature that does not verify over OUR canonical', async function () {
@@ -785,6 +857,175 @@ describe('RollcallRound', function () {
             const phases = fs.readFileSync(process.env.ROLLCALL_SPEND_LOG_PATH, 'utf8')
                              .trim().split('\n').map(l => JSON.parse(l).phase);
             assert.deepStrictEqual(phases, ['intent', 'ambiguous']);
+        });
+    });
+
+    // ── multi-chunk publish ──────────────────────────────────────────────────
+    //
+    // Everything past 41 signatures becomes several ROLLCALL actions, and one
+    // action is one transaction and one fee. The two things that must hold per
+    // CHUNK rather than per batch are the spend reservation and the record of
+    // what actually reached the wire.
+
+    describe('multi-chunk publish', function () {
+
+        // A 45-signer federation whose leader is this hub: two chunks, 41 + 4.
+        // The round opens at since = 6 with the delay at 8, so the first tick
+        // collects, the peers' signatures land, and the second tick publishes.
+        async function twoChunkLeader(env) {
+            const many = [];
+            const ids  = [];
+            for (let i = 0; i < 45; i++) {
+                const id = new ValidatorIdentity(i.toString(16).padStart(2, '0').repeat(32));
+                ids.push(id);
+                many.push(id.getPubkeyHex().toLowerCase());
+            }
+            const order     = orderFor(many, EPOCH);
+            const leaderIdx = many.indexOf(order[0]);
+            wireRpc({ tip: 36 });
+            const eng = makeEngine({ identity: ids[leaderIdx], members: many, candidates: many },
+                                   Object.assign({ ROLLCALL_PUBLISH_DELAY_BLOCKS: 8,
+                                                   ROLLCALL_SELF_PUBLISH_BLOCKS: 99 }, env || {}));
+            await eng._tick();
+            const canon = eng._canonical(EPOCH, LEDGER_HASH);
+            for (let i = 0; i < ids.length; i++)
+                eng._handleMessage({ type: 'XROLLCALL_SIGN',
+                                     data: { epoch: EPOCH, pubkey: many[i], sig: ids[i].sign(canon) } });
+            wireRpc({ tip: 38 });
+            return { eng, many, myPubkey: many[leaderIdx] };
+        }
+
+        function spendPhases() {
+            let text;
+            try { text = fs.readFileSync(process.env.ROLLCALL_SPEND_LOG_PATH, 'utf8'); }
+            catch (_) { return []; }
+            return text.trim() ? text.trim().split('\n').map(l => JSON.parse(l).phase) : [];
+        }
+
+        it('does not send a two-action roll call with only one publish left in the window', async function () {
+            // The ceiling is checked once before chunking, so without a per-chunk
+            // reservation both actions go out and the window overruns by one fee.
+            const { eng } = await twoChunkLeader({ ROLLCALL_MAX_PUBLISHES_PER_WINDOW: 1 });
+            await eng._tick();
+            assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 0,
+                'a batch the window cannot afford in full must send nothing');
+            assert.strictEqual(eng.rounds.get(EPOCH).published, false, 'the slot is released for a later tick');
+            assert.deepStrictEqual(spendPhases(), [],
+                'a declined batch leaves no orphan intent line on disk');
+            assert.strictEqual(eng.spendGuard.ceiling.countInWindow(), 0,
+                'a publish that never went out consumes no budget');
+            assert.ok(eng.spendGuard.blocked.spend >= 1,
+                'the COUNT ceiling is what refused the second action, not some other gate');
+        });
+
+        it('spends exactly one window slot per action, never one per batch', async function () {
+            const { eng } = await twoChunkLeader({ ROLLCALL_MAX_PUBLISHES_PER_WINDOW: 2 });
+            await eng._tick();
+            assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 2);
+            assert.strictEqual(eng.spendGuard.ceiling.countInWindow(), 2,
+                'two transactions are two spends, not one');
+            assert.strictEqual(eng.spendGuard.spentInWindow(),
+                2 * eng.spendGuard.estSpendUsdCents,
+                'the reservation IS the spend; record() alongside it would double-count');
+        });
+
+        it('a mid-batch failure gives back the budget the untried action never spent', async function () {
+            const bad = Object.assign(new Error('encoder rejected: bad payload'), { response: { status: 400 } });
+            const { eng } = await twoChunkLeader({ ROLLCALL_MAX_PUBLISHES_PER_WINDOW: 4 });
+            eng.hub.oraclePublisher.broadcastFn = sinon.stub();
+            eng.hub.oraclePublisher.broadcastFn.onCall(0).resolves({ txid: 'txid-a' });
+            eng.hub.oraclePublisher.broadcastFn.onCall(1).rejects(bad);
+            await eng._tick();
+            assert.strictEqual(eng.spendGuard.ceiling.countInWindow(), 1,
+                'the action that landed is a spend; the one that was refused is not');
+        });
+
+        it('retries only the actions that never reached the wire', async function () {
+            const bad = Object.assign(new Error('encoder rejected: bad payload'), { response: { status: 400 } });
+            const { eng } = await twoChunkLeader();
+            const bc = sinon.stub();
+            bc.onCall(0).resolves({ txid: 'txid-a' });
+            bc.onCall(1).rejects(bad);
+            bc.resolves({ txid: 'txid-b' });
+            eng.hub.oraclePublisher.broadcastFn = bc;
+
+            await eng._tick();
+            const state = eng.rounds.get(EPOCH);
+            assert.strictEqual(state.published, false, 'the slot is released so the tail can still land');
+            assert.strictEqual(state.sent.size, 41, 'the action that landed is remembered');
+            assert.strictEqual(eng._committed.has(String(EPOCH)), false);
+
+            wireRpc({ tip: 39 });
+            await eng._tick();
+            assert.strictEqual(bc.callCount, 3, 'the retry sends one action, not the whole set again');
+            const first = parseWire(bc.getCall(0).args[0]).pairs.map(p => p.pubkey);
+            const retry = parseWire(bc.getCall(2).args[0]).pairs.map(p => p.pubkey);
+            assert.strictEqual(retry.length, 4);
+            for (const pk of retry)
+                assert.ok(!first.includes(pk), 'a signature already broadcast is never re-paid for');
+            const everySent = first.concat(retry).sort();
+            assert.strictEqual(new Set(everySent).size, 45, 'every signature reached the wire exactly once');
+        });
+
+        it('counts our own signature as on the wire once ITS action landed', async function () {
+            // ownSigOnWire was all-or-nothing on the batch, so a later action's
+            // failure left it false and provoked a redundant self-publish of a
+            // signature this hub had already broadcast and paid for.
+            const bad = Object.assign(new Error('encoder rejected: bad payload'), { response: { status: 400 } });
+            const { eng, myPubkey } = await twoChunkLeader();
+            const bc = sinon.stub();
+            bc.onCall(0).resolves({ txid: 'txid-a' });
+            bc.onCall(1).rejects(bad);
+            eng.hub.oraclePublisher.broadcastFn = bc;
+            await eng._tick();
+            const state = eng.rounds.get(EPOCH);
+            assert.ok(state.sent.has(myPubkey), 'our signature rode the first action');
+            assert.strictEqual(state.ownSigOnWire, true,
+                'our own signature is on the wire even though a later action failed');
+        });
+
+        it('records how many signatures had already landed when a batch failed', async function () {
+            const bad = Object.assign(new Error('encoder rejected: bad payload'), { response: { status: 400 } });
+            const { eng } = await twoChunkLeader();
+            const bc = sinon.stub();
+            bc.onCall(0).resolves({ txid: 'txid-a' });
+            bc.onCall(1).rejects(bad);
+            eng.hub.oraclePublisher.broadcastFn = bc;
+            await eng._tick();
+            const lines = fs.readFileSync(process.env.ROLLCALL_SPEND_LOG_PATH, 'utf8')
+                            .trim().split('\n').map(JSON.parse);
+            assert.deepStrictEqual(lines.map(l => l.phase), ['intent', 'sent', 'failed']);
+            assert.strictEqual(lines[2].delivered, 41,
+                'an operator reconciling on chain needs to know the failure was partial');
+        });
+
+        // The operator pause is an out-of-band runtime toggle, so it can land while a
+        // chunk is in flight. Both the pre-loop check() and the reservations were taken
+        // in one earlier synchronous turn and cannot see it, so without a per-chunk
+        // re-read the remaining actions keep spending after the operator said stop.
+        it('an operator pause landing mid-batch stops the actions that have not gone out', async function () {
+            const { eng } = await twoChunkLeader({ ROLLCALL_MAX_PUBLISHES_PER_WINDOW: 4 });
+            const bc = sinon.stub();
+            bc.onCall(0).callsFake(async () => {
+                eng.spendGuard.pause('operator incident');   // paused while action 1 is in flight
+                return { txid: 'txid-a' };
+            });
+            bc.resolves({ txid: 'txid-b' });
+            eng.hub.oraclePublisher.broadcastFn = bc;
+            await eng._tick();
+            assert.strictEqual(bc.callCount, 1, 'a paused hub broadcasts nothing further');
+            const state = eng.rounds.get(EPOCH);
+            assert.strictEqual(state.sent.size, 41, 'the action that already landed still counts as sent');
+            assert.strictEqual(state.published, false, 'the slot is released so the tail can land after a resume');
+            assert.strictEqual(eng.spendGuard.ceiling.countInWindow(), 1,
+                'the action the pause stopped gives its budget back');
+            const lines = fs.readFileSync(process.env.ROLLCALL_SPEND_LOG_PATH, 'utf8')
+                            .trim().split('\n').map(JSON.parse);
+            assert.deepStrictEqual(lines.map(l => l.phase), ['intent', 'sent', 'failed'],
+                'phase failed, not an unknown phase: only failed un-commits the epoch on restart');
+            assert.strictEqual(lines[2].remaining, 1);
+            assert.match(lines[2].error, /PAUSED/,
+                'the PAUSE is what stopped it, not the count ceiling or the wallet floor');
         });
     });
 

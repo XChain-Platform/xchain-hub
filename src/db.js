@@ -37,6 +37,7 @@ if (NODE_MAJOR < 22 || (NODE_MAJOR === 22 && NODE_MINOR < 12)) {
 const mariadb = require('mariadb');
 const fs      = require('fs');
 const path    = require('path');
+const ark     = require('./anchor_reward_key.js');
 
 const DB_NAME_REGEX = /^[A-Za-z0-9_]+$/;
 
@@ -256,11 +257,24 @@ class Database {
             '(round_number, coin_pair, validator_pubkey)',
             ['round_number', 'coin_pair', 'validator_pubkey']
         );
+        // The reward key carries round_qualifier: snapshot_block for the anchor_archive
+        // leg, 0 for every other type, so non-archive keys are exactly what they were.
+        // The archive leg keys on MATCH_BATCH_SEQ, which a wipe-and-replay rebase
+        // reissues, so the four-column key collapsed two genuinely distinct archive
+        // anchors into one row. Backfill BEFORE widening: a pre-column archive row left
+        // at the DEFAULT 0 falls out of every qualified predicate and reads as absent.
         await this._migrateUniqueKey(
             'validator_rewards',
             'uq_reward',
-            '(validator_pubkey, round_number, reward_type)',
-            ['validator_pubkey', 'round_number', 'reward_type']
+            '(validator_pubkey, round_number, reward_type, round_qualifier)',
+            ['validator_pubkey', 'round_number', 'reward_type', 'round_qualifier']
+        );
+        await this._backfillArchiveRoundQualifier();
+        await this._widenUniqueKey(
+            'validator_rewards',
+            'uq_reward',
+            'round_qualifier',
+            '(validator_pubkey, round_number, reward_type, round_qualifier)'
         );
         // Plain (non-unique) indexes declared in a table's SQL source AFTER the
         // table first shipped. alterTableForDrift back-fills missing columns but
@@ -314,6 +328,17 @@ class Database {
             'source',
             '(snapshot_block, capability, signing_pubkey, source)'
         );
+        // attestation_responses: one request can finalize under two leader slots and
+        // yield two honestly signed rows that differ only in effective_time; the old
+        // (network, request_id) key absorbed the second as a duplicate on some hubs and
+        // kept it on others, so no window carrying such a request could reach batch
+        // quorum. The stamp joins the key (see the table's SQL); same widen semantics.
+        await this._widenUniqueKey(
+            'attestation_responses',
+            'uq_attest_response',
+            'effective_time',
+            '(network, request_id, effective_time)'
+        );
         // #4315: governance_proposals.voting_start/voting_end shipped as TIMESTAMP, which
         // MariaDB bounds to the signed 32-bit epoch (2038-01-19 03:14:07 UTC). Both hold a
         // FUTURE instant (voting_end is NOW() + GOV_VOTING_PERIOD), so they run out of range
@@ -321,6 +346,56 @@ class Database {
         // never MODIFYs a type, so the DDL edit alone would fix only fresh installs.
         await this._migrateColumnType('governance_proposals', 'voting_start', 'datetime', 'DATETIME NOT NULL');
         await this._migrateColumnType('governance_proposals', 'voting_end', 'datetime', 'DATETIME NOT NULL');
+        // attestation_responses.response_payload / meta hold PROVIDER bytes, and the on-chain
+        // twins they stand in for (attests.response_payload, attests.meta on the indexer) are
+        // utf8mb4. On the table's utf8mb3 tail a 4-byte character fails the mirror INSERT with
+        // errno 1366 under STRICT_TRANS_TABLES, so a body the ATTEST v1 path would have carried
+        // never reaches any indexer and the request it answers expires unresolved.
+        // alterTableForDrift adds a missing column and never restates an existing one, so the
+        // DDL edit in src/sql/attestation_responses.sql alone reaches only fresh installs.
+        await this._migrateColumnCharset('attestation_responses', 'response_payload', 'utf8mb4',
+            'MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci');
+        await this._migrateColumnCharset('attestation_responses', 'meta', 'utf8mb4',
+            'TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci');
+    }
+
+    // Widen a column's character set in place. Idempotent: reads the live
+    // CHARACTER_SET_NAME from information_schema and no-ops once it matches, so a fresh
+    // install (which gets the charset from the CREATE TABLE) and an already-migrated node
+    // both skip it. It reads the positive case rather than comparing against a legacy
+    // spelling because MariaDB 10.6 renamed utf8 to utf8mb3.
+    //
+    // WIDENING ONLY. `columnDef` restates the whole column, so it must name the same type
+    // and nullability the definition file declares; a narrowing here would fail on stored
+    // rows rather than converting them. A widen rewrites no stored value: utf8mb3 is a
+    // strict subset of utf8mb4, and utf8mb4_general_ci orders BMP characters exactly as
+    // utf8_general_ci does.
+    async _migrateColumnCharset(table, column, targetCharset, columnDef){
+        let db = await this.getConnection();
+        try {
+            let rows = await db.query(
+                "SELECT CHARACTER_SET_NAME FROM information_schema.columns " +
+                "WHERE table_schema = ? AND table_name = ? AND column_name = ?",
+                [this.dbName, table, column]
+            );
+            if(!rows[0]) return; // table/column not present yet; CREATE TABLE covers it
+            let liveCharset = String(rows[0].CHARACTER_SET_NAME || '').toLowerCase();
+            if(liveCharset === String(targetCharset).toLowerCase()) return; // already widened
+            await db.query('ALTER TABLE `' + table + '` MODIFY `' + column + '` ' + columnDef);
+            console.log('Migration: widened ' + table + '.' + column + ' ' + liveCharset + ' -> ' + targetCharset);
+        } catch(e){
+            // Swallowed loudly, as _migrateColumnType is and for the same reason: runMigrations
+            // is one sequential pass at startup, and a throw takes the remaining migrations and
+            // the hub boot with it. A narrow column stores every BMP body exactly as it does
+            // now, so booting is the better trade - but the line has to name what stays broken
+            // and the statement that finishes the job.
+            console.error('MIGRATION FAILED: ' + table + '.' + column + ' is still ' + targetCharset +
+                '-incapable. Until it is widened, a provider body carrying a 4-byte character ' +
+                'cannot be stored and the response never reaches an indexer. Run by hand: ' +
+                'ALTER TABLE `' + table + '` MODIFY `' + column + '` ' + columnDef, e);
+        } finally {
+            await db.release();
+        }
     }
 
     // Convert a column to a new type in place. Idempotent: reads the live DATA_TYPE from
@@ -436,6 +511,27 @@ class Database {
             console.log('Migration: widened UNIQUE KEY ' + indexName + ' on ' + table + ' to include ' + requiredColumn);
         } catch(e){
             console.error('Migration error widening ' + indexName + ' on ' + table + ':', e);
+        } finally {
+            await db.release();
+        }
+    }
+
+    // Stamp the archive-leg round qualifier onto reward rows written before the column
+    // existed. block_index IS the archive leg's snapshot_block at both writers, so the
+    // value is recoverable in place. Scoped to anchor_archive, so no other reward type's
+    // key can move, and idempotent (a stamped row no longer matches round_qualifier = 0).
+    async _backfillArchiveRoundQualifier(){
+        let db = await this.getConnection();
+        try {
+            let result = await db.query(
+                'UPDATE validator_rewards SET round_qualifier = block_index ' +
+                'WHERE reward_type = ? AND round_qualifier = 0 AND block_index IS NOT NULL AND block_index > 0',
+                [ark.ARCHIVE_REWARD_TYPE]);
+            let changed = (result && result.affectedRows) ? Number(result.affectedRows) : 0;
+            if(changed > 0)
+                console.log('Migration: qualified ' + changed + ' archive reward row(s) by snapshot block');
+        } catch(e){
+            console.error('Migration error qualifying archive rewards:', e);
         } finally {
             await db.release();
         }
@@ -726,6 +822,18 @@ class Database {
             config[row.param_name] = row.param_value;
         }
         return config;
+    }
+
+    // Every row of one module on one network, across coins, ordered so two hubs
+    // reading the same table see the same sequence. getConfig() above needs a coin,
+    // and a hub has none: it federates several chains and p2pConfig carries only
+    // HUB_NETWORK. Used for chain-agnostic modules whose param_name is the whole
+    // identity (ATTESTATION_PROVIDER rows are one definition per provider_id), where
+    // a coin-keyed read would have to invent a coin to ask for.
+    async getConfigRowsByModule(network, module){
+        let query = "SELECT coin, param_name, param_value FROM configs WHERE network = ? AND module = ? "
+                  + "ORDER BY coin, param_name";
+        return await this.doQuery(query, [network, module]);
     }
 
     // Network defaults to 'mainnet' for back-compat with older indexers.

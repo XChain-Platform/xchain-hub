@@ -88,7 +88,8 @@ export TEST_DB_USER="${TEST_DB_USER:-${CI_DB_USER:-root}}"
 export TEST_DB_PASS="${TEST_DB_PASS:-${CI_DB_PASS:-}}"
 export TEST_DB_NAME="${TEST_DB_NAME:-${CI_DB_NAME:-xchain_hub_test}}"
 
-need_sib xchain-documentation xchain-explorer xchain-indexer xchain-sdk xchain-wallet xchain-vm xchain-decoder
+need_sib xchain-documentation xchain-explorer xchain-indexer xchain-sdk xchain-wallet xchain-vm xchain-decoder \
+         xchain-encoder xchain-utxo-tracker xchain-sync
 
 # --- job: ci (XChain-Platform/.github ci-reusable.yml -> npm run ci) -------
 run_tier "ci" npm run ci
@@ -120,6 +121,12 @@ consensus_pin_check() { (cd "$SELF" && node -e '
   console.log("consensus pin conformance OK (testnet, regtest)");
 '); }
 run_tier "drift: coin consensus-pin conformance (canonical bundle)" consensus_pin_check
+# The hub owns src/observability/ and vendors it byte-for-byte into six consumers.
+# `--check` is cmp only (no npm install, no sibling module load), so the tier costs
+# a few dozen file compares; it treats an absent consumer as red, which is why the
+# three observability-only consumers joined need_sib above.
+run_tier "drift: vendored observability shim vs canonical (six consumers)" \
+  npm run check:observability-sync
 
 # --- job: coverage ---------------------------------------------------------
 run_tier "coverage ratchet (coverage:check)" npm run coverage:check

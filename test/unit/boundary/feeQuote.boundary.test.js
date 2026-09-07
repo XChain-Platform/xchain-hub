@@ -207,4 +207,58 @@ describe('Boundary: Fee Quote Calculation', function () {
             expect(result.nativeCoinAmount).to.equal('0.00000100');
         });
     });
+
+    // -----------------------------------------------------------------
+    // A quote is a promise about what the indexer will CHARGE. The indexer meters
+    // every fee from its pinned per-chain bundle and deliberately keeps GAS_PRICE
+    // and GAS_SCHEDULE out of its hub overlay (XChainIndexer._mergeHubParams: both
+    // lists are empty on every network, because these values feed block-hashed
+    // state and a live-polled consensus param forks the federation). A hub that
+    // honoured a chain-row override would quote a fee no indexer accepts, and a
+    // wallet trusting the quote would broadcast an underpaid action whose
+    // native-coin fee output is not refundable.
+    // -----------------------------------------------------------------
+    describe('config-row overrides do not move the quote off the pinned bundle', function () {
+
+        it('ignores a GAS_PRICE row and quotes the pinned price', async function () {
+            // Pinned GAS_PRICE is 0.00001 and ISSUE costs 100000 gas, so the pinned
+            // quote is 1.00000000; honouring this row would have quoted 0.10000000.
+            mockDb.getConfig.resolves({ GAS_PRICE: '0.000001' });
+            let result = await hub.getFeeQuote('ISSUE', 'BTC');
+            expect(result.gasPrice).to.equal('0.00001000');
+            expect(result.xchainAmount).to.equal('1.00000000');
+        });
+
+        it('ignores a GAS_SCHEDULE row and quotes the pinned gas cost', async function () {
+            mockDb.getConfig.resolves({ GAS_SCHEDULE: JSON.stringify({ ISSUE: 7 }) });
+            let result = await hub.getFeeQuote('ISSUE', 'BTC');
+            expect(result.gasCost).to.equal(100000);
+        });
+
+        it('does not invent an action the pinned schedule does not define', async function () {
+            mockDb.getConfig.resolves({ GAS_SCHEDULE: JSON.stringify({ MADE_UP: 7 }) });
+            let result = await hub.getFeeQuote('MADE_UP', 'BTC');
+            expect(result.error).to.include('unknown action');
+        });
+
+        it('warns once per diverging parameter rather than on every quote', async function () {
+            let warn = sinon.stub(console, 'warn');
+            // Both quotes must complete, so every price read answers, not just the first.
+            mockDb.doQuery.resetBehavior();
+            mockDb.doQuery.resolves([{ price: '1.00', status: 'finalized' }]);
+            mockDb.getConfig.resolves({ GAS_PRICE: '0.000001' });
+            await hub.getFeeQuote('ISSUE', 'BTC');
+            await hub.getFeeQuote('ISSUE', 'BTC');
+            expect(warn.callCount).to.equal(1);
+            expect(warn.firstCall.args[0]).to.contain('GAS_PRICE');
+        });
+
+        it('stays silent when the row agrees with the pinned bundle', async function () {
+            let warn = sinon.stub(console, 'warn');
+            mockDb.getConfig.resolves({ GAS_PRICE: '0.00001' });
+            let result = await hub.getFeeQuote('ISSUE', 'BTC');
+            expect(result.gasPrice).to.equal('0.00001000');
+            expect(warn.called).to.be.false;
+        });
+    });
 });

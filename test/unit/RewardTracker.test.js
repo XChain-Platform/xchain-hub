@@ -143,11 +143,17 @@ describe('RewardTracker', function () {
 
     describe('recordAnchorReward()', function () {
 
-        it('reads existing rows for (round, type) before inserting', async function () {
+        it('reads existing rows for (round, type, qualifier) before inserting', async function () {
             await rt.recordAnchorReward('anchor_DOGE', 8, hexPk(1), 953190);
             let sel = hub.db.doQuery.getCall(0).args;
-            expect(sel[0]).to.match(/SELECT[\s\S]*validator_rewards[\s\S]*round_number = \?[\s\S]*reward_type = \?/);
-            expect(sel[1]).to.deep.equal([8, 'anchor_DOGE']);
+            expect(sel[0]).to.match(/SELECT[\s\S]*validator_rewards[\s\S]*round_number = \?[\s\S]*reward_type = \?[\s\S]*round_qualifier = \?/);
+            // Qualifier 0 for a per-chain leg: its key is byte-identical to the pre-column key.
+            expect(sel[1]).to.deep.equal([8, 'anchor_DOGE', 0]);
+        });
+
+        it('qualifies the archive leg dedup read by its snapshot block', async function () {
+            await rt.recordAnchorReward('anchor_archive', 8, hexPk(1), 953190);
+            expect(hub.db.doQuery.getCall(0).args[1]).to.deep.equal([8, 'anchor_archive', 953190]);
         });
 
         it('records a per-chain anchor reward for the publisher', async function () {
@@ -156,7 +162,8 @@ describe('RewardTracker', function () {
             let args = hub.db.doQuery.getCall(1).args;
             expect(args[0]).to.include('INSERT IGNORE INTO validator_rewards');
             expect(args[0]).to.include('block_index');
-            expect(args[1]).to.deep.equal([hexPk(1), 8, 'anchor_DOGE', '10.00000000', 953190]);
+            expect(args[0]).to.include('round_qualifier');
+            expect(args[1]).to.deep.equal([hexPk(1), 8, 'anchor_DOGE', '10.00000000', 953190, 0]);
         });
 
         it('stores block_index 0 when no blockIndex given', async function () {
@@ -197,7 +204,7 @@ describe('RewardTracker', function () {
             expect(hub.db.doQuery.getCall(1).args[0]).to.include('DELETE FROM validator_rewards');
             let ins = hub.db.doQuery.getCall(2).args;
             expect(ins[0]).to.include('INSERT IGNORE INTO validator_rewards');
-            expect(ins[1]).to.deep.equal([hexPk(1), 5, 'anchor_BTC', '10.00000000', 100]);
+            expect(ins[1]).to.deep.equal([hexPk(1), 5, 'anchor_BTC', '10.00000000', 100, 0]);
         });
 
         it('never displaces a row that has already ridden an on-chain archive', async function () {
@@ -218,7 +225,7 @@ describe('RewardTracker', function () {
             expect(post.called, 'no reward may leave the hub over the retired rail').to.be.false;
             let ins = hub.db.doQuery.getCall(1).args;   // getCall(0) is the dedup SELECT
             expect(ins[0]).to.include('INSERT IGNORE INTO validator_rewards');
-            expect(ins[1]).to.deep.equal([hexPk(2), 3, 'anchor_archive', '10.00000000', 953200]);
+            expect(ins[1]).to.deep.equal([hexPk(2), 3, 'anchor_archive', '10.00000000', 953200, 953200]);
         });
 
         it('honors ANCHOR_REWARD_PER_PUBLISH config', async function () {
@@ -295,7 +302,7 @@ describe('RewardTracker', function () {
             await rt.recordAnchorReward('anchor_BTC', 5, hexPk(1), 100);
             let ins = hub.db.doQuery.getCall(1).args;                      // getCall(0) is the dedup SELECT
             expect(ins[0]).to.include('INSERT IGNORE INTO validator_rewards');
-            expect(ins[1]).to.deep.equal([hexPk(1), 5, 'anchor_BTC', '10.00000000', 100]);
+            expect(ins[1]).to.deep.equal([hexPk(1), 5, 'anchor_BTC', '10.00000000', 100, 0]);
         });
 
         it('gates the AMOUNT on the THREADED reward network, not the hub network (#2236)', async function () {

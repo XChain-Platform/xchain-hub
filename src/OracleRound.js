@@ -29,6 +29,8 @@ const PriceFetcher = require('./PriceFetcher.js');
 const XchainPriceSource = require('./XchainPriceSource.js');
 const { isXchainPriceActive, roundStartSeconds } = require('./xchain_price_activation.js');
 const { isAdmissibleSigner, provenPubkey } = require('./lib/chain_signer_admission.js');
+const { roundBand, describeImplausibleRound } = require('./lib/oracle_round_band.js');
+const { canonicalPrice } = require('./lib/canonical_price.js');
 const { PRICE_MAX, DEFAULT_ORACLE_ROUND_INTERVAL_MS,
         DEFAULT_ORACLE_SUBMISSION_WINDOW_MS, DERIVED_PAIRS } = require('./constants.js');
 
@@ -220,6 +222,11 @@ class OracleRound {
         this.submissionsPruneFailures = 0;
         this.lastSubmissionsPruneFailureRound = null;
         this._submissionsPruneDark = false;
+
+        // Edge latch for the out-of-band round warning. Holds the highest
+        // round already announced, so a standing sentinel is named once rather than
+        // on every diagnostics poll; see getSubmissionsInfo.
+        this._lastImplausibleRoundWarned = null;
 
         // Wall-clock anchor for round numbering. All hubs must agree on this
         // timestamp so they compute the same round number from the same time.
@@ -456,6 +463,46 @@ class OracleRound {
             console.warn('Oracle: failed to read per-pair drops for diagnostics:', err);
         }
 
+        // Rounds ALREADY STORED outside the plausible band.
+        //
+        // PriceAggregator refuses an out-of-band round at write time, but that
+        // cannot retract what is already in the table: a regtest venue's e2e price
+        // sentinels (round 888100012 and its family, written straight into the DB by
+        // the price-seed fixtures), a row from before this check existed, or a
+        // hand-seeded probe. The lost-round detector walks the round range
+        // in this table looking for holes, so ONE such row either swallows the whole
+        // scan or invents a hundred-million-round gap. Naming them here lets a
+        // detector drop them and still scan the real range.
+        //
+        // Reported, never deleted: this is a diagnostics read, and a row an operator
+        // has not seen is not a row the hub should quietly destroy.
+        let band = roundBand({ epochStartMs: this.epochStart, roundIntervalMs: this.roundInterval });
+        let implausibleRounds = [];
+        let implausibleRoundsReadError = false;
+        if (band) {
+            try {
+                let rows = await this.db.doQuery(
+                    'SELECT DISTINCT round_number FROM price_snapshots WHERE round_number > ? ' +
+                    'ORDER BY round_number DESC LIMIT 50', [band.max]);
+                implausibleRounds = rows.map(r => Number(r.round_number));
+            } catch (err) {
+                // Same additive-marker contract as the two reads above: without it a
+                // failed read serves the same empty array as a clean table.
+                implausibleRoundsReadError = true;
+                console.warn('Oracle: failed to read out-of-band rounds for diagnostics:', err);
+            }
+            // EDGE-LATCHED on the highest out-of-band round, same posture as
+            // _submissionsPruneDark: diagnostics are polled, so an unlatched warn
+            // would reprint the same standing fault into every log tail forever.
+            // A NEW out-of-band round (a higher one) re-announces itself.
+            if (implausibleRounds.length && implausibleRounds[0] !== this._lastImplausibleRoundWarned) {
+                this._lastImplausibleRoundWarned = implausibleRounds[0];
+                console.warn('Oracle: price_snapshots carries ' + implausibleRounds.length +
+                             ' round(s) past the plausible band: ' +
+                             describeImplausibleRound(implausibleRounds[0], band));
+            }
+        }
+
         return {
             currentRound:             this.currentRound,
             roundStartTime:           this.roundStartTime,
@@ -468,6 +515,19 @@ class OracleRound {
             droppedPairs:             droppedPairs,
             droppedPairCount:         droppedPairs.length,
             droppedPairsReadError:    droppedPairsReadError,
+            // The band this hub judges round numbers against, and any row
+            // already stored outside it. `roundBand` is null when the local schedule
+            // is unresolvable, which a consumer must read as "not checked" rather
+            // than as "clean" - hence the band rides beside the list.
+            roundBand:                    band,
+            implausibleRounds:            implausibleRounds,
+            implausibleRoundCount:        implausibleRounds.length,
+            implausibleRoundsReadError:   implausibleRoundsReadError,
+            // Write-time refusals by the ingest paths, so a peer pushing out-of-band
+            // rounds is visible even when nothing was ever stored.
+            implausibleRoundRejections:   this.hub && this.hub.priceAggregator
+                ? (this.hub.priceAggregator.implausibleRoundRejections || 0)
+                : 0,
             failedSubmissionPersists:      this.failedSubmissionPersists,
             lastSubmissionPersistFailureRound: this.lastSubmissionPersistFailureRound,
             lastSubmissionPersistFailureCount: this.lastSubmissionPersistFailureCount,
@@ -484,6 +544,18 @@ class OracleRound {
             round_timeouts:           this.oracleConsensus
                 ? (this.oracleConsensus._roundTimeouts || 0)
                 : 0,
+            // Rounds that opened on this hub and were recorded as abandoned before
+            // finalizing. Broader than round_timeouts, which only sees the
+            // two PBFT seats that held a pending round: the follower seat waiting on
+            // a PROPOSE that never came moved no counter at all, which is how a lost
+            // round left four of five validators with nothing to show for it.
+            abandoned_rounds:         this.oracleConsensus
+                ? (this.oracleConsensus._abandonedRounds || 0)
+                : 0,
+            lastAbandonedRound:       this.oracleConsensus
+                ? (this.oracleConsensus._lastAbandonedRound != null
+                    ? this.oracleConsensus._lastAbandonedRound : null)
+                : null,
             // Rounds finalized with only one uncorrelated upstream behind a
             // normally-multi-source pair. A different failure from round_timeouts above:
             // the round reached quorum and was signed normally, so nothing else in this
@@ -904,11 +976,24 @@ class OracleRound {
 
         // Validate individual prices: filter to positive finite values within bounds
         // AND to the canonical pair whitelist (reject fabricated/novel coin pairs).
-        let validPrices = prices.filter(p => {
-            if (!p || !this.canonicalPairs.has(p.coinPair)) return false;
-            let val = parseFloat(p.price);
-            return Number.isFinite(val) && val > 0 && val < this.priceMax;
-        });
+        //
+        // The spelling is checked before the bounds, and the CANONICAL spelling is
+        // what the entry carries onward. parseFloat alone is prefix-tolerant, so a
+        // peer's '100junk' admitted as 100 and was then kept verbatim: it reached
+        // the round's submission map, the trimmed median, and the oracle_submissions
+        // audit row, where bcmath reads it as 0 (bcnum coerces a non-numeric). Same
+        // value, two readings. lib/canonical_price.js carries the full argument.
+        let validPrices = [];
+        for (let p of prices) {
+            if (!p || !this.canonicalPairs.has(p.coinPair)) continue;
+            let canon = canonicalPrice(p.price);
+            if (canon === null) continue;
+            let val = parseFloat(canon);
+            if (!(Number.isFinite(val) && val > 0 && val < this.priceMax)) continue;
+            // Rebuild only when the spelling actually differed, so an honest
+            // submission's entry stays the object every other field came from.
+            validPrices.push(canon === p.price ? p : Object.assign({}, p, { price: canon }));
+        }
         // Surface both drop paths (item ce5a2d5d): the sibling drops at lines 531/545
         // already log, this filter was the one silent gap. A partial drop masks a peer
         // degrading pair coverage; a zero-valid drop masks the true cause of a

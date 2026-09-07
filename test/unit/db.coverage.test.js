@@ -281,6 +281,42 @@ describe('Database: extended coverage', function () {
             expect(enCall.args[2]).to.include('full_node');
         });
 
+        // The archive-leg qualifier reaches an AGED hub only through runMigrations:
+        // alterTableForDrift adds the column (it carries a DEFAULT) but never touches an
+        // index, and _migrateUniqueKey no-ops as soon as the index NAME exists. The
+        // backfill must run BEFORE the widen, or a pre-column archive row keeps qualifier
+        // 0 and falls out of every qualified predicate as though it were absent.
+        it('runMigrations backfills the archive round qualifier, then widens uq_reward', async function () {
+            const { db } = makeDb();
+            sinon.stub(db, '_migrateUniqueKey').resolves();
+            sinon.stub(db, '_migrateIndex').resolves();
+            sinon.stub(db, '_migrateEnumColumn').resolves();
+            sinon.stub(db, '_migrateColumnType').resolves();
+            const back = sinon.stub(db, '_backfillArchiveRoundQualifier').resolves();
+            const wide = sinon.stub(db, '_widenUniqueKey').resolves();
+            await db.runMigrations();
+            expect(back.calledOnce).to.be.true;
+            const widen = wide.getCalls().find(c => c.args[0] === 'validator_rewards');
+            expect(widen, 'uq_reward must be widened on aged databases').to.not.be.undefined;
+            expect(widen.args[1]).to.equal('uq_reward');
+            expect(widen.args[2]).to.equal('round_qualifier');
+            expect(widen.args[3]).to.equal('(validator_pubkey, round_number, reward_type, round_qualifier)');
+            expect(back.calledBefore(wide), 'backfill must precede the widen').to.be.true;
+        });
+
+        it('the archive qualifier backfill touches only anchor_archive rows still at 0', async function () {
+            const { db, mockConn } = makeDb();
+            mockConn.query.resolves({ affectedRows: 2 });
+            await db._backfillArchiveRoundQualifier();
+            const [sql, args] = mockConn.query.getCall(0).args;
+            expect(sql).to.include('UPDATE validator_rewards SET round_qualifier = block_index');
+            expect(sql).to.include('reward_type = ?');
+            expect(sql).to.include('round_qualifier = 0');
+            expect(sql).to.include('block_index IS NOT NULL');
+            expect(args).to.deep.equal(['anchor_archive']);
+            expect(mockConn.release.called).to.be.true;
+        });
+
         // #4315: a DDL-only fix converts fresh installs and leaves every DEPLOYED hub
         // TIMESTAMP-bound, because alterTableForDrift never MODIFYs a type. The migration
         // being wired is therefore part of the fix, not a detail of it.

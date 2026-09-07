@@ -40,11 +40,13 @@
  *      point it at a nonexistent dir to disable this fallback, e.g. for
  *      hermetic tests on a host that has a populated ~/.claude-xchain)
  *
- * The `_checkConfigDir` gate ensures empty or stale dir values fall through
- * cleanly to the next candidate. Token-only paths get paired with an
- * isolated empty dir so the CLI's auth-file lookup misses and falls through
- * to the env-var token (the CLI prefers a populated credentials.json over
- * an env var).
+ * The `_checkConfigDir` gate ensures empty, stale or logged-out dir values
+ * fall through cleanly to the next candidate: it reads `.credentials.json`
+ * and requires a non-empty access or refresh token, so a dir that merely
+ * exists never masks a credential that would actually serve the round.
+ * Token-only paths get paired with an isolated dir that is the hub's own,
+ * so the spawned CLI writes its state there instead of into the host
+ * operator's ambient `~/.claude`.
  *
  ********************************************************************/
 
@@ -58,20 +60,44 @@ const DEFAULT_HUB_CLAUDE_CONFIG_DIR = path.join(os.homedir(), '.claude-xchain');
 
 function _trim(v) { return (v == null) ? '' : String(v).trim(); }
 
-// A config dir counts as authenticated only when it carries the
-// `.credentials.json` the module header names as the source of its authority.
-// The gate used to accept mere non-emptiness, so a logged-out or merely-configured
-// dir (settings, logs, state) outranked the later OAuth-token and API-key
-// candidates: healthCheck reported the transport ready while paid calls spawned an
-// unauthenticated CLI and mapped to provider_error, instead of falling through to
-// the credential that would have served the round.
+// A real `.credentials.json` is a few hundred bytes. Anything past this is not
+// a credentials file, and reading it into memory to prove that is not worth it.
+const MAX_CREDENTIALS_BYTES = 256 * 1024;
+
+// The CLI writes its OAuth material under a `claudeAiOauth` envelope; older and
+// hand-assembled files put the same fields at the top level, so both shapes count.
+// A refresh token alone is enough: the CLI redeems it for an access token on the
+// next spawn.
+function _hasUsableToken(parsed) {
+    if (!parsed || typeof parsed !== 'object') return false;
+    const envelopes = [parsed];
+    if (parsed.claudeAiOauth && typeof parsed.claudeAiOauth === 'object') envelopes.push(parsed.claudeAiOauth);
+    return envelopes.some((e) => _trim(e.accessToken) !== '' || _trim(e.refreshToken) !== '');
+}
+
+// A config dir counts as authenticated only when its `.credentials.json` actually
+// carries a token. Existence alone is not authority: `claude logout` and a bare
+// `claude` run both leave a dir (settings, logs, state, and a token-less
+// credentials file) behind, and without this check that husk outranks the later
+// OAuth-token and API-key candidates. healthCheck then reports the transport
+// ready while paid calls spawn an unauthenticated CLI and map to provider_error,
+// instead of falling through to the credential that would serve the round.
+//
+// Token values are never returned or logged from here; the answer is a boolean.
 function _checkConfigDir(dirPath) {
     try {
         if (!fs.statSync(dirPath).isDirectory()) return false;
-        return fs.statSync(path.join(dirPath, '.credentials.json')).isFile();
+        const credPath = path.join(dirPath, '.credentials.json');
+        const credStat = fs.statSync(credPath);
+        if (!credStat.isFile() || credStat.size === 0 || credStat.size > MAX_CREDENTIALS_BYTES) return false;
+        return _hasUsableToken(JSON.parse(fs.readFileSync(credPath, 'utf8')));
     } catch { return false; }
 }
 
+// The isolated dir is the hub's own CLAUDE_CONFIG_DIR for token-based spawns: it
+// keeps the CLI's state writes out of the host operator's ambient `~/.claude`
+// and gives the spawn a directory it is allowed to write. It is not a precedence
+// trick; a spawn's CLAUDE_CODE_OAUTH_TOKEN is honoured whatever the dir holds.
 function _ensureIsolatedDir(dirPath) {
     try { fs.mkdirSync(dirPath, { recursive: true, mode: 0o700 }); }
     catch { /* non-fatal: CLI creates it if absent or fails cleanly */ }
@@ -104,8 +130,8 @@ function resolveHubLlmAuth(ctx) {
         return { ok: true, transport: 'claude_spawn', source: 'cli_config_dir', env: { CLAUDE_CONFIG_DIR: cliDir } };
     }
 
-    // Token paths pair with an isolated (empty) dir so the CLI's
-    // credentials-file lookup misses and falls through to the env var.
+    // Token paths pair with an isolated dir so the spawned CLI keeps its state
+    // under the hub's own directory rather than the host operator's.
     const isolatedDir = hubDir || cliDir || defaultDir;
     if (hubToken) {
         _ensureIsolatedDir(isolatedDir);
@@ -137,7 +163,7 @@ function resolveHubLlmAuth(ctx) {
         reason: 'no_credential_configured',
         detail: 'Set HUB_CLAUDE_CONFIG_DIR (preferred: run `CLAUDE_CONFIG_DIR=<dir> claude login` first; ' +
                 'the resulting credentials.json carries a refresh token and self-renews) ' +
-                'or HUB_CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`, ~2-week TTL) ' +
+                'or HUB_CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`, one-year TTL, no self-renewal) ' +
                 'or HUB_ANTHROPIC_API_KEY / ANTHROPIC_API_KEY (direct API).'
     };
 }

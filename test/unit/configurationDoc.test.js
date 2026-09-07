@@ -1,9 +1,13 @@
 // CONFIGURATION.md drift guard.
 //
-// Every ANCHOR_/XDEX_/CHECKPOINT_/FULLNODE_ env var read anywhere in src/
-// must be documented in CONFIGURATION.md. These families were the ~42-var
-// undocumented blind spot from the 2026-06-24 maintainability review; this
-// test keeps new knobs in those families from shipping undocumented.
+// Every ANCHOR_/XDEX_/CHECKPOINT_/FULLNODE_/ATTEST_/ATTESTATION_ env var read
+// anywhere in src/ must be documented in CONFIGURATION.md. The first four
+// families were the ~42-var undocumented blind spot from the 2026-06-24
+// maintainability review; the attestation families joined them because the
+// response-mirror batch rail shipped a publish kill switch, a buffer path and
+// two consensus-bearing regtest overrides that no gate here would have missed.
+// ATTESTATION is spelled out beside ATTEST because the alternation is anchored
+// on a trailing underscore, which ATTESTATION_FOO does not offer ATTEST.
 
 const assert = require('assert');
 const fs = require('fs');
@@ -13,7 +17,7 @@ const ROOT = path.join(__dirname, '..', '..');
 const SRC = path.join(ROOT, 'src');
 const DOC = path.join(ROOT, 'CONFIGURATION.md');
 
-const ENV_RE = /process\.env\.((?:ANCHOR|XDEX|CHECKPOINT|FULLNODE)_[A-Z_0-9]+)/g;
+const ENV_RE = /process\.env\.((?:ANCHOR|XDEX|CHECKPOINT|FULLNODE|ATTESTATION|ATTEST)_[A-Z_0-9]+)/g;
 const COIN_SUFFIX_RE = /_(BTC|LTC|DOGE)$/;
 
 function walkJs(dir, out) {
@@ -31,7 +35,7 @@ function walkJs(dir, out) {
 
 describe('CONFIGURATION.md env-var coverage', function () {
 
-    it('documents every ANCHOR_/XDEX_/CHECKPOINT_/FULLNODE_ env var read in src/', function () {
+    it('documents every ANCHOR_/XDEX_/CHECKPOINT_/FULLNODE_/ATTEST env var read in src/', function () {
         const doc = fs.readFileSync(DOC, 'utf8');
 
         const used = new Set();

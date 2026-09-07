@@ -308,6 +308,85 @@ describe('llm provider, _setConfig', function () {
         llm._setConfig(null);
         llm._setConfig(undefined);
     });
+
+    // A key nobody reads is the one failure the warn-and-keep validations above miss:
+    // a malformed value at least says so, an unread key is silent. Governance can put
+    // arbitrary keys in this payload, so the honesty guarantee has to be enforced here.
+    describe('unconsumed additional_config keys', function () {
+
+        afterEach(function () { sinon.restore(); });
+
+        it('warns once, and still applies the known sibling keys', function () {
+            const llm = _reloadProvider();
+            llm._resetUnconsumedWarnState();
+            let warn = sinon.stub(console, 'warn');
+            llm._setConfig({ additional_config: {
+                judge_model: 'claude-haiku-4-5',
+                prompt_envelope_version: 2,
+                judge_equivalence_threshold: 0.85
+            } });
+            let hits = warn.getCalls().filter(c => /not consumed by this build/.test(String(c.args[0])));
+            expect(hits.length).to.equal(1);
+            expect(hits[0].args[0]).to.match(/judge_equivalence_threshold/);
+            // The unknown key must not abort the install of the rest. Asserted through
+            // the one observable a sibling key has (there is no public getter), the same
+            // envelope_version ceiling the suite above uses. The assertion is on the
+            // CEILING the message reports, not merely on being rejected: a rejection
+            // alone is not discriminating, since the default ceiling of 1 also rejects
+            // version 3, so `max 2` is the only part that can tell an install that
+            // happened from one the unrecognised key aborted.
+            return llm.fetch(JSON.stringify({ prompt: 'hi', envelope_version: 3 }), {})
+                .then(() => { throw new Error('expected envelope_version reject'); })
+                .catch((e) => { expect(e.message).to.match(/unsupported envelope_version \(got 3, max 2\)/); });
+        });
+
+        it('does not repeat the warning for the same unknown-key set', function () {
+            const llm = _reloadProvider();
+            llm._resetUnconsumedWarnState();
+            let warn = sinon.stub(console, 'warn');
+            let ac = { judge_model: 'claude-haiku-4-5', judge_equivalence_threshold: 0.85 };
+            llm._setConfig({ additional_config: ac });
+            llm._setConfig({ additional_config: ac });
+            let hits = warn.getCalls().filter(c => /not consumed by this build/.test(String(c.args[0])));
+            expect(hits.length).to.equal(1);
+        });
+
+        it('warns again when a further unknown key appears', function () {
+            const llm = _reloadProvider();
+            llm._resetUnconsumedWarnState();
+            let warn = sinon.stub(console, 'warn');
+            llm._setConfig({ additional_config: { judge_equivalence_threshold: 0.85 } });
+            llm._setConfig({ additional_config: { judge_equivalence_threshold: 0.85, some_future_key: 1 } });
+            let hits = warn.getCalls().filter(c => /not consumed by this build/.test(String(c.args[0])));
+            expect(hits.length).to.equal(2);
+            expect(hits[1].args[0]).to.match(/some_future_key/);
+        });
+
+        it('says nothing when every key is one this build consumes', function () {
+            const llm = _reloadProvider();
+            llm._resetUnconsumedWarnState();
+            let warn = sinon.stub(console, 'warn');
+            llm._setConfig({ additional_config: {
+                approved_models: ['claude-opus-4-7'], judge_model: 'claude-haiku-4-5',
+                judge_fallback_models: [], model_vendors: {}, require_all_vendors: false,
+                max_completion_tokens: 1024, default_temperature: 0,
+                prompt_envelope_version: 1, enabled: true, max_budget_usd: 5
+            } });
+            let hits = warn.getCalls().filter(c => /not consumed by this build/.test(String(c.args[0])));
+            expect(hits.length).to.equal(0);
+        });
+
+        // The knob this warning was built for is gone from the shipped defaults, so a
+        // fresh hub no longer advertises a governance value the runtime cannot read.
+        it('no longer ships judge_equivalence_threshold in the llm provider defaults', function () {
+            const { DEFAULTS } = require('../../src/ProviderRegistry');
+            let ac = DEFAULTS && DEFAULTS.llm && DEFAULTS.llm.additional_config;
+            expect(ac).to.be.an('object');
+            expect(ac).to.not.have.property('judge_equivalence_threshold');
+            // Guard the guard: the fixture must still be the real defaults object.
+            expect(ac).to.have.property('judge_model');
+        });
+    });
 });
 
 // The envelope-version ceiling is read at exactly one place, the fetch() boundary, so
@@ -758,6 +837,38 @@ describe('llm provider, fetch via claude_spawn', function () {
             const out = await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {}));
 
             expect(out.body.toString('utf8')).to.equal('still served');
+        });
+
+        // Best-effort must not mean "silently nothing". Dispatch stays unconditional
+        // (refusing to call would turn an audit fault into a wrong on-chain outcome),
+        // so an unwritable primary sink has to leave the per-dispatch identity
+        // somewhere else. The aggregate spend-state file cannot stand in: it holds a
+        // rolling cost window and no call id.
+        it('keeps the dispatch identity in a fallback sink when the primary is unwritable', async function () {
+            const fallback = path.join(os.tmpdir(),
+                'llm-spend-fb-' + process.pid + '-' + Math.random().toString(36).slice(2) + '.jsonl');
+            process.env.LLM_SPEND_LOG_PATH = '/dev/null/not-a-dir/spend.jsonl';
+            process.env.LLM_SPEND_LOG_FALLBACK_PATH = fallback;
+            try {
+                const { llm } = reloadWithSpawnStub({ result: 'still served' });
+                await withSpawnEnv(() => llm.fetch(JSON.stringify({ prompt: 'hi' }), {}));
+
+                const lines = fsSync.readFileSync(fallback, 'utf8')
+                                    .split('\n').filter(Boolean).map(l => JSON.parse(l));
+                expect(lines.map(l => l.phase)).to.deep.equal(['intent', 'settle']);
+                expect(lines[1].id, 'the settle still ties back to its intent').to.equal(lines[0].id);
+                expect(lines[0].auditFallbackFrom, 'a fallback line names the sink it could not reach')
+                    .to.equal('/dev/null/not-a-dir/spend.jsonl');
+
+                const audit = llm.spendStats().audit;
+                expect(audit.total, 'the fault is a standing counter, not a scrolled-away warning')
+                    .to.equal(2);
+                expect(audit.toFallback).to.equal(2);
+                expect(audit.toStderr, 'the fallback took them, so stderr was not needed').to.equal(0);
+            } finally {
+                delete process.env.LLM_SPEND_LOG_FALLBACK_PATH;
+                try { fsSync.unlinkSync(fallback); } catch { /* never written */ }
+            }
         });
 
         // ---- the aggregate budget the per-call caps never bounded ----
@@ -1822,8 +1933,27 @@ describe('llm provider, vendor inference', function () {
         const llm = _reloadProvider();
         llm._setConfig({ additional_config: { model_vendors: { 'llama-3-70b': 'anthropic' } } });
         expect(llm._vendorOfModel('llama-3-70b', { 'llama-3-70b': 'openai' })).to.equal('openai');
-        // A pinned map that says nothing about this id falls through, not throws.
-        expect(llm._vendorOfModel('llama-3-70b', { 'other-model': 'openai' })).to.equal('anthropic');
+        // A pinned map that says nothing about this id no longer falls through to the
+        // live map: the two are the same governance field at two different anchors, so
+        // consulting the local one would resolve an anchored round against whatever
+        // config this hub happens to hold. Deterministic throw on every hub instead.
+        expect(() => llm._vendorOfModel('llama-3-70b', { 'other-model': 'openai' }))
+            .to.throw(/cannot infer vendor/);
+    });
+
+    // #7167: the divergence the exclusivity rule exists to stop. Same block-anchored
+    // request, two hubs at different hotReload states; without exclusivity the reloaded
+    // one routes claude-sonnet-4-6 to OpenAI and the laggard to Anthropic, prompting two
+    // different third parties over one round.
+    it('ignores a live model_vendors override when a block-anchored map is supplied', function () {
+        const llm = _reloadProvider();
+        llm._setConfig({ additional_config: { model_vendors: { 'claude-sonnet-4-6': 'openai' } } });
+        expect(llm._vendorOfModel('claude-sonnet-4-6', {}),
+            'anchored: the live override is not consulted, prefix inference answers')
+            .to.equal('anthropic');
+        expect(llm._vendorOfModel('claude-sonnet-4-6'),
+            'unpinned: the live override still wins, unchanged')
+            .to.equal('openai');
     });
 
     it('routes fetch through options.pinnedVendors for an unmapped model family', async function () {
@@ -2032,6 +2162,74 @@ describe('llm provider, fetch via openai_api', function () {
                 .reply(200, { choices: [{ message: { content: 'world' } }] });
             const res = await llm.fetch(JSON.stringify({ prompt: 'q' }), { pinnedModel: 'gpt-5-mini', maxResponseBytes: 64 });
             expect(res.body.toString('utf8')).to.equal('world');
+        });
+    });
+});
+
+// #7168: the HTTP status decides whether a response is a completion; the body's
+// shape only says which vendor wrote the error. Both transports asked the second
+// question alone, so a gateway 503 carrying neither `error` nor `type` parsed
+// clean, resolved as SUCCESS, and degraded to empty text -- on agree() that is
+// `empty_verdict`, which the spot-checker does not hold for re-judge, so the
+// outage discarded the check with no evidence while the SAME 503 with a vendor
+// error envelope failed over correctly.
+describe('llm provider, HTTP status-first error classification (#7168)', function () {
+
+    afterEach(function () { nock.cleanAll(); sinon.restore(); });
+
+    it('rejects an Anthropic 503 whose body carries no error envelope', async function () {
+        await _withEnv({ ANTHROPIC_API_KEY: 'sk-ant-test' }, async () => {
+            const llm = _reloadProvider();
+            nock('https://api.anthropic.com')
+                .post('/v1/messages')
+                .reply(503, { message: 'Service unavailable' });
+            let err;
+            try { await llm.fetch(JSON.stringify({ prompt: 'q' }), { pinnedModel: 'claude-sonnet-4-6' }); }
+            catch (e) { err = e; }
+            expect(err, 'a 503 must not resolve as a completion').to.exist;
+            expect(err.httpStatus).to.equal(503);
+            expect(err.transient, 'a 5xx earns a same-round judge fallback').to.equal(true);
+        });
+    });
+
+    it('rejects an OpenAI 503 whose body carries no error envelope', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            nock('https://api.openai.com')
+                .post('/v1/chat/completions')
+                .reply(503, { message: 'Service unavailable' });
+            let err;
+            try { await llm.fetch(JSON.stringify({ prompt: 'q' }), { pinnedModel: 'gpt-5-mini' }); }
+            catch (e) { err = e; }
+            expect(err).to.exist;
+            expect(err.httpStatus).to.equal(503);
+            expect(err.transient).to.equal(true);
+        });
+    });
+
+    it('classifies an envelope-less 4xx as hard, so the judge chain stops honestly', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            nock('https://api.openai.com')
+                .post('/v1/chat/completions')
+                .reply(400, { detail: 'bad request' });
+            let err;
+            try { await llm.fetch(JSON.stringify({ prompt: 'q' }), { pinnedModel: 'gpt-5-mini' }); }
+            catch (e) { err = e; }
+            expect(err).to.exist;
+            expect(err.httpStatus).to.equal(400);
+            expect(err.transient).to.equal(false);
+        });
+    });
+
+    it('still serves a normal 200 completion', async function () {
+        await _withEnv({ OPENAI_API_KEY: 'sk-oai-test' }, async () => {
+            const llm = _reloadProvider();
+            nock('https://api.openai.com')
+                .post('/v1/chat/completions')
+                .reply(200, { choices: [{ message: { content: 'served' } }], usage: {} });
+            const res = await llm.fetch(JSON.stringify({ prompt: 'q' }), { pinnedModel: 'gpt-5-mini' });
+            expect(res.body.toString('utf8')).to.equal('served');
         });
     });
 });

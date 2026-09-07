@@ -39,11 +39,16 @@ describe('OracleConsensus: price capability snapshot mirroring', function () {
             doQuery: async function (sql, params) {
                 calls.push({ sql: sql, params: params });
                 if (/INSERT IGNORE INTO capability_snapshots/i.test(sql)) {
-                    let [snapshot_block, capability, signing_pubkey, amount, source] = params;
-                    let dup = rows.some(r => r.snapshot_block === snapshot_block && r.capability === capability
-                        && r.signing_pubkey === signing_pubkey && r.source === source);
-                    if (!dup) rows.push({ id: rows.length + 1, snapshot_block, capability, signing_pubkey, amount, source });
-                    return { affectedRows: dup ? 0 : 1 };
+                    // One multi-row statement carries the whole set, so walk the flattened
+                    // params in groups of five rather than destructuring a single row.
+                    let inserted = 0;
+                    for (let i = 0; i + 4 < params.length; i += 5) {
+                        let [snapshot_block, capability, signing_pubkey, amount, source] = params.slice(i, i + 5);
+                        let dup = rows.some(r => r.snapshot_block === snapshot_block && r.capability === capability
+                            && r.signing_pubkey === signing_pubkey && r.source === source);
+                        if (!dup) { rows.push({ id: rows.length + 1, snapshot_block, capability, signing_pubkey, amount, source }); inserted++; }
+                    }
+                    return { affectedRows: inserted };
                 }
                 if (/FROM capability_snapshots/i.test(sql)) {
                     let [block, capability, pubkey, source] = params;

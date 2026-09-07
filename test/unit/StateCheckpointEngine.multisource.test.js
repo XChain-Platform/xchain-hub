@@ -67,11 +67,15 @@ function memDb() {
                 return checkpoints.filter(r => r.chain === params[0] && r.network === params[1] && r.block_index === params[2] && r.checkpoint_seq === params[3]).slice(0, 1);
             }
             if (sql.startsWith('INSERT IGNORE INTO capability_snapshots')) {
-                let [snapshot_block, capability, signing_pubkey, amount, source] = params;
-                source = source != null ? source : '';
-                // Widened key: dedupe on all four columns, so two source rows persist.
-                if (!snapshots.some(r => r.snapshot_block === snapshot_block && r.capability === capability && r.signing_pubkey === signing_pubkey && r.source === source))
-                    snapshots.push({ id: snapshots.length + 1, snapshot_block, capability, signing_pubkey, amount, source });
+                // One multi-row statement carries the whole set, so walk the flattened
+                // params in groups of five rather than destructuring a single row.
+                for (let i = 0; i + 4 < params.length; i += 5) {
+                    let [snapshot_block, capability, signing_pubkey, amount, source] = params.slice(i, i + 5);
+                    source = source != null ? source : '';
+                    // Widened key: dedupe on all four columns, so two source rows persist.
+                    if (!snapshots.some(r => r.snapshot_block === snapshot_block && r.capability === capability && r.signing_pubkey === signing_pubkey && r.source === source))
+                        snapshots.push({ id: snapshots.length + 1, snapshot_block, capability, signing_pubkey, amount, source });
+                }
                 return [];
             }
             if (sql.startsWith('SELECT * FROM capability_snapshots')) {

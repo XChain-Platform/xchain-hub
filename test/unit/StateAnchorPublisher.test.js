@@ -581,6 +581,33 @@ describe('StateAnchorPublisher', function () {
             expect(nd.pub.getAnchorStats()).to.include({ anchorsPublished: 1, sectionsAnchored: 1, bundlesOversize: 0 });
         });
 
+        // _splitBundle sizes an ESTIMATED attestation tail before the round that fills it
+        // has run, and after a split it estimates at the network-wide oracle_publish set
+        // rather than the group's own block, so the estimate can come in low. An oversize
+        // payload then reached the encoder as a RangeError, after the anchor intents were
+        // recorded and withdrawn, with bundlesOversize still reading 0.
+        it('refuses a bundle whose BUILT payload overflows the budget, before any intent is recorded', async function () {
+            let bus = buildMesh(1, { stakeWeighted: true });
+            let nd  = bus.nodes[0];
+            // Only the final build carries a non-empty attestation tail (_v7Bytes always
+            // measures with an empty one), so inflating on that condition leaves the
+            // splitter's estimate untouched: exactly the low-estimate shape.
+            let realBuild = nd.pub._buildV7Payload.bind(nd.pub);
+            nd.pub._buildV7Payload = function (secs, publisher, attestSigs) {
+                let p = realBuild(secs, publisher, attestSigs);
+                return (attestSigs && attestSigs.length > 0) ? p + 'x'.repeat(9000) : p;
+            };
+            let intents = 0;
+            let realIntent = nd.pub._recordAnchorIntent.bind(nd.pub);
+            nd.pub._recordAnchorIntent = async function (row) { intents++; return realIntent(row); };
+            await startAll(bus);
+            await nd.pub.flush();
+            expect(nd.published.filter(p => p.split('|')[1] === '0'), 'nothing was broadcast').to.deep.equal([]);
+            expect(intents, 'no anchor intent was recorded').to.equal(0);
+            expect(nd.pub.getAnchorStats()).to.include({ anchorsPublished: 0, bundlesOversize: 1 });
+            expect(nd.db.checkpoints[0].anchor_txid, 'the checkpoint row stays pending').to.equal(null);
+        });
+
         // item 2676: the balance check is a hard pre-send gate, not an advisory WARN.
         it('skips the flush when a wired DOGE balance is below the floor (item 2676)', async function () {
             let bus = buildMesh(1);
@@ -2043,6 +2070,62 @@ describe('StateAnchorPublisher', function () {
             'observed leader IS honored').to.equal('finalized');
         expect(follower.rewards.some(r => r.type === 'anchor_archive'),
             'observed leader mirrors the reward').to.equal(true);
+    });
+
+    it('a FINALIZED cannot suppress rows the co-signed archive never carried', async function () {
+        // XANC-FINALIZED-MEMBER-1: the XANCFIN canonical commits to (batch_seq, txid,
+        // match COUNT) and never to WHICH rows, and the content re-verification only asks
+        // that each announced row exist locally at the announced status. An elected
+        // leader that archives one row and announces two real ones therefore gets
+        // archived_status = status stamped on both, and the pending selector
+        // (`batch_seq IS NULL OR archived_status <> status`) skips a TERMINAL row
+        // forever: the unarchived row is suppressed on every follower and unreachable to
+        // full-parse recovery.
+        // Count-path mesh (mainnet record below the 961000 SWQ activation), the same
+        // shape the N=4 back-fill-propagates round above uses.
+        let bus = buildMesh(4, { btcBlock: 101, network: 'mainnet' });
+        let leader = archiveLeader(bus);
+        await startAll(bus);
+        await flushAll(bus);                                 // honest round: m1 archived fleet-wide
+        await waitUntil(() => bus.nodes.every(nd => nd.db.matches[0].archived_status === 'finalized'),
+            { label: 'the honest archive back-fill to reach every hub' });
+
+        let followers = bus.nodes.filter(nd => nd !== leader);
+        let gated = followers[0], abstaining = followers[1];
+        let seq  = leader.db.matches[0].batch_seq;
+        let txid = leader.db.matches[0].anchor_txid;
+        expect(seq,  'the honest round stamped a batch seq').to.not.equal(null);
+        expect(txid, 'the honest round stamped an archive txid').to.be.a('string');
+
+        // HONEST CONTROL: the round's real SIGN_REQ + FINALIZED stamped the row the
+        // archive DOES carry, on the gated follower, through the path under test.
+        expect(gated.db.matches[0].match_id).to.equal('m1');
+        expect(gated.db.matches[0].archived_status, 'the archived row IS stamped').to.equal('finalized');
+
+        // m2 is settled on both followers and rode no archive.
+        for (let nd of [gated, abstaining]) nd.db.matches.push(matchRow('m2'));
+
+        // The leader announces m1 AND m2 under the batch it really published: real rows,
+        // true statuses, a real on-chain v1 head, signed over its own list.
+        let announced = [{ match_id: 'm1', status: 'finalized' }, { match_id: 'm2', status: 'finalized' }];
+        let forged = () => ({ data: {
+            batch_seq: seq, txid: txid, snapshot_block: 100, matches: announced, calls: [], rewards: [],
+            sig_pubkey: leader.pubkey,
+            sig: leader.identity.sign(gated.pub._finalizedCanonical(seq, txid, announced.length))
+        }});
+
+        await gated.pub._handleFinalized(forged());
+        let m2 = gated.db.matches.find(m => m.match_id === 'm2');
+        expect(m2.archived_status, 'a row outside the co-signed archive is NOT suppressed').to.equal(null);
+        expect(m2.batch_seq, 'and carries no batch seq').to.equal(null);
+
+        // CONTROL: the SAME envelope on a hub holding no archive body for this (batch,
+        // proposer) still back-fills, so the envelope is valid all the way down and the
+        // membership record is the only thing that stopped it above.
+        abstaining.pub._observedArchiveContents.clear();
+        await abstaining.pub._handleFinalized(forged());
+        expect(abstaining.db.matches.find(m => m.match_id === 'm2').archived_status,
+            'a hub holding no co-signed body abstains and still back-fills').to.equal('finalized');
     });
 
     it('a FINALIZED for a batch whose checkpoint was NEVER anchored on-chain mirrors NO archive reward', async function () {

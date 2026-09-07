@@ -33,7 +33,7 @@ const sinon      = require('sinon');
 const { expect } = require('chai');
 const proxyquire = require('proxyquire');
 const { createMockHub } = require('../helpers/mockHub');
-const { VALIDATORS_3, buildSubmissions } = require('../helpers/fixtures');
+const { VALIDATORS_3, buildSubmissions, makeCapabilitySnapshotStub } = require('../helpers/fixtures');
 const OracleConsensus = require('../../src/OracleConsensus');
 
 const { DERIVED_PAIRS } = require('../../src/constants.js');
@@ -129,6 +129,10 @@ describe('DERIVED_PAIRS admission allow-list @regression', function () {
             pm = gateHub._peerManager;
             pm.validatorPubkeys = new Set();          // size 0 -> any sender is known
             const oracleRound = { getSubmissions: sinon.stub().returns(new Map()), canonicalPairs };
+            // A federated hub refuses a round with no deterministic capability snapshot, so the
+            // harness models one over the same validators: these cases are about something else,
+            // not about the snapshot being unreachable.
+            gateHub.capabilitySnapshot = makeCapabilitySnapshotStub(VALIDATORS_3);
             oc = new OracleConsensus(gateHub, oracleRound);
             oc.setValidatorSet(VALIDATORS_3);
             leader = oc._getLeader(ROUND);

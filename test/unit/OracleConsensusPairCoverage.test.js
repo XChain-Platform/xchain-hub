@@ -17,7 +17,7 @@ const sinon            = require('sinon');
 const { expect }       = require('chai');
 const OracleConsensus  = require('../../src/OracleConsensus');
 const { createMockHub } = require('../helpers/mockHub');
-const { VALIDATORS_3, buildSubmissions } = require('../helpers/fixtures');
+const { VALIDATORS_3, buildSubmissions, makeCapabilitySnapshotStub } = require('../helpers/fixtures');
 
 describe('OracleConsensus PROPOSE pair-coverage (stress-sweep 2026-07-08)', function () {
     let hub, pm, oc, oracleRound, leader;
@@ -28,6 +28,10 @@ describe('OracleConsensus PROPOSE pair-coverage (stress-sweep 2026-07-08)', func
         pm  = hub._peerManager;
         pm.validatorPubkeys = new Set();
         oracleRound = { getSubmissions: sinon.stub().returns(new Map()) };
+        // A federated hub refuses a round with no deterministic capability snapshot, so the
+        // harness models one over the same validators: these cases are about something else,
+        // not about the snapshot being unreachable.
+        hub.capabilitySnapshot = makeCapabilitySnapshotStub(VALIDATORS_3);
         oc = new OracleConsensus(hub, oracleRound);
         oc.setValidatorSet(VALIDATORS_3);
         leader = oc._getLeader(ROUND);

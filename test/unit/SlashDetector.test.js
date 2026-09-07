@@ -77,6 +77,45 @@ describe('SlashDetector', function () {
             expect(sd2.deviationThreshold).to.equal(0.0625);
             expect(warn.calledWithMatch(/diverges from the federation-uniform/)).to.equal(true);
         });
+
+        // The tightest band an operator can express is exactly the one a falsy-zero
+        // `||` default eats, so 0 is the case that proves the override is read at all
+        // rather than merely parsed. Both spellings: api.js forwards the env as the
+        // string '0', while a programmatic caller (XChainHub, an e2e helper) can hand
+        // over the number.
+        it('fail-fasts on an explicit string 0 slash band instead of silently defaulting', function () {
+            expect(() => new SlashDetector(createMockHub({ p2pConfig: { SLASH_DEVIATION_THRESHOLD: '0' } })))
+                .to.throw(/below the federation-uniform ORACLE_DEVIATION_THRESHOLD/);
+        });
+
+        it('fail-fasts on an explicit numeric 0 slash band', function () {
+            expect(() => new SlashDetector(createMockHub({ p2pConfig: { SLASH_DEVIATION_THRESHOLD: 0 } })))
+                .to.throw(/below the federation-uniform ORACLE_DEVIATION_THRESHOLD/);
+        });
+
+        // A non-numeric override must not survive as NaN. _checkDeviations does not
+        // compare the band with a JS `>`; it hands it to deviation_band.exceedsBand,
+        // which returns TRUE against a NaN band for any deviation at all. So a NaN band
+        // does not disable slashing, it slashes every honest submitter, breaching the
+        // never-slash-inside-the-co-signed-band invariant the constructor documents.
+        it('fail-fasts on a non-numeric slash band rather than carrying NaN into the band', function () {
+            expect(() => new SlashDetector(createMockHub({ p2pConfig: { SLASH_DEVIATION_THRESHOLD: 'abc' } })))
+                .to.throw(/is not a valid number/);
+        });
+
+        it('treats an empty-string override as absent (default band, no warning)', function () {
+            let warn = sinon.stub(console, 'warn');
+            let sd2 = new SlashDetector(createMockHub({ p2pConfig: { SLASH_DEVIATION_THRESHOLD: '' } }));
+            expect(sd2.deviationThreshold).to.equal(0.05);
+            expect(warn.calledWithMatch(/diverges from the federation-uniform/)).to.equal(false);
+        });
+
+        it('treats an absent override as absent (default band, no warning)', function () {
+            let warn = sinon.stub(console, 'warn');
+            let sd2 = new SlashDetector(createMockHub({ p2pConfig: {} }));
+            expect(sd2.deviationThreshold).to.equal(0.05);
+            expect(warn.calledWithMatch(/diverges from the federation-uniform/)).to.equal(false);
+        });
     });
 
     // -----------------------------------------------------------------

@@ -19,7 +19,7 @@ const sinon             = require('sinon');
 const { expect }        = require('chai');
 const OracleConsensus   = require('../../src/OracleConsensus');
 const { createMockHub } = require('../helpers/mockHub');
-const { pubkeyForTestSender } = require('../helpers/fixtures');
+const { pubkeyForTestSender, makeCapabilitySnapshotStub } = require('../helpers/fixtures');
 const diagnostics       = require('../../src/consensusDiagnostics');
 const observability     = require('../../src/observability');
 
@@ -70,7 +70,15 @@ describe('consensus diagnostics: silent PBFT drops become records (AT2)', functi
         });
 
         hub = createMockHub({ validatorAddr: VALSET[1].addr });   // we are val-b, a follower
+        // A real federated hub always resolves a BTC tip of its own, and the follower
+        // now bounds the leader-stamped btcBlockHeight against it, so the fixture has
+        // to model one. Same height the PROPOSE carries: an honest round in lockstep.
+        hub._resolveBtcLatestBlock = sinon.stub().resolves(1000);
         oracleRound = { getSubmissions: sinon.stub().returns(new Map()) };
+        // A federated hub refuses a round with no deterministic capability snapshot, so the
+        // harness models one over the same validators: these cases are about something else,
+        // not about the snapshot being unreachable.
+        hub.capabilitySnapshot = makeCapabilitySnapshotStub(VALSET);
         oc = new OracleConsensus(hub, oracleRound);
         oc.setValidatorSet(VALSET);
         oc._lastFinalizedPrices = new Map([['BTC/USD', '100.00000000']]);
@@ -264,13 +272,13 @@ describe('consensus diagnostics: checkpoint cadence stalls', function () {
         engine._cadenceStalls = 0;
         engine._cadenceStallLoggedAt = Date.now();   // throttle CLOSED
         engine._cadenceStallLogMs = 600000;
-        engine.coin = 'BTC';
+        engine.chains = ['BTC', 'LTC', 'DOGE'];
 
         for (let i = 0; i < 5; i++) engine._noteCadenceStall(100 + i, 'no qualified oracle_publish validator set');
 
         const records = sink.lines.filter((l) => l.includes('CHECKPOINT_STALLED'));
         expect(records).to.have.lengthOf(5);
-        expect(records[0]).to.include('chain=BTC');
+        expect(records[0]).to.include('chains=BTC/LTC/DOGE');
         expect(records[0]).to.include('reason="no qualified oracle_publish validator set"');
         expect(records[4]).to.include('stalls=5');
     });
@@ -285,6 +293,26 @@ describe('consensus diagnostics: checkpoint cadence stalls', function () {
         engine._noteCadenceStall(null, 'no snapshot rows');
         const rec = sink.lines.find((l) => l.includes('CHECKPOINT_STALLED'));
         expect(rec).to.include('reason="no snapshot rows"');
+        expect(rec).to.not.include('block=');
+        expect(rec).to.not.include('seq=');
+    });
+
+    it('names the round chains it actually runs, never a hardcoded BTC', function () {
+        // The emission read `this.coin`, a property this class never assigns, so the
+        // `|| 'BTC'` fallback fired every time and an LTC/DOGE hub's stall read as BTC.
+        const StateCheckpointEngine = require('../../src/StateCheckpointEngine');
+        const engine = Object.create(StateCheckpointEngine.prototype);
+        engine._cadenceStalls = 0;
+        engine._cadenceStallLoggedAt = Date.now();
+        engine._cadenceStallLogMs = 600000;
+        engine.chains = ['LTC', 'DOGE'];
+
+        engine._noteCadenceStall(4855000, 'no validator identity (cannot sign checkpoints)');
+
+        const rec = sink.lines.find((l) => l.includes('CHECKPOINT_STALLED'));
+        expect(rec).to.include('chains=LTC/DOGE');
+        expect(rec).to.include('block=4855000');
+        expect(rec).to.not.include('BTC');
         expect(rec).to.not.include('seq=');
     });
 });

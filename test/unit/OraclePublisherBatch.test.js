@@ -156,7 +156,31 @@ function makeDb(seed) {
                                                  Number(s.round_number) <= last);
             if (/status\s*=\s*\?/i.test(q))                  rows = rows.filter(s => s.status === args[2]);
             if (/consensus_proof\s+LIKE/i.test(q))           rows = rows.filter(s => s.batch === true);
-            if (/block_timestamp/i.test(q)) {
+            // Every branch below keys on the select LIST, not the whole statement: the
+            // reconcile query names block_timestamp AND coin_pair AND consensus_proof,
+            // so matching anywhere in the text would route it to the wrong shape.
+            let selectList = (q.match(/SELECT([\s\S]*?)FROM/i) || [, ''])[1];
+            // The reconcile reads the window's rows in full, one per pair, exactly as
+            // the co-signers' own derivation does. A seed row may carry `pairs`; when it
+            // does not, it models a row this stub cannot flesh out, which is what the
+            // production guard has to survive without touching the buffer.
+            if (/coin_pair/i.test(selectList)) {
+                let out = [];
+                for (let s of rows) {
+                    for (let p of (s.pairs || [{ pair: undefined, price: undefined }])) {
+                        out.push({ round_number: s.round_number, coin_pair: p.pair, price: p.price,
+                                   reference_block: s.reference_block,
+                                   block_timestamp: s.block_timestamp,
+                                   proof_head: s.batch === true ? '{"batch"' : '[{"pubk' });
+                    }
+                }
+                return out;
+            }
+            if (/consensus_proof/i.test(selectList)) {
+                return rows.map(s => ({ round_number: s.round_number,
+                                        consensus_proof: s.proof !== undefined ? s.proof : null }));
+            }
+            if (/block_timestamp/i.test(selectList)) {
                 return rows.map(s => ({ round_number: s.round_number, block_timestamp: s.block_timestamp }));
             }
             return rows.map(s => ({ round_number: s.round_number }));
@@ -210,9 +234,19 @@ function makePublisher(opts) {
     tmpDirs.push(dir);
 
     let signer = opts.signer === null ? null : (opts.signer || makeSigner(opts.signerOpts));
+    // The window-mechanics tests below buffer explicit 6-round windows, which the
+    // cadence ceiling would clamp at the fleet's 600s round interval (a
+    // 6-round window there publishes hourly against a 1800s fee-price staleness
+    // bound). Give them the 1s rounds a regtest venue runs, where the ceiling is
+    // ~1200 rounds and a 6-round window is honoured verbatim, so those tests keep
+    // measuring assembly and splitting rather than the ceiling. `fleetCadence: true`
+    // opts back into the real interval for the tests that exercise the ceiling itself.
+    let cadenceDefaults = opts.fleetCadence
+        ? {}
+        : { ORACLE_ROUND_INTERVAL: 1000, ORACLE_BATCH_WINDOW_ROUNDS: 6 };
     let hub = {
         p2pConfig: Object.assign({ PUBLISHER_QUEUE_PATH: path.join(dir, 'publisher-queue.jsonl') },
-                                 opts.cfg || {}),
+                                 cadenceDefaults, opts.cfg || {}),
         network:            opts.network === undefined ? 'regtest' : opts.network,
         db:                 opts.db || null,
         getIdentity:        () => makeIdentity(opts.me || ME),
@@ -363,6 +397,248 @@ describe('OraclePublisher PRICE batch rail', function () {
             expect(Array.from(h.p._buffer.keys())).to.deep.equal([2]);
             expect(readJsonl(h.bufferPath).map(e => e.round)).to.deep.equal([2]);
         });
+
+        // Half one. price_snapshots is last-write-wins (ON DUPLICATE KEY
+        // UPDATE); this buffer was first-write-wins. One round finalizing twice with
+        // different content therefore left the two stores permanently out of step, and
+        // since the leader proposes from the buffer while every co-signer re-derives
+        // from price_snapshots, the whole window became unsignable forever.
+        describe('a round that re-finalizes', function () {
+
+            it('replaces the buffered copy when the content CHANGED, in memory and on disk', async function () {
+                let h = makePublisher();
+                await h.p.start();
+                await h.p.onRoundFinalized(roundFixture(7));
+                // Same round number, the second finalization's timestamp and prices.
+                await h.p.onRoundFinalized(roundFixture(7, {
+                    time:  1800004800,
+                    pairs: [{ coinPair: 'BTC/USD', price: '61111.11' },
+                            { coinPair: 'LTC/USD', price: '81.5' }]
+                }));
+
+                let buffered = h.p._buffer.get(7);
+                expect(buffered.timestamp).to.equal(1800004800);
+                expect(buffered.pairs).to.deep.equal([
+                    { pair: 'BTC/USD', price: '61111.11' },
+                    { pair: 'LTC/USD', price: '81.5' }
+                ]);
+                // The file is compacted to ONE line for the round, carrying the new copy.
+                let onDisk = readJsonl(h.bufferPath);
+                expect(onDisk).to.have.length(1);
+                expect(onDisk[0].timestamp).to.equal(1800004800);
+                expect(logs.warn.join('\n')).to.match(/round 7 re-finalized with different content/);
+            });
+
+            it('survives a restart carrying the SECOND copy, not the first', async function () {
+                let h = makePublisher();
+                await h.p.start();
+                await h.p.onRoundFinalized(roundFixture(7));
+                await h.p.onRoundFinalized(roundFixture(7, { time: 1800004800 }));
+
+                let second = new OraclePublisher(h.hub);
+                instances.push(second);
+                await second.start();
+                expect(second._buffer.size).to.equal(1);
+                expect(second._buffer.get(7).timestamp).to.equal(1800004800);
+            });
+
+            it('is a no-op when the re-finalization is IDENTICAL, so a replay costs no disk', async function () {
+                let h = makePublisher();
+                await h.p.start();
+                await h.p.onRoundFinalized(roundFixture(7));
+                let after = fs.statSync(h.bufferPath).mtimeMs;
+                await h.p.onRoundFinalized(roundFixture(7));
+                await h.p.onRoundFinalized(roundFixture(7));
+
+                expect(readJsonl(h.bufferPath)).to.have.length(1);
+                expect(fs.statSync(h.bufferPath).mtimeMs).to.equal(after);
+                expect(logs.warn.join('\n')).to.not.match(/re-finalized with different content/);
+            });
+
+            it('treats a re-ordered pair list as identical: the canonical builder sorts pairs anyway', async function () {
+                let h = makePublisher();
+                await h.p.start();
+                await h.p.onRoundFinalized(roundFixture(7));
+                await h.p.onRoundFinalized(roundFixture(7, {
+                    pairs: [{ coinPair: 'LTC/USD', price: '80.5' },
+                            { coinPair: 'BTC/USD', price: '60000.12' }]
+                }));
+                expect(readJsonl(h.bufferPath)).to.have.length(1);
+                expect(logs.warn.join('\n')).to.not.match(/re-finalized with different content/);
+            });
+
+            // The regression as the federation experienced it: after the second
+            // finalization, what the leader PROPOSES has to be what its own
+            // price_snapshots holds, or no peer can ever reproduce it.
+            it('proposes the re-finalized content to the signing round', async function () {
+                let db = makeDb({ snapshots: [] });
+                let h = makePublisher({ db: db });
+                await h.p.start();
+                for (let r = 0; r < 6; r++) await h.p.onRoundFinalized(roundFixture(r));
+                await h.p.onRoundFinalized(roundFixture(5, {
+                    time:  1800009999,
+                    pairs: [{ coinPair: 'BTC/USD', price: '70000.00' }]
+                }));
+
+                await h.p._assembleWindow(0);
+                expect(h.signer.calls).to.have.length(1);
+                let proposed = h.signer.collectBatchSignatures.firstCall.args[3];
+                let last = proposed[proposed.length - 1];
+                expect(last.round).to.equal(5);
+                expect(last.timestamp).to.equal(1800009999);
+                expect(last.pairs).to.deep.equal([{ pair: 'BTC/USD', price: '70000.00' }]);
+            });
+        });
+
+        // Half two. receiveBatch dedupes per round, so a landed six-round
+        // batch typically stamps only the one round this hub was missing; the other
+        // five keep their v0 proof. Pruning only the stamped rows left a published
+        // window buffered forever, and every later leader re-proposed it.
+        it('prunes the WHOLE range a landed batch claims, not just the rows carrying its proof', async function () {
+            let proof = JSON.stringify({
+                batch: { first_round: 0, last_round: 5, btc_block_height: 800005 },
+                sigs: []
+            });
+            let db = makeDb({ snapshots: [
+                // Only round 3 was missing locally, so only round 3 carries the stamp.
+                { round_number: 3, block_timestamp: 1800001800, status: 'finalized',
+                  batch: true, proof: proof }
+            ] });
+            let h = makePublisher({ db: db, publishers: [ME, PEER1, PEER2] });
+            await h.p.start();
+            for (let r = 0; r < 8; r++) await h.p.onRoundFinalized(roundFixture(r));
+
+            let pruned = await h.p._pruneObservedWindow(0, 5);
+            expect(pruned).to.equal(6);
+            // Rounds 6 and 7 are outside the batch's claimed range and stay buffered.
+            expect(Array.from(h.p._buffer.keys()).sort((a, b) => a - b)).to.deep.equal([6, 7]);
+        });
+
+        // The healing half of this fix. The buffer fix above stops a NEW drift; a hub
+        // that already drifted (its buffered round 107 predates the fix) still holds a
+        // window no peer can co-sign until assembly reconciles it.
+        describe('reconciling the buffered window against price_snapshots', function () {
+
+            // A DB seed row shaped the way makeDb's reconcile branch expands it.
+            function snapRow(round, opts) {
+                opts = opts || {};
+                return {
+                    round_number:    round,
+                    status:          'finalized',
+                    reference_block: opts.anchor !== undefined ? opts.anchor : 800000 + round,
+                    block_timestamp: opts.time   !== undefined ? opts.time   : 1800000000 + round * 600,
+                    batch:           opts.batch === true,
+                    pairs:           opts.pairs || [{ pair: 'BTC/USD', price: '60000.12' },
+                                                    { pair: 'LTC/USD', price: '80.5' }]
+                };
+            }
+
+            it('refreshes a drifted round so the leader proposes what its own DB holds', async function () {
+                // The testnet shape: the DB moved round 5 on to a later timestamp and a
+                // new price set, and the buffer was left holding the superseded copy.
+                let snapshots = [];
+                for (let r = 0; r < 6; r++) snapshots.push(snapRow(r));
+                snapshots[5] = snapRow(5, { time: 1800009999,
+                                            pairs: [{ pair: 'BTC/USD', price: '70000.00' }] });
+                let h = makePublisher({ db: makeDb({ snapshots: snapshots }) });
+                await h.p.start();
+                // Buffer the pre-drift content, as the hub did before the DB moved.
+                for (let r = 0; r < 6; r++) await h.p.onRoundFinalized(roundFixture(r));
+
+                await h.p._assembleWindow(0);
+
+                let proposed = h.signer.collectBatchSignatures.firstCall.args[3];
+                let last = proposed[proposed.length - 1];
+                expect(last.round).to.equal(5);
+                expect(last.timestamp).to.equal(1800009999);
+                expect(last.pairs).to.deep.equal([{ pair: 'BTC/USD', price: '70000.00' }]);
+                expect(logs.warn.join('\n')).to.match(/buffered round 5 disagreed with this hub's own price_snapshots/);
+                // The refreshed copy is durable, so the next restart proposes it too.
+                expect(readJsonl(h.bufferPath).find(e => e.round === 5).timestamp).to.equal(1800009999);
+            });
+
+            it('sheds a round that arrived from a batch already on chain', async function () {
+                let snapshots = [];
+                for (let r = 0; r < 6; r++) snapshots.push(snapRow(r));
+                // Round 2 came back from a landed batch, so its reference_block is the
+                // LANDING chain's height, not a BTC anchor.
+                snapshots[2] = snapRow(2, { batch: true, anchor: 67856096 });
+                let h = makePublisher({ db: makeDb({ snapshots: snapshots }) });
+                await h.p.start();
+                for (let r = 0; r < 6; r++) await h.p.onRoundFinalized(roundFixture(r));
+
+                expect(await h.p._reconcileBufferedWindow(0, 5)).to.equal(1);
+                expect(h.p._buffer.has(2)).to.equal(false);
+                // The landing height never reaches the buffer, let alone a proposal.
+                for (let e of h.p._buffer.values()) expect(e.btcBlockHeight).to.not.equal(67856096);
+                expect(logs.warn.join('\n')).to.match(/dropping buffered round 2 .* already landed on chain/);
+            });
+
+            it('leaves an agreeing window completely alone', async function () {
+                let snapshots = [];
+                for (let r = 0; r < 6; r++) snapshots.push(snapRow(r));
+                let h = makePublisher({ db: makeDb({ snapshots: snapshots }) });
+                await h.p.start();
+                for (let r = 0; r < 6; r++) await h.p.onRoundFinalized(roundFixture(r));
+                let before = readJsonl(h.bufferPath);
+
+                expect(await h.p._reconcileBufferedWindow(0, 5)).to.equal(0);
+                expect(readJsonl(h.bufferPath)).to.deep.equal(before);
+                expect(logs.warn.join('\n')).to.not.match(/disagreed with this hub's own/);
+            });
+
+            it('never INVENTS a round: a finalized round with no buffered copy stays the self-check\'s case', async function () {
+                let h = makePublisher({ db: makeDb({ snapshots: [snapRow(0), snapRow(3)] }) });
+                await h.p.start();
+                await h.p.onRoundFinalized(roundFixture(0));
+
+                expect(await h.p._reconcileBufferedWindow(0, 5)).to.equal(0);
+                expect(Array.from(h.p._buffer.keys())).to.deep.equal([0]);
+            });
+
+            it('fails closed on a half-read round rather than overwriting good content', async function () {
+                // No `pairs` on the seed: the row reads back with no pair and no price,
+                // which the canonical builder would turn into NaN.
+                let h = makePublisher({ db: makeDb({ snapshots: [
+                    { round_number: 0, status: 'finalized', block_timestamp: 1800009999 }
+                ] }) });
+                await h.p.start();
+                await h.p.onRoundFinalized(roundFixture(0));
+
+                expect(await h.p._reconcileBufferedWindow(0, 5)).to.equal(0);
+                expect(h.p._buffer.get(0).timestamp).to.equal(1800000000);
+                expect(h.p._buffer.get(0).pairs).to.have.length(2);
+                expect(logs.warn.join('\n')).to.match(/skipping reconcile of buffered round 0/);
+            });
+
+            it('proposes the buffer as-is when the DB read throws', async function () {
+                let db = makeDb({ snapshots: [] });
+                db.doQuery = async (q) => {
+                    if (/coin_pair/i.test(q)) throw new Error('connection lost');
+                    return [];
+                };
+                let h = makePublisher({ db: db });
+                await h.p.start();
+                await h.p.onRoundFinalized(roundFixture(0));
+
+                expect(await h.p._reconcileBufferedWindow(0, 5)).to.equal(0);
+                expect(h.p._buffer.get(0).timestamp).to.equal(1800000000);
+                expect(logs.warn.join('\n')).to.match(/cannot reconcile the buffered copy of window \[0,5\]/);
+            });
+        });
+
+        it('falls back to the stamped round alone when the proof is unreadable', async function () {
+            let db = makeDb({ snapshots: [
+                { round_number: 3, block_timestamp: 1800001800, status: 'finalized',
+                  batch: true, proof: '{"batch": truncated' }
+            ] });
+            let h = makePublisher({ db: db, publishers: [ME, PEER1, PEER2] });
+            await h.p.start();
+            for (let r = 0; r < 6; r++) await h.p.onRoundFinalized(roundFixture(r));
+
+            expect(await h.p._pruneObservedWindow(0, 5)).to.equal(1);
+            expect(Array.from(h.p._buffer.keys()).sort((a, b) => a - b)).to.deep.equal([0, 1, 2, 4, 5]);
+        });
     });
 
     // ───────────────────────────────────── the window scheduler
@@ -502,6 +778,131 @@ describe('OraclePublisher PRICE batch rail', function () {
                 expect(h.p._takeoverTimers.has(0)).to.equal(false);
             });
 
+            // price_snapshots is a MINED view, so "not on chain" cannot
+            // separate a leader that never broadcast from one whose tx is sitting
+            // unmined in the DOGE mempool. Stepping in over the second pays the fee
+            // twice for a window already in flight, so the follower holds off until the
+            // ambiguity cooldown proves that tx never landed.
+            describe('the ambiguous-send cooldown', function () {
+
+                // ORACLE_PUBLISH_BLOCK_MS is unset in these fixtures, so the default
+                // cooldown is failoverWindowBlocks (2) x APPROX_BTC_BLOCK_MS.
+                const COOLDOWN_MS = 2 * 600000;
+
+                it('defers takeover while a batch this hub co-signed may still be in flight', async function () {
+                    let h = await followerOf({ landed: 99 });
+                    await h.p._assembleWindow(1);
+                    h.p._takeoverTimers.forEach(t => clearTimeout(t));
+                    h.p._takeoverTimers.clear();
+                    // The leader asked us to co-sign window 1 moments ago, which is the
+                    // last thing it needed before broadcasting.
+                    h.signer.coSignedAt = sinon.stub().returns(Date.now() - 1000);
+
+                    let took = await h.p._attemptTakeover(1);
+
+                    expect(took).to.equal(false);
+                    expect(h.broadcasts).to.have.length(0);
+                    expect(h.p.getStats().takeoverDeferred).to.equal(1);
+                    expect(h.p.getStats().takeoverAmbiguousCooldownMs).to.equal(COOLDOWN_MS);
+                    expect(logs.warn.join('\n')).to.match(/deferring takeover of window 1/);
+                    // The signer is asked about the window's ROUND RANGE, not its index.
+                    expect(h.signer.coSignedAt.firstCall.args).to.deep.equal([6, 11]);
+                });
+
+                it('re-arms the deferred takeover rather than cancelling it', async function () {
+                    let h = await followerOf({ landed: 99 });
+                    h.signer.coSignedAt = () => Date.now() - 1000;
+
+                    expect(await h.p._attemptTakeover(1)).to.equal(false);
+                    // Without the re-arm this window would be dropped by this hub
+                    // forever: the timer that fired is already gone.
+                    expect(h.p._takeoverTimers.has(1)).to.equal(true);
+                    expect(h.p.getStats().takeoverPending).to.equal(1);
+                });
+
+                it('takes over once the cooldown has elapsed with the window STILL off chain', async function () {
+                    let h = await followerOf({ landed: 99 });
+                    await h.p._assembleWindow(1);
+                    // Co-signed a full cooldown ago and still nothing mined: whatever
+                    // the leader sent is provably gone.
+                    h.signer.coSignedAt = () => Date.now() - COOLDOWN_MS - 1;
+
+                    let took = await h.p._attemptTakeover(1);
+
+                    expect(took).to.equal(true);
+                    expect(h.broadcasts).to.have.length(1);
+                    expect(h.p.getStats().takeoverDeferred).to.equal(0);
+                });
+
+                it('steps in at once when this hub never co-signed the window', async function () {
+                    let h = await followerOf({ landed: 99 });
+                    await h.p._assembleWindow(1);
+                    // A leader that never asked for a signature never assembled a batch,
+                    // so it cannot have one in flight: that is genuine silence.
+                    h.signer.coSignedAt = () => null;
+
+                    expect(await h.p._attemptTakeover(1)).to.equal(true);
+                    expect(h.broadcasts).to.have.length(1);
+                });
+
+                it('defers on an ambiguous send of this hub\'s OWN for the same window', async function () {
+                    let h = await followerOf({ landed: 99 });
+                    await h.p._assembleWindow(1);
+                    h.p._noteAmbiguousWindow(1);
+
+                    expect(await h.p._attemptTakeover(1)).to.equal(false);
+                    expect(h.broadcasts).to.have.length(0);
+                    expect(h.p.getStats().takeoverDeferred).to.equal(1);
+                });
+
+                it('records the window when a batch wire dead-letters on an ambiguous send', async function () {
+                    let h = await followerOf({ landed: 99, cfg: { ORACLE_BATCH_GRACE_MS: 1 } });
+                    h.p.setBroadcastHook(async () => {
+                        let e = new Error('socket hang up');
+                        e.code = 'ECONNRESET';
+                        throw e;
+                    });
+                    h.signer.coSignedAt = () => null;
+
+                    // ME leads window 0, so this is a plain leader publish that fails
+                    // ambiguously; the takeover armed against the SAME window must then
+                    // not re-broadcast over it.
+                    await h.p._assembleWindow(0);
+                    expect(readJsonl(h.deadPath)).to.have.length(1);
+                    expect(h.p._ambiguousWindows.has(0)).to.equal(true);
+
+                    expect(await h.p._attemptTakeover(0)).to.equal(false);
+                    expect(h.p.getStats().takeoverDeferred).to.equal(1);
+                });
+
+                it('is switched off by a zero cooldown, restoring the prior behaviour', async function () {
+                    let h = await followerOf({ landed: 99,
+                        cfg: { ORACLE_TAKEOVER_AMBIGUOUS_COOLDOWN_MS: '0' } });
+                    await h.p._assembleWindow(1);
+                    h.signer.coSignedAt = () => Date.now();
+
+                    expect(h.p.getStats().takeoverAmbiguousCooldownMs).to.equal(0);
+                    expect(await h.p._attemptTakeover(1)).to.equal(true);
+                    expect(h.broadcasts).to.have.length(1);
+                });
+
+                it('survives a signer with no co-signature memo at all', async function () {
+                    let h = await followerOf({ landed: 99 });
+                    await h.p._assembleWindow(1);
+                    delete h.signer.coSignedAt;
+
+                    expect(await h.p._attemptTakeover(1)).to.equal(true);
+                    expect(h.broadcasts).to.have.length(1);
+                });
+
+                it('never CONSTRUCTS a signer just to answer the ambiguity question', async function () {
+                    let h = await followerOf({ landed: 99 });
+                    h.hub.oracleBatchSigner = null;
+                    expect(h.p._takeoverAmbiguityAt(1, 6, 11)).to.equal(null);
+                    expect(h.p._ownedBatchSigner).to.equal(null);
+                });
+            });
+
             it('stop() clears pending takeover timers', async function () {
                 let h = await followerOf({ landed: 99 });
                 await h.p._assembleWindow(1);
@@ -522,6 +923,219 @@ describe('OraclePublisher PRICE batch rail', function () {
             // Not memoized, so a later attempt on this hub can re-run the round.
             expect(h.p._assembledWindows.has(0)).to.equal(false);
             expect(h.p.getStats().batchSignTimeouts).to.equal(1);
+        });
+    });
+
+    // ───────────────────────────────────── re-proposing a timed-out window
+
+    // "Re-proposable" was only ever a property of the memo, never a thing that
+    // happened: the catch-up sweep ran exactly ONCE per process, a grace after
+    // start(), so a window that missed quorum stayed unpublished until an operator
+    // restarted the hub. Measured on public testnet 2026-09-02, where window
+    // [102,107] was refused by three peers at the 2026-09-01 boot, was never
+    // attempted again, and left 744 rounds back to round 21 in the leader's buffer.
+    describe('the recurring catch-up sweep', function () {
+
+        // A signer that misses quorum for its first N attempts and then succeeds,
+        // which is what a peer coming back up (or a reconciled buffer) looks like.
+        function flakySigner(failFirst) {
+            let signer = { calls: [], getStats: () => ({ batchSignTimeouts: 0 }), start() {}, stop() {} };
+            signer.collectBatchSignatures = sinon.stub().callsFake(async (f, l, a, rounds) => {
+                signer.calls.push({ first: f, last: l, anchor: a, rounds: rounds.map(r => r.round) });
+                if (signer.calls.length <= failFirst)
+                    return { met: false, sigs: sigsOf(1), firstRound: f, lastRound: l };
+                return { met: true, sigs: sigsOf(3), firstRound: f, lastRound: l,
+                         btcBlockHeight: a, canonical: 'canonical-' + f + '-' + l };
+            });
+            return signer;
+        }
+
+        it('re-proposes a window that missed quorum, with byte-identical content, until it lands', async function () {
+            let signer = flakySigner(1);
+            let h = makePublisher({ signer: signer, cfg: { ORACLE_BATCH_CATCHUP_INTERVAL_MS: 25 } });
+            await h.p.start();
+            // Window 0 is closed by construction: window 1 holds a higher round.
+            for (let r = 0; r < 6; r++) h.p._buffer.set(r, bufferedFixture(r));
+            h.p._buffer.set(6, bufferedFixture(6));
+
+            await h.p._assembleWindow(0);
+            expect(h.broadcasts, 'the first attempt misses quorum').to.have.length(0);
+
+            await waitUntil(() => h.broadcasts.length === 1, 3000);
+            expect(signer.calls).to.have.length(2);
+            // The re-proposal is the SAME window over the SAME rounds: a retry that
+            // proposed different content would be a second honest batch, not a retry.
+            expect(signer.calls[1].first).to.equal(signer.calls[0].first);
+            expect(signer.calls[1].last).to.equal(signer.calls[0].last);
+            expect(signer.calls[1].rounds).to.deep.equal(signer.calls[0].rounds);
+            expect(h.p._assembledWindows.has(0), 'memoized once it publishes').to.equal(true);
+        });
+
+        it('stops asking once the window is assembled, so a healthy rail never re-signs', async function () {
+            let h = makePublisher({ cfg: { ORACLE_BATCH_CATCHUP_INTERVAL_MS: 25 } });
+            await h.p.start();
+            for (let r = 0; r < 6; r++) h.p._buffer.set(r, bufferedFixture(r));
+            h.p._buffer.set(6, bufferedFixture(6));
+
+            await h.p._assembleWindow(0);
+            expect(h.broadcasts).to.have.length(1);
+            let after = h.signer.calls.length;
+
+            for (let i = 0; i < 6; i++) h.p._sweepBufferCatchup();
+            await h.p._windowChain;
+            expect(h.signer.calls).to.have.length(after);
+            expect(h.broadcasts).to.have.length(1);
+        });
+
+        it('leaves the newest window alone: it may still be open', async function () {
+            let h = makePublisher();
+            await h.p.start();
+            for (let r = 0; r < 6; r++) h.p._buffer.set(r, bufferedFixture(r));
+            h.p._buffer.set(6, bufferedFixture(6));
+
+            expect(h.p._pendingCatchupWindows()).to.deep.equal([0]);
+        });
+
+        it('re-proposes at most four windows per sweep, oldest first, and says how many are waiting', async function () {
+            let h = makePublisher({ signerOpts: { met: false } });
+            await h.p.start();
+            // Ten closed windows plus one still open (window 10 is missing round 65).
+            for (let r = 0; r < 65; r++) h.p._buffer.set(r, bufferedFixture(r));
+
+            expect(h.p._pendingCatchupWindows()).to.have.length(10);
+            expect(h.p._sweepBufferCatchup()).to.equal(4);
+            await h.p._windowChain;
+
+            let asked = h.signer.calls.map(c => c.first);
+            expect(asked, 'oldest four windows, in order').to.deep.equal([0, 6, 12, 18]);
+            expect(logs.warn.join('\n')).to.match(
+                /10 closed window\(s\) are still buffered and unpublished; re-proposing 4 of them this sweep \(oldest first, from window 0\)/);
+        });
+
+        it('spends its four slots on windows that still need one, not on windows already assembled', async function () {
+            let h = makePublisher({ signerOpts: { met: false } });
+            await h.p.start();
+            for (let r = 0; r < 65; r++) h.p._buffer.set(r, bufferedFixture(r));
+            // Windows 0..5 were followed or published earlier in this process. Counting
+            // them against the per-sweep cap would spend every slot on windows that need
+            // nothing and never reach the one that timed out.
+            for (let w = 0; w <= 5; w++) h.p._noteAssembled(w);
+
+            expect(h.p._pendingCatchupWindows()).to.deep.equal([6, 7, 8, 9]);
+            h.p._sweepBufferCatchup();
+            await h.p._windowChain;
+            expect(h.signer.calls.map(c => c.first)).to.deep.equal([36, 42, 48, 54]);
+        });
+
+        it('reports the stuck backlog through getStats, and it falls as windows land', async function () {
+            let signer = flakySigner(1);
+            let h = makePublisher({ signer: signer });
+            await h.p.start();
+            for (let r = 0; r < 6; r++) h.p._buffer.set(r, bufferedFixture(r));
+            h.p._buffer.set(6, bufferedFixture(6));
+
+            await h.p._assembleWindow(0);
+            expect(h.p.getStats().batchWindowsAwaitingRetry).to.equal(1);
+            expect(h.p.getStats().batchCatchupSweeps).to.equal(0);
+
+            h.p._sweepBufferCatchup();
+            await h.p._windowChain;
+            expect(h.p.getStats().batchWindowsAwaitingRetry).to.equal(0);
+            expect(h.p.getStats().batchCatchupSweeps).to.equal(1);
+        });
+
+        it('stop() releases the sweep timer', async function () {
+            let h = makePublisher({ cfg: { ORACLE_BATCH_CATCHUP_INTERVAL_MS: 25 } });
+            await h.p.start();
+            expect(h.p._catchupSweepTimer).to.not.equal(null);
+            h.p.stop();
+            expect(h.p._catchupSweepTimer).to.equal(null);
+        });
+    });
+
+    // ───────────────────────────────────── a window closed while the hub was down
+
+    // The grace timer lives only in memory, so a restart inside the grace dropped it,
+    // and the boot catch-up skipped the HIGHEST buffered window on the theory that it
+    // might still be open. A window that closed and then lost its timer to a restart
+    // was therefore reachable by neither half: observed 2026-08-28, window 4 left
+    // unassembled on all five testnet validators after their hubs were recreated.
+    describe('a window closed while the hub was down', function () {
+
+        // A second publisher over the SAME hub config, and therefore the same queue and
+        // buffer files: what a process restart looks like to this class. The first is
+        // stopped so its timers cannot fire into the second one's assertions.
+        function restart(h, cfg) {
+            h.p.stop();
+            Object.assign(h.hub.p2pConfig, cfg || {});
+            let second = new OraclePublisher(h.hub);
+            second.setBroadcastHook(async (payload) => {
+                h.broadcasts.push(payload);
+                return { txid: 'tx-' + h.broadcasts.length };
+            });
+            instances.push(second);
+            h.p = second;
+            return second;
+        }
+
+        it('publishes the highest buffered window when its own last round already closed it', async function () {
+            let h = makePublisher({ cfg: { ORACLE_BATCH_GRACE_MS: 60000 } });
+            await h.p.start();
+            for (let r = 0; r < 6; r++) await h.p.onRoundFinalized(roundFixture(r));
+            expect(h.broadcasts, 'nothing publishes inside the grace').to.have.length(0);
+
+            let second = restart(h, { ORACLE_BATCH_GRACE_MS: 1 });
+            await second.start();
+            await waitUntil(() => h.broadcasts.length > 0,
+                { label: 'the restarted hub to catch up window 0 and broadcast it' });
+            await second._windowChain;
+
+            expect(h.signer.calls).to.have.length(1);
+            expect(h.signer.calls[0]).to.include({ first: 0, last: 5, count: 6 });
+        });
+
+        it('counts the highest buffered window as closed only once its last slot is buffered', async function () {
+            let h = makePublisher();
+            await h.p.start();
+            for (let r = 0; r < 6; r++) h.p._buffer.set(r, bufferedFixture(r));
+            expect(h.p._pendingCatchupWindows(), 'window 0 is complete').to.deep.equal([0]);
+
+            h.p._buffer.set(6, bufferedFixture(6));
+            expect(h.p._pendingCatchupWindows(), 'window 1 holds one round and may still fill')
+                .to.deep.equal([0]);
+        });
+
+        it('never pre-empts a grace timer that is still pending', async function () {
+            // The grace is what lets a straggler round land in the wire; a sweep that
+            // assembled the window early would publish without it.
+            let h = makePublisher({ cfg: { ORACLE_BATCH_GRACE_MS: 60000 } });
+            await h.p.start();
+            for (let r = 0; r < 6; r++) await h.p.onRoundFinalized(roundFixture(r));
+
+            expect(h.p._windows.get(0).timer, 'the live timer owns window 0').to.not.equal(null);
+            expect(h.p._pendingCatchupWindows()).to.deep.equal([]);
+            expect(h.p._sweepBufferCatchup()).to.equal(0);
+            expect(h.signer.calls).to.have.length(0);
+        });
+
+        it('re-registers the buffered window a restart dropped, so a higher round still closes it', async function () {
+            // Window 0's last slot was skipped, so only a higher round can close it, and
+            // that path walks the in-memory window map a restart had emptied.
+            let h = makePublisher({ cfg: { ORACLE_BATCH_GRACE_MS: 60000 } });
+            await h.p.start();
+            for (let r of [0, 1, 2, 3, 4]) await h.p.onRoundFinalized(roundFixture(r));
+
+            let second = restart(h, { ORACLE_BATCH_GRACE_MS: 1 });
+            await second.start();
+            expect(second._windows.has(0), 'the buffered window is tracked again').to.equal(true);
+            expect(second._windows.get(0).timer, 'but not armed: it may still fill').to.equal(null);
+
+            await second.onRoundFinalized(roundFixture(6));
+            await waitUntil(() => h.signer.calls.length > 0,
+                { label: 'window 1 arriving to close window 0 on the restarted hub' });
+            await second._windowChain;
+
+            expect(h.signer.calls[0]).to.include({ first: 0, last: 4, count: 5 });
         });
     });
 
@@ -1044,24 +1658,167 @@ describe('OraclePublisher PRICE batch rail', function () {
 
     describe('knobs', function () {
 
-        it('defaults to 6 / 300000 / 4032 and reads overrides from p2pConfig', function () {
-            let a = makePublisher();
-            expect(a.p.batchWindowRounds).to.equal(6);
+        it('defaults the window to the cadence ceiling, keeps 300000 / 4032, and reads ' +
+           'grace and buffer overrides from p2pConfig', function () {
+            let a = makePublisher({ fleetCadence: true });
+            // 1800s bound - 300s grace - 300s landing reserve = 1200s of budget, which
+            // is two 600s rounds. NOT the prior 6: that published hourly against a
+            // half-hourly staleness gate.
+            expect(a.p.batchWindowRounds).to.equal(2);
+            expect(a.p.batchWindowRoundsCeiling).to.equal(2);
             expect(a.p.batchGraceMs).to.equal(300000);
             expect(a.p.batchBufferMaxRounds).to.equal(4032);
 
-            let b = makePublisher({ cfg: { ORACLE_BATCH_WINDOW_ROUNDS: 12,
-                                           ORACLE_BATCH_GRACE_MS: 1000,
+            let b = makePublisher({ fleetCadence: true,
+                                    cfg: { ORACLE_BATCH_GRACE_MS: 1000,
                                            ORACLE_BATCH_BUFFER_MAX_ROUNDS: 50 } });
-            expect(b.p.batchWindowRounds).to.equal(12);
             expect(b.p.batchGraceMs).to.equal(1000);
             expect(b.p.batchBufferMaxRounds).to.equal(50);
+        });
+
+        it('honours a window at or below the ceiling', function () {
+            let h = makePublisher({ fleetCadence: true, cfg: { ORACLE_BATCH_WINDOW_ROUNDS: 1 } });
+            expect(h.p.batchWindowRounds).to.equal(1);
+            expect(logs.warn.join('\n')).to.not.contain('ORACLE_BATCH_WINDOW_ROUNDS');
+        });
+
+        it('clamps a window that would outrun the fee-price staleness bound, and says so', function () {
+            let h = makePublisher({ fleetCadence: true, cfg: { ORACLE_BATCH_WINDOW_ROUNDS: 12 } });
+            expect(h.p.batchWindowRounds).to.equal(2);
+            let warn = logs.warn.join('\n');
+            expect(warn).to.contain('ORACLE_BATCH_WINDOW_ROUNDS=12');
+            expect(warn).to.contain('1800s fee-price staleness bound');
+            expect(warn).to.contain('clamping to 2');
+        });
+
+        it('re-derives the ceiling when the grace or the round interval moves', function () {
+            // A shorter grace and a shorter landing reserve free budget for more rounds
+            // per wire: at a 300s round interval, (1800 - 60 - 60) / 300 buys 5.
+            let h = makePublisher({ fleetCadence: true,
+                                    cfg: { ORACLE_ROUND_INTERVAL: 300000,
+                                           ORACLE_BATCH_GRACE_MS: 60000,
+                                           ORACLE_BATCH_LANDING_RESERVE_MS: 60000 } });
+            expect(h.p.batchWindowRoundsCeiling).to.equal(5);
+            expect(h.p.batchWindowRounds).to.equal(5);
+        });
+
+        it('publishes one round per batch, loudly, when no window fits the bound', function () {
+            // An hour-long round interval cannot fit a 1800s bound at any window size.
+            let h = makePublisher({ fleetCadence: true, cfg: { ORACLE_ROUND_INTERVAL: 3600000 } });
+            expect(h.p.batchWindowRounds).to.equal(1);
+            expect(logs.warn.join('\n')).to.contain('no batch window fits');
+        });
+
+        it('reports the cadence against the bound in getStats', function () {
+            let h = makePublisher({ fleetCadence: true });
+            let s = h.p.getStats();
+            expect(s.batchWindowRounds).to.equal(2);
+            expect(s.batchWindowRoundsCeiling).to.equal(2);
+            expect(s.batchCadenceSeconds).to.equal(1200);
+            expect(s.oracleMaxPriceAgeSeconds).to.equal(1800);
+            // 2 * 600 + 300 grace + 300 landing reserve. The reserve is budgeted at 300s
+            // against a measured ~180s, so the peak an operator actually sees sits below
+            // this figure; it must never sit above the bound.
+            expect(s.batchWorstCaseSnapshotAgeSeconds).to.equal(1800);
+            expect(s.batchWorstCaseSnapshotAgeSeconds).to.be.at.most(s.oracleMaxPriceAgeSeconds);
         });
 
         it('puts the buffer file beside the queue and the dead-letter file', function () {
             let h = makePublisher();
             expect(h.p.bufferPath).to.equal(h.bufferPath);
             expect(path.dirname(h.p.bufferPath)).to.equal(path.dirname(h.p.deadLetterPath));
+        });
+    });
+
+    // ───────────────────────────────────── the cadence a chain reader sees
+
+    describe('the cadence a chain reader sees', function () {
+
+        // The verify clause is a live one: PRICE gaps on a fee-bearing chain stay
+        // under the staleness bound for a FULL HOUR, and an action picked at a random
+        // moment in it still prices. It cannot be run here, but its shape can: drive the
+        // real scheduler through two hours of fleet-cadence rounds, take the round ranges
+        // off the wires it actually queued, and walk a reader across the hour those wires
+        // cover. The arithmetic module is already tested on its own; what this adds is
+        // that the SCHEDULER emits the windows that arithmetic assumes. A publisher that
+        // derived a 2-round ceiling and then went on batching six rounds a wire would
+        // pass every test in `knobs` and fail here, which is the failure that put the
+        // half-hourly fee gate behind an hourly rail in the first place.
+
+        const ROUND_S   = 600;    // ORACLE_ROUND_INTERVAL as the fleet runs it
+        const GRACE_S   = 300;    // ORACLE_BATCH_GRACE_MS, ditto
+        const RESERVE_S = 300;    // ORACLE_BATCH_LANDING_RESERVE_MS, budgeted
+        const BOUND_S   = 1800;   // ORACLE_MAX_PRICE_AGE_SECONDS, consensus-pinned
+
+        // roundFixture's own clock, which is one round every ROUND_S.
+        function tsOf(round) { return 1800000000 + round * ROUND_S; }
+
+        // When a wire covering [.., lastRound] becomes readable on chain, and what the
+        // newest snapshot it carries is dated. Both halves of what a fee-paying action
+        // is judged against.
+        function landing(lastRound) {
+            return { readableAt: tsOf(lastRound) + GRACE_S + RESERVE_S, newest: tsOf(lastRound) };
+        }
+
+        // The oldest the newest visible snapshot ever gets, walked second by second
+        // across the whole span these landings cover. Second-by-second rather than at the
+        // peaks alone because the verify clause is about an arbitrary moment, not a
+        // chosen one.
+        function peakSnapshotAge(landings) {
+            let worst = 0;
+            for (let t = landings[0].readableAt; t <= landings[landings.length - 1].readableAt; t++) {
+                let newest = null;
+                for (let l of landings) { if (l.readableAt <= t) newest = l.newest; }
+                worst = Math.max(worst, t - newest);
+            }
+            return worst;
+        }
+
+        it('keeps the newest snapshot inside the fee-price bound for every second of the hour', async function () {
+            // The grace is shortened to 1ms so the case does not sleep five real minutes
+            // per window; the age arithmetic below still uses the fleet's 300s, which is
+            // the conservative direction (a longer grace than the run actually took).
+            let h = makePublisher({ fleetCadence: true, cfg: { ORACLE_BATCH_GRACE_MS: 1 } });
+            await h.p.start();
+            expect(h.p.batchWindowRounds).to.equal(2);
+
+            for (let r = 0; r < 12; r++) await h.p.onRoundFinalized(roundFixture(r));
+            await waitUntil(() => h.signer.calls.length >= 6,
+                { label: 'six 2-round windows to close and be proposed' });
+            await h.p._windowChain;
+
+            // What went on the wire, not what the config said would.
+            let wires = h.signer.calls.map(c => [c.first, c.last]);
+            expect(wires).to.deep.equal([[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11]]);
+            expect(h.broadcasts).to.have.length(6);
+
+            let landings = h.signer.calls.map(c => landing(c.last));
+            // The span walked is longer than the hour the clause asks for.
+            expect(landings[landings.length - 1].readableAt - landings[0].readableAt)
+                .to.be.at.least(3600);
+            // 1200s of window + 300s grace + 300s reserve, less the one second the walk
+            // cannot sample: the next landing resets the age at exactly the peak instant,
+            // so the sampled maximum sits one second below the open supremum of 1800s.
+            expect(peakSnapshotAge(landings)).to.equal(1799);
+            expect(peakSnapshotAge(landings)).to.be.at.most(BOUND_S);
+
+            // And the publish gap itself, which is what the explorer shows as the gap
+            // between consecutive PRICE actions.
+            for (let i = 1; i < landings.length; i++) {
+                expect(landings[i].newest - landings[i - 1].newest).to.equal(2 * ROUND_S);
+                expect(landings[i].newest - landings[i - 1].newest).to.be.below(BOUND_S);
+            }
+        });
+
+        it('measures the pre-fix 6-round window failing the same walk', async function () {
+            // The regression this case exists to catch, priced with the same arithmetic
+            // the passing case uses: an hourly rail leaves the newest snapshot 4200s old
+            // against a 1800s gate, so a fee-bearing action fails for most of every hour.
+            // Exactly what testnet showed on 2026-09-01.
+            let sixRoundWires = [landing(5), landing(11), landing(17)];
+            // Same one-second sampling artefact as above, against a supremum of 4200s.
+            expect(peakSnapshotAge(sixRoundWires)).to.equal(4199);
+            expect(peakSnapshotAge(sixRoundWires)).to.be.above(BOUND_S);
         });
     });
 });

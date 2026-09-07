@@ -76,7 +76,13 @@ const DEFAULTS = {
             // every vendor on the chains above (validators skip llm rounds and
             // accrue missed_count until they provision fallback keys).
             require_all_vendors:         false,
-            judge_equivalence_threshold: 0.85,
+            // No judge_equivalence_threshold here: the judge verdict is a strict
+            // boolean (`judgement.equivalent === true` plus a canonical_index in
+            // providers/llm.js agree()), never a similarity score, so a numeric
+            // threshold has nothing to tune. Shipping one told operators the
+            // governance proposal knob did something it never did. The unknown-key
+            // warning in llm.js _setConfig catches it when an already-passed
+            // proposal replays the key that deletion here cannot reach.
             max_completion_tokens:       1024,
             default_temperature:         0,
             prompt_envelope_version:     1
@@ -176,7 +182,11 @@ class ProviderRegistry {
 
     // Pull provider defs from the configs table and overlay onto defaults.
     // Each configs row under (coin, network, 'ATTESTATION_PROVIDER', <provider_id>)
-    // has a JSON-encoded definition as its param_value.
+    // has a JSON-encoded definition as its param_value. The read is coin-agnostic:
+    // a hub federates several chains and carries no coin, and a provider definition
+    // is one document per provider_id (framework spec §6), not one per chain. Read
+    // by the hub's OWN fields: XChainHub sets no `config.COIN/NETWORK`, so a
+    // namespace resolved from there matches nothing on a real hub.
     async load(){
         // Re-seed defaults so a removed governance row reverts to default,
         // not stays as the last-known state.
@@ -185,16 +195,48 @@ class ProviderRegistry {
             this.providers.set(id, def);
         }
 
-        // Hub config: coin/network describe which chain's configs to read
-        let coin = this.hub.config && this.hub.config.COIN;
-        let net  = this.hub.config && this.hub.config.NETWORK;
-        if (!coin || !net || !this.db) return;
+        if (!this.db) return;
+        // XChainHub derives this from p2pConfig.HUB_NETWORK and leaves it '' in
+        // standalone mode. Read both, because a hub-shaped stub may carry only one.
+        let net = this.hub.network
+            || (this.hub.p2pConfig && this.hub.p2pConfig.HUB_NETWORK)
+            || '';
+        if (!net) {
+            // Say it once. An operator who registered a provider row and got built-in
+            // defaults anyway has no other way to see why: the read is skipped, not failed.
+            if (!this._warnedNoNetwork) {
+                this._warnedNoNetwork = true;
+                console.warn('ProviderRegistry: hub has no network (standalone); '
+                    + 'ATTESTATION_PROVIDER rows are not read and built-in defaults apply');
+            }
+            return;
+        }
 
         try {
-            let rows = await this.db.getConfig(coin, net, 'ATTESTATION_PROVIDER');
-            for (let providerId of Object.keys(rows)) {
-                let raw = rows[providerId];
-                if (!raw) continue;
+            let rows = await this.db.getConfigRowsByModule(net, 'ATTESTATION_PROVIDER');
+            // Group by provider_id first. The same definition may legitimately be
+            // written under several coins; two DIFFERENT definitions under the same
+            // provider_id is an ambiguity, and picking one would make two hubs resolve
+            // different provider limits from the same table. Refuse that pair instead,
+            // on the anchoring rationale in _applyProviderGovernanceChange.
+            let byProvider = new Map();
+            for (let row of (rows || [])) {
+                let providerId = row && row.param_name;
+                if (!providerId || !row.param_value) continue;
+                if (!byProvider.has(providerId)) byProvider.set(providerId, []);
+                byProvider.get(providerId).push(row);
+            }
+
+            for (let [providerId, group] of byProvider) {
+                let distinct = new Set(group.map((r) => String(r.param_value)));
+                if (distinct.size > 1) {
+                    console.warn('ProviderRegistry: ATTESTATION_PROVIDER:' + providerId
+                        + ' has conflicting definitions under coins '
+                        + group.map((r) => r.coin).join(', ')
+                        + '; keeping the built-in default rather than resolving the ambiguity');
+                    continue;
+                }
+                let raw = group[0].param_value;
                 try {
                     let def = JSON.parse(raw);
                     if (!def.provider_id) def.provider_id = providerId;

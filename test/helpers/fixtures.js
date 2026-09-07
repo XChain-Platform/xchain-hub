@@ -10,6 +10,8 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
+const { bftQuorumOrSingle } = require('../../src/lib/bft_quorum.js');
+
 // Reusable validator sets for testing quorum/leader logic
 // Each entry has { pubkey, addr } matching the shape used throughout the hub
 
@@ -68,6 +70,28 @@ function makeFederationSnapshot(validators, blockIndex, amount) {
         blockIndex: blockIndex,
         count:      validators.length,
         validators: validators.map(v => ({ pubkey: v.pubkey, amount: String(amount || '50000') }))
+    };
+}
+
+// A capability-snapshot double for a hub whose price rounds must be DETERMINISTIC.
+// A federated OracleConsensus/Consensus refuses a round with no block-anchored snapshot
+// (sizing quorum from the local live set makes the finalization threshold a function of
+// this hub's indexer reachability), so a harness that only wants to exercise something
+// else still has to model the snapshot. Membership mirrors the validators handed in, and
+// the quorum is the shipped majority-floored BFT threshold over them, so the round is
+// sized exactly as the live-set fallback would size it.
+function makeCapabilitySnapshotStub(validators, amount) {
+    let snapshotFor = (capability, blockIndex) => ({
+        capability: capability,
+        blockIndex: Number(blockIndex),
+        count:      validators.length,
+        validators: validators.map(v => ({ pubkey: v.pubkey, amount: String(amount || '50000') }))
+    });
+    return {
+        getSnapshot:       async (capability, blockIndex) => snapshotFor(capability, blockIndex),
+        getWeightSnapshot: async (capability, blockIndex) => snapshotFor(capability, blockIndex),
+        getQuorum:         (snapshot) => bftQuorumOrSingle(
+            snapshot && Array.isArray(snapshot.validators) ? snapshot.validators.length : 0, 0)
     };
 }
 
@@ -134,6 +158,7 @@ module.exports = {
     makeWeightedValidator,
     makeWeightSnapshot,
     makeFederationSnapshot,
+    makeCapabilitySnapshotStub,
     VALIDATORS_1,
     VALIDATORS_3,
     VALIDATORS_4,

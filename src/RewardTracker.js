@@ -22,6 +22,7 @@
 
 const axios  = require('axios');
 const ar     = require('./anchor_reward_activation.js');
+const ark    = require('./anchor_reward_key.js');
 const bcmath = require('./bcmath.js');
 
 class RewardTracker {
@@ -182,11 +183,18 @@ class RewardTracker {
         if (!Number.isFinite(amount) || amount <= 0) return;
         let amountStr = amount.toFixed(8);
 
+        // Qualify the logical anchor by the archive leg's snapshot block. round_number is
+        // MATCH_BATCH_SEQ for anchor_archive, a dense counter a wipe-and-replay rebase
+        // reissues, so without this two distinct archive anchors share one identity and
+        // the guard below drops the second reward. 0 for every other reward type, whose
+        // round_number is a height and whose key is therefore unchanged.
+        let qualifier = ark.rewardRoundQualifier(rewardType, blockIndex || 0);
+
         // Cross-pubkey dedup guard: inspect any rows already holding this logical
-        // anchor (round_number, reward_type) regardless of pubkey.
+        // anchor (round_number, reward_type, qualifier) regardless of pubkey.
         let existing = await this.db.doQuery(
-            'SELECT validator_pubkey, batch_seq FROM validator_rewards WHERE round_number = ? AND reward_type = ?',
-            [roundNumber, rewardType])
+            'SELECT validator_pubkey, batch_seq FROM validator_rewards WHERE round_number = ? AND reward_type = ? AND round_qualifier = ?',
+            [roundNumber, rewardType, qualifier])
             .catch(e => { console.error('Error reading anchor reward for ' + lcPubkey + ':', e); return null; });
         existing = existing || [];
 
@@ -202,14 +210,14 @@ class RewardTracker {
             // Our pubkey sorts strictly lower and nothing is archived yet, so it
             // supersedes the local-only incumbent(s); every hub makes the same call.
             await this.db.doQuery(
-                'DELETE FROM validator_rewards WHERE round_number = ? AND reward_type = ? AND batch_seq IS NULL',
-                [roundNumber, rewardType])
+                'DELETE FROM validator_rewards WHERE round_number = ? AND reward_type = ? AND round_qualifier = ? AND batch_seq IS NULL',
+                [roundNumber, rewardType, qualifier])
                 .catch(e => console.error('Error consolidating anchor reward for ' + lcPubkey + ':', e));
         }
 
-        let query = `INSERT IGNORE INTO validator_rewards (validator_pubkey, round_number, reward_type, amount, block_index)
-                     VALUES (?, ?, ?, ?, ?)`;
-        await this.db.doQuery(query, [lcPubkey, roundNumber, rewardType, amountStr, blockIndex || 0])
+        let query = `INSERT IGNORE INTO validator_rewards (validator_pubkey, round_number, reward_type, amount, block_index, round_qualifier)
+                     VALUES (?, ?, ?, ?, ?, ?)`;
+        await this.db.doQuery(query, [lcPubkey, roundNumber, rewardType, amountStr, blockIndex || 0, qualifier])
             .catch(e => console.error('Error recording anchor reward for ' + lcPubkey + ':', e));
 
         console.log('Rewards: ' + rewardType + ' #' + roundNumber + ': ' + amountStr + ' XCHAIN to ' + lcPubkey.substring(0, 16) + '…');

@@ -56,6 +56,9 @@ const swq               = require('./stake_weighted_quorum.js');
 const eq                = require('./equivocation_header.js');
 const ckpt              = require('./checkpoint_commitment_activation.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
+const { positiveIntConfig } = require('./lib/config_int.js');
+const { resolveCheckpointIntervalBlocks } = require('./lib/checkpoint_cadence.js');
+const snapWrite         = require('./lib/capability_snapshot_write.js');
 const coins             = require('./coins');
 const { noteCheckpointStalled } = require('./consensusDiagnostics');
 
@@ -70,6 +73,13 @@ const ALLOWED_CHAINS = [...coins.ALLOWED_COINS];
 // CrossChainCallEngine's snapshot_block bound. See the constructor comment on
 // this.cosignToleranceBlocks for why this is deliberately NOT electionToleranceBlocks.
 const CHECKPOINT_COSIGN_TOLERANCE_BLOCKS = 144;
+
+// How many (chain, network, checkpoint_seq) signing commitments the engine holds. One
+// entry per chain per cadence round, so a few hundred spans many cadences on every
+// configured chain. Evicting the oldest is safe: the co-sign replay guard refuses a
+// sequence at or below the highest one already seated, so an evicted sequence is fenced
+// by the DB as soon as any later checkpoint finalizes.
+const CHECKPOINT_SIGNED_SEQ_MEMORY = 512;
 
 class StateCheckpointEngine extends EventEmitter {
 
@@ -88,10 +98,20 @@ class StateCheckpointEngine extends EventEmitter {
 
         let cfg = hub.p2pConfig || {};
         this.enabled        = String(process.env.CHECKPOINT_ENABLED || cfg.CHECKPOINT_ENABLED || 'true') !== 'false';
-        this.intervalBlocks = parseInt(process.env.CHECKPOINT_INTERVAL_BLOCKS || cfg.CHECKPOINT_INTERVAL_BLOCKS || '6');
+        // Resolve the cadence knobs through the house guards, not bare parseInt: a NaN
+        // pollMs makes setInterval clamp to ~1ms and storm, and a NaN or zero
+        // intervalBlocks makes the cadence latch never hold, anchoring 3 chains every poll.
+        // intervalBlocks goes through the shared resolver the anchor publisher also calls,
+        // so the two readers of CHECKPOINT_INTERVAL_BLOCKS cannot drift.
+        this.intervalBlocks = resolveCheckpointIntervalBlocks(cfg);
+        this.pollMs         = positiveIntConfig(process.env.CHECKPOINT_POLL_MS || cfg.CHECKPOINT_POLL_MS,
+                                                60000, 'CHECKPOINT_POLL_MS');
+        this.roundTimeoutMs = positiveIntConfig(process.env.CHECKPOINT_ROUND_TIMEOUT_MS || cfg.CHECKPOINT_ROUND_TIMEOUT_MS,
+                                                60000, 'CHECKPOINT_ROUND_TIMEOUT_MS');
+        // Confirmations is the one knob where 0 is meaningful (checkpoint the tip itself,
+        // the regtest venue setting), so it takes a non-negative guard rather than positiveIntConfig.
         this.confirmations  = parseInt(process.env.CHECKPOINT_CONFIRMATIONS  || cfg.CHECKPOINT_CONFIRMATIONS  || '6');
-        this.pollMs         = parseInt(process.env.CHECKPOINT_POLL_MS        || cfg.CHECKPOINT_POLL_MS        || '60000');
-        this.roundTimeoutMs = parseInt(process.env.CHECKPOINT_ROUND_TIMEOUT_MS || cfg.CHECKPOINT_ROUND_TIMEOUT_MS || '60000');
+        if(!(this.confirmations >= 0)) this.confirmations = 6;
 
         // Follower co-sign freshness bound on the leader-supplied snapshot_block.
         // DEDICATED and separate from StateAnchorPublisher.electionToleranceBlocks
@@ -146,6 +166,26 @@ class StateCheckpointEngine extends EventEmitter {
         // every incoming FINALIZED fails here, not only via the indirect tip-stall.
         this._malformedFinalized  = 0;
         this._subQuorumFinalized  = 0;
+        // Quorum-signed FINALIZED broadcasts refused because a DIFFERENT payload is
+        // already seated at that (chain, network, checkpoint_seq). Nothing honest
+        // produces this shape, so any non-zero value is a federation-level equivocation
+        // at one sequence and the fleet may already hold divergent rows: read the
+        // CONFLICTING lines in this hub's log and compare the seq across hubs.
+        this._seqConflicts        = 0;
+
+        // The canonical this hub signed at each sequence: Map<'chain|network|seq',
+        // canonical>. Every co-sign guard keys on snapshot_block, and seq is a pure
+        // function of it, so a cadence leader proposing two DIFFERENT block_index values
+        // at one snapshot_block clears all of them twice; signing one payload per
+        // sequence is what keeps the second quorum from forming. Held for this process
+        // only: a signer that restarts inside a cadence window can still answer a second
+        // payload, which a durable commitment would close at the price of a DB write on
+        // the signing path.
+        this._signedAtSeq = new Map();
+        // Signature requests refused because this hub already signed a different payload
+        // at that sequence. Nothing honest puts two payloads on the wire at one sequence;
+        // the SECOND PAYLOAD log lines name the blocks.
+        this._seqDoubleSignRefusals = 0;
 
         // Cadence stalls. Every pre-leadership bail in _tick used to return
         // silently, so a hub whose oracle_publish capability had gone unqualified
@@ -162,6 +202,46 @@ class StateCheckpointEngine extends EventEmitter {
         // at most once an hour and let the counter carry the true rate.
         this._cadenceStallLogMs = parseInt(process.env.CHECKPOINT_STALL_LOG_MS
             || cfg.CHECKPOINT_STALL_LOG_MS || String(60 * 60 * 1000));
+
+        // Frozen-tip livelock meter. The cadence leader is pubkeys[btcBlock % N], so
+        // "due, in the set, not my slot" is normal rotation ONLY while btcBlock keeps
+        // advancing. If the BTC tip freezes (indexer wedged, node stalled, regtest
+        // nobody mines) the slot pins to one constant and every hub whose rank is not
+        // that constant returns forever, for every chain, with cadence_stalls at 0.
+        // Proven live on a regtest venue 2026-08-19: BTC tip frozen four days at
+        // 14671, slot 31 vs rank 30, zero checkpoints in three weeks. Count the
+        // not-my-slot ticks that see the SAME btcBlock; past K consecutive ones the
+        // tick is metered as a stall naming the frozen block. K defaults to an hour of
+        // the default 60s poll, longer than any BTC inter-block gap that normal
+        // rotation would survive; a wedged tip stays wedged and crosses it.
+        this._frozenTipTicks = parseInt(process.env.CHECKPOINT_FROZEN_TIP_TICKS
+            || cfg.CHECKPOINT_FROZEN_TIP_TICKS || '60');
+        if(!(this._frozenTipTicks > 0)) this._frozenTipTicks = 60;
+        this._notMySlotBlock = null;     // btcBlock seen by the last not-my-slot tick
+        this._notMySlotTicks = 0;        // consecutive not-my-slot ticks at that block
+    }
+
+    // Record a due-but-not-my-slot tick at `btcBlock`. Returns true when the same
+    // block has now been seen for at least K consecutive such ticks (frozen tip).
+    // Compare NUMERICALLY: _resolveBtcLatestBlock serves the height from two
+    // sources (the pushed chain_tips row, then a getlatestblock RPC), so the same
+    // frozen height can arrive as 14671 on one tick and '14671' on the next. A
+    // strict === there would restart the counter every tick and leave the meter
+    // permanently at 1, which is precisely the silent failure it exists to catch.
+    _noteNotMySlot(btcBlock){
+        let block = Number(btcBlock);
+        if(this._notMySlotBlock === block){
+            this._notMySlotTicks++;
+        } else {
+            this._notMySlotBlock = block;
+            this._notMySlotTicks = 1;
+        }
+        return this._notMySlotTicks >= this._frozenTipTicks;
+    }
+
+    _clearNotMySlot(){
+        this._notMySlotBlock = null;
+        this._notMySlotTicks = 0;
     }
 
     // Record (and throttle-log) a cadence round this hub could not lead. `block` is
@@ -176,7 +256,11 @@ class StateCheckpointEngine extends EventEmitter {
         // The throttle exists so a persistent stall does not flood an operator's
         // tail; a collector counting stalled ticks needs every one, and dropping
         // 59 of every 60 is how a worsening cadence reads as a steady one.
-        noteCheckpointStalled({ chain: this.coin || 'BTC', seq: this._cadenceStallBlock, reason, stalls: this._cadenceStalls });
+        // Name the round's chain LIST, not one chain: a cadence round spans every
+        // chain in `this.chains`, so no single chain can own the stall.
+        // Records emitted before this carry `chain=BTC seq=<block>` from a `this.coin`
+        // this class never assigns; read those as an undetermined chain and a block.
+        noteCheckpointStalled({ chains: this.chains, block: this._cadenceStallBlock, reason, stalls: this._cadenceStalls });
 
         let now = Date.now();
         if(now - this._cadenceStallLoggedAt < this._cadenceStallLogMs) return;
@@ -267,12 +351,28 @@ class StateCheckpointEngine extends EventEmitter {
             round_timeouts:          this._roundTimeouts,
             malformed_finalized:     this._malformedFinalized,
             sub_quorum_finalized:    this._subQuorumFinalized,
+            // Non-zero means two quorum-signed payloads arrived at one checkpoint_seq.
+            // Never a tuning knob: it is an equivocation report and the fleet may hold
+            // divergent checkpoints at that sequence.
+            seq_conflicts:           this._seqConflicts,
+            // Non-zero means a proposer asked this hub to sign a second, different
+            // payload at a sequence it had already signed. The signature was refused, so
+            // this is the fence holding rather than damage; it still reports a proposer
+            // that put two payloads on the wire at one sequence.
+            seq_double_sign_refusals: this._seqDoubleSignRefusals,
             // Non-zero with a reason means the engine is alive but structurally
             // unable to checkpoint (unqualified capability, missing identity, not in the
             // validator set), the failure mode that produced 18 silent days on mainnet.
             cadence_stalls:          this._cadenceStalls,
             cadence_stall_reason:    this._cadenceStallReason,
-            cadence_stall_block:     this._cadenceStallBlock
+            cadence_stall_block:     this._cadenceStallBlock,
+            // Frozen-tip livelock meter: how many consecutive due-but-not-
+            // my-slot ticks have seen the same BTC snapshot block, and the K at which
+            // that becomes a metered stall. Non-zero and climbing with a moving tip is
+            // impossible; climbing past K means the BTC tip is not advancing.
+            frozen_tip_ticks:        this._notMySlotTicks,
+            frozen_tip_block:        this._notMySlotBlock,
+            frozen_tip_stall_ticks:  this._frozenTipTicks
         };
     }
 
@@ -310,6 +410,7 @@ class StateCheckpointEngine extends EventEmitter {
             if(this._lastCheckpointBtcBlock != null && btcBlock < this._lastCheckpointBtcBlock + this.intervalBlocks){
                 // On schedule: the cadence simply has not come round yet.
                 this._clearCadenceStall();
+                this._clearNotMySlot();
                 return;
             }
 
@@ -345,16 +446,42 @@ class StateCheckpointEngine extends EventEmitter {
                                                  pubkeys.length + ' member(s))');
                 return;
             }
-            // Not our slot: normal rotation in an N>1 federation, NOT a stall. A single-
-            // member set is always its own leader (btcBlock % 1 === 0 === rank), so this
-            // branch can never hide the lone-validator case the stall counter is for.
-            if(myRank !== (btcBlock % pubkeys.length)) return;
+            // Not our slot: normal rotation in an N>1 federation, NOT a stall, as long
+            // as btcBlock is still moving. A single-member set is always its own leader
+            // (btcBlock % 1 === 0 === rank), so this branch can never hide the
+            // lone-validator case. It CAN hide a frozen BTC tip (slot pinned to a
+            // constant that is not our rank, forever), so K consecutive not-my-slot
+            // ticks at the same btcBlock are metered as a stall.
+            if(myRank !== (btcBlock % pubkeys.length)){
+                if(this._noteNotMySlot(btcBlock)){
+                    this._noteCadenceStall(btcBlock, 'BTC snapshot block frozen at ' + btcBlock + ' for ' +
+                        this._notMySlotTicks + ' consecutive ticks while cadence slot ' + (btcBlock % pubkeys.length) +
+                        ' is not this hub\'s rank ' + myRank + ' of ' + pubkeys.length +
+                        ' (leader election cannot rotate until the BTC tip advances)');
+                } else {
+                    // A moving tip that merely rotated past us clears any earlier
+                    // frozen-tip reason so getcheckpointstats stays live.
+                    if(this._notMySlotTicks === 1) this._clearCadenceStall();
+                }
+                return;
+            }
+            this._clearNotMySlot();
 
             // We are the cadence leader (or a single-node set): one round per chain.
+            // Mirror the capability snapshot BEFORE the latch moves. This call sits
+            // outside the per-chain guard below, so a throw here aborts every chain's
+            // round; with the latch already advanced the whole interval was dropped
+            // and getcheckpointstats still read clean, which is the silent-cadence
+            // shape that cost 18 days on mainnet. Meter it and leave the round retryable.
+            try {
+                await this._persistCapabilitySnapshot('oracle_publish', btcBlock);
+            } catch(e){
+                this._noteCadenceStall(btcBlock, 'capability snapshot mirror failed: ' + (e && e.message));
+                return;
+            }
             // The latch advances even on per-chain failure; the next cadence retries.
             this._clearCadenceStall();
             this._lastCheckpointBtcBlock = btcBlock;
-            await this._persistCapabilitySnapshot('oracle_publish', btcBlock);
             for(let chain of this.chains){
                 if(!this.indexers[chain].url) continue;
                 try { await this._runRound(chain, btcBlock, validators); }
@@ -413,10 +540,13 @@ class StateCheckpointEngine extends EventEmitter {
         if(!this.identity) throw new Error('no validator identity (cannot sign checkpoints)');
 
         let myPubkey = this.identity.getPubkeyHex().toLowerCase();
-        let mySig    = this.identity.sign(canonical);
         // The SWQ gate below resolves on this.network; refuse before signing if
         // the checkpoint we just built disagrees (a mis-set indexer network).
         this._assertCheckpointNetwork(cp, 'propose');
+        // One payload per sequence (first of the two call sites, with co-sign), ahead of
+        // the signature so a refused proposal never produces one.
+        if(!this._claimSeqSignature(cp, canonical)) return;
+        let mySig    = this.identity.sign(canonical);
         let snapCount = validators.length;   // raw row count (matches _handleFinalized + anchor.js:336)
         // STAKE_WEIGHTED_QUORUM: weighted (source-deduped) at/above activation, else count.
         let weighted  = swq.isStakeWeightedQuorumActive(cp.snapshot_block, this.network);
@@ -566,6 +696,13 @@ class StateCheckpointEngine extends EventEmitter {
             return;
         }
 
+        // One payload per sequence. The leader is free to choose block_index at a given
+        // snapshot_block, so this is the guard that stops a proposer collecting quorum on
+        // two payloads at one sequence; every check above has already passed for BOTH of
+        // them. Last thing before the co-signature leaves the hub, so a proposal this hub
+        // would have declined anyway never claims the sequence.
+        if(!this._claimSeqSignature(cp, canonical)) return;
+
         this.peerManager.broadcast(XCHK_SIGN, {
             id: this._roundId(cp), sig_pubkey: myPubkey, sig: this.identity.sign(canonical)
         });
@@ -694,6 +831,38 @@ class StateCheckpointEngine extends EventEmitter {
                 ': checkpoint-commitment is active for snapshot_block ' + cp.snapshot_block +
                 ' but the light-client roots are absent');
 
+        // Same-seq conflict fence. uq_chain_seq admits exactly ONE row per
+        // (chain, network, checkpoint_seq), so a second, DIFFERENT payload at a seated
+        // sequence is dropped by the INSERT IGNORE below with no trace of why: the
+        // read-back then finds nothing, dumps every mirror subscriber for a resync that
+        // cannot repair it, advances the cadence latch and emits a checkpoint this hub
+        // does not hold. Two hubs that received the two FINALIZED broadcasts in opposite
+        // orders keep DIFFERENT checkpoints at that sequence, permanently and silently.
+        // Refuse and say so instead. This is DETECTION, not prevention: nothing here
+        // stops a Byzantine cadence leader collecting quorum on two payloads at one
+        // sequence (co-sign bounds every field derived from snapshot_block but leaves
+        // block_index free, and _roundId's block_index puts the two proposals in
+        // different rounds), so a divergence can still form across hubs. It becomes
+        // diagnosable rather than invisible.
+        //
+        // Compared FIELD-WISE and not by rebuilding a canonical from the seated row:
+        // _cpFromRow deliberately carries no light-client roots, so a canonical rebuilt
+        // through it is rootless on one side only and would read every ordinary
+        // post-flag-day re-delivery as a conflict. The roots are themselves derived from
+        // the block, so the four chained hashes plus block_index settle identity.
+        let seated = await this._seatedCheckpointAtSeq(cp);
+        if(seated && StateCheckpointEngine._checkpointRowDiffers(seated, cp)){
+            this._seqConflicts++;
+            console.error('StateCheckpointEngine: CONFLICTING checkpoint at ' + cp.chain + '/' + cp.network +
+                          ' seq ' + cp.checkpoint_seq + ': we hold block ' + Number(seated.block_index) +
+                          ' (' + String(seated.block_hash) + '), this FINALIZED carries block ' +
+                          Number(cp.block_index) + ' (' + String(cp.block_hash) + '). Both were quorum-signed, ' +
+                          'so the federation equivocated at one sequence; persisting nothing, streaming ' +
+                          'nothing and emitting nothing on this hub. Held signature set: ' +
+                          JSON.stringify(sigs));
+            return;
+        }
+
         await this._persistCapabilitySnapshot('oracle_publish', Number(cp.snapshot_block));
         await this.db.doQuery(
             'INSERT IGNORE INTO state_checkpoints (chain, network, block_index, block_hash, ledger_hash, actions_hash, contract_hash, checkpoint_seq, snapshot_block, state_root, state_root_version, block_merkle_root, block_merkle_version, validator_signatures) ' +
@@ -774,6 +943,38 @@ class StateCheckpointEngine extends EventEmitter {
     }
 
     _roundId(cp){ return cp.chain + '|' + cp.network + '|' + cp.block_index + '|' + cp.checkpoint_seq; }
+
+    // Claim the right to sign `canonical` at this checkpoint's sequence: true for an
+    // unsigned sequence and for a re-delivery of the payload already signed there (a
+    // repeated canonical creates no second checkpoint), false for a DIFFERENT payload,
+    // which is the double-signature that lets one sequence carry two quorum-signed
+    // checkpoints. Call it wherever a signature leaves this hub; false means do not sign.
+    //
+    // The refusal is unconditional, including for an honest leader that lost a round in
+    // flight and re-proposes a new block at the same snapshot_block, and for a reorg that
+    // moves the block under one: both are indistinguishable from equivocation to every
+    // peer, and the signatures already collected on the first payload can still be
+    // assembled by anyone. The cost is that one round; the cadence latch has already
+    // advanced, so the next snapshot_block checkpoints normally.
+    _claimSeqSignature(cp, canonical){
+        let key  = cp.chain + '|' + cp.network + '|' + Number(cp.checkpoint_seq);
+        let held = this._signedAtSeq.get(key);
+        if(held !== undefined && held !== canonical){
+            this._seqDoubleSignRefusals++;
+            console.error('StateCheckpointEngine: SECOND PAYLOAD at ' + cp.chain + '/' + cp.network +
+                          ' seq ' + cp.checkpoint_seq + ': this hub signed a different payload at that ' +
+                          'sequence and refuses block ' + Number(cp.block_index) + ' (' +
+                          String(cp.block_hash) + '). One signature per sequence is what keeps two ' +
+                          'quorum-signed checkpoints from existing there; the proposer put two on the wire.');
+            return false;
+        }
+        if(held === undefined){
+            this._signedAtSeq.set(key, canonical);
+            while(this._signedAtSeq.size > CHECKPOINT_SIGNED_SEQ_MEMORY)
+                this._signedAtSeq.delete(this._signedAtSeq.keys().next().value);
+        }
+        return true;
+    }
 
     _normalizeCheckpoint(raw){
         if(!raw || !raw.chain || !raw.network || raw.block_index == null) return null;
@@ -885,6 +1086,48 @@ class StateCheckpointEngine extends EventEmitter {
         return (r.length > 0 && r[0].max_seq != null) ? Number(r[0].max_seq) : null;
     }
 
+    // The one row uq_chain_seq already admitted at this (chain, network, seq), or null.
+    // Keyed on the UNIQUE index and NOT on block_index, unlike the mirror read-back:
+    // the whole point is to see the row a different block_index seated.
+    // Fails OPEN on a read error, deliberately. uq_chain_seq is the safety property and
+    // it holds with or without this read; the fence only decides whether the loser is
+    // DIAGNOSED or dropped silently. Throwing here would turn a transient DB blip into a
+    // refusal to persist quorum-signed checkpoints, which is strictly worse than the
+    // divergence it is watching for (StateCheckpointEngine.broadcast-gap pins that a DB
+    // fault on this table must still leave the commit, the latch and the emit intact).
+    async _seatedCheckpointAtSeq(cp){
+        let r;
+        try {
+            r = await this.db.doQuery(
+                'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND checkpoint_seq = ? LIMIT 1',
+                [cp.chain, cp.network, Number(cp.checkpoint_seq)]);
+        } catch(e){
+            console.warn('StateCheckpointEngine: same-seq conflict check could not read ' + cp.chain + '/' +
+                         cp.network + ' seq ' + cp.checkpoint_seq + ' (' + (e && e.message) +
+                         '); the unique key still admits one row, but a conflict would go unreported');
+            return null;
+        }
+        return (r && r.length > 0) ? r[0] : null;
+    }
+
+    // Does a seated row name a DIFFERENT payload than `cp`? Identity is block_index plus
+    // the four chained hashes, which every checkpoint version carries; the light-client
+    // roots are derived from that same block and are deliberately left out, so a NULL/''
+    // normalization difference can never read a re-delivery as an equivocation. Hashes
+    // compare case-insensitively (the driver's serialization need not match ours).
+    static _checkpointRowDiffers(row, cp){
+        // Not comparable is not a conflict. Every identity column is NOT NULL in
+        // state_checkpoints, so a row missing one did not come from the table and reading
+        // its absence as an equivocation would refuse a legitimate checkpoint.
+        if(!row || row.block_index == null || row.block_hash == null) return false;
+        let hx = (a, b) => String(a == null ? '' : a).toLowerCase() !== String(b == null ? '' : b).toLowerCase();
+        return Number(row.block_index) !== Number(cp.block_index) ||
+               hx(row.block_hash,    cp.block_hash)    ||
+               hx(row.ledger_hash,   cp.ledger_hash)   ||
+               hx(row.actions_hash,  cp.actions_hash)  ||
+               hx(row.contract_hash, cp.contract_hash);
+    }
+
     // Mirror CrossChainDexEngine._resolveCapabilityValidators (incl. regtest seam).
     // Source-keyed at/above STAKE_WEIGHTED_QUORUM (this.network + block), else legacy
     // count set (source='' , weight=amount). Uses the deployment network so the set is
@@ -941,13 +1184,13 @@ class StateCheckpointEngine extends EventEmitter {
                          ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
             return;
         }
-        for(let v of validators){
-            let pubkey = String(v.pubkey).toLowerCase();
-            let amount = String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0'));
-            let source = String(v.source != null ? v.source : '');
-            await this.db.doQuery(
-                'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?)',
-                [block, capability, pubkey, amount, source]);
+        // Write the whole set in ONE statement. A per-row loop left the mirror PARTIAL
+        // whenever any single INSERT threw, and a partial set carries no completeness
+        // marker, so it reads back as COMPLETE and under-counts S exactly the way the
+        // truncated set above would. Rationale and the "do not chunk" rule live in
+        // lib/capability_snapshot_write.js; broadcast stays here, per writer.
+        let rows = await snapWrite.writeCapabilitySnapshotRows(this.db, capability, block, validators);
+        for(let row of rows){
             // Select the row back by (block, capability, pubkey, SOURCE),
             // matching the widened uq_cap_snap. A pubkey-only select-back returned
             // just ONE of a multi-source key's rows (LIMIT 1), so the mirror stream
@@ -956,7 +1199,7 @@ class StateCheckpointEngine extends EventEmitter {
             await this._broadcastRowOrResync(
                 'capability_snapshots',
                 'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
-                [block, capability, pubkey, source],
+                [block, capability, row.signing_pubkey, row.source],
                 'capability-snapshot broadcast gap');
         }
     }

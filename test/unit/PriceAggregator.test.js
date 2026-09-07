@@ -203,6 +203,55 @@ describe('PriceAggregator.retractFromActionIndex()', function () {
         expect(hub.db.bumpPriceIngestWatermark.called).to.equal(false);
     });
 
+    it('HUB-RETRACT-4: writes the fence BEFORE both deletes', async function () {
+        hub.db.doQuery.resolves({ affectedRows: 1 });
+        await agg.retractFromActionIndex('BTC', 50, null, 7);
+        let calls      = hub.db.doQuery.getCalls();
+        let snapCall   = calls.find(c => /DELETE FROM price_snapshots/.test(c.args[0]));
+        let oracleCall = calls.find(c => /DELETE FROM oracle_prices/.test(c.args[0]));
+        expect(hub.db.bumpPriceIngestWatermark.firstCall.calledBefore(snapCall)).to.equal(true);
+        expect(hub.db.bumpPriceIngestWatermark.firstCall.calledBefore(oracleCall)).to.equal(true);
+    });
+
+    // The caller drops its durable outbox row on a success return, so a swallowed fence-write
+    // failure deleted the rows, left the fence unpersisted and destroyed the only retry.
+    it('HUB-RETRACT-4: fails the retraction when the fence write fails, deleting nothing', async function () {
+        hub.db.doQuery.resolves({ affectedRows: 1 });
+        hub.db.bumpPriceIngestWatermark.rejects(new Error('watermark table is gone'));
+        let events = [];
+        agg.on('row:deleted', e => events.push(e));
+
+        let result = await agg.retractFromActionIndex('BTC', 50, null, 7);
+
+        expect(result).to.have.property('error');
+        expect(result).to.not.have.property('retracted');
+        expect(result.error).to.match(/ingest fence not persisted/);
+        let deletes = hub.db.doQuery.getCalls().filter(c => /^DELETE FROM/.test(c.args[0]));
+        expect(deletes).to.deep.equal([]);
+        expect(events).to.deep.equal([]);
+    });
+
+    // xchain-indexer/src/hub_client.js TERMINAL_HUB_REJECTIONS: a match there DROPS the queued
+    // retraction instead of retrying it, which would undo this whole guard.
+    it('HUB-RETRACT-4: the fence-failure error is retryable, not a terminal hub rejection', async function () {
+        const TERMINAL = [
+            /^duplicate$/i,
+            /^stale \(retracted generation\)$/i,
+            /^invalid\b/i,
+            /^insufficient quorum\b/i,
+            /\b(is|are) required$/i,
+            /^chain must be one of\b/i
+        ];
+        hub.db.doQuery.resolves({ affectedRows: 1 });
+        for (let message of ['db is required', 'invalid watermark', 'duplicate']) {
+            hub.db.bumpPriceIngestWatermark.rejects(new Error(message));
+            let result = await agg.retractFromActionIndex('BTC', 50, null, 7);
+            expect(result.error, message).to.be.a('string');
+            for (let rx of TERMINAL)
+                expect(rx.test(result.error), message + ' vs ' + rx).to.equal(false);
+        }
+    });
+
     it('treats a DELETE result with no affectedRows as zero deletions (and emits nothing)', async function () {
         // Some drivers return an array (not a result object): guard against undefined.
         hub.db.doQuery.resolves([]);

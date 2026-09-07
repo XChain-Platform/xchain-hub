@@ -365,6 +365,50 @@ describe('observability/logShipper', function () {
         await log.stop();
         expect(log.timer).to.equal(null);
     });
+
+    // Exercises the real _post/fetch path. Every other test here injects a
+    // transport, which is why the unreleased response body below went unseen.
+    it('releases the response body so a stalled collector cannot pin the socket', async function () {
+        this.timeout(5000);
+        let closed = false;
+        const sockets = new Set();
+        const server = http.createServer((req, res) => {
+            req.resume();
+            // Answer with headers and a first chunk, then never end the body.
+            req.on('end', () => { res.writeHead(200); res.write('ack'); });
+            res.socket.on('close', () => { closed = true; });
+        });
+        server.on('connection', (s) => { sockets.add(s); s.on('close', () => sockets.delete(s)); });
+        await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+        const { port } = server.address();
+
+        const log = createLogShipper({
+            service: 'svc',
+            env: {
+                LOG_SHIP_ENABLED: '1',
+                LOG_SHIP_URL: `http://127.0.0.1:${port}/logs`,
+                LOG_SHIP_BATCH_SIZE: '1',
+                LOG_SHIP_TIMEOUT_MS: '400'
+            },
+            console: fakeConsole()
+        });
+
+        try {
+            log.info('one');
+            await log.flush();
+            // fetch() resolves on headers and the abort timer is cleared with it,
+            // so an unreleased body leaves nothing that will ever close this
+            // socket. Measured: released in under 2ms, unreleased still open at 3s.
+            for (let i = 0; i < 100 && !closed; i++) {
+                await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+            expect(closed).to.equal(true);
+        } finally {
+            await log.stop();
+            for (const s of sockets) s.destroy();
+            await new Promise((resolve) => server.close(resolve));
+        }
+    });
 });
 
 describe('observability/installObservability', function () {

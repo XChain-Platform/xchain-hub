@@ -44,9 +44,11 @@ const PriceAggregator    = require('./PriceAggregator.js');
 const OraclePublisher    = require('./OraclePublisher.js');
 const { loadSignerHooks, applySignerHooks } = require('./lib/signer-loader.js');
 const fullnodeActivation = require('./lib/fullnode_activation.js');
+const presence           = require('./lib/oracle_round_presence.js');
 const HubDbBroadcaster   = require('./HubDbBroadcaster.js');
 const CapabilityRegistry = require('./CapabilityRegistry.js');
 const CapabilitySnapshot = require('./CapabilitySnapshot.js');
+const StakeShareWatcher  = require('./StakeShareWatcher.js');
 const ProviderRegistry      = require('./ProviderRegistry.js');
 const AttestationRound       = require('./AttestationRound.js');
 const AttestationConsensus   = require('./AttestationConsensus.js');
@@ -55,6 +57,8 @@ const AttestationRelay       = require('./AttestationRelay.js');
 const FullNodeChallengeRound = require('./FullNodeChallengeRound.js');
 const RollcallRound          = require('./RollcallRound.js');
 const AttestationSpotChecker = require('./AttestationSpotChecker.js');
+const AttestationResponseMirror = require('./AttestationResponseMirror.js');
+const AttestationBatchPublisher = require('./AttestationBatchPublisher.js');
 const { bcmul, bcdiv }   = require('./bcmath.js');
 const mathjs             = require('mathjs');
 const fs                 = require('fs');
@@ -65,7 +69,17 @@ const axios              = require('axios');
 // self-provisions and populates, rather than an externally-maintained hub
 // schema. Coerced to the string "true"/"false" like every other value here;
 // xchain-explorer's db.js reads it back with `=== true || === 'true'`.
-const PARAMETER_LIST     = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass", "self_sync"];
+//
+// hub_url travels WITH self_sync, in the same checkpoint block, and belongs on this
+// list for that reason: a self-syncing explorer needs the hub endpoint its mirror
+// writer follows, and xchain-node ships the two together precisely so they cannot
+// arrive by different paths. This list is the path, and while it named self_sync
+// alone it silently dropped the endpoint out of every pushed block - so an explorer
+// whose container env carried no HUB_API_URL was told to self-sync with nowhere to
+// sync from, and served a mirror nothing writes (or, once the explorer started
+// refusing that state, no mirror at all: the hub-mirrored routes then 500 per
+// request for that coin while its siblings answer normally).
+const PARAMETER_LIST     = ["host", "port", "service_port", "db_host", "db_port", "name", "user", "pass", "self_sync", "hub_url"];
 const OPERATIONAL_PARAMS = new Set(["GAS_PRICE", "ACTIVATION_DELAY_BLOCKS", "EXPIRATION_FEE_PER_DAY"]);
 const JSON_BLOB_PARAMS   = new Set(["GAS_SCHEDULE", "STAKING"]);
 
@@ -103,11 +117,14 @@ class XChainHub {
         this.hubDbBroadcaster = null;
         this.capabilityRegistry      = null;
         this.capabilitySnapshot      = new CapabilitySnapshot(this);  // available pre-startCapabilities so consensus engines can use it from start()
+        this.stakeShareWatcher       = null;  // minted in startCapabilities(); watches our own stake share vs the weighted quorum gate
         this.providerRegistry        = null;
         this.attestationRound        = null;
         this.attestationConsensus    = null;
         this.attestationPublisher    = null;
         this.attestationSpotChecker  = null;
+        this.attestationResponseMirror = null;
+        this.attestationBatchPublisher = null;
         this.attestationRelay        = null;
         this.fullNodeChallenge       = null;
         this.rollcallRound           = null;
@@ -387,6 +404,24 @@ class XChainHub {
         }
         this.attestationSpotChecker = new AttestationSpotChecker(this, this.providerRegistry);
 
+        // The mirror producer, and the publisher's counterpart above the ATTEST
+        // response mirror activation height: the publisher declines a mirror-era
+        // request and this writes its row instead, so exactly one of the two serves
+        // every finalized round. Needs no signer wiring at all, which is the point of
+        // the design: a mirrored response costs no validator a chain transaction.
+        this.attestationResponseMirror = new AttestationResponseMirror(this);
+
+        // The mirror's chain-side counterpart: one ATTEST v5 head (plus v6
+        // continuations) per window on the DOGE rail, so the response history stays
+        // reconstructible from chain parse even though no response is its own
+        // transaction. Third consumer of the one operator signer and wallet, with its
+        // own buffer, dead-letter, spend budget and marker table; it schedules nothing
+        // on a network whose mirror activation entry is null.
+        this.attestationBatchPublisher = new AttestationBatchPublisher(this);
+        if(attestationSignerHooks){
+            applySignerHooks(this.attestationBatchPublisher, attestationSignerHooks);
+        }
+
         // Cross-chain relay driver, opt-in via ATTEST_RELAY_ENABLED=1. Its v3 request leg
         // broadcasts on BTC and takes the publisher's signer; its v4 response leg
         // broadcasts on the ORIGIN chain, so it is wired separately per chain.
@@ -399,6 +434,8 @@ class XChainHub {
         await this.attestationRound.start();
         await this.attestationPublisher.start();
         await this.attestationSpotChecker.start();
+        await this.attestationResponseMirror.start();
+        await this.attestationBatchPublisher.start();
         await this.attestationRelay.start();
 
         if(this.governance && typeof this.governance.on === 'function'){
@@ -465,6 +502,7 @@ class XChainHub {
     getAttestationConsensus(){   return this.attestationConsensus; }
     getAttestationPublisher(){   return this.attestationPublisher; }
     getAttestationSpotChecker(){ return this.attestationSpotChecker; }
+    getAttestationResponseMirror(){ return this.attestationResponseMirror; }
     getAttestationRelay(){       return this.attestationRelay; }
     getProviderRegistry(){       return this.providerRegistry; }
 
@@ -914,6 +952,44 @@ class XChainHub {
         return await this.db.doQuery(query, [limit || 50]);
     }
 
+    // Per-round PRESENCE over a range of oracle rounds: for each round,
+    // did this hub record it at all, and with what outcome class. getpricesnapshots
+    // returns the rows a hub HAS, so a hub holding nothing for a round is
+    // indistinguishable there from a hub asked about a round that never happened;
+    // this answers over an explicit range, so absence is a reported value.
+    //
+    // Range resolution: an omitted to_round anchors on this hub's highest recorded
+    // round (deliberately NOT the current wall-clock round: the anchor is then a
+    // fact about stored data, and a hub whose newest rounds are all missing reports
+    // a lower to_round, which is itself the divergence signal). Callers comparing
+    // hubs should pass both bounds so every hub answers about the same rounds.
+    async getOracleRoundPresence(fromRound, toRound, limit) {
+        let lim = parseInt(limit, 10);
+        if (!Number.isFinite(lim) || lim <= 0) lim = presence.DEFAULT_RANGE;
+        if (lim > presence.MAX_RANGE) lim = presence.MAX_RANGE;
+
+        let to = parseInt(toRound, 10);
+        if (!Number.isFinite(to)) {
+            let top = await this.db.doQuery('SELECT MAX(round_number) AS max_round FROM price_snapshots', []);
+            to = (top && top[0] && top[0].max_round != null) ? Number(top[0].max_round) : null;
+            // No price_snapshots rows at all: an empty range, not a fabricated one.
+            if (to === null) return { from_round: null, to_round: null, rounds: [], missing: [], digest: null };
+        }
+        let from = parseInt(fromRound, 10);
+        if (!Number.isFinite(from)) from = to - (lim - 1);
+        if (from < 0) from = 0;
+        if (to < from) to = from;
+        // Clamp the span the caller asked for, never the caller's own bounds
+        // silently: from wins, so an explicit from_round is always honoured.
+        if (to - from + 1 > presence.MAX_RANGE) to = from + presence.MAX_RANGE - 1;
+
+        let rows = await this.db.doQuery(
+            'SELECT round_number, coin_pair, status, reference_block, block_timestamp ' +
+            'FROM price_snapshots WHERE round_number BETWEEN ? AND ?', [from, to]);
+        let summary = presence.summarizeRoundPresence(rows, from, to);
+        return { from_round: from, to_round: to, ...summary };
+    }
+
     // Oracle price staleness bound in seconds, mirroring the indexer's
     // ORACLE_MAX_PRICE_AGE_SECONDS so advisory quotes reject the rounds the fee gate does.
     // Precedence: a regtest-only p2pConfig/env override (where 0 disables the bound),
@@ -1041,13 +1117,28 @@ class XChainHub {
         };
     }
 
+    // One line per (coin, network, param) that disagrees with the pinned bundle.
+    // getFeeQuote is a polled public endpoint, so an un-deduped warning would be a
+    // log flood rather than a signal an operator can act on.
+    _warnFeeConfigInert(coin, network, param, rowValue, pinnedValue) {
+        if (!this._feeConfigInertWarned) this._feeConfigInertWarned = new Set();
+        let key = coin + '/' + network + '/' + param;
+        if (this._feeConfigInertWarned.has(key)) return;
+        this._feeConfigInertWarned.add(key);
+        console.warn('XChainHub.getFeeQuote: configs row ' + key + ' = ' + rowValue
+            + ' disagrees with the pinned bundle (' + pinnedValue + ') and is IGNORED. '
+            + 'Indexers meter fees from their own pinned bundle and never from a hub '
+            + 'overlay, so honouring this row would quote a fee no indexer accepts. '
+            + 'Change the value by repinning the per-chain bundle on both sides.');
+    }
+
     async getFeeQuote(action, chain) {
         // The hub's own network, so a testnet or regtest hub reads its own config rows.
         let network = this.network || 'mainnet';
 
-        // Defaults come from the canonical per-chain bundle, never an inline literal, so
-        // a repin cannot diverge from what the indexer meters. The prior inline copy had
-        // already drifted. GAS_SCHEDULE / GAS_PRICE config rows still override per hub.
+        // Values come from the canonical per-chain bundle, never an inline literal and
+        // never a config row, so a quote cannot diverge from what the indexer meters.
+        // The prior inline copy had already drifted.
         let gasSchedule = {};
         let gasPrice    = '0.00001';
         try {
@@ -1056,22 +1147,34 @@ class XChainHub {
             if (bundle && bundle.GAS_PRICE)    gasPrice    = String(bundle.GAS_PRICE);
         } catch (_) { /* unknown chain (the public path is gated by validateChain); serve no schedule */ }
 
-        // Operator override layer. The configs tree keys coins by FULL name and
-        // db.getConfig does not normalize, so the ticker must be mapped or nothing matches.
+        // Chain-row divergence check, NOT an override layer. The indexer excludes
+        // GAS_PRICE and GAS_SCHEDULE from its hub overlay by a consensus rule
+        // (XChainIndexer._mergeHubParams: both lists are empty on every network, because
+        // these feed block-hashed state and a live-polled consensus param forks the
+        // federation), so a row applied here would move the QUOTE and never the fee the
+        // indexer accepts. A wallet pre-flighting the quote would then broadcast an
+        // underpaid action whose native-coin fee output is not refundable. Read the row
+        // only to tell the operator it is inert. The configs tree keys coins by FULL
+        // name and db.getConfig does not normalize, so the ticker must be mapped.
         let overrideKey = coins.COIN_FULL_NAME[chain] || chain;
         try {
             let chainCfg = await this.db.getConfig(overrideKey, network, 'chain');
-            if (chainCfg && chainCfg.GAS_PRICE) {
-                let parsed = parseFloat(chainCfg.GAS_PRICE);
-                if (parsed > 0) gasPrice = chainCfg.GAS_PRICE;
+            if (chainCfg && chainCfg.GAS_PRICE && String(chainCfg.GAS_PRICE) !== gasPrice) {
+                this._warnFeeConfigInert(overrideKey, network, 'GAS_PRICE',
+                    String(chainCfg.GAS_PRICE), gasPrice);
             }
             if (chainCfg && chainCfg.GAS_SCHEDULE) {
-                try {
-                    let sched = JSON.parse(chainCfg.GAS_SCHEDULE);
-                    if (sched && typeof sched === 'object') gasSchedule = Object.assign(gasSchedule, sched);
-                } catch (_) { /* malformed blob; keep defaults */ }
+                let sched = null;
+                try { sched = JSON.parse(chainCfg.GAS_SCHEDULE); } catch (_) { /* malformed blob */ }
+                // Any key that differs from the pinned schedule diverges, and so does a key
+                // the pinned schedule does not carry at all (it would have invented an action).
+                if (sched && typeof sched === 'object'
+                    && Object.keys(sched).some((k) => String(sched[k]) !== String(gasSchedule[k]))) {
+                    this._warnFeeConfigInert(overrideKey, network, 'GAS_SCHEDULE',
+                        chainCfg.GAS_SCHEDULE, 'the pinned per-chain schedule');
+                }
             }
-        } catch (_) { /* config store unavailable; keep protocol defaults */ }
+        } catch (_) { /* config store unavailable; the pinned bundle is the answer anyway */ }
 
         if (!Object.prototype.hasOwnProperty.call(gasSchedule, action)) return { error: 'unknown action: ' + action };
         let gasCost = gasSchedule[action];
@@ -1161,6 +1264,15 @@ class XChainHub {
     // CapabilitySnapshot sends the indexer, so a divergent capabilities.json forks the
     // qualified set and quorum N. mainnet/testnet throw MIN_STAKE_MISMATCH and boot
     // halts; regtest/standalone warn. A missing MIN_STAKE key counts as a mismatch.
+    //
+    // A canonical capability ABSENT from the file entirely is a different, worse class
+    // and is refused on EVERY network (CAPABILITY_UNCONFIGURED, #1988). A low floor is
+    // something a test venue chooses deliberately, which is why the mismatch above is
+    // non-strict off mainnet/testnet; a hole is never chosen, and its blast radius is
+    // total: CapabilitySnapshot fails closed on every round for that capability
+    // (min_stake_unconfigured) because omitting min_stake would let each indexer apply
+    // its OWN threshold and fork the qualified set. Warning once at boot and then
+    // failing every round forever is the behaviour this refusal replaces.
     _assertCanonicalMinStakes(caps){
         if(!caps || typeof caps !== 'object' || Array.isArray(caps)) return;
         if(process.env.XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT === '1'){
@@ -1198,6 +1310,36 @@ class XChainHub {
                     ((entry && entry.MIN_STAKE !== undefined) ? entry.MIN_STAKE : '(missing -> 0)') +
                     ' vs canonical ' + canonical.MIN_STAKE);
             }
+        }
+        // Capabilities the canonical registry knows about that this file never mentions.
+        // DISABLED_CAPABILITIES does NOT excuse one: that flag only stops THIS hub from
+        // serving the capability, while it still has to build the federation-wide
+        // snapshot for every round its peers run.
+        let unconfigured = Object.keys(canonicalCaps).filter(cap => !caps[cap]);
+        if(unconfigured.length > 0){
+            let missing = unconfigured.map(cap =>
+                cap + ' (canonical ' + canonicalCaps[cap].MIN_STAKE + ')').join('; ');
+            let err = new Error('CONSENSUS CANNOT RUN: capability ' +
+                (unconfigured.length === 1 ? '"' + unconfigured[0] + '" is' : unconfigured.join(', ') + ' are') +
+                ' missing from HUB_CAPABILITY_CONFIG entirely, so this hub has no qualifying ' +
+                'floor for ' + (unconfigured.length === 1 ? 'it' : 'them') + ' and CapabilitySnapshot ' +
+                'refuses to build a snapshot: EVERY consensus round for ' +
+                (unconfigured.length === 1 ? 'that capability' : 'those capabilities') +
+                ' fails closed with min_stake_unconfigured. Omitting min_stake would let each ' +
+                'indexer apply its OWN threshold, so two hubs could qualify different validator ' +
+                'sets for the same round and FORK. Add CAPABILITIES.<capability>.MIN_STAKE to ' +
+                'capabilities.json (equal to the indexer constant) for: ' + missing +
+                '. Refusing to start rather than warning once and then failing every round ' +
+                '(XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT=1 to bypass on a venue that deliberately ' +
+                'runs without these capabilities).');
+            err.code = 'CAPABILITY_UNCONFIGURED';
+            err.capabilities = unconfigured;
+            // Surface any threshold mismatches too, so one boot attempt shows the
+            // operator every edit the file needs rather than one per restart.
+            if(mismatches.length > 0){
+                console.warn('Capability MIN_STAKE mismatches in the same config: ' + mismatches.join('; '));
+            }
+            throw err;
         }
         if(mismatches.length === 0) return;
         let detail = 'capability MIN_STAKE diverges from the canonical coins registry ' +
@@ -1284,9 +1426,11 @@ class XChainHub {
                 this._loadCapabilityConfigFile(configFilePath);
             } catch(e){
                 // A canonical MIN_STAKE or FULLNODE mismatch is a consensus-fork
-                // misconfig, so halt boot. Read/parse problems keep the legacy
+                // misconfig, and an unconfigured capability fails every consensus
+                // round for it, so halt boot. Read/parse problems keep the legacy
                 // warn-and-degrade path, where self-tests fail "config missing".
-                if(e && (e.code === 'MIN_STAKE_MISMATCH' || e.code === 'FULLNODE_CONFIG_MISMATCH')) throw e;
+                if(e && (e.code === 'MIN_STAKE_MISMATCH' || e.code === 'FULLNODE_CONFIG_MISMATCH' ||
+                         e.code === 'CAPABILITY_UNCONFIGURED')) throw e;
                 console.warn('Could not load capability config from ' + configFilePath + ': ', e);
             }
         }
@@ -1370,6 +1514,17 @@ class XChainHub {
             console.log('Capability MIN_STAKE (genesis, pinned #4352): ' + genesis +
                 ' (must equal the indexer configs/<COIN>.js constants)');
         } catch (e) { /* best-effort operator log */ }
+
+        // Watch our OWN share of active stake against the STAKE_WEIGHTED_QUORUM
+        // two-thirds commit gate. Nothing else does: the gate counts
+        // community stake in the denominator whether or not it ever signs, so a
+        // share that drifts to 2/3 halts every round the moment one more staker
+        // appears, and the previous round gives no warning at all (a prior halt was
+        // 18 hours of dead price rounds found by a tester). Started here rather
+        // than with the stake poll above because it needs no identity: a
+        // read-only hub can watch the federation just as well.
+        this.stakeShareWatcher = new StakeShareWatcher(this);
+        this.stakeShareWatcher.start();
     }
 
     // In-flight guard: _stakePollTimer fires on a bare setInterval while the pass awaits
@@ -1421,19 +1576,24 @@ class XChainHub {
 
     // Resolve the latest BTC block index: first hub.db.getChainTip (populated by the
     // indexer's pushChainTip on the network _resolveBtcIndexerUrl picks), then a direct
-    // getlatestblock call for stacks with no tip push. Null when both paths fail.
+    // getlatestblock call for stacks with no tip push. Null when both paths fail, and
+    // null when the direct path only re-serves a height _btcDirectTipAcceptable dates
+    // as frozen.
     async _resolveBtcLatestBlock(){
         // A cross-network configs tree makes this throw. Degrade to the documented null
         // rather than crashing the scheduler tick that called it.
         let network;
         try { network = await this._resolveBtcNetwork(); }
         catch (err) { console.error('XChainHub: cannot resolve BTC latest block:', err.message); return null; }
+        // Held past the block below: a rejected tip is still the only block_time the hub
+        // has, and the direct path is dated against it.
+        let pushedTip = null;
         try {
-            let tip = await this.db.getChainTip('BTC', network);
+            pushedTip = await this.db.getChainTip('BTC', network);
             // Freshness bound on the pushed tip. If the co-located indexer halts,
             // getChainTip serves the same frozen row forever, so rounds would anchor to a
             // stale height. Fall through when the tip is stale or unverifiable.
-            if(tip && tip.blockHeight && this._btcPushedTipFresh(tip)) return tip.blockHeight;
+            if(pushedTip && pushedTip.blockHeight && this._btcPushedTipFresh(pushedTip)) return pushedTip.blockHeight;
         } catch (_) { /* hub db down? fall through */ }
         let url = await this._resolveBtcIndexerUrl();
         if(!url) return null;
@@ -1455,11 +1615,37 @@ class XChainHub {
                     ' exceeds MAX_INDEXER_LAG_BLOCKS (' + maxLag + '); ignoring stale tip');
                 return null;
             }
-            return Number(result.block_index) || null;
+            let directHeight = Number(result.block_index) || null;
+            if(directHeight && !this._btcDirectTipAcceptable(directHeight, pushedTip)) return null;
+            return directHeight;
         } catch (err) {
             console.error('XChainHub: failed to resolve BTC latest block from indexer:', err);
             return null;
         }
+    }
+
+    // Age gate for the DIRECT path, dated against the pushed tip the gate above rejected.
+    // `lag` cannot see a halted chain: a stopped bitcoind freezes the decoder and the
+    // committed tip together, so lag reads 0 while the height never moves.
+    //
+    // The bound is deliberately NOT MAX_TIP_AGE_S. A rejected pushed tip costs one HTTP
+    // call, a rejected direct height returns null and stalls anchoring, so the two gates
+    // price a false reject differently. Bitcoin block gaps are exponential with a 600s
+    // mean, which refuses a live mainnet tip ~13.5% of the time at 1200s and ~6e-6 at
+    // 7200s. A height that BEATS the pushed tip proves the chain moved and is always
+    // taken, so only a height that has not moved can be dated as frozen.
+    _btcDirectTipAcceptable(directHeight, tip){
+        if(!tip || !tip.blockHeight) return true;
+        let blockTime = Number(tip.blockTime);
+        if(!Number.isFinite(blockTime) || blockTime <= 0) return true;
+        if(Number(directHeight) > Number(tip.blockHeight)) return true;
+        let maxAge = Number(process.env.MAX_DIRECT_TIP_AGE_S);
+        if(!Number.isFinite(maxAge) || maxAge <= 0) maxAge = 7200;
+        let ageS = Math.floor(Date.now() / 1000) - blockTime;
+        if(ageS <= maxAge) return true;
+        console.warn('XChainHub: direct BTC tip (height ' + directHeight + ') has not advanced past a tip ' +
+            ageS + 's old, exceeding MAX_DIRECT_TIP_AGE_S (' + maxAge + '); treating the BTC stack as halted');
+        return false;
     }
 
     // Freshness gate for the pushed BTC tip used by path 1 above. setChainTip stores
@@ -1838,11 +2024,33 @@ class XChainHub {
         if(this._capabilityRecheckTimer){ clearInterval(this._capabilityRecheckTimer); this._capabilityRecheckTimer = null; }
         if(this._stakePollTimer){ clearInterval(this._stakePollTimer); this._stakePollTimer = null; }
         if(this._transportSetTimer){ clearInterval(this._transportSetTimer); this._transportSetTimer = null; }
+        if(this.stakeShareWatcher){ this.stakeShareWatcher.stop(); }
         if(this._capabilityConfigDebounce){ clearTimeout(this._capabilityConfigDebounce); this._capabilityConfigDebounce = null; }
         if(this._capabilityConfigWatcher){ try { this._capabilityConfigWatcher.close(); } catch(e){} this._capabilityConfigWatcher = null; }
         if(this.governance)       await this.governance.stop();
         if(this.reorgHandler)     await this.reorgHandler.stop();
         if(this.rollcallRound)    await this.rollcallRound.stop();
+        // Detached BEFORE db.close() below: the listener's only side effect is a DB
+        // write, so leaving it attached past the close turns a late-finalizing round
+        // into an error on a dead pool instead of a no-op.
+        if(this.attestationResponseMirror) await this.attestationResponseMirror.stop();
+        // Stopped beside the mirror and for the same reason: its window timer's only
+        // side effect is a DB read followed by a spend, so leaving it armed past the
+        // close would run a publish pass against a dead pool.
+        if(this.attestationBatchPublisher) this.attestationBatchPublisher.stop();
+        // The rest of the attestation family started in startAttestation(): each of
+        // these detaches its own request:finalized, peerManager or reorgHandler
+        // listener, so skipping one leaves it firing into a hub the caller believes
+        // is fully closed, and a same-process restart doubles that listener again.
+        if(this.attestationPublisher)   await this.attestationPublisher.stop();
+        if(this.attestationSpotChecker) await this.attestationSpotChecker.stop();
+        if(this.attestationRound)       await this.attestationRound.stop();
+        if(this.fullNodeChallenge)      await this.fullNodeChallenge.stop();
+        if(this.attestationRelay)       await this.attestationRelay.stop();
+        // Stopped LAST among the attestation family: attestationRound proposes INTO
+        // consensus (consensus.propose()), so stopping consensus before round would
+        // let a poll already in flight fire into a consensus whose state is cleared.
+        if(this.attestationConsensus)   await this.attestationConsensus.stop();
         if(this.stateAnchorPublisher) await this.stateAnchorPublisher.stop();
         if(this.retractionConsensus) this.retractionConsensus.stop();
         if(this.stateCheckpoints) await this.stateCheckpoints.stop();

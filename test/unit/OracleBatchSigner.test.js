@@ -71,7 +71,11 @@ function snapshotRows(rounds) {
                 price:           p.price,
                 reference_block: r.btcBlockHeight,
                 block_timestamp: r.timestamp,
-                status:          r.status || 'finalized'
+                status:          r.status || 'finalized',
+                // What LEFT(consensus_proof, 8) returns. A v0-finalized round's proof
+                // is a bare signature ARRAY; a round ingested from a landed batch
+                // carries the {"batch":...} object of D23.
+                proof_head:      r.batchSourced ? '{"batch"' : '[{"pubk'
             });
     return rows;
 }
@@ -356,6 +360,201 @@ describe('OracleBatchSigner (XPRICEB batch-signing round)', function () {
         mesh.stop();
         expect(res.met).to.equal(false);
         expect(res.sigs.length).to.equal(1);
+    });
+
+    // ─────────────────────────────── the refusal has to be readable
+
+    // Capture the refusal lines without pulling sinon into a file that has never
+    // needed it. Restores in a finally so a throwing assertion cannot leave the
+    // console patched for the rest of the suite.
+    async function captureWarnings(fn) {
+        let lines = [];
+        let real  = console.warn;
+        console.warn = (...a) => lines.push(a.join(' '));
+        try { await fn(); } finally { console.warn = real; }
+        return lines;
+    }
+
+    describe('the refusal reason', function () {
+
+        // The line an operator actually got for the two windows that never published
+        // was "proposal does not match this hub's own finalized rounds" and nothing
+        // else, and the leader's proposal is persisted nowhere, so the disagreement
+        // could not be reconstructed afterwards.
+        it('names the first differing round and the differing PRICE', async function () {
+            let mesh = buildMesh(4);
+            let fabricated = clone(baseRounds());
+            fabricated[3].pairs[0].price = '99999';
+
+            let warns = await captureWarnings(() =>
+                mesh.nodes[0].signer.collectBatchSignatures(100, 105, 5005, fabricated));
+            mesh.stop();
+
+            let refusals = warns.filter(l => /refusing to co-sign batch \[100,105\]/.test(l));
+            expect(refusals).to.have.length(3);
+            for (let line of refusals) {
+                expect(line).to.match(/does not match this hub's own finalized rounds/);
+                expect(line).to.match(/round 103 pair BTC\/USD price proposed 99999, derived 60003/);
+            }
+        });
+
+        it('names a differing round TIMESTAMP', async function () {
+            let mesh = buildMesh(4);
+            let shifted = clone(baseRounds());
+            shifted[2].timestamp = shifted[2].timestamp + 600;
+
+            let warns = await captureWarnings(() =>
+                mesh.nodes[0].signer.collectBatchSignatures(100, 105, 5005, shifted));
+            mesh.stop();
+
+            let refusals = warns.filter(l => /refusing to co-sign/.test(l));
+            expect(refusals).to.have.length(3);
+            expect(refusals[0]).to.match(/round 102 timestamp proposed 1700001800, derived 1700001200/);
+        });
+
+        it('names a round the leader proposed that never finalized here', async function () {
+            let mesh = buildMesh(4);
+            let extra = clone(baseRounds());
+            extra.push({ round: 106, timestamp: 1700003600, btcBlockHeight: 5006,
+                         pairs: [{ pair: 'BTC/USD', price: '60006' }] });
+
+            let warns = await captureWarnings(() =>
+                mesh.nodes[0].signer.collectBatchSignatures(100, 106, 5006, extra));
+            mesh.stop();
+
+            let refusals = warns.filter(l => /refusing to co-sign/.test(l));
+            expect(refusals).to.have.length(3);
+            expect(refusals[0]).to.match(/round\(s\) 106 proposed but not finalized here/);
+        });
+
+        it('names a round finalized here that the proposal omits', async function () {
+            let mesh = buildMesh(4);
+            let short = clone(baseRounds()).filter(r => r.round !== 102);
+
+            let warns = await captureWarnings(() =>
+                mesh.nodes[0].signer.collectBatchSignatures(100, 105, 5005, short));
+            mesh.stop();
+
+            let refusals = warns.filter(l => /refusing to co-sign/.test(l));
+            expect(refusals).to.have.length(3);
+            expect(refusals[0]).to.match(/round\(s\) 102 finalized here but not proposed/);
+        });
+
+        // Diagnostics may never move the verdict: the canonical byte comparison is
+        // still the only thing that decides, and an honest window must stay signable.
+        it('changes no verdict: the honest window still reaches quorum in silence', async function () {
+            let mesh = buildMesh(4);
+            let warns = await captureWarnings(async () => {
+                let res = await mesh.nodes[0].signer.collectBatchSignatures(100, 105, 5005, baseRounds());
+                expect(res.met).to.equal(true);
+            });
+            mesh.stop();
+            expect(warns.filter(l => /refusing to co-sign/.test(l))).to.have.length(0);
+        });
+    });
+
+    // The second half of the refusal-readability fix. PriceAggregator.receiveBatch pins reference_block
+    // to the LANDING chain's block_index, so a round ingested from a batch that
+    // already landed no longer carries its own BTC anchor. Reading that column as an
+    // anchor invents a number (testnet round 116 held DOGE height 67856096 where its
+    // BTC anchor was 150176) and the refusal that followed said nothing about why.
+    it('refuses a window holding a round ingested from a landed batch, and says the window already published', async function () {
+        let ingested = baseRounds().map(r => (r.round === 102
+            ? Object.assign({}, r, { batchSourced: true, btcBlockHeight: 67856096 })
+            : r));
+        let mesh = buildMesh(4, { perNodeRounds: (i) => (i === 0 ? baseRounds() : ingested) });
+
+        let warns = await captureWarnings(() =>
+            mesh.nodes[0].signer.collectBatchSignatures(100, 105, 5005, baseRounds()));
+        mesh.stop();
+
+        let refusals = warns.filter(l => /refusing to co-sign batch \[100,105\]/.test(l));
+        expect(refusals).to.have.length(3);
+        for (let line of refusals) {
+            expect(line).to.match(/round\(s\) 102 here came from a batch that already landed/);
+            expect(line).to.match(/this window has already published/);
+            // The bare mismatch line must NOT be what an operator sees for this case.
+            expect(line).to.not.match(/does not match this hub's own finalized rounds/);
+        }
+        for (let i = 1; i < mesh.nodes.length; i++) {
+            expect(mesh.nodes[i].signer.getStats().batchSignRefusals).to.equal(1);
+            expect(mesh.nodes[i].sent).to.have.length(0);
+        }
+    });
+
+    it('still co-signs a window whose rounds all carry an ordinary v0 proof', async function () {
+        let mesh = buildMesh(4);
+        let res = await mesh.nodes[0].signer.collectBatchSignatures(100, 105, 5005, baseRounds());
+        mesh.stop();
+        expect(res.met).to.equal(true);
+        expect(res.sigs.length).to.be.at.least(3);
+    });
+
+    // A co-signature is the last thing a leader waits on before it broadcasts,
+    // so it is the only local evidence a FOLLOWER has that a leader's DOGE tx may
+    // already be in flight and merely unmined. OraclePublisher's takeover reads this
+    // memo to defer instead of re-publishing over a live transaction.
+    describe('the co-signature memo read by the takeover cooldown', function () {
+
+        it('records the moment this hub co-signed a leader\'s window', async function () {
+            let mesh   = buildMesh(4);
+            let before = Date.now();
+            await mesh.nodes[0].signer.collectBatchSignatures(100, 105, 5005, baseRounds());
+            let after  = Date.now();
+            mesh.stop();
+
+            for (let i = 1; i < mesh.nodes.length; i++) {
+                let at = mesh.nodes[i].signer.coSignedAt(100, 105);
+                expect(at, 'follower ' + i).to.be.a('number');
+                expect(at).to.be.within(before, after);
+                expect(mesh.nodes[i].signer.getStats().batchWindowsCoSigned).to.equal(1);
+            }
+        });
+
+        it('answers on OVERLAP, so a split window still reports its signed sub-range', async function () {
+            let mesh = buildMesh(4);
+            await mesh.nodes[0].signer.collectBatchSignatures(100, 105, 5005, baseRounds());
+            mesh.stop();
+
+            let follower = mesh.nodes[1].signer;
+            expect(follower.coSignedAt(96, 107)).to.be.a('number');   // window contains the sub-range
+            expect(follower.coSignedAt(105, 110)).to.be.a('number');  // overlaps at one round
+            expect(follower.coSignedAt(106, 111)).to.equal(null);     // the NEXT window, disjoint
+            expect(follower.coSignedAt(90, 99)).to.equal(null);
+        });
+
+        it('reports nothing for a window the leader never asked this hub to sign', async function () {
+            let mesh = buildMesh(4);
+            mesh.stop();
+            expect(mesh.nodes[1].signer.coSignedAt(100, 105)).to.equal(null);
+            expect(mesh.nodes[1].signer.getStats().batchWindowsCoSigned).to.equal(0);
+        });
+
+        it('records nothing when the co-signature is REFUSED', async function () {
+            // One node's rounds disagree, so it withholds its signature; a hub that
+            // never signed never told a leader it could broadcast.
+            let divergent = baseRounds().map(r => (r.round === 102
+                ? Object.assign({}, r, { pairs: [{ pair: 'BTC/USD', price: '1.00' }] })
+                : r));
+            let mesh = buildMesh(4, { perNodeRounds: (i) => (i === 1 ? divergent : baseRounds()) });
+            await captureWarnings(() =>
+                mesh.nodes[0].signer.collectBatchSignatures(100, 105, 5005, baseRounds()));
+            mesh.stop();
+
+            expect(mesh.nodes[1].signer.coSignedAt(100, 105)).to.equal(null);
+            expect(mesh.nodes[2].signer.coSignedAt(100, 105)).to.be.a('number');
+        });
+
+        it('bounds the memo, evicting the oldest windows first', function () {
+            let mesh   = buildMesh(1);
+            let signer = mesh.nodes[0].signer;
+            for (let w = 0; w < 300; w++) signer._noteCoSigned(w * 6, w * 6 + 5);
+            mesh.stop();
+
+            expect(signer.getStats().batchWindowsCoSigned).to.equal(256);
+            expect(signer.coSignedAt(0, 5)).to.equal(null);            // evicted
+            expect(signer.coSignedAt(299 * 6, 299 * 6 + 5)).to.be.a('number');
+        });
     });
 
     it('withholds the batch when this hub does not hold `price` at the batch anchor', async function () {

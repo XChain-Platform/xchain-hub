@@ -34,6 +34,7 @@ const EventEmitter      = require('events');
 const ValidatorIdentity = require('./ValidatorIdentity.js');
 const eq                = require('./equivocation_header.js');
 const pricePair         = require('./price_pair_activation.js');
+const priceScale        = require('./price_scale_activation.js');
 const priceSigTally     = require('./price_sig_tally_activation.js');
 const swq               = require('./stake_weighted_quorum.js');
 const { PRICE_MAX, PRICE_V1_COINS, PRICE_V1_FIATS,
@@ -42,6 +43,7 @@ const { PRICE_BATCH_MAX_ROUND_COUNT } = require('./price_batch_compression.js');
 const { bcgt }          = require('./bcmath.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { normalizeRetractionBounds } = require('./lib/retraction_bounds.js');
+const roundBandLib      = require('./lib/oracle_round_band.js');
 
 // Minimum gap between ingest-fence rejection warnings for the SAME source
 // chain. Sized so a stalled rail keeps re-announcing itself in any log tail while a
@@ -65,6 +67,47 @@ class PriceAggregator extends EventEmitter {
         // Per-source-chain state for the ingest pair-coverage check
         // ({ seen: Set, last: ms, suppressed: n, rounds: n }). See _checkIngestPairCoverage.
         this._missingPairWarnState = new Map();
+        // Out-of-band round rejections, surfaced through the oracle
+        // diagnostics RPC. Monotonic for the process, same posture as the other
+        // ingest counters here: the log carries the driver line, this is the read tier.
+        this.implausibleRoundRejections = 0;
+        this.lastImplausibleRound = null;
+    }
+
+    // The plausible round band for THIS hub, or null when the local oracle
+    // schedule is unresolvable (a mirror hub built without an OracleRound, a
+    // test double, a hub whose clock predates ORACLE_EPOCH_START).
+    //
+    // Null means "no opinion" and every caller must treat it that way. A hub
+    // that cannot resolve its own schedule must not start refusing its
+    // federation's consensus output on a guess; see lib/oracle_round_band.js.
+    _roundBand() {
+        let oracle = this.hub && this.hub.oracle;
+        if (!oracle) return null;
+        return roundBandLib.roundBand({
+            epochStartMs:    oracle.epochStart,
+            roundIntervalMs: oracle.roundInterval
+        });
+    }
+
+    // Write-time half of the defence: refuse a round number the schedule
+    // could not have produced. Returns null to accept, or the rejection reason.
+    //
+    // ONE-SIDED. Only the FUTURE side rejects, because only it is impossible:
+    // replaying indexers, catching-up chain-only nodes and hour-wide batch
+    // windows all legitimately push rounds that are hours or days old, and
+    // bounding the past would drop real consensus output.
+    _refuseOutOfBandRound(round, sourceChain, what) {
+        let band = this._roundBand();
+        if (!band || !roundBandLib.isRoundImplausible(round, band)) return null;
+        this.implausibleRoundRejections += 1;
+        this.lastImplausibleRound = Number(round);
+        // Never silent: an out-of-band round is either a corrupt row upstream or a
+        // peer with a broken clock, and both need naming rather than a quiet drop.
+        console.warn('PriceAggregator: refusing ' + what + ' from ' +
+                     (sourceChain || 'unknown') + ': ' +
+                     roundBandLib.describeImplausibleRound(round, band));
+        return 'implausible round';
     }
 
     // Name a pair that STOPPED arriving from a source chain. The PRODUCER path records a
@@ -257,6 +300,12 @@ class PriceAggregator extends EventEmitter {
             return { accepted: false, reason: 'invalid round' };
         }
 
+        // The round number must be one this hub's own schedule could have
+        // produced. Checked BEFORE any signature work, since an out-of-band round is
+        // refused whatever it is signed with.
+        let bandReason = this._refuseOutOfBandRound(round, sourceChain, 'PRICE v0 round');
+        if (bandReason) return { accepted: false, reason: bandReason };
+
         // timestamp is part of the signed payload; it must be present and sane
         let timestamp = parseInt(roundData.timestamp);
         if (!Number.isFinite(timestamp) || timestamp < 0) {
@@ -298,9 +347,17 @@ class PriceAggregator extends EventEmitter {
         // will reject. If even that blip is unacceptable at arming time, the clean
         // fix is to add block_time to the hub-push payload and key on it here.
         let pairPattern = pricePair.pricePairPattern(timestamp, this.hub && this.hub.network);
+
+        // The price-value flag day (price_scale_activation.js, vendored byte-identically
+        // from the indexer) rides the SAME key as the pair bound above, so the hub can
+        // never grade a price under a rule the chain is not yet applying. At/above it a
+        // price is canonical: no leading zeros, at most 8 decimals, which is what every
+        // producer already emits and what bounds the stored string to 19 characters,
+        // inside the price column. UNARMED on mainnet today.
+        let pricePattern = priceScale.priceValuePattern(timestamp, this.hub && this.hub.network);
         for (let p of roundData.pairs) {
             if (!p || typeof p.pair !== 'string' || !pairPattern.test(p.pair) ||
-                p.price === undefined || p.price === null || !/^[0-9]+(\.[0-9]+)?$/.test(String(p.price)) ||
+                p.price === undefined || p.price === null || !pricePattern.test(String(p.price)) ||
                 // Enforce the consensus PRICE_MAX ceiling at ingest, as constants.js mandates
                 // ("the ingestion layer must reject anything at or above it"); every other
                 // price entry point already does, so the ingest/aggregate bounds cannot drift
@@ -591,6 +648,13 @@ class PriceAggregator extends EventEmitter {
             return refuse('invalid round window');
         }
 
+        // Batch twin. Judged on lastRound alone: the per-round loop below
+        // already refuses any round outside [firstRound, lastRound], so the window's
+        // top bounds every round the batch can carry. A signed batch is atomic, so an
+        // out-of-band round takes the whole batch down rather than being dropped from it.
+        let bandReason = this._refuseOutOfBandRound(lastRound, sourceChain, 'PRICE v0 batch');
+        if (bandReason) return refuse(bandReason);
+
         // The BATCH anchor: part of the signed canonical, and the height every oracle
         // flag day below resolves on (§5.5). Distinct from each round's own anchor.
         let btcBlockHeight = parseInt(batchData.btc_block_height);
@@ -631,6 +695,11 @@ class PriceAggregator extends EventEmitter {
         // batch, because every round in it landed in the same block.
         let pairPattern = pricePair.pricePairPattern(blockTime, this.hub && this.hub.network);
 
+        // The price-value flag day, keyed on the batch's block_time for the same reason
+        // the pair bound is: one pattern for the whole batch, because every round in it
+        // landed in the same block, and no window can straddle this gate.
+        let pricePattern = priceScale.priceValuePattern(blockTime, this.hub && this.hub.network);
+
         // Per-round structure. Rounds must be strictly ascending, unique and inside the
         // declared window (D16); the window is validated for shape, deliberately NOT
         // against the publisher's window-size knob, so validation stays range-agnostic.
@@ -654,7 +723,7 @@ class PriceAggregator extends EventEmitter {
             // single-round push would be refused for.
             for (let p of r.pairs) {
                 if (!p || typeof p.pair !== 'string' || !pairPattern.test(p.pair) ||
-                    p.price === undefined || p.price === null || !/^[0-9]+(\.[0-9]+)?$/.test(String(p.price)) ||
+                    p.price === undefined || p.price === null || !pricePattern.test(String(p.price)) ||
                     !(parseFloat(String(p.price)) > 0) ||
                     !(parseFloat(String(p.price)) < PRICE_MAX)) {
                     return refuse('invalid pairs');
@@ -1160,6 +1229,32 @@ class PriceAggregator extends EventEmitter {
             }
         }
 
+        // HUB-RETRACT-4: durably record this retraction's generation + orphaned-range lower bound
+        // so a stale price push (a fire-and-forget or in-flight PRICE arriving AFTER the delete, or
+        // a retried push carrying the pre-reorg generation) is rejected at ingest instead of
+        // re-inserting the orphan. Only when the source carried a generation to fence on; without
+        // it we cannot tell stale from fresh, so we leave the fence untouched (pre-fix behaviour).
+        // Runs even on a 0-row delete: the stale push may not have arrived yet.
+        //
+        // Written BEFORE the deletes, and a failed write aborts the retraction rather than being
+        // logged and forgotten. The caller drops its durable outbox row on a success return
+        // (xchain-indexer hub_push_queue.js markHubPushDelivered), so a swallowed failure left the
+        // rows deleted, the fence unpersisted and no retry anywhere in the fleet. Early is safe
+        // because the fence is monotonic (GREATEST generation, LEAST from in db.js
+        // bumpPriceIngestWatermark), so it can only reject pushes this retraction is about to
+        // delete; there is no hub-side transaction spanning both, so this is fail-closed, not
+        // atomic. Keep the error wording clear of the indexer's TERMINAL_HUB_REJECTIONS patterns
+        // (xchain-indexer/src/hub_client.js) or the retained retry becomes a silent drop.
+        if (fenced) {
+            try {
+                await this.db.bumpPriceIngestWatermark(sourceChain, gen, from);
+            } catch (e) {
+                console.error('PriceAggregator: ingest-watermark bump failed for ' + sourceChain + ':', e && e.message);
+                return { error: 'ingest fence not persisted for ' + sourceChain
+                    + ' (' + ((e && e.message) || 'unknown error') + ')' };
+            }
+        }
+
         let snapResult = await this.db.doQuery('DELETE FROM price_snapshots WHERE ' + snapQ.where, snapQ.args);
         // oracle_prices tracks the PRICE v1 oracle action via action_index
         let oracleQ = buildArgs('action_index');
@@ -1183,20 +1278,6 @@ class PriceAggregator extends EventEmitter {
             if (bounded) evt.to_action_index = to;
             if (fenced) evt.retraction_generation = gen;
             this.emit('row:deleted', evt);
-        }
-
-        // HUB-RETRACT-4: durably record this retraction's generation + orphaned-range lower bound
-        // so a stale price push (a fire-and-forget or in-flight PRICE arriving AFTER the delete, or
-        // a retried push carrying the pre-reorg generation) is rejected at ingest instead of
-        // re-inserting the orphan. Only when the source carried a generation to fence on; without
-        // it we cannot tell stale from fresh, so we leave the fence untouched (pre-fix behaviour).
-        // Runs even on a 0-row delete: the stale push may not have arrived yet.
-        if (fenced) {
-            try {
-                await this.db.bumpPriceIngestWatermark(sourceChain, gen, from);
-            } catch (e) {
-                console.error('PriceAggregator: ingest-watermark bump failed for ' + sourceChain + ':', e && e.message);
-            }
         }
 
         // D28: clear the publisher's durable at-most-once marker for every round the

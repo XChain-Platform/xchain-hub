@@ -46,16 +46,23 @@ const coins      = require('../../src/coins');
 // (REWARD) moved to its final vanity address. Addresses are in the consensus
 // subset, so only the BTC mainnet golden moves; every other golden is
 // deliberately untouched and is the no-drift check.
+// REGENERATED 2026-09-01: GAS_SCHEDULE gains SWEEP_BASE, SWEEP_PER_ITEM,
+// CALLBACK_BASE and CALLBACK_PER_RECIPIENT, the unified prices SWEEP and CALLBACK move
+// onto at the UNIFIED_FEES_SWEEP_CALLBACK flag day. GAS_SCHEDULE is in consensusSubset()
+// and is hashed WHOLE, so ADDING a key moves all nine hashes by construction, even though
+// the flag reading them is unarmed on mainnet and testnet. Same one-wave rollout rule as
+// the folds above: every vendoring service ships the new pins together, and a straggler
+// fail-closes on verifyConsensusPin() rather than forking.
 const GOLDEN_HASH = {
-    BTC:  { mainnet: '6f0722aed9d46d74612b630af6d7c0d4538208eec85da546d7ef4b1afb08908b',
-            testnet: 'f6589c6b88dc930db05998070ef0b73743f58623a0d23fbc30fdb158c49d1427',
-            regtest: '24e6a363e5a36285574dea357328a997fdee5762ef812d8947eacf69c51afc24' },
-    LTC:  { mainnet: 'f5c81b02f2c8bdd4a828f25495cc5c63fa18e6040c80569c2aaeb8d6860ce577',
-            testnet: '9faf066a1470be2486d8a2cd121548ca02de1397d0678a2ab8dc0e712ebfa8fd',
-            regtest: '5ad03b383d873d309640e75dfefa2787a5806cb8a84ee46f4cc7fb25ca7f808b' },
-    DOGE: { mainnet: '8073fa2632b84c691ad625ee107f8a03ca90483f1b726700e46db833b86399b4',
-            testnet: '2991d7e7caf2b212de959dd5831ac1477e0b13da95ac1ed8c2b43e2704732439',
-            regtest: '019220a461e34c99fcf5cbf107673f13d3f2a57d2a20e16a0323ed44c81edd11' },
+    BTC:  { mainnet: '6c865f52059978b2510b9e24999a2eacc86103ab8f869764e1973d012d4b8a8d',
+            testnet: 'd3c66a4fb288b2666a2a4fad85200bbeac162bb36fed8a3eddcfc7b2d4d48070',
+            regtest: '29976bd33cad1842320c57acdc849250646adea765f70a0ae5dad3f201f7d5d7' },
+    LTC:  { mainnet: '3fb8f4d80784d526a4147d8f39185e81f2037bf761a86bbd583673d147d7a004',
+            testnet: 'ae94a951a838e64f9c36e503b978d9b9ad5ea74f7b443465baaabca8f675ea0d',
+            regtest: 'bca62db9f59a6f7566620b086380c10fffac08dabe99f00a4fcc7cd038e46146' },
+    DOGE: { mainnet: '717b5ff477d4b4b04026f4620cd6e178f71139b5393f9e8d807696c2f7cf1da3',
+            testnet: 'b90aec4381b0ad32caba078706c8fb244cbe267390e41668fa063d9e64fb60e6',
+            regtest: '816632e9f6647e726042282c37789ae8d924e8d4a1b2995ddde8d6a54a0bba54' },
 };
 
 describe('coins registry', () => {

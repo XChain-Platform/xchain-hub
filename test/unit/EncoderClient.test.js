@@ -57,9 +57,26 @@ describe('EncoderClient', function () {
             expect(c.timeout).to.equal(5000);
         });
 
-        it('uses 30000ms as default timeout', function () {
+        // The default has to be STRICTLY GREATER than the encoder's own worst-case
+        // internal budget, not equal to it. Pinned as an inequality against the
+        // encoder's shipped NODE_RPC_TIMEOUT (30000) times its longest sequential
+        // sendrawtransaction chain (3 hops: _sendRaw, an uncached chainName for the
+        // isRegtest gate, and the fee-cap retry _sendRaw), because equality is the
+        // defect: an abort here is classified ambiguous and dead-letters the round.
+        it('defaults to a budget strictly greater than the encoder worst-case RPC chain', function () {
             let c = new EncoderClient('http://enc/rpc', '');
-            expect(c.timeout).to.equal(30000);
+            expect(c.timeout).to.be.above(3 * 30000);
+            expect(c.timeout).to.equal(120000);
+        });
+
+        // A timeout is the one knob where 0 must NOT mean "explicitly set": axios reads
+        // 0 as no timeout at all, which would wedge a publisher pass on a hung encoder
+        // forever. Non-positive and non-finite values fall back rather than disarming.
+        it('falls back to the default for a non-positive or non-finite timeout', function () {
+            expect(new EncoderClient('http://enc/rpc', '', 0).timeout).to.equal(120000);
+            expect(new EncoderClient('http://enc/rpc', '', -1).timeout).to.equal(120000);
+            expect(new EncoderClient('http://enc/rpc', '', NaN).timeout).to.equal(120000);
+            expect(new EncoderClient('http://enc/rpc', '', 'abc').timeout).to.equal(120000);
         });
 
         it('initialises _rpcId to 0', function () {
@@ -225,15 +242,22 @@ describe('EncoderClient', function () {
             expect(caught.rpcData.required).to.equal(12345);
         });
 
+        // This one is a REAL encoder shape end to end, and is the fixture to copy: a
+        // create_tx OperationalError is the only family the encoder forwards
+        // structurally, as -32010 with data.reason = its xchainCode
+        // (xchain-encoder api.js, the `err.operational === true` branch on create_tx
+        // and create_envelope_cancel_tx). CHANGE_ADDRESS_REQUIRED is one of those
+        // codes; an invented name here is what the first consumer would branch on and
+        // silently never match.
         it('mirrors the encoder code and data.reason on the non-2xx branch, status intact', async function () {
             axiosStub.post.rejects(httpError(400, { jsonrpc: '2.0', id: null, error: {
-                code: -32010, message: 'no change address', data: { reason: 'MISSING_CHANGE_ADDRESS' }
+                code: -32010, message: 'no change address', data: { reason: 'CHANGE_ADDRESS_REQUIRED' }
             } }));
             let c = new EncoderClient('http://enc/rpc', '');
             let caught = null;
             try { await c._call('create_tx', {}); } catch (e) { caught = e; }
             expect(caught.rpcCode).to.equal(-32010);
-            expect(caught.rpcData.reason).to.equal('MISSING_CHANGE_ADDRESS');
+            expect(caught.rpcData.reason).to.equal('CHANGE_ADDRESS_REQUIRED');
             // Same object still, so the retry classifier and the dead-letter record
             // keep reading the HTTP status.
             expect(caught.response.status).to.equal(400);
@@ -241,15 +265,24 @@ describe('EncoderClient', function () {
 
         // The 5xx rule is what keeps an ambiguous send from being re-labelled
         // retry-safe; attaching the structured fields must not disturb it.
+        //
+        // Unlike the create_tx fixture above, this body is DELIBERATELY synthetic and
+        // must not be copied as a wire example. The encoder never sends it: broadcast_tx
+        // collapses every failure to -32010's sibling -32603 with no `data` at all, its
+        // own busy body is -32029 with no reason, and UTXO_TRACKER_STALE reaches a caller
+        // only through create_tx's -32010. The fixture exists to prove the passthrough is
+        // driven by the STATUS and not by the body, so it carries fields the real 5xx
+        // lacks on purpose: a consumer that branches on rpcData.reason after a
+        // broadcast_tx would read undefined in production.
         it('a 5xx keeps its untouched message and its ambiguous classification', async function () {
             axiosStub.post.rejects(httpError(503, { jsonrpc: '2.0', id: null, error: {
-                code: -32000, message: 'Server busy, retry shortly', data: { reason: 'TRACKER_UNAVAILABLE' }
+                code: -32000, message: 'Server busy, retry shortly', data: { reason: 'UTXO_TRACKER_STALE' }
             } }));
             let c = new EncoderClient('http://enc/rpc', '');
             let caught = null;
             try { await c._call('broadcast_tx', { tx_hex: 'ab' }); } catch (e) { caught = e; }
             expect(caught.message).to.equal('Request failed with status code 503');
-            expect(caught.rpcData.reason).to.equal('TRACKER_UNAVAILABLE');
+            expect(caught.rpcData.reason).to.equal('UTXO_TRACKER_STALE');
             expect(isAmbiguousSendError(caught)).to.equal(true);
         });
     });

@@ -53,6 +53,7 @@ const CrossChainDexConsensus = require('./CrossChainDexConsensus.js');
 const { normalizeRetractionBounds } = require('./lib/retraction_bounds.js');
 const { RELAY_MIN_FUTURE_S, relayMarginFloorS } = require('./lib/relay_margin.js');
 const { allCanonicalInts }   = require('./lib/canonical_int.js');
+const snapWrite              = require('./lib/capability_snapshot_write.js');
 const coins                  = require('./coins');
 
 // The INT-backed fields _canonicalMatch signs VERBATIM while the indexer's
@@ -68,6 +69,15 @@ const DEFAULT_POLL_MS = 15000;
 // Min on-chain confirmations a give-side escrow must have before a peer will sign
 // a proposed match (Byzantine safety against matching on a reorg-able escrow).
 const DEFAULT_MIN_CONFIRMATIONS = 1;
+
+// True only for the driver's "this table does not exist" condition, which is the ONE
+// rebuild failure that genuinely means "no finalized matches yet" (a hub whose schema
+// has not been created). db.doQuery rethrows the driver error verbatim, so the
+// structured errno/code survive; message text is not matched, because it is localized
+// and carries the table name.
+function isMissingTableError(e){
+    return !!e && (Number(e.errno) === 1146 || e.code === 'ER_NO_SUCH_TABLE');
+}
 
 class CrossChainDexEngine extends EventEmitter {
 
@@ -119,6 +129,15 @@ class CrossChainDexEngine extends EventEmitter {
         // Rebuilt on startup from cross_chain_matches and kept in sync on finalize/retract.
         this.committed = new Map();
 
+        // Is the ledger above trustworthy? Only a FAILED rebuild falsifies it: an engine
+        // that has never rebuilt has no poll timer and no consensus subscription, so it
+        // can neither propose nor co-sign, and starting out true keeps a construct-only
+        // engine behaving exactly as before. While false, _discoverAndMatch proposes
+        // nothing and validateProposedMatch refuses to sign, because _effectiveRemaining
+        // subtracts this ledger from the full offer amount and an under-counted ledger
+        // re-offers escrow that finalized matches already reserved.
+        this._committedReady = true;
+
         // match_ids currently in a PBFT round but not yet written, so a fast next poll
         // doesn't re-propose the same deterministic fill. Cleared on write/failure;
         // _insertMatchRow is INSERT IGNORE so a slipped duplicate is still harmless.
@@ -132,12 +151,25 @@ class CrossChainDexEngine extends EventEmitter {
         // (legacy knob, e.g. regtest venues pinning 1) > coins.DEFAULT_CONFIRMATIONS[coin].
         // A signing gate only, not signed content: no canonical/flag-day impact.
         let flatMinConf = parseInt(process.env.XDEX_MIN_CONFIRMATIONS || cfg.XDEX_MIN_CONFIRMATIONS);
+        // Clamp an override back up to the per-coin default on mainnet and testnet, the
+        // same raise-only rule coins.resolveConfirmations enforces for XCHAIN_CONFIRMATIONS_<COIN>
+        // (CF-1): a lowered depth here lets this hub co-sign a match against an escrow the rest
+        // of the federation still treats as reorg-able. Regtest keeps the full override.
+        let _confFloored = (this.network === 'mainnet' || this.network === 'testnet');
         this.minConfirmations = {};
         for(const tick of ALLOWED_CHAINS){
             let perCoin = parseInt(process.env['XDEX_MIN_CONFIRMATIONS_' + tick] || cfg['XDEX_MIN_CONFIRMATIONS_' + tick]);
+            let def = coins.DEFAULT_CONFIRMATIONS[tick] || DEFAULT_MIN_CONFIRMATIONS;
             let val = Number.isFinite(perCoin) && perCoin > 0 ? perCoin
                     : (Number.isFinite(flatMinConf) && flatMinConf > 0 ? flatMinConf
-                    : (coins.DEFAULT_CONFIRMATIONS[tick] || DEFAULT_MIN_CONFIRMATIONS));
+                    : def);
+            if(_confFloored && val < def){
+                console.warn('[CrossChainDex] XDEX_MIN_CONFIRMATIONS' + (Number.isFinite(perCoin) && perCoin > 0 ? '_' + tick : '') +
+                    '=' + val + ' is below the ' + this.network + ' floor ' + def + '; clamping to ' + def +
+                    ' (confirmation overrides may only raise the depth on mainnet and testnet; ' +
+                    'regtest keeps the full override)');
+                val = def;
+            }
             this.minConfirmations[tick] = val;
         }
 
@@ -193,32 +225,57 @@ class CrossChainDexEngine extends EventEmitter {
     // Rebuild the committed-fill ledger from finalized matches (restart safety + the
     // authoritative reservation source). Each match contributes its fill amounts to BOTH
     // legs: A gives a_amount / receives b_amount, B gives b_amount / receives a_amount.
+    //
+    // Builds into a LOCAL map and swaps it in only on success, so a failed rebuild can
+    // never leave a cleared or half-populated ledger behind. Only the missing-table
+    // condition is benign; every other failure (deadlock, lost connection, timeout on an
+    // existing table) leaves the previous ledger untouched and clears the readiness flag,
+    // because the old clear-then-swallow-everything shape resolved with ZERO reservations
+    // and let start() proceed to matching against them. Returns true when the ledger is
+    // trustworthy, so the poll tick can retry without a second timer.
     async _rebuildCommitted(){
-        this.committed.clear();
+        let next = new Map();
         try {
             let rows = await this.db.doQuery(
                 "SELECT a_chain, a_action_index, a_amount, b_chain, b_action_index, b_amount " +
                 "FROM cross_chain_matches WHERE status = 'finalized'");
-            for(let r of rows) this._applyCommit(r, +1);
-        } catch(e){ /* table may not exist yet */ }
+            for(let r of rows) this._applyCommit(r, +1, next);
+        } catch(e){
+            if(!isMissingTableError(e)){
+                this._committedReady = false;
+                console.error('CrossChainDex: reservation-ledger rebuild FAILED (' + ((e && e.message) || e) +
+                              '); this hub proposes and co-signs NOTHING until it succeeds, ' +
+                              'because an unrebuilt ledger re-offers escrow already reserved by finalized matches');
+                return false;
+            }
+            next = new Map();   // no table yet: an empty ledger is genuinely correct
+        }
+        if(!this._committedReady)
+            console.log('CrossChainDex: reservation ledger rebuilt (' + next.size + ' offer legs); matching resumes');
+        this.committed       = next;
+        this._committedReady = true;
+        return true;
     }
 
     _offerKey(chain, actionIndex){ return chain + ':' + Number(actionIndex); }
 
     // Apply (sign=+1) or reverse (sign=-1) a match row's fills against both legs' ledgers.
-    _applyCommit(r, sign){
+    // `target` lets _rebuildCommitted accumulate into an off-to-the-side map it only
+    // installs on success; every other caller mutates the live ledger.
+    _applyCommit(r, sign, target){
+        let ledger = target || this.committed;
         let kA = this._offerKey(r.a_chain, r.a_action_index);
         let kB = this._offerKey(r.b_chain, r.b_action_index);
-        let a  = this.committed.get(kA) || { give: '0', get: '0' };
-        let b  = this.committed.get(kB) || { give: '0', get: '0' };
+        let a  = ledger.get(kA) || { give: '0', get: '0' };
+        let b  = ledger.get(kB) || { give: '0', get: '0' };
         let aAmt = String(r.a_amount), bAmt = String(r.b_amount);
         let f = (sign < 0)
             ? (cur, amt) => String(bc.bcsub(cur, amt, 64))
             : (cur, amt) => String(bc.bcadd(cur, amt, 64));
         a.give = f(a.give, aAmt); a.get = f(a.get, bAmt);   // A gives a_amount, receives b_amount
         b.give = f(b.give, bAmt); b.get = f(b.get, aAmt);   // B gives b_amount, receives a_amount
-        this.committed.set(kA, a);
-        this.committed.set(kB, b);
+        ledger.set(kA, a);
+        ledger.set(kB, b);
     }
 
     _committedFor(offer){
@@ -257,6 +314,12 @@ class CrossChainDexEngine extends EventEmitter {
         if(this._matching) return;
         this._matching = true;
         try {
+            // Reservation-ledger gate. _effectiveRemaining below subtracts this.committed
+            // from the full offer amount, so a tick that runs against a ledger which never
+            // rebuilt re-offers escrow already locked into finalized matches. Retry the
+            // rebuild on this tick rather than on a second timer, and propose nothing until
+            // it succeeds; every other engine startCrossChain brings up stays running.
+            if(!this._committedReady && !(await this._rebuildCommitted())) return;
             let offersByCoin = {};
             // Fetch each coin's order book in parallel: the three RPC calls are fully
             // independent (each populates its own offersByCoin slot) and matching runs
@@ -650,26 +713,49 @@ class CrossChainDexEngine extends EventEmitter {
         } catch(e){
             console.error('CrossChainDex: snapshot persist on finalize FAILED (fail-closed; deferring match ' +
                           String(row.match_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
-            this._inflight.delete(row.match_id);
-            if(this.consensus && typeof this.consensus.forgetFinalized === 'function') this.consensus.forgetFinalized(row.match_id);
+            this._deferFinalize(row);
             return;
         }
         if(!persistedRows){
             console.error('CrossChainDex: snapshot persist wrote ZERO capability rows for snapshot_block ' +
                           row.snapshot_block + ' (degraded/empty validator set; fail-closed, deferring match ' +
                           String(row.match_id).substring(0, 16) + '... to a later round)');
-            this._inflight.delete(row.match_id);
-            if(this.consensus && typeof this.consensus.forgetFinalized === 'function') this.consensus.forgetFinalized(row.match_id);
+            this._deferFinalize(row);
             return;
         }
-        let inserted = await this._insertMatchRow(row);
+        // The durable INSERT is the fill, so account it in the reservation ledger BEFORE
+        // any fallible delivery step. A write that throws means nothing was committed
+        // here: defer it exactly as the two preconditions above do, so the next poll
+        // re-proposes rather than the round staying in-flight and retired forever.
+        let inserted;
+        try {
+            inserted = await this._insertMatchRow(row);
+        } catch(e){
+            console.error('CrossChainDex: finalized match row write FAILED (fail-closed; deferring match ' +
+                          String(row.match_id).substring(0, 16) + '... to a later round): ' + (e && e.message));
+            this._deferFinalize(row);
+            return;
+        }
         if(inserted) this._applyCommit(row, +1);
         this._inflight.delete(row.match_id);
+        await this._mirrorMatchRow(row);
         console.log('CrossChainDex: finalized ' + String(row.match_id).substring(0, 16) + '... ' +
                     row.a_chain + ':' + row.a_action_index + ' ⇄ ' + row.b_chain + ':' + row.b_action_index +
                     ' [' + row.a_kind + '/' + row.b_kind + '] fill ' + row.a_amount + '⇄' + row.b_amount +
                     ' (' + (ev.signatures ? ev.signatures.length : 0) + ' sigs)');
         this.emit('match:finalized', { matchId: row.match_id });
+    }
+
+    // Release a match that finalized in PBFT but whose write refused or failed, so the
+    // next poll can re-propose it. Both releases are needed: _inflight gates the poll
+    // and the consensus finalized-ring refuses to re-run a match id it has retired. No
+    // 'match:finalized' event is emitted, because nothing was written in this hub's DB.
+    // Named and shaped to match CrossChainCallEngine._deferFinalize; the two engines are
+    // kept in lockstep by design.
+    _deferFinalize(row){
+        this._inflight.delete(row.match_id);
+        if(this.consensus && typeof this.consensus.forgetFinalized === 'function')
+            this.consensus.forgetFinalized(row.match_id);
     }
 
     // Independent confirmation a peer runs before signing a leader's proposed match:
@@ -678,6 +764,14 @@ class CrossChainDexEngine extends EventEmitter {
     // SAME match_id and canonical. Returns true only when our own view confirms the
     // match. A Byzantine leader cannot get us to sign a match we can't independently see.
     async validateProposedMatch(row){
+        // Reservation-ledger gate. The follower check below is NOT independent of the
+        // leader's: it re-derives filled_before from this same this.committed, so a hub
+        // whose ledger failed to rebuild would co-sign exactly the over-fill it would
+        // have proposed. Refuse to sign rather than sign blind.
+        if(!this._committedReady){
+            console.warn('CrossChainDex: refusing to co-sign a proposed match; the reservation ledger has not rebuilt');
+            return false;
+        }
         if(!row || row.a_chain === row.b_chain) return false;
         // Canonical integer spellings. These fields are signed verbatim but the
         // indexer's settlement pass rebuilds the canonical from the mirrored BIGINT row,
@@ -816,12 +910,42 @@ class CrossChainDexEngine extends EventEmitter {
                 [row.validator_signatures, row.finalizing_view, row.effective_time, row.match_id]);
             if(revive && Number(revive.affectedRows) > 0) inserted = true;
         }
-        // Mirror to indexers: re-read the row (to get its AUTO_INCREMENT id) and broadcast.
-        if(this.broadcaster){
-            let read = await this.db.doQuery('SELECT * FROM cross_chain_matches WHERE match_id = ? LIMIT 1', [row.match_id]);
-            if(read.length) this.broadcaster.broadcastRow({ table: 'cross_chain_matches', row: read[0] });
-        }
+        // The indexer mirror deliberately does NOT happen here. A throw between the durable
+        // write and this return skips the caller's `if(inserted) this._applyCommit(row, +1)`
+        // and leaves a finalized fill in the DB with no reservation in the in-memory ledger;
+        // the next poll then re-offers the same escrow, and since the ledger only rebuilds at
+        // start(), that divergence survives until a restart. _writeFinalizedMatch credits the
+        // ledger first and mirrors afterwards through _mirrorMatchRow, which cannot throw.
         return inserted;
+    }
+
+    // Stream a match row this hub has ALREADY committed to hub-DB mirror subscribers.
+    // Never throws: the fill is durable and the ledger has been credited, so a delivery
+    // failure must not skip the caller's tail. A throw from the re-read and a zero-row
+    // result are the same undeliverable-row event, and dropAllForResync is the sanctioned
+    // repair (StateCheckpointEngine._broadcastRowOrResync and the OracleConsensus
+    // price-round path are the in-repo precedents): the watermark heartbeat advances on
+    // its own wall clock and would otherwise certify completeness past a committed,
+    // quorum-signed match until the socket happened to reconnect.
+    async _mirrorMatchRow(row){
+        let b = this.broadcaster;
+        if(!b) return;
+        if(b.subscribers && b.subscribers.size === 0) return;   // nothing to gap
+        let failure = null;
+        try {
+            let read = await this.db.doQuery('SELECT * FROM cross_chain_matches WHERE match_id = ? LIMIT 1', [row.match_id]);
+            if(read && read.length){
+                b.broadcastRow({ table: 'cross_chain_matches', row: read[0] });
+                return;
+            }
+            failure = 'the committed row read back empty';
+        } catch(e){
+            failure = (e && e.message) ? e.message : String(e);
+        }
+        console.error('CrossChainDex: could not stream a committed cross_chain_matches row to mirror ' +
+                      'subscribers (' + failure + '); forcing subscriber resync');
+        try { if(typeof b.dropAllForResync === 'function') b.dropAllForResync('cross_chain_matches mirror gap'); }
+        catch(_e){ /* the repair itself must never fail a committed match */ }
     }
 
     // Resolve the qualifying validator set, normalized to { pubkey, source, weight, amount }.
@@ -883,13 +1007,12 @@ class CrossChainDexEngine extends EventEmitter {
                          ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
             return 0;
         }
-        for(let v of validators){
-            let pubkey = String(v.pubkey).toLowerCase();
-            let amount = String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0'));
-            let source = String(v.source != null ? v.source : '');
-            await this.db.doQuery(
-                'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?)',
-                [block, capability, pubkey, amount, source]);
+        // One statement for the whole set: a per-row loop left the mirror PARTIAL on any
+        // single INSERT throw, and a partial set has no completeness marker so a verifier
+        // reads it as COMPLETE. Rationale in lib/capability_snapshot_write.js. Parity with
+        // StateCheckpointEngine and the other four writers.
+        let rows = await snapWrite.writeCapabilitySnapshotRows(this.db, capability, block, validators);
+        for(let row of rows){
             if(this.broadcaster){
                 // Select back on the full widened uq_cap_snap
                 // (snapshot_block, capability, signing_pubkey, source). A pubkey-only
@@ -899,7 +1022,7 @@ class CrossChainDexEngine extends EventEmitter {
                 // where source='' and there is one row per key.
                 let r = await this.db.doQuery(
                     'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
-                    [block, capability, pubkey, source]);
+                    [block, capability, row.signing_pubkey, row.source]);
                 if(r.length) this.broadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
             }
         }

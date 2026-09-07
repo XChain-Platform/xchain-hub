@@ -18,13 +18,24 @@ const ProviderRegistry   = require('../../src/ProviderRegistry');
 // Helpers
 // ────────────────────────────────────────────────────────────────────────────
 
+// Mirrors the real hub: XChainHub sets p2pConfig and derives `network` from
+// HUB_NETWORK, and has no `config` property at all. The old fixture fabricated
+// `config: { COIN, NETWORK }`, which is why load() reading hub.config never went
+// red here while it early-returned on every production hub.
 function makeHub(overrides) {
+    let net = overrides && overrides.network !== undefined ? overrides.network : 'mainnet';
     return {
-        config: overrides && overrides.config ? overrides.config : { COIN: 'BTC', NETWORK: 'mainnet' },
-        db:     overrides && overrides.db     ? overrides.db     : {
-            getConfig: sinon.stub().resolves({})
+        p2pConfig: net ? { HUB_NETWORK: net } : null,
+        network:   net,
+        db:        overrides && overrides.db ? overrides.db : {
+            getConfigRowsByModule: sinon.stub().resolves([])
         }
     };
+}
+
+// One configs row as db.getConfigRowsByModule returns it.
+function row(paramName, value, coin) {
+    return { coin: coin || 'Bitcoin', param_name: paramName, param_value: value };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -93,12 +104,12 @@ describe('ProviderRegistry', function () {
     describe('load()', function () {
         it('re-seeds defaults and overlays governance definitions', async function () {
             let db = {
-                getConfig: sinon.stub().resolves({
-                    http_get: JSON.stringify({
+                getConfigRowsByModule: sinon.stub().resolves([
+                    row('http_get', JSON.stringify({
                         provider_id: 'http_get',
                         max_response_bytes: 65536  // governance-raised cap
-                    })
-                })
+                    }))
+                ])
             };
             let hub = makeHub({ db });
             let reg = new ProviderRegistry(hub);
@@ -106,11 +117,71 @@ describe('ProviderRegistry', function () {
             expect(reg.getDef('http_get').max_response_bytes).to.equal(65536);
         });
 
+        // This fixture is production-shaped on purpose: the hub object a real
+        // XChainHub hands the registry carries no `config`, so a namespace resolved
+        // from there stops load() before the read.
+        // Asserting the stored value (not just that a stub was called) is what makes
+        // this go red if the namespace resolution regresses: the built-in default is
+        // 16384, so a skipped read reports 16384 and fails the equality below.
+        it('reads the configs table on a production-shaped hub', async function () {
+            let db = {
+                getConfigRowsByModule: sinon.stub().resolves([
+                    row('llm', JSON.stringify({ provider_id: 'llm', max_response_bytes: 123 }))
+                ])
+            };
+            let hub = { p2pConfig: { HUB_NETWORK: 'mainnet' }, network: 'mainnet', db };
+            let reg = new ProviderRegistry(hub);
+            await reg.load();
+            expect(db.getConfigRowsByModule.calledOnceWithExactly('mainnet', 'ATTESTATION_PROVIDER')).to.be.true;
+            expect(reg.getDef('llm').max_response_bytes).to.equal(123);
+        });
+
+        it('resolves the network from p2pConfig when the hub has no derived field', async function () {
+            let db = {
+                getConfigRowsByModule: sinon.stub().resolves([
+                    row('llm', JSON.stringify({ provider_id: 'llm', max_response_bytes: 456 }))
+                ])
+            };
+            let reg = new ProviderRegistry({ p2pConfig: { HUB_NETWORK: 'testnet' }, db });
+            await reg.load();
+            expect(db.getConfigRowsByModule.calledOnceWithExactly('testnet', 'ATTESTATION_PROVIDER')).to.be.true;
+            expect(reg.getDef('llm').max_response_bytes).to.equal(456);
+        });
+
+        it('keeps the built-in default when two coins disagree about one provider', async function () {
+            // Resolving this by picking a coin would let two hubs read different
+            // limits out of the same table; the ambiguity is refused, loudly.
+            let db = {
+                getConfigRowsByModule: sinon.stub().resolves([
+                    row('llm', JSON.stringify({ provider_id: 'llm', max_response_bytes: 111 }), 'Bitcoin'),
+                    row('llm', JSON.stringify({ provider_id: 'llm', max_response_bytes: 222 }), 'Litecoin')
+                ])
+            };
+            let warn = sinon.stub(console, 'warn');
+            let reg = new ProviderRegistry(makeHub({ db }));
+            await reg.load();
+            expect(reg.getDef('llm').max_response_bytes).to.equal(16384);
+            expect(warn.calledOnce).to.be.true;
+            expect(warn.firstCall.args[0]).to.contain('conflicting definitions');
+        });
+
+        it('applies a definition duplicated identically across coins', async function () {
+            let same = JSON.stringify({ provider_id: 'llm', max_response_bytes: 777 });
+            let db = {
+                getConfigRowsByModule: sinon.stub().resolves([
+                    row('llm', same, 'Bitcoin'), row('llm', same, 'Litecoin')
+                ])
+            };
+            let reg = new ProviderRegistry(makeHub({ db }));
+            await reg.load();
+            expect(reg.getDef('llm').max_response_bytes).to.equal(777);
+        });
+
         it('injects provider_id when the governance def omits it', async function () {
             let db = {
-                getConfig: sinon.stub().resolves({
-                    new_provider: JSON.stringify({ consensus_strategy: 'byte_equality' })
-                })
+                getConfigRowsByModule: sinon.stub().resolves([
+                    row('new_provider', JSON.stringify({ consensus_strategy: 'byte_equality' }))
+                ])
             };
             let hub = makeHub({ db });
             let reg = new ProviderRegistry(hub);
@@ -122,7 +193,9 @@ describe('ProviderRegistry', function () {
 
         it('skips empty or null raw values', async function () {
             let db = {
-                getConfig: sinon.stub().resolves({ badprov: null, emptyprov: '' })
+                getConfigRowsByModule: sinon.stub().resolves([
+                    row('badprov', null), row('emptyprov', '')
+                ])
             };
             let hub = makeHub({ db });
             let reg = new ProviderRegistry(hub);
@@ -133,7 +206,7 @@ describe('ProviderRegistry', function () {
 
         it('warns and skips invalid JSON rows', async function () {
             let db = {
-                getConfig: sinon.stub().resolves({ broken: 'NOT_JSON' })
+                getConfigRowsByModule: sinon.stub().resolves([row('broken', 'NOT_JSON')])
             };
             let hub = makeHub({ db });
             let reg = new ProviderRegistry(hub);
@@ -141,22 +214,26 @@ describe('ProviderRegistry', function () {
             expect(reg.isKnown('broken')).to.be.false;
         });
 
-        it('does not call DB when coin or network is missing', async function () {
-            let db = { getConfig: sinon.stub().resolves({}) };
-            let hub = makeHub({ config: { COIN: '', NETWORK: '' }, db });
+        it('does not call DB when the hub has no network, and says so once', async function () {
+            let db = { getConfigRowsByModule: sinon.stub().resolves([]) };
+            let warn = sinon.stub(console, 'warn');
+            let hub = makeHub({ network: '', db });
             let reg = new ProviderRegistry(hub);
             await reg.load();
-            expect(db.getConfig.called).to.be.false;
+            await reg.load();
+            expect(db.getConfigRowsByModule.called).to.be.false;
+            expect(reg.isKnown('http_get')).to.be.true;
+            expect(warn.calledOnce).to.be.true;
         });
 
         it('does not call DB when db is null', async function () {
-            let hub = { config: { COIN: 'BTC', NETWORK: 'mainnet' }, db: null };
+            let hub = { p2pConfig: { HUB_NETWORK: 'mainnet' }, network: 'mainnet', db: null };
             let reg = new ProviderRegistry(hub);
             await reg.load();  // must not throw
         });
 
         it('handles DB error gracefully', async function () {
-            let db = { getConfig: sinon.stub().rejects(new Error('db down')) };
+            let db = { getConfigRowsByModule: sinon.stub().rejects(new Error('db down')) };
             let hub = makeHub({ db });
             let reg = new ProviderRegistry(hub);
             await reg.load();  // must not throw; defaults still present
@@ -168,7 +245,7 @@ describe('ProviderRegistry', function () {
 
     describe('hotReload()', function () {
         it('re-loads providers and re-injects config into loaded modules', async function () {
-            let db = { getConfig: sinon.stub().resolves({}) };
+            let db = { getConfigRowsByModule: sinon.stub().resolves([]) };
             let hub = makeHub({ db });
             let reg = new ProviderRegistry(hub);
             // Simulate an already-loaded module with _setConfig
@@ -178,8 +255,22 @@ describe('ProviderRegistry', function () {
             expect(setConfigStub.calledOnce).to.be.true;
         });
 
+        // hotReload() is load(), so the same namespace defect made the governance
+        // hot path dead too. Same shape of assertion, driven through hotReload.
+        it('reads the configs table on a production-shaped hub', async function () {
+            let db = {
+                getConfigRowsByModule: sinon.stub().resolves([
+                    row('llm', JSON.stringify({ provider_id: 'llm', max_response_bytes: 123 }))
+                ])
+            };
+            let reg = new ProviderRegistry({ p2pConfig: { HUB_NETWORK: 'mainnet' }, network: 'mainnet', db });
+            await reg.hotReload();
+            expect(db.getConfigRowsByModule.calledOnce).to.be.true;
+            expect(reg.getDef('llm').max_response_bytes).to.equal(123);
+        });
+
         it('does not throw when _setConfig throws', async function () {
-            let db = { getConfig: sinon.stub().resolves({}) };
+            let db = { getConfigRowsByModule: sinon.stub().resolves([]) };
             let hub = makeHub({ db });
             let reg = new ProviderRegistry(hub);
             reg.modules.set('http_get', { _setConfig: sinon.stub().throws(new Error('bad config')) });
@@ -470,9 +561,9 @@ describe('ProviderRegistry', function () {
 
         it('genesis stays pinned to DEFAULTS even when the configs table raised the live floor', async function () {
             let db = {
-                getConfig: sinon.stub().resolves({
-                    llm: JSON.stringify({ provider_id: 'llm', min_stake_xchain: '99999' })
-                }),
+                getConfigRowsByModule: sinon.stub().resolves([
+                    row('llm', JSON.stringify({ provider_id: 'llm', min_stake_xchain: '99999' }))
+                ]),
                 doQuery: sinon.stub().resolves([])
             };
             let reg = new ProviderRegistry(makeHub({ db }));
@@ -534,9 +625,9 @@ describe('ProviderRegistry', function () {
             // into the live def, and a restarted hub would otherwise disagree with a
             // long-running one about which state machine a historical block runs.
             let db = {
-                getConfig: sinon.stub().resolves({
-                    llm: JSON.stringify({ provider_id: 'llm', consensus_strategy: 'byte_equality' })
-                }),
+                getConfigRowsByModule: sinon.stub().resolves([
+                    row('llm', JSON.stringify({ provider_id: 'llm', consensus_strategy: 'byte_equality' }))
+                ]),
                 doQuery: sinon.stub().resolves([])
             };
             let reg = new ProviderRegistry(makeHub({ db }));
@@ -548,7 +639,7 @@ describe('ProviderRegistry', function () {
 
         it('anchors a full-def governance strategy change at its activation block', async function () {
             let db = {
-                getConfig: sinon.stub().resolves({}),
+                getConfigRowsByModule: sinon.stub().resolves([]),
                 doQuery:   sinon.stub().resolves([
                     { parameter: 'ATTESTATION_PROVIDER:llm', activation_block: 7000,
                       proposed_value: JSON.stringify({ provider_id: 'llm', consensus_strategy: 'byte_equality' }) }
@@ -587,7 +678,7 @@ describe('ProviderRegistry', function () {
     describe('loadGovernanceHistory', function () {
         it('anchors a full-def proposal floor at its activation block', async function () {
             let db = {
-                getConfig: sinon.stub().resolves({}),
+                getConfigRowsByModule: sinon.stub().resolves([]),
                 doQuery:   sinon.stub().resolves([
                     { parameter: 'ATTESTATION_PROVIDER:llm', activation_block: 7000,
                       proposed_value: JSON.stringify({ provider_id: 'llm', min_stake_xchain: '30000',
@@ -617,7 +708,7 @@ describe('ProviderRegistry', function () {
                   newValue: JSON.stringify(proposal) });
 
             let db = {
-                getConfig: sinon.stub().resolves({}),
+                getConfigRowsByModule: sinon.stub().resolves([]),
                 doQuery:   sinon.stub().resolves([
                     { parameter: 'ATTESTATION_PROVIDER:llm', activation_block: 7000,
                       proposed_value: JSON.stringify(proposal) }
@@ -634,7 +725,7 @@ describe('ProviderRegistry', function () {
 
         it('leaves the floor untouched for a bare additional_config proposal', async function () {
             let db = {
-                getConfig: sinon.stub().resolves({}),
+                getConfigRowsByModule: sinon.stub().resolves([]),
                 doQuery:   sinon.stub().resolves([
                     { parameter: 'ATTESTATION_PROVIDER:llm', activation_block: 8000,
                       proposed_value: JSON.stringify({ approved_models: ['z'] }) }
@@ -648,7 +739,7 @@ describe('ProviderRegistry', function () {
 
         it('seeds genesis then layers passed ATTESTATION_PROVIDER proposals by activation_block', async function () {
             let db = {
-                getConfig: sinon.stub().resolves({}),
+                getConfigRowsByModule: sinon.stub().resolves([]),
                 doQuery:   sinon.stub().resolves([
                     { parameter: 'ATTESTATION_PROVIDER:llm', activation_block: 3000,
                       proposed_value: JSON.stringify({ additional_config: { approved_models: ['claude-opus-4-8'], judge_model: 'claude-haiku-4-6' } }) },
@@ -665,7 +756,7 @@ describe('ProviderRegistry', function () {
 
         it('accepts a bare additional_config object as proposed_value', async function () {
             let db = {
-                getConfig: sinon.stub().resolves({}),
+                getConfigRowsByModule: sinon.stub().resolves([]),
                 doQuery:   sinon.stub().resolves([
                     { parameter: 'ATTESTATION_PROVIDER:llm', activation_block: 4000,
                       proposed_value: JSON.stringify({ approved_models: ['claude-opus-4-8'] }) }

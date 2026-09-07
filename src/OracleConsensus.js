@@ -39,6 +39,7 @@ const bcmath            = require('./bcmath.js');
 const devband           = require('./lib/deviation_band.js');
 const { isAdmissibleSigner, provenPubkey } = require('./lib/chain_signer_admission.js');
 const { canonicalValidatorOrder } = require('./validator_order.js');
+const snapWrite         = require('./lib/capability_snapshot_write.js');
 const { noteDrop } = require('./consensusDiagnostics');
 
 const ORACLE_PROPOSE = 'ORACLE_PROPOSE';
@@ -56,6 +57,25 @@ const FALLBACK_GRACE_MS = 3000;  // brief grace before fallback proposer takes o
 // the round becomes ready to finalize (block-driven, so every hub uses the same
 // window); receivers apply the same grace before accepting such a fallback PROPOSE.
 const DEFAULT_LEADER_TIMEOUT_MS = 30000;  // 30 seconds (< finalization window)
+
+// Slack the round-abandonment watchdog adds on top of the round's own
+// timer ladder before it declares the round lost and writes the durable skipped
+// record. Wide enough that a round finishing at the very edge of its finalization
+// window (or one re-opened by a PROPOSE that landed late) still wins the race and
+// disarms the watchdog, narrow enough that the record lands long before the next
+// round's boundary (rounds are ~10 minutes apart).
+const DEFAULT_ROUND_ABANDON_GRACE_MS = 15000;
+// Follower freshness bound on the leader-supplied btcBlockHeight in a PROPOSE.
+// Same family and default as StateCheckpointEngine.cosignToleranceBlocks and
+// CrossChainCallEngine's snapshot_block bound: about a day of BTC blocks.
+const DEFAULT_SNAPSHOT_TOLERANCE_BLOCKS = 144;
+// How many times the watchdog defers to a still-live pending round before writing
+// the skipped record anyway. Each deferral is one more finalization window, so a
+// round stuck behind the _armFinalizeRetry DB-outage self-heal gets a bounded
+// chance to land its snapshot first. Bounded, because the point of the watchdog is
+// that SOMETHING durable is written: an unbounded deferral is the silence it exists
+// to end (a later quorum still upgrades the skipped rows to finalized).
+const ROUND_ABANDON_MAX_REARMS = 3;
 
 // Backoff for the self-heal re-drive of a committed round whose snapshot store keeps
 // failing (item 4281, see _armFinalizeRetry). Starts fast because most DB stalls are
@@ -116,6 +136,15 @@ class OracleConsensus extends EventEmitter {
         this._singleSourceRounds    = 0;
         this._lastSingleSourceRound = null;
 
+        // Rounds this hub watched open and then recorded as abandoned,
+        // same counter convention as _roundTimeouts. Distinct from it: a timeout
+        // counts only the two PBFT seats that held a pending round, while the
+        // follower seat that never got a PROPOSE at all left no trace anywhere.
+        // Surfaced as abandoned_rounds through OracleRound.getSubmissionsInfo, so
+        // "this hub keeps losing rounds" is legible without a DB query.
+        this._abandonedRounds    = 0;
+        this._lastAbandonedRound = null;
+
         // When each round became ready to finalize (Date.now() at finalizeRound's
         // follower path). The receiver-side leader-timeout grace in _handlePropose
         // is measured from here so every honest hub applies the same window before
@@ -127,6 +156,19 @@ class OracleConsensus extends EventEmitter {
         // stop() or once the round is taken. Only the elected fallback proposer
         // arms one. Map<round, Timeout>.
         this.leaderTimers = new Map();
+
+        // Armed round-abandonment watchdogs, keyed by round.
+        // Map<round, { timer, btcBlockHeight, btcBlockTime, rearms }>.
+        //
+        // EVERY seat that observes a round open arms one, so a round that dies
+        // between opening and finalizing still becomes a durable 'skipped' record
+        // HERE rather than only on whichever hub happened to take one of the
+        // early store-skipped branches in finalizeRound. Before this, the
+        // follower seats (leader submitted, someone else is the elected fallback)
+        // and both PBFT timeout seats returned in silence, so testnet rounds
+        // 25-27 finalized nowhere and left a row on exactly one of five
+        // validators: the federation could not even agree the rounds happened.
+        this.roundWatchdogs = new Map();
 
         // Already finalized rounds (prevents double-store), bounded FIFO (L1):
         // this set only ever grew (~1 entry per round), leaking for the process
@@ -208,6 +250,25 @@ class OracleConsensus extends EventEmitter {
                 'Intended only for a deliberate single-host deployment.');
         }
         this.leaderTimeout       = parseInt(process.env.ORACLE_LEADER_TIMEOUT_MS) || DEFAULT_LEADER_TIMEOUT_MS;
+        // Follower freshness bound on the leader-supplied btcBlockHeight in a
+        // PROPOSE. That height selects the price snapshot (quorum N), the member set
+        // the round's leader is elected from, and the STAKE_WEIGHTED_QUORUM
+        // activation outcome, and it is a wire field the proposer chose. Same family
+        // and default as StateCheckpointEngine.cosignToleranceBlocks and
+        // CrossChainCallEngine's snapshot_block bound: about a day of BTC blocks, so
+        // honest tip skew between hubs costs a round nothing. 0 is meaningful (pin to
+        // our own tip exactly), hence the non-negative guard rather than `|| default`.
+        this.snapshotToleranceBlocks = parseInt(process.env.ORACLE_SNAPSHOT_TOLERANCE_BLOCKS
+            || String(DEFAULT_SNAPSHOT_TOLERANCE_BLOCKS));
+        if (!(this.snapshotToleranceBlocks >= 0))
+            this.snapshotToleranceBlocks = DEFAULT_SNAPSHOT_TOLERANCE_BLOCKS;
+        // Extra slack on top of the round's own timer ladder before the
+        // abandonment watchdog declares the round lost. Additive only:
+        // _roundAbandonMs() derives the window from the ladder, so a deployment
+        // that widens ORACLE_FINALIZATION_TIMEOUT widens the watchdog with it and
+        // this knob never has to be retuned alongside it.
+        this.roundAbandonGraceMs = positiveIntConfig(process.env.ORACLE_ROUND_ABANDON_GRACE_MS,
+            DEFAULT_ROUND_ABANDON_GRACE_MS, 'ORACLE_ROUND_ABANDON_GRACE_MS');
         // A proposed pair this follower can verify against NOTHING (no live
         // local aggregate AND no finalized history) used to fall through with only
         // the (0, PRICE_MAX) clamp, letting a Byzantine leader who is the sole
@@ -337,6 +398,8 @@ class OracleConsensus extends EventEmitter {
         }
         for (let [, t] of this.leaderTimers) clearTimeout(t);
         this.leaderTimers.clear();
+        for (let [, w] of this.roundWatchdogs) { if (w && w.timer) clearTimeout(w.timer); }
+        this.roundWatchdogs.clear();
         this.pendingRounds.clear();
         this.roundReadyAt.clear();
         this.earlyMessages.clear();
@@ -412,6 +475,11 @@ class OracleConsensus extends EventEmitter {
             if (i !== -1) this._locallySkippedOrder.splice(i, 1);
         }
         if (this.finalized.has(round)) return;
+        // The round reached a durable outcome, so the abandonment watchdog has
+        // nothing left to record. Disarmed here as well as in
+        // _clearRoundTracking, because the single-node finalize path never calls
+        // that.
+        this._disarmRoundWatchdog(round);
         this.finalized.add(round);
         this._finalizedOrder.push(round);
         if (this._finalizedOrder.length > this.finalizedMax) {
@@ -578,6 +646,29 @@ class OracleConsensus extends EventEmitter {
                 : null;
         }
 
+        // No deterministic snapshot on a FEDERATED hub: skip, in both quorum modes. A
+        // null snapshot (indexer down / timeout / 401-403 / malformed) otherwise falls
+        // through to _getQuorum(), which reads this hub's own validatorSet or open-peer
+        // count, so the finalization THRESHOLD becomes a function of local reachability:
+        // at one height a hub holding a seven-member snapshot needs five votes while a
+        // hub whose fetch failed needs three over its live four. The same null also
+        // unfilters the member tally (_countDistinctMembers) and reverts leader election
+        // to live-set rotation. The under-quorum hub then publishes a PRICE v0 the
+        // indexer rejects at its own gate (actions/price.js re-derives the count over
+        // getValidatorsByCapability at the same height), so the degradation buys no
+        // liveness and spends a fee to say so. Consensus.js takes exactly this posture
+        // for config rounds and CrossChainEngine for cross-chain ones; this is that gate,
+        // not a new one. Genuine single-node / regtest bootstrap (_getQuorum() === 0)
+        // keeps the self-finalize path, same federation test as the empty-set guard below.
+        if (!this._hasDeterministicSnapshot(snapshot) && this._getQuorum() > 0) {
+            console.warn('Oracle: Round ' + round + ' has no deterministic price capability snapshot at block ' +
+                btcBlockHeight + ' while this hub is federated; skipping rather than sizing quorum from this ' +
+                'hub\'s live validator set, which peers do not share.');
+            await this._storeSkippedRound(round, btcBlockHeight, btcBlockTime,
+                'no deterministic capability snapshot');
+            return;
+        }
+
         // A federation whose price-qualifying set is empty at this block must skip
         // the round, not self-finalize it: getQuorum(empty)=0 would otherwise take
         // the single-node bypass below and publish a one-signature PRICE v0 the
@@ -653,6 +744,14 @@ class OracleConsensus extends EventEmitter {
             });
             return;
         }
+
+        // Past every early-skip branch: this hub has a usable submission set and a
+        // quorum for the round, so from here the round is OPEN here whatever seat
+        // this hub takes (leader, elected fallback, or a follower that only waits).
+        // Arm the abandonment watchdog before the seat split so all three leave the
+        // same durable record when the round dies. Disarmed by
+        // _clearRoundTracking on finalize and on an immediate skip.
+        this._armRoundWatchdog(round, btcBlockHeight, btcBlockTime);
 
         let leader   = this._getLeader(round, memberPubkeys);
         let myAddr   = this.peerManager.validatorAddr;
@@ -766,9 +865,7 @@ class OracleConsensus extends EventEmitter {
             // _checkPrepareQuorum/_checkCommitQuorum can tally signer stake (the count
             // quorum above is ignored when weighted).
             weighted:       !!weighted,
-            validators:     (weighted && snapshot && Array.isArray(snapshot.validators))
-                ? snapshot.validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), source: String(v.source != null ? v.source : ''), weight: String(v.weight != null ? v.weight : '0') }))
-                : [],
+            validators:     this._normalizeValidators(snapshot, weighted),
             // Snapshot member pubkeys for the count-mode vote tally (Oracle M1).
             // Null (no usable snapshot) keeps the legacy raw-sender count.
             memberPubkeys:  memberPubkeys || null
@@ -867,6 +964,27 @@ class OracleConsensus extends EventEmitter {
     _addVote(voteSet, envelope) {
         let pk = provenPubkey(envelope);
         if (pk) voteSet.add(pk);
+    }
+
+    // Normalize a locked snapshot's validators into the source-keyed shape the
+    // weighted predicate needs ([{pubkey:lower, source, weight}]); [] in count mode.
+    // Mirrors Consensus._normalizeValidators, including the truncation carry.
+    //
+    // SWQ-TRUNC parity: the marker is a plain array property CapabilitySnapshot sets on
+    // the SNAPSHOT, so the .map below drops it while meetsStakeThreshold reads it off the
+    // array it is handed. Without the carry a round locked over a capped snapshot loses
+    // its fail-closed guard and an under-counted S lets a minority of stake clear the 2/3
+    // bar. Same one-liner as the sibling rebuilds in this file (:2083) and in
+    // CrossChainDexEngine.js / StakeShareWatcher.js.
+    _normalizeValidators(snapshot, weighted) {
+        if (!weighted || !snapshot || !Array.isArray(snapshot.validators)) return [];
+        let out = snapshot.validators.map(v => ({
+            pubkey: String(v.pubkey).toLowerCase(),
+            source: String(v.source != null ? v.source : ''),
+            weight: String(v.weight != null ? v.weight : '0')
+        }));
+        if (snapshot.truncated === true) out.truncated = true;
+        return out;
     }
 
     // Pubkey set of a locked capability snapshot, or null when there is no usable
@@ -978,6 +1096,40 @@ class OracleConsensus extends EventEmitter {
                     }
                     blockHeight = round;
                 }
+                // Freshness bound (fail closed), the missing half of the guard above,
+                // which closes only the ABSENT-height case. A present but ancient
+                // height is refused by nothing downstream: CapabilitySnapshot's echo
+                // check rejects a MISMATCHED echo, and the indexer fail-closes only
+                // above its own tip, so an old-but-indexed block resolves a perfectly
+                // valid snapshot. That hands the proposer three choices at once: the
+                // quorum denominator (getQuorum(snap)), the member set that
+                // _getLeader elects from (so it can pick a height where it is the
+                // round's leader and the legitimacy check then validates it against
+                // its own choice), and the weighted-vs-count mode the guard below
+                // calls a federation-split hazard. Bound the wire height against our
+                // own resolved BTC tip before any of the three read it, and decline
+                // when we cannot resolve a tip of our own. Same shape and tolerance as
+                // StateCheckpointEngine's co-sign guard. Federated hubs only, like
+                // every other fail-closed guard on this path.
+                if (this._getQuorum() > 0) {
+                    let myTip = this.hub && this.hub._resolveBtcLatestBlock
+                        ? await this.hub._resolveBtcLatestBlock()
+                        : null;
+                    if (!Number.isFinite(Number(myTip))) {
+                        console.warn('Oracle: dropping PROPOSE for round ' + round + ': cannot resolve ' +
+                            'our own BTC tip to bound the leader-supplied snapshot height ' +
+                            '(federated hub).');
+                        return;
+                    }
+                    if (Math.abs(Number(myTip) - Number(blockHeight)) > this.snapshotToleranceBlocks) {
+                        console.warn('Oracle: dropping PROPOSE for round ' + round + ': block height ' +
+                            blockHeight + ' deviates from our own BTC tip ' + myTip + ' by more than ' +
+                            this.snapshotToleranceBlocks + ' blocks (federated hub); a stale height would ' +
+                            'let the proposer select the price snapshot, the round leader and the ' +
+                            'quorum mode.');
+                        return;
+                    }
+                }
                 // Same activation gate + weight snapshot the leader locked in finalizeRound,
                 // so this follower tallies the round identically (weighted on stake or legacy
                 // on count), keyed on the round's BTC block boundary + the hub's network.
@@ -1009,6 +1161,20 @@ class OracleConsensus extends EventEmitter {
                     snap = this.hub.capabilitySnapshot
                         ? await this.hub.capabilitySnapshot.getSnapshot('price', blockHeight)
                         : null;
+                }
+                // Follower twin of the leader-side deterministic-snapshot gate in
+                // finalizeRound, in BOTH quorum modes and in the same position relative to
+                // the empty-snapshot check, so a leader and a follower refuse exactly the
+                // same rounds. Without it this follower opens a pending round sized from
+                // its own live set (quorumForRound falls through to _getQuorum below) with
+                // memberPubkeys null, so its vote tally is unfiltered and its leader
+                // election is live-set rotation: three ways to disagree with every peer at
+                // the same height on nothing but its own indexer reachability.
+                if (!this._hasDeterministicSnapshot(snap) && this._getQuorum() > 0) {
+                    console.warn('Oracle: dropping PROPOSE for round ' + round + ': no deterministic price ' +
+                        'capability snapshot at block ' + blockHeight + ' while federated; refusing to open a ' +
+                        'pending round sized from this hub\'s live validator set.');
+                    return;
                 }
                 quorumForRound = snap
                     ? this.hub.capabilitySnapshot.getQuorum(snap)
@@ -1325,9 +1491,7 @@ class OracleConsensus extends EventEmitter {
                 snapshot:       snap || null,
                 quorum:         quorum,
                 weighted:       !!wt,
-                validators:     (wt && snap && Array.isArray(snap.validators))
-                    ? snap.validators.map(v => ({ pubkey: String(v.pubkey).toLowerCase(), source: String(v.source != null ? v.source : ''), weight: String(v.weight != null ? v.weight : '0') }))
-                    : [],
+                validators:     this._normalizeValidators(snap, wt),
                 // Snapshot member pubkeys for the count-mode vote tally (Oracle M1).
                 memberPubkeys:  memberPubkeys || null,
                 timer:          setTimeout(() => {
@@ -1346,6 +1510,12 @@ class OracleConsensus extends EventEmitter {
                 }, this.finalizationTimeout)
             };
             this.pendingRounds.set(round, pending);
+            // A PROPOSE is the other way a round becomes OPEN on this hub: a seat
+            // whose own finalizeRound never ran for this round (its round scheduler
+            // missed the boundary, or it had no submissions of its own) still
+            // observed the round through gossip and must hold a record of it.
+            // Idempotent with the finalizeRound arming.
+            this._armRoundWatchdog(round, pending.btcBlockHeight, pending.btcBlockTime);
             // Replay any PREPARE/COMMIT that arrived while this handler was
             // awaiting the snapshot fetch above (finding F7).
             this._drainEarlyMessages(round);
@@ -1754,22 +1924,67 @@ class OracleConsensus extends EventEmitter {
         // withhold or slash. Uses the hardcoded constant (not an env value) and bignumber
         // math so every hub gates identically.
         // CONSENSUS-CRITICAL: deploy fleet-wide atomically.
-        if (values.length % 2 === 0) {
-            let lo = values[mid - 1].s, hi = values[mid].s; // sorted ascending, both > 0
-            if (devband.twoSourceSpreadExceeds(lo, hi, ORACLE_DEVIATION_THRESHOLD, 18)) {
-                console.warn('Oracle: dropping ' + coinPair + ' this round: the two middle values '
-                    + 'disagree beyond the ' + (ORACLE_DEVIATION_THRESHOLD * 100) + '% mean-deviation gate ('
-                    + lo + ' vs ' + hi + '), so the published mean would put every submitter outside the band');
-                return null;
-            }
-        }
-
+        //
+        // The gate measures the ROUNDED median, not the exact midpoint (item 7067). The
+        // exact-midpoint form ((hi-lo)/(hi+lo)) answered a question no other gate asks:
+        // the price a co-signer receives is the 8-decimal median computed below, and
+        // rounding moves it off the midpoint by up to half an ulp, which is enough to
+        // straddle the band. Measured, not reasoned: 0.09500010 and 0.10500011 spread
+        // 0.049999997500002625 (inside), median 0.10000011, and the low submission then
+        // sits 0.0500000449999505 from THAT (outside). A follower re-deriving over the
+        // proposer-excluded set lands on 0.09500010, trips the identical band in
+        // _handlePropose, and rejects the WHOLE proposal, so one boundary pair wedges the
+        // round in a finalization timeout. Both middles are checked because rounding moves
+        // the reference toward one of them and away from the other, so either can be the
+        // far side; with 8-decimal submissions (what every producer emits) that is the
+        // only difference from the midpoint form, and it is strictly the safe direction.
+        // Both SIDES are quantized to 8 decimals first, because that is the comparison
+        // _handlePropose actually performs: the follower's local aggregate is itself an
+        // 8-decimal median, so measuring a raw sub-8-decimal submission against a rounded
+        // reference would score quantization error as feed disagreement and drop a pair
+        // every submitter agreed on exactly (found by the fuzz property, at 1.05e-8: one
+        // 8-decimal ulp is 5% of a price that small).
+        //
         // Compute median in bignumber (no float midpoint average / .toFixed artifact)
         let median;
         if (values.length % 2 === 0) {
             median = bcmath.bcformat(bcmath.bcdiv(bcmath.bcadd(values[mid - 1].s, values[mid].s, 8), '2', 8), 8);
         } else {
             median = bcmath.bcformat(values[mid].s, 8);
+        }
+
+        // deviation_band's stated precondition: a zero reference makes bcdiv's guard
+        // return deviation 0, so every gate below it would pass vacuously. A median that
+        // rounds to zero is also not a price anything can be denominated in, so drop the
+        // pair rather than federation-sign a 0.00000000. Unreachable from an 8-decimal
+        // producer, which already refuses a value that formats to zero.
+        if (!bcmath.bcgt(median, '0')) {
+            console.warn('Oracle: dropping ' + coinPair + ' this round: the aggregate rounds to '
+                + median + ' at 8 decimals, which is not a publishable price');
+            return null;
+        }
+
+        if (values.length % 2 === 0) {
+            // sorted ascending, both > 0; quantized to the published scale (see above)
+            let lo = bcmath.bcformat(values[mid - 1].s, 8), hi = bcmath.bcformat(values[mid].s, 8);
+            // Only a DISAGREEMENT is gated. When both middles quantize to the same price
+            // there is one camp, not two, and the mean is that camp's own value: this gate
+            // has nothing to say. It is scoped that way deliberately rather than by
+            // accident, because the median is computed by rounding the SUM to 8 decimals
+            // and then rounding the quotient again, and at magnitudes near the 8-decimal
+            // ulp that double rounding can land a unanimous set one ulp off its own value
+            // (1.425e-7 -> 0.00000015). That is a defect in the median arithmetic, which
+            // is federation-uniform and out of scope here; leave its behaviour exactly as
+            // it is rather than change it silently under a gate change.
+            if (lo !== hi &&
+                (devband.exceedsBand(lo, median, ORACLE_DEVIATION_THRESHOLD, 18) ||
+                 devband.exceedsBand(hi, median, ORACLE_DEVIATION_THRESHOLD, 18))) {
+                console.warn('Oracle: dropping ' + coinPair + ' this round: the two middle values '
+                    + 'disagree beyond the ' + (ORACLE_DEVIATION_THRESHOLD * 100) + '% mean-deviation gate ('
+                    + lo + ' vs ' + hi + '), so the published price ' + median
+                    + ' would put every submitter outside the band');
+                return null;
+            }
         }
         return this._clampToLastFinalized(coinPair, median);
     }
@@ -2006,17 +2221,16 @@ class OracleConsensus extends EventEmitter {
                 ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
             return 0;
         }
-        for (let v of validators) {
-            let pubkey = String(v.pubkey).toLowerCase();
-            let amount = String(v.weight != null ? v.weight : (v.amount != null ? v.amount : '0'));
-            let source = String(v.source != null ? v.source : '');
-            await this.db.doQuery(
-                'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?)',
-                [block, capability, pubkey, amount, source]);
+        // One statement for the whole set: a per-row loop left the mirror PARTIAL on any
+        // single INSERT throw, and a partial set has no completeness marker so a verifier
+        // reads it as COMPLETE. Rationale in lib/capability_snapshot_write.js. Parity with
+        // StateCheckpointEngine and the other four writers.
+        let rows = await snapWrite.writeCapabilitySnapshotRows(this.db, capability, block, validators);
+        for (let row of rows) {
             if (this.hub && this.hub.hubDbBroadcaster) {
                 let r = await this.db.doQuery(
                     'SELECT * FROM capability_snapshots WHERE snapshot_block = ? AND capability = ? AND signing_pubkey = ? AND source = ? LIMIT 1',
-                    [block, capability, pubkey, source]);
+                    [block, capability, row.signing_pubkey, row.source]);
                 if (r.length) this.hub.hubDbBroadcaster.broadcastRow({ table: 'capability_snapshots', row: r[0] });
             }
         }
@@ -2306,6 +2520,89 @@ class OracleConsensus extends EventEmitter {
             clearTimeout(t);
             this.leaderTimers.delete(round);
         }
+        this._disarmRoundWatchdog(round);
+    }
+
+    // --- Round-abandonment watchdog ---
+
+    // How long after a round opens here this hub waits before calling it lost.
+    // Derived from the round's own timer ladder (leader timeout -> fallback grace
+    // -> finalization window) plus slack, so it is always the LAST timer to fire
+    // and never pre-empts a round that is still legitimately in flight.
+    _roundAbandonMs() {
+        return this.leaderTimeout + FALLBACK_GRACE_MS + this.finalizationTimeout
+             + this.roundAbandonGraceMs;
+    }
+
+    // Arm the watchdog for a round this hub has observed OPEN: it saw a usable
+    // submission set at the block boundary, or a peer's PROPOSE opened the round
+    // here. Idempotent per round, and a no-op once the round already has a durable
+    // outcome (finalized, or a skipped row already stored).
+    //
+    // btcBlockHeight/btcBlockTime are the round's real BTC anchor, carried so the
+    // skipped row this may eventually write names the SAME (round, reference_block,
+    // block_timestamp) every other hub writes. Re-deriving them at fire time would
+    // stamp each hub's rows with its own wall clock and make the per-round presence
+    // digests differ for a round every hub actually agreed on.
+    _armRoundWatchdog(round, btcBlockHeight, btcBlockTime) {
+        if (this.finalized.has(round) || this.locallySkipped.has(round)) return;
+        if (this.roundWatchdogs.has(round)) return;
+        let entry = {
+            timer:          null,
+            btcBlockHeight: btcBlockHeight,
+            btcBlockTime:   btcBlockTime,
+            rearms:         0
+        };
+        this.roundWatchdogs.set(round, entry);
+        this._scheduleRoundWatchdog(round, entry, this._roundAbandonMs());
+    }
+
+    _scheduleRoundWatchdog(round, entry, delay) {
+        entry.timer = setTimeout(() => this._onRoundAbandoned(round), delay);
+        // A watchdog must never be the reason the process stays alive; stop() is
+        // what tears it down on a clean shutdown, matching the leader timers.
+        if (entry.timer && typeof entry.timer.unref === 'function') entry.timer.unref();
+    }
+
+    _disarmRoundWatchdog(round) {
+        let entry = this.roundWatchdogs.get(round);
+        if (!entry) return;
+        if (entry.timer) clearTimeout(entry.timer);
+        this.roundWatchdogs.delete(round);
+    }
+
+    // The round opened here and never reached a durable outcome. Write the skipped
+    // record so this hub's absence of a snapshot is a stated fact rather than a
+    // hole, and so hub-to-hub presence comparison (getoracleroundpresence) can tell
+    // "we all lost this round" apart from "this hub never saw it".
+    _onRoundAbandoned(round) {
+        let entry = this.roundWatchdogs.get(round);
+        if (!entry) return;
+        if (this.finalized.has(round) || this.locallySkipped.has(round)) {
+            this.roundWatchdogs.delete(round);
+            return;
+        }
+        // Still in flight (a late PROPOSE re-opened it, or _armFinalizeRetry is
+        // re-driving a quorum-signed round behind a DB stall). Give it another
+        // finalization window, bounded, then record regardless.
+        let pending = this.pendingRounds.get(round);
+        if (pending && entry.rearms < ROUND_ABANDON_MAX_REARMS) {
+            entry.rearms++;
+            this._scheduleRoundWatchdog(round, entry,
+                this.finalizationTimeout + this.roundAbandonGraceMs);
+            return;
+        }
+        this.roundWatchdogs.delete(round);
+        this._abandonedRounds++;
+        this._lastAbandonedRound = round;
+        console.warn('Oracle: Round ' + round + ' opened here but never finalized; ' +
+            'recording it as abandoned so this hub holds a durable record of the round.');
+        // NOT _markFinalized: the skip is local and reprocessable, so a late
+        // federation quorum still upgrades these rows to 'finalized' (#7).
+        this._storeSkippedRound(round, entry.btcBlockHeight, entry.btcBlockTime,
+            'round abandoned before finalization').catch(err =>
+                console.error('Oracle: Error storing abandoned round ' + round + ':',
+                    err && err.message ? err.message : err));
     }
 
     // Hub F3: when the round has a block-locked snapshot, the leader
@@ -2399,13 +2696,24 @@ class OracleConsensus extends EventEmitter {
     // federation test is `_getQuorum() > 0` (validatorSet has >=2 registered
     // members, or a live peer is connected); a genuine single-node / regtest
     // bootstrap has `_getQuorum() === 0`, so it keeps the self-finalize path. A
-    // null snapshot (indexer unreachable) is NOT this case: that is the separate
-    // graceful-degradation-to-live-count path and is left untouched.
+    // null snapshot (indexer unreachable) is a DIFFERENT case, handled one guard
+    // earlier on both round paths by _hasDeterministicSnapshot.
     _isEmptyFederationSnapshot(snapshot) {
         if (!snapshot) return false;
         let vals = snapshot.validators;
         let empty = !Array.isArray(vals) || vals.length === 0;
         return empty && this._getQuorum() > 0;
+    }
+
+    // Fail-closed gate for a federated hub: a block-anchored snapshot is what makes the
+    // round's N the SAME number on every hub. Null (indexer down / timeout / 401-403 /
+    // malformed) is not a smaller federation, it is an unknown one, and sizing quorum
+    // from local live state at that point makes the finalization threshold a function of
+    // this hub's reachability. Present-but-EMPTY is a different case (a real, agreed-upon
+    // zero-qualifier set) and is handled by _isEmptyFederationSnapshot.
+    // Mirrors Consensus._hasDeterministicSnapshot.
+    _hasDeterministicSnapshot(snapshot) {
+        return !!(snapshot && Array.isArray(snapshot.validators));
     }
 
     // Canonicalize the digest PREIMAGE, not just hash whatever array

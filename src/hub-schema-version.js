@@ -19,11 +19,11 @@
  * when ANY table in the indexer's mirror set gains a DDL change a stale indexer
  * cannot interpret, and equally when the mirror SET itself gains a table (a table
  * a stale indexer does not know about is a row shape it cannot interpret either,
- * it just fails by omission instead of by column). As of now that set is seven
+ * it just fails by omission instead of by column). As of now that set is eight
  * tables: oracle_prices, price_snapshots, cross_chain_matches, cross_chain_calls,
- * capability_snapshots, state_checkpoints, anchor_reward_attestations (see
- * xchain-indexer/src/hub_db_sync.js RETRACTION_COLUMNS + CROSS_CHAIN_TABLES +
- * HUB_STATE_TABLES). oracle_prices and cross_chain_matches gate the settlement
+ * capability_snapshots, state_checkpoints, anchor_reward_attestations,
+ * attestation_responses (see xchain-indexer/src/hub_db_sync.js RETRACTION_COLUMNS +
+ * CROSS_CHAIN_TABLES + HUB_STATE_TABLES). oracle_prices and cross_chain_matches gate the settlement
  * barriers waitForOracleSyncTimestamp / waitForMatchSync, so omitting them here
  * is a ledger-fork risk. The indexer rejects a version mismatch so a hub-side
  * column added before the indexer migrates cannot be silently dropped and fork
@@ -54,6 +54,16 @@
 // COLLECT-spendable reward for an anchor it cannot show ever landed. Fail closed
 // instead: a stale indexer must reject this stream until it has applied the
 // 2026-08-13-anchor-reward-attestations-doge-anchor-txid migration.
-const HUB_SCHEMA_VERSION = 4;
+//
+// v5: the mirror set gained attestation_responses (hub_db_sync
+// HUB_STATE_TABLES). It carries a finalized ATTEST response, signed by the
+// responsible set over the mirror-era canonical, so the response no longer
+// needs a validator-paid on-chain ATTEST v1 transaction and its Bitcoin fee
+// (the ATTEST response mirror design). A stale indexer does not
+// merely miss rows here: without the table it never learns that a response
+// finalized at all, so the request it is waiting on times out instead of
+// resolving. A stale indexer must reject this stream until it has applied
+// the 2026-09-03-attestation-responses migration.
+const HUB_SCHEMA_VERSION = 5;
 
 module.exports = { HUB_SCHEMA_VERSION };

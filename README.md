@@ -4,8 +4,8 @@
 # XChain Platform Hub
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.12.3-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tests-5%2C447%2B%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/version-0.15.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/tests-5%2C977%2B%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node">
   <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License">
 </p>
@@ -129,14 +129,21 @@ self-tests fail ("config missing"), and capabilities have no `MIN_STAKE` so they
 stay **inactive** (the hub now fails closed rather than qualifying at a 0 threshold).
 The file is hot-reloaded; edits apply without a restart.
 
+**Every capability in the canonical registry must appear here**, with the
+`MIN_STAKE` the pinned coin bundle carries (`src/coins/BTC.js`
+`STAKING.CAPABILITIES`). A capability left out has no qualifying floor, so the
+hub cannot build its snapshot and every consensus round for it fails closed;
+the hub therefore refuses to start on any network and names the capability.
+`XCHAIN_HUB_SKIP_MIN_STAKE_ASSERT=1` bypasses the check loudly.
+
 ```json
 {
   "CAPABILITIES": {
     "price":          { "MIN_STAKE": "1000.00000000" },
-    "cross_chain":    { "MIN_STAKE": "1000.00000000" },
+    "cross_chain":    { "MIN_STAKE": "5000.00000000" },
     "oracle_publish": { "MIN_STAKE": "500.00000000"  },
     "attestation":    { "MIN_STAKE": "1000.00000000" },
-    "full_node":      { "MIN_STAKE": "1000.00000000" }
+    "full_node":      { "MIN_STAKE": "2000.00000000" }
   },
   "DISABLED_CAPABILITIES": [],
   "price":          { "sources": ["coingecko"], "fiats": ["USD"] },
@@ -187,25 +194,41 @@ editing it, re-run `bin/sync-observability.sh` to refresh the vendored copies in
 the sibling services; drift fails the parity check CI runs across those copies,
 which you can run locally with `bin/sync-observability.sh --check`.
 
+### Shim controls, and the defaults in force
+
+These four names configure the shim itself. The fleet deploy path carries them
+into the container: `xchain-node` forwards any of them set in the module config
+store or in the deploy host's environment (`ModuleService.resolveObservabilityEnv`),
+and the validator compose files under `claude/deploy/testnet-validators/` name
+them outright. Nothing is fabricated when neither source sets one, so these
+defaults hold on an unconfigured box:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `LOG_LEVEL` | `info` | Lowest level emitted. `debug` \| `info` \| `warn` \| `error`; an unrecognised value falls back to `info`. |
+| `LOG_FORMAT` | `text` | `text` emits `<iso-ts> <level> [<service>] <msg> key=value`; `json` emits one NDJSON record per line. |
+| `METRICS_ENABLED` | `false` | Registers the `/metrics` route. The counter registry is built either way, so counters are collected whether or not the route is exposed. |
+| `XCHAIN_LOG_PATCH` | `1` | Routes bare `console.*` calls through the shim so they carry the level and service prefix. `0` leaves `console` untouched, which is what the test bootstrap sets. |
+
 ## Scripts
 
 | Command | Description |
 |---|---|
 | `npm run api` | Start the hub API server |
 | `bin/run-db-tiers.sh` | Run the DB-backed tiers against a throwaway MariaDB it starts and drops |
-| `npm test` | Run unit tests (~4,645 tests) |
+| `npm test` | Run unit tests (~5,174 tests) |
 | `npm run test:integration` | Integration tests (~89 tests, requires MariaDB) |
 | `npm run test:e2e` | End-to-end tests (~70 tests, requires full stack) |
 | `npm run test:fuzz` | Fuzz tests (property-based via fast-check, 90 tests) |
 | `npm run test:chaos` | Chaos engineering tests (81 tests) |
 | `npm run test:smoke` | Smoke tests (quick sanity check, 25 tests) |
-| `npm run test:regression` | Regression tests (tagged across all suites, 235 tests) |
-| `npm run test:regression:p0` | P0-priority regression tests (109 tests) |
-| `npm run test:regression:p0p1` | P0+P1 regression tests (194 tests) |
+| `npm run test:regression` | Regression tests (tagged across all suites, 236 tests) |
+| `npm run test:regression:p0` | P0-priority regression tests (110 tests) |
+| `npm run test:regression:p0p1` | P0+P1 regression tests (195 tests) |
 | `npm run test:perf` | All performance tests (50 tests) |
 | `npm run test:mutate` | Mutation tests (Stryker) |
 | `npm run test:mutate:pilot` | Pilot mutation tests (phase 1) |
-| `npm run test:all` | Complete test suite (5,447 tests) |
+| `npm run test:all` | Complete test suite (5,977 tests) |
 
 ### Running the DB-backed tiers
 
@@ -265,7 +288,7 @@ All methods are called via HTTP POST with JSON-RPC 2.0 format. See [API Referenc
 |---|---|
 | Config | `ping`, `getallconfigs`, `updateconfig` |
 | Validators | `registervalidator`, `syncvalidators`, `getvalidators`, `getvalidatorstatus` |
-| Oracle | `getoraclesubmissions`, `getpricesnapshots`, `getprice` |
+| Oracle | `getoraclesubmissions`, `getpricesnapshots`, `getoracleroundpresence`, `getprice` |
 | Fees | `getfeequote` |
 | Cross-Chain | `requestattestation`, `getattestation`, `getattestations` |
 | Swaps | `initiateswap`, `getswap`, `getswaps` |

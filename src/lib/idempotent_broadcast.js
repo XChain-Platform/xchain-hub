@@ -27,8 +27,12 @@
  *     failure talking to the node) is AMBIGUOUS: a blind retry could double-spend
  *     the fee and double-anchor the work. Callers tag the error and defer instead
  *     of re-broadcasting. The RPC-error envelope alone is NOT proof of a
- *     rejection; see ENCODER_TRANSPORT_FALLBACK below. (Was duplicated verbatim
- *     as _isAmbiguousSendError in Oracle/Attest/Anchor/FullNode.)
+ *     rejection; see ENCODER_TRANSPORT_FALLBACK below. Nor is a definitive
+ *     rejection proof that NO money moved: a multi-phase signer hook can be
+ *     rejected on its reveal after its funding transaction is already on chain,
+ *     so an error carrying `fundsCommitted` is AMBIGUOUS whatever its shape.
+ *     (Was duplicated verbatim as _isAmbiguousSendError in
+ *     Oracle/Attest/Anchor/FullNode.)
  *
  *   AtMostOnce
  *     In-process at-most-once key set: the primitive behind the publishers'
@@ -67,6 +71,16 @@ const ENCODER_TRANSPORT_FALLBACK = 'Transaction broadcast failed';
 
 function isAmbiguousSendError(e){
     if (!e) return false;
+    // Read BEFORE every message and status rule, because it outranks all of them. A
+    // multi-phase signer hook (HUB_SIGNER_MODULE broadcast(), the P2SH fund-then-reveal
+    // pipeline in examples/doge-signer.example.js) puts its funding transaction on chain
+    // and can then be rejected DEFINITIVELY on the reveal. The rules below would read
+    // that rejection as a clean pre-send failure and hand the caller back to its
+    // attempts-and-requeue path, which re-enters the hook, funds fresh UTXOs and pays for
+    // the same payload twice. Money has already moved, so the send is ambiguous by
+    // definition and the caller must dead-letter rather than rebuild. The hook sets the
+    // flag; nothing else in the hub does.
+    if (e.fundsCommitted) return true;
     let message = String(e.message || '');
     // A definitive rejection and an ambiguous transport failure share the SAME
     // 'Encoder RPC error' envelope, so this case is read before the prefix is trusted.
@@ -130,12 +144,19 @@ async function broadcastOnce({ key, tracker, guard, balance, cost, ambiguousTag,
     try {
         result = await send();
     } catch (e){
-        // The send did not go out, so it consumes no budget: release on EVERY throw,
-        // ambiguous included. That keeps the "failed sends consume no budget"
-        // invariant the old post-send record() gave for free, and matches
-        // AttestationPublisher, the in-repo reserve/commit/release exemplar.
-        if (guard) guard.release(token);
-        if (ambiguousTag && isAmbiguousSendError(e)) e[ambiguousTag] = true;
+        // Settle by whether the send WENT OUT, not by whether it threw. An ambiguous
+        // error means the transaction may already be on the wire with its fee paid, so
+        // its reservation is COMMITTED: releasing hands the ceiling back an allowance a
+        // real spend consumed, and the next caller spends past it. Only a definitive
+        // failure (nothing left this process) gives the budget back. Same rule
+        // AttestationRelay and AttestationPublisher state at their own ambiguous
+        // branches; the older wording classified an UNKNOWN outcome as a failure.
+        let ambiguous = isAmbiguousSendError(e);
+        if (guard){
+            if (ambiguous) guard.commit(token);
+            else guard.release(token);
+        }
+        if (ambiguousTag && ambiguous) e[ambiguousTag] = true;
         throw e;
     }
 

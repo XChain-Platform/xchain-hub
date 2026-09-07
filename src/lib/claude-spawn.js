@@ -33,7 +33,10 @@
  *
  * Credentials are resolved via hub-credentials.js; the returned `env` is
  * merged into the child process env so the CLI inherits the OAuth refresh
- * token (or env-var token) without touching the caller's shell env.
+ * token (or env-var token) without touching the caller's shell env. The
+ * competing credential vars the CLI reads on its own are scrubbed from that
+ * copy first, so the ONE source the resolver selected is the only live one
+ * (see CLI_CREDENTIAL_ENV_KEYS below).
  *
  ********************************************************************/
 
@@ -44,6 +47,92 @@ const os = require('os');
 const { resolveHubLlmAuth } = require('./hub-credentials');
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
+
+// Credential env vars the CLI reads on its own. hub-credentials.js declares a
+// resolution order and picks exactly ONE source, so any of these still inherited
+// from the operator's shell is a credential the hub considered and REJECTED --
+// and the CLI, not the resolver, then decides which one bills. That divergence is
+// the resolver's contract broken silently: hub-credentials' own note ("a spawn's
+// CLAUDE_CODE_OAUTH_TOKEN is honoured whatever the dir holds") says an ambient
+// token outranks the selected config dir, so `source: hub_config_dir` could be
+// reported while a stray shell export paid for the call.
+//
+// Scrubbed with `delete`, never assignment to '': an empty string is a value, and
+// nothing here may depend on the CLI reading one as unset. The list must track the
+// CLI's credential surface; ROUTING vars (ANTHROPIC_BASE_URL, CLAUDE_CODE_USE_BEDROCK,
+// CLAUDE_CODE_USE_VERTEX) are deliberately left alone, since an operator pointing the
+// binary at a gateway is a deployment choice this transport does not own.
+const CLI_CREDENTIAL_ENV_KEYS = [
+    'ANTHROPIC_API_KEY',
+    'ANTHROPIC_AUTH_TOKEN',
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'CLAUDE_CONFIG_DIR'
+];
+
+// Build the child env so the resolved source is the only live credential: copy the
+// ambient env, drop every competing key, then apply auth.env LAST. Every claude_spawn
+// branch of resolveHubLlmAuth sets CLAUDE_CONFIG_DIR, so scrubbing it changes nothing
+// today; it is in the list so a future branch that omits it cannot inherit the
+// operator's dir by accident.
+function _childEnv(authEnv) {
+    const env = { ...process.env };
+    for (const key of CLI_CREDENTIAL_ENV_KEYS) delete env[key];
+    return { ...env, ...(authEnv || {}) };
+}
+
+// A VENDOR-AVAILABILITY failure the caller may retry on another model, as opposed to
+// an outcome the model actually produced. The boundary is the one providers/llm.js
+// `_isTransientStatus` draws for the HTTP transports (429 plus any 5xx, 529 included);
+// it is restated here rather than imported because llm.js already requires this module
+// and a back-import would be circular. The two definitions are a pair: move one, move
+// the other.
+const AVAILABILITY_STATUS_RE = /\b(429|500|502|503|504|529)\b/;
+const AVAILABILITY_TEXT_RE   = /overloaded|rate.?limit|too many requests|service unavailable|bad gateway|gateway time-?out|upstream connect error|usage limit reached|session limit/i;
+const AVAILABILITY_ERROR_TYPES = ['overloaded_error', 'rate_limit_error'];
+
+// A DETERMINISTIC refusal never heals, so it must outrank an availability match: the
+// refusal wording can carry a status token of its own, and re-asking a different model
+// would be shopping for an answer the first judge already gave. Same precedence the
+// resolved fallback contract needs, and the same one the sibling classifier in
+// prometheus-guardrails learned from live payloads.
+const REFUSAL_TEXT_RE = /safeguards flagged|flagged by (?:our|the) safeguards|content[ _-]?(?:policy|filter)\s*(?:violation|refusal)|blocked by (?:our|the) (?:content|safety) (?:policy|filter|system)/i;
+
+function _statusOf(value) {
+    let n = Number(value);
+    return Number.isFinite(n) ? n : null;
+}
+
+// Decide whether a non-zero CLI exit reports the VENDOR being unavailable. Reads the
+// structured stdout envelope first (--output-format json carries the vendor's own
+// status and error type on an error run), then the free-form error text, because which
+// stream carries the detail is a CLI implementation detail this module does not own.
+//
+// The text scan is deliberately fed stderr plus the envelope's MESSAGE fields, never
+// the whole stdout blob: a bare status token is matched by word boundary, and a usage
+// or cost figure ("input_tokens":500) would otherwise read as a 500. A miss keeps
+// today's answer, so the worst case of too tight a scan is the behaviour that shipped.
+function _cliFailureIsTransient(stdout, stderr) {
+    let json = null;
+    try { json = JSON.parse(stdout); } catch { /* free-form output; text scan below */ }
+    const envelope = (json && typeof json === 'object') ? json : {};
+    const err = (envelope.error && typeof envelope.error === 'object') ? envelope.error : {};
+
+    const text = [
+        stderr,
+        err.message,
+        envelope.message,
+        envelope.subtype
+    ].map((v) => (typeof v === 'string' ? v : '')).join('\n');
+    if (REFUSAL_TEXT_RE.test(text)) return false;
+
+    for (const status of [_statusOf(envelope.status), _statusOf(err.status), _statusOf(err.code)]) {
+        if (status === 429 || (status >= 500 && status <= 599)) return true;
+    }
+    const type = String(err.type || envelope.type || envelope.subtype || '').toLowerCase();
+    if (AVAILABILITY_ERROR_TYPES.includes(type)) return true;
+
+    return AVAILABILITY_STATUS_RE.test(text) || AVAILABILITY_TEXT_RE.test(text);
+}
 
 // Run claude --print, pipe prompt via stdin, capture parsed JSON result.
 //
@@ -123,13 +212,13 @@ async function runClaudePrint(opts) {
         const child = spawn(CLAUDE_BIN, args, {
             cwd,
             stdio: ['pipe', 'pipe', 'pipe'],
-            env: { ...process.env, ...auth.env }
+            env: _childEnv(auth.env)
         });
 
         // Classification contract shared with the HTTP transports (providers/llm.js):
-        // err.transient=true marks a TRANSPORT failure the judge fallback chain may
-        // retry on a different model; err.transient=false marks a REACHED-CLI outcome
-        // (the process ran and produced a verdict/error) that must NOT trigger
+        // err.transient=true marks a TRANSPORT-or-VENDOR-availability failure the judge
+        // fallback chain may retry on a different model; err.transient=false marks a
+        // REACHED-MODEL outcome (a verdict, a refusal, a hard vendor error) that must NOT trigger
         // re-judging, and err.kind='refusal' marks a model refusal, mirroring the
         // anthropic_api/openai_api paths so refusal reporting is symmetric across
         // vendors. Without this every bare-Error rejection fell through agree()'s
@@ -169,7 +258,18 @@ async function runClaudePrint(opts) {
                 // Non-zero exit is how a CLI-side API 4xx or model-level hard
                 // failure surfaces: the process was reached, so this is not a
                 // transport failure and must not advance the judge chain.
-                rejectHard('claude-spawn: exit ' + code + (stderr ? ': ' + stderr.trim().slice(0, 400) : ''));
+                //
+                // Reaching the CLI is not the same as reaching the MODEL, though, and
+                // the exit code alone cannot tell them apart. A vendor 429/5xx (529
+                // included) surfaces here too, and it is an availability failure with
+                // no verdict behind it: the HTTP transports classify exactly that as
+                // transient and fall over to the next judge, so a hub whose transport
+                // happens to be the CLI must not lose the round to the same outage.
+                // Everything unrecognized -- auth, 4xx, an exhausted --max-budget-usd,
+                // a refusal -- keeps the hard classification.
+                const msg = 'claude-spawn: exit ' + code + (stderr ? ': ' + stderr.trim().slice(0, 400) : '');
+                if (_cliFailureIsTransient(stdout, stderr)) rejectTransient(msg);
+                else                                        rejectHard(msg);
                 return;
             }
             let json;

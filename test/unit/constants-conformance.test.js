@@ -181,3 +181,97 @@ describe('oracle round-interval shared constants (#2653)', () => {
         expect(or.submissionWindow).to.equal(constants.DEFAULT_ORACLE_SUBMISSION_WINDOW_MS);
     });
 });
+
+// #7215: the two PRICE lanes derive their accepted (coin, fiat) universe from two
+// INDEPENDENT literals in this one package, and nothing bound them. v1 push ingest
+// gates on constants.PRICE_V1_COINS / PRICE_V1_FIATS (PriceAggregator.receiveOraclePrice);
+// v0 ingest and PROPOSE co-signing gate on the product PriceFetcher builds from
+// coins.ALLOWED_COINS x its own private FIATS literal (OracleRound's canonicalPairs).
+// The fiat lists were byte-identical by hand and the coin sides equal only by
+// coincidence, so adding a chain to coins/ or a code to either fiat list landed in ONE
+// lane silently: the v0 lane picks up a registry coin automatically while v1 ingest
+// keeps rejecting it as an invalid coin, or a v1-only fiat is accepted on push while
+// no hub ever fetches, whitelists or co-signs the matching pair. The constants.js
+// lockstep comment named only the indexer, never PriceFetcher, so the in-repo half of
+// the coupling was undocumented as well as unguarded.
+describe('PRICE v0 and v1 lanes accept the same coin/fiat universe (#7215)', function () {
+    const fs   = require('fs');
+    const path = require('path');
+    const coins        = require('../../src/coins');
+    const PriceFetcher = require('../../src/PriceFetcher');
+
+    // Split the v0 product back into its two axes. Bound through getCoinPairs()
+    // (the surface OracleRound actually consumes) rather than a new export, so the
+    // gate cannot pass against a list the v0 lane no longer uses.
+    const v0Pairs  = PriceFetcher.getCoinPairs();
+    const v0Coins  = [...new Set(v0Pairs.map(p => p.split('/')[0]))];
+    const v0Fiats  = [...new Set(v0Pairs.map(p => p.split('/')[1]))];
+
+    it('the v1 coin fence equals the v0 lane coin registry', function () {
+        expect(constants.PRICE_V1_COINS,
+            'PRICE_V1_COINS and the v0 lane disagree; a coin added to only one lane is ' +
+            'accepted on that lane and rejected on the other')
+            .to.deep.equal(v0Coins);
+        expect(v0Coins, 'PriceFetcher no longer builds its pairs from coins.ALLOWED_COINS')
+            .to.deep.equal([...coins.ALLOWED_COINS]);
+    });
+
+    it('the v1 fiat fence equals the fiat axis of the v0 pair product', function () {
+        expect(constants.PRICE_V1_FIATS,
+            'PRICE_V1_FIATS and PriceFetcher\'s FIATS literal have drifted; the two lanes ' +
+            'would accept different fiats for the same coin')
+            .to.deep.equal(v0Fiats);
+    });
+
+    it('the full v1 product is exactly the v0 fetched pair set', function () {
+        const v1Pairs = [];
+        for (const coin of constants.PRICE_V1_COINS)
+            for (const fiat of constants.PRICE_V1_FIATS) v1Pairs.push(coin + '/' + fiat);
+        expect(v1Pairs.slice().sort()).to.deep.equal(v0Pairs.slice().sort());
+    });
+
+    // The one deliberate asymmetry, and the reason this gate compares the FETCHED
+    // product rather than OracleRound's canonicalPairs: DERIVED_PAIRS widens what v0
+    // ADMITS without widening what any hub produces, and must never join the v1 fence.
+    it('keeps DERIVED_PAIRS out of the v1 fence', function () {
+        for (const pair of constants.DERIVED_PAIRS) {
+            const [coin, fiat] = pair.split('/');
+            expect(constants.PRICE_V1_COINS,
+                'DERIVED_PAIRS is v0-admission only; ' + coin + ' must not become a v1 coin')
+                .to.not.include(coin);
+            expect(v0Pairs, 'DERIVED_PAIRS must stay out of the FETCHED product too')
+                .to.not.include(pair);
+            expect(fiat).to.be.a('string');
+        }
+    });
+
+    // The indexer is the arbiter for the v1 lane: it rejects these on chain, so a hub
+    // fence wider than the indexer's accepts a push the chain will not carry, and a
+    // narrower one refuses a push the chain accepted. Same required-sibling policy as
+    // the mirror gate above, so bin/ci-all.sh can never pass this green-by-skip.
+    it('the indexer config agrees with both lanes', function () {
+        const REPO_ROOT = (function () {
+            let dir = __dirname;
+            while (!fs.existsSync(path.join(dir, 'package.json'))) {
+                const up = path.dirname(dir);
+                if (up === dir) throw new Error('no package.json above ' + __dirname);
+                dir = up;
+            }
+            return dir;
+        })();
+        const abs = path.join(path.dirname(REPO_ROOT), 'xchain-indexer', 'src', 'config.js');
+        if (!fs.existsSync(abs)) {
+            if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1')
+                throw new Error('price-lane parity gate cannot run: xchain-indexer/src/config.js ' +
+                    'missing at ' + abs + '; XCHAIN_REQUIRE_SIBLINGS=1 forbids the green-by-skip');
+            this.skip();
+            return;
+        }
+        const resolved = require.resolve(abs);
+        delete require.cache[resolved];
+        const cfg = require(resolved).getConfig('BTC', 'mainnet');
+        expect(cfg.COINS, 'indexer COINS vs hub PRICE_V1_COINS').to.deep.equal(constants.PRICE_V1_COINS);
+        expect(Object.keys(cfg.FIATS), 'indexer FIATS vs hub PRICE_V1_FIATS')
+            .to.deep.equal(constants.PRICE_V1_FIATS);
+    });
+});

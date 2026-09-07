@@ -736,6 +736,51 @@ describe('CrossChainCallEngine', function () {
             expect(forget.calledWith(row.round_id)).to.equal(true);
         });
 
+        // The finalized-row INSERT sat outside any recovery: a throw left _inflight set
+        // and the round retired in consensus, and because the round id is derived from
+        // phase + call_id alone, every later poll returned at the _inflight guard and the
+        // dispatch (or result) could never be recovered, even after the DB came back.
+        it('_writeFinalizedRow defers instead of wedging the round when the INSERT throws', async function () {
+            const { engine, db, broadcaster } = makeEngine();
+            const row = finalizeRow();
+            const forget = engine.consensus.forgetFinalized;
+            engine._inflight.add(row.round_id);
+            sinon.stub(engine, '_persistCapabilitySnapshot').resolves(3);
+            const real = engine.db.doQuery.bind(engine.db);
+            sinon.stub(engine.db, 'doQuery').callsFake(async (sql, params) => {
+                if (String(sql).startsWith('INSERT INTO cross_chain_calls')) throw new Error('deadlock');
+                return real(sql, params);
+            });
+
+            await engine._writeFinalizedRow({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
+
+            expect(db.rows.length, 'nothing was written').to.equal(0);
+            expect(broadcaster.broadcastRow.called).to.equal(false);
+            expect(engine._inflight.has(row.round_id), 'the in-flight slot must be released').to.equal(false);
+            expect(forget.calledWith(row.round_id), 'the round must be re-proposable').to.equal(true);
+        });
+
+        // The row is durable by the time the mirror runs, so a delivery failure must
+        // release the round and force a subscriber resync rather than wedge it.
+        it('_writeFinalizedRow releases the round and forces a resync when the mirror read fails', async function () {
+            const { engine, db, broadcaster } = makeEngine();
+            broadcaster.dropAllForResync = sinon.stub();
+            const row = finalizeRow();
+            engine._inflight.add(row.round_id);
+            sinon.stub(engine, '_persistCapabilitySnapshot').resolves(3);
+            const real = engine.db.doQuery.bind(engine.db);
+            sinon.stub(engine.db, 'doQuery').callsFake(async (sql, params) => {
+                if (String(sql).startsWith('SELECT * FROM cross_chain_calls')) throw new Error('connection lost');
+                return real(sql, params);
+            });
+
+            await engine._writeFinalizedRow({ row, signatures: [{ pubkey: 'a'.repeat(64), sig: '1'.repeat(128) }] });
+
+            expect(db.rows.length, 'the row is still durable').to.equal(1);
+            expect(engine._inflight.has(row.round_id), 'a mirror failure must not wedge the round').to.equal(false);
+            expect(broadcaster.dropAllForResync.calledOnce, 'an undeliverable row must force a resync').to.equal(true);
+        });
+
         it('_persistCapabilitySnapshot returns the persisted row count (0 when truncated)', async function () {
             const { engine } = makeEngine();
             engine._resolveCapabilityValidators = async () =>
