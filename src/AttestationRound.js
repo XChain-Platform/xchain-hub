@@ -77,6 +77,14 @@ class AttestationRound {
         // null = start a fresh sweep from the oldest pending request.
         this.pollCursor = null;
 
+        // The BTC tip the last successful poll reported, as
+        // { blockHeight, observedAt (ms) }, or null before the first one. Every hub
+        // that runs rounds polls a Bitcoin indexer, so this is a BTC height every
+        // attestation validator holds; the batch publisher anchors on it when no
+        // indexer has pushed a chain_tips row to this hub, which on a federation
+        // that shares one Bitcoin indexer is every hub but the one it pushes to.
+        this.observedTip = null;
+
         // AttestationConsensus instance; set via setConsensus after creation
         this.consensus = null;
 
@@ -165,7 +173,14 @@ class AttestationRound {
         this.rounds.clear();
         this.seen.clear();
         this.pollCursor = null;
+        this.observedTip = null;
         this._pollRunning = false;
+    }
+
+    // The BTC tip the last successful poll reported, or null. A copy, so a reader
+    // cannot move the round's own record.
+    getObservedBtcTip(){
+        return this.observedTip ? Object.assign({}, this.observedTip) : null;
     }
 
     async _pollPending(){
@@ -226,6 +241,7 @@ class AttestationRound {
         if(!result || result.error) return;
         let latestBlock = Number(result.latest_block_index) || 0;
         let requests    = result.requests || [];
+        if(latestBlock > 0) this.observedTip = { blockHeight: latestBlock, observedAt: Date.now() };
 
         for(let req of requests){
             let rid = String(req.request_id || '').toLowerCase();
