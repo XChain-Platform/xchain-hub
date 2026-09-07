@@ -526,7 +526,9 @@ class AttestationConsensus extends EventEmitter {
         // INVARIANT (item 6490): quorum <= redundancy, held by measuring the
         // PRE-WIDENING set size rather than responsible.length. AttestationRound
         // now builds the set as slice(0, max(1, redundancy) + widen) with widen up
-        // to ATTEST_RESPONSIBLE_WIDENING.maxSlots, so bftQuorum over the widened
+        // to ATTEST_RESPONSIBLE_WIDENING.maxSlots, and above ATTEST_ZERO_CONF_ACTIVATION
+        // up to ATTEST_RESPONSIBLE_WIDENING_V2.headroom + .maxSlots, a max of 3 and
+        // nonzero from the request's own block, so bftQuorum over the widened
         // length exceeds redundancy for small redundancies (redundancy 1, widen 1
         // -> bftQuorum(2) = 2), which would raise the finalization bar in exactly
         // the rounds the liveness ladder fires for and make it tip-dependent per

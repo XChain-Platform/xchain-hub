@@ -122,7 +122,7 @@ describe('AttestationRound', function () {
         it('falls back to defaults when config is empty', function () {
             let hub = makeHub();
             let ar  = new AttestationRound(hub, makeProviderRegistry());
-            expect(ar.pollMs).to.equal(15000);
+            expect(ar.pollMs).to.equal(3000);
             expect(ar.confirmations).to.equal(3);
         });
 
@@ -151,7 +151,7 @@ describe('AttestationRound', function () {
             } });
             let ar = new AttestationRound(hub, makeProviderRegistry());
 
-            expect(ar.pollMs,         'poll cadence').to.equal(15000);
+            expect(ar.pollMs,         'poll cadence').to.equal(3000);
             expect(ar.confirmations,  'reorg depth').to.equal(3);
             expect(ar.fetchTimeoutMs, 'fetch budget').to.equal(10000);
             expect(ar.leaderRotationBlocks).to.be.greaterThan(0);

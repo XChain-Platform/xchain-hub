@@ -164,8 +164,8 @@ The `full_node` capability requires a reachable BTC RPC endpoint (`FULLNODE.BTC_
 
 | Variable | Default | Description |
 |---|---|---|
-| `ATTESTATION_POLL_MS` | `15000` | How often AttestationRound polls the BTC indexer for new pending requests |
-| `ATTESTATION_CONFIRMATIONS` | `3` | BTC blocks of confirmation before initiating an external provider fetch (reorg safety) |
+| `ATTESTATION_POLL_MS` | `3000` | How often AttestationRound polls the BTC indexer for new pending requests. With the hub serving at the tip this interval is the floor on how long a request waits before any validator starts work on it |
+| `ATTESTATION_CONFIRMATIONS` | `3` | BTC blocks of confirmation before initiating an external provider fetch (reorg safety). Legacy-era value only: at and above `ATTEST_ZERO_CONF_ACTIVATION` for the network the hub serves a request at the tip it was mined in and the effective count is `0`, so this knob is inert there |
 | `ATTESTATION_FETCH_TIMEOUT` | `10000` | Per-request provider fetch timeout (ms) |
 | `ATTESTATION_RETRY_AFTER_MS` | `5 x ATTESTATION_POLL_MS` | How long an evaluated request is suppressed from re-polling before it can be re-evaluated (lets transiently-skipped requests retry) |
 | `ATTESTATION_ROUND_TIMEOUT_MS` | `120000` | PBFT round lifetime before in-memory state is dropped |

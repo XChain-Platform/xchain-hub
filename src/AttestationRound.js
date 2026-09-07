@@ -36,6 +36,10 @@ const bc     = require('./bcmath.js');
 const swq    = require('./stake_weighted_quorum.js');
 const esc    = require('./attestation_escalation.js');
 const wid    = require('./attest_responsible_widening_activation.js');
+// The zero-confirmation flag day. Selects the effective confirmation count for a
+// request (confirmationsFor) and carries the boot-time ordering assertion the
+// constructor runs; keyed on the REQUEST's own block, never on the tip.
+const zc     = require('./attest_zero_conf_activation.js');
 // The consensus round-timeout default the seen-window floor below is keyed to.
 // Required, never re-spelled: see the constant's own note in constants.js.
 // SUPPORTED_CONSENSUS_STRATEGIES is the admission allowlist _startRound declines an
@@ -45,7 +49,13 @@ const { positiveIntConfig } = require('./lib/config_int.js');
 
 const ATTEST_PROPOSE = 'ATTEST_PROPOSE';
 
-const DEFAULT_POLL_MS         = 15000;  // how often to poll the indexer for new pending requests
+// How often to poll the indexer for new pending requests. 3 s, not the historical
+// 15 s: above ATTEST_ZERO_CONF_ACTIVATION the hub serves a request at the tip it
+// was mined at, so this interval IS the floor on how long a contract waits for its
+// response, and a 15 s floor dominated the whole mined-to-mirrored budget. Two
+// indexer queries per poll (the tip read and the pending page), so a five-hub
+// federation costs about 3.3 queries a second fleet-wide.
+const DEFAULT_POLL_MS         = 3000;
 const DEFAULT_CONFIRMATIONS   = 3;      // BTC blocks of confirmation before initiating fetch (spec §14)
 const DEFAULT_FETCH_TIMEOUT   = 10000;  // ms: provider fetch timeout
 const POLL_LIMIT              = 100;    // max pending requests fetched per poll page (cursor advances across pages)
@@ -121,8 +131,9 @@ class AttestationRound {
         // must never nest inside a LIVE consensus round: if it evicts first, the
         // next poll re-`_startRound`s a request whose round is still pending and
         // issues another paid provider fetch that consensus.propose() then discards
-        // on its `pending.has(rid)` guard. At stock defaults 5*15s=75s is already
-        // shorter than the 120s round timeout, and lowering ATTESTATION_POLL_MS
+        // on its `pending.has(rid)` guard. At stock defaults 5*3s=15s is far shorter
+        // than the 120s round timeout, so it is the Math.max floor below that binds
+        // and the effective window is 120s+3s=123s; lowering ATTESTATION_POLL_MS
         // widens the gap silently. Sourcing the round timeout from the same config
         // key AND the same shared default AttestationConsensus reads keeps the two
         // windows coupled on both paths; a re-spelled literal here coupled them only
@@ -146,6 +157,42 @@ class AttestationRound {
         // this the Map grew monotonically with lifetime request volume (it was
         // only ever cleared on stop()).
         this.roundsTtlMs    = parseInt(this.config.ATTESTATION_ROUND_TTL_MS)   || (60 * 60 * 1000);
+
+        // Fetch accounting, monotonic for the process life and reported by getStats.
+        // No fetch counter existed anywhere before: the durable fetch cache's whole
+        // purpose is to keep a restart from re-paying a provider, and nothing made
+        // "did this hub pay once or twice for this request" observable. Consumers
+        // alert on a rise in fetchCount without a matching request, and read
+        // fetchCacheHitCount as the cache doing its job.
+        this.fetchCount         = 0;   // provider calls this process actually issued
+        this.fetchCacheHitCount = 0;   // rounds served from the durable cache instead
+
+        // Boot-time ordering assertion for the zero-confirmation flag day (spec
+        // §3.2 a): zero-conf must sit at or above both the mirror and the widening
+        // heights, or a request between the heights is served at the tip under rules
+        // that still expect the wait, with no headroom behind it. Throws on mainnet
+        // and testnet, warns on regtest and standalone; a hub with no network string
+        // is standalone and the seam returns without a word. Deliberately NOT caught:
+        // a misordered map is a consensus misconfiguration and must stop the boot.
+        zc.assertZeroConfOrdering(this.hub && this.hub.network ? this.hub.network : '');
+    }
+
+    // The confirmation depth this hub waits before it starts a round for a request
+    // admitted at `requestBlock`. Above ATTEST_ZERO_CONF_ACTIVATION it is 0: the hub
+    // serves the request the block it is mined in (operator ruling 2026-09-07; the
+    // provider spend on a request that later reorgs is an accepted cost of business).
+    // Below it, it is the operator's legacy-era ATTESTATION_CONFIRMATIONS tunable.
+    //
+    // Keyed on the REQUEST's own block rather than the tip, so the rule for a given
+    // request is fixed the moment it is admitted and cannot move under it mid-window.
+    // Every site that shapes what a peer sees must read THIS and not this.confirmations:
+    // the effective count feeds the leader slot and the model index, and two hubs that
+    // disagree on it elect different leaders and fetch with different models, which
+    // stalls the round on the equivalence check.
+    confirmationsFor(requestBlock){
+        return zc.isZeroConfActive(requestBlock, this.hub ? this.hub.network : undefined)
+            ? 0
+            : this.confirmations;
     }
 
     setConsensus(consensus){
@@ -249,7 +296,10 @@ class AttestationRound {
 
             // Wait CONFIRMATIONS blocks past the request's tx before initiating
             // any external API call (spec §14; avoids paying for reorg'd work).
-            if(Number(req.block_index) + this.confirmations > latestBlock) continue;
+            // Above the zero-conf flag day the effective count is 0 and the request
+            // is eligible in the block it was mined in; confirmationsFor takes the
+            // REQUEST's block, which is the same height the ladders below key on.
+            if(Number(req.block_index) + this.confirmationsFor(req.block_index) > latestBlock) continue;
 
             this.seen.set(rid, Date.now());
             this._startRound(req, latestBlock).catch(e =>
@@ -470,7 +520,7 @@ class AttestationRound {
         // broadcasts first moves. Falls back to slot 0 when the poll couldn't
         // resolve a tip height.
         let step = Number.isFinite(Number(latestBlock)) && Number(latestBlock) > 0
-            ? esc.escalationStep(Number(latestBlock), snapshotBlk, this.confirmations, this.leaderRotationBlocks)
+            ? esc.escalationStep(Number(latestBlock), snapshotBlk, this.confirmationsFor(snapshotBlk), this.leaderRotationBlocks)
             : 0;
         let leaderIdx    = esc.leaderIndex(step, responsible.length);
         let leaderPubkey = responsible[leaderIdx] ? responsible[leaderIdx].pubkey : (responsible[0] ? responsible[0].pubkey : null);
@@ -482,6 +532,16 @@ class AttestationRound {
             return;
         }
         let amLeader = (leaderPubkey === myPubkey);
+
+        // The round's opening line, one per started round on a responsible hub, and
+        // the only place the EFFECTIVE confirmation count is visible: the boot line
+        // reports the constructor's tunable, which has no request block to key on.
+        // Format is pinned by the acceptance drill (spec §10 ZC1 greps for
+        // `tip=<N> conf=0 widen=1`), so it is a contract, not a debug line.
+        console.log('AttestationRound: starting ' + rid.substring(0,16) +
+                    '... tip=' + latestBlock +
+                    ' conf=' + this.confirmationsFor(snapshotBlk) +
+                    ' widen=' + widen);
 
         let providerDef = this.providerRegistry.getDef(providerId);
 
@@ -501,7 +561,7 @@ class AttestationRound {
         // model (a judge_model round mixing vendors would fail equivalence).
         let approvedModels = Array.isArray(pinnedAc.approved_models) ? pinnedAc.approved_models : [];
         let modelIdx = Number.isFinite(Number(latestBlock)) && Number(latestBlock) > 0
-            ? esc.modelIndex(Number(latestBlock), snapshotBlk, this.confirmations, Number(request.deadline_block), approvedModels.length)
+            ? esc.modelIndex(Number(latestBlock), snapshotBlk, this.confirmationsFor(snapshotBlk), Number(request.deadline_block), approvedModels.length)
             : 0;
         let pinnedFetchModel = approvedModels[modelIdx] || approvedModels[0] || null;
         let pinnedJudgeModel = pinnedAc.judge_model || null;
@@ -596,9 +656,14 @@ class AttestationRound {
         if(cached){
             fetched  = { body: cached.body, meta: cached.meta };
             myStatus = cached.status;
+            this.fetchCacheHitCount++;
             console.log('AttestationRound: reusing recorded fetch for ' + rid.substring(0,16) +
                         '... (status=' + myStatus + '); no provider call issued');
         } else {
+            // Counted BEFORE the call, not after it: a fetch that throws may still
+            // have reached the provider and cost money, and the number this exposes
+            // is "what did this hub spend", not "what came back".
+            this.fetchCount++;
             try {
                 fetched = await providerModule.fetch(request.payload, {
                     maxResponseBytes: providerDef.max_response_bytes,
@@ -790,7 +855,14 @@ class AttestationRound {
             seen_count:      this.seen.size,
             in_flight_count: inFlight,
             proposed_count:  proposed,
-            failed_count:    failed
+            failed_count:    failed,
+            // Provider spend, monotonic for the process life (never evicted with
+            // `rounds` or `seen`, which is the point: the question they answer is
+            // whether a restart re-paid for a request, and a restart is exactly
+            // when those maps are empty). ZC2 reads fetch_count on every
+            // responsible hub after a re-mine and expects 1.
+            fetch_count:           this.fetchCount,
+            fetch_cache_hit_count: this.fetchCacheHitCount
         };
         // Expose the non-ok publication-throttle ring health so an
         // undersized ATTESTATION_NONOK_PUBLISHED_MAX (evictions of entries
