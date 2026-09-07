@@ -476,6 +476,64 @@ describe('AttestationBatchPublisher', function () {
             expect(warned.filter(w => /connection lost/.test(w)).length,
                 'a recovered rail that fails again must warn again').to.equal(1);
         });
+
+        // A federation that shares one Bitcoin indexer has one hub with a chain_tips
+        // row and N-1 without (testnet 2026-09-07: four of five validators). Every
+        // one of them polls that indexer for requests, and the poll reports the tip,
+        // so a hub with no pushed row anchors on the tip its own round observed.
+        it('anchors on the tip the attestation poll observed when no chain tip was pushed', async function () {
+            let hub = makeHub({ dir: dir });
+            hub.db.setTip(null);
+            hub.getAttestationRound = () => ({
+                getObservedBtcTip: () => ({ blockHeight: ANCHOR - 3, observedAt: Date.now() })
+            });
+            let p = makePublisher(hub);
+            let now = 200 * WINDOW_S;
+            p._floorWindow = now - WINDOW_S;
+
+            let result = await p.sweep(now);
+
+            expect(result.published).to.equal(1);
+            expect(decodeHead(p.wires[0]).btcBlockHeight).to.equal(ANCHOR - 3);
+            expect(p.getStats().anchorSource).to.equal('observed');
+            expect(p.getStats().anchorFailure).to.equal(null);
+        });
+
+        it('prefers the pushed chain tip over the observed one where both exist', async function () {
+            let hub = makeHub({ dir: dir });
+            hub.getAttestationRound = () => ({
+                getObservedBtcTip: () => ({ blockHeight: ANCHOR - 3, observedAt: Date.now() })
+            });
+            let p = makePublisher(hub);
+            let now = 200 * WINDOW_S;
+            p._floorWindow = now - WINDOW_S;
+
+            await p.sweep(now);
+
+            expect(decodeHead(p.wires[0]).btcBlockHeight).to.equal(ANCHOR);
+            expect(p.getStats().anchorSource).to.equal('pushed');
+        });
+
+        it('names both missing sources when neither the pushed nor the observed tip resolves', async function () {
+            let hub = makeHub({ dir: dir });
+            hub.db.setTip(null);
+            hub.getAttestationRound = () => ({ getObservedBtcTip: () => null });
+            let p = makePublisher(hub);
+            let now = 200 * WINDOW_S;
+            p._floorWindow = now - WINDOW_S;
+
+            let warned = [];
+            let realWarn = console.warn;
+            console.warn = (msg) => warned.push(String(msg));
+            try { await p.sweep(now); } finally { console.warn = realWarn; }
+
+            expect(p.wires.length).to.equal(0);
+            let line = warned.find(w => /no BTC anchor/.test(w));
+            expect(line).to.match(/chain_tips/);
+            expect(line).to.match(/pushchaintip/);
+            expect(line, 'the operator has to know the fallback was tried too').to.match(/attestation poll/);
+            expect(p.getStats().anchorSource).to.equal(null);
+        });
     });
 
     // ------------------------------------------------------------ membership
@@ -753,6 +811,37 @@ describe('AttestationBatchPublisher', function () {
             expect(sent.length, 'a refusal is silent on the wire').to.equal(0);
             expect(p.stats.signRefusals).to.equal(1);
             expect(p.stats.signRefusalsNoChainTip).to.equal(1);
+        });
+
+        // The follower half of the same gap: a hub with no chain_tips row refused every
+        // proposal, so a federation sharing one Bitcoin indexer could never reach the
+        // batch quorum. With the poll-observed tip it bounds the proposal like any
+        // other follower, and the bound is still enforced against that tip.
+        it('co-signs from the observed tip when no chain tip was pushed, and still bounds the anchor', async function () {
+            let hub = makeHub({ dir: dir });
+            let sent = [];
+            hub.peerManager = { on(){}, removeListener(){}, broadcast(type, data){ sent.push({ type, data }); } };
+            hub.db.setTip(null);
+            hub.getAttestationRound = () => ({
+                getObservedBtcTip: () => ({ blockHeight: ANCHOR, observedAt: Date.now() })
+            });
+            let p = makePublisher(hub);
+            let start = 200 * WINDOW_S;
+
+            let at = async (anchor) => {
+                sent.length = 0;
+                await p._handleSignReq({
+                    type: AttestationBatchPublisher.XATTESTB_SIGN_REQ,
+                    sig_pubkey: 'ff'.repeat(32),
+                    data: { network: 'regtest', window_start: start, window_end: start + WINDOW_S,
+                            row_count: 0, btc_block_height: anchor, rows: [] }
+                });
+                return sent.length === 1;
+            };
+
+            expect(await at(ANCHOR), 'the observed tip must be signable').to.equal(true);
+            expect(await at(ANCHOR + 1), 'an anchor above the observed tip is refused').to.equal(false);
+            expect(p.stats.signRefusalsNoChainTip, 'a bound refusal is not the missing-tip class').to.equal(0);
         });
     });
 

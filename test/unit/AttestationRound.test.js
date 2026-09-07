@@ -727,6 +727,31 @@ describe('AttestationRound', function () {
             expect(ar.seen.size).to.equal(0);
         });
 
+        // The batch publisher anchors on this tip when no indexer pushed a chain_tips
+        // row to the hub, so the poll has to record it even on a page with no requests.
+        it('records the BTC tip the poll reported, and stop() forgets it', async function () {
+            axiosStub.post.resolves({ data: { result: { latest_block_index: 100, requests: [] } } });
+            let hub = makeHub({ _resolveBtcIndexerUrl: sinon.stub().resolves('http://idx/rpc') });
+            let ar  = new AttestationRound(hub, makeProviderRegistry());
+            expect(ar.getObservedBtcTip()).to.equal(null);
+
+            await ar._pollPending();
+
+            let tip = ar.getObservedBtcTip();
+            expect(tip.blockHeight).to.equal(100);
+            expect(tip.observedAt).to.be.a('number');
+            tip.blockHeight = 1;
+            expect(ar.getObservedBtcTip().blockHeight, 'a reader gets a copy').to.equal(100);
+
+            // A poll that reports no usable tip keeps the last good one.
+            axiosStub.post.resolves({ data: { result: { latest_block_index: 0, requests: [] } } });
+            await ar._pollPending();
+            expect(ar.getObservedBtcTip().blockHeight).to.equal(100);
+
+            await ar.stop();
+            expect(ar.getObservedBtcTip()).to.equal(null);
+        });
+
         it('skips requests that are already in seen map', async function () {
             axiosStub.post.resolves({
                 data: {
