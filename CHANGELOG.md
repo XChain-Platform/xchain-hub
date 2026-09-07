@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.2] - 2026-09-07
+
+### Fixed
+- The hourly ATTEST response batch anchors on the BTC tip the attestation poll observed when no chain tip was pushed to the hub, so a validator without its own Bitcoin indexer can lead and co-sign batches instead of deferring every window.
+
 ## [0.15.0] - 2026-09-07
 
 ### Added
