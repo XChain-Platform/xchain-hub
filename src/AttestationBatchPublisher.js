@@ -195,6 +195,9 @@ class AttestationBatchPublisher {
         // logged. Both null while the anchor resolves.
         this._anchorFailure = null;
         this._anchorWarned  = null;
+        // 'pushed' (a chain_tips row) or 'observed' (the attestation poll's tip) once
+        // an anchor has resolved; null before. Logged on every change, read by stats.
+        this._anchorSource  = null;
 
         this.stats = {
             windowsPublished: 0, windowsEmpty: 0, windowsDeferred: 0,
@@ -578,13 +581,22 @@ class AttestationBatchPublisher {
     // Bitcoin indexer has never called `pushchaintip`, which is a one-line
     // configuration gap that otherwise presents as every window deferring forever with
     // nothing on chain and no coverage.
+    // TWO SOURCES, PUSHED FIRST. A `chain_tips` row exists only on the hub a Bitcoin
+    // indexer pushes to, and a federation that shares one indexer has exactly one such
+    // hub; measured on testnet 2026-09-07, four of five validators deferred every
+    // window and refused every co-sign for want of it, so no batch could reach its
+    // quorum of five. Every attestation validator polls a Bitcoin indexer to find
+    // requests, though, and that poll reports the tip, so the tip the round observed
+    // is the fallback: the same height source the round's own leader ladder and
+    // widening step already trust. The pushed row keeps precedence where it exists so
+    // the one hub that has it behaves exactly as before.
     async _resolveAnchor(){
         let db = this._db();
         if(!db){
             this._anchorFailure = 'this hub has no database handle';
             return null;
         }
-        let tip = null;
+        let tip = null, pushedFailure;
         try {
             if(typeof db.getChainTip !== 'function'){
                 this._anchorFailure = 'the database layer exposes no getChainTip()';
@@ -596,18 +608,44 @@ class AttestationBatchPublisher {
             return null;
         }
         let n = Number(tip && tip.blockHeight);
-        if(!Number.isFinite(n) || n <= 0){
-            this._anchorFailure = tip
-                ? 'the BTC chain_tips row holds no usable block_height (' + JSON.stringify(tip.blockHeight) + ')'
-                : 'no BTC chain_tips row exists for network ' + (this.network || '<unset>') +
-                  '; the Bitcoin indexer has not called pushchaintip on this hub';
-            return null;
-        }
+        if(Number.isFinite(n) && n > 0) return this._anchorResolved(Math.trunc(n), 'pushed');
+        pushedFailure = tip
+            ? 'the BTC chain_tips row holds no usable block_height (' + JSON.stringify(tip.blockHeight) + ')'
+            : 'no BTC chain_tips row exists for network ' + (this.network || '<unset>') +
+              '; the Bitcoin indexer has not called pushchaintip on this hub';
+
+        let observed = this._observedBtcTip();
+        let o = Number(observed && observed.blockHeight);
+        if(Number.isFinite(o) && o > 0) return this._anchorResolved(Math.trunc(o), 'observed');
+
+        this._anchorFailure = pushedFailure +
+            ', and the attestation poll has not observed a BTC tip either';
+        return null;
+    }
+
+    // The tip the attestation round's request poll last reported, or null on a hub
+    // that runs no round (observer-only, or the round not yet started).
+    _observedBtcTip(){
+        let round = this.hub && typeof this.hub.getAttestationRound === 'function'
+            ? this.hub.getAttestationRound() : null;
+        if(!round || typeof round.getObservedBtcTip !== 'function') return null;
+        return round.getObservedBtcTip();
+    }
+
+    _anchorResolved(height, source){
         // Both latches clear together: an outage that returns after the tip came back is
         // a NEW episode and has to say so, even when its cause reads the same.
         this._anchorFailure = null;
         this._anchorWarned  = null;
-        return Math.trunc(n);
+        // Say so once when the source changes: an operator reading "published" on a hub
+        // with no chain_tips row should be able to see which height it anchored on.
+        if(source !== this._anchorSource){
+            this._anchorSource = source;
+            console.log('AttestationBatchPublisher: anchoring batches on the ' +
+                (source === 'pushed' ? 'pushed BTC chain tip (chain_tips row)'
+                                     : 'BTC tip observed by the attestation poll (no chain_tips row on this hub)'));
+        }
+        return height;
     }
 
     // One line per distinct cause, not one per window. The sweep runs every window, so
@@ -1262,7 +1300,9 @@ class AttestationBatchPublisher {
             quarantinedWindows: this._quarantined.size,
             // Null unless the last anchor read failed. A rising windowsDeferred with a
             // reason here is a configuration gap, not a busy federation.
-            anchorFailure: this._anchorFailure || null
+            anchorFailure: this._anchorFailure || null,
+            // Which height source the last resolved anchor came from, or null.
+            anchorSource:  this._anchorSource || null
         });
     }
 }
