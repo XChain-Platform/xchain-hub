@@ -214,12 +214,14 @@ describe('AttestationResponseMirror', function () {
     // ── the era gate ────────────────────────────────────────────────────────
 
     describe('below the activation height', function () {
-        it('writes nothing and broadcasts nothing on an unratified network (testnet, null)', async function () {
+        // testnet is RATIFIED as of v0.15.0; the mainnet case below is the one that
+        // still stands for an unratified network. Testnet now proves the boundary.
+        it('writes nothing and broadcasts nothing below the testnet activation height', async function () {
             let hub = makeHub({ network: 'testnet' });
             let m   = new AttestationResponseMirror(hub);
             await m.start();
 
-            hub._consensus.emit('request:finalized', finalizedEvent({ request: { block_index: 999999 } }));
+            hub._consensus.emit('request:finalized', finalizedEvent({ request: { block_index: 150000 } }));
             await settle();
 
             expect(hub.db.queries).to.have.length(0, 'the legacy on-chain path owns this response');

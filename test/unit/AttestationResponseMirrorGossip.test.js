@@ -427,16 +427,17 @@ describe('AttestationResponseMirror: ATTEST_RESULT gossip', function () {
         });
 
         it('drops a row for a request BELOW the activation height', async function () {
-            // testnet's activation entry is the unratified null sentinel, so no height
-            // is mirror-era there: the identical gate the producer path applies.
+            // testnet is RATIFIED as of the v0.15.0 train, so a height below its
+            // activation is what makes a request pre-mirror there now, rather than the
+            // network having no height at all. Same gate the producer path applies.
             let hub    = makeHub({ network: 'testnet' });
             let mirror = new AttestationResponseMirror(hub);
-            stubRequestLookup([localRequest({ block_index: 999999 })]);
+            stubRequestLookup([localRequest({ block_index: 150000 })]);
             await mirror.start();
 
             await mirror._handleResult({
                 type: ATTEST_RESULT,
-                data: gossipPayload({ network: 'testnet', requestBlock: 999999 })
+                data: gossipPayload({ network: 'testnet', requestBlock: 150000 })
             });
 
             expect(hub.db.table).to.have.length(0);

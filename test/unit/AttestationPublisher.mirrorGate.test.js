@@ -144,12 +144,16 @@ describe('AttestationPublisher: mirror-activation gate (D58)', function () {
         cleanup(pub);
     });
 
-    it('testnet (activation entry null, unratified): NOT gated, legacy path runs', async function () {
+    // testnet was RATIFIED in the v0.15.0 train, so it no longer stands for an
+    // unratified network; mainnet above is the case that still does. What testnet
+    // proves now is the era boundary itself: below its height the legacy path owns
+    // the response, which is the half of the old assertion that still holds.
+    it('testnet BELOW its activation height: NOT gated, legacy path runs', async function () {
         const pub = makePublisher(MY_PUB, { network: 'testnet' });
         const bcast = sinon.stub().resolves({ txid: 'legacy-tx-3' });
         pub.setBroadcastHook(bcast);
 
-        await pub.onRequestFinalized(finalizedEvent('55'.repeat(32), 999999));
+        await pub.onRequestFinalized(finalizedEvent('55'.repeat(32), 150000));
 
         expect(bcast.calledOnce).to.equal(true);
         cleanup(pub);
