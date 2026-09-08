@@ -736,8 +736,14 @@ class CrossChainCallEngine extends EventEmitter {
                     'source_chain','source_action_index','source_contract_index',
                     'target_chain','target_contract_index','method','params_json',
                     'gas_limit','cross_hops','effective_time','result_status','return_payload_b64',
-                    'finalizing_view','validator_signatures','push_generation'];
-        let vals = cols.map(c => row[c]);
+                    'finalizing_view','validator_signatures','push_generation',
+                    'btc_chain_id'];
+        // Resolved into the value list rather than onto `row`: the row object feeds the
+        // canonical and the retraction paths, and btc_chain_id is transport, never consensus.
+        // The XCALL canonical enumerates its fields explicitly, so this value has no path
+        // into a signed preimage.
+        let btcChainId = await this._resolveBtcChainId(row.network);
+        let vals = cols.map(c => (c === 'btc_chain_id' ? btcChainId : row[c]));
         // A retracted row for the same (call_id, phase) can exist after a reorg.
         // INSERT IGNORE would silently discard the re-finalized content, leaving
         // the call permanently stranded in 'retracted'. Use ON DUPLICATE KEY UPDATE
@@ -817,6 +823,21 @@ class CrossChainCallEngine extends EventEmitter {
         catch(_e){ /* the repair itself must never fail a committed call row */ }
     }
 
+    // The chain instance this hub's rows belong to: the hash of BTC block 1 on the chain its
+    // Bitcoin indexer follows, reported through pushchaintip. Stamped on call rows so a mirror
+    // that survived a re-genesis can refuse a call minted on the dead chain. Unknown reads as
+    // NULL, which every mirror accepts, and a lookup failure must never fail a finalized row,
+    // so it degrades to NULL. Twin of CrossChainDexEngine._resolveBtcChainId; keep in lockstep.
+    async _resolveBtcChainId(network){
+        try {
+            if(!this.db || typeof this.db.getChainTip !== 'function') return null;
+            let tip = await this.db.getChainTip('bitcoin', network || this.network || '');
+            return (tip && tip.chainId) ? tip.chainId : null;
+        } catch(e){
+            return null;
+        }
+    }
+
     // Persist + mirror the qualifying validator set (consensus leader path,
     // same contract as CrossChainDexEngine._persistCapabilitySnapshot).
     // Returns the number of capability rows resolved (and persisted) for this
@@ -842,7 +863,12 @@ class CrossChainCallEngine extends EventEmitter {
         // single INSERT throw, and a partial set has no completeness marker so a verifier
         // reads it as COMPLETE. Rationale in lib/capability_snapshot_write.js. Parity with
         // StateCheckpointEngine and the other four writers.
-        let rows = await snapWrite.writeCapabilitySnapshotRows(this.db, capability, block, validators);
+        //
+        // The chain identity is passed rather than left to the writer's own lookup: this
+        // engine knows the row's network, so the snapshot a call is verified against carries
+        // the same identity the call row does, even on a hub whose HUB_NETWORK is unset.
+        let rows = await snapWrite.writeCapabilitySnapshotRows(
+            this.db, capability, block, validators, await this._resolveBtcChainId(network));
         for(let row of rows){
             if(this.broadcaster){
                 // Select back on the full widened uq_cap_snap

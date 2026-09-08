@@ -49,8 +49,12 @@ function memDb(failAt) {
             if (!/^INSERT IGNORE INTO capability_snapshots/.test(sql)) return [];
             seen++;
             if (seen === failAt) throw new Error('lock wait timeout exceeded');
-            for (let i = 0; i + 4 < params.length; i += 5) {
-                let [snapshot_block, capability, signing_pubkey, amount, source] = params.slice(i, i + 5);
+            // Row width comes from the statement itself: the writer column list has grown
+            // (btc_chain_id, ) while the CONTROL above still drives the retired
+            // five-column per-row shape, and both must parse here.
+            let width = String(sql).match(/\(([^)]*)\)\s+VALUES/)[1].split(',').length;
+            for (let i = 0; i + width - 1 < params.length; i += width) {
+                let [snapshot_block, capability, signing_pubkey, amount, source] = params.slice(i, i + width);
                 rows.push({ snapshot_block, capability, signing_pubkey, amount, source });
             }
             return [];

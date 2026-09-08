@@ -699,7 +699,7 @@ describe('Database: extended coverage', function () {
             const getConfig = sinon.stub(db, 'getConfig')
                 .resolves({ block_height: '840000', block_time: '1718000000' });
             const tip = await db.getChainTip('LTC', 'testnet');
-            expect(tip).to.deep.equal({ blockHeight: 840000, blockTime: 1718000000 });
+            expect(tip).to.deep.equal({ blockHeight: 840000, blockTime: 1718000000, chainId: null });
             expect(getConfig.calledWith('litecoin', 'testnet', 'chain_tips')).to.be.true;
         });
 
@@ -712,13 +712,13 @@ describe('Database: extended coverage', function () {
             getConfig.withArgs('BTC', 'mainnet', 'chain_tips')
                 .resolves({ block_height: '820000', block_time: '1717000000' });
             const tip = await db.getChainTip('BTC');
-            expect(tip).to.deep.equal({ blockHeight: 820000, blockTime: 1717000000 });
+            expect(tip).to.deep.equal({ blockHeight: 820000, blockTime: 1717000000, chainId: null });
         });
 
         it('getChainTip defaults block_time to 0 when unparseable', async function () {
             const { db } = makeDb();
             sinon.stub(db, 'getConfig').resolves({ block_height: '5', block_time: 'NaNish' });
-            expect(await db.getChainTip('BTC')).to.deep.equal({ blockHeight: 5, blockTime: 0 });
+            expect(await db.getChainTip('BTC')).to.deep.equal({ blockHeight: 5, blockTime: 0, chainId: null });
         });
     });
 

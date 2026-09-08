@@ -43,7 +43,7 @@
  ********************************************************************/
 
 const TABLE   = 'capability_snapshots';
-const COLUMNS = '(snapshot_block, capability, signing_pubkey, amount, source)';
+const COLUMNS = '(snapshot_block, capability, signing_pubkey, amount, source, btc_chain_id)';
 
 /**
  * Normalize a resolved validator set into snapshot rows, exactly as the six in-loop
@@ -64,26 +64,54 @@ function normalizeCapabilitySnapshotRows(capability, block, validators){
 }
 
 /**
+ * The chain instance this hub's rows belong to (hash of BTC block 1 on the chain its
+ * Bitcoin indexer follows). Resolved here for the callers that do not pass one, so the
+ * five writers outside the cross-chain engines keep their four-argument call shape and
+ * still stamp the identity. Never throws and never blocks the write: an unknown identity
+ * is NULL, which is exactly how every row written before this column reads, and NULL is
+ * accepted by every mirror.
+ */
+async function resolveBtcChainId(db){
+    try {
+        if(!db || typeof db.getChainTip !== 'function') return null;
+        // capability_snapshots has no network column: the set belongs to the hub, so the
+        // hub's own network is the one to ask about.
+        let tip = await db.getChainTip('bitcoin', process.env.HUB_NETWORK || '');
+        return (tip && tip.chainId) ? tip.chainId : null;
+    } catch(e){
+        return null;
+    }
+}
+
+/**
  * Write the whole validator set in one INSERT IGNORE, all-or-nothing.
  *
  * Returns the normalized rows so the caller can broadcast them; an empty set writes
  * nothing and returns [], which is what the truncation guard's "no rows mirrored" and an
  * empty capability set both want.
+ *
+ * `btcChainId` is optional: a caller that already knows the row network's identity passes
+ * it, and anyone else lets resolveBtcChainId ask the database. The column is transport,
+ * never consensus: it is not in uq_cap_snap and it is in no signed canonical, so stamping
+ * it cannot change which set a verifier reads or how the set dedupes.
  */
-async function writeCapabilitySnapshotRows(db, capability, block, validators){
+async function writeCapabilitySnapshotRows(db, capability, block, validators, btcChainId){
     let rows = normalizeCapabilitySnapshotRows(capability, block, validators);
     if(rows.length === 0) return rows;
 
+    let chainId = (btcChainId === undefined) ? await resolveBtcChainId(db)
+                                             : (btcChainId || null);
+
     let args = [];
     for(let r of rows)
-        args.push(r.snapshot_block, r.capability, r.signing_pubkey, r.amount, r.source);
+        args.push(r.snapshot_block, r.capability, r.signing_pubkey, r.amount, r.source, chainId);
 
     await db.doQuery(
         'INSERT IGNORE INTO ' + TABLE + ' ' + COLUMNS + ' VALUES ' +
-        rows.map(() => '(?, ?, ?, ?, ?)').join(', '),
+        rows.map(() => '(?, ?, ?, ?, ?, ?)').join(', '),
         args);
 
     return rows;
 }
 
-module.exports = { TABLE, COLUMNS, normalizeCapabilitySnapshotRows, writeCapabilitySnapshotRows };
+module.exports = { TABLE, COLUMNS, normalizeCapabilitySnapshotRows, resolveBtcChainId, writeCapabilitySnapshotRows };

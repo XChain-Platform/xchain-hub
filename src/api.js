@@ -960,7 +960,10 @@ async function startApi(){
         },
 
         // Network is optional for back-compat with older indexers; defaults to 'mainnet'.
-        async pushchaintip({coin, network, block_height, block_time}){
+        // chain_id is optional too: only a Bitcoin indexer sends it (the hash of ITS block 1),
+        // and it is what lets a mirror refuse cross-chain rows written by a hub that followed a
+        // different chain instance. Absent leaves the stored identity untouched.
+        async pushchaintip({coin, network, block_height, block_time, chain_id}){
             if(!coin) return {error: "coin is required"};
             let chainErr = validateChain(coin);
             if (chainErr) return chainErr;
@@ -976,8 +979,17 @@ async function startApi(){
             let time = strictInt(block_time);
             if (time === null || time < 0)
                 return {error: "invalid block_time"};
+            // Reject before the write, not after: a malformed identity stored on the tip
+            // would be stamped onto every later match and call row and would make every
+            // mirror refuse rows this hub is authoritative for.
+            let chainId = undefined;
+            if (chain_id !== undefined && chain_id !== null) {
+                if (typeof chain_id !== 'string' || !/^[0-9a-f]{64}$/.test(chain_id))
+                    return {error: "invalid chain_id"};
+                chainId = chain_id;
+            }
             try {
-                await hub.db.setChainTip(coin, network, height, time);
+                await hub.db.setChainTip(coin, network, height, time, chainId);
                 return {status: "success"};
             } catch (err) {
                 return {error: err.message || "error pushing chain tip"};
@@ -1824,6 +1836,22 @@ async function startApi(){
         }
     });
 
+    // The identity of the Bitcoin chain this hub follows (hash of that chain's block 1),
+    // learned from the Bitcoin indexer's pushchaintip. It rides the three cross-chain
+    // envelopes because a DOGE/LTC mirror cannot derive it locally: the envelope is the
+    // only place it can learn which chain the rows it is being handed belong to. Never
+    // fails a snapshot: an unreadable identity is served as "unknown" (null), which every
+    // mirror accepts exactly as it accepted rows before the column existed.
+    async function btcChainIdForSnapshot() {
+        try {
+            if (!hub.db || typeof hub.db.getChainTip !== 'function') return null;
+            let tip = await hub.db.getChainTip('bitcoin', (hub && hub.network) ? hub.network : HUB_NETWORK);
+            return (tip && tip.chainId) ? tip.chainId : null;
+        } catch (err) {
+            return null;
+        }
+    }
+
     app.get('/hub-db/snapshot/cross_chain_matches', async (req, res) => {
         try {
             if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
@@ -1840,7 +1868,7 @@ async function startApi(){
                 "SELECT * FROM cross_chain_matches WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?",
                 [since, limit]
             );
-            res.type('json').send(JSON.stringify({ table: 'cross_chain_matches', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'cross_chain_matches', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -1857,7 +1885,7 @@ async function startApi(){
                 'SELECT * FROM capability_snapshots WHERE id > ? ORDER BY id ASC LIMIT ?',
                 [since, limit]
             );
-            res.type('json').send(JSON.stringify({ table: 'capability_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'capability_snapshots', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });
@@ -1870,6 +1898,9 @@ async function startApi(){
     // finalizing_view (signed into the EQUIV canonical) and push_generation (source-chain
     // reorg fence, item 5308) ARE mirror-consumed and MUST be included, or a freshly
     // bootstrapped mirror rebuilds the wrong EQUIV view and mis-fences reorg retractions.
+    // btc_chain_id is mirror-consumed for the same reason: it is what the mirror's
+    // chain-identity filter reads, so omitting it would silently disarm that filter for
+    // every bootstrapped row while the streamed (SELECT *) path kept it.
     app.get('/hub-db/snapshot/cross_chain_calls', async (req, res) => {
         try {
             if (req.query.limit) { let limErr = validateLimit(req.query.limit); if (limErr) return res.status(400).json(limErr); }
@@ -1883,11 +1914,11 @@ async function startApi(){
                 'SELECT id, call_id, phase, snapshot_block, network, source_chain, source_action_index, ' +
                 'source_contract_index, target_chain, target_contract_index, method, params_json, gas_limit, ' +
                 'cross_hops, effective_time, status, finalizing_view, push_generation, result_status, ' +
-                "return_payload_b64, validator_signatures, created_at " +
+                "return_payload_b64, validator_signatures, btc_chain_id, created_at " +
                 "FROM cross_chain_calls WHERE id > ? AND status <> 'retracted' ORDER BY id ASC LIMIT ?",
                 [since, limit]
             );
-            res.type('json').send(JSON.stringify({ table: 'cross_chain_calls', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION }, bigIntReplacer));
+            res.type('json').send(JSON.stringify({ table: 'cross_chain_calls', rows: rows, count: rows.length, watermark: Math.floor(Date.now() / 1000), schema_version: HUB_SCHEMA_VERSION, btc_chain_id: await btcChainIdForSnapshot() }, bigIntReplacer));
         } catch (err) {
             console.error('hub snapshot endpoint error:', err);
             res.status(500).json({ error: 'snapshot error' });

@@ -837,17 +837,26 @@ class Database {
     }
 
     // Network defaults to 'mainnet' for back-compat with older indexers.
-    async setChainTip(coin, network, blockHeight, blockTime){
+    //
+    // `chainId` (optional) identifies the chain INSTANCE the pushing indexer follows:
+    // the hash of its block 1, not of block 0, because the regtest genesis hash is a
+    // chainparams constant that survives every re-genesis while block 1 commits to the
+    // moment the new chain started. Omitted (older indexer, or a chain whose block 1 is
+    // not mined yet) leaves the stored value alone rather than clearing it, so a single
+    // push that has not learned the id cannot erase an identity the mirrors are filtering on.
+    async setChainTip(coin, network, blockHeight, blockTime, chainId){
         let net = network || 'mainnet';
         // Store under the full coin name (see COIN_FULL_NAME) so chain_tips never
         // appears as an abbreviation-keyed phantom coin in the served config tree.
         let key = normalizeCoin(coin);
         await this.setParam(key, net, 'chain_tips', 'block_height', String(blockHeight));
         await this.setParam(key, net, 'chain_tips', 'block_time',   String(blockTime));
+        if(typeof chainId === 'string' && chainId)
+            await this.setParam(key, net, 'chain_tips', 'chain_id', chainId);
     }
 
     // Network defaults to 'mainnet' for back-compat; multi-network hubs must pass it explicitly.
-    // Returns: { blockHeight, blockTime } or null if not set.
+    // Returns: { blockHeight, blockTime, chainId } or null if not set.
     async getChainTip(coin, network){
         let net = network || 'mainnet';
         // Prefer the canonical full-name key (setChainTip writes there now). Fall
@@ -859,7 +868,12 @@ class Database {
         if(!cfg.block_height) return null;
         return {
             blockHeight: parseInt(cfg.block_height),
-            blockTime:   parseInt(cfg.block_time) || 0
+            blockTime:   parseInt(cfg.block_time) || 0,
+            // Explicitly null, never undefined, when no indexer has reported one: every
+            // consumer (the row stamps, the snapshot envelopes) treats null as "identity
+            // unknown", which the mirrors accept, so a hub that has not learned its chain
+            // keeps behaving exactly as it did before the column existed.
+            chainId:     (typeof cfg.chain_id === 'string' && cfg.chain_id) ? cfg.chain_id : null
         };
     }
 
