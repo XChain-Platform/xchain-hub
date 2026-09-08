@@ -249,6 +249,27 @@ describe('AttestationRound zero-confirmation flip', function () {
             expect(ar.getStats().fetch_cache_hit_count).to.equal(0);
         });
 
+        it('refuses a re-poll of a request this hub already finalized before any provider call (ZC2)', async function () {
+            // The request stays pending on the indexer until its callback binds,
+            // so it is re-polled once `seen` expires; the ring must refuse it
+            // ahead of the fetch, not inside propose() after the money is spent.
+            let { ar, reg, request } = makeRegtestRound([]);
+            ar.consensus = { isRoundActive: () => false, isFinalized: sinon.stub().returns(true), propose: sinon.stub() };
+            let fetchStub = reg.getModule().fetch;
+            fetchStub.resetHistory();
+            sinon.stub(console, 'log');
+            await ar._startRound(request, 500);
+            sinon.restore();
+            expect(ar.consensus.isFinalized.calledWith(request.request_id), 'the ring was asked about this rid').to.be.true;
+            expect(fetchStub.called, 'a finalized request must not reach the provider').to.be.false;
+            expect(ar.consensus.propose.called, 'nothing is proposed either').to.be.false;
+            // getStats reads the consensus rings too, which this narrow stub does
+            // not carry; the counters under test live on the round itself.
+            ar.consensus = null;
+            expect(ar.getStats().fetch_count).to.equal(0);
+            expect(ar.getStats().finalized_skip_count).to.equal(1);
+        });
+
         it('counts a durable-cache reuse instead, and issues no provider call', async function () {
             let { ar, reg, request } = makeRegtestRound([{ status: 'ok', body: Buffer.from('cached'), meta: '200' }]);
             let fetchStub = reg.getModule().fetch;

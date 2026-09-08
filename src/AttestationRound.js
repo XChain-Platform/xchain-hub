@@ -166,6 +166,7 @@ class AttestationRound {
         // fetchCacheHitCount as the cache doing its job.
         this.fetchCount         = 0;   // provider calls this process actually issued
         this.fetchCacheHitCount = 0;   // rounds served from the durable cache instead
+        this.finalizedSkipCount = 0;   // re-polls refused on the finalized ring before any fetch
 
         // Boot-time ordering assertion for the zero-confirmation flag day (spec
         // §3.2 a): zero-conf must sit at or above both the mirror and the widening
@@ -640,6 +641,16 @@ class AttestationRound {
             console.log('AttestationRound: skipping fetch for ' + rid.substring(0,16) + '... (consensus round already active)');
             return;
         }
+        // The same short-circuit for a round this hub already FINALIZED. The
+        // request stays pending on the indexer until its callback binds, at
+        // least one block later, which outlives both `seen` and the durable
+        // cache (retryAfterMs), so a re-poll in that window must be refused
+        // here rather than by propose()'s ring check after the provider is paid.
+        if(this.consensus && typeof this.consensus.isFinalized === 'function' && this.consensus.isFinalized(rid)){
+            this.finalizedSkipCount++;
+            console.log('AttestationRound: skipping fetch for ' + rid.substring(0,16) + '... (already finalized; awaiting bind)');
+            return;
+        }
 
         // Durable, request_id-keyed twin of the in-memory `seen`
         // window. Both guards above die with the process (`seen` is cleared on
@@ -862,7 +873,8 @@ class AttestationRound {
             // when those maps are empty). ZC2 reads fetch_count on every
             // responsible hub after a re-mine and expects 1.
             fetch_count:           this.fetchCount,
-            fetch_cache_hit_count: this.fetchCacheHitCount
+            fetch_cache_hit_count: this.fetchCacheHitCount,
+            finalized_skip_count:  this.finalizedSkipCount
         };
         // Expose the non-ok publication-throttle ring health so an
         // undersized ATTESTATION_NONOK_PUBLISHED_MAX (evictions of entries

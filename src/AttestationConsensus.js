@@ -378,6 +378,16 @@ class AttestationConsensus extends EventEmitter {
         return this.pending.has(String(rid).toLowerCase());
     }
 
+    // Whether this hub already finalized a round for the request. Consulted by
+    // AttestationRound BEFORE the provider is paid, and again in propose(): the
+    // request stays in the indexer's pending list until its callback binds,
+    // which outlives the `seen` and fetch-cache windows, so a re-poll must be
+    // refused ahead of the fetch. An evicted rid reads false, as in propose(),
+    // so the tombstone re-propose path is unchanged.
+    isFinalized(rid){
+        return this.finalized.has(String(rid).toLowerCase());
+    }
+
     _pruneEarlyMessages(now){
         for(let [rid, expiresAt] of this.earlyMessageTtl){
             if(expiresAt <= now){
