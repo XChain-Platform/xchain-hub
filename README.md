@@ -4,8 +4,8 @@
 # XChain Platform Hub
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.15.0-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tests-5%2C977%2B%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/version-0.16.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/tests-6%2C326%2B%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node">
   <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License">
 </p>
@@ -215,7 +215,7 @@ neither source sets one, so these defaults hold on an unconfigured box:
 |---|---|
 | `npm run api` | Start the hub API server |
 | `bin/run-db-tiers.sh` | Run the DB-backed tiers against a throwaway MariaDB it starts and drops |
-| `npm test` | Run unit tests (~5,174 tests) |
+| `npm test` | Run unit tests (~5,521 tests) |
 | `npm run test:integration` | Integration tests (~89 tests, requires MariaDB) |
 | `npm run test:e2e` | End-to-end tests (~70 tests, requires full stack) |
 | `npm run test:fuzz` | Fuzz tests (property-based via fast-check, 90 tests) |
@@ -227,7 +227,7 @@ neither source sets one, so these defaults hold on an unconfigured box:
 | `npm run test:perf` | All performance tests (50 tests) |
 | `npm run test:mutate` | Mutation tests (Stryker) |
 | `npm run test:mutate:pilot` | Pilot mutation tests (phase 1) |
-| `npm run test:all` | Complete test suite (5,977 tests) |
+| `npm run test:all` | Complete test suite (6,326 tests) |
 
 ### Running the DB-backed tiers
 
