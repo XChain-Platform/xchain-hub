@@ -83,15 +83,16 @@ describe('attest_responsible_widening: activation gate', function () {
     });
 });
 
-describe('attest_responsible_widening: the ladder (stage 1, testnet: widening armed, zero-conf null)', function () {
+describe('attest_responsible_widening: the ladder (stage 1, testnet: widening armed, request below the zero-conf flip)', function () {
 
     before(function () {
         // Vacuity guard (D91): stage-1 numbers can only be asserted where widening is
-        // armed AND zero-conf is NOT, which on regtest is no longer true (zero-conf arms
-        // at 0 there). Fail loudly rather than silently pass over the wrong branch if
-        // that ever stops being testnet's shape.
+        // armed AND the REQUEST block sits below the zero-conf flip (the stage is keyed
+        // on the request block, D106). Regtest arms zero-conf at 0, so testnet with a
+        // request below 151800 is the shape; fail loudly if that ever stops being true.
         expect(wid.ATTEST_RESPONSIBLE_WIDENING_ACTIVATION.testnet).to.be.a('number');
-        expect(zc.ATTEST_ZERO_CONF_ACTIVATION.testnet).to.equal(null);
+        expect(zc.ATTEST_ZERO_CONF_ACTIVATION.testnet).to.be.a('number');
+        expect(REQ_S1).to.be.below(zc.ATTEST_ZERO_CONF_ACTIVATION.testnet);
         expect(REQ_S1).to.be.at.least(wid.ATTEST_RESPONSIBLE_WIDENING_ACTIVATION.testnet);
     });
 

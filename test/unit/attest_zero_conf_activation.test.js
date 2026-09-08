@@ -144,10 +144,12 @@ describe('ATTEST zero-conf flip: hub copy value-identity @regression', function 
             expect(local.isZeroConfActive(1000, 'regtest')).to.equal(true);
         });
 
-        it('is inert on testnet until the operator sizes it (floor 151324, D17)', function () {
-            expect(local.ATTEST_ZERO_CONF_ACTIVATION.testnet).to.equal(null);
+        it('is sized on testnet at 151800, above the 151324 mirror floor (D17, D106)', function () {
+            expect(local.ATTEST_ZERO_CONF_ACTIVATION.testnet).to.equal(151800);
             expect(local.isZeroConfActive(151324, 'testnet')).to.equal(false);
-            expect(local.isZeroConfActive(999999999, 'testnet')).to.equal(false);
+            expect(local.isZeroConfActive(151799, 'testnet')).to.equal(false);
+            expect(local.isZeroConfActive(151800, 'testnet')).to.equal(true);
+            expect(local.isZeroConfActive(999999999, 'testnet')).to.equal(true);
         });
 
         it('gates on the REQUEST block, exactly at the threshold, once armed', function () {
