@@ -13,12 +13,21 @@
 const { expect } = require('chai');
 const crypto = require('crypto');
 const wid = require('../../src/attest_responsible_widening_activation.js');
+const zc  = require('../../src/attest_zero_conf_activation.js');
 const AttestationRound = require('../../src/AttestationRound.js');
 
 // The measured incident this ladder exists for: BTC testnet4 request
 // 77f37a86..., admitted at 150699 with deadlineBlocks 10, redundancy 3.
 const REQ = 150699;
 const DEADLINE = 150709;
+
+// Stage-1 (pre-zero-conf) heights: regtest arms ATTEST_ZERO_CONF_ACTIVATION at 0 (D91),
+// so every regtest request now runs the V2 ladder below. Stage-1 numbers are asserted on
+// testnet instead, at or above the widening height (150780) where zero-conf stays the
+// null (unratified) sentinel, so widenSlots keeps taking the `if(zc.isZeroConfActive(...))`
+// false branch byte for byte.
+const REQ_S1      = 150780;
+const DEADLINE_S1 = 150790;
 
 describe('attest_responsible_widening: activation gate', function () {
 
@@ -41,8 +50,15 @@ describe('attest_responsible_widening: activation gate', function () {
             if (typeof height !== 'number') continue;
             expect(wid.widenSlots(height + 500, height - 1, height + 29, net),
                 net + ': a request below the height must never widen').to.equal(0);
+            // Derived from the maps, never a hardcoded network list (D91): where zero-conf
+            // is armed on the request's own block the ladder runs V2 and the ceiling is
+            // headroom + maxSlots; where it is not, the ceiling is stage-1's bare maxSlots.
+            const zcActive = zc.isZeroConfActive(height, net);
+            const expected = zcActive
+                ? wid.ATTEST_RESPONSIBLE_WIDENING_V2.headroom + wid.ATTEST_RESPONSIBLE_WIDENING_V2.maxSlots
+                : wid.ATTEST_RESPONSIBLE_WIDENING.maxSlots;
             expect(wid.widenSlots(height + 21, height, height + 30, net),
-                net + ': a request at the height must widen').to.equal(wid.ATTEST_RESPONSIBLE_WIDENING.maxSlots);
+                net + ': a request at the height must widen').to.equal(expected);
         }
     });
 
@@ -67,53 +83,115 @@ describe('attest_responsible_widening: activation gate', function () {
     });
 });
 
-describe('attest_responsible_widening: the ladder', function () {
+describe('attest_responsible_widening: the ladder (stage 1, testnet: widening armed, request below the zero-conf flip)', function () {
+
+    before(function () {
+        // Vacuity guard (D91): stage-1 numbers can only be asserted where widening is
+        // armed AND the REQUEST block sits below the zero-conf flip (the stage is keyed
+        // on the request block, D106). Regtest arms zero-conf at 0, so testnet with a
+        // request below 151800 is the shape; fail loudly if that ever stops being true.
+        expect(wid.ATTEST_RESPONSIBLE_WIDENING_ACTIVATION.testnet).to.be.a('number');
+        expect(zc.ATTEST_ZERO_CONF_ACTIVATION.testnet).to.be.a('number');
+        expect(REQ_S1).to.be.below(zc.ATTEST_ZERO_CONF_ACTIVATION.testnet);
+        expect(REQ_S1).to.be.at.least(wid.ATTEST_RESPONSIBLE_WIDENING_ACTIVATION.testnet);
+    });
 
     it('grants nothing inside the first segment, so a healthy round never sees a widened set', function () {
-        // serviceable at 150702, span 7, three segments of 7/3.
-        for (const at of [150699, 150700, 150702, 150703, 150704]) {
-            expect(wid.widenSlots(at, REQ, DEADLINE, 'regtest'), 'block ' + at).to.equal(0);
+        // serviceable at REQ_S1+3, span 7, three segments of 7/3.
+        for (const at of [REQ_S1, REQ_S1 + 1, REQ_S1 + 3, REQ_S1 + 4, REQ_S1 + 5]) {
+            expect(wid.widenSlots(at, REQ_S1, DEADLINE_S1, 'testnet'), 'block ' + at).to.equal(0);
         }
     });
 
     it('reaches both slots BEFORE the deadline on the measured 10-block window', function () {
-        expect(wid.widenSlots(150705, REQ, DEADLINE, 'regtest')).to.equal(1);
-        expect(wid.widenSlots(150707, REQ, DEADLINE, 'regtest')).to.equal(2);
-        expect(wid.widenSlots(DEADLINE, REQ, DEADLINE, 'regtest')).to.equal(2);
+        expect(wid.widenSlots(REQ_S1 + 6, REQ_S1, DEADLINE_S1, 'testnet')).to.equal(1);
+        expect(wid.widenSlots(REQ_S1 + 8, REQ_S1, DEADLINE_S1, 'testnet')).to.equal(2);
+        expect(wid.widenSlots(DEADLINE_S1, REQ_S1, DEADLINE_S1, 'testnet')).to.equal(2);
     });
 
     it('scales with the request window rather than a fixed block count', function () {
         // A 100-block deadline gets a proportionally longer grace period.
-        expect(wid.widenSlots(REQ + 10, REQ, REQ + 100, 'regtest')).to.equal(0);
-        expect(wid.widenSlots(REQ + 40, REQ, REQ + 100, 'regtest')).to.equal(1);
-        expect(wid.widenSlots(REQ + 70, REQ, REQ + 100, 'regtest')).to.equal(2);
+        expect(wid.widenSlots(REQ_S1 + 10, REQ_S1, REQ_S1 + 100, 'testnet')).to.equal(0);
+        expect(wid.widenSlots(REQ_S1 + 40, REQ_S1, REQ_S1 + 100, 'testnet')).to.equal(1);
+        expect(wid.widenSlots(REQ_S1 + 70, REQ_S1, REQ_S1 + 100, 'testnet')).to.equal(2);
     });
 
     it('never exceeds maxSlots, however far past the deadline', function () {
-        for (const at of [DEADLINE + 1, DEADLINE + 100, DEADLINE + 100000]) {
-            expect(wid.widenSlots(at, REQ, DEADLINE, 'regtest')).to.equal(wid.ATTEST_RESPONSIBLE_WIDENING.maxSlots);
+        for (const at of [DEADLINE_S1 + 1, DEADLINE_S1 + 100, DEADLINE_S1 + 100000]) {
+            expect(wid.widenSlots(at, REQ_S1, DEADLINE_S1, 'testnet')).to.equal(wid.ATTEST_RESPONSIBLE_WIDENING.maxSlots);
         }
     });
 
     it('is monotone non-decreasing in height, which is what makes hub and indexer agree', function () {
         let prev = 0;
-        for (let at = REQ; at <= DEADLINE + 20; at++) {
-            const v = wid.widenSlots(at, REQ, DEADLINE, 'regtest');
+        for (let at = REQ_S1; at <= DEADLINE_S1 + 20; at++) {
+            const v = wid.widenSlots(at, REQ_S1, DEADLINE_S1, 'testnet');
             expect(v, 'block ' + at).to.be.at.least(prev);
             prev = v;
         }
     });
 
     it('grants nothing on a degenerate span (deadline at or inside the confirmation lag)', function () {
-        expect(wid.widenSlots(REQ + 50, REQ, REQ, 'regtest')).to.equal(0);
-        expect(wid.widenSlots(REQ + 50, REQ, REQ + 3, 'regtest')).to.equal(0);
-        expect(wid.widenSlots(REQ + 50, REQ, REQ - 5, 'regtest')).to.equal(0);
+        expect(wid.widenSlots(REQ_S1 + 50, REQ_S1, REQ_S1, 'testnet')).to.equal(0);
+        expect(wid.widenSlots(REQ_S1 + 50, REQ_S1, REQ_S1 + 3, 'testnet')).to.equal(0);
+        expect(wid.widenSlots(REQ_S1 + 50, REQ_S1, REQ_S1 - 5, 'testnet')).to.equal(0);
     });
 
     it('grants nothing for unusable heights', function () {
-        expect(wid.widenSlots(NaN, REQ, DEADLINE, 'regtest')).to.equal(0);
-        expect(wid.widenSlots(REQ + 8, undefined, DEADLINE, 'regtest')).to.equal(0);
-        expect(wid.widenSlots(REQ + 8, REQ, null, 'regtest')).to.equal(0);
+        expect(wid.widenSlots(NaN, REQ_S1, DEADLINE_S1, 'testnet')).to.equal(0);
+        expect(wid.widenSlots(REQ_S1 + 8, undefined, DEADLINE_S1, 'testnet')).to.equal(0);
+        expect(wid.widenSlots(REQ_S1 + 8, REQ_S1, null, 'testnet')).to.equal(0);
+    });
+});
+
+describe('attest_responsible_widening: the V2 ladder (zero-conf armed, D27, D28)', function () {
+
+    before(function () {
+        // regtest arms ATTEST_ZERO_CONF_ACTIVATION at 0 (D91), so REQ/DEADLINE (BTC
+        // testnet4's measured incident block numbers, reused here as arbitrary regtest
+        // heights) run the V2 branch of widenSlots.
+        expect(zc.isZeroConfActive(REQ, 'regtest')).to.equal(true);
+    });
+
+    it('grants headroom at the request block, where elapsed is 0 (D27)', function () {
+        expect(wid.widenSlots(REQ, REQ, DEADLINE, 'regtest')).to.equal(wid.ATTEST_RESPONSIBLE_WIDENING_V2.headroom);
+    });
+
+    it('grants headroom at elapsed 0 generally, including before the request block', function () {
+        expect(wid.widenSlots(REQ - 2, REQ, DEADLINE, 'regtest')).to.equal(wid.ATTEST_RESPONSIBLE_WIDENING_V2.headroom);
+    });
+
+    it('grants headroom, never 0, on a degenerate span (D27)', function () {
+        expect(wid.widenSlots(REQ + 50, REQ, REQ, 'regtest')).to.equal(wid.ATTEST_RESPONSIBLE_WIDENING_V2.headroom);
+        expect(wid.widenSlots(REQ + 50, REQ, REQ - 5, 'regtest')).to.equal(wid.ATTEST_RESPONSIBLE_WIDENING_V2.headroom);
+    });
+
+    it('reaches headroom+1 and headroom+2 before the deadline on the measured 10-block window', function () {
+        // start=REQ, span=10, segment=10/3=3.333: idx 1 at elapsed>=3.333 (elapsed 4),
+        // idx 2 (clamped to maxSlots) at elapsed>=6.667 (elapsed 7).
+        expect(wid.widenSlots(REQ + 4, REQ, DEADLINE, 'regtest'))
+            .to.equal(wid.ATTEST_RESPONSIBLE_WIDENING_V2.headroom + 1);
+        expect(wid.widenSlots(REQ + 7, REQ, DEADLINE, 'regtest'))
+            .to.equal(wid.ATTEST_RESPONSIBLE_WIDENING_V2.headroom + wid.ATTEST_RESPONSIBLE_WIDENING_V2.maxSlots);
+        expect(wid.widenSlots(DEADLINE, REQ, DEADLINE, 'regtest'))
+            .to.equal(wid.ATTEST_RESPONSIBLE_WIDENING_V2.headroom + wid.ATTEST_RESPONSIBLE_WIDENING_V2.maxSlots);
+    });
+
+    it('clamps to headroom+maxSlots (3) past the deadline, however far past it', function () {
+        const ceiling = wid.ATTEST_RESPONSIBLE_WIDENING_V2.headroom + wid.ATTEST_RESPONSIBLE_WIDENING_V2.maxSlots;
+        expect(ceiling).to.equal(3);
+        for (const at of [DEADLINE + 1, DEADLINE + 100, DEADLINE + 100000]) {
+            expect(wid.widenSlots(at, REQ, DEADLINE, 'regtest')).to.equal(ceiling);
+        }
+    });
+
+    it('is monotone non-decreasing in atBlock', function () {
+        let prev = 0;
+        for (let at = REQ - 5; at <= DEADLINE + 20; at++) {
+            const v = wid.widenSlots(at, REQ, DEADLINE, 'regtest');
+            expect(v, 'block ' + at).to.be.at.least(prev);
+            prev = v;
+        }
     });
 });
 

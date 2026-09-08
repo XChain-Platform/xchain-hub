@@ -69,6 +69,57 @@ describe('consensus_rules_digest: the digest', function () {
     });
 });
 
+// The zero-confirmation flip's three appended SHARED_GATES rows (§8), plus the two
+// helpers a ROLLCALL v1 publisher and the rules-aware capability set filter both read.
+describe('consensus_rules_digest: knownGateKeys() and activeGatesAt() (D88)', function () {
+
+    it('is sorted, has 19 entries, and contains the three gates this train appends', function () {
+        const keys = crd.knownGateKeys();
+        expect(keys).to.have.lengthOf(19, 'SHARED_GATES total entry count moved; re-derive this floor before changing it');
+        expect(keys).to.deep.equal([...keys].sort());
+        expect(keys).to.include.members([
+            'attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION',
+            'attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING_V2',
+            'rollcall_gates_activation.ROLLCALL_GATES_ACTIVATION'
+        ]);
+    });
+
+    it('excludes a far-future sentinel height, however high the chain climbs', function () {
+        // PRICE_PAIR_WIDEN_ACTIVATION.mainnet is the live example named in the module
+        // header: at or above FAR_FUTURE_HEIGHT_SENTINEL it must never read as active.
+        const at = crd.activeGatesAt(crd.FAR_FUTURE_HEIGHT_SENTINEL, 'mainnet');
+        expect(at).to.not.include('price_pair_activation.PRICE_PAIR_WIDEN_ACTIVATION');
+    });
+
+    it('excludes a null (unratified) entry at any height', function () {
+        // ATTEST_ZERO_CONF_ACTIVATION.mainnet is null (unratified) today.
+        for (const h of [0, 1000000, crd.FAR_FUTURE_HEIGHT_SENTINEL - 1]) {
+            expect(crd.activeGatesAt(h, 'mainnet')).to.not.include('attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION');
+        }
+    });
+
+    it('excludes non-map exports (frozen ladder constants), never active in this sense', function () {
+        for (const h of [0, 150780, 999999999]) {
+            for (const net of ['mainnet', 'testnet', 'regtest']) {
+                const at = crd.activeGatesAt(h, net);
+                expect(at).to.not.include('attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING');
+                expect(at).to.not.include('attest_responsible_widening_activation.ATTEST_RESPONSIBLE_WIDENING_V2');
+            }
+        }
+    });
+
+    it('includes a gate exactly at its own activation height (<=, not <)', function () {
+        // regtest arms ATTEST_ZERO_CONF_ACTIVATION at 0.
+        expect(crd.activeGatesAt(0, 'regtest')).to.include('attest_zero_conf_activation.ATTEST_ZERO_CONF_ACTIVATION');
+    });
+
+    it('returns [] for a non-finite height', function () {
+        expect(crd.activeGatesAt(NaN, 'regtest')).to.deep.equal([]);
+        expect(crd.activeGatesAt(undefined, 'regtest')).to.deep.equal([]);
+        expect(crd.activeGatesAt(Infinity, 'regtest')).to.deep.equal([]);
+    });
+});
+
 describe('consensus_rules_digest: the heartbeat alarms', function () {
 
     // A PeerManager with no sockets: _notePeerRules and the report are pure over

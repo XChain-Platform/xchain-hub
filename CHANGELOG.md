@@ -5,10 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-09-08
+
+- Testnet activation heights sized: zero-confirmation ATTEST service from block 151800 and ROLLCALL v1 gates from epoch 152208.
+### Added
+- The PRICE batch publisher sheds buffered rounds once their batch lands (on every push, and by asking the landing chain's indexer before each catch-up sweep), so a hub restarted onto a full buffer no longer re-publishes windows the chain already carries.
+- Attestation requests are served the block they are mined in, with one headroom slot in the responsible set from the start, above a new zero-confirmation activation height; the hub refuses to boot if that height is armed below the mirror or widening heights.
+
+### Fixed
+- A request this hub already finalized is refused before the provider is called when it is re-polled while waiting to bind, so a re-mine or a slow bind no longer pays the provider again; `finalized_skip_count` counts those refusals.
+- ROLLCALL v1 carries the consensus gates the publisher's build knows, published for epochs at or above a new gates activation height, with the pair cap per action sized to the list.
+
+### Changed
+- The pending-request poll runs every 3 seconds instead of 15, and attestation stats report provider fetches and fetch-cache hits.
+
 ## [0.15.2] - 2026-09-07
 
 ### Fixed
 - The hourly ATTEST response batch anchors on the BTC tip the attestation poll observed when no chain tip was pushed to the hub, so a validator without its own Bitcoin indexer can lead and co-sign batches instead of deferring every window.
+
 
 ## [0.15.0] - 2026-09-07
 

@@ -973,6 +973,24 @@ class PriceAggregator extends EventEmitter {
             + (sourceChain || 'unknown') + ' (' + stored + ' stored, ' + duplicates + ' duplicate round(s), '
             + validatorCount + ' sigs)');
 
+        // Tell the batch rail these rounds are on chain, WHETHER OR NOT any row was
+        // stored. On a validator every round is normally a duplicate here (it finalized
+        // them itself), so the stored rows the publisher's observation prune keys on
+        // never appear, and its buffer kept every round it ever finalized until the
+        // catch-up sweep re-published them as duplicates. The batch header is
+        // the chain-derived range and this push reaches every hub, so it is the one
+        // place a follower learns that a window it did not lead has landed.
+        let landedPublisher = this.hub && this.hub.oraclePublisher;
+        if (landedPublisher && typeof landedPublisher.noteBatchLanded === 'function') {
+            try {
+                landedPublisher.noteBatchLanded(firstRound, lastRound,
+                    { sourceChain: sourceChain, actionIndex: batchData.action_index });
+            } catch (e) {
+                console.warn('PriceAggregator: could not hand the landed batch [' + firstRound + '..' +
+                    lastRound + '] to the publisher; its rounds stay buffered:', e && e.message);
+            }
+        }
+
         return { accepted: true, stored, duplicates, rejected: 0 };
     }
 

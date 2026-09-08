@@ -2259,6 +2259,24 @@ class StateAnchorPublisher {
         this._checkArchiveAttestQuorum();
     }
 
+    // A validator_rewards row the indexer credits from on-chain bytes is not archive
+    // cargo: anchor_<CHAIN>/anchor_bundle at/above ANCHOR_REWARD_ACTIVATION, anchor_archive
+    // at/above ARCHIVE_REWARD_ACTIVATION, judged on the row's block_index and this hub's
+    // network (an unscoped hub answers false and keeps archiving: costs DOGE, never a row).
+    _isChainDerivedReward(row){
+        let type  = String(row && row.reward_type || '');
+        // A row with no block_index is pre-upgrade local state; the selector's SQL
+        // already excludes it, and Number(null) would read as height 0 here.
+        if(!row || row.block_index === null || row.block_index === undefined || row.block_index === '') return false;
+        let block = Number(row.block_index);
+        if(!Number.isFinite(block)) return false;
+        if(/^anchor_(BTC|LTC|DOGE)$/.test(type) || type === 'anchor_bundle')
+            return ar.isAnchorRewardActive(block, this.network);
+        if(type === 'anchor_archive')
+            return ar.isArchiveRewardActive(block, this.network);
+        return false;
+    }
+
     // Archive round (v1/v2).
     // Leader = hash-order rank 0 over the oracle_publish set, with the same
     // failover ladder as the checkpoint leg: the election key is anchored on the archive
@@ -2346,6 +2364,11 @@ class StateAnchorPublisher {
         let rewards = await this.db.doQuery(
             "SELECT * FROM validator_rewards WHERE reward_type LIKE 'anchor\\_%' AND batch_seq IS NULL AND block_index IS NOT NULL " +
             "ORDER BY reward_type ASC, round_number ASC, validator_pubkey ASC LIMIT ?", [this.maxBatch]);
+        // Derived rows are dropped here, not in the SQL, because they keep batch_seq NULL
+        // on purpose: rows are immutable and nothing else reads NULL as "unarchived" for them.
+        // Archiving them was self-feeding: each archive publish records an anchor_archive
+        // reward, which the next flush archived alone, one reward-only ANCHOR per restart.
+        rewards = (rewards || []).filter(r => !this._isChainDerivedReward(r));
         if((!matches || matches.length === 0) && (!calls || calls.length === 0) && (!rewards || rewards.length === 0)){ this._pendingMatches = 0; return 'none'; }
         matches = matches || [];
         calls   = calls   || [];

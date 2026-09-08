@@ -40,9 +40,9 @@ jobs:
   # Dedicated perf job with a real MariaDB. This tier is deliberately outside
   # `npm run ci`, and so outside the pre-push venue gate: a caller cannot inject
   # a `services:` container into the shared reusable workflow's job, and the
-  # suite needs one. Declared as separate in the platform's
-  # claude/bin/ci-job-reachability-config.json, which is what keeps a job that
-  # nothing else runs from going dark unnoticed.
+  # suite needs one. Declared as separate in the platform's job-reachability
+  # config, which is what keeps a job that nothing else runs from going dark
+  # unnoticed.
   perf:
     # Only spend the perf runtime once the gate is green.
     needs: ci

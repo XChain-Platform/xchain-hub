@@ -61,6 +61,14 @@
  * nobody is evicted, and the unrolled-epochs monitor is the detector. That is
  * correct behaviour, not an error path.
  *
+ * TWO WIRE FORMS, chosen by the EPOCH height. At or above
+ * ROLLCALL_GATES_ACTIVATION an epoch is published as ROLLCALL v1, carrying a
+ * GATES field (this build's knownGateKeys(), comma-joined) that the canonical
+ * commits to as sha256(GATES); below it, v0 exactly as before. Signers sign over
+ * the PUBLISHER's list, so a validator whose build knows a different list signs
+ * different bytes and is recorded absent for that epoch: roll the fleet BETWEEN
+ * epochs, never across one.
+ *
  * A ROLLCALL is always a two-phase P2SH publish (the header alone is past the
  * 80-byte OP_RETURN limit), and the built-in encoder pipeline fails closed on
  * P2SH, so this engine publishes ONLY through a signer module that exports
@@ -83,8 +91,10 @@ const StateAnchorPublisher       = require('./StateAnchorPublisher.js');
 const { isAmbiguousSendError }   = require('./lib/idempotent_broadcast.js');
 const { forwardableUtxos }       = require('./lib/encoder_utxo_forward.js');
 const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
-const eq                         = require('./equivocation_header.js');
 const rca                        = require('./rollcall_activation.js');
+const rga                        = require('./rollcall_gates_activation.js');
+const { knownGateKeys }          = require('./consensus_rules_digest.js');
+const { buildRollcallCanonical } = require('./rollcall_canonical.js');
 const { CANONICAL_REORG_BUFFER } = require('./snapshot_reorg_buffer.js');
 
 // The one gossip type this engine adds. PeerManager.broadcast has no type
@@ -94,11 +104,17 @@ const XROLLCALL_SIGN = 'XROLLCALL_SIGN';
 // (peers a poll ahead); a few more covers a hub catching up after a stall.
 const EARLY_SIG_EPOCHS = 4;
 
-// Wire chunking bound, from the frozen test vector's size budget: a 7-digit
-// epoch header costs 152 bytes and each (PUBKEY, SIG) pair 194, against the
-// protocol's 8189-byte action-data ceiling. A federation larger than this is
-// rolled in several actions per epoch, which the union rule makes free.
+// Wire chunking bound for a v0 roll call, from the frozen test vector's size
+// budget: a 7-digit epoch header costs 152 bytes and each (PUBKEY, SIG) pair 194,
+// against the protocol's 8189-byte action-data ceiling. A federation larger than
+// this is rolled in several actions per epoch, which the union rule makes free.
 const MAX_PAIRS_PER_ACTION = 41;
+// The protocol's action-data ceiling and the exact cost of one (PUBKEY, SIG)
+// pair on the wire: '|' + 64 hex + '|' + 128 hex. An action past the ceiling is
+// DROPPED by the decoder with no error anywhere, so both numbers are asserted
+// against the frozen vector's size_budget block by the canonical suite.
+const ACTION_DATA_CEILING = 8189;
+const BYTES_PER_PAIR      = 194;
 
 // Per-network defaults for the three publish tunables. These are hub POLICY, not
 // consensus: no §3.3/§3.4 chain rule reads any of them, which is why they live
@@ -287,28 +303,76 @@ class RollcallRound {
 
     // ── canonical + wire ─────────────────────────────────────────────────────
 
+    // The GATES field this hub publishes for `epochHeight`, or null below
+    // ROLLCALL_GATES_ACTIVATION (a v0 epoch). The list is what THIS build knows,
+    // active or not, so a signer's list stays a true superset comparand at any
+    // later request block; the sorted comma-joined form is the wire field and the
+    // canonical hashes it.
+    _gatesFor(epochHeight){
+        if(!rga.isRollcallGatesActive(epochHeight, this.network)) return null;
+        return knownGateKeys().join(',');
+    }
+
     // CONSENSUS-CRITICAL: must byte-match what xchain-indexer's actions/rollcall.js
     // rebuilds from the carried fields and what the BTC close rebuilds from its own
     // ledger_hash. Frozen by xchain-documentation/protocol/test-vectors/rollcall_canonical.json.
     //
-    // Every ROLLCALL that can exist is at or above EQUIV_HEADER_ACTIVATION, so only
-    // the wrapped form is ever built; the bare headerless form has no producer.
-    _canonical(epochHeight, ledgerHash){
-        let content = String(this.network) + '|' + Number(epochHeight) + '|' + String(ledgerHash).toLowerCase();
-        return eq.buildEquivCanonical(eq.ENGINE_TAGS.ROLLCALL, String(Number(epochHeight)), 0, content);
+    // The spelling itself lives in rollcall_canonical.js, called rather than
+    // repeated: with two forms (v0, and v1 appending sha256(GATES)) three sites
+    // rebuilding these bytes by hand is three places to drift, and a drift drops
+    // real presence proofs and evicts live validators with nothing going red.
+    // Omitting `gates` is the v0 form, byte-identical to what this method built
+    // before v1 existed.
+    _canonical(epochHeight, ledgerHash, gates){
+        return buildRollcallCanonical({ network: this.network, epochHeight, ledgerHash, gates });
     }
 
-    // ROLLCALL|0|EPOCH_HEIGHT|LEDGER_HASH|PUBLISHER|SIG_COUNT|PUBKEY_1|SIG_1|...
+    // v0: ROLLCALL|0|EPOCH_HEIGHT|LEDGER_HASH|PUBLISHER|SIG_COUNT|PUBKEY_1|SIG_1|...
+    // v1: ROLLCALL|1|EPOCH_HEIGHT|LEDGER_HASH|PUBLISHER|GATES|SIG_COUNT|PUBKEY_1|SIG_1|...
+    //
+    // The version is a function of `gates` alone, so the wire and the canonical
+    // this hub signed cannot disagree about which form the epoch is.
     //
     // PUBLISHER carries no signature of its own; it is the key the publish reward
     // attaches to, and the chain pays only the ELECTED leader, so naming a key
     // here is a claim the close checks rather than a race anyone can win.
-    _buildWire(epochHeight, ledgerHash, publisher, pairs){
-        let parts = ['ROLLCALL', '0', String(Number(epochHeight)),
-                     String(ledgerHash).toLowerCase(), String(publisher).toLowerCase(),
-                     String(pairs.length)];
+    _buildWire(epochHeight, ledgerHash, publisher, pairs, gates){
+        let v1    = (gates !== undefined && gates !== null);
+        let parts = ['ROLLCALL', v1 ? '1' : '0', String(Number(epochHeight)),
+                     String(ledgerHash).toLowerCase(), String(publisher).toLowerCase()];
+        if(v1) parts.push(String(gates));
+        parts.push(String(pairs.length));
         for(let p of pairs) parts.push(String(p.pubkey).toLowerCase(), String(p.sig).toLowerCase());
         return parts.join('|');
+    }
+
+    // The v1 wire prefix ahead of the first pair, in bytes, measured from the REAL
+    // GATES string rather than remembered as a number: every '|' between header
+    // fields is counted here and the separator BEFORE each pair is counted in that
+    // pair's 194, so header + 194 * pairs is the exact payload size. A 7-digit
+    // epoch and a 2-digit SIG_COUNT are the widest fields any v1 action can carry
+    // (the cap below is under 100), which is the same basis the frozen vector
+    // measured v0's 152-byte header on.
+    static v1HeaderBytes(gates){
+        return Buffer.byteLength(['ROLLCALL', '1', '1008000', 'a'.repeat(64), 'b'.repeat(64),
+                                  String(gates), '00'].join('|'), 'utf8');
+    }
+
+    // Pairs per action for an epoch publishing `gates`: floor((8189 - header) / 194).
+    //
+    // v0 keeps the frozen 41 (header 152). v1 is DERIVED, never hardcoded: GATES is
+    // knownGateKeys().join(',') and grows every time a gate is appended to
+    // SHARED_GATES, so a hardcoded cap would go stale silently and the first
+    // oversize action would be dropped by the decoder with nothing going red.
+    // Today (D88) that is 19 keys / 1076 bytes, header 1228, cap 35.
+    //
+    // Zero means no pair fits at all, which a GATES list longer than the ceiling
+    // would produce; the publish path refuses rather than building an action the
+    // decoder would drop.
+    static maxPairsForGates(gates){
+        if(gates === undefined || gates === null) return MAX_PAIRS_PER_ACTION;
+        let cap = Math.floor((ACTION_DATA_CEILING - RollcallRound.v1HeaderBytes(gates)) / BYTES_PER_PAIR);
+        return cap > 0 ? cap : 0;
     }
 
     // Split a pair list into per-action chunks. Any number of ROLLCALLs may land
@@ -439,11 +503,17 @@ class RollcallRound {
             if(/^[0-9a-f]{64}$/.test(pk)) members.add(pk);
         }
 
-        let canonical = this._canonical(epoch, ledgerHash);
+        // Resolved ONCE per epoch and carried on the round state: the canonical this
+        // hub signs, the canonical it verifies every peer's signature against
+        // (_onSign reads state.canonical) and the wire it publishes must all be the
+        // same form, and re-deriving the form at each of those sites is how they
+        // would come to disagree mid-epoch.
+        let gates     = this._gatesFor(epoch);
+        let canonical = this._canonical(epoch, ledgerHash, gates);
         let myPubkey  = this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
 
         let state = {
-            epoch, ledgerHash, canonical, members,
+            epoch, ledgerHash, canonical, members, gates,
             sigs:         new Map(),   // pubkey -> sig, deduped, verified
             signed:       false,
             order:        null,        // election order, resolved lazily at publish time
@@ -493,7 +563,8 @@ class RollcallRound {
         if(early) for(let [pk, sig] of early) this._onSign({ epoch, pubkey: pk, sig });
 
         console.log('RollcallRound: epoch=' + epoch + ' ledger_hash=' + ledgerHash.substring(0, 16) +
-                    '... members=' + members.size + ' signed=' + (state.signed ? 'yes' : 'no identity'));
+                    '... members=' + members.size + ' signed=' + (state.signed ? 'yes' : 'no identity') +
+                    ' v=' + (gates === null ? '0' : '1' + ' gates=' + gates.split(',').length));
     }
 
     // ── collect ──────────────────────────────────────────────────────────────
@@ -714,7 +785,19 @@ class RollcallRound {
             return 'retry';
         }
 
-        let chunks = RollcallRound.chunkPairs(pairs, MAX_PAIRS_PER_ACTION);
+        // The cap is per EPOCH, not per build: a v1 epoch carries the GATES field in
+        // every action, so its pairs-per-action budget is what the ceiling leaves
+        // after that string. chunkPairs falls back to the v0 41 on a non-positive
+        // size, so the refusal has to happen here rather than there.
+        let maxPairs = RollcallRound.maxPairsForGates(state.gates);
+        if(maxPairs < 1){
+            console.error('RollcallRound: the GATES field is ' + String(state.gates).length +
+                          ' bytes, leaving no room for a signature pair inside the ' +
+                          ACTION_DATA_CEILING + '-byte action-data ceiling (epoch ' + state.epoch +
+                          ', ' + kind + '); refusing to publish an action the decoder would drop');
+            return 'retry';
+        }
+        let chunks = RollcallRound.chunkPairs(pairs, maxPairs);
 
         // RESERVE one token per chunk, because one chunk is one transaction and one
         // fee. check() above is a PURE predicate read once for the whole batch, so on
@@ -781,7 +864,7 @@ class RollcallRound {
                 return 'retry';
             }
             let chunk = chunks[i];
-            let wire = this._buildWire(state.epoch, state.ledgerHash, myPubkey, chunk);
+            let wire = this._buildWire(state.epoch, state.ledgerHash, myPubkey, chunk, state.gates);
             try {
                 let res = await this._broadcast(wire);
                 // The reservation IS the spend; record() here would count it twice.
@@ -1065,6 +1148,8 @@ class RollcallRound {
 module.exports = RollcallRound;
 module.exports.XROLLCALL_SIGN       = XROLLCALL_SIGN;
 module.exports.MAX_PAIRS_PER_ACTION = MAX_PAIRS_PER_ACTION;
+module.exports.ACTION_DATA_CEILING  = ACTION_DATA_CEILING;
+module.exports.BYTES_PER_PAIR       = BYTES_PER_PAIR;
 module.exports.PUBLISH_DELAY_DEFAULTS      = PUBLISH_DELAY_DEFAULTS;
 module.exports.ELECTION_TOLERANCE_DEFAULTS = ELECTION_TOLERANCE_DEFAULTS;
 module.exports.SELF_PUBLISH_DEFAULTS       = SELF_PUBLISH_DEFAULTS;

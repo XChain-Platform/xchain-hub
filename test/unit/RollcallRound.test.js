@@ -29,6 +29,8 @@ const EventEmitter = require('events');
 const ValidatorIdentity    = require('../../src/ValidatorIdentity.js');
 const StateAnchorPublisher = require('../../src/StateAnchorPublisher.js');
 const rca                  = require('../../src/rollcall_activation.js');
+const rga                  = require('../../src/rollcall_gates_activation.js');
+const { knownGateKeys }    = require('../../src/consensus_rules_digest.js');
 
 const BTC_URL  = 'http://btc-indexer.test';
 const DOGE_URL = 'http://doge-indexer.test';
@@ -1142,6 +1144,174 @@ describe('RollcallRound', function () {
             assert.strictEqual(eng.acceptWindow, rca.ROLLCALL_ACCEPT_WINDOW_BLOCKS.regtest);
             delete process.env.ROLLCALL_INTERVAL_BLOCKS;
             delete process.env.ROLLCALL_ACCEPT_WINDOW_BLOCKS;
+        });
+    });
+
+    // ── ROLLCALL v1: the GATES form ──────────────────────────────────────────
+    //
+    // Keyed on the EPOCH height, so the whole difference between the two forms is
+    // one threshold. The threshold is stubbed here rather than armed through
+    // XC_ROLLCALL_GATES_REGTEST_ACTIVATION because that variable is read ONCE at
+    // require time: setting it in this file would arm the module for every other
+    // suite mocha loads in the same process. The env grammar itself is the gate
+    // module's own test (row 4).
+
+    describe('ROLLCALL v1 above the gates height', function () {
+
+        const GATES = knownGateKeys().join(',');
+
+        let savedGates;
+        beforeEach(function () { savedGates = rga.ROLLCALL_GATES_ACTIVATION.regtest; });
+        afterEach(function () { rga.ROLLCALL_GATES_ACTIVATION.regtest = savedGates; });
+
+        // v1 pushes the pairs one field right of v0, so parseWire cannot read it.
+        function parseWireV1(payload) {
+            const f = payload.split('|');
+            const pairs = [];
+            for (let i = 7; i < f.length; i += 2) pairs.push({ pubkey: f[i], sig: f[i + 1] });
+            return { action: f[0], version: f[1], epoch: Number(f[2]), ledgerHash: f[3],
+                     publisher: f[4], gates: f[5], sigCount: Number(f[6]), pairs };
+        }
+
+        it('publishes v1 carrying this build\'s gate list, signed over the v1 canonical', async function () {
+            rga.ROLLCALL_GATES_ACTIVATION.regtest = 0;
+            wireRpc({ tip: 42 });
+            const order = orderFor(PKS, EPOCH);
+            const eng = makeEngine({ identity: IDS[PKS.indexOf(order[0])] },
+                                   { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_SELF_PUBLISH_BLOCKS: 99 });
+            await eng._tick();
+
+            const bc = eng.hub.oraclePublisher.broadcastFn;
+            assert.strictEqual(bc.callCount, 1);
+            const w = parseWireV1(bc.getCall(0).args[0]);
+            assert.strictEqual(w.version, '1');
+            assert.strictEqual(w.gates, GATES, 'GATES is knownGateKeys() joined, as published');
+            assert.strictEqual(w.sigCount, w.pairs.length);
+            // The signature on the wire must verify over the canonical the DOGE parser
+            // rebuilds from the CARRIED gates, and must NOT verify over the v0 form:
+            // a site that quietly dropped GATES would still accept it otherwise.
+            const v1 = eng._canonical(EPOCH, LEDGER_HASH, GATES);
+            const v0 = eng._canonical(EPOCH, LEDGER_HASH);
+            const mine = w.pairs.find(p => p.pubkey === order[0]);
+            assert.ok(mine, 'the publisher signed its own roll call');
+            assert.strictEqual(ValidatorIdentity.verify(v1, mine.sig, order[0]), true);
+            assert.strictEqual(ValidatorIdentity.verify(v0, mine.sig, order[0]), false,
+                'the v1 signature must be bound to the gates commitment');
+        });
+
+        it('verifies a peer\'s signature against the SAME canonical for the epoch', async function () {
+            rga.ROLLCALL_GATES_ACTIVATION.regtest = 0;
+            wireRpc({ tip: 36 });
+            const eng = makeEngine({});
+            await eng._tick();
+            const state = eng.rounds.get(EPOCH);
+            assert.strictEqual(state.gates, GATES);
+            assert.strictEqual(state.canonical, eng._canonical(EPOCH, LEDGER_HASH, GATES));
+
+            // A peer on the same build: counted.
+            eng._handleMessage({ type: 'XROLLCALL_SIGN',
+                                 data: { epoch: EPOCH, pubkey: PKS[1], sig: IDS[1].sign(state.canonical) } });
+            assert.strictEqual(state.sigs.has(PKS[1]), true);
+            // A peer still signing the v0 canonical (an un-upgraded build, or one whose
+            // gate list differs) verifies against nothing and is simply absent. This is
+            // the cost §7.2 names: roll the fleet BETWEEN epochs, never across one.
+            eng._handleMessage({ type: 'XROLLCALL_SIGN',
+                                 data: { epoch: EPOCH, pubkey: PKS[2],
+                                         sig: IDS[2].sign(eng._canonical(EPOCH, LEDGER_HASH)) } });
+            assert.strictEqual(state.sigs.has(PKS[2]), false);
+        });
+
+        it('is v0, byte for byte, for an epoch BELOW the gates height', async function () {
+            // The same engine, one block of threshold apart: the only thing that
+            // decides the form is the epoch height.
+            rga.ROLLCALL_GATES_ACTIVATION.regtest = EPOCH + 1;
+            wireRpc({ tip: 42 });
+            const order = orderFor(PKS, EPOCH);
+            const eng = makeEngine({ identity: IDS[PKS.indexOf(order[0])] },
+                                   { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_SELF_PUBLISH_BLOCKS: 99 });
+            await eng._tick();
+            assert.strictEqual(eng.rounds.get(EPOCH).gates, null);
+            const bc = eng.hub.oraclePublisher.broadcastFn;
+            assert.strictEqual(bc.callCount, 1);
+            const w = parseWire(bc.getCall(0).args[0]);
+            assert.strictEqual(w.version, '0');
+            assert.strictEqual(w.sigCount, w.pairs.length);
+            const mine = w.pairs.find(p => p.pubkey === order[0]);
+            assert.strictEqual(ValidatorIdentity.verify(eng._canonical(EPOCH, LEDGER_HASH),
+                                                        mine.sig, order[0]), true);
+        });
+
+        it('stays v0 where the height is the INERT null placeholder', async function () {
+            // `0 >= null` is true in JS; only the isFinite guard keeps an unarmed
+            // network on v0, and an accidental v1 there forks the whole federation.
+            rga.ROLLCALL_GATES_ACTIVATION.regtest = null;
+            wireRpc({ tip: 36 });
+            const eng = makeEngine({});
+            await eng._tick();
+            assert.strictEqual(eng.rounds.get(EPOCH).gates, null);
+        });
+
+        it('splits at the DERIVED v1 cap, not the v0 41', async function () {
+            rga.ROLLCALL_GATES_ACTIVATION.regtest = 0;
+            const cap = RollcallRound.maxPairsForGates(GATES);
+            assert.ok(cap > 0 && cap < RollcallRound.MAX_PAIRS_PER_ACTION,
+                'the live gate list must cost pairs, or this case proves nothing');
+
+            const many = [];
+            const ids  = [];
+            for (let i = 0; i < cap + 4; i++) {
+                const id = new ValidatorIdentity(i.toString(16).padStart(2, '0').repeat(32));
+                ids.push(id);
+                many.push(id.getPubkeyHex().toLowerCase());
+            }
+            const order = orderFor(many, EPOCH);
+            wireRpc({ tip: 36 });
+            const eng = makeEngine({ identity: ids[many.indexOf(order[0])], members: many, candidates: many },
+                                   { ROLLCALL_PUBLISH_DELAY_BLOCKS: 8, ROLLCALL_SELF_PUBLISH_BLOCKS: 99 });
+            await eng._tick();
+            const canon = eng._canonical(EPOCH, LEDGER_HASH, GATES);
+            for (let i = 0; i < ids.length; i++)
+                eng._handleMessage({ type: 'XROLLCALL_SIGN',
+                                     data: { epoch: EPOCH, pubkey: many[i], sig: ids[i].sign(canon) } });
+            wireRpc({ tip: 38 });
+            await eng._tick();
+
+            const bc = eng.hub.oraclePublisher.broadcastFn;
+            assert.strictEqual(bc.callCount, 2);
+            assert.deepStrictEqual(bc.getCalls().map(c => parseWireV1(c.args[0]).sigCount), [cap, 4]);
+            // The bound that matters is the byte one: an action past the ceiling is
+            // dropped by the decoder with nothing going red anywhere.
+            for (const c of bc.getCalls())
+                assert.ok(Buffer.byteLength(c.args[0], 'utf8') <= RollcallRound.ACTION_DATA_CEILING,
+                    'a published v1 action is ' + Buffer.byteLength(c.args[0], 'utf8') + ' bytes');
+            // Every signature rides exactly one action; a split may cost a fee and
+            // must never cost a signature.
+            const seen = new Set();
+            for (const c of bc.getCalls()) for (const p of parseWireV1(c.args[0]).pairs) seen.add(p.pubkey);
+            assert.strictEqual(seen.size, cap + 4);
+        });
+
+        it('refuses to publish rather than build an action past the ceiling', async function () {
+            // A GATES list longer than the ceiling leaves room for no pair at all.
+            // chunkPairs falls back to the v0 41 on a non-positive size, so without
+            // the explicit refusal this would broadcast an action the decoder drops.
+            rga.ROLLCALL_GATES_ACTIVATION.regtest = 0;
+            wireRpc({ tip: 42 });
+            const order = orderFor(PKS, EPOCH);
+            const eng = makeEngine({ identity: IDS[PKS.indexOf(order[0])] },
+                                   { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_SELF_PUBLISH_BLOCKS: 99 });
+            await eng._tick();
+            assert.strictEqual(eng.hub.oraclePublisher.broadcastFn.callCount, 1, 'the normal list publishes');
+
+            loadModule();
+            wireRpc({ tip: 42 });
+            const eng2 = makeEngine({ identity: IDS[PKS.indexOf(order[0])] },
+                                    { ROLLCALL_PUBLISH_DELAY_BLOCKS: 1, ROLLCALL_SELF_PUBLISH_BLOCKS: 99 });
+            eng2._gatesFor = () => 'a.B,'.repeat(3000);
+            await eng2._tick();
+            assert.strictEqual(eng2.hub.oraclePublisher.broadcastFn.callCount, 0,
+                'an oversize GATES list must stop the publish, not ride out un-decodable');
+            assert.strictEqual(eng2.rounds.get(EPOCH).published, false, 'the slot is released for a retry');
         });
     });
 });

@@ -132,6 +132,11 @@ describe('StateAnchorPublisher archive wrapper is picked on the consensus key', 
           checkpoint_seq: 100, snapshot_block: 100 }
     ];
 
+    // A finalized, never-archived match: the archive's real cargo. Only its
+    // pending-ness matters here; the round bails at the rank gate before it
+    // reads any other field.
+    const PENDING_MATCH = { match_id: 'm1', status: 'finalized', archived_status: null, batch_seq: null };
+
     // Order the fixture rows the way the SQL asks, so the assertion tests the
     // ORDER BY the code actually emits rather than a hard-coded string.
     function orderRows(sql) {
@@ -159,11 +164,12 @@ describe('StateAnchorPublisher archive wrapper is picked on the consensus key', 
         let { pub } = buildPub({
             identity,
             async doQuery(sql) {
-                if (sql.startsWith('SELECT * FROM cross_chain_matches')) return [];
+                // The cargo that carries the round to the wrapper pick is a pending
+                // match: a regtest anchor reward is chain-derived above the flag-day
+                // (active from 0 there) and no longer archive cargo.
+                if (sql.startsWith('SELECT * FROM cross_chain_matches')) return [PENDING_MATCH];
                 if (sql.startsWith('SELECT * FROM cross_chain_calls'))   return [];
-                if (sql.startsWith('SELECT * FROM validator_rewards'))
-                    return [{ reward_type: 'anchor_BTC', round_number: 1, validator_pubkey: me,
-                              block_index: 100, batch_seq: null, amount: '1' }];
+                if (sql.startsWith('SELECT * FROM validator_rewards'))  return [];
                 if (sql.startsWith('SELECT * FROM state_checkpoints')) return orderRows(sql).slice(0, 1);
                 return [];
             }
@@ -190,9 +196,7 @@ describe('StateAnchorPublisher archive wrapper is picked on the consensus key', 
             identity,
             async doQuery(sql) {
                 if (sql.startsWith('SELECT * FROM state_checkpoints')) { seen.push(sql); return orderRows(sql).slice(0, 1); }
-                if (sql.startsWith('SELECT * FROM validator_rewards'))
-                    return [{ reward_type: 'anchor_BTC', round_number: 1, validator_pubkey: me,
-                              block_index: 100, batch_seq: null, amount: '1' }];
+                if (sql.startsWith('SELECT * FROM cross_chain_matches')) return [PENDING_MATCH];
                 return [];
             }
         });

@@ -4,8 +4,8 @@
 # XChain Platform Hub
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.15.0-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tests-5%2C977%2B%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/version-0.16.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/tests-6%2C326%2B%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node">
   <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License">
 </p>
@@ -164,8 +164,8 @@ The `full_node` capability requires a reachable BTC RPC endpoint (`FULLNODE.BTC_
 
 | Variable | Default | Description |
 |---|---|---|
-| `ATTESTATION_POLL_MS` | `15000` | How often AttestationRound polls the BTC indexer for new pending requests |
-| `ATTESTATION_CONFIRMATIONS` | `3` | BTC blocks of confirmation before initiating an external provider fetch (reorg safety) |
+| `ATTESTATION_POLL_MS` | `3000` | How often AttestationRound polls the BTC indexer for new pending requests. With the hub serving at the tip this interval is the floor on how long a request waits before any validator starts work on it |
+| `ATTESTATION_CONFIRMATIONS` | `3` | BTC blocks of confirmation before initiating an external provider fetch (reorg safety). Legacy-era value only: at and above `ATTEST_ZERO_CONF_ACTIVATION` for the network the hub serves a request at the tip it was mined in and the effective count is `0`, so this knob is inert there |
 | `ATTESTATION_FETCH_TIMEOUT` | `10000` | Per-request provider fetch timeout (ms) |
 | `ATTESTATION_RETRY_AFTER_MS` | `5 x ATTESTATION_POLL_MS` | How long an evaluated request is suppressed from re-polling before it can be re-evaluated (lets transiently-skipped requests retry) |
 | `ATTESTATION_ROUND_TIMEOUT_MS` | `120000` | PBFT round lifetime before in-memory state is dropped |
@@ -199,9 +199,8 @@ which you can run locally with `bin/sync-observability.sh --check`.
 These four names configure the shim itself. The fleet deploy path carries them
 into the container: `xchain-node` forwards any of them set in the module config
 store or in the deploy host's environment (`ModuleService.resolveObservabilityEnv`),
-and the validator compose files under `claude/deploy/testnet-validators/` name
-them outright. Nothing is fabricated when neither source sets one, so these
-defaults hold on an unconfigured box:
+and the validator compose files name them outright. Nothing is fabricated when
+neither source sets one, so these defaults hold on an unconfigured box:
 
 | Variable | Default | Effect |
 |---|---|---|
@@ -216,7 +215,7 @@ defaults hold on an unconfigured box:
 |---|---|
 | `npm run api` | Start the hub API server |
 | `bin/run-db-tiers.sh` | Run the DB-backed tiers against a throwaway MariaDB it starts and drops |
-| `npm test` | Run unit tests (~5,174 tests) |
+| `npm test` | Run unit tests (~5,521 tests) |
 | `npm run test:integration` | Integration tests (~89 tests, requires MariaDB) |
 | `npm run test:e2e` | End-to-end tests (~70 tests, requires full stack) |
 | `npm run test:fuzz` | Fuzz tests (property-based via fast-check, 90 tests) |
@@ -228,7 +227,7 @@ defaults hold on an unconfigured box:
 | `npm run test:perf` | All performance tests (50 tests) |
 | `npm run test:mutate` | Mutation tests (Stryker) |
 | `npm run test:mutate:pilot` | Pilot mutation tests (phase 1) |
-| `npm run test:all` | Complete test suite (5,977 tests) |
+| `npm run test:all` | Complete test suite (6,326 tests) |
 
 ### Running the DB-backed tiers
 

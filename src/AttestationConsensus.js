@@ -378,6 +378,16 @@ class AttestationConsensus extends EventEmitter {
         return this.pending.has(String(rid).toLowerCase());
     }
 
+    // Whether this hub already finalized a round for the request. Consulted by
+    // AttestationRound BEFORE the provider is paid, and again in propose(): the
+    // request stays in the indexer's pending list until its callback binds,
+    // which outlives the `seen` and fetch-cache windows, so a re-poll must be
+    // refused ahead of the fetch. An evicted rid reads false, as in propose(),
+    // so the tombstone re-propose path is unchanged.
+    isFinalized(rid){
+        return this.finalized.has(String(rid).toLowerCase());
+    }
+
     _pruneEarlyMessages(now){
         for(let [rid, expiresAt] of this.earlyMessageTtl){
             if(expiresAt <= now){
@@ -526,7 +536,9 @@ class AttestationConsensus extends EventEmitter {
         // INVARIANT (item 6490): quorum <= redundancy, held by measuring the
         // PRE-WIDENING set size rather than responsible.length. AttestationRound
         // now builds the set as slice(0, max(1, redundancy) + widen) with widen up
-        // to ATTEST_RESPONSIBLE_WIDENING.maxSlots, so bftQuorum over the widened
+        // to ATTEST_RESPONSIBLE_WIDENING.maxSlots, and above ATTEST_ZERO_CONF_ACTIVATION
+        // up to ATTEST_RESPONSIBLE_WIDENING_V2.headroom + .maxSlots, a max of 3 and
+        // nonzero from the request's own block, so bftQuorum over the widened
         // length exceeds redundancy for small redundancies (redundancy 1, widen 1
         // -> bftQuorum(2) = 2), which would raise the finalization bar in exactly
         // the rounds the liveness ladder fires for and make it tip-dependent per
