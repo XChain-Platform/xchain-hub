@@ -135,7 +135,7 @@ const METHODS = [
     ['initiateswap', 'Initiate a tracked cross-chain swap.', ['source_chain', 'source_action_index', 'dest_chain', 'dest_action_index'], { auth: true }],
     ['getswap', 'One tracked swap, keyed by source chain + action index.', ['source_chain', 'source_action_index']],
     ['getswaps', 'List tracked swaps, optionally filtered by status.', ['status', 'limit']],
-    ['pushchaintip', 'Indexer push: chain tip update.', ['coin', 'network', 'block_height', 'block_time'], { auth: true, internal: true }],
+    ['pushchaintip', 'Indexer push: chain tip update.', ['coin', 'network', 'block_height', 'block_time', 'chain_id'], { auth: true, internal: true }],
     ['pushpriceround', 'Indexer push: finalized price round for cross-validation.', ['source_chain', 'round', 'timestamp', 'btc_block_height', 'pairs', 'sigs', 'action_index', 'block_index', 'push_generation'], { auth: true, internal: true }],
     // Present in the committed spec but missing from this list, so every
     // regeneration silently DELETED it and the drift guard only noticed on the
