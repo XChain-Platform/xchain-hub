@@ -503,8 +503,12 @@ describe('StateAnchorPublisher', function () {
         return d;
     }
     function archiveOrder(bus, batchSeq) {
-        // Content-anchored key: wrapper checkpoint (CP_ROW at the bus's record network) + batch seq.
-        let key = 'XANCV1|' + CP_ROW.chain + '|' + bus.network + '|' + CP_ROW.checkpoint_seq + '|' + (batchSeq || 0);
+        // Wrapper-anchored key: the wrapper checkpoint identity (CP_ROW at the bus's
+        // record network) and nothing else. Read from the publisher rather than
+        // re-spelled here, so this helper cannot drift from the shipped key the way the
+        // hardcoded copy did when the hub-local batch seq left the key.
+        let key = bus.nodes[0].pub._archiveElectionKey(
+            { chain: CP_ROW.chain, network: bus.network, checkpoint_seq: CP_ROW.checkpoint_seq }, batchSeq || 0);
         let order = StateAnchorPublisher.hashOrder(key, bus.nodes.map(nd => nd.pubkey));
         return order.map(pk => bus.nodes.find(nd => nd.pubkey === pk));
     }
