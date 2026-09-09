@@ -1564,12 +1564,16 @@ class PriceAggregator extends EventEmitter {
         }
         let snap = await capSnapshot.getSnapshot('price', block);
         if (!snap || !Array.isArray(snap.validators)) return null;
-        return snap.validators.map(v => ({
+        let counted = snap.validators.map(v => ({
             pubkey: v.pubkey,
             source: '',
             weight: String(v.amount != null ? v.amount : '0'),
             amount: String(v.amount != null ? v.amount : '0')
         }));
+        // getSnapshot marks an over-cap COUNT set truncated as well, and the persist guard
+        // reads the marker off this array, so carry it in both modes.
+        if (snap.truncated === true) counted.truncated = true;
+        return counted;
     }
 
     // Persist the `price` set at `block` and mirror it to hub-DB subscribers. The write

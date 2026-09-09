@@ -686,7 +686,7 @@ class AttestationBatchPublisher {
         // A truncated weight snapshot under-counts total stake, so the 2/3 bar could
         // pass a batch the full set would refuse. Same fail-closed reading the PRICE
         // rails carry.
-        if(weighted && snap.truncated === true) return null;
+        if(snap.truncated === true) return null;
         let set = snap.validators.map(v => ({
             pubkey: String(v.pubkey).toLowerCase(),
             weight: String((weighted ? v.weight : v.amount) != null ? (weighted ? v.weight : v.amount) : '0'),

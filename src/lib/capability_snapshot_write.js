@@ -88,7 +88,9 @@ async function resolveBtcChainId(db){
  *
  * Returns the normalized rows so the caller can broadcast them; an empty set writes
  * nothing and returns [], which is what the truncation guard's "no rows mirrored" and an
- * empty capability set both want.
+ * empty capability set both want. A set carrying `truncated` is refused here too, so a
+ * writer that never learned the rule still cannot put a partial set in the mirror; a
+ * complete set never carries the marker, so nothing legitimate changes shape.
  *
  * `btcChainId` is optional: a caller that already knows the row network's identity passes
  * it, and anyone else lets resolveBtcChainId ask the database. The column is transport,
@@ -96,6 +98,15 @@ async function resolveBtcChainId(db){
  * it cannot change which set a verifier reads or how the set dedupes.
  */
 async function writeCapabilitySnapshotRows(db, capability, block, validators, btcChainId){
+    // SWQ-TRUNC-MIRROR held at the choke point, so no writer can forget it in either
+    // quorum mode: a truncated set has dropped signers and no completeness column, so a
+    // mirror reads it COMPLETE. Refusing leaves S=0, which fails closed like an empty set.
+    if(validators && validators.truncated === true){
+        console.warn('capability_snapshot_write: refusing to mirror a TRUNCATED ' + capability +
+                     ' capability snapshot at block ' + block +
+                     ' (over the source cap; raise VALIDATOR_QUERY_LIMIT fleet-wide). No rows mirrored.');
+        return [];
+    }
     let rows = normalizeCapabilitySnapshotRows(capability, block, validators);
     if(rows.length === 0) return rows;
 

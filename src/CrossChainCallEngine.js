@@ -903,8 +903,13 @@ class CrossChainCallEngine extends EventEmitter {
                 }
             } else {
                 let snap = await this.capSnapshot.getSnapshot(capability, block);
-                if(snap && Array.isArray(snap.validators))
+                if(snap && Array.isArray(snap.validators)){
                     validators = snap.validators.map(v => ({ pubkey: v.pubkey, source: '', weight: String(v.amount != null ? v.amount : '0'), amount: String(v.amount != null ? v.amount : '0') }));
+                    // getSnapshot marks an over-cap COUNT set truncated too, and the persist
+                    // guard reads the marker off this array, so carry it in both modes or the
+                    // mirror takes a partial set below the stake-weighted flag day.
+                    if(snap.truncated === true) validators.truncated = true;
+                }
             }
         }
         if(validators.length === 0 && this._seedLocalValidator && this.identity){
