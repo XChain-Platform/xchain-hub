@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - A hub that does not run oracle consensus derives `price` capability snapshots from its own Bitcoin view, so its indexer can validate on-chain PRICE batches instead of refusing every one.
 
+## [0.16.2] - 2026-09-09
+
+### Fixed
+- The hub image installs the llm provider's CLI, so a validator configured for the spawn transport can serve an llm attestation instead of failing every fetch.
+
+
 ## [0.16.0] - 2026-09-08
 
 - Testnet activation heights sized: zero-confirmation ATTEST service from block 151800 and ROLLCALL v1 gates from epoch 152208.
