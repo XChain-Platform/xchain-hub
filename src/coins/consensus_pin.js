@@ -68,15 +68,13 @@ module.exports = {
         // untouched and were re-verified as unchanged by this edit.
         // REGENERATED 2026-09-01: GAS_SCHEDULE gains SWEEP_BASE,
         // SWEEP_PER_ITEM, CALLBACK_BASE and CALLBACK_PER_RECIPIENT, the unified prices
-        // SWEEP and CALLBACK move onto at the UNIFIED_FEES_SWEEP_CALLBACK flag day
-        // (regtest genesis-active; mainnet ARMED at genesis by the 2026-09-09 ruling,
-        // identity on the indexed mainnet history: 0 SWEEP, 0 CALLBACK, measured
-        // 2026-09-09; testnet is a future instant, 1790812800). GAS_SCHEDULE is hashed
-        // whole by consensusSubset(), so ADDING a key moves every hash even on a network
-        // where the flag that reads it is not yet active, and the same one-wave rollout
-        // rule as every regeneration above applies in full: every service bundling these
-        // must ship the new values together, and a straggler fail-closes on
-        // verifyConsensusPin() at boot rather than forking.
+        // SWEEP and CALLBACK move onto at the UNIFIED_FEES_SWEEP_CALLBACK flag day (both
+        // networks UNARMED; regtest genesis-active). GAS_SCHEDULE is hashed whole by
+        // consensusSubset(), so ADDING a key moves every hash even while the flag that
+        // reads it is unarmed, and the same one-wave rollout rule as every regeneration
+        // above applies in full: every service bundling these must ship the new values
+        // together, and a straggler fail-closes on verifyConsensusPin() at boot rather
+        // than forking. Mainnet stays null (Phase 6 arms it).
         testnet: {
             BTC:  'd3c66a4fb288b2666a2a4fad85200bbeac162bb36fed8a3eddcfc7b2d4d48070',
             LTC:  'ae94a951a838e64f9c36e503b978d9b9ad5ea74f7b443465baaabca8f675ea0d',
