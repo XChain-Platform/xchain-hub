@@ -172,6 +172,15 @@ class XChainHub {
         this.priceAggregator.on('row:deleted', (event) => {
             this.hubDbBroadcaster.broadcastDeletion(event);
         });
+        // Arm the derived `price` capability snapshot pass. Armed here, beside the
+        // aggregator and BEFORE startP2P/startOracle, because it must run on a hub that
+        // never reaches either: without it nothing writes a `price` capability snapshot
+        // on a non-consensus hub, its mirror stays empty, and its indexer records every
+        // on-chain PRICE batch `invalid: insufficient signer stake`. The pass itself
+        // disarms on a hub that DOES run oracle consensus, whose round-finalization
+        // writer already owns those rows; see PriceAggregator._runsOracleConsensus for
+        // why that decision is deferred to the first pass rather than taken here.
+        this.priceAggregator.startPriceCapabilityDerivation();
         console.log('XChain Hub started (MariaDB: ' + this.dbName + ')');
     }
 
@@ -2035,6 +2044,10 @@ class XChainHub {
         if(this._stakePollTimer){ clearInterval(this._stakePollTimer); this._stakePollTimer = null; }
         if(this._transportSetTimer){ clearInterval(this._transportSetTimer); this._transportSetTimer = null; }
         if(this.stakeShareWatcher){ this.stakeShareWatcher.stop(); }
+        // Disarmed with the other timers, and for the same reason the attestation batch
+        // publisher is: its pass ends in a DB write, so leaving it armed past db.close()
+        // would run one against a dead pool.
+        if(this.priceAggregator) this.priceAggregator.stopPriceCapabilityDerivation();
         if(this._capabilityConfigDebounce){ clearTimeout(this._capabilityConfigDebounce); this._capabilityConfigDebounce = null; }
         if(this._capabilityConfigWatcher){ try { this._capabilityConfigWatcher.close(); } catch(e){} this._capabilityConfigWatcher = null; }
         if(this.governance)       await this.governance.stop();
