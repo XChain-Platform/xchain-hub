@@ -363,9 +363,12 @@ class XChainHub {
         this.oraclePublisher = new OraclePublisher(this);
         // The single wiring point for ALL on-chain DOGE publishing: StateAnchorPublisher
         // borrows these hooks via _resolveSigner(). Throws on a broken module.
+        //
+        // Every applySignerHooks call below names the rail its publisher settles on.
+        // The operator signer holds ONE key; the loader refuses to wire it into a
+        // publisher whose chain the module does not declare.
         let signerHooks = loadSignerHooks();
-        if(signerHooks){
-            applySignerHooks(this.oraclePublisher, signerHooks);
+        if(signerHooks && applySignerHooks(this.oraclePublisher, signerHooks, 'DOGE')){
             console.log('OraclePublisher: operator signer wired (' + signerHooks.source + ')');
         }
         await this.oraclePublisher.start();
@@ -397,9 +400,12 @@ class XChainHub {
         this.attestationPublisher  = new AttestationPublisher(this);
         // Mirrors startOracle's signer wiring: without it a validator finalizes ATTEST
         // responses but never broadcasts them and the queue grows forever.
+        // Wired on the DOGE rail it has always used. Its response leg is retired in
+        // practice by AttestationResponseMirror, and the leg's own chain
+        // declaration belongs with that retirement, not with this change; the
+        // AttestationPublisher/AttestationRelay files are owned elsewhere right now.
         let attestationSignerHooks = loadSignerHooks();
-        if(attestationSignerHooks){
-            applySignerHooks(this.attestationPublisher, attestationSignerHooks);
+        if(attestationSignerHooks && applySignerHooks(this.attestationPublisher, attestationSignerHooks, 'DOGE')){
             console.log('AttestationPublisher: operator signer wired (' + attestationSignerHooks.source + ')');
         }
         this.attestationSpotChecker = new AttestationSpotChecker(this, this.providerRegistry);
@@ -419,15 +425,18 @@ class XChainHub {
         // on a network whose mirror activation entry is null.
         this.attestationBatchPublisher = new AttestationBatchPublisher(this);
         if(attestationSignerHooks){
-            applySignerHooks(this.attestationBatchPublisher, attestationSignerHooks);
+            applySignerHooks(this.attestationBatchPublisher, attestationSignerHooks, 'DOGE');
         }
 
         // Cross-chain relay driver, opt-in via ATTEST_RELAY_ENABLED=1. Its v3 request leg
         // broadcasts on BTC and takes the publisher's signer; its v4 response leg
         // broadcasts on the ORIGIN chain, so it is wired separately per chain.
+        // Wired on DOGE, unchanged: the relay owns its own per-chain rails
+        // (setChainWalletSignHook) and its file is owned elsewhere right now, so its
+        // home-leg chain declaration is deliberately left to that owner.
         this.attestationRelay = new AttestationRelay(this);
         if(attestationSignerHooks){
-            applySignerHooks(this.attestationRelay, attestationSignerHooks);
+            applySignerHooks(this.attestationRelay, attestationSignerHooks, 'DOGE');
         }
 
         await this.attestationConsensus.start();
@@ -472,9 +481,12 @@ class XChainHub {
         // A hub running this tier without startOracle still needs a SlashDetector.
         if(!this.slashDetector) this.slashDetector = new SlashDetector(this);
         this.fullNodeChallenge = new FullNodeChallengeRound(this);
+        // NODEPROOF verdicts settle on BTC. A DOGE-only operator module (every module
+        // written before the `chains` declaration) is refused here and the round stays
+        // observe-only with a warn line, instead of signing a BTC payload with the DOGE
+        // key and burning a DOGE fee on it.
         let fnSignerHooks = loadSignerHooks();
-        if(fnSignerHooks){
-            applySignerHooks(this.fullNodeChallenge, fnSignerHooks);
+        if(fnSignerHooks && applySignerHooks(this.fullNodeChallenge, fnSignerHooks, 'BTC')){
             console.log('FullNodeChallengeRound: operator signer wired (' + fnSignerHooks.source + ')');
         }
         await this.fullNodeChallenge.start();
@@ -489,8 +501,7 @@ class XChainHub {
         // construction does not depend on startOracle having run.
         this.rollcallRound = new RollcallRound(this);
         let rcSignerHooks = loadSignerHooks();
-        if(rcSignerHooks){
-            applySignerHooks(this.rollcallRound, rcSignerHooks);
+        if(rcSignerHooks && applySignerHooks(this.rollcallRound, rcSignerHooks, 'DOGE')){
             console.log('RollcallRound: operator signer wired (' + rcSignerHooks.source + ')');
         }
         await this.rollcallRound.start();
