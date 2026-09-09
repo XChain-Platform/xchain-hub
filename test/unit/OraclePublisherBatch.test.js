@@ -2075,4 +2075,153 @@ describe('OraclePublisher PRICE batch rail', function () {
             });
         });
     });
+
+    // ───────────────────────────────────── publisher role and publish history
+
+    // Two hubs that are nothing alike produce byte-identical status without these
+    // fields: one whose
+    // publisher set will not resolve (a wedge) and one that is simply not in that set
+    // (nothing wrong at all). Both leave the rank state null, because it is written
+    // only after the membership test passes, so every counter downstream of it reads
+    // null for both. These two fields are what tells them apart, and they are what lets
+    // a backlog rail speak for a stuck publisher without speaking for every node that
+    // was never going to publish.
+    describe('publisher role and publish history', function () {
+
+        it('is honestly unknown before any window election has run', function () {
+            let h = makePublisher();
+            let s = h.p.getStats();
+            expect(s.publisherRole).to.equal('unknown');
+            expect(s.everPublished).to.equal(false);
+        });
+
+        it('names in_set for a hub that elected into the set and has published nothing yet', async function () {
+            // The signing round never meets quorum, so the window is assembled, elected
+            // and then reaches no wire. This is the stuck publisher before its first
+            // publication, which had no representation in the payload at all.
+            let h = makePublisher({ publishers: [ME, PEER1], signerOpts: { met: false } });
+            await h.p.start();
+            for (let r = 0; r < 12; r++) h.p._buffer.set(r, bufferedFixture(r));
+
+            await h.p._assembleWindow(0);   // ME is rank 0, so window 0 is its own
+
+            let s = h.p.getStats();
+            expect(s.publisherRole).to.equal('in_set');
+            expect(s.everPublished).to.equal(false);
+            expect(h.broadcasts).to.have.length(0);
+        });
+
+        it('names not_in_set for a hub the set resolved without, where the counters are null', async function () {
+            let h = makePublisher({ publishers: [PEER1, PEER2] });
+            await h.p.start();
+            for (let r = 0; r < 12; r++) h.p._buffer.set(r, bufferedFixture(r));
+
+            await h.p._assembleWindow(0);
+
+            let s = h.p.getStats();
+            expect(s.publisherRole).to.equal('not_in_set');
+            expect(s.everPublished).to.equal(false);
+            // The older reading, kept as a control. It is null here and
+            // null for a wedged hub alike, which is exactly the ambiguity above resolves.
+            expect(s.publisherCount).to.equal(null);
+            expect(s.lastRankRound).to.equal(null);
+            expect(h.signer.calls).to.have.length(0);
+        });
+
+        it('names set_unresolved while the capability snapshot will not resolve', async function () {
+            let h = makePublisher({ capabilitySnapshot: { getSnapshot: sinon.stub().resolves(null) } });
+            await h.p.start();
+            for (let r = 0; r < 12; r++) h.p._buffer.set(r, bufferedFixture(r));
+
+            await h.p._assembleWindow(0);
+
+            let s = h.p.getStats();
+            expect(s.publisherRole).to.equal('set_unresolved');
+            expect(s.everPublished).to.equal(false);
+            expect(s.publisherCount).to.equal(null);
+        });
+
+        it('lets a dark snapshot outrank a remembered role, because membership stops being knowable', async function () {
+            let dark = false;
+            let h = makePublisher({
+                signerOpts: { met: false },
+                capabilitySnapshot: {
+                    getSnapshot: sinon.stub().callsFake(async () => (
+                        dark ? null : { validators: [{ pubkey: ME }] }))
+                }
+            });
+            await h.p.start();
+            for (let r = 0; r < 12; r++) h.p._buffer.set(r, bufferedFixture(r));
+
+            await h.p._assembleWindow(0);
+            expect(h.p.getStats().publisherRole).to.equal('in_set');
+
+            dark = true;
+            await h.p._assembleWindow(1);
+            expect(h.p.getStats().publisherRole, 'the last successful election is history, not the answer')
+                .to.equal('set_unresolved');
+        });
+
+        it('re-derives the role per window, so a hub dropped from the set stops claiming in_set', async function () {
+            let members = [ME, PEER1];
+            let h = makePublisher({
+                signerOpts: { met: false },
+                capabilitySnapshot: {
+                    getSnapshot: sinon.stub().callsFake(async () => (
+                        { validators: members.map(p => ({ pubkey: p })) }))
+                }
+            });
+            await h.p.start();
+            for (let r = 0; r < 24; r++) h.p._buffer.set(r, bufferedFixture(r));
+
+            await h.p._assembleWindow(0);
+            expect(h.p.getStats().publisherRole).to.equal('in_set');
+
+            members = [PEER1, PEER2];
+            await h.p._assembleWindow(2);
+            expect(h.p.getStats().publisherRole).to.equal('not_in_set');
+        });
+
+        it('reports everPublished once a window has actually reached a wire', async function () {
+            let h = makePublisher({ cfg: { ORACLE_BATCH_GRACE_MS: 1 } });
+            await h.p.start();
+            for (let r = 0; r < 6; r++) await h.p.onRoundFinalized(roundFixture(r));
+            await waitUntil(() => h.broadcasts.length > 0,
+                { label: 'window 0 to close and its wire to broadcast' });
+            await h.p._windowChain;
+
+            let s = h.p.getStats();
+            expect(s.everPublished).to.equal(true);
+            expect(s.publisherRole).to.equal('in_set');
+        });
+
+        it('still reports everPublished after a restart, off the durable marker', async function () {
+            // A restart empties lastPublishedRound: it is process memory, assigned only
+            // on the publish path. The confirmed marker row is what survives, and
+            // startup already reads those rows for the at-most-once guard, so the honest
+            // answer costs no second query.
+            let db = makeDb({ markers: { 41: { round: 41, txid: 'tx-41', sent_at: '2026-08-26 12:00:00' } } });
+            let h = makePublisher({ db: db });
+            await h.p.start();
+
+            let s = h.p.getStats();
+            expect(s.lastPublishedRound, 'process memory really is empty after a restart').to.equal(null);
+            expect(s.everPublished, 'a publisher of months standing must not read as one that never published')
+                .to.equal(true);
+            // No election has run in the new process, so the role is unknown rather than
+            // a stale claim carried across the restart.
+            expect(s.publisherRole).to.equal('unknown');
+        });
+
+        it('does not read an intent-only marker as a publication', async function () {
+            // sent_at NULL is a round whose on-chain state is unknown after a crash. It
+            // is quarantined and never auto-rebroadcast, and it is not evidence that
+            // anything this hub built ever landed.
+            let db = makeDb({ markers: { 41: { round: 41, txid: null, sent_at: null } } });
+            let h = makePublisher({ db: db });
+            await h.p.start();
+
+            expect(h.p.getStats().everPublished).to.equal(false);
+        });
+    });
 });

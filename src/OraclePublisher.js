@@ -191,6 +191,14 @@ class OraclePublisher {
         this.publishedCount     = 0;
         this.lastPublishedRound = null;
         this.lastPublishedTxid  = null;
+        // Highest CONFIRMED round read out of the durable marker table at startup.
+        // The three fields above are process memory: they are assigned only on the
+        // publish path, so after a restart they read exactly like a hub that has never
+        // published at all. This one answers "has this hub ever published?" honestly
+        // across a restart, and costs no extra query because _hydratePublishedMarkers
+        // already reads those rows for the at-most-once guard. Null when no hub DB is
+        // wired (dev/test) or when nothing has ever been confirmed.
+        this._durableEverPublishedRound = null;
         // In-process at-most-once guard. Round ids broadcast this process lifetime
         // are recorded here the instant broadcaster(payload) succeeds. If the
         // post-broadcast queue rewrite fails (disk full, permissions, transient I/O),
@@ -341,6 +349,16 @@ class OraclePublisher {
         this._lastRankState  = null; // { round, myRank, leaderRank, isLeader, publisherCount }
         this._leaderRounds   = 0;    // rounds this hub was the elected leader
         this._followerRounds = 0;    // finalized rounds this hub deferred (not leader)
+        // The election OUTCOME, which the rotation state above cannot carry. _lastRankState
+        // is written only once this hub has been found in the publisher set, so a hub that
+        // is absent from that set leaves it null and reaches a monitor looking identical to
+        // a hub whose publisher set would not resolve at all. One of those is a wedge and
+        // the other is a node that was never going to publish, and until they are told
+        // apart every rail that would catch the wedge has to stay silent or it reddens the
+        // public rollup for every non-publishing node. Null until the first window election
+        // runs, which is also the honest reading right after a restart: no election has
+        // happened yet in this process and nothing durable records the last one.
+        this._publisherRole  = null; // 'in_set' | 'not_in_set'; see getStats publisherRole
 
         // Auto-create EncoderClient if DOGE_ENCODER_URL env var is set
         // This is the JSON-RPC endpoint of an xchain-encoder instance configured for DOGE.
@@ -2000,9 +2018,20 @@ class OraclePublisher {
         if (pubkeys.length === 0) return;   // fail closed, already logged by the resolver
         let me     = this.identity ? String(this.identity.getPubkeyHex()).toLowerCase() : null;
         let myRank = me ? pubkeys.indexOf(me) : -1;
-        if (myRank < 0) return;             // not an oracle_publish validator at this anchor
+        if (myRank < 0) {
+            // Not an oracle_publish validator at this anchor. Recorded rather than
+            // returned silently: this is the state a monitor has to be able to name, so
+            // that a node which is not in the publisher set can be left alone instead of
+            // being read as a publisher that has failed to publish.
+            this._publisherRole = 'not_in_set';
+            return;
+        }
 
         let leaderRank = windowIndex % pubkeys.length;
+        // Membership is re-derived per window off the block-pinned snapshot, so a hub
+        // added to or dropped from the set flips on the next window close and never
+        // reports a stale role.
+        this._publisherRole = 'in_set';
         this._lastRankState = {
             round:          last,
             myRank:         myRank,
@@ -2572,6 +2601,15 @@ class OraclePublisher {
             let round = Number(r.round);
             if (r.sent_at !== null && r.sent_at !== undefined) {
                 this._publishedRounds.mark(round);
+                // Piggy-backed on the rows already being read: a confirmed marker is
+                // proof this hub published once, and retention never empties the table
+                // below the most recent window, so the proof survives a restart.
+                // Intent-only rows are deliberately excluded, because their on-chain
+                // state is unknown and they are not evidence of a publication.
+                if (Number.isFinite(round) &&
+                    (this._durableEverPublishedRound === null || round > this._durableEverPublishedRound)) {
+                    this._durableEverPublishedRound = round;
+                }
             } else {
                 this._quarantinedRounds.add(round);
                 quarantined.push(round);
@@ -3078,6 +3116,34 @@ class OraclePublisher {
             // healthy-but-never-leader hub from a genuinely idle one and spot a dark
             // peer publisher (this hub's follower count climbs while its leader
             // rounds never land on-chain elsewhere).
+            // Why this hub is not publishing, as a NAMED state rather than an absence.
+            // Every field below reads null both for a hub whose publisher set will not
+            // resolve (a wedge) and for a hub that is simply not in that set (nothing
+            // wrong at all), because the rank state they come from is written only after
+            // the membership test passes. These two answer the question those cannot:
+            //
+            //   in_set         this hub was in the publisher set at the last window it
+            //                  elected on, so a backlog here is a real stall
+            //   not_in_set     the set resolved and this hub was not in it; a backlog is
+            //                  expected and must not degrade anything
+            //   set_unresolved the set itself would not resolve, so membership is
+            //                  unknowable right now (fail-closed, logged separately)
+            //   unknown        no election has run yet in this process, which is what a
+            //                  freshly restarted hub honestly reports until the first
+            //                  window closes
+            //
+            // set_unresolved is read off the dark-snapshot flag the resolver already
+            // maintains, so it costs no state of its own and it outranks the remembered
+            // role: while the snapshot is dark, the last successful election is history,
+            // not the current answer.
+            publisherRole:       this._snapshotDark ? 'set_unresolved' : (this._publisherRole || 'unknown'),
+            // Has this hub EVER published, as opposed to "did it publish in this process".
+            // lastPublishedRound is process memory, so it cannot answer this after a
+            // restart; the durable confirmed marker can, and does so without a second
+            // query. A consumer that gates on lastPublishedRound alone treats every
+            // restarted publisher as one that has never published.
+            everPublished:       (Number.isFinite(Number(this.lastPublishedRound)) && Number(this.lastPublishedRound) > 0)
+                                 || this._durableEverPublishedRound !== null,
             myRank:              this._lastRankState ? this._lastRankState.myRank : null,
             leaderRank:          this._lastRankState ? this._lastRankState.leaderRank : null,
             isLeader:            this._lastRankState ? this._lastRankState.isLeader : null,
