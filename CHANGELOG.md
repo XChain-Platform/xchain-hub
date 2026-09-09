@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.3] - 2026-09-09
+
+### Fixed
+- Every silent oracle round exit (a scheduler number gap, a restart between submission and finalization, a bare seat return) leaves a structured `round_lost` record and a skipped row, so a round with no snapshot row is explained instead of vanishing.
+- A catch-up sweep wire may spend the change of a wire the same publish pass already sent, bounded by pass, `ORACLE_PUBLISH_SELF_CHAIN_MAX_DEPTH` (default 4), the encoder UTXO cap and readable confirmation depth, so a publisher with a buffered backlog no longer fails on dust once its confirmed outputs are spent.
+
+### Changed
+- The pushed-tip line past `MAX_TIP_AGE_S` logs at info and names the Bitcoin block gap, since every such line measured over 24h was a real gap and not a fault.
+
 ## [0.16.2] - 2026-09-09
 
 ### Fixed
