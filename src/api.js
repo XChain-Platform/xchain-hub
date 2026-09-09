@@ -158,7 +158,7 @@ const WRITE_METHODS  = new Set([
     'updateconfig', 'registervalidator', 'rotatevalidator', 'deregistervalidator', 'syncvalidators',
     'propose', 'proposeslashpenalty', 'vote', 'requestattestation', 'reportreorg', 'initiateswap',
     'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushattestbatch', 'pushoracleprice',
-    'pushpricereorg', 'pushxcallreorg',
+    'pushpricereorg', 'pushxcallreorg', 'retractattestbatch',
     'pushdexreorg', 'anchorflush', 'pauseeffectorspend', 'resumeeffectorspend'
 ]);
 
@@ -176,7 +176,13 @@ const WRITE_METHODS  = new Set([
 // same role pushpriceround already plays outside the retraction tier. Its own
 // retraction path is pushpricereorg below; a batch push carries no
 // destructive row:deleted broadcast of its own.
-const REORG_WRITE_METHODS = new Set(['pushpricereorg', 'pushxcallreorg', 'pushdexreorg']);
+//
+// retractattestbatch (ATTEST v5/v6, spec section 6.3 / frontier row 55) IS in this
+// set even though it deletes nothing and only clears a display link: it is issued by
+// the same rollback.js retraction block as its siblings and travels on the same
+// HubClient credential, so leaving it in the bulk tier would mean an operator who
+// scoped HUB_REORG_API_KEY had one retraction rail still answering to the bulk key.
+const REORG_WRITE_METHODS = new Set(['pushpricereorg', 'pushxcallreorg', 'pushdexreorg', 'retractattestbatch']);
 
 // The ONLY rpc methods reachable on the public P2P-port feed (PeerManager
 // setFeedHandlers). This is the complete set an indexer sends to its hub
@@ -188,7 +194,7 @@ const REORG_WRITE_METHODS = new Set(['pushpricereorg', 'pushxcallreorg', 'pushde
 // indexer must call it and it is signature- or content-validated hub-side.
 const FEED_RPC_METHODS = new Set([
     'pushchaintip', 'pushpriceround', 'pushpricebatch', 'pushattestbatch', 'pushoracleprice',
-    'pushpricereorg', 'pushxcallreorg', 'pushdexreorg'
+    'pushpricereorg', 'pushxcallreorg', 'pushdexreorg', 'retractattestbatch'
 ]);
 const HUB_REORG_API_KEY   = process.env.HUB_REORG_API_KEY || '';
 
@@ -1117,6 +1123,38 @@ async function startApi(){
                 });
             } catch (err) {
                 return {error: err.message || "error processing attestation batch"};
+            }
+        },
+
+        // Retract the batch LINK after a reorg un-landed an ATTEST v5/v6 batch on the
+        // pushing indexer's chain (spec section 6.3, frontier row 55). The indexer names
+        // the batch by its key, the window bounds that key is derived from, and the
+        // action index the landing push carried; the hub clears `batch_action_index` on
+        // the rows that link names and re-broadcasts them. NOTHING IS DELETED here: a
+        // signed mirror row is legitimate whichever batch carried it, so the reorg
+        // invalidates the link and not the response (AttestationResponseMirror
+        // .retractBatchLink says why at length).
+        //
+        // The parameter list IS the interface, and the indexer's HubClient pins exactly
+        // these names.
+        async retractattestbatch({source_chain, network, batch_key, window_start, window_end, action_index}){
+            if(!source_chain) return {error: "source_chain is required"};
+            let chainErr = validateChain(source_chain);
+            if (chainErr) return chainErr;
+            if(!batch_key) return {error: "batch_key is required"};
+            if(action_index === undefined || action_index === null)
+                return {error: "action_index is required"};
+            if(!hub.attestationResponseMirror) return {error: "attestation response mirror not ready"};
+            try {
+                return await hub.attestationResponseMirror.retractBatchLink(source_chain, {
+                    network:      network,
+                    batch_key:    batch_key,
+                    window_start: window_start,
+                    window_end:   window_end,
+                    action_index: action_index
+                });
+            } catch (err) {
+                return {error: err.message || "error retracting the attestation batch link"};
             }
         },
 

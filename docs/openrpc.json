@@ -583,24 +583,6 @@
       }
     },
     {
-      "name": "getattestationresponsibleset",
-      "summary": "The responsible validator set for one pending attestation request, resolved from the capability snapshot at its buried block.",
-      "paramStructure": "by-name",
-      "params": [
-        {
-          "name": "request_id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          }
-        }
-      ],
-      "result": {
-        "name": "result",
-        "schema": {}
-      }
-    },
-    {
       "name": "getcrosschaincallstats",
       "summary": "Cross-chain call relay backlog depth and lifetime failure counters.",
       "paramStructure": "by-name",
@@ -750,17 +732,6 @@
         "name": "result",
         "schema": {}
       }
-    },
-    {
-      "name": "getrollcallstatus",
-      "summary": "ROLLCALL presence-proof publisher status for this hub: the epoch it last worked, whether it signed, how many signatures it holds and how many are already on chain, the elected leader and this hub's rank, any txids it published, and whether its signer module can broadcast. Publisher state only: the authoritative roll-call record lives on the BTC indexer.",
-      "paramStructure": "by-name",
-      "params": [],
-      "result": {
-        "name": "result",
-        "schema": {}
-      },
-      "x-auth": "x-api-key header, when HUB_API_KEY is configured"
     },
     {
       "name": "getoraclepublisherstatus",
@@ -1292,6 +1263,35 @@
         "name": "result",
         "schema": {}
       }
+    },
+    {
+      "name": "getattestationresponsibleset",
+      "summary": "The responsible validator set for one pending attestation request, resolved from the capability snapshot at its buried block.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "request_id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      }
+    },
+    {
+      "name": "getrollcallstatus",
+      "summary": "ROLLCALL presence-proof publisher status for this hub: the epoch it last worked, whether it signed, how many signatures it holds and how many are already on chain, the elected leader and this hub's rank, any txids it published, and whether its signer module can broadcast. Publisher state only: the authoritative roll-call record lives on the BTC indexer.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-auth": "x-api-key header, when HUB_API_KEY is configured"
     },
     {
       "name": "reportreorg",
@@ -2240,6 +2240,85 @@
         },
         {
           "name": "retraction_generation",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-auth": "x-api-key header, when HUB_API_KEY is configured",
+      "x-internal": true
+    },
+    {
+      "name": "retractattestbatch",
+      "summary": "Indexer push: a reorg un-landed an ATTEST v5 batch, so the batch link it stamped on the carried response rows is cleared. Clears the link only; no mirror row is deleted.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "source_chain",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "network",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "batch_key",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "window_start",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "window_end",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "number",
+              "object"
+            ]
+          }
+        },
+        {
+          "name": "action_index",
           "required": false,
           "schema": {
             "type": [
