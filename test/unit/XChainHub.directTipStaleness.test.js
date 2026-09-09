@@ -53,6 +53,7 @@ describe('XChainHub direct-tip staleness gate', function () {
         };
         warnLog  = sinon.stub(console, 'warn');
         errorLog = sinon.stub(console, 'error');
+        sinon.stub(console, 'log');   // the pushed-tip block-gap line is info level
     });
 
     afterEach(function () {

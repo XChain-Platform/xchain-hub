@@ -40,7 +40,7 @@ const devband           = require('./lib/deviation_band.js');
 const { isAdmissibleSigner, provenPubkey } = require('./lib/chain_signer_admission.js');
 const { canonicalValidatorOrder } = require('./validator_order.js');
 const snapWrite         = require('./lib/capability_snapshot_write.js');
-const { noteDrop } = require('./consensusDiagnostics');
+const { noteDrop, noteRoundLost } = require('./consensusDiagnostics');
 
 const ORACLE_PROPOSE = 'ORACLE_PROPOSE';
 const ORACLE_PREPARE = 'ORACLE_PREPARE';
@@ -398,8 +398,31 @@ class OracleConsensus extends EventEmitter {
         }
         for (let [, t] of this.leaderTimers) clearTimeout(t);
         this.leaderTimers.clear();
-        for (let [, w] of this.roundWatchdogs) { if (w && w.timer) clearTimeout(w.timer); }
+        // An armed watchdog is an open round with no outcome, and nothing re-arms it
+        // after a restart: record each one and write its skipped row best-effort
+        // (upgradable, so a federation that finalizes without this hub still wins).
+        let inFlight = [];
+        for (let [round, w] of this.roundWatchdogs) {
+            if (w && w.timer) clearTimeout(w.timer);
+            if (this.finalized.has(round) || this.locallySkipped.has(round)) continue;
+            inFlight.push([round, w]);
+        }
         this.roundWatchdogs.clear();
+        for (let [round, w] of inFlight) {
+            noteRoundLost({
+                phase: 'shutdown', round, cause: 'stopped_with_round_in_flight',
+                seat: (w && w.seat) || 'unknown', ...((w && w.seatInfo) || {}),
+                pending: this.pendingRounds.has(round)
+            });
+            console.warn('Oracle: stopping with round ' + round + ' open and unfinalized; recording it as skipped');
+        }
+        if (inFlight.length) {
+            await Promise.allSettled(inFlight.map(([round, w]) =>
+                this._storeSkippedRound(round, w && w.btcBlockHeight, w && w.btcBlockTime,
+                    'hub stopped with round in flight').catch(err =>
+                    console.error('Oracle: Error storing in-flight round ' + round + ' at stop:',
+                        err && err.message ? err.message : err))));
+        }
         this.pendingRounds.clear();
         this.roundReadyAt.clear();
         this.earlyMessages.clear();
@@ -757,7 +780,10 @@ class OracleConsensus extends EventEmitter {
         let myAddr   = this.peerManager.validatorAddr;
         let isLeader = this._isLeaderIdentity(leader, myAddr, this._resolveSenderPubkey(myAddr));
 
+        // Every return past this point is a seat, not an outcome: stamp it on the
+        // watchdog entry so the abandonment record names what this hub waited on.
         if (isLeader) {
+            this._noteRoundSeat(round, 'leader');
             this._proposeRound(round, submissions, false, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys);
             return;
         }
@@ -780,6 +806,7 @@ class OracleConsensus extends EventEmitter {
             // by the time this fires the round is already taken and we abort.
             let fb = [...submissions.keys()].filter(a => a !== leaderSubAddr).sort()[0];
             if (fb === myAddr) {
+                this._noteRoundSeat(round, 'elected_fallback_awaiting_leader', { leader: leaderSubAddr });
                 let t = setTimeout(() => {
                     this.leaderTimers.delete(round);
                     if (this.pendingRounds.has(round) || this.finalized.has(round)) return;
@@ -787,18 +814,27 @@ class OracleConsensus extends EventEmitter {
                     // non-member submitter arriving during the grace cannot shift
                     // the fallback election (Oracle M1).
                     let subs = this._filterSubmissionsToSnapshot(this.oracleRound.getSubmissions(round), memberPubkeys);
-                    if (!subs || subs.size === 0) return;
+                    if (!subs || subs.size === 0) {
+                        this._noteRoundSeat(round, 'fallback_without_member_submissions', { leader: leaderSubAddr });
+                        return;
+                    }
                     // Re-elect against the (possibly grown) submission set in case
                     // gossip delivered more submitters during the grace.
                     let fb2 = [...subs.keys()].filter(a => a !== this._leaderSubmissionAddr(subs, leader)).sort()[0];
-                    if (fb2 !== myAddr) return;
+                    if (fb2 !== myAddr) {
+                        this._noteRoundSeat(round, 'awaiting_other_fallback', { leader: leaderSubAddr, fallback: fb2 });
+                        return;
+                    }
+                    this._noteRoundSeat(round, 'fallback_proposer', { leader: leaderSubAddr });
                     this._proposeRound(round, subs, true, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys);
                 }, this.leaderTimeout + FALLBACK_GRACE_MS);
                 // Don't let an armed grace timer keep the process alive on its own;
                 // the hub stays up via its other listeners. Cleared on stop().
                 if (t.unref) t.unref();
                 this.leaderTimers.set(round, t);
+                return;
             }
+            this._noteRoundSeat(round, 'follower_awaiting_leader', { leader: leaderSubAddr, fallback: fb });
             return;
         }
 
@@ -806,17 +842,23 @@ class OracleConsensus extends EventEmitter {
         let fallbackAddr = [...submissions.keys()].sort()[0];
         if (fallbackAddr !== myAddr) {
             // Someone else is the fallback. Wait for their PROPOSE.
+            this._noteRoundSeat(round, 'awaiting_other_fallback', { leader: null, fallback: fallbackAddr });
             return;
         }
 
         // I'm the fallback. Grace period in case a real-leader PROPOSE is in flight;
         // if pendingRounds gets populated during the grace, abort.
+        this._noteRoundSeat(round, 'fallback_in_grace', { leader: null });
         let t = setTimeout(() => {
             this.leaderTimers.delete(round);
             if (this.pendingRounds.has(round) || this.finalized.has(round)) return;
             // Filter to snapshot members, matching the election above (Oracle M1).
             let subs = this._filterSubmissionsToSnapshot(this.oracleRound.getSubmissions(round), memberPubkeys);
-            if (!subs || subs.size === 0) return;
+            if (!subs || subs.size === 0) {
+                this._noteRoundSeat(round, 'fallback_without_member_submissions', { leader: null });
+                return;
+            }
+            this._noteRoundSeat(round, 'fallback_proposer', { leader: null });
             this._proposeRound(round, subs, true, btcBlockHeight, btcBlockTime, snapshot, quorum, weighted, memberPubkeys);
         }, FALLBACK_GRACE_MS);
         // Don't let this grace timer keep the process alive on its own; register
@@ -2571,6 +2613,17 @@ class OracleConsensus extends EventEmitter {
         this.roundWatchdogs.delete(round);
     }
 
+    // Stamp the seat this hub currently holds in an open round on its watchdog
+    // entry, so the round_lost record names what the hub was waiting on. The seat
+    // moves as the round progresses (follower -> fallback proposer); the last stamp
+    // is the one the record carries. No-op once the round has an outcome.
+    _noteRoundSeat(round, seat, info) {
+        let entry = this.roundWatchdogs.get(round);
+        if (!entry) return;
+        entry.seat     = seat;
+        entry.seatInfo = info || null;
+    }
+
     // The round opened here and never reached a durable outcome. Write the skipped
     // record so this hub's absence of a snapshot is a stated fact rather than a
     // hole, and so hub-to-hub presence comparison (getoracleroundpresence) can tell
@@ -2597,6 +2650,13 @@ class OracleConsensus extends EventEmitter {
         this._lastAbandonedRound = round;
         console.warn('Oracle: Round ' + round + ' opened here but never finalized; ' +
             'recording it as abandoned so this hub holds a durable record of the round.');
+        // Structured twin of the line above: seat and anchor as fields, plus the counter.
+        noteRoundLost({
+            phase: 'finalize', round, cause: 'abandoned_in_flight',
+            seat: entry.seat || 'unknown', ...(entry.seatInfo || {}),
+            rearms: entry.rearms, pending: !!pending,
+            reference_block: entry.btcBlockHeight, block_timestamp: entry.btcBlockTime
+        });
         // NOT _markFinalized: the skip is local and reprocessable, so a late
         // federation quorum still upgrades these rows to 'finalized' (#7).
         this._storeSkippedRound(round, entry.btcBlockHeight, entry.btcBlockTime,
