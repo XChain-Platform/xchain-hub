@@ -34,6 +34,18 @@
  *     (Was duplicated verbatim as _isAmbiguousSendError in
  *     Oracle/Attest/Anchor/FullNode.)
  *
+ *   isNeverSentError(e)
+ *     The strict half of the definitive class: not merely "retrying is safe" but
+ *     "no byte of this transaction left the process". Two shapes prove it, and they
+ *     are the two isAmbiguousSendError already reads: a sub-500 HTTP response (the
+ *     encoder refused the call before it ever built or forwarded a transaction, for
+ *     example insufficient funds or an unconfirmed-change refusal) and a
+ *     never-connected transport code. A NAMED node rejection is definitive but NOT
+ *     never-sent, because the transaction reached the node to be rejected; callers
+ *     that need "nothing was spent and nothing is in flight" must not read it as
+ *     such. Used by callers that hold a durable publish-intent marker and want to
+ *     DROP it and rebuild rather than quarantine the work for an operator.
+ *
  *   AtMostOnce
  *     In-process at-most-once key set: the primitive behind the publishers'
  *     _publishedRounds / broadcasted-request guards. A key marked the instant a
@@ -93,6 +105,22 @@ function isAmbiguousSendError(e){
     let code = String(e.code || '');
     if (code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'EAI_AGAIN') return false; // never sent
     return true;
+}
+
+// True only when the send is PROVEN not to have left this process. Deliberately a
+// strict subset of !isAmbiguousSendError(e): that predicate answers "is a retry safe",
+// which a node rejection also satisfies, while this one answers "is there nothing on
+// any wire and nothing spent". The RPC-error envelope is therefore excluded, because a
+// named rejection is the node's own verdict on a transaction it received.
+function isNeverSentError(e){
+    if (!e) return false;
+    // Outranks both shapes below for the same reason it outranks every rule in
+    // isAmbiguousSendError: a multi-phase signer hook can carry a funded phase-one
+    // transaction on chain and still surface a 4xx or an ECONNREFUSED on its reveal.
+    if (e.fundsCommitted) return false;
+    if (e.response && Number(e.response.status) < 500) return true;   // refused before processing
+    let code = String(e.code || '');
+    return code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'EAI_AGAIN';   // never connected
 }
 
 class AtMostOnce {
@@ -165,4 +193,4 @@ async function broadcastOnce({ key, tracker, guard, balance, cost, ambiguousTag,
     return result || {};
 }
 
-module.exports = { isAmbiguousSendError, AtMostOnce, broadcastOnce };
+module.exports = { isAmbiguousSendError, isNeverSentError, AtMostOnce, broadcastOnce };
