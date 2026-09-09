@@ -91,7 +91,7 @@ const swq           = require('./stake_weighted_quorum.js');
 const pst           = require('./price_sig_tally_activation.js');
 const { AtMostOnce, isAmbiguousSendError } = require('./lib/idempotent_broadcast.js');
 const { sumUtxosCoins } = require('./lib/utxo_balance.js');
-const { forwardableUtxos } = require('./lib/encoder_utxo_forward.js');
+const { forwardableUtxos, ENCODER_MAX_UTXO_COUNT } = require('./lib/encoder_utxo_forward.js');
 const { assertSingleTxEncoding } = require('./lib/two_phase_guard.js');
 
 // ~10 min. Translates the rank-staggered takeover window from BTC blocks (the
@@ -314,6 +314,25 @@ class OraclePublisher {
         this.allowUnconfirmedInputs =
             String(process.env.ORACLE_PUBLISH_ALLOW_UNCONFIRMED_INPUTS ||
                    cfg.ORACLE_PUBLISH_ALLOW_UNCONFIRMED_INPUTS || 'false') === 'true';
+
+        // Narrow exception to the rule above: a wire may spend the change of a wire
+        // THIS publisher broadcast earlier in the SAME pass. A catch-up sweep sends
+        // CATCHUP_WINDOWS_PER_SWEEP wires within one second, so wires past the
+        // confirmed-output count see only dust, and a dust sweep prices its own fee
+        // above the dust it collects. The package hazard the rule guards against
+        // needs a CHEAP ancestor; every wire in one pass is built seconds apart at
+        // one fee policy, so they rise and fall together. Bounded by depth, and the
+        // next pass still defers wholesale on the NO_CONFIRMED_UTXO gate.
+        this.selfChainMaxDepth = parseInt(
+            process.env.ORACLE_PUBLISH_SELF_CHAIN_MAX_DEPTH ||
+            cfg.ORACLE_PUBLISH_SELF_CHAIN_MAX_DEPTH || '4');
+        if (!Number.isFinite(this.selfChainMaxDepth) || this.selfChainMaxDepth < 0) this.selfChainMaxDepth = 4;
+
+        // txids this publisher broadcast in the pass now running, and how many wires
+        // that pass has sent. Cleared at the head of every pass, so nothing survives
+        // into a later pass where the change is no longer ours-this-second.
+        this._passSelfChange = new Set();
+        this._passChainDepth = 0;
         // Leader-rotation observability (item 3218). A dark peer publisher is
         // otherwise invisible: this hub's own status stays perfect while 1/N of
         // rounds never land on-chain. Track the rank state of the most recent
@@ -588,12 +607,13 @@ class OraclePublisher {
         // 2. Create an unsigned PSBT with the PRICE v0 payload
         // PRICE v0 payloads are typically ~900-1100 bytes (well above the 80-byte OP_RETURN limit),
         // so we use P2SH encoding which is what xchain-encoder supports for large payloads.
+        let selection = this._selectInputs(utxos);
         let psbtResult = await this.encoder.createTx({
             // Forwarded only while the set is inside the encoder's caller-facing
             // MAX_UTXO_COUNT; past it the param is omitted so the encoder selects
             // from its own uncapped fetch of this same address. See
             // lib/encoder_utxo_forward.js.
-            utxos:    forwardableUtxos(utxos, 'OraclePublisher'),
+            utxos:    forwardableUtxos(selection.utxos, 'OraclePublisher'),
             // The encoder's P2SH path runs bitcoin.address.fromBase58Check() on this
             // field, so it must be the base58check address (not the raw hex pubkey).
             pubkey:   this.dogeAddress,
@@ -610,7 +630,9 @@ class OraclePublisher {
             // judged on its own fee rate. When no confirmed output is available the
             // pass defers (see the NO_CONFIRMED_UTXO gate), which is the correct
             // outcome: a deferred window is recoverable, a chained package is not.
-            unconfirmed: this.allowUnconfirmedInputs
+            // The one exception is our own change from this same pass, which
+            // _selectInputs hands over explicitly.
+            unconfirmed: selection.unconfirmed
         });
         if (!psbtResult || !psbtResult.psbt) {
             throw new Error('encoder returned no PSBT');
@@ -628,6 +650,43 @@ class OraclePublisher {
             throw new Error('wallet sign hook returned invalid tx hex');
         }
         return txHex;
+    }
+
+    // Which inputs create_tx may spend for the wire being built, as
+    // { utxos, unconfirmed }. The caller still passes the array through
+    // forwardableUtxos, so the encoder cap is applied in exactly one place.
+    //
+    // Default is the fetched set with unconfirmed spending refused, which is the
+    // confirmed-inputs-only rule at the createTx call. The exception is narrow and
+    // explicit: when this pass has already broadcast a wire, that wire's change is
+    // added and unconfirmed spending allowed for it. Below ENCODER_MAX_UTXO_COUNT the
+    // forwarded array IS the encoder's candidate set, so nothing else unconfirmed can
+    // be selected and a third party's unconfirmed payment to this address stays
+    // unspendable.
+    //
+    // Four conditions return the untouched default: the regtest escape hatch is on
+    // (it already allows everything), the set is past the cap (the encoder then
+    // fetches its own, which this filter cannot bound), the chain is at its depth
+    // limit, or any output arrives without a readable confirmations field, since a
+    // source that stops serving depth must never be read as "all unconfirmed".
+    _selectInputs(utxos) {
+        let fallback = { utxos: utxos, unconfirmed: this.allowUnconfirmedInputs };
+        if (this.allowUnconfirmedInputs)                        return fallback;
+        if (!Array.isArray(utxos))                              return fallback;
+        if (utxos.length > ENCODER_MAX_UTXO_COUNT)              return fallback;
+        if (this._passSelfChange.size === 0)                    return fallback;
+        if (this._passChainDepth >= this.selfChainMaxDepth)     return fallback;
+
+        let confirmed = [];
+        let ownChange = [];
+        for (let u of utxos) {
+            let conf = Number(u && u.confirmations);
+            if (!Number.isFinite(conf) || conf < 0)             return fallback;
+            if (conf >= CONFIRMED_DEPTH) { confirmed.push(u); continue; }
+            if (u.txid && this._passSelfChange.has(String(u.txid))) ownChange.push(u);
+        }
+        if (ownChange.length === 0)                             return fallback;
+        return { utxos: confirmed.concat(ownChange), unconfirmed: true };
     }
 
     // Classify a broadcast failure (delegates to the shared classifier so
@@ -2664,6 +2723,12 @@ class OraclePublisher {
             return;
         }
 
+        // A new pass: no wire of ours is in flight from it yet, so no unconfirmed
+        // output is eligible until this pass sends one. Cleared here rather than at
+        // the end so an early return can never leave a stale txid behind.
+        this._passSelfChange.clear();
+        this._passChainDepth = 0;
+
         let remaining = [];
         let publishedThisPass = false;
         for (let entry of entries) {
@@ -2807,6 +2872,11 @@ class OraclePublisher {
                 // at-most-once anchor: even if the rewrite below fails and leaves this
                 // round on the durable queue, the next tick's guard will skip it.
                 for (let r of entryRounds) this._publishedRounds.mark(r);
+                // This wire's change becomes spendable by the next wire in this pass.
+                // Depth counts sends, not chain links, so it over-counts a pass that
+                // spent separate confirmed outputs and stops chaining early.
+                this._passChainDepth++;
+                if (result && result.txid) this._passSelfChange.add(String(result.txid));
                 this.spendGuard.commit(spendToken);   // the reservation IS the fee charged to the window
                 // Persist the durable sent marker so the guard survives a restart (the
                 // in-process tracker above does not). Best-effort: on failure the intent
