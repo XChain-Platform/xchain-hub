@@ -37,6 +37,7 @@ const { expect } = require('chai');
 const AttestationBatchPublisher = require('../../src/AttestationBatchPublisher.js');
 const ValidatorIdentity = require('../../src/ValidatorIdentity.js');
 const abw = require('../../src/lib/attest_batch_wire.js');
+const { isNeverSentError, isAmbiguousSendError } = require('../../src/lib/idempotent_broadcast.js');
 
 const WINDOW_S = 10;                       // regtest override; the whole suite closes windows in seconds
 const ANCHOR   = 941234;
@@ -67,6 +68,21 @@ function makeDb(){
                                     (a.request_id < b.request_id ? -1 : 1))
                     .slice(0, limit)
                     .map(r => Object.assign({}, r));
+            }
+            // Read BEFORE the marker SELECT below, whose predicate this statement shares:
+            // matched the other way round, a withdraw would silently read as a lookup and
+            // the row it was meant to remove would survive.
+            if(/^DELETE FROM attest_published_batches/i.test(sql)){
+                let [network, windowStart, fromStatus] = args;
+                // The status predicate is honoured, because the whole safety argument for
+                // the withdraw is that it can only remove an intent-only row: a fake that
+                // deleted unconditionally could not fail the case that matters.
+                let idx = markers.findIndex(m => m.network === network &&
+                                                 Number(m.window_start) === Number(windowStart) &&
+                                                 m.status === fromStatus);
+                if(idx < 0) return { affectedRows: 0 };
+                markers.splice(idx, 1);
+                return { affectedRows: 1 };
             }
             if(/SELECT MAX\(window_start\)/i.test(sql)){
                 let newest = markers.reduce((m, r) => Math.max(m, Number(r.window_start)), 0);
@@ -533,6 +549,252 @@ describe('AttestationBatchPublisher', function () {
             expect(line).to.match(/pushchaintip/);
             expect(line, 'the operator has to know the fallback was tried too').to.match(/attestation poll/);
             expect(p.getStats().anchorSource).to.equal(null);
+        });
+    });
+
+    // ------------------------------------------------------------ refused before sending
+
+    // The intent marker exists to stop a SECOND fee for a window that may
+    // already carry a transaction. A head that was refused BEFORE it could be sent
+    // carries none: the encoder answered 4xx, or the socket never connected. Keeping the
+    // marker there quarantined the window forever, so one transient refusal on an hourly
+    // window dropped that hour out of the chain-only reconstruction permanently (AT5
+    // logs, 2026-09-05). These cases pin which failures withdraw the marker and, more
+    // importantly, which ones still must not.
+    describe('a head refused before it was sent', function () {
+
+        // The classifier the branch turns on. Its contract is NARROWER than "safe to
+        // retry": a named node rejection is definitive, but the node had to receive the
+        // transaction to reject it, so it is not proof that nothing left the process and
+        // must not withdraw a marker.
+        it('classifies only provably-unsent shapes as never sent', function () {
+            expect(isNeverSentError({ response: { status: 400 } })).to.equal(true);
+            expect(isNeverSentError({ response: { status: 429 } })).to.equal(true);
+            expect(isNeverSentError({ code: 'ECONNREFUSED' })).to.equal(true);
+            expect(isNeverSentError({ code: 'ENOTFOUND' })).to.equal(true);
+            expect(isNeverSentError({ code: 'EAI_AGAIN' })).to.equal(true);
+
+            expect(isNeverSentError(new Error('Encoder RPC error: bad-txns-inputs-missingorspent')),
+                'a node rejection received the transaction').to.equal(false);
+            expect(isNeverSentError({ response: { status: 502 } })).to.equal(false);
+            expect(isNeverSentError({ code: 'ETIMEDOUT' })).to.equal(false);
+            expect(isNeverSentError(new Error('socket hang up'))).to.equal(false);
+            expect(isNeverSentError(null)).to.equal(false);
+            // A multi-phase signer that already funded on chain is never "unsent",
+            // whatever shape the failure that follows has.
+            expect(isNeverSentError(Object.assign(new Error('refused'),
+                { fundsCommitted: true, response: { status: 400 } }))).to.equal(false);
+            expect(isNeverSentError(Object.assign(new Error('refused'),
+                { fundsCommitted: true, code: 'ECONNREFUSED' }))).to.equal(false);
+
+            // And it never contradicts the ambiguity gate: nothing may be both.
+            for (let e of [{ response: { status: 400 } }, { code: 'ECONNREFUSED' },
+                           { code: 'ETIMEDOUT' }, new Error('socket hang up')])
+                expect(isNeverSentError(e) && isAmbiguousSendError(e)).to.equal(false);
+        });
+
+        // A broadcaster that throws the scripted error for call N, and succeeds once the
+        // script runs out. `calls` counts every attempt, thrown or not.
+        function makeScriptedPublisher(hub, script){
+            let p = new AttestationBatchPublisher(hub);
+            let sent = [];
+            p.calls = 0;
+            p.setBroadcastHook(async (payload) => {
+                let e = script[p.calls++];
+                if(e) throw e;
+                sent.push(payload);
+                return { txid: 'tx' + sent.length };
+            });
+            p.wires = sent;
+            return p;
+        }
+
+        // The encoder refusing the call before it builds anything: insufficient funds, or
+        // change from the previous window still unconfirmed. HTTP 4xx, nothing sent.
+        function httpRefusal(){
+            return Object.assign(new Error('Encoder RPC error: insufficient funds'),
+                                 { response: { status: 400 } });
+        }
+        function neverConnected(){
+            return Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+        }
+
+        // Rows whose payloads are random hex, so the deflated body cannot fit one wire
+        // and the window is genuinely a head plus continuations.
+        function chunkedRows(start){
+            let out = [];
+            for (let i = 0; i < 6; i++)
+                out.push(makeRow({ effective_time: start + 1, request_action_index: i,
+                                   response_payload: crypto.randomBytes(3000).toString('hex') }));
+            return out;
+        }
+
+        function captureErrors(){
+            let lines = [];
+            let real = console.error;
+            console.error = (msg) => lines.push(String(msg));
+            return { lines, restore(){ console.error = real; } };
+        }
+
+        it('withdraws the intent marker on an HTTP 4xx head refusal and lands the window next cycle',
+        async function () {
+            let hub = makeHub({ dir: dir });
+            let now = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+            hub.db.responses.push(makeRow({ effective_time: start + 1 }));
+            let p = makeScriptedPublisher(hub, [httpRefusal()]);
+            p._floorWindow = start;
+
+            await p.sweep(now);
+
+            expect(p.wires.length, 'the refused head never went out').to.equal(0);
+            expect(hub.db.marker(start),
+                'an intent marker for an unsent window is what strands its coverage').to.equal(null);
+            expect(p.stats.windowsRefusalRetried).to.equal(1);
+            expect(p.stats.windowsQuarantined).to.equal(0);
+            // Nothing was sent, so nothing may be charged against the window ceiling.
+            expect(p.spendGuard.spentInWindow()).to.equal(0);
+
+            let result = await p.sweep(now);
+
+            expect(result.published, 'the rebuilt window must publish').to.equal(1);
+            expect(p.wires.length).to.equal(1);
+            expect(decodeHead(p.wires[0]).windowStart).to.equal(start);
+            expect(hub.db.marker(start).status).to.equal('sent');
+            expect(p.getStats().refusalRetryWindows,
+                'a landed window keeps no attempt history').to.equal(0);
+        });
+
+        it('does the same for a never-connected transport error', async function () {
+            let hub = makeHub({ dir: dir });
+            let now = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+            hub.db.responses.push(makeRow({ effective_time: start + 1 }));
+            let p = makeScriptedPublisher(hub, [neverConnected()]);
+            p._floorWindow = start;
+
+            await p.sweep(now);
+            expect(hub.db.marker(start)).to.equal(null);
+            expect(p.stats.windowsRefusalRetried).to.equal(1);
+
+            await p.sweep(now);
+            expect(p.wires.length).to.equal(1);
+            expect(hub.db.marker(start).status).to.equal('sent');
+        });
+
+        // The whole point of the marker. An ambiguous head may be in a mempool this hub
+        // cannot see, so the window stays latched and an operator reconciles it.
+        it('still latches and quarantines an AMBIGUOUS head failure', async function () {
+            let hub = makeHub({ dir: dir });
+            let now = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+            hub.db.responses.push(makeRow({ effective_time: start + 1 }));
+            let p = makeScriptedPublisher(hub, [new Error('socket hang up')]);
+            p._floorWindow = start;
+
+            let cap = captureErrors();
+            try { await p.sweep(now); } finally { cap.restore(); }
+
+            expect(p.wires.length).to.equal(0);
+            expect(hub.db.marker(start).status,
+                'an ambiguous send must keep its intent marker').to.equal('intent');
+            expect(p.stats.windowsRefusalRetried).to.equal(0);
+            expect(cap.lines.filter(l => /AMBIGUOUSLY/.test(l)).length).to.equal(1);
+
+            // And the next sweep refuses it rather than paying a second time.
+            await p.sweep(now);
+            expect(p.wires.length).to.equal(0);
+            expect(p.stats.windowsQuarantined).to.equal(1);
+        });
+
+        // A continuation failing proves nothing about the head, which is already on
+        // chain and already paid for. Provably-unsent or not, the window latches.
+        it('still latches when a wire AFTER the head fails, even provably unsent', async function () {
+            let hub = makeHub({ dir: dir });
+            let now = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+            for (let r of chunkedRows(start)) hub.db.responses.push(r);
+            let p = makeScriptedPublisher(hub, [null, neverConnected()]);
+            p._floorWindow = start;
+
+            let cap = captureErrors();
+            try { await p.sweep(now); } finally { cap.restore(); }
+
+            expect(p.calls, 'this window must be more than one wire for the case to mean anything')
+                .to.be.at.least(2);
+            expect(p.wires.length, 'the head went out').to.equal(1);
+            expect(hub.db.marker(start).status).to.equal('intent');
+            expect(p.stats.windowsRefusalRetried).to.equal(0);
+            expect(cap.lines.filter(l => /CRITICAL - wire 2\//.test(l)).length).to.equal(1);
+
+            await p.sweep(now);
+            expect(p.stats.windowsQuarantined).to.equal(1);
+        });
+
+        // A refusal that never clears must not re-propose forever: the federation's
+        // signing capacity is the scarce thing. At the bound it latches like any other
+        // failure, once, and quarantines from then on.
+        it('latches exactly once when the attempt bound is reached', async function () {
+            let hub = makeHub({ dir: dir });
+            let now = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+            hub.db.responses.push(makeRow({ effective_time: start + 1 }));
+            let p = makeScriptedPublisher(hub, [httpRefusal(), httpRefusal(), httpRefusal(), httpRefusal()]);
+            p._floorWindow = start;
+            expect(p.maxRefusalAttempts).to.equal(3);
+
+            let cap = captureErrors();
+            try {
+                await p.sweep(now);          // attempt 1: withdrawn, retried
+                await p.sweep(now);          // attempt 2: withdrawn, retried
+                await p.sweep(now);          // attempt 3: the bound, latch
+                await p.sweep(now);          // quarantined, no fourth broadcast attempt
+            } finally { cap.restore(); }
+
+            expect(p.stats.windowsRefusalRetried).to.equal(2);
+            expect(p.calls, 'the latched window must not be broadcast again').to.equal(3);
+            expect(hub.db.marker(start).status).to.equal('intent');
+            expect(cap.lines.filter(l => /CRITICAL - wire 1\//.test(l)).length,
+                'a permanently refused window latches once, not once per sweep').to.equal(1);
+            expect(p.stats.windowsQuarantined).to.equal(1);
+        });
+
+        // The withdraw is guarded on status = 'intent'. A batch the federation landed
+        // between the send and the failure leaves a `landed` row, and that row is the
+        // authoritative coverage record: the retry path must not be able to remove it.
+        it('cannot withdraw a marker that is no longer intent-only', async function () {
+            let hub = makeHub({ dir: dir });
+            let now = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+            hub.db.markers.push({ network: 'regtest', window_start: start, window_end: now,
+                                  row_count: 3, status: 'landed', txid: 'dogetxid' });
+            let p = makeScriptedPublisher(hub, []);
+
+            await p._clearIntent(start);
+
+            expect(hub.db.marker(start).status).to.equal('landed');
+            expect(hub.db.marker(start).txid).to.equal('dogetxid');
+        });
+
+        // A crash marker is a genuinely unknown outcome and stays quarantined across a
+        // restart: the retry path must not have widened what _hydrateMarkers admits.
+        it('still quarantines a genuine intent-only crash marker after a restart', async function () {
+            let hub = makeHub({ dir: dir });
+            let now = 200 * WINDOW_S;
+            let start = now - WINDOW_S;
+            hub.db.markers.push({ network: 'regtest', window_start: start, window_end: now,
+                                  row_count: 1, status: 'intent', txid: null });
+
+            let p = makeScriptedPublisher(hub, []);
+            let cap = captureErrors();
+            try { await p._hydrateMarkers(); } finally { cap.restore(); }
+
+            expect(p._quarantined.has(start)).to.equal(true);
+            expect(cap.lines.filter(l => /publish-intent marker with no outcome/.test(l)).length).to.equal(1);
+
+            p._floorWindow = start;
+            await p.sweep(now);
+            expect(p.wires.length).to.equal(0);
         });
     });
 
