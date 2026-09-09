@@ -10,14 +10,24 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// Derived `price` capability snapshots on a hub that does NOT run oracle consensus
-// (oracle PRICE batching, derivation ruling 2026-09-09).
+// Derived capability snapshots on a hub that does NOT run oracle consensus
+// (oracle PRICE batching, derivation ruling 2026-09-09; widened to all four
+// capabilities by the operator's dq 2 option (a) ruling, same day).
 //
 // The bug these pin: the only writer of a `price` capability snapshot was
 // OracleConsensus._persistCapabilitySnapshot on the round-FINALIZATION path, so a
 // chain-only node's hub mirrored an EMPTY capability_snapshots and its indexer, which
 // off BTC resolves the price set from that mirrored table alone, recorded every landed
 // batch `invalid: insufficient signer stake`.
+//
+// The FIRST build of this pass derived `price` alone, which left the same hole open on
+// every other capability the consensus path persists. Measured on the real testnet
+// chain-only node 2026-09-09: its HubMirror held 1,148 capability_snapshots rows over
+// BTC [151560..151723] and EVERY ONE was `price`. Of 13 verdict divergences against
+// origin, five were ATTEST actions refused `invalid: insufficient signer stake` (no
+// `attestation` snapshot) and one was an ANCHOR archive head stored `unverified` (no
+// `oracle_publish` snapshot: xchain-indexer actions/anchor.js:384-387, `oracleN === 0`).
+// The `every capability` block below drives each of those refusals to its flip.
 //
 // The ordering is the whole difficulty and it is what `derives before any batch
 // arrives` below exists to pin: the indexer validates a parsed batch BEFORE it pushes
@@ -108,19 +118,46 @@ function indexerReadsWeights(db, capability, snapshotBlock) {
 // `anchor`, signed by `signers`. src/stake_weighted_quorum.js is byte-identical in
 // the hub and the indexer (md5 825b15d71eb9972df6a3915e4e6a08b3 in both), so this is
 // the indexer's own arithmetic, not a re-implementation of it.
-function indexerVerdict(db, anchor, signers) {
-    let validators = indexerReadsWeights(db, 'price', anchor);
+//
+// `capability` selects which rail's verdict is being asked for: actions/price.js reads
+// the `price` set, actions/attest.js (via getStakeWeightsByCapability('attestation',
+// anchor)) reads the `attestation` set, and the cross-chain verifiers read `cross_chain`.
+// The predicate is the same in all three; only the rows differ.
+function indexerVerdict(db, anchor, signers, capability) {
+    let validators = indexerReadsWeights(db, capability || 'price', anchor);
     return swq.meetsStakeThreshold(validators, signers)
         ? 'valid'
         : 'invalid: insufficient signer stake';
 }
 
-describe('PriceAggregator: derived `price` capability snapshots (chain-only hub)', function () {
+// The status xchain-indexer actions/anchor.js stamps on an ARCHIVE HEAD whose payload
+// declares SNAPSHOT_BLOCK. Its shape is NOT the price/attest one: an empty
+// `oracle_publish` set is not a refusal, it is `unverified` (anchor.js:384-387,
+// `if(oracleN === 0){ data['STATUS'] = 'unverified'; }`), which is the divergence the
+// measured node actually showed. Only once the set is non-empty does the quorum
+// predicate decide valid vs refused.
+function indexerArchiveHeadStatus(db, snapshotBlock, signers) {
+    let validators = indexerReadsWeights(db, 'oracle_publish', snapshotBlock);
+    if (validators.length === 0) return 'unverified';
+    return swq.meetsStakeThreshold(validators, signers)
+        ? 'valid'
+        : 'invalid: insufficient signer stake';
+}
+
+describe('PriceAggregator: derived capability snapshots (chain-only hub)', function () {
 
     // testnet: STAKE_WEIGHTED_QUORUM_ACTIVATION is 0, so every height resolves weighted,
     // which is the mode the measured testnet node runs in.
     const TIP    = 151800;
     const ANCHOR = 151797;      // a batch anchor inside the lookback window
+
+    // Every capability the consensus path persists, and the number the window/capability
+    // grid produces. Spelled out here rather than imported so a silent narrowing of the
+    // module's own list (the exact regression this row fixes) fails these tests instead
+    // of agreeing with itself.
+    const CAPS       = ['price', 'oracle_publish', 'cross_chain', 'attestation'];
+    const WINDOW     = 4;                       // HUB_..._LOOKBACK_BLOCKS below
+    const GRID       = WINDOW * CAPS.length;    // (capability, height) pairs in one pass
 
     let hub, agg, db, capSnapshot, broadcaster, envSaved;
 
@@ -192,16 +229,37 @@ describe('PriceAggregator: derived `price` capability snapshots (chain-only hub)
             let res = await agg.runPriceCapabilityDerivation();
 
             expect(res.ran).to.be.true;
-            expect(res.written).to.equal(4);            // TIP-3 .. TIP
+            expect(res.written).to.equal(GRID);         // TIP-3 .. TIP, every capability
             expect(res.tip).to.equal(TIP);
             // No batch was pushed, parsed or validated to get here: the indexer could not
             // have pushed one, because its own verdict above was a refusal.
             expect(receive.called).to.be.false;
             // The set came from the Bitcoin view, at BTC heights, through the hub's own
             // CapabilitySnapshot reads. Validator identity still goes through Bitcoin.
-            expect(capSnapshot.getWeightSnapshot.callCount).to.equal(4);
-            expect(capSnapshot.getWeightSnapshot.getCalls().map(c => c.args[1]).sort())
-                .to.deep.equal([TIP - 3, TIP - 2, TIP - 1, TIP]);
+            expect(capSnapshot.getWeightSnapshot.callCount).to.equal(GRID);
+            let asked = capSnapshot.getWeightSnapshot.getCalls().map(c => c.args[0] + '@' + c.args[1]).sort();
+            let want  = [];
+            for (let h of [TIP - 3, TIP - 2, TIP - 1, TIP]) for (let c of CAPS) want.push(c + '@' + h);
+            expect(asked).to.deep.equal(want.sort());
+        });
+
+        it('covers the TIP for every capability before it walks any older height', async function () {
+            // The per-tick cap is an RPC budget, so a cold hub whose window is wider than
+            // one tick must still have the tip FULLY covered: an ATTEST or an archive head
+            // landing now anchors nearest the tip, and covering price-at-tip while leaving
+            // attestation-at-tip for a later tick is the same refusal in a smaller window.
+            let order = [];
+            capSnapshot.getWeightSnapshot.callsFake(async (capability, block) => {
+                order.push({ capability, block });
+                return { capability, blockIndex: block, count: SET.length,
+                         truncated: false, validators: SET.map(v => ({ ...v })) };
+            });
+
+            await agg.runPriceCapabilityDerivation();
+
+            expect(order.slice(0, CAPS.length).every(o => o.block === TIP)).to.be.true;
+            expect(order.slice(0, CAPS.length).map(o => o.capability).sort())
+                .to.deep.equal(CAPS.slice().sort());
         });
 
         it('flips the indexer verdict on the batch anchor from refused to valid', async function () {
@@ -215,6 +273,145 @@ describe('PriceAggregator: derived `price` capability snapshots (chain-only hub)
             await agg.runPriceCapabilityDerivation();
             expect(indexerVerdict(db, TIP - 9, THREE_SIGNERS))
                 .to.equal('invalid: insufficient signer stake');
+        });
+    });
+
+    describe('every capability the consensus path persists', function () {
+
+        it('derives ALL FOUR, not `price` alone: the measured node held only `price`', async function () {
+            await agg.runPriceCapabilityDerivation();
+
+            // The shape the real chain-only node was in (1,148 rows, one capability).
+            let written = [...new Set([...db.store.values()].map(r => r.capability))].sort();
+            expect(written).to.deep.equal(CAPS.slice().sort());
+            // Every capability covers the whole window, not just the tip.
+            for (let c of CAPS) {
+                for (let h of [TIP - 3, TIP - 2, TIP - 1, TIP])
+                    expect(indexerReadsWeights(db, c, h), c + '@' + h).to.have.length(SET.length);
+            }
+        });
+
+        it('flips the ATTEST refusal the node showed five times, from refused to valid', async function () {
+            // xchain-indexer judges a v5 ATTEST head by getStakeWeightsByCapability
+            // ('attestation', anchor), which off BTC is the hub-mirrored table alone. With
+            // nobody writing those rows the node refused five ATTEST actions origin called
+            // valid (measured 2026-09-09).
+            expect(indexerVerdict(db, ANCHOR, THREE_SIGNERS, 'attestation'))
+                .to.equal('invalid: insufficient signer stake');
+            await agg.runPriceCapabilityDerivation();
+            expect(indexerVerdict(db, ANCHOR, THREE_SIGNERS, 'attestation')).to.equal('valid');
+        });
+
+        it('flips the ANCHOR archive head from `unverified` to a real verdict', async function () {
+            // anchor.js:384-387: oracleN === 0 is not a refusal, it is `unverified`, which
+            // is why this assertion is not the ATTEST one with a different capability.
+            expect(indexerArchiveHeadStatus(db, ANCHOR, THREE_SIGNERS)).to.equal('unverified');
+            await agg.runPriceCapabilityDerivation();
+            expect(indexerArchiveHeadStatus(db, ANCHOR, THREE_SIGNERS)).to.equal('valid');
+        });
+
+        it('flips the cross_chain verdict, so a match verifier resolves a real set', async function () {
+            expect(indexerVerdict(db, ANCHOR, THREE_SIGNERS, 'cross_chain'))
+                .to.equal('invalid: insufficient signer stake');
+            await agg.runPriceCapabilityDerivation();
+            expect(indexerVerdict(db, ANCHOR, THREE_SIGNERS, 'cross_chain')).to.equal('valid');
+        });
+
+        it('still fails a capability closed when its own signers do not clear the bar', async function () {
+            // The point of deriving is not to make everything valid: it is to give the
+            // verifier the real set. One signer out of four sources cannot clear 3S > 2T,
+            // and the derived rows must not change that.
+            await agg.runPriceCapabilityDerivation();
+            for (let c of CAPS)
+                expect(indexerVerdict(db, ANCHOR, [SET[0].pubkey], c), c)
+                    .to.equal('invalid: insufficient signer stake');
+        });
+
+        it('is byte-identical to the consensus writer for EVERY capability, not just price', async function () {
+            // OracleConsensus._persistCapabilitySnapshot(capability, block) is the shared
+            // consensus writer's four-argument shape (StateCheckpointEngine and
+            // AttestationBatchPublisher call snapWrite the same way). If the derived rows
+            // differ for any capability, the two mirrors disagree about who was capable at
+            // a BTC height, which is the fork this pass exists to avoid.
+            for (let capability of CAPS) {
+                let consensusDb  = makeFakeDb();
+                let consensusHub = createMockHub({ db: consensusDb });
+                consensusHub.db                 = consensusDb;
+                consensusHub.network            = 'testnet';
+                consensusHub.capabilitySnapshot = capSnapshot;
+                consensusHub.hubDbBroadcaster   = null;
+                let oc = new OracleConsensus(consensusHub, null);
+                oc.db = consensusDb;
+
+                let derivedDb  = makeFakeDb();
+                let derivedHub = createMockHub({ db: derivedDb });
+                derivedHub.db                 = derivedDb;
+                derivedHub.network            = 'testnet';
+                derivedHub.capabilitySnapshot = capSnapshot;
+                derivedHub.hubDbBroadcaster   = null;
+                let derived = new PriceAggregator(derivedHub);
+
+                await oc._persistCapabilitySnapshot(capability, ANCHOR);
+                await derived._persistDerivedCapabilitySnapshot(capability, ANCHOR);
+
+                let ocInsert  = consensusDb.queries.find(q => /^INSERT IGNORE INTO capability_snapshots/.test(q.sql));
+                let devInsert = derivedDb.queries.find(q => /^INSERT IGNORE INTO capability_snapshots/.test(q.sql));
+                expect(ocInsert,  capability + ': consensus path wrote nothing').to.exist;
+                expect(devInsert, capability + ': derivation path wrote nothing').to.exist;
+                expect(devInsert.sql, capability).to.equal(ocInsert.sql);
+                expect(devInsert.args, capability).to.deep.equal(ocInsert.args);
+                // And the capability really is the one asked for, not `price` under a label.
+                expect(devInsert.args[1], capability).to.equal(capability);
+            }
+        });
+
+        it('mirrors every capability to hub-DB subscribers under its own name', async function () {
+            await agg.runPriceCapabilityDerivation();
+            let seen = new Set();
+            for (let call of broadcaster.broadcastRow.getCalls()) {
+                expect(call.args[0].table).to.equal('capability_snapshots');
+                seen.add(call.args[0].row.capability);
+            }
+            expect([...seen].sort()).to.deep.equal(CAPS.slice().sort());
+            expect(broadcaster.broadcastRow.callCount).to.equal(GRID * SET.length);
+        });
+
+        it('reports per-capability tallies so one stuck capability names itself', async function () {
+            // A single `written` number would hide three healthy capabilities behind a
+            // fourth that never resolves, which is exactly how `price`-only shipped
+            // unnoticed. attestation is the one made to fail here.
+            sinon.stub(console, 'warn');
+            capSnapshot.getWeightSnapshot.callsFake(async (capability, block) => {
+                if (capability === 'attestation') return null;   // degraded read
+                return { capability, blockIndex: block, count: SET.length,
+                         truncated: false, validators: SET.map(v => ({ ...v })) };
+            });
+
+            let res = await agg.runPriceCapabilityDerivation();
+
+            expect(res.byCapability.attestation.written).to.equal(0);
+            expect(res.byCapability.attestation.failed).to.equal(WINDOW);
+            for (let c of ['price', 'oracle_publish', 'cross_chain']) {
+                expect(res.byCapability[c].written, c).to.equal(WINDOW);
+                expect(res.byCapability[c].failed, c).to.equal(0);
+            }
+            // The healthy three are covered, the stuck one is not, and it is retried.
+            expect(indexerVerdict(db, ANCHOR, THREE_SIGNERS)).to.equal('valid');
+            expect(indexerVerdict(db, ANCHOR, THREE_SIGNERS, 'attestation'))
+                .to.equal('invalid: insufficient signer stake');
+            expect(agg._capDerivedBlocks.get('attestation').size).to.equal(0);
+        });
+
+        it('names the capability in the once-per-height warning', async function () {
+            let warn = sinon.stub(console, 'warn');
+            capSnapshot.getWeightSnapshot.callsFake(async (capability) =>
+                (capability === 'oracle_publish' ? null : { capability, count: 0, truncated: false, validators: [] }));
+
+            await agg.runPriceCapabilityDerivation();
+
+            let lines = warn.getCalls().map(c => c.args.join(' '));
+            expect(lines.some(l => /`oracle_publish` capability snapshot/.test(l))).to.be.true;
+            expect(lines.some(l => /`price` capability snapshot/.test(l))).to.be.false;
         });
     });
 
@@ -263,18 +460,21 @@ describe('PriceAggregator: derived `price` capability snapshots (chain-only hub)
             }
         });
 
-        it('spends no second read on a height it already covered, and picks up a new tip', async function () {
+        it('spends no second read on a (capability, height) it already covered, and picks up a new tip', async function () {
             await agg.runPriceCapabilityDerivation();
-            expect(capSnapshot.getWeightSnapshot.callCount).to.equal(4);
+            expect(capSnapshot.getWeightSnapshot.callCount).to.equal(GRID);
 
             hub._resolveBtcLatestBlock.resolves(TIP + 1);
             let second = await agg.runPriceCapabilityDerivation();
-            expect(second.written).to.equal(1);
-            expect(capSnapshot.getWeightSnapshot.callCount).to.equal(5);
-            expect(capSnapshot.getWeightSnapshot.lastCall.args[1]).to.equal(TIP + 1);
+            // One new height, every capability: nothing already covered is re-read.
+            expect(second.written).to.equal(CAPS.length);
+            expect(capSnapshot.getWeightSnapshot.callCount).to.equal(GRID + CAPS.length);
+            expect(capSnapshot.getWeightSnapshot.getCalls().slice(-CAPS.length)
+                .every(c => c.args[1] === TIP + 1)).to.be.true;
             // The window slid, so the height that fell out of it is forgotten rather than
-            // accumulated: the covered set is bounded by the lookback.
-            expect(agg._priceCapDerivedBlocks.size).to.equal(4);
+            // accumulated: each capability's covered set is bounded by the lookback.
+            for (let c of CAPS)
+                expect(agg._capDerivedBlocks.get(c).size, c).to.equal(WINDOW);
         });
     });
 
@@ -287,7 +487,7 @@ describe('PriceAggregator: derived `price` capability snapshots (chain-only hub)
             let res = await agg.runPriceCapabilityDerivation();
 
             expect(res.written).to.equal(0);
-            expect(res.failed).to.equal(4);
+            expect(res.failed).to.equal(GRID);
             expect(db.store.size).to.equal(0);
             expect(db.queries.filter(q => /INSERT/.test(q.sql))).to.have.length(0);
             expect(err.called).to.be.true;
@@ -300,14 +500,15 @@ describe('PriceAggregator: derived `price` capability snapshots (chain-only hub)
             sinon.stub(console, 'warn');
             capSnapshot.getWeightSnapshot.resolves(null);
             await agg.runPriceCapabilityDerivation();
-            expect(agg._priceCapDerivedBlocks.size).to.equal(0);
+            for (let c of CAPS)
+                expect(agg._capDerivedBlocks.get(c).size, c).to.equal(0);
 
             capSnapshot.getWeightSnapshot.callsFake(async (capability, block) => ({
                 capability: capability, blockIndex: block, count: SET.length,
                 truncated: false, validators: SET.map(v => ({ ...v }))
             }));
             let second = await agg.runPriceCapabilityDerivation();
-            expect(second.written).to.equal(4);
+            expect(second.written).to.equal(GRID);
             expect(indexerVerdict(db, ANCHOR, THREE_SIGNERS)).to.equal('valid');
         });
 
@@ -353,7 +554,7 @@ describe('PriceAggregator: derived `price` capability snapshots (chain-only hub)
             }));
             let res = await agg.runPriceCapabilityDerivation();
             expect(res.written).to.equal(0);
-            expect(res.empty).to.equal(4);
+            expect(res.empty).to.equal(GRID);
             expect(res.failed).to.equal(0);
             expect(db.store.size).to.equal(0);
             // Nobody qualified, so an off-BTC verifier reading zero rows reaches the same
