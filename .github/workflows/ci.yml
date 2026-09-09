@@ -33,7 +33,18 @@ jobs:
       # one and reports a gate disagreement that exists nowhere but in CI. The
       # same expression is what xchain-indexer already passes. Empty everywhere
       # else, which keeps the existing behaviour.
-      siblings-ref: ${{ startsWith(github.head_ref, 'release/') && github.head_ref || '' }}
+      #
+      # On a HOTFIX PR the siblings ride the PR's BASE branch instead, because a
+      # single-repo patch train has no sibling branch to be tested against: the
+      # tree is branched from a master tag, no sibling publishes `hotfix/vX.Y.Z`,
+      # and the develop default then compares master-lineage code against
+      # siblings carrying develop-only work. Measured on the v0.16.2 cut: the
+      # chain-registry guard read the wallet's develop snapshot (a regtest
+      # encoder port moved there alone) against this tree's master one and went
+      # red on a commit that touches neither. The pre-push venue gate already
+      # ships master siblings for such a branch, so this is also what makes the
+      # two venues agree instead of disagreeing by default.
+      siblings-ref: ${{ startsWith(github.head_ref, 'release/') && github.head_ref || startsWith(github.head_ref, 'hotfix/') && github.base_ref || '' }}
     # Perf now runs in the dedicated `perf` job below (with a database), so the
     # gate does not also run the self-skipping perf step.
 
@@ -138,6 +149,11 @@ jobs:
   # gate (bin/ci-full.sh). Its consumers are cloned sparsely below rather than via
   # the checkout-siblings action: the check is `cmp` on four files per repo, so it
   # needs neither the full history nor the sibling's node_modules.
+  #
+  # Both refs below carry the same hotfix arm as the two sibling call sites above,
+  # for the same reason: `github.ref` on a pull request is refs/pull/N/merge, so a
+  # hotfix cut from a master tag would otherwise be drift-checked against canonical
+  # artifacts carrying develop-only work and red on a change it does not contain.
   drift-guards:
     runs-on: ubuntu-latest
     steps:
@@ -149,7 +165,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: XChain-Platform/xchain-wallet
-          ref: ${{ github.ref == 'refs/heads/master' && 'master' || 'develop' }}
+          ref: ${{ github.ref == 'refs/heads/master' && 'master' || startsWith(github.head_ref, 'hotfix/') && github.base_ref || 'develop' }}
           ssh-key: ${{ secrets.XCHAIN_WALLET_DEPLOY_KEY }}
           path: xchain-wallet
 
@@ -165,7 +181,7 @@ jobs:
       # cannot leave this job checking a stale subset.
       - name: Check out the observability shim consumers
         env:
-          SIBLINGS_REF: ${{ github.ref == 'refs/heads/master' && 'master' || 'develop' }}
+          SIBLINGS_REF: ${{ github.ref == 'refs/heads/master' && 'master' || startsWith(github.head_ref, 'hotfix/') && github.base_ref || 'develop' }}
           OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
@@ -225,9 +241,10 @@ jobs:
         # Same release-awareness as the shared workflow call above, and it has to
         # be the same expression: the ratchet re-runs the unit suite, so siblings
         # pinned at develop make it measure a suite whose cross-repo guards fail
-        # or skip for a reason the gate itself does not have.
+        # or skip for a reason the gate itself does not have. The hotfix arm is
+        # part of "the same expression" for exactly that reason.
         with:
-          ref: ${{ startsWith(github.head_ref, 'release/') && github.head_ref || '' }}
+          ref: ${{ startsWith(github.head_ref, 'release/') && github.head_ref || startsWith(github.head_ref, 'hotfix/') && github.base_ref || '' }}
 
       - name: Use Node.js 22
         uses: actions/setup-node@v4
