@@ -1682,8 +1682,11 @@ class XChainHub {
         }
         let ageS = Math.floor(Date.now() / 1000) - blockTime;
         if(ageS > maxAge){
-            console.warn('XChainHub: pushed BTC tip (height ' + tip.blockHeight + ') is ' + ageS +
-                's old, exceeds MAX_TIP_AGE_S (' + maxAge + '); falling through to the direct indexer path');
+            // Info, not warn: a 1200s bound refuses ~13.5% of live mainnet blocks, the
+            // direct path answers one call later, and _btcDirectTipAcceptable is the
+            // gate that warns when the chain has actually stopped.
+            console.log('XChainHub: pushed BTC tip (height ' + tip.blockHeight + ') is ' + ageS +
+                's old, past MAX_TIP_AGE_S (' + maxAge + '): a long block gap, taking the direct indexer path');
             return false;
         }
         return true;
