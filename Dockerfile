@@ -10,6 +10,18 @@ COPY ./package-lock.json /XChainHub/package-lock.json
 WORKDIR /XChainHub
 RUN npm ci --omit=dev
 
+# The llm attestation provider's default transport spawns this CLI by name
+# (src/lib/claude-spawn.js: CLAUDE_BIN, default `claude`), which
+# resolveHubLlmAuth PREFERS over an API key whenever HUB_CLAUDE_CONFIG_DIR is
+# set. It has to live in the image, and it has to live HERE rather than being
+# installed into a running container: the testnet fleet ran for twelve days on a
+# hand-built `testnet-validator-claude` image, the v0.16.0 roll rebuilt the tag
+# from this file, and the binary silently vanished. Every seated hub then
+# answered `spawn claude ENOENT`, so every llm request on BTC testnet expired
+# with zero responses until 2026-09-09 . Pinned for the same reason the
+# base tag is: a floating install moves the runtime with no signal.
+RUN npm install -g @anthropic-ai/claude-code@2.1.266
+
 COPY ./src /XChainHub/src
 COPY ./docs /XChainHub/docs
 COPY ./.en[v] /XChainHub/.env
