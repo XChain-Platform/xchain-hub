@@ -24,7 +24,7 @@
 // never carries that meaning.
 
 const path             = require('path');
-const { spawnSync }    = require('child_process');
+const { spawn }        = require('child_process');
 const { expect }       = require('chai');
 
 const XChainHub        = require('../../src/XChainHub');
@@ -191,9 +191,7 @@ describe('XChainHub standalone network (HUB_NETWORK without P2P_VALIDATOR_ADDR)'
         this.timeout(30000);
 
         // Port 1 has no listener, so a valid boot never gets past the DB into serving;
-        // no P2P_VALIDATOR_ADDR, so every run below is standalone. The gate is a
-        // module-load check that fires in well under a second (the refusal case below
-        // exits in ~0.4 s), so a short spawn timeout is enough to observe it.
+        // no P2P_VALIDATOR_ADDR, so every run below is standalone.
         const BASE_ENV = {
             PATH: process.env.PATH,
             HOME: process.env.HOME,
@@ -207,15 +205,56 @@ describe('XChainHub standalone network (HUB_NETWORK without P2P_VALIDATOR_ADDR)'
         };
         const REFUSAL = 'Invalid optional environment variable: HUB_NETWORK';
 
-        function boot(network) {
+        // Ceiling, NOT a budget: nothing waits it out on a healthy run. It exists so a
+        // hung boot fails in finite time, and it is named in the assertion messages so a
+        // venue-speed failure cannot be misread as a gate regression.
+        const BOOT_CEILING_MS = 20000;
+
+        // Wait for a DECISIVE SIGNAL, never for a slice of wall clock. The two
+        // boots-past-the-gate cases never exit on their own (a valid boot blocks on a
+        // dead DB port), so a fixed spawnSync timeout WAS their exit path, and the
+        // assertion then read whatever output happened to arrive before the kill. Any
+        // venue slower than the budget lost the very line being asserted, and the refusal
+        // case reported a null exit code, which reads as "did not refuse" and is
+        // indistinguishable from a real regression. Resolving on the marker also drops
+        // roughly ten seconds of deliberate dead wait from every run of this suite.
+        function boot(network, marker) {
             const env = Object.assign({}, BASE_ENV);
             if (network !== null) env.HUB_NETWORK = network;
-            const r = spawnSync('node', [API_ENTRY], { env, timeout: 5000, encoding: 'utf8' });
-            return { status: r.status, stderr: (r.stderr || '') + (r.stdout || '') };
+            return new Promise((resolve) => {
+                const child = spawn('node', [API_ENTRY], { env });
+                let output     = '';
+                let markerSeen = false;
+                let settled    = false;
+                const finish = (status, timedOut) => {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(ceiling);
+                    child.kill('SIGKILL');           // no-op once it has already exited
+                    resolve({ status, stderr: output, markerSeen, timedOut });
+                };
+                const ceiling = setTimeout(() => finish(null, true), BOOT_CEILING_MS);
+                const onData = (buf) => {
+                    output += buf.toString();
+                    if (marker && !markerSeen && output.includes(marker)) {
+                        markerSeen = true;
+                        finish(null, false);          // seen it; nothing left to wait for
+                    }
+                };
+                child.stdout.on('data', onData);
+                child.stderr.on('data', onData);
+                child.on('error', () => finish(null, false));
+                child.on('exit',  (code) => finish(code, false));
+            });
         }
 
-        it('refuses to boot on a network name that is not mainnet|testnet|regtest', function () {
-            const r = boot('tesnet');
+        it('refuses to boot on a network name that is not mainnet|testnet|regtest', async function () {
+            const r = await boot('tesnet');
+            // Checked before the exit code so a killed boot names itself, instead of
+            // surfacing as `expected null to equal 1` and sending the reader after a
+            // refusal that did in fact happen.
+            expect(r.timedOut, 'api.js never exited within ' + BOOT_CEILING_MS +
+                'ms, so this run measured venue speed rather than the gate').to.equal(false);
             expect(r.status).to.equal(1);
             expect(r.stderr).to.include(REFUSAL);
         });
@@ -224,15 +263,19 @@ describe('XChainHub standalone network (HUB_NETWORK without P2P_VALIDATOR_ADDR)'
         // it says the boot got THROUGH rather than merely that no refusal was printed.
         const PAST_THE_GATE = 'Creating ' + BASE_ENV.HUB_DB_NAME + ' database';
 
-        it('boots past the gate on a valid network name', function () {
-            const r = boot('testnet');
+        it('boots past the gate on a valid network name', async function () {
+            const r = await boot('testnet', PAST_THE_GATE);
             expect(r.stderr).to.not.include(REFUSAL);
+            expect(r.timedOut, 'boot never reached "' + PAST_THE_GATE + '" within ' +
+                BOOT_CEILING_MS + 'ms').to.equal(false);
             expect(r.stderr).to.include(PAST_THE_GATE);
         });
 
-        it('boots past the gate with HUB_NETWORK unset, as every single-host hub does', function () {
-            const r = boot(null);
+        it('boots past the gate with HUB_NETWORK unset, as every single-host hub does', async function () {
+            const r = await boot(null, PAST_THE_GATE);
             expect(r.stderr).to.not.include(REFUSAL);
+            expect(r.timedOut, 'boot never reached "' + PAST_THE_GATE + '" within ' +
+                BOOT_CEILING_MS + 'ms').to.equal(false);
             expect(r.stderr).to.include(PAST_THE_GATE);
         });
     });
