@@ -212,14 +212,31 @@ describe('RollcallRound', function () {
             assert.strictEqual(eng.newestSignableEpoch(6), 0, 'a falsy height check would skip epoch 0');
         });
 
-        it('is inert where ROLLCALL_ACTIVATION is null (mainnet)', function () {
+        // Mainnet arms at 0 by the 2026-09-09 ruling, so the null case is driven through
+        // a temporary key on the live map: the subject is the JS coercion trap, not which
+        // network happens to be unarmed.
+        it('is inert on a network whose ROLLCALL_ACTIVATION is null', function () {
+            const NET = 'unarmednet';
+            rca.ROLLCALL_ACTIVATION[NET] = null;
+            try {
+                const eng = makeEngine({});
+                eng.network = NET;
+                eng.interval = 1008;
+                eng.acceptWindow = 144;
+                // `0 >= null` is true in JS; only the Number.isFinite guard keeps this
+                // from arming an unarmed network at height 0.
+                assert.strictEqual(eng.newestSignableEpoch(1008 + 10), null);
+            } finally { delete rca.ROLLCALL_ACTIVATION[NET]; }
+        });
+
+        it('signs epochs on a genesis-armed mainnet', function () {
             const eng = makeEngine({});
             eng.network = 'mainnet';
             eng.interval = 1008;
             eng.acceptWindow = 144;
-            // `0 >= null` is true in JS; only the Number.isFinite guard keeps this
-            // from arming mainnet at height 0.
-            assert.strictEqual(eng.newestSignableEpoch(1008 + 10), null);
+            // Ruled 2026-09-09: mainnet carries 0 validators and 0 roll-calls, so epochs
+            // exist from genesis and the newest signable one is the last interval boundary.
+            assert.strictEqual(eng.newestSignableEpoch(1008 + 10), 1008);
         });
     });
 

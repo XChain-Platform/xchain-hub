@@ -172,8 +172,8 @@ describe('RollcallRound publish-tunable invariants (D88)', function () {
 // A network whose activation height is the INERT placeholder must cost nothing
 // at runtime, not merely decide nothing. Without this the engine starts, polls
 // its BTC indexer every 30 seconds forever, and each poll throws and logs on a
-// hub that has no BTC indexer configured, which is every mainnet hub today.
-// A recurring warning about a feature nobody armed reads as a fault.
+// hub that has no BTC indexer configured. A recurring warning about a feature
+// nobody armed reads as a fault. Regtest is the network this still covers.
 describe('RollcallRound stays inert where the operator has not armed it', function () {
 
     // Constructed without going through the real hub: start() must decide from
@@ -196,9 +196,10 @@ describe('RollcallRound stays inert where the operator has not armed it', functi
         return eng;
     }
 
-    // Regtest joined mainnet as inert on 2026-08-31: arming a network commits every
-    // BTC indexer on it to a wired DOGE peer, and a single-coin regtest venue has none.
-    ['mainnet', 'regtest'].forEach(function (net) {
+    // Regtest is the network that ships inert (2026-08-31 ruling): arming a network commits
+    // every BTC indexer on it to a wired DOGE peer, and a single-coin regtest venue has
+    // none. Mainnet left this list on 2026-09-09, when it armed at genesis.
+    ['regtest'].forEach(function (net) {
         it('refuses to start on ' + net + ', which has no activation height', async function () {
             assert.strictEqual(rca.ROLLCALL_ACTIVATION[net], null,
                 'this test is about the inert placeholder; if ' + net + ' has been armed, retarget it');
@@ -215,7 +216,9 @@ describe('RollcallRound stays inert where the operator has not armed it', functi
     });
 
     it('does start on the networks that are armed', async function () {
-        for (const net of ['testnet']) {
+        // mainnet joined this list on 2026-09-09: armed at genesis, so a mainnet hub now
+        // starts the engine instead of idling on an inert placeholder.
+        for (const net of ['mainnet', 'testnet']) {
             assert.ok(Number.isFinite(rca.ROLLCALL_ACTIVATION[net]), net + ' is expected to be armed');
             const eng = engineFor(net);
             const real = console.log;

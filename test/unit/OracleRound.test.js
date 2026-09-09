@@ -15,6 +15,9 @@ const { expect }     = require('chai');
 const proxyquire     = require('proxyquire');
 const { createMockHub }     = require('../helpers/mockHub');
 const { buildSubmissions, pubkeyForTestSender }  = require('../helpers/fixtures');
+// The composition gate's own map. Every shipped network is genesis-on since the
+// 2026-09-09 ruling, so the boundary case below installs a temporary network on it.
+const { XCHAIN_PRICE_ACTIVATION } = require('../../src/xchain_price_activation.js');
 
 describe('OracleRound', function () {
 
@@ -75,40 +78,54 @@ describe('OracleRound', function () {
 
         it('is CLOSED before the network resolves, so a hub that cannot tell stays quiet', function () {
             // currentBtcNetwork is only set by a successful per-round resolve. A hub
-            // that does not know its own network must not guess: composing on mainnet
-            // before D6 puts a pair in a signed round that every peer rejects wholesale.
+            // that does not know its own network must not guess: composing where the
+            // gate is shut puts a pair in a signed round that every peer rejects wholesale.
             expect(or.currentBtcNetwork).to.equal(undefined);
             or.currentRound = 100;
             expect(or._xchainPriceGateOpen()).to.equal(false);
         });
 
-        it('is CLOSED on mainnet, which is unarmed pending D6', function () {
-            or.currentBtcNetwork = 'mainnet';
+        it('is CLOSED on a network this hub does not recognize', function () {
+            // The closed-venue axis (mainnet is armed, so an unrecognized network carries
+            // it). It must never compose: a pair in a signed round that peers reject kills
+            // all 36.
+            or.currentBtcNetwork = 'signet';
             or.currentRound = 100;
             expect(or._xchainPriceGateOpen()).to.equal(false);
         });
 
-        it('is OPEN on regtest and testnet, which are genesis-on', function () {
+        it('is OPEN on every shipped network, mainnet included since the 2026-09-09 ruling', function () {
+            // Mainnet armed at genesis: 0 PRICE actions have ever been indexed on any
+            // mainnet chain (measured 2026-09-09), so composing from block 0 reinterprets
+            // no signed round and native-coin fees are payable from the first one.
             or.currentRound = 100;
-            or.currentBtcNetwork = 'regtest';
-            expect(or._xchainPriceGateOpen()).to.equal(true);
-            or.currentBtcNetwork = 'testnet';
-            expect(or._xchainPriceGateOpen()).to.equal(true);
+            for (const net of ['mainnet', 'regtest', 'testnet']) {
+                or.currentBtcNetwork = net;
+                expect(or._xchainPriceGateOpen(), net).to.equal(true);
+            }
         });
 
         it('reads the round number, not the wall clock', function () {
             // The gate must be reproducible for a given round on every hub. Anything
             // that consults Date.now() at composition time reintroduces the skew the
             // round-start key exists to remove.
-            or.currentBtcNetwork = 'mainnet';
-            or.epochStart = 0;
-            or.roundInterval = 1000;
-            // Round number x 1s interval, so the round whose start crosses the mainnet
-            // sentinel is the one that opens the gate - regardless of when it is asked.
-            or.currentRound = 9999999998;
-            expect(or._xchainPriceGateOpen()).to.equal(false);
-            or.currentRound = 9999999999;
-            expect(or._xchainPriceGateOpen()).to.equal(true);
+            //
+            // Every shipped network is genesis-on since the 2026-09-09 ruling, so the
+            // crossing is driven through a temporary network with a future threshold:
+            // the subject is which KEY the gate reads, not which network is armed.
+            const NET = 'boundarynet';
+            XCHAIN_PRICE_ACTIVATION[NET] = 1790000000;
+            try {
+                or.currentBtcNetwork = NET;
+                or.epochStart = 0;
+                or.roundInterval = 1000;
+                // Round number x 1s interval, so the round whose START crosses the
+                // threshold is the one that opens the gate, regardless of when it is asked.
+                or.currentRound = 1789999999;
+                expect(or._xchainPriceGateOpen()).to.equal(false);
+                or.currentRound = 1790000000;
+                expect(or._xchainPriceGateOpen()).to.equal(true);
+            } finally { delete XCHAIN_PRICE_ACTIVATION[NET]; }
         });
 
         it('is CLOSED when the round number is not yet a real round', function () {

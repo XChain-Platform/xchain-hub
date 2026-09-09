@@ -63,15 +63,21 @@ describe('PRICE v0 pair-name widening flag-day: hub copy @regression', function 
     });
 
     describe('the bound this hub will enforce', function () {
-        it('is still UNARMED on mainnet, so nothing changes there yet', function () {
-            expect(local.PRICE_PAIR_WIDEN_ACTIVATION.mainnet).to.equal(9999999999);
-            expect(local.isPricePairWideningActive(Math.floor(Date.now() / 1000), 'mainnet')).to.equal(false);
-            expect(local.isValidPricePair('XCHAIN/USD', Math.floor(Date.now() / 1000), 'mainnet')).to.equal(false);
+        it('is ARMED at genesis on mainnet by the 2026-09-09 ruling', function () {
+            // 0 PRICE actions have ever been indexed on any mainnet chain (measured
+            // 2026-09-09), so the widened bound reinterprets no round this hub could
+            // have co-signed, and native-coin fees are payable from the first block.
+            expect(local.PRICE_PAIR_WIDEN_ACTIVATION.mainnet).to.equal(0);
+            expect(local.isPricePairWideningActive(Math.floor(Date.now() / 1000), 'mainnet')).to.equal(true);
+            expect(local.isValidPricePair('XCHAIN/USD', Math.floor(Date.now() / 1000), 'mainnet')).to.equal(true);
         });
 
-        it('admits XCHAIN/USD on regtest and testnet, where it is genesis-on', function () {
+        it('admits XCHAIN/USD on every network, where it is genesis-on', function () {
+            expect(local.isValidPricePair('XCHAIN/USD', 0, 'mainnet')).to.equal(true);
             expect(local.isValidPricePair('XCHAIN/USD', 0, 'regtest')).to.equal(true);
             expect(local.isValidPricePair('XCHAIN/USD', 0, 'testnet')).to.equal(true);
+            // A network the gate cannot evaluate still falls back to the legacy bound.
+            expect(local.isValidPricePair('XCHAIN/USD', 0, 'signet')).to.equal(false);
         });
 
         it('leaves every existing pair valid under both bounds', function () {
