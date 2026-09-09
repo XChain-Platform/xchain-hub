@@ -44,7 +44,8 @@ const DROP_REASONS = new Set([
     'early_ttl',          // buffered pre-round message aged out unread
     'early_capacity',     // buffer full; oldest round or newest message evicted
     'oversized',          // pre-round envelope past the size ceiling
-    'unknown_sender'      // admissible signature, but not an attributed validator
+    'unknown_sender',     // admissible signature, but not an attributed validator
+    'round_lost'          // a price round this hub opened or scheduled ended with no row at all
 ]);
 
 // An unknown-sender flood is the one drop an outsider can drive, so it is the
@@ -149,6 +150,20 @@ function noteDrop({ reason, phase, round, sender, envelope, ...extra } = {}) {
     catch { return null; }
 }
 
+/**
+ * Record a price round that left no row: not finalized, not skipped, nothing.
+ * Every other drop here is one message; this one is a whole round, and it is
+ * its own reason because a lost round leaves no other trace anywhere.
+ *
+ * @param {object} d
+ * @param {number} d.round     the round that was lost (the first of a run, with `to`)
+ * @param {string} d.phase     schedule|finalize|shutdown
+ * @param {string} d.cause     what ended it, free text but stable per call site
+ */
+function noteRoundLost({ round, phase, cause, ...extra } = {}) {
+    return noteDrop({ reason: 'round_lost', phase, round, cause: cause || 'unknown', ...extra });
+}
+
 /** Record a peer message rejected at the transport layer. */
 function notePeerReject({ peer, reason } = {}) {
     try { return getLogger().warn('PEER_REJECT', { peer: peer || 'unknown', reason: reason || 'unknown' }); }
@@ -241,7 +256,7 @@ function _resetDiagnostics() {
 }
 
 module.exports = {
-    noteDrop, notePeerReject, noteShutdown, noteCheckpointStalled, installCrashHandlers,
+    noteDrop, noteRoundLost, notePeerReject, noteShutdown, noteCheckpointStalled, installCrashHandlers,
     stampRemoteIp, remoteIpOf, REMOTE_IP,
     DROP_REASONS, DEDUPE_MAX_KEYS, DEDUPE_WINDOW_MS,
     _resetDiagnostics

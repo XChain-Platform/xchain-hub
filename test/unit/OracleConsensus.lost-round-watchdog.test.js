@@ -204,7 +204,7 @@ describe('OracleConsensus: a lost round is durably recorded on every hub', funct
         expect(oc._roundTimeouts || 0).to.equal(0);
     });
 
-    it('stop() disarms armed watchdogs', async function () {
+    it('stop() disarms armed watchdogs, recording the open round once and never again', async function () {
         seat(VALIDATORS_3[2]);
         await oc.finalizeRound(ROUND, HEIGHT, TIME);
         expect(oc.roundWatchdogs.size).to.equal(1);
@@ -212,7 +212,12 @@ describe('OracleConsensus: a lost round is durably recorded on every hub', funct
         await oc.stop();
 
         expect(oc.roundWatchdogs.size).to.equal(0);
+        // stop() writes the skipped row itself, so a restart between open and
+        // finalize leaves a record before the process is gone...
+        expect(skipped.calledOnce, 'stop() records the in-flight round').to.be.true;
+        expect(skipped.firstCall.args[3]).to.match(/stopped/);
+        // ...and the disarmed watchdog never fires afterwards.
         await abandonRound();
-        expect(skipped.called, 'a stopped engine writes nothing').to.be.false;
+        expect(skipped.calledOnce, 'a stopped engine writes nothing more').to.be.true;
     });
 });

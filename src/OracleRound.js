@@ -31,6 +31,11 @@ const { isXchainPriceActive, roundStartSeconds } = require('./xchain_price_activ
 const { isAdmissibleSigner, provenPubkey } = require('./lib/chain_signer_admission.js');
 const { roundBand, describeImplausibleRound } = require('./lib/oracle_round_band.js');
 const { canonicalPrice } = require('./lib/canonical_price.js');
+const { noteRoundLost } = require('./consensusDiagnostics');
+
+// Burned round numbers per scheduler gap that also get a skipped row; a wider gap
+// is an outage, recorded once by range rather than as a flood of rows on return.
+const ROUND_GAP_SKIP_ROW_CAP = 12;
 const { PRICE_MAX, DEFAULT_ORACLE_ROUND_INTERVAL_MS,
         DEFAULT_ORACLE_SUBMISSION_WINDOW_MS, DERIVED_PAIRS } = require('./constants.js');
 
@@ -367,8 +372,25 @@ class OracleRound {
             clearInterval(this.roundTimer);
             this.roundTimer = null;
         }
+        // An armed finalization timer is a submitted round nothing rehydrates after a
+        // restart (the round number is wall-clock derived, so a restarted hub resumes
+        // at the current one): record each and write its upgradable skipped row.
+        let inFlight = [...this.finalizationTimers.keys()];
         for (let t of this.finalizationTimers.values()) clearTimeout(t);
         this.finalizationTimers.clear();
+        if (inFlight.length) {
+            let btcBlockHeight = this.currentBtcBlockHeight;
+            let btcBlockTime   = this.currentBtcBlockTime;
+            await Promise.allSettled(inFlight.map(round => {
+                noteRoundLost({ phase: 'shutdown', round, cause: 'stopped_before_finalization' });
+                console.warn('Oracle: stopping with round ' + round + ' submitted but not finalized; recording it as skipped');
+                if (!this.oracleConsensus || typeof this.oracleConsensus._storeSkippedRound !== 'function') return null;
+                return this.oracleConsensus._storeSkippedRound(round, btcBlockHeight, btcBlockTime,
+                    'hub stopped before finalization').catch(err =>
+                    console.error('Oracle: Failed to store skipped round ' + round + ' at stop:',
+                        err && err.message ? err.message : err));
+            }));
+        }
     }
 
     // Get the current round number
@@ -681,6 +703,12 @@ class OracleRound {
         // (and so a restarted hub resumes at the correct number instead of 1).
         let newRound = Math.floor((Date.now() - this.epochStart) / this.roundInterval);
         if (newRound === this.lastExecutedRound) return;
+        // A forward clock step, a suspended process or a late tick burns every number
+        // in between with no tick, no submission and no row: record the run first.
+        // A fresh start (-1) is not a gap.
+        if (this.lastExecutedRound >= 0 && newRound > this.lastExecutedRound + 1) {
+            this._noteRoundNumbersSkipped(this.lastExecutedRound + 1, newRound - 1);
+        }
         this.lastExecutedRound = newRound;
 
         this.currentRound   = newRound;
@@ -871,6 +899,30 @@ class OracleRound {
         this._scheduleFinalization(this.currentRound);
     }
 
+    // Record a run of round numbers the scheduler stepped over: one line for the run,
+    // a skipped row for the first ROUND_GAP_SKIP_ROW_CAP, anchored at each round's
+    // nominal wall-clock start so every hub that stepped over it writes the same row.
+    _noteRoundNumbersSkipped(from, to) {
+        let count = to - from + 1;
+        noteRoundLost({
+            phase: 'schedule', round: from, cause: 'round_numbers_skipped',
+            from: from, to: to, count: count,
+            last_executed: from - 1, resumed_at: to + 1
+        });
+        console.warn('Oracle: scheduler stepped from round ' + (from - 1) + ' to ' + (to + 1) +
+            ', burning ' + count + ' round number(s) ' + from + '..' + to +
+            ' (forward clock step or a tick more than a round late); recording them as skipped');
+        if (!this.oracleConsensus || typeof this.oracleConsensus._storeSkippedRound !== 'function') return;
+        let upto = Math.min(to, from + ROUND_GAP_SKIP_ROW_CAP - 1);
+        for (let r = from; r <= upto; r++) {
+            let nominalStart = Math.floor((this.epochStart + r * this.roundInterval) / 1000);
+            this.oracleConsensus._storeSkippedRound(r, null, nominalStart,
+                'round number skipped by the scheduler (clock step or late tick)').catch(err =>
+                console.error('Oracle: Failed to store scheduler-skipped round ' + r + ':',
+                    err && err.message ? err.message : err));
+        }
+    }
+
     // Schedule finalization for a round after the submission window
     _scheduleFinalization(round) {
         // Capture the BTC chain tip values for this round at scheduling time
@@ -878,9 +930,14 @@ class OracleRound {
         let btcBlockTime   = this.currentBtcBlockTime;
         let prior = this.finalizationTimers.get(round);
         if (prior) clearTimeout(prior);
+        // Every exit below that is neither a finalizeRound call nor a skipped row
+        // leaves a round_lost record; the prose lines stay for a reader.
         let timer = setTimeout(() => {
             this.finalizationTimers.delete(round);
-            if (this.oracleConsensus) {
+            try {
+                // No consensus engine is a standalone hub, not a lost round: nothing
+                // was ever going to finalize here, so there is nothing to record.
+                if (!this.oracleConsensus) return;
                 if (this.chainTipFallbackActive) {
                     let lastGoodTip = this.lastSuccessfulChainTipFetchAt ?? this._startTime;
                     if ((Date.now() - lastGoodTip) > this.roundInterval) {
@@ -892,14 +949,23 @@ class OracleRound {
                         // local increment here would double-count a round whose fetch
                         // had already failed.
                         this.oracleConsensus._storeSkippedRound(round, btcBlockHeight, btcBlockTime,
-                            'chain-tip fallback active, anchor unreliable').catch(err =>
-                            console.error('Oracle: Failed to store skipped round ' + round + ':', err.message));
+                            'chain-tip fallback active, anchor unreliable').catch(err => {
+                            console.error('Oracle: Failed to store skipped round ' + round + ':', err.message);
+                            noteRoundLost({ phase: 'finalize', round, cause: 'skip_store_rejected',
+                                err: err && err.message ? err.message : String(err) });
+                        });
                         return;
                     }
                 }
                 this.oracleConsensus.finalizeRound(round, btcBlockHeight, btcBlockTime).catch(err => {
                     console.error('Oracle: Finalization error for round ' + round + ':', err.message);
+                    noteRoundLost({ phase: 'finalize', round, cause: 'finalize_rejected',
+                        err: err && err.message ? err.message : String(err) });
                 });
+            } catch (err) {
+                console.error('Oracle: Finalization threw for round ' + round + ':', err && err.message ? err.message : err);
+                noteRoundLost({ phase: 'finalize', round, cause: 'finalize_threw',
+                    err: err && err.message ? err.message : String(err) });
             }
         }, this.submissionWindow);
         this.finalizationTimers.set(round, timer);
