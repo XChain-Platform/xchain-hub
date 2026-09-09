@@ -261,6 +261,28 @@ function validateChain(chain) {
     return null;
 }
 
+// Turn a refusal into a JSON-RPC TRANSPORT error rather than a method result.
+//
+// express-json-rpc-router puts whatever a handler RETURNS into the envelope's
+// `result` slot and only what it THROWS into the `error` slot. So a refusal
+// returned as `{ error: '...' }` arrives as `{ result: { error: '...' } }`, and a
+// caller that checks the envelope's `error` field alone reads a refused call as an
+// accepted one. Throwing this puts the refusal where such a caller looks.
+//
+// -32602 (Invalid params) is the correct code: every use here rejects the CALL's
+// arguments, not the hub's ability to serve it.
+//
+// Adding a call site is WIRE-VISIBLE for external callers, and for the queueing
+// callers in this mesh it also changes the retry verdict: an in-envelope refusal is
+// classified terminal and drops the queued row, while a thrown error reads as a
+// transport failure and is retried. Convert a handler only after checking what its
+// callers do with the two shapes.
+function rpcParamError(message) {
+    let err = new Error(message);
+    err.code = -32602;
+    return err;
+}
+
 // Strict, because parseInt admits anything with an integer PREFIX: '50junk' passed as
 // 50, '1e3' as 1 and '50.5' as 50, and several of the ~16 call sites forward the
 // ORIGINAL value into a `LIMIT ?` bind rather than the parsed one. The queries stayed
@@ -990,8 +1012,17 @@ async function startApi(){
         // different chain instance. Absent leaves the stored identity untouched.
         async pushchaintip({coin, network, block_height, block_time, chain_id}){
             if(!coin) return {error: "coin is required"};
+            // THROWN, not returned: an unknown coin is a refusal, and returned it landed
+            // in the envelope's result slot where a caller checking only `error` read it
+            // as a stored tip. The chain tip gates staleness checks fleet-wide, so a
+            // silently-refused push is worse here than a noisy one. Safe to throw on this
+            // handler specifically because its only mesh caller is fire-and-forget (the
+            // indexer's hub client logs and moves on); the sibling push handlers below
+            // keep the returned shape because theirs is a durable outbox whose terminal
+            // classification reads the in-envelope message. Same wording either way, so
+            // logs and operator runbooks are unchanged.
             let chainErr = validateChain(coin);
-            if (chainErr) return chainErr;
+            if (chainErr) throw rpcParamError(chainErr.error);
             if(block_height === undefined || block_height === null)
                 return {error: "block_height is required"};
             if(block_time === undefined || block_time === null)

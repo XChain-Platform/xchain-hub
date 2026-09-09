@@ -218,6 +218,40 @@ describe('cross-chain chain identity (btc_chain_id)', function () {
             expect(r).to.deep.equal({ status: 'success' });
             expect(db.setChainTip.firstCall.args[4]).to.equal(undefined);
         });
+
+        // An unknown coin must land in the JSON-RPC envelope's ERROR slot, not its result
+        // slot. The router routes a RETURNED value to `result` and only a THROWN one to
+        // `error`, so while this refusal was returned as { error: '...' } the envelope read
+        // { result: { error: '...' } } and any caller checking the envelope's error field
+        // alone saw an accepted push. The code matters as much as the throw: -32602 is what
+        // lets a caller tell a rejected argument from a hub that failed to serve the call.
+        ['ETH', 'btc', 'BTCX', '', 0, null, undefined, {}].forEach((bad) => {
+            it('refuses coin ' + JSON.stringify(bad) + ' without writing a tip', async function () {
+                let thrown = null;
+                try {
+                    await methods.pushchaintip({ coin: bad, network: 'regtest', block_height: 131, block_time: 1757298240 });
+                } catch (err) { thrown = err; }
+                // The falsy coins are caught one guard earlier and keep their own
+                // in-result shape; only a PRESENT but unknown coin reaches validateChain.
+                if (!bad) {
+                    expect(thrown, 'a missing coin is a returned refusal, not a throw').to.equal(null);
+                } else {
+                    expect(thrown, 'an unknown coin must throw so the refusal lands in the error slot').to.be.an('error');
+                    expect(thrown.code).to.equal(-32602);
+                    expect(thrown.message).to.equal('chain must be one of: BTC, LTC, DOGE');
+                }
+                expect(db.setChainTip.called, 'no tip may be written for a refused coin').to.be.false;
+            });
+        });
+
+        it('still stores a tip for every allowed coin', async function () {
+            for (const coin of ['BTC', 'LTC', 'DOGE']) {
+                db.setChainTip.resetHistory();
+                let r = await methods.pushchaintip({ coin: coin, network: 'regtest', block_height: 131, block_time: 1757298240 });
+                expect(r).to.deep.equal({ status: 'success' });
+                expect(db.setChainTip.calledOnce, coin + ' must still be accepted').to.be.true;
+            }
+        });
     });
 
     // ────────────────────────────────────────────────────────────────────────
