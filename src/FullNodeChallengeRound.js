@@ -82,6 +82,12 @@ const PASS_CMP = (a, b) => Buffer.compare(Buffer.from(String(a), 'utf8'),
 // quiet enough to stay readable. Same idiom as CapabilitySnapshot.getQuorum.
 const TRUNC_WARN_THROTTLE_MS = 3600000;
 
+// Coin ticker a signer hook was wired for, normalized the way signer-loader
+// normalizes its declarations so 'btc' and 'BTC' compare equal. Anything empty
+// becomes null: an untagged wiring is not a claim about a chain.
+const _chainTag = (coin) => (coin === undefined || coin === null || String(coin).trim() === '')
+    ? null : String(coin).trim().toUpperCase();
+
 class FullNodeChallengeRound {
 
     constructor(hub){
@@ -193,6 +199,19 @@ class FullNodeChallengeRound {
         this.walletSignFn = null;   // fn(psbtHex) -> Promise<txHex>
         this.btcAddress   = process.env.BTC_ADDRESS || cfg.BTC_ADDRESS || '';
 
+        // The rail a verdict settles on: built, funded and broadcast on BTC through the
+        // encoder and address above. src/lib/signer-loader.js reads this to decide
+        // whether the operator's one HUB_SIGNER_MODULE may be wired here; the historical
+        // module signs with the DOGE key, and wiring it here spent DOGE fees on payloads
+        // BTC then read as an invalid REQUEST_ID.
+        this.signingChain = 'BTC';
+        // Chain each hook was wired FOR, when the wiring site said (signer-loader does).
+        // null means an untagged direct wiring, which is trusted, as it was before the
+        // declaration existed.
+        this._signHookChain      = null;
+        this._broadcastHookChain = null;
+        this._chainMismatchWarned = false;
+
         // Shared SpendGuard for the on-chain NODEPROOF verdict spend. Adds a
         // per-window spend ceiling (count + $2000-clamped USD budget, default-ON) and a
         // per-capability runtime pause so an operator can halt verdict BTC spend at
@@ -223,9 +242,27 @@ class FullNodeChallengeRound {
         this._handler = (env) => this._handleMessage(env);
     }
 
-    setBroadcastHook(fn){ this.broadcastFn  = fn; }
-    setEncoder(enc){      this.encoder      = enc; }
-    setWalletSignHook(fn){ this.walletSignFn = fn; }
+    setBroadcastHook(fn, chain){  this.broadcastFn  = fn; this._broadcastHookChain = _chainTag(chain); }
+    setEncoder(enc){              this.encoder      = enc; }
+    setWalletSignHook(fn, chain){ this.walletSignFn = fn; this._signHookChain      = _chainTag(chain); }
+
+    // Defence in depth behind signer-loader's chain gate: name any hook wired for
+    // another coin. The loader is the only production wiring path, but a hook set
+    // directly (a driver, a future wiring site, an operator patch) would otherwise
+    // sign a BTC verdict with a foreign key and pay that chain's fee for a payload
+    // BTC cannot read. Returns a reason string, or null when the wiring is sound.
+    _signerChainMismatch(){
+        let wrong = [];
+        if(this._broadcastHookChain && this._broadcastHookChain !== this.signingChain)
+            wrong.push('broadcast hook wired for ' + this._broadcastHookChain);
+        if(this._signHookChain && this._signHookChain !== this.signingChain)
+            wrong.push('wallet-sign hook wired for ' + this._signHookChain);
+        if(!wrong.length) return null;
+        return 'FullNodeChallengeRound: REFUSING to publish a NODEPROOF verdict: it settles on ' +
+               this.signingChain + ' but the ' + wrong.join(' and ') + '. Nothing was built, funded or ' +
+               'signed. Configure a HUB_SIGNER_MODULE declaring chains: [\'' + this.signingChain +
+               '\'], or leave this round observe-only.';
+    }
 
     async start(){
         if(!this.enabled){
@@ -600,6 +637,16 @@ class FullNodeChallengeRound {
         let quorum = Math.floor((2 * state.eligible.size) / 3) + 1;
         if(state.sigs.size < quorum) return;
 
+        // Wrong-chain signer check FIRST, ahead of the spend guard's reservation and of
+        // anything the encoder builds: a mismatch is a standing configuration fact, not
+        // a transient send failure, so it must not consume this window's budget or
+        // claim the round. Warned once, then the round simply stays observe-only.
+        let chainMismatch = this._signerChainMismatch();
+        if(chainMismatch){
+            if(!this._chainMismatchWarned){ this._chainMismatchWarned = true; console.warn(chainMismatch); }
+            return;
+        }
+
         // Shared SpendGuard gate on the PRIMARY (leader) verdict spend path.
         // A runtime pause (per-capability) or an exhausted per-window spend ceiling
         // DEFERS finalization (return without claiming the round) so a later tick
@@ -914,6 +961,14 @@ class FullNodeChallengeRound {
     }
 
     async _broadcastVerdict(wire){
+        // Second gate on the same fact, for every caller that does not come through
+        // _maybeFinalize. Refuse before the hook runs and before the encoder fetches a
+        // UTXO, so a wrong-chain wiring costs nothing.
+        let chainMismatch = this._signerChainMismatch();
+        if(chainMismatch){
+            if(!this._chainMismatchWarned){ this._chainMismatchWarned = true; console.warn(chainMismatch); }
+            throw new Error(chainMismatch);
+        }
         if(this.broadcastFn) return await this.broadcastFn(wire);
         if(this.encoder && this.walletSignFn && this.btcAddress){
             // Same three-step encoder contract the sibling publishers use

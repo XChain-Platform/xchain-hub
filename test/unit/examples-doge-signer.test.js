@@ -33,6 +33,14 @@ describe('examples/doge-signer (static contract)', function () {
         assert.ok(/broadcast/.test(source), 'a signer module exposes broadcast');
         assert.ok(/module\.exports/.test(source));
     });
+
+    // The declaration is what stops the hub wiring this DOGE-key module into a
+    // BTC-rail publisher and paying a DOGE fee for a payload BTC cannot read.
+    // A template that quietly dropped it would take every copy with it.
+    it('declares the single chain its key can sign for', function () {
+        assert.ok(/chains:\s*\['DOGE'\]/.test(source),
+            "the reference template must declare chains: ['DOGE']");
+    });
 });
 
 // Load the reference signer for real, with the SDK and dotenv stubbed, so the
@@ -122,6 +130,13 @@ describe('examples/doge-signer (post-funding failures)', function () {
         assert.ok(caught);
         assert.strictEqual(caught.fundsCommitted, undefined,
             'nothing was funded, so the round must stay retryable');
+    });
+
+    it('carries the chain declaration through to the loaded module', function () {
+        const signer = loadSigner(encoderStub(), wallet);
+        // Array.from: the sandbox builds the literal in its own realm, so the value is
+        // a cross-realm array and deepStrictEqual would fail on the prototype alone.
+        assert.deepStrictEqual(Array.from(signer.chains), ['DOGE']);
     });
 
     it('does not tag a successful two-phase publish', async function () {

@@ -63,6 +63,15 @@ for (const [name, value] of [['DOGE_WIF', WIF], ['DOGE_ADDRESS', ADDRESS], ['DOG
 const sdk = new XChainSDK({ network: NETWORK, encoderUrl: ENCODER });
 
 module.exports = {
+    // The coins this module can sign for. It holds ONE key, DOGE_WIF, against a
+    // Dogecoin address, so DOGE is the whole list. The hub wires a publisher's sign,
+    // broadcast and balance hooks only when the publisher's own rail appears here;
+    // without the declaration it wired this module into BTC-rail publishers too, and
+    // their payloads went out on Dogecoin at DOGE fee cost while the BTC side saw
+    // nothing. Omitting it entirely means DOGE only, so an older module
+    // keeps working, but a signer for another chain MUST declare it.
+    chains: ['DOGE'],
+
     // Full publish pipeline for a raw wire payload string → { txid }.
     // Mirrors sdk lifecycleManager.submitAction's encode/sign/broadcast +
     // P2SH phase-2 reveal, minus the action-composition step (the hub hands
