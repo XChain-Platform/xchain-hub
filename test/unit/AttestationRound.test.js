@@ -1257,6 +1257,166 @@ describe('AttestationRound', function () {
         });
     });
 
+    // ── silent-slot leader skip (ledger P60) ─────────────────────────────────
+    //
+    // The live defect: the ladder caps at MAX_LEADER_ROTATIONS and never wraps,
+    // so a request at block R froze at slot 3 from R+9 onward. With a mute member
+    // in that slot no PROPOSE ever established the round's canonical stamp and
+    // every retry timed out (testnet4 request 233, 28 consecutive rounds).
+
+    describe('_startRound() silent-slot leader skip (P60)', function () {
+
+        const ME = 'aa'.repeat(32);   // slot 0, this hub, proposes
+        const BB = 'bb'.repeat(32);   // slot 1
+        const CC = 'cc'.repeat(32);   // slot 2
+        const DD = 'dd'.repeat(32);   // slot 3, the frozen slot; never proposes
+        const EE = 'ee'.repeat(32);   // slot 4, live
+
+        function makeRequest(overrides) {
+            return {
+                request_id:     'rid0060',
+                provider_id:    'llm',
+                redundancy:     2,
+                block_index:    100,
+                action_index:   1,
+                deadline_block: 200,
+                payload:        JSON.stringify({ prompt: 'hi' }),
+                ...overrides
+            };
+        }
+
+        // A consensus stand-in with the two seams AttestationRound uses: propose()
+        // (which records this hub's own proposal, as the real one does) and the
+        // cross-round proposer record hasProposedFor() reads.
+        function makeConsensus() {
+            let seen = new Map();
+            return {
+                proposers: seen,
+                propose: sinon.stub().callsFake(async function (rid, state) {
+                    if(!seen.has(rid)) seen.set(rid, new Set());
+                    seen.get(rid).add(ME);
+                }),
+                hasProposedFor: (rid, pk) => !!(seen.get(rid) && seen.get(rid).has(pk))
+            };
+        }
+
+        function setup() {
+            let capSS = { getSnapshot: sinon.stub().resolves({
+                validators: [ME, BB, CC, DD, EE].map(pubkey => ({ pubkey }))
+            }) };
+            let hub = makeHub({ capabilitySnapshot: capSS });
+            hub.getIdentity = () => makeIdentity(ME);
+            let reg = makeProviderRegistry({
+                getModule: sinon.stub().returns({
+                    fetch: sinon.stub().resolves({ body: Buffer.from('ok'), meta: 'claude-sonnet-4-6' })
+                })
+            });
+            let ar = new AttestationRound(hub, reg);
+            sinon.stub(ar, '_computeResponsibleSet').returns(
+                [ME, BB, CC, DD, EE].map((pubkey, i) => ({ pubkey, hash: String(i) })));
+            let consensus = makeConsensus();
+            ar.setConsensus(consensus);
+            return { ar, consensus };
+        }
+
+        // Serviceable from block 103 (confirmations 3), rotation window 2 blocks:
+        // tip 104 is step 0, tip 110 is step 3 (the capped, frozen slot).
+        it('moves the leader past a slot that held a full window without proposing', async function () {
+            let { ar, consensus } = setup();
+
+            await ar._startRound(makeRequest(), 104);
+            expect(consensus.propose.lastCall.args[1].leaderPubkey, 'step 0 leads at slot 0').to.equal(ME);
+
+            // Step 3: the bare ladder's terminal slot. DD holds it from here.
+            await ar._startRound(makeRequest(), 110);
+            expect(consensus.propose.lastCall.args[1].leaderPubkey, 'step 3 seats the capped slot').to.equal(DD);
+
+            // A full rotation window later DD still has not proposed, so the slot
+            // is proven silent and the round steps over it instead of freezing.
+            await ar._startRound(makeRequest(), 112);
+            expect(consensus.propose.lastCall.args[1].leaderPubkey).to.equal(EE);
+            expect(ar.leaderSilence.get('rid0060').silent.has(DD)).to.be.true;
+        });
+
+        it('never re-elects a live leader from an earlier slot', async function () {
+            let { ar, consensus } = setup();
+            await ar._startRound(makeRequest(), 104);   // ME leads and proposes
+            await ar._startRound(makeRequest(), 110);   // DD seated
+            await ar._startRound(makeRequest(), 112);   // DD proven silent -> EE
+            consensus.proposers.get('rid0060').add(EE);  // EE answers, so it stays live
+            await ar._startRound(makeRequest(), 118);
+            await ar._startRound(makeRequest(), 124);
+
+            for(let call of consensus.propose.getCalls().slice(2)){
+                expect(call.args[1].leaderPubkey, 'rotation went backwards').to.equal(EE);
+            }
+            // ME is live and proposed in the first round; the skip must not make
+            // it eligible again.
+            expect(ar.leaderSilence.get('rid0060').silent.has(ME)).to.be.false;
+        });
+
+        it('does not skip a leader that proposed inside its window', async function () {
+            let { ar, consensus } = setup();
+            await ar._startRound(makeRequest(), 110);   // DD seated at step 3
+            consensus.proposers.get('rid0060').add(DD);  // DD answers
+            await ar._startRound(makeRequest(), 112);
+            expect(consensus.propose.lastCall.args[1].leaderPubkey).to.equal(DD);
+            expect(ar.leaderSilence.get('rid0060').silent.size).to.equal(0);
+        });
+
+        it('prints the EFFECTIVE slot in the round opening line', async function () {
+            let { ar } = setup();
+            await ar._startRound(makeRequest(), 110);
+            let log = sinon.spy(console, 'log');
+            await ar._startRound(makeRequest(), 112);
+            let line = log.getCalls().map(c => String(c.args[0])).find(s => s.indexOf('leaderSlot=') !== -1);
+            expect(line).to.be.a('string');
+            expect(line).to.contain('leaderSlot=4');
+        });
+
+        it('logs one line naming the request, the skipped key and the slot', async function () {
+            let { ar } = setup();
+            await ar._startRound(makeRequest(), 110);
+            let warn = sinon.spy(console, 'warn');
+            await ar._startRound(makeRequest(), 112);
+            let lines = warn.getCalls().map(c => String(c.args[0]))
+                .filter(s => s.indexOf('leader slot 3 skipped') !== -1);
+            expect(lines).to.have.lengthOf(1);
+            expect(lines[0]).to.contain('rid0060');
+            expect(lines[0]).to.contain(DD.substring(0, 16));
+            expect(lines[0]).to.contain('no PROPOSE');
+        });
+
+        it('holds the last live slot, logging once, when nothing live remains ahead', async function () {
+            let { ar, consensus } = setup();
+            await ar._startRound(makeRequest(), 110);   // DD seated
+            await ar._startRound(makeRequest(), 112);   // DD silent -> EE seated
+            let warn = sinon.spy(console, 'warn');
+            await ar._startRound(makeRequest(), 114);   // EE silent -> nothing ahead
+            // Slot 2 (CC) is the last live slot the walk reached; the round still
+            // names a leader rather than running off the end of the set.
+            expect(consensus.propose.lastCall.args[1].leaderPubkey).to.equal(CC);
+            expect(ar.leaderSilence.get('rid0060').silent.has(EE)).to.be.true;
+
+            // CC then goes silent too and the ladder degrades one more slot, but
+            // the "out of live slots" line is a once-per-request explanation.
+            await ar._startRound(makeRequest(), 116);
+            expect(consensus.propose.lastCall.args[1].leaderPubkey).to.equal(BB);
+            let held = warn.getCalls().map(c => String(c.args[0]))
+                .filter(s => s.indexOf('no live leader slot remains') !== -1);
+            expect(held).to.have.lengthOf(1);
+        });
+
+        it('evicts the silence record on the rounds TTL', function () {
+            let { ar } = setup();
+            ar.leaderSilence.set('old', { silent: new Set(), updatedAt: Date.now() - ar.roundsTtlMs - 1 });
+            ar.leaderSilence.set('new', { silent: new Set(), updatedAt: Date.now() });
+            ar._evictStaleLeaderSilence();
+            expect(ar.leaderSilence.has('old')).to.be.false;
+            expect(ar.leaderSilence.has('new')).to.be.true;
+        });
+    });
+
     // ── ATTEST_PROPOSE export ────────────────────────────────────────────────
 
     describe('module exports', function () {

@@ -287,6 +287,21 @@ class AttestationConsensus extends EventEmitter {
         this.tornDownMax    = positiveIntConfig(this.config.ATTESTATION_TORNDOWN_MAX, 10000,
             'ATTESTATION_TORNDOWN_MAX');
 
+        // Which responsible members have been OBSERVED proposing, per request
+        // (ledger P60). `pending.proposals` already holds this for a LIVE round,
+        // but a round timeout deletes `pending` outright while the request lives on
+        // across retries, so the one question AttestationRound's leader rotation
+        // has to answer - "has this member ever spoken for this request?" - had no
+        // record that outlived a single attempt. Membership only; the proposals
+        // themselves stay on `pending`, since a torn-down round must not be able to
+        // hand a stale body to its successor (item 2640).
+        // Map<rid, Set<pubkey>>, ring-bounded FIFO on the same rule as `tornDown`
+        // so requestId flooding cannot grow it without bound.
+        this.proposerSeen       = new Map();
+        this._proposerSeenOrder = [];
+        this.proposerSeenMax    = positiveIntConfig(this.config.ATTESTATION_PROPOSER_SEEN_MAX, 10000,
+            'ATTESTATION_PROPOSER_SEEN_MAX');
+
         this._messageHandler = null;
         // Same rule as the ring caps above, and its sharpest instance: setTimeout with a
         // NEGATIVE delay fires on the next tick, so a negative here tears every round
@@ -352,6 +367,8 @@ class AttestationConsensus extends EventEmitter {
         this._nonOkPublishedOrder = [];
         this.tornDown.clear();
         this._tornDownOrder = [];
+        this.proposerSeen.clear();
+        this._proposerSeenOrder = [];
     }
 
     // Mark a round id as torn down without finalization (timeout / non-ok
@@ -368,6 +385,40 @@ class AttestationConsensus extends EventEmitter {
             let oldest = this._tornDownOrder.shift();
             this.tornDown.delete(oldest);
         }
+    }
+
+    // Record that `pubkey` proposed for `rid`. Called for every PROPOSE this hub
+    // ACCEPTS (sig verified, sender responsible, payload within cap) and for this
+    // hub's own proposal at the moment it enters the round. A proposal this hub
+    // refuses to make or to accept is deliberately not recorded: the peers judging
+    // that slot see silence either way, and the whole point of the record is that
+    // every hub reaches the same verdict from what crossed the wire.
+    _recordProposer(rid, pubkey){
+        let key = String(rid || '').toLowerCase();
+        let pk  = String(pubkey || '').toLowerCase();
+        if(!key || !pk) return;
+        let set = this.proposerSeen.get(key);
+        if(!set){
+            set = new Set();
+            this.proposerSeen.set(key, set);
+            this._proposerSeenOrder.push(key);
+            if(this._proposerSeenOrder.length > this.proposerSeenMax){
+                let oldest = this._proposerSeenOrder.shift();
+                this.proposerSeen.delete(oldest);
+            }
+        }
+        set.add(pk);
+    }
+
+    // Has `pubkey` proposed for `rid` at any point in the request's life, across
+    // every retry round? Read by AttestationRound._resolveLeader to tell a leader
+    // slot that is silent from one that is merely slow. An evicted (or never
+    // recorded) rid reads false, which costs the round one more rotation window of
+    // patience before it skips - the safe direction, since a wrongly skipped LIVE
+    // leader loses a slot that could have finalized.
+    hasProposedFor(rid, pubkey){
+        let set = this.proposerSeen.get(String(rid || '').toLowerCase());
+        return !!(set && set.has(String(pubkey || '').toLowerCase()));
     }
 
     // True while a consensus round for `rid` is live (pending, not yet
@@ -677,6 +728,9 @@ class AttestationConsensus extends EventEmitter {
 
         if(myPubkey && myBody && mySig && !myBodyOverCap){
             pending.proposals.set(myPubkey, { body: myBody, meta: myMeta, sig: mySig, status: myStatus, effectiveTime: myEffective });
+            // Same record the wire path keeps for peers, so this hub never proves
+            // ITSELF silent as leader on a retry round after its own round timed out.
+            this._recordProposer(rid, myPubkey);
         }
 
         pending.timer = setTimeout(() => {
@@ -844,6 +898,12 @@ class AttestationConsensus extends EventEmitter {
                 senderPubkey.substring(0,16) + '... for ' + rid.substring(0,16) + '... (rejected)');
             return;
         }
+
+        // This member has now spoken for this request. Recorded outside `pending`
+        // so it survives the round teardown a timeout performs, and recorded even
+        // when the proposal itself is a duplicate: the leader-rotation question is
+        // whether the slot answered at all, not how many times.
+        this._recordProposer(rid, senderPubkey);
 
         // Store (idempotent; dedup by sender pubkey). Status is trusted only
         // because the sig was just verified over a canonical that binds it.
