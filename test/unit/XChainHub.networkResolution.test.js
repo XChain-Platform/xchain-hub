@@ -83,6 +83,16 @@ describe('XChainHub network resolution honours HUB_NETWORK', function () {
         return hub;
     }
 
+    // Standalone mode with a DECLARED network: no p2pConfig, but the operator set
+    // HUB_NETWORK and api.js validated it, so the hub resolves like a validator
+    // rather than taking the dev-loop preference order (row 40).
+    function scopedStandaloneHub(network, configs) {
+        const hub = new XChainHub('h', 1, 'd', 'u', 'p', null, { network });
+        mockDb.getAllConfigs.resolves(configs);
+        hub.db = mockDb;
+        return hub;
+    }
+
     describe('_resolveBtcNetwork', function () {
 
         it('returns HUB_NETWORK, not the regtest leg, on a multi-network tree', async function () {
@@ -158,6 +168,19 @@ describe('XChainHub network resolution honours HUB_NETWORK', function () {
         it('keeps the regtest>testnet>mainnet preference for a standalone hub', async function () {
             expect(await standaloneHub(MULTI_NETWORK_CONFIGS)._resolveBtcNetwork()).to.equal('regtest');
         });
+
+        it('honours a DECLARED network on a standalone hub, not the preference order', async function () {
+            expect(await scopedStandaloneHub('mainnet', MULTI_NETWORK_CONFIGS)._resolveBtcNetwork())
+                .to.equal('mainnet');
+        });
+
+        it('fails closed on a standalone hub whose declared network is absent from the tree', async function () {
+            const hub = scopedStandaloneHub('testnet', MULTI_NETWORK_CONFIGS);
+            let threw = null;
+            try { await hub._resolveBtcNetwork(); } catch (e) { threw = e; }
+            expect(threw).to.not.equal(null);
+            expect(threw.message).to.contain('HUB_NETWORK=testnet');
+        });
     });
 
     describe('_resolveIndexerUrl', function () {
@@ -194,6 +217,12 @@ describe('XChainHub network resolution honours HUB_NETWORK', function () {
         it('keeps the preference order for a standalone hub', async function () {
             expect(await standaloneHub(MULTI_NETWORK_CONFIGS)._resolveIndexerUrl('BTC'))
                 .to.equal('http://127.0.0.1:3514');
+        });
+
+        it('resolves the DECLARED network leg on a standalone hub', async function () {
+            const hub = scopedStandaloneHub('mainnet', MULTI_NETWORK_CONFIGS);
+            expect(await hub._resolveIndexerUrl('BTC')).to.equal('http://10.0.0.9:3500');
+            expect(await hub._resolveIndexerUrl('DOGE')).to.equal('http://10.0.0.9:3520');
         });
     });
 

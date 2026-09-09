@@ -326,8 +326,23 @@ if (P2P_VALIDATOR_ADDR && !process.env.ORACLE_EPOCH_START) {
 // (no silent default: a wrong/blank value would mis-gate the quorum rule). Must
 // match the INDEXER_NETWORK of the chains this hub federates.
 const HUB_NETWORK = (process.env.HUB_NETWORK || '').toLowerCase();
-if (P2P_VALIDATOR_ADDR && !['mainnet', 'testnet', 'regtest'].includes(HUB_NETWORK)) {
+const HUB_NETWORKS = ['mainnet', 'testnet', 'regtest'];
+if (P2P_VALIDATOR_ADDR && !HUB_NETWORKS.includes(HUB_NETWORK)) {
     console.error('Missing/invalid required environment variable: HUB_NETWORK (must be one of mainnet|testnet|regtest; names the deployment network for consensus activation gating; must match the indexers this hub federates)');
+    process.exit(1);
+}
+// A STANDALONE hub (no P2P_VALIDATOR_ADDR) runs no consensus of its own, but its
+// INGEST path is gated by the same network-keyed flag days a validator's is:
+// PriceAggregator.receiveValidatedBatch resolves the EQUIV wrap, the quorum mode,
+// the sig-tally order and the pair-name bound off hub.network. Left '', every one of
+// those failed closed, so a chain-only node pushing on-chain PRICE batches to its own
+// hub had every testnet batch refused (its signatures verify against an unwrapped
+// canonical, and 4-of-7 misses the count quorum the widened rule does not apply).
+// OPTIONAL here, unlike validator mode: unset stays '' so every existing single-host
+// deployment behaves exactly as before. SET must still name a real network, because a
+// typo would mis-gate the same rules that being blank mis-gated.
+if (!P2P_VALIDATOR_ADDR && HUB_NETWORK && !HUB_NETWORKS.includes(HUB_NETWORK)) {
+    console.error('Invalid optional environment variable: HUB_NETWORK (must be one of mainnet|testnet|regtest; names the deployment network for ingest activation gating on a standalone hub; leave it unset for a hub that judges no network-keyed content)');
     process.exit(1);
 }
 const p2pConfig = P2P_VALIDATOR_ADDR ? {
@@ -431,7 +446,11 @@ async function startApi(){
         process.env.HUB_DB_NAME,
         process.env.HUB_DB_USER,
         HUB_DB_SECRET,
-        p2pConfig
+        p2pConfig,
+        // Standalone-mode network. Inert in validator mode, where p2pConfig.HUB_NETWORK
+        // carries the identical value and wins; this is the only path by which a hub with
+        // no p2pConfig at all can learn which network its ingest gates should resolve on.
+        { network: HUB_NETWORK }
     );
     await hub.start();
 

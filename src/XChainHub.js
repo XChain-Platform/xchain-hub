@@ -84,16 +84,23 @@ const OPERATIONAL_PARAMS = new Set(["GAS_PRICE", "ACTIVATION_DELAY_BLOCKS", "EXP
 const JSON_BLOB_PARAMS   = new Set(["GAS_SCHEDULE", "STAKING"]);
 
 class XChainHub {
-    constructor(dbHost, dbPort, dbName, dbUser, dbPass, p2pConfig) {
+    constructor(dbHost, dbPort, dbName, dbUser, dbPass, p2pConfig, opts) {
         this.dbHost    = dbHost;
         this.dbPort    = dbPort;
         this.dbName    = dbName;
         this.dbUser    = dbUser;
         this.dbPass    = dbPass;
         this.p2pConfig = p2pConfig || null;
-        // Consensus activation gating (notably STAKE_WEIGHTED_QUORUM). Set in validator
-        // mode, validated in api.js; '' in standalone, where no consensus runs.
-        this.network   = (this.p2pConfig && this.p2pConfig.HUB_NETWORK) ? String(this.p2pConfig.HUB_NETWORK) : '';
+        // Activation gating (notably STAKE_WEIGHTED_QUORUM). In validator mode it comes
+        // from p2pConfig, validated in api.js. A STANDALONE hub runs no consensus but
+        // still INGESTS network-keyed content (PriceAggregator.receiveValidatedBatch
+        // resolves the EQUIV wrap, the quorum mode, the sig-tally order and the pair-name
+        // bound off this string), so it takes the network api.js validated the same way
+        // for HUB_NETWORK there. Unset stays '', the pre-existing behaviour of every
+        // single-host deployment. p2pConfig === null, never emptiness here, remains the
+        // standalone-mode signal for startP2P and everything gated behind it.
+        this.network   = (this.p2pConfig && this.p2pConfig.HUB_NETWORK) ? String(this.p2pConfig.HUB_NETWORK)
+                       : ((opts && opts.network) ? String(opts.network) : '');
         // Seeded HERE, not in startCapabilities: startP2P constructs
         // FullNodeChallengeRound first and it snapshots cfg.FULLNODE at construction.
         // Never creates p2pConfig; a null one is startP2P's standalone-mode signal.
@@ -1673,10 +1680,12 @@ class XChainHub {
         return true;
     }
 
-    // Which BTC network this hub talks to. In validator mode the answer is this.network
-    // and nothing else; the configs table only confirms that network has an indexer, and
-    // a tree carrying only OTHER networks throws. The old first-found order let a mainnet
-    // validator anchor to the REGTEST tip. Standalone hubs keep the order for dev loops.
+    // Which BTC network this hub talks to. For a hub that DECLARED one (every validator,
+    // and a standalone hub whose operator set HUB_NETWORK) the answer is this.network and
+    // nothing else; the configs table only confirms that network has an indexer, and a
+    // tree carrying only OTHER networks throws. The old first-found order let a mainnet
+    // validator anchor to the REGTEST tip. A hub with no declared network keeps the
+    // regtest>testnet>mainnet order for dev loops.
     async _resolveBtcNetwork(){
         // A hub told which network it is never guesses: with no configs, its own is the answer.
         if(!this.db) return this.network || 'mainnet';
@@ -1794,9 +1803,10 @@ class XChainHub {
             let port = (nested && nested['port']) || netConfig['INDEXER_API_PORT'];
             return (host && port) ? ('http://' + host + ':' + port) : null;
         };
-        // A validator hub reads ONLY its own network's indexer. The preference order
-        // below is a dev-loop convenience that, on a multi-network tree, silently handed
-        // a mainnet-gated hub the regtest indexer.
+        // A hub that declared its network (any validator, and a standalone hub whose
+        // operator set HUB_NETWORK) reads ONLY that network's indexer. The preference
+        // order below is a dev-loop convenience for a hub that declared none, and on a
+        // multi-network tree it silently handed a mainnet-gated hub the regtest indexer.
         if(this.network) return urlFor(cc[this.network]);
         // Standalone/dev: prefer regtest > testnet > mainnet so dev loops Just Work.
         // Production should set <COIN>_INDEXER_API_URL explicitly.
