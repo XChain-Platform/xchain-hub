@@ -36,13 +36,25 @@ describe('attest_responsible_widening: activation gate', function () {
     const unratified = () => Object.keys(wid.ATTEST_RESPONSIBLE_WIDENING_ACTIVATION)
         .filter(n => wid.ATTEST_RESPONSIBLE_WIDENING_ACTIVATION[n] === null);
 
+    // Every shipped network is armed since the 2026-09-09 genesis-arm ruling (mainnet 0),
+    // so the null branch is driven through a temporary key on the live map instead of
+    // riding whichever network happened to be unratified.
+    function withNullNetwork(fn) {
+        const NET = 'unratifiednet';
+        wid.ATTEST_RESPONSIBLE_WIDENING_ACTIVATION[NET] = null;
+        try { fn(NET); }
+        finally { delete wid.ATTEST_RESPONSIBLE_WIDENING_ACTIVATION[NET]; }
+    }
+
     it('is inert on every network whose height is the null sentinel, at any height', function () {
-        expect(unratified(), 'no unratified network left: this test would be vacuous').to.not.be.empty;
-        for (const net of unratified()) {
-            for (const at of [REQ, REQ + 5, REQ + 50, REQ + 5000]) {
-                expect(wid.widenSlots(at, REQ, DEADLINE, net), net + '@' + at).to.equal(0);
+        withNullNetwork(function (nullNet) {
+            expect(unratified(), 'the null sentinel case must be reachable').to.include(nullNet);
+            for (const net of unratified()) {
+                for (const at of [REQ, REQ + 5, REQ + 50, REQ + 5000]) {
+                    expect(wid.widenSlots(at, REQ, DEADLINE, net), net + '@' + at).to.equal(0);
+                }
             }
-        }
+        });
     });
 
     it('gates an armed network on the REQUEST block', function () {
@@ -68,11 +80,22 @@ describe('attest_responsible_widening: activation gate', function () {
     });
 
     // The null sentinel must not coerce through `>=`. If it did, every block of an
-    // unratified network would satisfy `req >= 0` and the ladder would arm on
-    // mainnet, which is the inverse of what the sentinel means.
+    // unratified network would satisfy `req >= 0` and the ladder would arm there,
+    // which is the inverse of what the sentinel means.
     it('never arms on a network whose height is the null sentinel', function () {
-        expect(wid.ATTEST_RESPONSIBLE_WIDENING_ACTIVATION.mainnet).to.equal(null);
-        expect(wid.widenSlots(0, 0, 10, 'mainnet')).to.equal(0);
+        withNullNetwork(function (nullNet) {
+            expect(wid.ATTEST_RESPONSIBLE_WIDENING_ACTIVATION[nullNet]).to.equal(null);
+            expect(wid.widenSlots(0, 0, 10, nullNet)).to.equal(0);
+            expect(wid.widenSlots(1e9, 0, 10, nullNet)).to.equal(0);
+        });
+    });
+
+    it('arms mainnet at genesis by the 2026-09-09 ruling, so the ladder runs from block 0', function () {
+        // 0 attestations on any mainnet chain (measured 2026-09-09), so widening
+        // reinterprets no admitted request.
+        expect(wid.ATTEST_RESPONSIBLE_WIDENING_ACTIVATION.mainnet).to.equal(0);
+        expect(wid.widenSlots(0, 0, 30, 'mainnet'), 'the first segment is the unwidened set').to.equal(0);
+        expect(wid.widenSlots(15, 0, 30, 'mainnet'), 'the ladder must run on mainnet').to.equal(1);
     });
 
     it('gates on the REQUEST block, so a request admitted below the height never widens', function () {
