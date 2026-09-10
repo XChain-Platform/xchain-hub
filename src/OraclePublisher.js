@@ -213,15 +213,19 @@ class OraclePublisher {
         // health (a stalled rail is otherwise invisible: every price_snapshots row
         // still reads finalized while nothing lands on-chain).
         this.publishedCount     = 0;
+        // Newest publication this hub can prove: assigned on the publish path and
+        // hydrated at startup from the durable confirmed markers. The monitor's
+        // batch-backlog rail gates on this round, and a null reads to it as a hub that
+        // has never published, which silences the rail for every restarted publisher.
+        // publishedCount above stays process memory on purpose: it counts what THIS
+        // lifetime sent, which the marker table cannot answer.
         this.lastPublishedRound = null;
         this.lastPublishedTxid  = null;
-        // Highest CONFIRMED round read out of the durable marker table at startup.
-        // The three fields above are process memory: they are assigned only on the
-        // publish path, so after a restart they read exactly like a hub that has never
-        // published at all. This one answers "has this hub ever published?" honestly
-        // across a restart, and costs no extra query because _hydratePublishedMarkers
-        // already reads those rows for the at-most-once guard. Null when no hub DB is
-        // wired (dev/test) or when nothing has ever been confirmed.
+        // Highest CONFIRMED round in the durable marker table, read at startup. Answers
+        // "has this hub ever published?" from evidence that excludes intent-only rows,
+        // and costs no extra query because _hydratePublishedMarkers already reads those
+        // rows for the at-most-once guard. Null when no hub DB is wired (dev/test) or
+        // when nothing has ever been confirmed.
         this._durableEverPublishedRound = null;
         // In-process at-most-once guard. Round ids broadcast this process lifetime
         // are recorded here the instant broadcaster(payload) succeeds. If the
@@ -2741,26 +2745,43 @@ class OraclePublisher {
     // to verify and replay by hand (no price-by-round indexer query exists to reconcile
     // them automatically). Best-effort: a DB error is logged and startup continues; the
     // in-process guard still covers this process lifetime.
+    //
+    // The same scan restores the last-published markers getStats() reports, so a hub
+    // that has published for months does not read as one that never published once its
+    // process memory is gone. txid rides along in the select list because the marker
+    // row is the only record of which wire carried that round.
     async _hydratePublishedMarkers() {
         if (!this.db) return;
-        let rows = await this.db.doQuery('SELECT round, sent_at FROM oracle_published_rounds', []);
+        let rows = await this.db.doQuery('SELECT round, txid, sent_at FROM oracle_published_rounds', []);
         let quarantined = [];
+        // Highest CONFIRMED row seen, which is the publication a restarted hub reports.
+        let newest = null;
         for (let r of (rows || [])) {
             let round = Number(r.round);
             if (r.sent_at !== null && r.sent_at !== undefined) {
                 this._publishedRounds.mark(round);
-                // Piggy-backed on the rows already being read: a confirmed marker is
-                // proof this hub published once, and retention never empties the table
-                // below the most recent window, so the proof survives a restart.
-                // Intent-only rows are deliberately excluded, because their on-chain
-                // state is unknown and they are not evidence of a publication.
-                if (Number.isFinite(round) &&
-                    (this._durableEverPublishedRound === null || round > this._durableEverPublishedRound)) {
-                    this._durableEverPublishedRound = round;
+                // A confirmed marker is proof this hub published once, and retention
+                // never empties the table below the most recent window, so the proof
+                // survives a restart. Intent-only rows are deliberately excluded: their
+                // on-chain state is unknown, so they are not evidence of a publication.
+                if (Number.isFinite(round) && (newest === null || round > newest.round)) {
+                    newest = { round: round, txid: (r.txid === undefined ? null : r.txid) };
                 }
             } else {
                 this._quarantinedRounds.add(round);
                 quarantined.push(round);
+            }
+        }
+        // Idempotent, and never walks the markers backwards: an already-published round
+        // in this process outranks anything the table can offer, and an empty table
+        // leaves a fresh hub reporting null.
+        if (newest !== null) {
+            if (this._durableEverPublishedRound === null || newest.round > this._durableEverPublishedRound) {
+                this._durableEverPublishedRound = newest.round;
+            }
+            if (this.lastPublishedRound === null || newest.round > Number(this.lastPublishedRound)) {
+                this.lastPublishedRound = newest.round;
+                this.lastPublishedTxid  = newest.txid;
             }
         }
         if (quarantined.length > 0) {
@@ -3285,11 +3306,10 @@ class OraclePublisher {
             // role: while the snapshot is dark, the last successful election is history,
             // not the current answer.
             publisherRole:       this._snapshotDark ? 'set_unresolved' : (this._publisherRole || 'unknown'),
-            // Has this hub EVER published, as opposed to "did it publish in this process".
-            // lastPublishedRound is process memory, so it cannot answer this after a
-            // restart; the durable confirmed marker can, and does so without a second
-            // query. A consumer that gates on lastPublishedRound alone treats every
-            // restarted publisher as one that has never published.
+            // Has this hub EVER published, in a form a consumer can gate on without
+            // reading a round number. Both terms are durable across a restart:
+            // lastPublishedRound is hydrated from the marker table at startup, and the
+            // confirmed marker below is the intent-excluded evidence behind it.
             everPublished:       (Number.isFinite(Number(this.lastPublishedRound)) && Number(this.lastPublishedRound) > 0)
                                  || this._durableEverPublishedRound !== null,
             myRank:              this._lastRankState ? this._lastRankState.myRank : null,

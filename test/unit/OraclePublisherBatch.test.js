@@ -2366,17 +2366,18 @@ describe('OraclePublisher PRICE batch rail', function () {
             expect(s.publisherRole).to.equal('in_set');
         });
 
-        it('still reports everPublished after a restart, off the durable marker', async function () {
-            // A restart empties lastPublishedRound: it is process memory, assigned only
-            // on the publish path. The confirmed marker row is what survives, and
-            // startup already reads those rows for the at-most-once guard, so the honest
-            // answer costs no second query.
+        it('still reports the last published round and everPublished after a restart', async function () {
+            // The confirmed marker row is what survives a restart, and startup already
+            // reads those rows for the at-most-once guard, so the honest answer costs no
+            // second query. The monitor's batch-backlog rail gates on lastPublishedRound,
+            // so a null there silences the rail for a publisher of months standing.
             let db = makeDb({ markers: { 41: { round: 41, txid: 'tx-41', sent_at: '2026-08-26 12:00:00' } } });
             let h = makePublisher({ db: db });
             await h.p.start();
 
             let s = h.p.getStats();
-            expect(s.lastPublishedRound, 'process memory really is empty after a restart').to.equal(null);
+            expect(s.lastPublishedRound, 'the restarted hub reports what it put on chain').to.equal(41);
+            expect(s.lastPublishedTxid).to.equal('tx-41');
             expect(s.everPublished, 'a publisher of months standing must not read as one that never published')
                 .to.equal(true);
             // No election has run in the new process, so the role is unknown rather than
@@ -2393,6 +2394,8 @@ describe('OraclePublisher PRICE batch rail', function () {
             await h.p.start();
 
             expect(h.p.getStats().everPublished).to.equal(false);
+            expect(h.p.getStats().lastPublishedRound, 'an unverified round is not a publication')
+                .to.equal(null);
         });
     });
 });
