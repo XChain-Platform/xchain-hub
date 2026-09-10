@@ -1094,14 +1094,47 @@ class OracleRound {
             if (pk) validatorPubkey = pk;
         }
         if (!validatorPubkey) {
-            console.warn('Oracle: skipping DB persist for unregistered sender ' + envelope.sender +
-                ' (call syncvalidators to register the peer)');
+            // The registry is a hand-maintained addr->key table, so a hub that holds no
+            // federation identity of its own has no reason to carry a row for every peer
+            // whose frames it merely receives: it dropped the audit row for the WHOLE
+            // federation and its database showed no view of the network at all. The
+            // envelope already carries a signature-proven key, and the stake-weight feed
+            // can say whether that key holds qualifying stake at the round's block, which
+            // is a stronger attribution than a typed row and is the same set the round's
+            // own aggregation filters submissions down to. Registering the peers is NOT
+            // the alternative: it puts a key in a local table without telling this hub
+            // anything about the stake behind it.
+            this._persistFromStakeWeight(round, envelope, validPrices, senderPubkey);
             return;
         }
         // Remote peer submission: _handleMessage is a synchronous message handler, so this
         // stays fire-and-forget, but _persistSubmissions now counts its own failures
         // internally (via allSettled) and never rejects, so the drop is still observable.
         this._persistSubmissions(round, envelope.sender, validPrices, validatorPubkey);
+    }
+
+    // Audit-row fallback for a sender the registry does not know. Qualifying stake at
+    // the round's block boundary stands in for the missing registry row; anything the
+    // feed cannot place there keeps the original refusal, so an unknown key still
+    // writes no placeholder row and still names its remedy.
+    //
+    // Async and self-catching because _handleMessage is a synchronous handler: this is
+    // fire-and-forget exactly like the registered-sender persist beside it, and an
+    // indexer fault must cost an audit row rather than the round.
+    async _persistFromStakeWeight(round, envelope, prices, senderPubkey) {
+        let feed = this.hub && this.hub.stakeWeightFeed;
+        try {
+            if (senderPubkey && feed && typeof feed.isQualified === 'function' &&
+                await feed.isQualified('price', this.currentBtcBlockHeight, senderPubkey)) {
+                await this._persistSubmissions(round, envelope.sender, prices, senderPubkey);
+                return;
+            }
+        } catch (e) {
+            console.warn('Oracle: stake-weight lookup failed for sender ' + envelope.sender +
+                ' on round ' + round + ': ' + ((e && e.message) ? e.message : e));
+        }
+        console.warn('Oracle: skipping DB persist for unregistered sender ' + envelope.sender +
+            ' (call syncvalidators to register the peer)');
     }
 
     // Persist price submissions to the database

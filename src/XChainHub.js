@@ -48,6 +48,7 @@ const presence           = require('./lib/oracle_round_presence.js');
 const HubDbBroadcaster   = require('./HubDbBroadcaster.js');
 const CapabilityRegistry = require('./CapabilityRegistry.js');
 const CapabilitySnapshot = require('./CapabilitySnapshot.js');
+const StakeWeightFeed    = require('./StakeWeightFeed.js');
 const StakeShareWatcher  = require('./StakeShareWatcher.js');
 const ProviderRegistry      = require('./ProviderRegistry.js');
 const AttestationRound       = require('./AttestationRound.js');
@@ -124,6 +125,12 @@ class XChainHub {
         this.hubDbBroadcaster = null;
         this.capabilityRegistry      = null;
         this.capabilitySnapshot      = new CapabilitySnapshot(this);  // available pre-startCapabilities so consensus engines can use it from start()
+        // The federation's stake view for a hub that serves no capability of its own.
+        // Built here for the same reason as the snapshot above: it answers the
+        // threshold question the snapshot asks on its very first fetch, which happens
+        // before startCapabilities decides what this hub can serve. Inert on a hub
+        // whose capability registry carries its own thresholds.
+        this.stakeWeightFeed         = new StakeWeightFeed(this);
         this.stakeShareWatcher       = null;  // minted in startCapabilities(); watches our own stake share vs the weighted quorum gate
         this.providerRegistry        = null;
         this.attestationRound        = null;
