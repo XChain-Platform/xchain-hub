@@ -32,6 +32,7 @@ const ValidatorIdentity = require('./ValidatorIdentity.js');
 const { PRICE_MAX, ORACLE_DEVIATION_THRESHOLD, ORACLE_MAX_CHANGE_PER_ROUND,
         XCHAIN_PRICE_MAX_CHANGE_PER_ROUND, DERIVED_PAIRS } = require('./constants.js');
 const swq               = require('./stake_weighted_quorum.js');
+const ocr               = require('./oracle_clamp_reference_activation.js');
 const { bftQuorumOrSingle } = require('./lib/bft_quorum.js');
 const { positiveIntConfig } = require('./lib/config_int.js');
 const eq                = require('./equivocation_header.js');
@@ -740,7 +741,14 @@ class OracleConsensus extends EventEmitter {
         // Before ANY path aggregates, bootstrap included: a hub clamping against an
         // older round emits a median its peers will not co-sign. After every skip
         // guard, so a skipped round costs no read.
-        await this._refreshLastFinalizedForRound(round);
+        //
+        // GATED on oracle_clamp_reference_activation.js, keyed on the round's own BTC
+        // block height (the value that locked this round's snapshot above). Below it
+        // the reference keeps its pre-alignment writers only, so a mixed-version fleet
+        // never judges one round against two different references.
+        if (ocr.isClampReferenceAlignActive(btcBlockHeight, this.hub ? this.hub.network : undefined)) {
+            await this._refreshLastFinalizedForRound(round);
+        }
 
         let quorum = snapshot
             ? this.hub.capabilitySnapshot.getQuorum(snapshot)
@@ -1119,7 +1127,15 @@ class OracleConsensus extends EventEmitter {
         // Align the clamp reference to THIS round before the co-sign gate below reads
         // it. Placed after the digest and known-sender checks so an unsigned or forged
         // PROPOSE cannot make a hub query its database.
-        await this._refreshLastFinalizedForRound(round);
+        //
+        // GATED on oracle_clamp_reference_activation.js, keyed on the envelope's own
+        // btcBlockHeight: the same field that becomes `blockHeight` for the
+        // weighted-quorum gate below, so the follower and the leader evaluate one round
+        // against one height. The header records why reading it ahead of the freshness
+        // bound is safe.
+        if (ocr.isClampReferenceAlignActive(btcBlockHeight, this.hub ? this.hub.network : undefined)) {
+            await this._refreshLastFinalizedForRound(round);
+        }
 
         // Resolve the round's locked snapshot BEFORE validating the proposer
         // (Oracle M1): the fallback-proposer election below must run over the

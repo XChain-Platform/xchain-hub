@@ -21,7 +21,21 @@ const OracleConsensus = require('../../src/OracleConsensus');
 const bcmath          = require('../../src/bcmath');
 const { ORACLE_MAX_CHANGE_PER_ROUND } = require('../../src/constants');
 const { createMockHub } = require('../helpers/mockHub');
-const { buildSubmissions } = require('../helpers/fixtures');
+const { buildSubmissions, VALIDATORS_3, makeCapabilitySnapshotStub } = require('../helpers/fixtures');
+const ocrMod          = require('../../src/oracle_clamp_reference_activation.js');
+
+const ARMED = ocrMod.ORACLE_CLAMP_REFERENCE_ACTIVATION.testnet;
+
+// Both sides of the divergence the gate switches between, derived from the two
+// candidate references rather than hardcoded, so a change to the per-round bound
+// moves them together.
+function clampedFrom(reference) {
+    return bcmath.bcformat(
+        bcmath.bcadd(reference,
+            bcmath.bcmul(reference, String(ORACLE_MAX_CHANGE_PER_ROUND), 8), 8), 8);
+}
+const ALIGNED = clampedFrom('200.00000000');   // 250.00000000, the round-100 reference
+const STALE   = clampedFrom('100.00000000');   // 125.00000000, the round-99 reference
 
 describe('OracleConsensus: the clamp reference is aligned to the round being judged', function () {
     let hub, oc, oracleRound;
@@ -33,6 +47,7 @@ describe('OracleConsensus: the clamp reference is aligned to the round being jud
 
     beforeEach(function () {
         hub = createMockHub();
+        hub.network = 'regtest';
         oracleRound = { getSubmissions: sinon.stub().returns(new Map()) };
         oc = new OracleConsensus(hub, oracleRound);
         sinon.stub(console, 'warn');
@@ -41,33 +56,60 @@ describe('OracleConsensus: the clamp reference is aligned to the round being jud
 
     afterEach(function () { sinon.restore(); });
 
-    it('re-reads the reference when the hub sat out the round the federation finalized', async function () {
-        // This hub last stored round 99 and seeded from it.
+    // Round 99 seeded and stored locally, round 100 finalized by the federation
+    // without this hub storing it (the row is in price_snapshots but never went
+    // through _storeSnapshot), round 101 a runaway aggregate the clamp must bind.
+    // Returns the price round 101 stored.
+    async function runStraddledRound(network, btcBlockHeight) {
+        hub.network = network;
         hub.db.doQuery.resolves([row('BTC/USD', '100.00000000', 99)]);
         await oc._seedLastFinalizedPrices();
         expect(oc._getLastFinalizedPrice('BTC/USD')).to.equal('100.00000000');
         expect(oc._lastFinalizedRoundFor('BTC/USD')).to.equal(99);
 
-        // Round 100 finalized WITHOUT this hub storing it, so the row is in
-        // price_snapshots but never went through _storeSnapshot.
         hub.db.doQuery.resolves([row('BTC/USD', '200.00000000', 100)]);
-
-        // Round 101: a runaway aggregate the clamp must bind.
         oracleRound.getSubmissions.returns(buildSubmissions([
             { sender: 'ws://validator-1:10001', prices: [{ coinPair: 'BTC/USD', price: '999999.00000000' }] },
             { sender: 'ws://validator-2:10001', prices: [{ coinPair: 'BTC/USD', price: '999999.00000000' }] }
         ]));
         const store = sinon.stub(oc, '_storeSnapshot').resolves();
 
-        await oc.finalizeRound(101, 100, 1700000000);
+        await oc.finalizeRound(101, btcBlockHeight, 1700000000);
 
         expect(store.calledOnce, 'round 101 stored').to.be.true;
-        const stored = store.firstCall.args[1].find(p => p.coinPair === 'BTC/USD');
-        const expected = bcmath.bcformat(
-            bcmath.bcadd('200.00000000',
-                bcmath.bcmul('200.00000000', String(ORACLE_MAX_CHANGE_PER_ROUND), 8), 8), 8);
-        expect(stored.price, 'clamped against the round-100 price, not the round-99 one').to.equal(expected);
+        return store.firstCall.args[1].find(p => p.coinPair === 'BTC/USD').price;
+    }
+
+    it('re-reads the reference when the hub sat out the round the federation finalized', async function () {
+        const price = await runStraddledRound('testnet', ARMED);
+
+        expect(price, 'clamped against the round-100 price, not the round-99 one').to.equal(ALIGNED);
         expect(oc._lastFinalizedRoundFor('BTC/USD')).to.equal(100);
+    });
+
+    it('takes the aligned path on a regtest hub, which is armed at genesis', async function () {
+        const price = await runStraddledRound('regtest', 0);
+
+        expect(price).to.equal(ALIGNED);
+        expect(oc._lastFinalizedRoundFor('BTC/USD')).to.equal(100);
+    });
+
+    // The negative control. This is the pre-alignment behaviour the fleet still runs
+    // below the height, and it is the divergence the gate exists to schedule: an
+    // identical submission set emits half the price an aligned hub emits.
+    it('keeps the stale timer-only reference one block below the height', async function () {
+        const price = await runStraddledRound('testnet', ARMED - 1);
+
+        expect(price, 'the round-99 reference still bounds the aggregate').to.equal(STALE);
+        expect(price).to.not.equal(ALIGNED);
+        expect(oc._lastFinalizedRoundFor('BTC/USD'), 'no round-aligned re-read ran').to.equal(99);
+    });
+
+    it('keeps the stale timer-only reference on unratified mainnet at any height', async function () {
+        const price = await runStraddledRound('mainnet', 9999999);
+
+        expect(price).to.equal(STALE);
+        expect(oc._lastFinalizedRoundFor('BTC/USD')).to.equal(99);
     });
 
     it('issues no query on the common path where the hub already holds the previous round', async function () {
@@ -135,5 +177,62 @@ describe('OracleConsensus: the clamp reference is aligned to the round being jud
 
     it('treats an empty cache as no position rather than round zero', async function () {
         expect(oc._maxCachedFinalizedRound(), 'a cold cache is null, not 0').to.equal(null);
+    });
+});
+
+// The second call site. finalizeRound decides what a leader emits; this one decides
+// what a follower will co-sign, so both have to flip on the same height or the two
+// halves of one round are judged against different references.
+describe('OracleConsensus: the propose-side clamp reference honours the same height', function () {
+    let hub, pm, oc, oracleRound, leader, refresh;
+    const ROUND = 1;
+
+    beforeEach(function () {
+        hub = createMockHub();
+        pm  = hub._peerManager;
+        pm.validatorPubkeys = new Set();          // size 0, so _isKnownSender accepts any sender
+        oracleRound = { getSubmissions: sinon.stub().returns(new Map()) };
+        hub.capabilitySnapshot = makeCapabilitySnapshotStub(VALIDATORS_3);
+        oc = new OracleConsensus(hub, oracleRound);
+        oc.setValidatorSet(VALIDATORS_3);
+        leader = oc._getLeader(ROUND);
+        pm.validatorAddr = VALIDATORS_3.find(v => v.addr !== leader.addr).addr;
+        refresh = sinon.spy(oc, '_refreshLastFinalizedForRound');
+        sinon.stub(console, 'warn');
+        sinon.stub(console, 'log');
+    });
+
+    afterEach(function () { sinon.restore(); });
+
+    function propose(btcBlockHeight) {
+        const prices = [{ coinPair: 'BTC/USD', price: '100000' }];
+        return { sender: leader.addr, sig_pubkey: leader.pubkey, data: {
+            round: ROUND, prices, digest: oc._digest(ROUND, prices),
+            btcBlockHeight, btcBlockTime: 1700000000
+        } };
+    }
+
+    it('aligns the reference for a PROPOSE at the height', async function () {
+        hub.network = 'testnet';
+        await oc._handlePropose(propose(ARMED));
+        expect(refresh.calledOnceWithExactly(ROUND)).to.be.true;
+    });
+
+    it('aligns it on regtest, which is armed at genesis', async function () {
+        hub.network = 'regtest';
+        await oc._handlePropose(propose(0));
+        expect(refresh.calledOnceWithExactly(ROUND)).to.be.true;
+    });
+
+    it('does not touch the reference one block below the height', async function () {
+        hub.network = 'testnet';
+        await oc._handlePropose(propose(ARMED - 1));
+        expect(refresh.called, 'the pre-alignment path reads nothing per round').to.be.false;
+    });
+
+    it('does not touch the reference on unratified mainnet', async function () {
+        hub.network = 'mainnet';
+        await oc._handlePropose(propose(9999999));
+        expect(refresh.called).to.be.false;
     });
 });

@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A hub that does not run oracle consensus derives `price` capability snapshots from its own Bitcoin view, so its indexer can validate on-chain PRICE batches instead of refusing every one.
 - That derivation now covers `oracle_publish`, `cross_chain` and `attestation` too, so a chain-only node stops refusing every ATTEST and storing every archive head unverified.
 
+### Changed
+- The oracle clamp reference realignment is gated on its own activation height, keyed on the round's BTC block height: testnet 152400, mainnet unratified, regtest genesis.
+
 ## [0.16.3] - 2026-09-09
 
 ### Fixed
