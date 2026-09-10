@@ -137,10 +137,34 @@ const AMBIGUOUS_WINDOW_MEMO_MAX = 256;
 // backlog of a hundred windows must not be attempted in one pass: the live window
 // queued behind it would wait out every one of them.
 const CATCHUP_WINDOWS_PER_SWEEP = 4;
-// How often that sweep runs. An hour at the shipped defaults: the refusals it recovers
-// from are either transient or content drift that reconciliation repairs, and neither
-// gets better by asking again sooner. See _startBufferCatchupSweep.
+// How often that sweep runs when there is nothing to catch up on. An hour at the
+// shipped defaults: the refusals it recovers from are either transient or content
+// drift that reconciliation repairs, and neither gets better by asking again sooner.
+// See _startBufferCatchupSweep.
 const DEFAULT_BATCH_CATCHUP_INTERVAL_MS = 3600000;
+// ...and how often it runs while a BACKLOG deeper than one sweep is waiting. Four
+// windows an hour is a drain rate of 96 windows a day, and the fleet was measured on
+// 2026-09-07 carrying 697 closed buffered windows per hub, which that rate needs seven
+// months to walk once. The hourly idle is what made the backlog structurally
+// undrainable; nothing about the serialization required it, because a sweep never has
+// more than CATCHUP_WINDOWS_PER_SWEEP assemblies outstanding either way (see
+// _runCatchupSweepTick's in-flight await). At a minute a 697-window backlog is walked
+// in about three hours instead.
+const DEFAULT_BATCH_CATCHUP_BACKLOG_INTERVAL_MS = 60000;
+// Failed catch-up attempts after which a window is retired from the sweep, and the
+// minimum age of its FIRST failed attempt before that retirement may happen.
+//
+// Both bounds together, because either alone retires the wrong windows. A count alone
+// retires a window that lost six attempts in six minutes to one peer rebooting; an age
+// alone retires a window that has simply been waiting behind a long backlog for its
+// first turn. What the pair describes is the only shape that is actually hopeless: a
+// window this hub has proposed repeatedly, over hours, that the federation will not
+// co-sign - the [32,32] "no finalized rounds in the window locally" and [46,47] "round
+// 46 proposed but not finalized here" refusals measured on the fleet, which are content
+// divergences no number of re-proposals can repair. Retiring those is what lets the
+// windows behind them reach a slot.
+const DEFAULT_CATCHUP_MAX_ATTEMPTS = 6;
+const DEFAULT_CATCHUP_RETIRE_AFTER_MS = 6 * 3600000;
 
 // Confirmation depth at which the watchdog calls a broadcast landed. One block is
 // the whole question here: the failure being watched for is a transaction that never
@@ -396,6 +420,23 @@ class OraclePublisher {
         this.batchCatchupIntervalMs = positiveIntConfig(
             process.env.ORACLE_BATCH_CATCHUP_INTERVAL_MS || cfg.ORACLE_BATCH_CATCHUP_INTERVAL_MS,
             DEFAULT_BATCH_CATCHUP_INTERVAL_MS, 'ORACLE_BATCH_CATCHUP_INTERVAL_MS');
+ // The backlog cadence, clamped so it can never be SLOWER than the idle one: a
+ // deployment that deliberately slows the sweep down has not asked for a faster
+ // one under load.
+ this.batchCatchupBacklogIntervalMs = Math.min(
+ this.batchCatchupIntervalMs,
+ positiveIntConfig(
+ process.env.ORACLE_BATCH_CATCHUP_BACKLOG_INTERVAL_MS || cfg.ORACLE_BATCH_CATCHUP_BACKLOG_INTERVAL_MS,
+ DEFAULT_BATCH_CATCHUP_BACKLOG_INTERVAL_MS, 'ORACLE_BATCH_CATCHUP_BACKLOG_INTERVAL_MS'));
+ // 0 disables retirement entirely: every window is re-proposed forever, which is
+ // the pre-fix behaviour and the right setting for an operator who would
+ // rather a stuck backlog stay visible than be retired quietly.
+ this.catchupMaxAttempts = nonNegativeIntConfig(
+ process.env.ORACLE_BATCH_CATCHUP_MAX_ATTEMPTS || cfg.ORACLE_BATCH_CATCHUP_MAX_ATTEMPTS,
+ DEFAULT_CATCHUP_MAX_ATTEMPTS, 'ORACLE_BATCH_CATCHUP_MAX_ATTEMPTS');
+ this.catchupRetireAfterMs = nonNegativeIntConfig(
+ process.env.ORACLE_BATCH_CATCHUP_RETIRE_AFTER_MS || cfg.ORACLE_BATCH_CATCHUP_RETIRE_AFTER_MS,
+ DEFAULT_CATCHUP_RETIRE_AFTER_MS, 'ORACLE_BATCH_CATCHUP_RETIRE_AFTER_MS');
 
         // ---- The window ceiling, and why the window is not just a number
         //
@@ -488,6 +529,21 @@ class OraclePublisher {
         this.batchSplitCount         = 0;
         this.batchUnpublishableCount = 0;
         this.batchCatchupSweeps      = 0;
+ // windowIndex -> { count, firstAt } for windows the catch-up sweep has proposed
+ // and that produced no wire. Cleared the moment a window is assembled, so what
+ // it holds is exactly the set of windows that keep failing. Bounded by the
+ // pending set itself, which _pendingCatchupWindows already bounds.
+ this._catchupAttempts = new Map();
+ // Where the next sweep starts in the pending list. Without it every sweep spent
+ // all four of its slots on the same four oldest windows, so a backlog whose head
+ // was permanently unco-signable never advanced past it however long it ran: the
+ // windows behind the head were never once proposed. This is the other half of
+ // "structurally cannot drain".
+ this._catchupCursor = 0;
+ this.batchCatchupRetiredWindows = 0;
+ // Set by stop(), so a sweep tick that is mid-await when the publisher stops does
+ // not re-arm the timer stop() just cleared.
+ this._stopped = false;
         // Rounds shed from the buffer because a batch carrying them was seen to land:
         // via the indexer's push into PriceAggregator (landedBatchPrunedRounds) or via
         // the pre-sweep read of the landing chain's indexer (chainReconcilePrunedRounds).
@@ -875,6 +931,7 @@ class OraclePublisher {
 
     // Initialize the publisher: ensure queue directory exists, load any pending rounds
     async start() {
+ this._stopped = false;
         // The per-window spend ceilings were memory-only, so every restart
         // restored a full allowance. Reload the saved window before anything publishes.
         this.spendGuard.persistTo();
@@ -969,6 +1026,7 @@ class OraclePublisher {
     // Release every timer this class owns, plus a batch signer it created itself.
     // The class had no stop() before the batch rail, because it had no timers.
     stop() {
+ this._stopped = true;
         for (let state of this._windows.values()) {
             if (state.timer) clearTimeout(state.timer);
         }
@@ -976,7 +1034,7 @@ class OraclePublisher {
         for (let timer of this._takeoverTimers.values()) clearTimeout(timer);
         this._takeoverTimers.clear();
         if (this._catchupTimer) { clearTimeout(this._catchupTimer); this._catchupTimer = null; }
-        if (this._catchupSweepTimer) { clearInterval(this._catchupSweepTimer); this._catchupSweepTimer = null; }
+ if (this._catchupSweepTimer) { clearTimeout(this._catchupSweepTimer); this._catchupSweepTimer = null; }
         if (this._confirmTimer) { clearInterval(this._confirmTimer); this._confirmTimer = null; }
         if (this._ownedBatchSigner) {
             try { this._ownedBatchSigner.stop(); } catch (e) { /* stopping is best-effort */ }
@@ -1936,19 +1994,74 @@ class OraclePublisher {
     // signing round that costs up to ORACLE_BATCH_SIGN_TIMEOUT_MS and they are
     // serialized on _windowChain: an unbounded sweep over a long backlog would occupy
     // that chain for hours and starve the live window queued behind it.
+ // Slots are spent from a rotating cursor rather than always on the head of the
+ // backlog, and a window that has failed long enough is retired instead of taking a
+ // slot forever. Both exist because of the same measurement: at four windows an hour,
+ // always the oldest four, a hub holding 697 closed windows re-proposed windows 10-13
+ // for ever and proposed window 14 never once.
     _sweepBufferCatchup() {
         let pending = this._pendingCatchupWindows();
         if (pending.length === 0) return 0;
-        let take = pending.slice(0, CATCHUP_WINDOWS_PER_SWEEP);
         this.batchCatchupSweeps++;
+
+ // Resume where the last sweep stopped, wrapping when the cursor has passed
+ // everything still pending.
+ let start = 0;
+ while (start < pending.length && pending[start] < this._catchupCursor) start++;
+ if (start >= pending.length) start = 0;
+
+ let take = [];
+ let retired = [];
+ for (let i = 0; i < pending.length && take.length < CATCHUP_WINDOWS_PER_SWEEP; i++) {
+ let w = pending[(start + i) % pending.length];
+ // Retiring costs no slot: a hopeless window must not displace a window that
+ // could still publish, which is the whole point of retiring it.
+ if (this._retireExhaustedWindow(w)) { retired.push(w); continue; }
+ let seen = this._catchupAttempts.get(w);
+ if (seen) seen.count++;
+ else this._catchupAttempts.set(w, { count: 1, firstAt: Date.now() });
+ take.push(w);
+ }
+ if (take.length === 0 && retired.length === 0) return 0;
+ if (take.length > 0) this._catchupCursor = take[take.length - 1] + 1;
+
         if (pending.length > take.length) {
             console.warn('OraclePublisher: ' + pending.length + ' closed window(s) are still ' +
                 'buffered and unpublished; re-proposing ' + take.length + ' of them this sweep ' +
-                '(oldest first, from window ' + take[0] + ')');
+ '(from window ' + (take.length ? take[0] : '-') + ', resuming at ' +
+ this._catchupCursor + ' next sweep)' +
+ (retired.length ? '; retired ' + retired.length + ' window(s) that will never be co-signed' : ''));
         }
         for (let w of take) this._queueWindowAssembly(w);
         return take.length;
     }
+
+ // Retire one window from the catch-up sweep when it has failed enough attempts, for
+ // long enough, that the federation is not going to co-sign it. True when it was
+ // retired this call.
+ //
+ // Retirement is a memo entry, NOT a deletion: the buffered rounds stay exactly where
+ // they are, so the observation prune, a takeover and the ORACLE_BATCH_BUFFER_MAX_ROUNDS
+ // bound all behave as before, and nothing this hub holds is thrown away. All it
+ // changes is that the window stops consuming a re-proposal slot the windows behind
+ // it need.
+ _retireExhaustedWindow(windowIndex) {
+ if (this.catchupMaxAttempts <= 0) return false;
+ let seen = this._catchupAttempts.get(windowIndex);
+ if (!seen || seen.count < this.catchupMaxAttempts) return false;
+ if ((Date.now() - seen.firstAt) < this.catchupRetireAfterMs) return false;
+
+ let first = windowIndex * this.batchWindowRounds;
+ let last = first + this.batchWindowRounds - 1;
+ this.batchCatchupRetiredWindows++;
+ this._noteAssembled(windowIndex); // also clears the attempt record
+ console.warn('OraclePublisher: window [' + first + ',' + last + '] has failed ' + seen.count +
+ ' batch-signing round(s) over ' + Math.round((Date.now() - seen.firstAt) / 60000) +
+ ' minute(s) and is retired from the catch-up sweep: no quorum of the price-capable set ' +
+ 'will reproduce its content, so re-proposing it only starves the windows behind it. Its ' +
+ 'rounds stay buffered; batchCatchupRetiredWindows in getoraclepublisherstatus counts this.');
+ return true;
+ }
 
     // The recurring half of the catch-up, and the half that was missing.
     //
@@ -1967,16 +2080,51 @@ class OraclePublisher {
     // repairs from price_snapshots, and neither is fixed by asking again sooner; what
     // a fast retry WOULD buy is a signing round per window per interval across the
     // whole federation, plus a refusal line per peer per attempt in every log.
+ // A self-rescheduling timeout rather than an interval, because the cadence is not
+ // fixed: an idle rail waits the full ORACLE_BATCH_CATCHUP_INTERVAL_MS, and a rail
+ // with a backlog deeper than one sweep comes straight back at the backlog cadence.
+ // Each tick also AWAITS the assemblies it queued before re-arming, so the number of
+ // catch-up assemblies outstanding on _windowChain is still capped at
+ // CATCHUP_WINDOWS_PER_SWEEP no matter how short the cadence gets. That cap is what
+ // the serialization argument was ever about; the hour of idling between sweeps
+ // protected nothing and cost the fleet a backlog it could not walk.
     _startBufferCatchupSweep() {
         if (this._catchupSweepTimer) return;
-        this._catchupSweepTimer = setInterval(() => {
-            this._reconcileThenSweep().catch(e =>
-                console.error('OraclePublisher: buffer catch-up sweep failed:', e));
-        }, this.batchCatchupIntervalMs);
+ this._armCatchupSweep(this.batchCatchupIntervalMs);
+ }
+
+ _armCatchupSweep(delayMs) {
+ this._catchupSweepTimer = setTimeout(() => {
+ this._catchupSweepTimer = null;
+ this._runCatchupSweepTick();
+ }, delayMs);
         if (this._catchupSweepTimer.unref) this._catchupSweepTimer.unref();
     }
 
+ async _runCatchupSweepTick() {
+ // A tick supersedes whatever was armed: the timer path has already cleared it,
+ // and a caller driving a sweep by hand must not leave a second one pending.
+ if (this._catchupSweepTimer) { clearTimeout(this._catchupSweepTimer); this._catchupSweepTimer = null; }
+ try {
+ await this._reconcileThenSweep();
+ // The assemblies this sweep queued, so the next tick cannot pile a second
+ // sweep's worth onto the chain behind them.
+ await this._windowChain;
+ } catch (e) {
+ console.error('OraclePublisher: buffer catch-up sweep failed:', e);
+ }
+ if (this._stopped) return;
+ let backlog = this._pendingCatchupWindows().length;
+ this._armCatchupSweep(backlog > CATCHUP_WINDOWS_PER_SWEEP
+ ? this.batchCatchupBacklogIntervalMs
+ : this.batchCatchupIntervalMs);
+ }
+
     _noteAssembled(windowIndex) {
+ // A window that reached an assembly outcome is no longer a failing one, whether
+ // it published, was followed, or was found empty. Keeping its attempt record
+ // would retire the NEXT window to reuse the index after the memo evicts.
+ this._catchupAttempts.delete(windowIndex);
         this._assembledWindows.set(windowIndex, true);
         while (this._assembledWindows.size > ASSEMBLED_WINDOW_MEMO_MAX) {
             this._assembledWindows.delete(this._assembledWindows.keys().next().value);
@@ -3171,6 +3319,15 @@ class OraclePublisher {
             // cannot agree on content, which no other field here shows.
             batchWindowsAwaitingRetry: this._pendingCatchupWindows().length,
             batchCatchupSweeps:        this.batchCatchupSweeps,
+ // Drain observability. batchWindowsAwaitingRetry alone cannot tell a rail
+ // that is walking its backlog from one pinned on the same four windows:
+ // batchCatchupCursor moves on every sweep that spends a slot, and
+ // batchCatchupRetiredWindows counts windows given up on rather than published.
+ // A non-zero retired count is a real loss of history and belongs in a report,
+ // not just a log line.
+ batchCatchupCursor: this._catchupCursor,
+ batchCatchupRetiredWindows: this.batchCatchupRetiredWindows,
+ batchCatchupBacklogIntervalMs: this.batchCatchupBacklogIntervalMs,
             // Landed-batch pruning. bufferedWindowsPending climbing while
             // both pruned counters stay flat is a hub that hears no batch pushes AND
             // cannot reach its landing-chain indexer; chainReconcileFailures says which.
