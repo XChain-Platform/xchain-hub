@@ -1009,7 +1009,7 @@ describe('OraclePublisher PRICE batch rail', function () {
             let asked = h.signer.calls.map(c => c.first);
             expect(asked, 'oldest four windows, in order').to.deep.equal([0, 6, 12, 18]);
             expect(logs.warn.join('\n')).to.match(
- /10 closed window\(s\) are still buffered and unpublished; re-proposing 4 of them this sweep \(from window 0, resuming at 4 next sweep\)/);
+                /10 closed window\(s\) are still buffered and unpublished; re-proposing 4 of them this sweep \(from window 0, resuming at 4 next sweep\)/);
         });
 
         it('spends its four slots on windows that still need one, not on windows already assembled', async function () {
@@ -1052,176 +1052,176 @@ describe('OraclePublisher PRICE batch rail', function () {
             expect(h.p._catchupSweepTimer).to.equal(null);
         });
 
- // ─────────────────────────── the backlog has to actually drain
- //
- // Measured on the fleet 2026-09-07: every validator logged "697 closed
- // window(s) are still buffered and unpublished; re-proposing 4 of them this
- // sweep (oldest first, from window 10)" once an hour, for ever. Three separate
- // properties made that undrainable and each one is asserted below: the sweep
- // always spent its slots on the SAME oldest four, it idled a full hour between
- // sweeps whatever the depth of the backlog, and a window the federation would
- // never co-sign ([32,32], [46,47]) kept its slot for the life of the process.
- describe('draining a backlog', function () {
+        // ─────────────────────────── the backlog has to actually drain
+        //
+        // Measured on the fleet 2026-09-07: every validator logged "697 closed
+        // window(s) are still buffered and unpublished; re-proposing 4 of them this
+        // sweep (oldest first, from window 10)" once an hour, for ever. Three separate
+        // properties made that undrainable and each one is asserted below: the sweep
+        // always spent its slots on the SAME oldest four, it idled a full hour between
+        // sweeps whatever the depth of the backlog, and a window the federation would
+        // never co-sign ([32,32], [46,47]) kept its slot for the life of the process.
+        describe('draining a backlog', function () {
 
- it('spends each sweep on the NEXT windows, so a stuck head cannot own every slot', async function () {
- let h = makePublisher({ signerOpts: { met: false } });
- await h.p.start();
- for (let r = 0; r < 65; r++) h.p._buffer.set(r, bufferedFixture(r));
- expect(h.p._pendingCatchupWindows()).to.have.length(10);
+            it('spends each sweep on the NEXT windows, so a stuck head cannot own every slot', async function () {
+                let h = makePublisher({ signerOpts: { met: false } });
+                await h.p.start();
+                for (let r = 0; r < 65; r++) h.p._buffer.set(r, bufferedFixture(r));
+                expect(h.p._pendingCatchupWindows()).to.have.length(10);
 
- let sweeps = [];
- for (let i = 0; i < 3; i++) {
- let before = h.signer.calls.length;
- h.p._sweepBufferCatchup();
- await h.p._windowChain;
- sweeps.push(h.signer.calls.slice(before).map(c => c.first));
- }
- // Nothing lands (met:false), so all ten windows stay pending: the only
- // thing that can move the proposals along is the cursor.
- expect(sweeps[0]).to.deep.equal([0, 6, 12, 18]);
- expect(sweeps[1], 'the second sweep proposes windows the first never reached')
- .to.deep.equal([24, 30, 36, 42]);
- expect(sweeps[2], 'and wraps once every pending window has had a turn')
- .to.deep.equal([48, 54, 0, 6]);
- });
+                let sweeps = [];
+                for (let i = 0; i < 3; i++) {
+                    let before = h.signer.calls.length;
+                    h.p._sweepBufferCatchup();
+                    await h.p._windowChain;
+                    sweeps.push(h.signer.calls.slice(before).map(c => c.first));
+                }
+                // Nothing lands (met:false), so all ten windows stay pending: the only
+                // thing that can move the proposals along is the cursor.
+                expect(sweeps[0]).to.deep.equal([0, 6, 12, 18]);
+                expect(sweeps[1], 'the second sweep proposes windows the first never reached')
+                    .to.deep.equal([24, 30, 36, 42]);
+                expect(sweeps[2], 'and wraps once every pending window has had a turn')
+                    .to.deep.equal([48, 54, 0, 6]);
+            });
 
- it('retires a window that has failed long enough, and stops spending slots on it', async function () {
- let h = makePublisher({ signerOpts: { met: false },
- cfg: { ORACLE_BATCH_CATCHUP_MAX_ATTEMPTS: 2, ORACLE_BATCH_CATCHUP_RETIRE_AFTER_MS: 0 } });
- await h.p.start();
- // One closed window (0) plus an open one, so the cursor cannot hide a
- // window that is simply never reached behind one that is retired.
- for (let r = 0; r < 7; r++) h.p._buffer.set(r, bufferedFixture(r));
+            it('retires a window that has failed long enough, and stops spending slots on it', async function () {
+                let h = makePublisher({ signerOpts: { met: false },
+                    cfg: { ORACLE_BATCH_CATCHUP_MAX_ATTEMPTS: 2, ORACLE_BATCH_CATCHUP_RETIRE_AFTER_MS: 0 } });
+                await h.p.start();
+                // One closed window (0) plus an open one, so the cursor cannot hide a
+                // window that is simply never reached behind one that is retired.
+                for (let r = 0; r < 7; r++) h.p._buffer.set(r, bufferedFixture(r));
 
- for (let i = 0; i < 3; i++) { h.p._sweepBufferCatchup(); await h.p._windowChain; }
+                for (let i = 0; i < 3; i++) { h.p._sweepBufferCatchup(); await h.p._windowChain; }
 
- expect(h.signer.calls.map(c => c.first), 'proposed twice, then retired')
- .to.deep.equal([0, 0]);
- expect(h.p.getStats().batchCatchupRetiredWindows).to.equal(1);
- expect(h.p._pendingCatchupWindows(), 'no longer holds a slot').to.deep.equal([]);
- expect(logs.warn.join('\n')).to.match(
- /window \[0,5\] has failed 2 batch-signing round\(s\).*retired from the catch-up sweep/);
- // Retiring is a memo entry, never a deletion: the rounds are still here.
- expect(h.p._buffer.size).to.equal(7);
- });
+                expect(h.signer.calls.map(c => c.first), 'proposed twice, then retired')
+                    .to.deep.equal([0, 0]);
+                expect(h.p.getStats().batchCatchupRetiredWindows).to.equal(1);
+                expect(h.p._pendingCatchupWindows(), 'no longer holds a slot').to.deep.equal([]);
+                expect(logs.warn.join('\n')).to.match(
+                    /window \[0,5\] has failed 2 batch-signing round\(s\).*retired from the catch-up sweep/);
+                // Retiring is a memo entry, never a deletion: the rounds are still here.
+                expect(h.p._buffer.size).to.equal(7);
+            });
 
- it('will not retire on attempt count alone: a fast burst of failures is a peer reboot', async function () {
- let h = makePublisher({ signerOpts: { met: false },
- cfg: { ORACLE_BATCH_CATCHUP_MAX_ATTEMPTS: 2,
- ORACLE_BATCH_CATCHUP_RETIRE_AFTER_MS: 3600000 } });
- await h.p.start();
- for (let r = 0; r < 7; r++) h.p._buffer.set(r, bufferedFixture(r));
+            it('will not retire on attempt count alone: a fast burst of failures is a peer reboot', async function () {
+                let h = makePublisher({ signerOpts: { met: false },
+                    cfg: { ORACLE_BATCH_CATCHUP_MAX_ATTEMPTS: 2,
+                           ORACLE_BATCH_CATCHUP_RETIRE_AFTER_MS: 3600000 } });
+                await h.p.start();
+                for (let r = 0; r < 7; r++) h.p._buffer.set(r, bufferedFixture(r));
 
- for (let i = 0; i < 5; i++) { h.p._sweepBufferCatchup(); await h.p._windowChain; }
+                for (let i = 0; i < 5; i++) { h.p._sweepBufferCatchup(); await h.p._windowChain; }
 
- expect(h.signer.calls.map(c => c.first)).to.deep.equal([0, 0, 0, 0, 0]);
- expect(h.p.getStats().batchCatchupRetiredWindows).to.equal(0);
- expect(h.p._pendingCatchupWindows()).to.deep.equal([0]);
- });
+                expect(h.signer.calls.map(c => c.first)).to.deep.equal([0, 0, 0, 0, 0]);
+                expect(h.p.getStats().batchCatchupRetiredWindows).to.equal(0);
+                expect(h.p._pendingCatchupWindows()).to.deep.equal([0]);
+            });
 
- it('never retires when retirement is switched off', async function () {
- let h = makePublisher({ signerOpts: { met: false },
- cfg: { ORACLE_BATCH_CATCHUP_MAX_ATTEMPTS: 0, ORACLE_BATCH_CATCHUP_RETIRE_AFTER_MS: 0 } });
- await h.p.start();
- for (let r = 0; r < 7; r++) h.p._buffer.set(r, bufferedFixture(r));
+            it('never retires when retirement is switched off', async function () {
+                let h = makePublisher({ signerOpts: { met: false },
+                    cfg: { ORACLE_BATCH_CATCHUP_MAX_ATTEMPTS: 0, ORACLE_BATCH_CATCHUP_RETIRE_AFTER_MS: 0 } });
+                await h.p.start();
+                for (let r = 0; r < 7; r++) h.p._buffer.set(r, bufferedFixture(r));
 
- for (let i = 0; i < 5; i++) { h.p._sweepBufferCatchup(); await h.p._windowChain; }
+                for (let i = 0; i < 5; i++) { h.p._sweepBufferCatchup(); await h.p._windowChain; }
 
- expect(h.signer.calls).to.have.length(5);
- expect(h.p.getStats().batchCatchupRetiredWindows).to.equal(0);
- });
+                expect(h.signer.calls).to.have.length(5);
+                expect(h.p.getStats().batchCatchupRetiredWindows).to.equal(0);
+            });
 
- it('forgets the failure record as soon as a window assembles', async function () {
- let signer = flakySigner(1);
- let h = makePublisher({ signer: signer,
- cfg: { ORACLE_BATCH_CATCHUP_MAX_ATTEMPTS: 2, ORACLE_BATCH_CATCHUP_RETIRE_AFTER_MS: 0 } });
- await h.p.start();
- for (let r = 0; r < 7; r++) h.p._buffer.set(r, bufferedFixture(r));
+            it('forgets the failure record as soon as a window assembles', async function () {
+                let signer = flakySigner(1);
+                let h = makePublisher({ signer: signer,
+                    cfg: { ORACLE_BATCH_CATCHUP_MAX_ATTEMPTS: 2, ORACLE_BATCH_CATCHUP_RETIRE_AFTER_MS: 0 } });
+                await h.p.start();
+                for (let r = 0; r < 7; r++) h.p._buffer.set(r, bufferedFixture(r));
 
- h.p._sweepBufferCatchup(); // attempt 1: misses quorum
- await h.p._windowChain;
- h.p._sweepBufferCatchup(); // attempt 2: lands
- await h.p._windowChain;
+                h.p._sweepBufferCatchup();          // attempt 1: misses quorum
+                await h.p._windowChain;
+                h.p._sweepBufferCatchup();          // attempt 2: lands
+                await h.p._windowChain;
 
- expect(h.broadcasts).to.have.length(1);
- expect(h.p.getStats().batchCatchupRetiredWindows,
- 'a window that published is not a window that was given up on').to.equal(0);
- expect(h.p._catchupAttempts.has(0)).to.equal(false);
- });
+                expect(h.broadcasts).to.have.length(1);
+                expect(h.p.getStats().batchCatchupRetiredWindows,
+                    'a window that published is not a window that was given up on').to.equal(0);
+                expect(h.p._catchupAttempts.has(0)).to.equal(false);
+            });
 
- it('comes back at the backlog cadence instead of idling an hour, and walks the whole backlog',
- async function () {
- this.timeout(10000);
- // The hourly idle IS the structural stall: at four windows an hour these
- // twenty windows need five hours, and the fleet's 697 need seven months.
- let h = makePublisher({ cfg: { ORACLE_BATCH_CATCHUP_INTERVAL_MS: 3600000,
- ORACLE_BATCH_CATCHUP_BACKLOG_INTERVAL_MS: 5 } });
- await h.p.start();
- for (let r = 0; r < 125; r++) h.p._buffer.set(r, bufferedFixture(r));
- expect(h.p._pendingCatchupWindows()).to.have.length(20);
+            it('comes back at the backlog cadence instead of idling an hour, and walks the whole backlog',
+                async function () {
+                this.timeout(10000);
+                // The hourly idle IS the structural stall: at four windows an hour these
+                // twenty windows need five hours, and the fleet's 697 need seven months.
+                let h = makePublisher({ cfg: { ORACLE_BATCH_CATCHUP_INTERVAL_MS: 3600000,
+                                               ORACLE_BATCH_CATCHUP_BACKLOG_INTERVAL_MS: 5 } });
+                await h.p.start();
+                for (let r = 0; r < 125; r++) h.p._buffer.set(r, bufferedFixture(r));
+                expect(h.p._pendingCatchupWindows()).to.have.length(20);
 
- await h.p._runCatchupSweepTick();
- // Four per sweep is unchanged; what changed is that the next sweep is
- // seconds away while a backlog remains, not an hour.
- expect(h.broadcasts.length, 'one sweep still publishes at most four').to.equal(4);
- await waitUntil(() => h.p._pendingCatchupWindows().length <= 4, 3000);
- expect(h.broadcasts.length).to.be.at.least(16);
- });
+                await h.p._runCatchupSweepTick();
+                // Four per sweep is unchanged; what changed is that the next sweep is
+                // seconds away while a backlog remains, not an hour.
+                expect(h.broadcasts.length, 'one sweep still publishes at most four').to.equal(4);
+                await waitUntil(() => h.p._pendingCatchupWindows().length <= 4, 3000);
+                expect(h.broadcasts.length).to.be.at.least(16);
+            });
 
- it('holds the per-sweep bound even at the backlog cadence, so the live window is never queued behind more than four',
- async function () {
- this.timeout(10000);
- let h = makePublisher({ cfg: { ORACLE_BATCH_CATCHUP_INTERVAL_MS: 3600000,
- ORACLE_BATCH_CATCHUP_BACKLOG_INTERVAL_MS: 1 } });
- await h.p.start();
- for (let r = 0; r < 125; r++) h.p._buffer.set(r, bufferedFixture(r));
+            it('holds the per-sweep bound even at the backlog cadence, so the live window is never queued behind more than four',
+                async function () {
+                this.timeout(10000);
+                let h = makePublisher({ cfg: { ORACLE_BATCH_CATCHUP_INTERVAL_MS: 3600000,
+                                               ORACLE_BATCH_CATCHUP_BACKLOG_INTERVAL_MS: 1 } });
+                await h.p.start();
+                for (let r = 0; r < 125; r++) h.p._buffer.set(r, bufferedFixture(r));
 
- // Count how many assemblies are in flight at once across the whole drain.
- let inFlight = 0, peak = 0;
- let real = h.p._assembleWindow.bind(h.p);
- sinon.stub(h.p, '_assembleWindow').callsFake(async (w, o) => {
- inFlight++; peak = Math.max(peak, inFlight);
- try { return await real(w, o); } finally { inFlight--; }
- });
+                // Count how many assemblies are in flight at once across the whole drain.
+                let inFlight = 0, peak = 0;
+                let real = h.p._assembleWindow.bind(h.p);
+                sinon.stub(h.p, '_assembleWindow').callsFake(async (w, o) => {
+                    inFlight++; peak = Math.max(peak, inFlight);
+                    try { return await real(w, o); } finally { inFlight--; }
+                });
 
- await h.p._runCatchupSweepTick();
- await waitUntil(() => h.p._pendingCatchupWindows().length <= 4, 3000);
- expect(peak, 'assemblies are serialized; the cadence does not change that').to.equal(1);
- });
+                await h.p._runCatchupSweepTick();
+                await waitUntil(() => h.p._pendingCatchupWindows().length <= 4, 3000);
+                expect(peak, 'assemblies are serialized; the cadence does not change that').to.equal(1);
+            });
 
- it('drops back to the idle cadence once the backlog is gone', async function () {
- let h = makePublisher({ cfg: { ORACLE_BATCH_CATCHUP_INTERVAL_MS: 3600000,
- ORACLE_BATCH_CATCHUP_BACKLOG_INTERVAL_MS: 5 } });
- await h.p.start();
- for (let r = 0; r < 13; r++) h.p._buffer.set(r, bufferedFixture(r)); // 2 closed windows
+            it('drops back to the idle cadence once the backlog is gone', async function () {
+                let h = makePublisher({ cfg: { ORACLE_BATCH_CATCHUP_INTERVAL_MS: 3600000,
+                                               ORACLE_BATCH_CATCHUP_BACKLOG_INTERVAL_MS: 5 } });
+                await h.p.start();
+                for (let r = 0; r < 13; r++) h.p._buffer.set(r, bufferedFixture(r));   // 2 closed windows
 
- let armed = [];
- sinon.stub(h.p, '_armCatchupSweep').callsFake((ms) => armed.push(ms));
- await h.p._runCatchupSweepTick();
+                let armed = [];
+                sinon.stub(h.p, '_armCatchupSweep').callsFake((ms) => armed.push(ms));
+                await h.p._runCatchupSweepTick();
 
- expect(h.broadcasts).to.have.length(2);
- expect(armed, 'nothing left to catch up on: wait the full interval')
- .to.deep.equal([3600000]);
- });
+                expect(h.broadcasts).to.have.length(2);
+                expect(armed, 'nothing left to catch up on: wait the full interval')
+                    .to.deep.equal([3600000]);
+            });
 
- it('never re-arms after stop(), even when the tick was already running', async function () {
- let h = makePublisher({ cfg: { ORACLE_BATCH_CATCHUP_INTERVAL_MS: 3600000,
- ORACLE_BATCH_CATCHUP_BACKLOG_INTERVAL_MS: 5 } });
- await h.p.start();
- for (let r = 0; r < 125; r++) h.p._buffer.set(r, bufferedFixture(r));
+            it('never re-arms after stop(), even when the tick was already running', async function () {
+                let h = makePublisher({ cfg: { ORACLE_BATCH_CATCHUP_INTERVAL_MS: 3600000,
+                                               ORACLE_BATCH_CATCHUP_BACKLOG_INTERVAL_MS: 5 } });
+                await h.p.start();
+                for (let r = 0; r < 125; r++) h.p._buffer.set(r, bufferedFixture(r));
 
- let tick = h.p._runCatchupSweepTick();
- h.p.stop();
- await tick;
- expect(h.p._catchupSweepTimer).to.equal(null);
- });
+                let tick = h.p._runCatchupSweepTick();
+                h.p.stop();
+                await tick;
+                expect(h.p._catchupSweepTimer).to.equal(null);
+            });
 
- it('never lets a backlog cadence be SLOWER than the idle one', function () {
- let h = makePublisher({ cfg: { ORACLE_BATCH_CATCHUP_INTERVAL_MS: 1000,
- ORACLE_BATCH_CATCHUP_BACKLOG_INTERVAL_MS: 60000 } });
- expect(h.p.batchCatchupBacklogIntervalMs).to.equal(1000);
- });
- });
+            it('never lets a backlog cadence be SLOWER than the idle one', function () {
+                let h = makePublisher({ cfg: { ORACLE_BATCH_CATCHUP_INTERVAL_MS: 1000,
+                                               ORACLE_BATCH_CATCHUP_BACKLOG_INTERVAL_MS: 60000 } });
+                expect(h.p.batchCatchupBacklogIntervalMs).to.equal(1000);
+            });
+        });
     });
 
     // ───────────────────────────────────── a window closed while the hub was down
