@@ -7,12 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-09-10
+
 ### Added
 - A hub that does not run oracle consensus derives `price` capability snapshots from its own Bitcoin view, so its indexer can validate on-chain PRICE batches instead of refusing every one.
 - That derivation now covers `oracle_publish`, `cross_chain` and `attestation` too, so a chain-only node stops refusing every ATTEST and storing every archive head unverified.
+- The publisher status names which kind of non-publisher a hub is, so a silent oracle is read as configured rather than broken.
+- New federation write `retractattestbatch` clears a batch link the chain has un-landed.
+- The leader-rotation silent-slot skip is gated on its own activation height, keyed on the request block: testnet 152400, mainnet unratified, regtest genesis.
 
 ### Changed
+- Mainnet activation gates are armed at genesis under the 2026-09-09 ruling, proven identity on the measured mainnet history and on a from-genesis replay witness.
+- The oracle clamp reference is a function of the round being judged rather than each hub's own timer, so two hubs judge one PROPOSE against the same reference.
 - The oracle clamp reference realignment is gated on its own activation height, keyed on the round's BTC block height: testnet 152400, mainnet unratified, regtest genesis.
+- A standalone hub honours `HUB_NETWORK`, so its ingest gates resolve on the network it declares instead of a default.
+- A signer module declares the chains it serves, and a publisher on another rail stays unwired instead of loading a signer that cannot sign for it.
+
+### Fixed
+- An unknown chain on the tip push and on the four other durable pushes is answered as a JSON-RPC error instead of a success result, so a mis-pointed indexer learns it is being refused.
+- The oracle publisher restores its last-published markers from the durable table at startup, so a restart no longer re-publishes windows the chain already carries.
+- A judge_model leader stamps the round's effective_time when the winner is established rather than at proposal, so an otherwise unanimous round no longer times out on the follower propagation floor.
+- A rotating catch-up cursor, a backlog cadence and attempt-plus-age retirement drain the buffered oracle window backlog instead of re-attempting the head of it forever.
+- The p2p message-listener ceiling is sized from the subscriber roster, so a large federation no longer trips the max-listeners warning.
+- The wider `validator_rewards` and `capability_snapshots` unique keys are built before the old narrow ones are dropped, so a failed widen can no longer leave the table with no unique key at all.
+- The attestation batch publisher retries a head wire the encoder refused before it was sent, instead of treating an unsent wire as broadcast.
+- The archive election key binds the wrapper checkpoint only, and a stale batch sequence converges upward instead of forking hubs whose tables differ.
+- Leader rotation steps over a slot it has proven silent instead of freezing on it, so a round with every capable hub proposing no longer times out for the rest of the request's life.
+- A truncated capability snapshot is refused in count mode as well as weighted mode, so a mirror can no longer read a partial signer set as complete.
+- A standalone hub in weighted mode reads the federation's stake snapshot from the pinned staking bundle, so it persists the validators' oracle frames instead of skipping every unregistered sender.
 
 ## [0.16.3] - 2026-09-09
 
