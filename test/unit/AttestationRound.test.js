@@ -14,6 +14,10 @@ const sinon          = require('sinon');
 const { expect }     = require('chai');
 const proxyquire     = require('proxyquire');
 const EventEmitter   = require('events');
+// The flag day the silent-slot leader skip rides. Read rather than re-spelled, so
+// a height change moves the cases with it instead of leaving them asserting a
+// literal the code no longer uses.
+const lssMod         = require('../../src/attest_leader_silence_skip_activation.js');
 
 const LICENSE_HEADER = ''; // Only needed for file comment; tests use it below
 
@@ -1277,7 +1281,11 @@ describe('AttestationRound', function () {
                 request_id:     'rid0060',
                 provider_id:    'llm',
                 redundancy:     2,
-                block_index:    100,
+                // Regtest serves at the tip (zero-conf is armed there from genesis),
+                // so the ladder starts at the request block itself rather than a
+                // confirmation lag above it. 103 keeps every tip literal below on
+                // the step it was written for.
+                block_index:    103,
                 action_index:   1,
                 deadline_block: 200,
                 payload:        JSON.stringify({ prompt: 'hi' }),
@@ -1300,11 +1308,20 @@ describe('AttestationRound', function () {
             };
         }
 
-        function setup() {
-            let capSS = { getSnapshot: sinon.stub().resolves({
-                validators: [ME, BB, CC, DD, EE].map(pubkey => ({ pubkey }))
-            }) };
+        // The skip is flag-day gated (attest_leader_silence_skip_activation.js) on
+        // the request's own block_index, so a hub with no network resolves the gate
+        // OFF and every case below would assert the pre-skip ladder. These cases are
+        // about the skip's behaviour once it is armed, so they run on regtest, where
+        // the gate is 0 and the request block used here is above it. The gate itself
+        // has its own suite further down.
+        function setup(network) {
+            let validators = [ME, BB, CC, DD, EE].map(pubkey => ({ pubkey }));
+            let capSS = {
+                getSnapshot:       sinon.stub().resolves({ validators }),
+                getWeightSnapshot: sinon.stub().resolves({ validators })
+            };
             let hub = makeHub({ capabilitySnapshot: capSS });
+            hub.network = network || 'regtest';
             hub.getIdentity = () => makeIdentity(ME);
             let reg = makeProviderRegistry({
                 getModule: sinon.stub().returns({
@@ -1319,8 +1336,9 @@ describe('AttestationRound', function () {
             return { ar, consensus };
         }
 
-        // Serviceable from block 103 (confirmations 3), rotation window 2 blocks:
-        // tip 104 is step 0, tip 110 is step 3 (the capped, frozen slot).
+        // Serviceable from block 103 (the request's own block, served at the tip),
+        // rotation window 2 blocks: tip 104 is step 0, tip 110 is step 3 (the
+        // capped, frozen slot).
         it('moves the leader past a slot that held a full window without proposing', async function () {
             let { ar, consensus } = setup();
 
@@ -1414,6 +1432,88 @@ describe('AttestationRound', function () {
             ar._evictStaleLeaderSilence();
             expect(ar.leaderSilence.has('old')).to.be.false;
             expect(ar.leaderSilence.has('new')).to.be.true;
+        });
+
+        // ── the skip's activation gate ───────────────────────────────────────
+        //
+        // Why the skip needs a height at all: a hub that can skip and a hub that
+        // cannot elect DIFFERENT leaders for the same request, and a round whose
+        // members disagree about the leader has no leader proposal to take its
+        // canonical effective_time from, so it times out on every retry. Under one
+        // height the whole fleet changes leader arithmetic on the same request,
+        // whatever order the binaries land in during a roll.
+        //
+        // Both cases run on testnet with zero-conf already active at the request
+        // block, so the effective confirmation count is 0 on both sides of the
+        // height and the two ladders differ only in the skip.
+        describe('activation gate', function () {
+
+            const ARMED = lssMod.ATTEST_LEADER_SILENCE_SKIP_ACTIVATION.testnet;
+
+            // Request at R, confirmations 0, rotation window 2 blocks: tip R+7 is
+            // step 3, the bare ladder's terminal slot, and tip R+9 is a full window
+            // later with the slot still unanswered.
+            function gateRequest(requestBlock, rid) {
+                return makeRequest({
+                    request_id:     rid,
+                    block_index:    requestBlock,
+                    deadline_block: requestBlock + 100
+                });
+            }
+
+            it('holds the frozen slot for a request admitted below the height', async function () {
+                let { ar, consensus } = setup('testnet');
+                let below = ARMED - 1;
+                let warn  = sinon.spy(console, 'warn');
+
+                await ar._startRound(gateRequest(below, 'ridgatelo'), below + 7);
+                expect(consensus.propose.lastCall.args[1].leaderPubkey, 'step 3 seats the capped slot').to.equal(DD);
+
+                await ar._startRound(gateRequest(below, 'ridgatelo'), below + 9);
+                expect(consensus.propose.lastCall.args[1].leaderPubkey,
+                    'the pre-skip ladder freezes on the mute slot').to.equal(DD);
+
+                // Nothing about the skip path ran: no observation was recorded and
+                // no skip line was printed, so a peer on the pre-skip build reaches
+                // the same slot from the same request.
+                expect(ar.leaderSilence.has('ridgatelo')).to.be.false;
+                expect(warn.getCalls().map(c => String(c.args[0]))
+                    .filter(s => s.indexOf('skipped for') !== -1)).to.have.lengthOf(0);
+            });
+
+            it('skips to the next live slot for a request admitted at the height', async function () {
+                let { ar, consensus } = setup('testnet');
+
+                await ar._startRound(gateRequest(ARMED, 'ridgatehi'), ARMED + 7);
+                expect(consensus.propose.lastCall.args[1].leaderPubkey).to.equal(DD);
+
+                await ar._startRound(gateRequest(ARMED, 'ridgatehi'), ARMED + 9);
+                expect(consensus.propose.lastCall.args[1].leaderPubkey).to.equal(EE);
+                expect(ar.leaderSilence.get('ridgatehi').silent.has(DD)).to.be.true;
+            });
+
+            it('reads the per-network table the fleet flips on', function () {
+                expect(lssMod.isLeaderSilenceSkipActive(ARMED - 1, 'testnet')).to.be.false;
+                expect(lssMod.isLeaderSilenceSkipActive(ARMED, 'testnet')).to.be.true;
+                expect(lssMod.isLeaderSilenceSkipActive(ARMED + 1, 'testnet')).to.be.true;
+
+                // mainnet carries the unratified sentinel, which must read as OFF at
+                // every height rather than coercing `blk >= null` into `blk >= 0`.
+                expect(lssMod.ATTEST_LEADER_SILENCE_SKIP_ACTIVATION.mainnet).to.equal(null);
+                expect(lssMod.isLeaderSilenceSkipActive(0, 'mainnet')).to.be.false;
+                expect(lssMod.isLeaderSilenceSkipActive(9999999, 'mainnet')).to.be.false;
+
+                expect(lssMod.ATTEST_LEADER_SILENCE_SKIP_ACTIVATION.regtest).to.equal(0);
+                expect(lssMod.isLeaderSilenceSkipActive(0, 'regtest')).to.be.true;
+
+                // A network with no entry is a misconfiguration, not a posture.
+                expect(lssMod.isLeaderSilenceSkipActive(9999999, 'signet')).to.be.false;
+                expect(lssMod.isLeaderSilenceSkipActive(9999999, undefined)).to.be.false;
+
+                // An unusable height never arms the skip either.
+                expect(lssMod.isLeaderSilenceSkipActive(NaN, 'regtest')).to.be.false;
+                expect(lssMod.isLeaderSilenceSkipActive(null, 'regtest')).to.be.false;
+            });
         });
     });
 

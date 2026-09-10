@@ -40,6 +40,10 @@ const wid    = require('./attest_responsible_widening_activation.js');
 // request (confirmationsFor) and carries the boot-time ordering assertion the
 // constructor runs; keyed on the REQUEST's own block, never on the tip.
 const zc     = require('./attest_zero_conf_activation.js');
+// The leader-rotation silent-slot skip flag day. Keyed on the REQUEST's own block
+// like the two above, so every hub flips the leader arithmetic on the same request
+// rather than on whichever tip it happened to poll.
+const lss    = require('./attest_leader_silence_skip_activation.js');
 // The consensus round-timeout default the seen-window floor below is keyed to.
 // Required, never re-spelled: see the constant's own note in constants.js.
 // SUPPORTED_CONSENSUS_STRATEGIES is the admission allowlist _startRound declines an
@@ -461,9 +465,25 @@ class AttestationRound {
     // gets there a window later runs the pre-skip ladder for one more poll, which
     // is the same transient skew the escalation module's header already tolerates.
     //
+    // GATED on attest_leader_silence_skip_activation.js, keyed on `requestBlock`
+    // (the request's own block_index, the same anchor the widening and zero-conf
+    // gates use). Below the height this returns the bare spec §8.2 ladder and
+    // touches nothing else: no silent set is consulted, no watch is armed and no
+    // skip warning is emitted, so a mixed-version fleet cannot disagree about the
+    // leader of a request admitted below the flag day. `esc.leaderIndex` is the
+    // empty-observation case of `esc.effectiveLeaderSlot`, which is what makes the
+    // gated-off path the pre-skip result rather than a reimplementation of it.
+    //
     // `latestBlock` is the poll's indexer tip and `step` the ladder step already
     // derived from it. Returns { index, pubkey } for the slot the round should run.
-    _resolveLeader(rid, responsible, step, latestBlock){
+    _resolveLeader(rid, responsible, step, latestBlock, requestBlock){
+        let pubkeyOf = (i) => (responsible[i] ? responsible[i].pubkey : (responsible[0] ? responsible[0].pubkey : null));
+
+        if(!lss.isLeaderSilenceSkipActive(requestBlock, this.hub ? this.hub.network : undefined)){
+            let plain = esc.leaderIndex(step, responsible.length);
+            return { index: plain, pubkey: pubkeyOf(plain) };
+        }
+
         let rec = this.leaderSilence.get(rid);
         if(!rec){
             rec = { silent: new Set(), watchPubkey: null, watchBlock: null, heldLogged: false, updatedAt: 0 };
@@ -481,10 +501,8 @@ class AttestationRound {
             }
             return s;
         };
-        let pubkeyAt = (i) => (responsible[i] ? responsible[i].pubkey : (responsible[0] ? responsible[0].pubkey : null));
-
         let idx    = esc.effectiveLeaderSlot(step, responsible.length, silentSlots());
-        let pubkey = pubkeyAt(idx);
+        let pubkey = pubkeyOf(idx);
 
         // Has this member proposed for this request at any point, across every
         // retry round? Consensus owns that record because it owns the PROPOSE
@@ -502,7 +520,7 @@ class AttestationRound {
                          ' to ' + latestBlock + ' with no PROPOSE for this request; the skip does not spend a rotation)');
             let skippedIdx = idx;
             idx    = esc.effectiveLeaderSlot(step, responsible.length, silentSlots());
-            pubkey = pubkeyAt(idx);
+            pubkey = pubkeyOf(idx);
 
             // Rule: when no live slot remains AHEAD, the ladder holds the last live
             // slot it reached instead of running off the end. The tell is that the
@@ -633,11 +651,14 @@ class AttestationRound {
         //
         // _resolveLeader layers the silent-slot skip (ledger P60) over that
         // arithmetic: the ladder stopping ON a mute member, rather than stepping
-        // over it, is what pinned request 233 at leaderSlot=3 forever.
+        // over it, is what pinned request 233 at leaderSlot=3 forever. The skip is
+        // gated on the request's own block (attest_leader_silence_skip_activation.js),
+        // so a request admitted below the flag day gets the bare ladder on every hub
+        // whatever build it runs.
         let step = Number.isFinite(Number(latestBlock)) && Number(latestBlock) > 0
             ? esc.escalationStep(Number(latestBlock), snapshotBlk, this.confirmationsFor(snapshotBlk), this.leaderRotationBlocks)
             : 0;
-        let leader       = this._resolveLeader(rid, responsible, step, latestBlock);
+        let leader       = this._resolveLeader(rid, responsible, step, latestBlock, snapshotBlk);
         let leaderIdx    = leader.index;
         let leaderPubkey = leader.pubkey;
         let amResponsible = responsible.some(v => v.pubkey === myPubkey);
