@@ -1015,12 +1015,11 @@ async function startApi(){
             // THROWN, not returned: an unknown coin is a refusal, and returned it landed
             // in the envelope's result slot where a caller checking only `error` read it
             // as a stored tip. The chain tip gates staleness checks fleet-wide, so a
-            // silently-refused push is worse here than a noisy one. Safe to throw on this
-            // handler specifically because its only mesh caller is fire-and-forget (the
-            // indexer's hub client logs and moves on); the sibling push handlers below
-            // keep the returned shape because theirs is a durable outbox whose terminal
-            // classification reads the in-envelope message. Same wording either way, so
-            // logs and operator runbooks are unchanged.
+            // silently-refused push is worse here than a noisy one. Its only mesh caller is
+            // fire-and-forget (the indexer's hub client logs and moves on), and the four
+            // durable push handlers below now throw the same code, which their client
+            // classifies terminal off the code rather than off an in-envelope message. Same
+            // wording either way, so logs and operator runbooks are unchanged.
             let chainErr = validateChain(coin);
             if (chainErr) throw rpcParamError(chainErr.error);
             if(block_height === undefined || block_height === null)
@@ -1055,8 +1054,23 @@ async function startApi(){
         // Indexer has already verified PBFT signatures locally; hub deduplicates by round_number.
         async pushpriceround({source_chain, round, timestamp, btc_block_height, pairs, sigs, action_index, block_index, push_generation}){
             if(!source_chain) return {error: "source_chain is required"};
+            // THROWN, not returned, on this handler and the three durable push siblings below
+            // (pushpricebatch, pushattestbatch, pushoracleprice). Returned, the refusal landed
+            // in the envelope's result slot, where a caller that checks only the envelope's
+            // `error` field read a refused push as an accepted one. An unknown chain is a
+            // property of the payload, so it is the one refusal a replay can never clear: the
+            // queued row carries the same source_chain into the same verdict forever.
+            //
+            // Only the remaining in-envelope guards below stay returned. They describe the
+            // HUB's state (an aggregator still booting, a DB error), which a later attempt can
+            // clear, and the push client must go on reading those as retryable.
+            //
+            // The refusal is only bounded on the caller's side once its push client treats
+            // -32602 as terminal, which is why that change ships in the same release as this
+            // one; on its own, this half turns every unknown-chain push into a row that
+            // retries forever. The message text is unchanged in both directions.
             let chainErr = validateChain(source_chain);
-            if (chainErr) return chainErr;
+            if (chainErr) throw rpcParamError(chainErr.error);
             if(round === undefined || round === null) return {error: "round is required"};
             if(!Array.isArray(pairs)) return {error: "pairs must be an array"};
             if(!hub.priceAggregator) return {error: "price aggregator not ready"};
@@ -1090,8 +1104,9 @@ async function startApi(){
         // re-verifies once via receiveValidatedBatch, then dedupes per round.
         async pushpricebatch({source_chain, first_round, last_round, btc_block_height, rounds, block_time, sigs, action_index, block_index, push_generation}){
             if(!source_chain) return {error: "source_chain is required"};
+            // Thrown for the reason spelled out on pushpriceround above.
             let chainErr = validateChain(source_chain);
-            if (chainErr) return chainErr;
+            if (chainErr) throw rpcParamError(chainErr.error);
             if(first_round === undefined || first_round === null) return {error: "first_round is required"};
             if(last_round === undefined || last_round === null) return {error: "last_round is required"};
             if(!Array.isArray(rounds)) return {error: "rounds must be an array"};
@@ -1131,8 +1146,9 @@ async function startApi(){
         // batch carries it (batching widens the hub/chain clock skew).
         async pushattestbatch({source_chain, network, window_start, window_end, row_count, btc_block_height, rows, sigs, action_index, block_index, block_time, push_generation}){
             if(!source_chain) return {error: "source_chain is required"};
+            // Thrown for the reason spelled out on pushpriceround above.
             let chainErr = validateChain(source_chain);
-            if (chainErr) return chainErr;
+            if (chainErr) throw rpcParamError(chainErr.error);
             if(!Array.isArray(rows)) return {error: "rows must be an array"};
             if(!hub.attestationResponseMirror) return {error: "attestation response mirror not ready"};
             try {
@@ -1191,8 +1207,9 @@ async function startApi(){
 
         async pushoracleprice({source_chain, source_address, coin, tick, fiat, value, fee, memo, block_time, action_index, push_generation}){
             if(!source_chain) return {error: "source_chain is required"};
+            // Thrown for the reason spelled out on pushpriceround above.
             let chainErr = validateChain(source_chain);
-            if (chainErr) return chainErr;
+            if (chainErr) throw rpcParamError(chainErr.error);
             if(!source_address) return {error: "source_address is required"};
             if(!coin || !tick || !fiat || !value)
                 return {error: "coin, tick, fiat, value are required"};

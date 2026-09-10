@@ -184,11 +184,20 @@ describe('hub pushpricebatch JSON-RPC (PRICE batch ingest, spec section 5.7)', f
             expect(result).to.deep.equal({ error: 'source_chain is required' });
         });
 
+        // THROWN, not returned: an unknown chain refuses the call's own arguments, which a
+        // replay can never turn into an acceptance, so it belongs in the envelope's error
+        // slot where a queueing caller classes it terminal. api.push-unknown-chain.test.js
+        // covers the shape across all four durable push handlers.
         it('source_chain must be an allowed chain', async function () {
-            const result = await api.controller.pushpricebatch({
-                source_chain: 'NOPE', first_round: 1, last_round: 6, btc_block_height: 100, rounds: []
-            });
-            expect(result.error).to.match(/chain must be one of/);
+            let thrown = null;
+            try {
+                await api.controller.pushpricebatch({
+                    source_chain: 'NOPE', first_round: 1, last_round: 6, btc_block_height: 100, rounds: []
+                });
+            } catch (err) { thrown = err; }
+            expect(thrown).to.be.an('error');
+            expect(thrown.code).to.equal(-32602);
+            expect(thrown.message).to.match(/chain must be one of/);
         });
 
         it('first_round is required', async function () {
