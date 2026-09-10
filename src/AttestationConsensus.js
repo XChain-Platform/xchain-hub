@@ -1062,10 +1062,11 @@ class AttestationConsensus extends EventEmitter {
         pending.winner = winner;
         pending.status = 'ok';
 
-        // Settle the round's single effective_time on the leader's, before any
-        // canonical below is built from it. Every hub that reaches this line holds
-        // the same proposals, so every hub settles on the same bytes.
-        this._resolveRoundEffectiveTime(pending);
+        // Settle the round's single effective_time, before any canonical below is
+        // built from it. Which value that is depends on the strategy; see
+        // _settleWinnerEffectiveTime for the rule and why judge_model cannot take
+        // the same one byte_equality does.
+        this._settleWinnerEffectiveTime(pending, pending.status);
 
         // Walk back through the proposals and collect any sigs that match the winner.
         // Proposals that diverge from the winner are slash candidates for
@@ -1212,10 +1213,13 @@ class AttestationConsensus extends EventEmitter {
         pending.winner = { body: Buffer.alloc(0), meta: '' };
         pending.status = status;
 
-        // Same leader-settling as the ok path, for the same reason. A non-ok
-        // outcome is derivable by every hub independently, so every hub reaches
-        // this line on its own and would otherwise stamp its own clock.
-        this._resolveRoundEffectiveTime(pending);
+        // Same settling as the ok path, and the status is what decides which value
+        // it takes: provider_error is derivable by every hub independently, so
+        // every hub reaches this line on its own and must converge on a stamp
+        // already on the wire, while a judge_model no_quorum is only ever reached
+        // behind the leader gate and carries the judge call's latency with it. See
+        // _settleWinnerEffectiveTime.
+        this._settleWinnerEffectiveTime(pending, status);
 
         // Error PROPOSEs were signed over this exact canonical (empty body,
         // empty meta, same status), so their sigs transfer directly - in the LEGACY
@@ -2121,6 +2125,44 @@ class AttestationConsensus extends EventEmitter {
         if(leaderProposal && leaderProposal.effectiveTime != null)
             pending.effectiveTime = leaderProposal.effectiveTime;
         return pending.effectiveTime;
+    }
+
+    // Settle the round's single effective_time at winner establishment, choosing
+    // between the two rules the two consensus strategies need.
+    //
+    // BYTE_EQUALITY CONVERGES ON THE LEADER'S PROPOSAL STAMP; JUDGE_MODEL STAMPS AT
+    // ESTABLISHMENT BECAUSE THE JUDGE CALL AGES THE PROPOSAL STAMP PAST THE FOLLOWER
+    // FLOOR. Under byte_equality every hub runs its own agree() and establishes its
+    // own winner locally, so the only value they can all arrive at without a round
+    // trip is one that is already on the wire - which is the whole argument in
+    // _resolveRoundEffectiveTime's header, unchanged. Under judge_model only the
+    // elected leader establishes a winner and every follower adopts the stamp off
+    // the leader's PREPARE (_handlePrepare's winner-establishing blocks), so the
+    // leader is free to pick a fresh value here, and has to: agree() is an LLM
+    // round trip that runs for as long as it runs, and a stamp chosen back at
+    // proposal time has aged by that whole latency before any follower sees it.
+    // Once the ageing exceeds ATTEST_RESPONSE_EFFECTIVE_TIME_SLACK_BEHIND_S the
+    // PREPARE fails _effectiveTimeWithinFollowerWindow at every follower and the
+    // round times out on a body all of them agree with, every cycle, forever.
+    // Widening that slack is not the repair: the low guard is a propagation floor
+    // (see the constants), so a stamp that has aged that close to the fleet's
+    // clocks is genuinely unsafe to publish, not merely inconvenient.
+    //
+    // PROVIDER_ERROR KEEPS THE PROPOSAL STAMP EVEN UNDER JUDGE_MODEL. That outcome
+    // is derivable with no judge call, so _maybeAdvanceFromProposals reaches it
+    // ahead of the leader gate and EVERY responsible hub establishes it locally.
+    // The adoption branch that would carry a leader's fresh stamp to a follower
+    // only runs while that follower has no winner of its own, so a leader stamping
+    // freshly there would sign bytes no peer ever adopts and break the one path
+    // that converges today. It also has nothing to gain: with no judge in it, the
+    // proposal stamp has aged by one gossip hop rather than by a model call.
+    _settleWinnerEffectiveTime(pending, status){
+        if(!pending.mirrorEra) return null;
+        if(pending.pinnedConsensusStrategy === 'judge_model' && status !== 'provider_error'){
+            pending.effectiveTime = this._chooseEffectiveTime();
+            return pending.effectiveTime;
+        }
+        return this._resolveRoundEffectiveTime(pending);
     }
 
     // Outbound wire fields carrying the round's effective_time. Empty in the legacy

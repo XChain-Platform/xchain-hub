@@ -803,8 +803,29 @@ function _canonicalMeta(proposals, idx, options){
     return raw;
 }
 
-exports.agree = async (proposals, options) => {
-    options = options || {};
+// The judge transport, as a rebindable binding rather than a direct call. Always
+// _runLlm on a validator; nothing reads it off config or the environment, so it
+// cannot be swapped anywhere but in-process.
+//
+// It exists because the OUTER budget below has to hold against a transport that
+// does not honour the timeout it was handed, and no real transport here has that
+// shape: both HTTP branches arm _armWallClockDeadline and the CLI branch arms a
+// SIGTERM kill, so a suite that mocks https or child_process only ever reproduces
+// the bound that already worked. Injecting the judge call is the only way to build
+// the failure the wall is for.
+let _judgeCall = _runLlm;
+exports._setJudgeCallForTest = (fn) => { _judgeCall = (typeof fn === 'function') ? fn : _runLlm; };
+
+// Sentinel resolved by the outer wall-clock race in exports.agree. A private
+// Symbol so it can never collide with a verdict (agree() resolves an object or
+// null) no matter what a transport returns.
+const _AGREE_BUDGET_SPENT = Symbol('agree budget spent');
+
+// The whole agree() call, ladder included, bounded from ENTRY by
+// options.timeoutMs. See exports.agree below for why the inner ladder deadline
+// is not enough on its own; `judgeInfo` is the telemetry channel that lets the
+// wrapper name the model that actually answered.
+async function _agreeJudged(proposals, options, judgeInfo) {
     // Kill switch: a single proposal is returned without any billed
     // judge call, so only gate the paths that would actually dial a vendor (the
     // multi-proposal judge fan-out below). Guarded again just before _runLlm.
@@ -880,7 +901,12 @@ exports.agree = async (proposals, options) => {
     // transport default per attempt, as before.
     let deadlineAt = Number(options.timeoutMs) > 0 ? Date.now() + Number(options.timeoutMs) : null;
     const REMAINING_FLOOR_MS = 250;
+    let judgeCall  = _judgeCall;
+    // From here on a vendor call is dialled, which is what makes this round's
+    // latency worth a log line at the wrapper's return.
+    judgeInfo.attempted = true;
     for (let jm of judgeChain) {
+        judgeInfo.model = jm;
         let attemptTimeoutMs = options.timeoutMs;
         if (deadlineAt !== null) {
             let remaining = deadlineAt - Date.now();
@@ -891,7 +917,7 @@ exports.agree = async (proposals, options) => {
             attemptTimeoutMs = remaining;
         }
         try {
-            judgeText = await _runLlm({
+            judgeText = await judgeCall({
                 prompt:      judgePrompt,
                 system:      judgeSystem,
                 // judgeSystem is hub-authored and tells the model that nothing outside
@@ -916,6 +942,7 @@ exports.agree = async (proposals, options) => {
                 pinnedVendors: options.pinnedVendors || null
             });
             reached = true;
+            judgeInfo.answered = jm;
             if (jm !== judgeModel)
                 console.warn('llm: judge fell back to ' + jm + ' (pinned ' + judgeModel + ' unreachable)');
             break;
@@ -1015,6 +1042,78 @@ exports.agree = async (proposals, options) => {
     // out-of-range index). This IS a real verdict, not an inconclusive
     // could-not-judge outcome, so options.outcome is left as-is.
     return null;
+}
+
+// THE ROUND'S WHOLE JUDGE BUDGET, measured from entry rather than from the first
+// transport call. The ladder inside already gives each attempt the remaining
+// budget and stops advancing once it is gone, but that only bounds the calls it
+// actually reaches: the work before the first attempt, the verdict parse after
+// the last one, and above all a transport that does not honour the timeout it
+// was handed all sit outside it. The caller is an attestation round whose
+// effective_time and round timer are both sized against this number
+// (AttestationConsensus._maybeAdvanceFromProposals), so it needs a wall it can
+// reason about without auditing three transports: whatever the ladder is doing,
+// it gets an answer within options.timeoutMs of the call.
+//
+// A spent budget resolves through the existing inconclusive channel, under its
+// own reason so an operator can tell a TIME budget from the SPEND budget that
+// already reports 'budget_exhausted'. Inconclusive maps to no_quorum, which is
+// retryable, so the request survives to a later round.
+//
+// The losing inner promise is left running to completion: nothing can cancel a
+// spawned CLI or an in-flight request from here, and its own transport deadline
+// will end it. Its result is dropped and its rejection swallowed, because an
+// orphaned transport failure surfacing as an unhandled rejection takes the hub
+// process down.
+//
+// This is a wall against ASYNC overrun only. Synchronous work on this path (the
+// spend-audit fsync in _appendLine, JSON of a large candidate set) blocks the
+// event loop, and a timer cannot fire while it does.
+exports.agree = async (proposals, options) => {
+    options = options || {};
+    const startedAt = Date.now();
+    // Filled in by the ladder: whether a judge call was attempted at all, the last
+    // model it dialled, and the model that actually answered (the two differ when
+    // the chain walked past an unreachable vendor, and only the second exists when
+    // a verdict came back). Read back below so the latency line is usable even on
+    // the paths that return no verdict.
+    const judgeInfo = {};
+    const budgetMs  = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 0;
+
+    let timer  = null;
+    let verdict;
+    try {
+        let inner = _agreeJudged(proposals, options, judgeInfo);
+        if (budgetMs > 0) {
+            inner.catch(() => {});
+            let spent = new Promise(resolve => {
+                timer = setTimeout(() => resolve(_AGREE_BUDGET_SPENT), budgetMs);
+                if (timer.unref) timer.unref();
+            });
+            verdict = await Promise.race([inner, spent]);
+        } else {
+            verdict = await inner;
+        }
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+
+    if (verdict === _AGREE_BUDGET_SPENT) {
+        console.warn('llm: agree() budget of ' + budgetMs + 'ms spent before a verdict' +
+            (judgeInfo.model ? ' (last judge dialled ' + judgeInfo.model + ')' : '') + '; inconclusive');
+        _markInconclusive(options, 'judge_timeout');
+        verdict = null;
+    }
+
+    // One line per judge round so the fleet's judge latency is readable off the
+    // logs. Only the multi-proposal path dials a vendor, and only that path has a
+    // latency worth recording; the redundancy=1 short-circuit stays silent.
+    if (judgeInfo.attempted) {
+        console.warn('llm: agree() returned in ' + (Date.now() - startedAt) + 'ms' +
+            ' (judge=' + (judgeInfo.answered || (judgeInfo.model ? judgeInfo.model + ':no-answer' : 'none')) +
+            ', verdict=' + (verdict ? 'winner' : 'null') + ')');
+    }
+    return verdict;
 };
 
 // Capability self-test probe. Confirms credential paths are configured for
