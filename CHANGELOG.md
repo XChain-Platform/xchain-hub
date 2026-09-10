@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.4] - 2026-09-10
+
+### Fixed
+- ANCHOR archive election keys on the wrapper only, and a stale batch sequence converges instead of forking.
+- An attestation batch head wire the encoder refused before it was sent is retried instead of being counted as sent.
+- A signer module declares the chains it serves, and a publisher on another rail stays unwired.
+- A unique-key widen builds the wider key before dropping the old one, so the table never loses the constraint mid-migration.
+- The P2P message-listener ceiling is sized from the subscriber roster instead of a fixed count.
+
+### Changed
+- The mainnet consensus gates measured identity on the indexed mainnet history arm at genesis, matching the indexer's maps; a from-genesis replay on BTC and DOGE witnessed no state change.
+
 ## [0.16.3] - 2026-09-09
 
 ### Fixed
