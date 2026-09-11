@@ -125,6 +125,20 @@ describe('attestation_escalation: effectiveLeaderSlot', function () {
         expect(esc.effectiveLeaderSlot(9, 5, new Set([3, 4]))).to.equal(2);
     });
 
+    it('ruled acceptable: seats a slot BEHIND the plain ladder when every slot ahead is silent', function () {
+        // The plain ladder's raw step-9 target is slot 3, and slot 3 (and
+        // slot 4 past it) are both proven silent, so there is no live slot
+        // left ahead. The dead-end rule holds slot 2 instead: a real
+        // regression relative to leaderIndex's own answer for this step, and
+        // the ruled-acceptable behavior documented on effectiveLeaderSlot.
+        expect(esc.leaderIndex(9, 5)).to.equal(3);
+        let held = esc.effectiveLeaderSlot(9, 5, new Set([3, 4]));
+        expect(held).to.equal(2);
+        expect(held).to.be.below(esc.leaderIndex(9, 5));
+        // Never seats a slot already proven silent, even while regressing.
+        expect(new Set([3, 4]).has(held)).to.be.false;
+    });
+
     it('holds the LAST slot, never slot 0, when every slot is silent', function () {
         expect(esc.effectiveLeaderSlot(0, 4, new Set([0, 1, 2, 3]))).to.equal(3);
         expect(esc.effectiveLeaderSlot(9, 4, new Set([0, 1, 2, 3]))).to.equal(3);

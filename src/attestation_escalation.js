@@ -99,6 +99,18 @@ function nextLiveSlot(from, count, silentSlots){
 //     still names a leader (a leaderless round has no canonical stamp to settle
 //     on and times out forever, which is the defect this whole path exists for).
 //
+// RULED ACCEPTABLE: the hold in that third bullet can seat a slot LOWER than
+// the plain step-only ladder (leaderIndex) would land on, when every slot
+// ahead of the last live one is silent: the ladder's raw target slot is
+// itself silent and everything past it is too, so the walk settles on an
+// earlier live slot instead of advancing onto (or past) dead ground. That is
+// a deliberate regression, not a defect: the alternative is stopping on a
+// slot already proven mute, which is exactly the freeze this function exists
+// to break. It never returns to a slot already proven silent (second bullet)
+// and never invents a member outside `responsibleCount`, so the seated slot
+// is always a real, live candidate, just not necessarily the furthest one
+// the step count alone would suggest.
+//
 // `silentSlots` is an OBSERVATION supplied by the caller, not something derived
 // here: this function stays pure and block-deterministic, and two callers
 // holding the same observation always agree on the slot.
