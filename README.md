@@ -166,7 +166,7 @@ The `full_node` capability requires a reachable BTC RPC endpoint (`FULLNODE.BTC_
 |---|---|---|
 | `ATTESTATION_POLL_MS` | `3000` | How often AttestationRound polls the BTC indexer for new pending requests. With the hub serving at the tip this interval is the floor on how long a request waits before any validator starts work on it |
 | `ATTESTATION_CONFIRMATIONS` | `3` | BTC blocks of confirmation before initiating an external provider fetch (reorg safety). Legacy-era value only: at and above `ATTEST_ZERO_CONF_ACTIVATION` for the network the hub serves a request at the tip it was mined in and the effective count is `0`, so this knob is inert there |
-| `ATTESTATION_FETCH_TIMEOUT` | `10000` | Per-request provider fetch timeout (ms) |
+| `ATTESTATION_FETCH_TIMEOUT` | `20000` | Per-request provider fetch timeout (ms). Bounds both the provider fetch and the `judge_model` judge call, so the two legs of one round agree on how long a slow vendor may be. Raised from `10000` by operator ruling: a healthy-but-slow provider crossing 10 s cost the round an independent body, which byte_equality reads as a no_quorum rather than as a slow vendor |
 | `ATTESTATION_RETRY_AFTER_MS` | `5 x ATTESTATION_POLL_MS` | How long an evaluated request is suppressed from re-polling before it can be re-evaluated (lets transiently-skipped requests retry) |
 | `ATTESTATION_ROUND_TIMEOUT_MS` | `120000` | PBFT round lifetime before in-memory state is dropped |
 | `ATTESTATION_QUEUE_PATH` | `./data/attestation-queue.jsonl` | FSYNC queue for in-flight ATTEST v1 (response) broadcasts |

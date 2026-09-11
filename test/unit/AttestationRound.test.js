@@ -157,7 +157,7 @@ describe('AttestationRound', function () {
 
             expect(ar.pollMs,         'poll cadence').to.equal(3000);
             expect(ar.confirmations,  'reorg depth').to.equal(3);
-            expect(ar.fetchTimeoutMs, 'fetch budget').to.equal(10000);
+            expect(ar.fetchTimeoutMs, 'fetch budget').to.equal(20000);
             expect(ar.leaderRotationBlocks).to.be.greaterThan(0);
             // The floor still sits above the (defaulted) consensus round window rather
             // than collapsing onto 5*pollMs.
@@ -1023,6 +1023,29 @@ describe('AttestationRound', function () {
             await ar._startRound(makeRequest());
             expect(fetchStub.calledOnce, 'the round reached the provider fetch').to.be.true;
             expect(fetchStub.firstCall.args[1].network).to.equal('regtest');
+        });
+
+        it('gives an unconfigured hub a 20 s provider fetch budget, not 10 s (operator ruling 2026-09-11)', async function () {
+            // The budget the provider actually receives, not the field the constructor
+            // parsed: a hub with no ATTESTATION_FETCH_TIMEOUT key is the whole fleet
+            // today, and a 10 s abort on a slow-but-healthy provider cost the round an
+            // independent body that byte_equality then read as no_quorum. Asserted at
+            // the call site because that is where the budget is spent.
+            let myPubkey = 'aa'.repeat(32);
+            let capSS = { getSnapshot: sinon.stub().resolves({ validators: [{ pubkey: myPubkey }] }) };
+            let hub   = makeHub();                  // no p2pConfig at all
+            hub.capabilitySnapshot = capSS;
+            hub.getIdentity = () => makeIdentity(myPubkey);
+            let fetchStub = sinon.stub().resolves({ body: Buffer.from('ok'), meta: '200' });
+            let reg = makeProviderRegistry({ getModule: sinon.stub().returns({ fetch: fetchStub }) });
+            let ar  = new AttestationRound(hub, reg);
+            sinon.stub(ar, '_computeResponsibleSet').returns([{ pubkey: myPubkey, hash: '00' }]);
+            ar.setConsensus({ propose: sinon.stub().resolves() });
+            await ar._startRound(makeRequest());
+            expect(fetchStub.calledOnce, 'the round reached the provider fetch').to.be.true;
+            expect(fetchStub.firstCall.args[1].timeoutMs).to.equal(20000);
+            // Still far under the round timer, which stays the terminal backstop.
+            expect(fetchStub.firstCall.args[1].timeoutMs).to.be.lessThan(ar.retryAfterMs);
         });
     });
 
